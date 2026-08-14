@@ -1,0 +1,703 @@
+# The code-execution protocol, contract version 1: the canonical IDL.
+#
+# Unlike the generated artifacts beside it, this file is hand-maintained. It
+# specifies a backend that Otari *calls*, so nothing in this repo serves these
+# paths and there is nothing to generate it from.
+#
+# Read it with `docs/code-execution-protocol.md`, which carries the semantics an
+# OpenAPI document cannot express: that sessions are stateful, that a failed
+# program is still a successful operation, and how the contract may grow.
+# `tests/unit/test_code_execution_contract.py` keeps the two in agreement, and
+# `scripts/check_code_execution_conformance.py` checks a running backend against
+# this file.
+openapi: 3.1.0
+
+info:
+  title: Otari code-execution protocol
+  # The contract version, not a release version: a backend implements contract
+  # version 1 and stays conforming whatever an upstream model provider's own
+  # tool version does next. Re-pinning to a newer upstream result shape would be
+  # contract version 2.
+  version: "1"
+  summary: The contract between Otari and a code-execution backend.
+  description: |
+    When a request uses the `otari_code_execution` tool, Otari does not run the
+    code itself. It leases a session from a code-execution backend, runs each
+    tool call against that session, and releases it.
+
+    Sessions are stateful: interpreter state and the workspace filesystem
+    persist across calls within a session and are destroyed with it.
+
+    Failure of the executed program is reported *in* the payload, through
+    `return_code` and `stderr`, not by failing the operation. Only a backend
+    that could not run the call at all returns an error status.
+
+    The three session operations are required of every backend. The three file
+    operations are optional, and are marked `x-otari-optional` here.
+  license:
+    name: Apache-2.0
+    identifier: Apache-2.0
+  contact:
+    name: Otari
+    url: https://github.com/mozilla-ai/otari
+
+externalDocs:
+  description: The prose contract, normative for semantics
+  url: https://github.com/mozilla-ai/otari/blob/main/docs/code-execution-protocol.md
+
+servers:
+  - url: "{sandbox_url}"
+    description: |
+      A code-execution backend. Otari takes this from its `sandbox_url` setting
+      (`OTARI_SANDBOX_URL`); in hybrid mode it points at the platform's
+      authenticated proxy rather than at the backend directly.
+    variables:
+      sandbox_url:
+        default: http://localhost:8080
+
+# The contract itself carries no authentication: the reference backend has none
+# and assumes a single trusted client on a private network. A deployment MAY
+# require a bearer credential, which is why both an unauthenticated and an
+# authenticated request are declared acceptable here. Tenancy, where a backend
+# is multi-tenant, is injected by whichever component authenticates the caller,
+# so it is a property of the deployment and not specified here.
+security:
+  - {}
+  - bearerAuth: []
+
+paths:
+  /sessions:
+    post:
+      operationId: CreateSession
+      summary: Lease a session
+      description: |
+        Leases a session and returns a handle. A backend MAY accept the
+        lifetime hints or clamp them to its own ceilings, and reports what is in
+        force. A client MUST NOT assume a session outlives the values the handle
+        reports.
+      requestBody:
+        required: false
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/CreateSessionRequest"
+      responses:
+        "201":
+          description: Session leased.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/SessionHandle"
+        "401":
+          description: |
+            Credential missing or rejected, where the deployment requires one.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "503":
+          description: |
+            At capacity, no session leased. Distinct from a malformed request:
+            retryable in principle, though Otari surfaces it as a failed request
+            rather than backing off, so a backend should not rely on the client
+            re-offering the work.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /sessions/{session_id}:
+    parameters:
+      - $ref: "#/components/parameters/SessionId"
+    delete:
+      operationId: DestroySession
+      summary: Release a session
+      description: |
+        Releases the session and destroys its state. Releasing a session that
+        does not exist is not an error worth distinguishing: it is already in
+        the desired state, so a backend MAY answer `204` for an unknown id.
+
+        A backend SHOULD reclaim sessions that are never released, which is what
+        the lifetime bounds on the handle are for.
+      responses:
+        "204":
+          description: Session released, or already gone.
+        "404":
+          description: Unknown session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /sessions/{session_id}/exec:
+    parameters:
+      - $ref: "#/components/parameters/SessionId"
+    post:
+      operationId: Execute
+      summary: Run one tool call in a session
+      description: |
+        Runs one tool call against a leased session and returns its result.
+
+        `timeout_seconds` bounds the backend's execution, not the client's
+        patience. A client MUST allow more wall-clock than it grants, since its
+        own budget also covers transport and the backend's teardown; otherwise a
+        legitimate near-limit execution is reported as an unreachable backend.
+
+        A client is not required to exercise every tool kind (Otari drives only
+        `code_execution` today), but a backend MUST accept the kind it is asked
+        for and MUST refuse an unknown one.
+      requestBody:
+        required: true
+        content:
+          application/json:
+            schema:
+              $ref: "#/components/schemas/ExecRequest"
+      responses:
+        "200":
+          description: |
+            The call ran. This includes a program that failed: the outcome is in
+            the result block's `return_code` and `stderr`.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/ExecResponse"
+        "400":
+          description: Unknown tool kind.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Unknown session.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "422":
+          description: |
+            Malformed request, including an `input` that does not carry the
+            fields its tool kind and command require.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /sessions/{session_id}/files/list:
+    parameters:
+      - $ref: "#/components/parameters/SessionId"
+    get:
+      operationId: ListFiles
+      summary: Enumerate a session's workspace
+      x-otari-optional: true
+      description: |
+        Optional. Confined to the addressed session's own workspace: a path
+        escaping it MUST be refused rather than served.
+      parameters:
+        - name: path
+          in: query
+          required: false
+          description: A directory relative to the workspace root.
+          schema:
+            type: string
+            default: "."
+      responses:
+        "200":
+          description: The directory's entries.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileList"
+        "403":
+          description: Path outside the session workspace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Unknown session, or no such directory.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+  /sessions/{session_id}/files:
+    parameters:
+      - $ref: "#/components/parameters/SessionId"
+    get:
+      operationId: GetFile
+      summary: Read one file from the workspace
+      x-otari-optional: true
+      description: |
+        Optional. Returns the file's bytes, typed with whatever media type the
+        backend derived. Confined to the addressed session's own workspace.
+      parameters:
+        - name: path
+          in: query
+          required: true
+          description: A file relative to the workspace root.
+          schema:
+            type: string
+            minLength: 1
+      responses:
+        "200":
+          description: The file's bytes.
+          content:
+            application/octet-stream:
+              schema:
+                type: string
+                format: binary
+        "400":
+          description: The path is a directory, not a file.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "403":
+          description: Path outside the session workspace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "404":
+          description: Unknown session, or no such file.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+    post:
+      operationId: PutFile
+      summary: Write one file into the workspace
+      x-otari-optional: true
+      description: |
+        Optional. Seeds an input file for later calls in the session. A backend
+        MAY cap the size of a written file and MUST refuse one over the cap
+        rather than truncating it.
+      requestBody:
+        required: true
+        content:
+          multipart/form-data:
+            schema:
+              type: object
+              required: [file]
+              properties:
+                file:
+                  type: string
+                  format: binary
+                  description: The file's bytes.
+                path:
+                  type: string
+                  description: |
+                    Destination relative to the workspace root. Absent, the
+                    backend derives one from the uploaded file's name.
+      responses:
+        "201":
+          description: File written.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/FileUploadResult"
+        "403":
+          description: Path outside the session workspace.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+        "413":
+          description: File larger than the backend's cap.
+          content:
+            application/json:
+              schema:
+                $ref: "#/components/schemas/Error"
+
+components:
+  securitySchemes:
+    bearerAuth:
+      type: http
+      scheme: bearer
+      description: |
+        Sent as `Authorization: Bearer <token>` where the deployment uses one.
+        In Otari's hybrid mode this is how the platform's authenticated proxy
+        admits the request and derives tenancy from the caller's workspace, so
+        the backend behind it never has to.
+
+  parameters:
+    SessionId:
+      name: session_id
+      in: path
+      required: true
+      description: The id from the session handle, used verbatim.
+      schema:
+        type: string
+        minLength: 1
+
+  schemas:
+    # Every response schema keeps `additionalProperties: true`: the contract
+    # grows additively, so a backend MAY return fields not described here and a
+    # consumer MUST ignore the ones it does not recognise rather than rejecting
+    # the response.
+
+    CreateSessionRequest:
+      type: object
+      additionalProperties: true
+      description: Lifetime hints, both optional.
+      properties:
+        idle_timeout_seconds:
+          type: [integer, "null"]
+          minimum: 1
+          description: Reclaim the session after this long without activity.
+        max_lifetime_seconds:
+          type: [integer, "null"]
+          minimum: 1
+          description: Reclaim the session this long after creation.
+
+    SessionHandle:
+      type: object
+      additionalProperties: true
+      required: [session_id]
+      properties:
+        session_id:
+          type: string
+          minLength: 1
+          description: |
+            Addresses this session in every later operation. A string, not a
+            number, so a client can use it without reformatting it.
+        idle_timeout_seconds:
+          type: integer
+          description: The idle timeout actually in force.
+        max_lifetime_seconds:
+          type: integer
+          description: The maximum lifetime actually in force.
+        created_at:
+          type: number
+          description: When the session was created, in POSIX seconds.
+        last_activity_at:
+          type: number
+          description: When the session was last used, in POSIX seconds.
+      examples:
+        - session_id: 3f6c1a9e8b2d4c7f
+          created_at: 1786000000.0
+          last_activity_at: 1786000000.0
+          idle_timeout_seconds: 300
+          max_lifetime_seconds: 3600
+
+    ExecRequest:
+      description: |
+        One tool call. The `tool` field selects both the operation and the shape
+        of `input`, which is why this is a discriminated union rather than one
+        object with a free-form `input`.
+      oneOf:
+        - $ref: "#/components/schemas/CodeExecutionRequest"
+        - $ref: "#/components/schemas/BashExecutionRequest"
+        - $ref: "#/components/schemas/TextEditorRequest"
+      discriminator:
+        propertyName: tool
+        mapping:
+          code_execution: "#/components/schemas/CodeExecutionRequest"
+          bash_code_execution: "#/components/schemas/BashExecutionRequest"
+          text_editor_code_execution: "#/components/schemas/TextEditorRequest"
+
+    CodeExecutionRequest:
+      type: object
+      additionalProperties: true
+      required: [tool, input]
+      description: Run source in the session's persistent interpreter.
+      properties:
+        tool:
+          const: code_execution
+        input:
+          $ref: "#/components/schemas/CodeExecutionInput"
+        timeout_seconds:
+          $ref: "#/components/schemas/TimeoutSeconds"
+        tool_use_id:
+          $ref: "#/components/schemas/ToolUseIdRequest"
+      examples:
+        - tool: code_execution
+          input:
+            code: print(2 + 2)
+          timeout_seconds: 60
+
+    BashExecutionRequest:
+      type: object
+      additionalProperties: true
+      required: [tool, input]
+      description: Run a shell command in the session's workspace.
+      properties:
+        tool:
+          const: bash_code_execution
+        input:
+          $ref: "#/components/schemas/BashExecutionInput"
+        timeout_seconds:
+          $ref: "#/components/schemas/TimeoutSeconds"
+        tool_use_id:
+          $ref: "#/components/schemas/ToolUseIdRequest"
+
+    TextEditorRequest:
+      type: object
+      additionalProperties: true
+      required: [tool, input]
+      description: View or edit a file in the session's workspace.
+      properties:
+        tool:
+          const: text_editor_code_execution
+        input:
+          $ref: "#/components/schemas/TextEditorInput"
+        timeout_seconds:
+          $ref: "#/components/schemas/TimeoutSeconds"
+        tool_use_id:
+          $ref: "#/components/schemas/ToolUseIdRequest"
+
+    CodeExecutionInput:
+      type: object
+      additionalProperties: true
+      required: [code]
+      properties:
+        code:
+          type: string
+          minLength: 1
+          description: Source to run in the session's interpreter.
+
+    BashExecutionInput:
+      type: object
+      additionalProperties: true
+      required: [command]
+      properties:
+        command:
+          type: string
+          minLength: 1
+          description: The shell command to run.
+
+    TextEditorInput:
+      type: object
+      additionalProperties: true
+      required: [command, path]
+      description: |
+        Mirrors Anthropic's text-editor command set. The command-specific fields
+        are validated per command, not per request, which a single schema cannot
+        express: `create` needs `file_text`, `str_replace` needs `old_str` and
+        `new_str`, `insert` needs `insert_line` and `new_str`, and `view` and
+        `undo_edit` need neither.
+      properties:
+        command:
+          type: string
+          enum: [view, create, str_replace, insert, undo_edit]
+        path:
+          type: string
+          minLength: 1
+          description: The file, relative to the session's workspace root.
+        file_text:
+          type: [string, "null"]
+          description: The new file's content, for `create`.
+        old_str:
+          type: [string, "null"]
+          description: The text to replace, for `str_replace`.
+        new_str:
+          type: [string, "null"]
+          description: The replacement or inserted text.
+        insert_line:
+          type: [integer, "null"]
+          description: The line to insert after, for `insert`.
+        view_range:
+          type: [array, "null"]
+          items:
+            type: integer
+          minItems: 2
+          maxItems: 2
+          description: An inclusive line range to view, for `view`.
+
+    TimeoutSeconds:
+      type: integer
+      minimum: 1
+      description: |
+        How long the backend may spend executing. A backend MAY impose a ceiling
+        of its own, clamping a larger value or refusing the request as malformed,
+        so the contract sets no maximum.
+
+    ToolUseIdRequest:
+      type: [string, "null"]
+      description: |
+        Correlation id. The backend generates one if absent, and echoes it on
+        the response either way.
+
+    ExecResponse:
+      type: object
+      additionalProperties: true
+      required: [tool_use_id, result_block]
+      description: |
+        The outcome of one tool call. Note the envelope: the result block is
+        nested under `result_block`, not returned bare. A backend that returns
+        the block at the top level is not conforming.
+      properties:
+        tool_use_id:
+          type: string
+          description: The call's correlation id, echoed or generated.
+        result_block:
+          $ref: "#/components/schemas/ResultBlock"
+        execution_time_ms:
+          type: [integer, "null"]
+          minimum: 0
+          description: How long the backend spent executing.
+      examples:
+        - tool_use_id: srvtoolu_...
+          execution_time_ms: 84
+          result_block:
+            type: code_execution_tool_result
+            tool_use_id: srvtoolu_...
+            content:
+              type: code_execution_result
+              stdout: "..."
+              stderr: "..."
+              return_code: 0
+              content:
+                - type: code_execution_output
+                  file_id: "..."
+                  filename: chart.png
+
+    ResultBlock:
+      type: object
+      additionalProperties: true
+      required: [type, tool_use_id, content]
+      description: |
+        Matches Anthropic's `code_execution_20250825` content blocks, so a
+        consumer that already parses Anthropic responses needs no translation
+        layer for it.
+      properties:
+        type:
+          type: string
+          minLength: 1
+          description: |
+            The tool kind that ran: `code_execution_tool_result`,
+            `bash_code_execution_tool_result`, or
+            `text_editor_code_execution_tool_result`.
+
+            Deliberately not an enum. A later contract version may add a tool
+            kind, and a client MUST NOT reject a result block solely because its
+            `type` is unfamiliar; Otari treats it as an opaque string and reads
+            the payload.
+          examples:
+            - code_execution_tool_result
+            - bash_code_execution_tool_result
+            - text_editor_code_execution_tool_result
+        tool_use_id:
+          type: string
+          description: The call's correlation id.
+        content:
+          $ref: "#/components/schemas/CodeExecutionResult"
+
+    CodeExecutionResult:
+      type: object
+      additionalProperties: true
+      description: |
+        The result block's payload. A single object, not a list of mixed content
+        blocks: the *nested* `content` is the list, of files the execution
+        produced. Code that treats the outer field as a list will not parse a
+        conforming response.
+
+        Required on the block even for a run that produced nothing: such a run
+        returns empty streams and a `return_code` of 0, not an omitted payload.
+        Its own fields are all optional and default as described.
+      properties:
+        type:
+          const: code_execution_result
+          default: code_execution_result
+          description: |
+            Contract version 1 rules out the error variant of Anthropic's union:
+            a backend MUST NOT return a payload of type
+            `code_execution_tool_result_error` carrying an `error_code`. Report
+            the failure through `return_code` and `stderr` instead. A client
+            reading this contract has no reason to inspect this field, so an
+            error variant would be read as an empty successful run, and the call
+            would be billed as one.
+        stdout:
+          type: [string, "null"]
+          default: ""
+          description: What the call wrote to stdout.
+        stderr:
+          type: [string, "null"]
+          default: ""
+          description: |
+            What the call wrote to stderr. Output here, or a non-zero
+            `return_code`, is how a backend reports that the code failed; there
+            is no top-level error flag.
+        return_code:
+          type: [integer, "null"]
+          default: 0
+          description: |
+            The call's exit status. An explicit `null` means no exit status, and
+            reads the same as 0.
+        content:
+          type: [array, "null"]
+          default: []
+          items:
+            $ref: "#/components/schemas/CodeExecutionOutputFile"
+          description: |
+            Files the execution produced. Empty when it produced none; the
+            reference backend does not populate it today. For a
+            `text_editor_code_execution` `create`, the file's content is not
+            echoed back here: it is already on the originating tool call's
+            `input.file_text`.
+
+    CodeExecutionOutputFile:
+      type: object
+      additionalProperties: true
+      required: [file_id, filename]
+      description: A file the execution produced, such as a chart or a CSV.
+      properties:
+        type:
+          const: code_execution_output
+          default: code_execution_output
+        file_id:
+          type: string
+          description: Addresses the file for retrieval.
+        filename:
+          type: string
+          description: The name the execution gave it.
+
+    FileList:
+      type: object
+      additionalProperties: true
+      required: [files]
+      properties:
+        files:
+          type: array
+          items:
+            $ref: "#/components/schemas/FileMetadata"
+
+    FileMetadata:
+      type: object
+      additionalProperties: true
+      required: [path, size_bytes]
+      properties:
+        path:
+          type: string
+          description: Relative to the session's workspace root.
+        size_bytes:
+          type: integer
+          minimum: 0
+        mime_type:
+          type: [string, "null"]
+        modified_at:
+          type: number
+          description: When the file was last written, in POSIX seconds.
+
+    FileUploadResult:
+      type: object
+      additionalProperties: true
+      required: [path, size_bytes]
+      properties:
+        path:
+          type: string
+          description: Where the file was stored, relative to the workspace root.
+        size_bytes:
+          type: integer
+          minimum: 0
+
+    Error:
+      type: object
+      additionalProperties: true
+      description: |
+        Informational. A client treats any non-2xx as a failed operation and
+        MUST NOT depend on this body, so a backend is free to carry its own
+        diagnostic shape here.
+      properties:
+        detail:
+          description: What went wrong, in whatever shape the backend reports.

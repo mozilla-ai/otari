@@ -55,6 +55,12 @@ s3 = [
 [dependency-groups]
 dev = [
     "boto3-stubs[s3]",
+    # Validating payloads against the published code-execution contract
+    # (docs/public/code-execution-openapi.yaml), in its conformance script and
+    # the test that keeps the spec and the doc in agreement. Nothing at runtime
+    # uses it: the gateway parses that contract with its own Pydantic models.
+    "jsonschema>=4.26.0",
+    "types-jsonschema",
     "moto[s3]>=5.0.0",
     "mypy",
     "pytest>=9.0.3,<10",

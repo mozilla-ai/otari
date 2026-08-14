@@ -14,14 +14,25 @@ a single container that stands alone with no orchestrator. mozilla.ai operates a
 second, pool-backed backend for [otari.ai](https://otari.ai). Both implement this
 contract, and Otari cannot tell which one answered.
 
-> **Transport is not yet fixed.** This specification describes operations and
-> payload semantics, deliberately independent of how they are carried. Today
-> there is exactly one binding, HTTP/JSON, described under
-> [HTTP/JSON binding](#httpjson-binding) and implemented by every backend that
-> exists. That binding is **provisional**: while only one transport has ever been
-> implemented, committing the versioned contract to it would be premature. The
-> operations and payloads below are the stable part; the binding may gain
-> siblings.
+The contract is HTTP/JSON, described by OpenAPI. Its machine-readable form is
+[`public/code-execution-openapi.yaml`](public/code-execution-openapi.yaml),
+which a backend implementer can generate a server stub or a client from
+directly. The two are normative in different registers, and neither is
+redundant: the OpenAPI document is normative for shapes, paths, and status
+codes; this document is normative for the semantics a schema cannot carry, such
+as session statefulness, how a failed program is reported, and the extension
+policy. `tests/unit/test_code_execution_contract.py` fails when they disagree.
+
+> **Why HTTP, and when that gets revisited.** A transport-neutral IDL (proto,
+> serving gRPC and HTTP/JSON alike) was weighed and declined: it would be a
+> second contract paradigm in a house whose SDKs are already generated from
+> OpenAPI, with no workload today to pay for it. Server-streamed output
+> (incremental `stdout` and `stderr` while code runs) rides HTTP over SSE or
+> chunked responses, so streaming did not decide it. Two triggers reopen the
+> question: the first backend that is not reachable over HTTP, and the first
+> bidirectional interactive workload, meaning a live PTY where input is fed while
+> output is read on one connection. Discrete tool calls, which is all the
+> contract carries today, need neither.
 
 ## Roles
 
@@ -70,8 +81,8 @@ Response fields:
 | `session_id` | yes | A string addressing this session in every later operation |
 | `idle_timeout_seconds` | no | The idle timeout actually in force |
 | `max_lifetime_seconds` | no | The maximum lifetime actually in force |
-| `created_at` | no | When the session was created |
-| `last_activity_at` | no | When the session was last used |
+| `created_at` | no | When the session was created, in POSIX seconds |
+| `last_activity_at` | no | When the session was last used, in POSIX seconds |
 
 `session_id` is a string, not a number: a client may use it to address the
 session without reformatting it.
@@ -108,6 +119,11 @@ in a single request.
 client MUST allow more wall-clock than it grants, since its own budget also
 covers transport and the backend's teardown; otherwise a legitimate
 near-limit execution is reported as an unreachable backend.
+
+A backend MAY impose a ceiling on `timeout_seconds`, and MAY either clamp a
+larger value or refuse the request as malformed, so the contract sets no maximum
+of its own. A client that needs a long-running call cannot assume the value it
+sent was honoured.
 
 ### DestroySession
 
@@ -195,6 +211,11 @@ returns a `content` whose `stdout` and `stderr` are empty and whose
 `return_code` is `0`, not a block with `content` omitted. Its own fields are all
 OPTIONAL and default as shown in the example.
 
+Each entry in the nested `content` list describes one file the execution
+produced, and carries a `file_id` addressing it plus the `filename` the
+execution gave it. Both are REQUIRED on an entry: a reference to a file a client
+can neither name nor fetch is not worth emitting.
+
 The block's `type` corresponds to the tool kind that ran:
 `code_execution_tool_result`, `bash_code_execution_tool_result`, or
 `text_editor_code_execution_tool_result`.
@@ -266,8 +287,7 @@ it is absent, rather than defaulting to a placeholder tenant.
 
 ## HTTP/JSON binding
 
-The one binding that exists today. Provisional, per the note at the top of this
-document. Payloads are JSON; the operation names above map to:
+Payloads are JSON; the operation names above map to:
 
 | Operation | Method and path |
 |---|---|
@@ -289,6 +309,7 @@ Status codes:
 | Session created, file written | `201` |
 | Execute succeeded (including code that failed) | `200` |
 | Session destroyed | `204` |
+| Credential missing or rejected, where the deployment requires one | `401` |
 | Unknown session, or unknown file | `404` |
 | Malformed request, or unknown tool kind | `400` or `422` |
 | Path outside the session workspace | `403` |
@@ -300,9 +321,32 @@ A bearer credential, where the deployment uses one, is sent as
 
 Server-streamed output (incremental `stdout` and `stderr` while code runs) fits
 this binding over SSE or chunked responses and is a planned addition; it is not
-part of version 1. Bidirectional interactive execution, where input is fed while
-output is read on one connection, is the case this binding strains at, and is
-the open question behind not yet fixing the transport.
+part of version 1.
+
+## Reference implementation, and checking conformance
+
+[otari-sandbox-container](https://github.com/mozilla-ai/otari-sandbox-container)
+is the reference backend: a single container, no orchestrator, published as
+`mzdotai/otari-sandbox-container`, and the implementation the contract above was
+read off. It is the one to read when a clause here is ambiguous, and the one to
+start from when building another backend. Two behaviours of it are its own, not
+the contract's: it refuses a `timeout_seconds` above 120 rather than clamping it,
+and it never populates the file-reference list.
+
+To check a backend against the published contract, point the conformance script
+at a running instance:
+
+```bash
+uv run python scripts/check_code_execution_conformance.py --base-url http://localhost:8080
+```
+
+It leases a session, runs a call of each tool kind, exercises the file
+operations, releases the session, and validates every response against
+`docs/public/code-execution-openapi.yaml`. The three session operations are
+required, so a failure there is a non-conforming backend; the file operations are
+optional, and a backend that does not serve them reports as skipped rather than
+failing. Running it is how a second implementation shows it is interchangeable
+with the reference one rather than merely similar to it.
 
 ## Configuration
 

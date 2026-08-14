@@ -53,6 +53,13 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
   no `make openapi` target; `make openapi-check` only validates. Verify with
   `make openapi-check` and `make postman-check`. The same `openapi-spec` CI job runs both
   checks, so missing this fails CI even when `openapi-check` passes.
+- `docs/public/code-execution-openapi.yaml` is the exception in that directory: it is
+  **hand-maintained**, not generated. It specifies a backend Otari calls, so no app here
+  serves those paths and `generate_openapi.py` neither reads nor writes it. Edit it
+  together with `docs/code-execution-protocol.md`, which is normative for the semantics a
+  schema cannot carry; `tests/unit/test_code_execution_contract.py` fails when the two
+  disagree, and `scripts/check_code_execution_conformance.py` checks a live backend
+  against it.
 - `CHANGELOG.md` and the GitHub Release body are generated from Conventional
   Commits by git-cliff (`cliff.toml`) at release time, not per-PR. Because PRs are
   squash-merged, the PR title is what git-cliff parses; `otari-pr-title.yml`
