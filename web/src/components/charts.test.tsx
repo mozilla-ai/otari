@@ -23,7 +23,7 @@ describe("TrendChart", () => {
       />,
     );
 
-    // The chart is labelled for screen readers and backed by recharts (the SVG
+    // The chart is labeled for screen readers and backed by recharts (the SVG
     // surface only exists when the library mounted and measured a size).
     expect(screen.getByRole("img", { name: "cost per day" })).toBeInTheDocument();
     expect(container.querySelector(".recharts-surface")).not.toBeNull();

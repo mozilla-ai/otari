@@ -2,14 +2,14 @@ import { expect, type Page } from "@playwright/test";
 
 import { authHeaders, expectOk } from "./helpers";
 
-// The fixture the behavioural-parity specs read.
+// The fixture the behavioral-parity specs read.
 //
 // Every value is namespaced (`parity-…`) so an assertion can name exactly the
 // rows this fixture owns. The suite shares one gateway database with
 // dashboard.spec.ts, which seeds its own usage under a different source, and the
 // pages under test are gateway-wide: an assertion on a global count would be a
 // bet on what ran before it. Filtering to this namespace is what makes the
-// behaviour, not the surrounding state, the thing under test.
+// behavior, not the surrounding state, the thing under test.
 //
 // Rows are imported through POST /v1/usage/external-events rather than by making
 // provider calls: the endpoint writes real usage_logs rows (priced through the

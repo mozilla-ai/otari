@@ -5,7 +5,7 @@ execute?". Without it the contract is undiscoverable: a client has to read the
 docs to learn that ``otari_web_search`` exists, and cannot tell whether this
 deployment has a backend wired up for it.
 
-Each entry reports the declaration forms this deployment actually honours right
+Each entry reports the declaration forms this deployment actually honors right
 now, so the answer changes with configuration: interception adds the
 provider-named web-search keywords, and a tool with no backend URL is listed as
 unavailable rather than hidden (a client seeing ``available: false`` learns the

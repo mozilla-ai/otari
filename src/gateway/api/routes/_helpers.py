@@ -101,7 +101,7 @@ def text_from_content(content: Any) -> str:
     operate on the textual prompt.
 
     Returns:
-        The flattened text, or an empty string for unrecognised shapes.
+        The flattened text, or an empty string for unrecognized shapes.
     """
     if isinstance(content, str):
         return content

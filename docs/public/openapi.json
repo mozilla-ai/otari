@@ -5486,7 +5486,7 @@
         "type": "object"
       },
       "RouterStatus": {
-        "description": "How warm this user's routing memory is, and what depends on it.\n\nRouting memory has no single warmth: it is a set of independent pools.\n``default_pool`` is what a request with no ``Otari-Router-Task`` header votes\nover (every record the user has, labelled or not) and ``tasks`` lists each\npartition, which only requests carrying that label use. Each crosses\n``seed_count`` on its own.",
+        "description": "How warm this user's routing memory is, and what depends on it.\n\nRouting memory has no single warmth: it is a set of independent pools.\n``default_pool`` is what a request with no ``Otari-Router-Task`` header votes\nover (every record the user has, labeled or not) and ``tasks`` lists each\npartition, which only requests carrying that label use. Each crosses\n``seed_count`` on its own.",
         "properties": {
           "alpha": {
             "title": "Alpha",

@@ -171,7 +171,7 @@ class RouterStatus(BaseModel):
 
     Routing memory has no single warmth: it is a set of independent pools.
     ``default_pool`` is what a request with no ``Otari-Router-Task`` header votes
-    over (every record the user has, labelled or not) and ``tasks`` lists each
+    over (every record the user has, labeled or not) and ``tasks`` lists each
     partition, which only requests carrying that label use. Each crosses
     ``seed_count`` on its own.
     """

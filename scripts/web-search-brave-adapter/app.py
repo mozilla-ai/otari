@@ -13,7 +13,7 @@ here, never in the gateway.
 Each result's ``content`` is Brave's snippet; ``extracted_content`` is left
 unset so the gateway still fetches and extracts the full page (matching the
 SearXNG path). Set ``extracted_content`` here instead if you want snippet-only
-behaviour and to skip the gateway's per-URL fetch.
+behavior and to skip the gateway's per-URL fetch.
 
 The gateway may forward provider-specific knobs as extra query params
 (``provider_options`` on the ``otari_web_search`` tool entry, set by the

@@ -37,6 +37,6 @@ projects:
                 value: "0.0.0.0"
               # The gateway token (gw-...) from otari.ai. Setting this alone
               # switches Otari into hybrid mode -- no OTARI_MODE needed.
-              # Create it in otari.ai under Organisation > Gateways > Create token.
+              # Create it in otari.ai under Organization > Gateways > Create token.
               - key: OTARI_AI_TOKEN
                 sync: false

@@ -104,6 +104,18 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
   (README, docs, doc comments, commit messages, PR descriptions). Use commas,
   semicolons, colons, parentheses, or periods, or rephrase. This does not apply
   to code (for example CLI flags like `--all`) or en-dash numeric ranges like `3–4`.
+- Spell prose in **US English** (`behavior`, `recognize`, `serialize`, `catalog`,
+  `labeled`, `license`, `color`). This covers docs, READMEs, comments,
+  docstrings, commit messages, and user-visible UI copy, which is what the
+  dashboard already uses (`Default pricing catalog`) and what otari.ai's own nav
+  says (`Organization`).
+- Three things keep whatever spelling they already have, because they are not
+  ours to respell: an identifier or attribute borrowed from an external API
+  (`aria-labelledby`, `asyncio.CancelledError`, GitHub's `cancelled` job
+  conclusion), a value that travels on the wire or into a database, and a
+  third-party product's own name. `cancelled` is therefore left alone repo-wide:
+  it names an asyncio method and a CI conclusion far more often than it appears
+  as prose, and splitting the spelling by context would read as a typo either way.
 
 ## Notes for Agents
 - Prefer minimal, targeted edits over broad refactors.

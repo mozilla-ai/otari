@@ -190,7 +190,7 @@ def test_every_operation_declares_the_unauthorized_response(spec: dict[str, Any]
     """The credential is a deployment property, so any operation can answer 401.
 
     Declaring it on one operation only would leave a generated client treating
-    the same answer elsewhere as an unrecognised failure.
+    the same answer elsewhere as an unrecognized failure.
     """
     missing = [
         operation["operationId"]

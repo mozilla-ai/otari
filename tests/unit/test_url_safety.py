@@ -101,7 +101,7 @@ async def test_unresolvable_host_rejected(monkeypatch: pytest.MonkeyPatch) -> No
     """Hostnames that fail to resolve are rejected (DNS-rebinding TOCTOU).
 
     A name that doesn't resolve at validation time could resolve to an internal
-    address at fetch time. Operators that genuinely want this behaviour opt in
+    address at fetch time. Operators that genuinely want this behavior opt in
     via OTARI_MCP_ALLOW_PRIVATE_HOSTS.
     """
     from gateway.services import url_safety

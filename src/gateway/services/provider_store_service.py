@@ -204,7 +204,7 @@ async def get_credential_for_update(db: AsyncSession, instance: str) -> Provider
 
     Used by the PATCH path so a version check and the write it guards run under
     the same row lock: on PostgreSQL a concurrent PATCH waits and then sees the
-    new ``updated_at`` (so it 412s instead of clobbering). SQLite serialises
+    new ``updated_at`` (so it 412s instead of clobbering). SQLite serializes
     writers anyway, so the lock is a no-op there without changing correctness.
     """
     stmt = select(ProviderCredential).where(ProviderCredential.instance == instance).with_for_update()

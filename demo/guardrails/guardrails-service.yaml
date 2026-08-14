@@ -14,7 +14,7 @@
 # never changes if the model/provider is swapped underneath.
 #
 # `valid: false` in the /validate result means an injection was detected.
-# See https://github.com/mozilla-ai/any-guardrail for the guardrail catalogue.
+# See https://github.com/mozilla-ai/any-guardrail for the guardrail catalog.
 
 threadpool:
   max_workers: 8

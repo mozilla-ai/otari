@@ -123,7 +123,7 @@ class LocalDirFileStore:
     def _resolve(self, storage_ref: str) -> Path:
         """Resolve ``storage_ref`` under the root, rejecting any escape.
 
-        ``storage_ref`` is server-generated today, but this is defence-in-depth:
+        ``storage_ref`` is server-generated today, but this is defense-in-depth:
         if a value ever came from elsewhere, a ``../`` traversal must not read or
         delete outside the store root.
         """

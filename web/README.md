@@ -1,7 +1,7 @@
 # Otari admin dashboard
 
 A React + [HeroUI v3](https://www.heroui.com) single-page app for the Otari
-gateway's standalone admin panel: browse the model catalogue, set model pricing,
+gateway's standalone admin panel: browse the model catalog, set model pricing,
 manage aliases, and toggle runtime settings (model discovery and default
 pricing). It talks to the gateway's management API (`/v1/models`, `/v1/pricing`,
 `/v1/aliases`, `/v1/settings`) using the master key, which the operator enters
