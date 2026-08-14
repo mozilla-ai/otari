@@ -148,5 +148,12 @@ PATCH /v1/tool-settings                         # not yet wrapped
 POST /v1/tool-settings/{service}/test           # not yet wrapped
 POST /v1/search                                 # not yet wrapped
 POST /v1/search/{search_tool_name}              # not yet wrapped
+# Search tools (runtime search-tool management)
+GET /v1/search-tools                            # not yet wrapped
+GET /v1/search-tools/providers                  # not yet wrapped
+POST /v1/search-tools                           # not yet wrapped
+PATCH /v1/search-tools/{name}                   # not yet wrapped
+DELETE /v1/search-tools/{name}                  # not yet wrapped
+POST /v1/search-tools/reencrypt                 # not yet wrapped
 # Settings
 POST /v1/settings/master-key/rotate             # not yet wrapped
