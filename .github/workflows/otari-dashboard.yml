@@ -104,3 +104,17 @@ jobs:
     - name: Run end-to-end tests
       working-directory: web
       run: npm run e2e
+
+    # The suite writes a Playwright trace for any test that fails
+    # (`trace: "retain-on-failure"`), which is the only way to see what the browser
+    # was actually doing on a failure nobody can reproduce locally. Without this
+    # step the runner deletes it and the trace might as well not exist. Failures
+    # only, so a green run uploads nothing.
+    - name: Upload Playwright traces
+      if: failure()
+      uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4.6.2
+      with:
+        name: playwright-traces
+        path: web/test-results/
+        retention-days: 7
+        if-no-files-found: ignore
