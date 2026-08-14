@@ -1,22 +1,6 @@
-import { expect, type Page, test } from "@playwright/test";
+import { expect, test } from "@playwright/test";
 
-// Matches web/e2e/otari.yml. The login step needs a known key.
-const MASTER_KEY = "e2e-master-key";
-
-// Scope link lookups to the sidebar navigation landmark. The Overview landing
-// page has tile-links whose names substring-collide with sidebar items (e.g.
-// "Providers healthy", "Active users", "No budgets configured"), so an unscoped
-// getByRole("link", { name }) is ambiguous there.
-const nav = (page: Page) => page.getByRole("navigation");
-
-async function login(page: Page): Promise<void> {
-  await page.goto("/");
-  await page.locator('input[type="password"]').fill(MASTER_KEY);
-  await page.locator('input[type="password"]').press("Enter");
-  // The sidebar appears once authenticated, regardless of the index landing
-  // page.
-  await expect(nav(page).getByRole("link", { name: "Providers" })).toBeVisible();
-}
+import { login, MASTER_KEY, nav } from "./helpers";
 
 // One shared gateway + DB, so the flows build on each other and must run in order.
 test.describe.configure({ mode: "serial" });

@@ -19,7 +19,30 @@ export default defineConfig({
     baseURL: "http://127.0.0.1:8000",
     trace: "on-first-retry",
   },
-  projects: [{ name: "chromium", use: { ...devices["Desktop Chrome"] } }],
+  // Three ordered projects over one gateway, rather than one project relying on
+  // the alphabetical order of filenames. `onboarding` needs the empty database
+  // serve.sh leaves behind (it asserts the first-run screens), so anything that
+  // writes usage has to come after it; the parity specs in turn all read one
+  // seeded fixture, so they hang off the seed rather than each re-creating it.
+  projects: [
+    {
+      name: "onboarding",
+      testMatch: /dashboard\.spec\.ts/,
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "seed",
+      testMatch: /parity\.setup\.ts/,
+      dependencies: ["onboarding"],
+      use: { ...devices["Desktop Chrome"] },
+    },
+    {
+      name: "parity",
+      testMatch: /parity\..*\.spec\.ts/,
+      dependencies: ["seed"],
+      use: { ...devices["Desktop Chrome"] },
+    },
+  ],
   webServer: {
     command: "bash e2e/serve.sh",
     url: "http://127.0.0.1:8000/health",
