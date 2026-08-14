@@ -121,7 +121,7 @@ No database is created. Otari keeps no local state in hybrid mode: users, budget
 | --- | --- | --- |
 | `PORT`, `OTARI_PORT` | `8000` | Keeps Render's detected port aligned with Otari's listening port. |
 | `OTARI_HOST` | `0.0.0.0` | Binds Otari on the container network. |
-| `OTARI_AI_TOKEN` | you provide | The gateway token (`gw-...`) for this Otari instance. Create it in otari.ai under **Organisation > Gateways > Create token**. Setting this alone switches Otari into hybrid mode; no `OTARI_MODE` is needed. |
+| `OTARI_AI_TOKEN` | you provide | The gateway token (`gw-...`) for this Otari instance. Create it in otari.ai under **Organization > Gateways > Create token**. Setting this alone switches Otari into hybrid mode; no `OTARI_MODE` is needed. |
 
 `OTARI_MASTER_KEY`, `OTARI_DATABASE_URL`, the pricing flags, and the migration/bootstrap flags from the standalone Blueprint don't apply here: hybrid mode has no local database or management endpoints to protect. Only `/health`, `/health/liveness`, `/health/readiness`, `/v1/chat/completions`, `/v1/messages`, and `/v1/responses` are exposed. Chat requests use `Authorization: Bearer <otari-user-token>` issued by otari.ai, not a locally minted API key.
 

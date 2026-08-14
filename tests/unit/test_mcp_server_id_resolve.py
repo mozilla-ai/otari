@@ -149,7 +149,7 @@ async def test_resolve_429_passthrough_with_retry_after(monkeypatch: pytest.Monk
 @pytest.mark.asyncio
 async def test_resolve_402_passthrough(monkeypatch: pytest.MonkeyPatch) -> None:
     """402 (payment required / quota) should forward verbatim, matching
-    `_resolve_platform_credentials`'s behaviour for the same code."""
+    `_resolve_platform_credentials`'s behavior for the same code."""
 
     async def fake_post(**kwargs: Any) -> httpx.Response:
         return httpx.Response(402, json={"detail": "quota exhausted"})

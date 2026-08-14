@@ -37,7 +37,7 @@ def test_build_web_search_backend_config_overrides_env(monkeypatch: pytest.Monke
 
 
 def test_build_web_search_backend_env_fallback_when_config_unset(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Pure-env deployment: no config value, env still honoured (byte-for-byte prior behavior).
+    # Pure-env deployment: no config value, env still honored (byte-for-byte prior behavior).
     monkeypatch.setenv("OTARI_WEB_SEARCH_MAX_RESULTS", "4")
     config = GatewayConfig()
     config.web_search_max_results = None

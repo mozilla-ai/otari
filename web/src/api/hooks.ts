@@ -468,7 +468,7 @@ export function useToolSettings() {
   });
 }
 
-// The declaration forms this deployment honours. Depends on tool settings
+// The declaration forms this deployment honors. Depends on tool settings
 // (interception, the backend URLs), so a settings save invalidates it.
 export function useTools() {
   return useQuery({

@@ -26,7 +26,7 @@ is rejected at startup as conflicting configuration (the token would otherwise
 select hybrid). Leave `OTARI_MODE` unset to let the token decide.
 
 `OTARI_AI_TOKEN` is the gateway token (`gw_...`) you create in otari.ai for
-this Otari instance. In otari.ai, go to `Organisation > Gateways`, create or
+this Otari instance. In otari.ai, go to `Organization > Gateways`, create or
 open a gateway, then click `Create token`. It is not the per-request user token
 (`tk_...`) that clients send in `Authorization: Bearer ...`.
 

@@ -34,7 +34,7 @@ gateway token.
 
 This document describes only the fields Otari actually reads. Every response
 shape below is **open for extension**: a peer may return additional fields, and
-Otari ignores any it does not recognise. Consumers of this contract MUST do the
+Otari ignores any it does not recognize. Consumers of this contract MUST do the
 same (ignore unknown fields) so the platform can add fields without breaking
 older gateways.
 
@@ -156,7 +156,7 @@ Otari also surfaces it as the `X-Otari-Request-ID` response header.
 `fallback_enabled` is informational, set by the platform when its routing
 policy actually allows fallback (i.e. the policy has multiple enabled entries
 and `fallback_enabled = true`). Otari uses `len(attempts) > 1` for its
-own behaviour.
+own behavior.
 
 `attempts` MUST contain at least one entry. An empty list is treated as a
 platform bug and surfaced as `502 Bad Gateway`.
@@ -183,7 +183,7 @@ multi-attempt shape.
 
 ### Failure
 
-| Status | Behaviour |
+| Status | Behavior |
 |---|---|
 | `400`, `401`, `402`, `403`, `404`, `429` | Status code is forwarded to the client; `429`'s `Retry-After` header is preserved. The `detail` is the platform's JSON `detail` string when present, otherwise the fallback `"Authorization request rejected"`. |
 | `422`, `5xx`                      | Mapped to `502 Bad Gateway` with `detail = "Authorization service unavailable"`. |
@@ -231,7 +231,7 @@ configs are resolved (SSRF guard, no bearer token over cleartext `http://`).
 
 ### Failure
 
-| Status | Behaviour |
+| Status | Behavior |
 |---|---|
 | `400`, `401`, `402`, `403`, `404`, `429` | Status code is forwarded to the client; `429`'s `Retry-After` header is preserved. The `detail` is the platform's JSON `detail` string when present, otherwise the fallback `"MCP server resolution failed"`. |
 | `422`, `5xx`                      | Mapped to `502 Bad Gateway` with `detail = "Authorization service unavailable"`. |
@@ -282,7 +282,7 @@ this field.
 
 ### Failure
 
-| Status | Behaviour |
+| Status | Behavior |
 |---|---|
 | `400`, `401`, `402`, `403`, `404`, `429` | Status code is forwarded to the client; `429`'s `Retry-After` header is preserved. The `detail` is the platform's JSON `detail` string when present, otherwise the fallback `"Web search resolution failed"`. |
 | `422`, `5xx`                      | Mapped to `502 Bad Gateway` with `detail = "Authorization service unavailable"`. |
@@ -454,7 +454,7 @@ content chunks). These are out of reach without either prefix-buffering
 restart event (which would break OpenAI SDK compatibility).
 
 Mid-stream failover is not currently planned. If a future client SDK starts
-honouring a custom restart event, it could be added behind that capability
+honoring a custom restart event, it could be added behind that capability
 flag.
 
 ## Configuration

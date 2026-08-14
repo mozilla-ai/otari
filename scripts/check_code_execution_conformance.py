@@ -179,13 +179,13 @@ def _check_create_session(
     if reported_a_number and reported > idle_hint:
         checks.append(
             Check(
-                "CreateSession honours lifetime hints",
+                "CreateSession honors lifetime hints",
                 FAIL,
                 f"asked for an idle timeout of {idle_hint}s, handle reports {reported}s",
             )
         )
     else:
-        checks.append(Check("CreateSession honours lifetime hints", PASS))
+        checks.append(Check("CreateSession honors lifetime hints", PASS))
     session_id: str = handle["session_id"]
     return checks, session_id
 

@@ -275,7 +275,7 @@ def _flatten_result_block(block: ResultBlock) -> str:
     """Render the structured result as a single string for the model.
 
     The tool loop hands the model one string per tool call, so the block's
-    fields collapse into labelled sections. Errors come through as a non-zero
+    fields collapse into labeled sections. Errors come through as a non-zero
     ``return_code`` or a non-empty ``stderr``; the contract has no top-level
     ``is_error`` flag.
 

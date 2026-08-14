@@ -98,7 +98,7 @@ class KnnRoutingMemory:
         self.max_records = max(0, int(config.router_max_records_per_user))
         # What one decision may load. `max_records` is the operator's own answer to
         # "how many records should this router use"; 0 means eviction is off, which
-        # is not a licence for an unbounded select, so fall back to the default.
+        # is not a license for an unbounded select, so fall back to the default.
         self._read_limit = self.max_records or _DEFAULT_READ_LIMIT
         # trace_key -> chosen model, so the turns of one conversation reuse its
         # first decision. Bounded LRU, in-process only: a restart simply re-decides

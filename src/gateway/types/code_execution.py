@@ -7,13 +7,13 @@ object instead of walking untyped dicts.
 
 Only the fields the gateway actually reads are modelled. The contract's
 extension policy says a backend may return additional fields and a consumer
-must ignore the ones it does not recognise, so unknown keys are dropped rather
+must ignore the ones it does not recognize, so unknown keys are dropped rather
 than rejected, and the spec doc (not this module) is the full contract.
 
 The same policy is why these models are liberal about the values they accept.
 A field the gateway only renders absorbs a null or an unusable shape and keeps
 going, because a payload that carries usable output must not be discarded over
-a stream the backend chose to serialise as `null`. Validation is reserved for
+a stream the backend chose to serialize as `null`. Validation is reserved for
 the parts the gateway cannot proceed without: it fails on a missing session id
 or a missing result payload, not on a cosmetic field.
 
@@ -41,7 +41,7 @@ def _rendered_text(value: Any) -> Any:
     """Coerce whatever a backend put in a render-only field into text.
 
     ``null`` becomes empty: a backend that models an absent stream as an
-    optional field serialises it that way rather than omitting it, and a plain
+    optional field serializes it that way rather than omitting it, and a plain
     ``str`` would reject it.
 
     Anything else non-string is stringified rather than dropped. Dropping it

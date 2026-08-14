@@ -201,7 +201,7 @@ export function TrendChart({
   return (
     // A static chart is an image to AT; one that owns drag selection is not
     // (role="img" would hide the interaction entirely), so it presents as a
-    // labelled group instead. Keyboard equivalents live with the callers
+    // labeled group instead. Keyboard equivalents live with the callers
     // (presets, zoom buttons, the Activity pan rail).
     <div
       role={selectable ? "group" : "img"}

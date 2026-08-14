@@ -63,7 +63,7 @@ class FakeBackend:
     # allows. `None` accepts any budget.
     budget_ceiling_seconds: int | None = None
     # Typed loosely on purpose: JSON has one numeric type, so a conforming backend
-    # may serialise an integer timeout as `99999.0`.
+    # may serialize an integer timeout as `99999.0`.
     reported_idle_timeout: float = 300
     download_body: bytes = _FILE_BODY
     calls: list[tuple[str, str]] = field(default_factory=list)
@@ -300,7 +300,7 @@ def test_lifetime_hint_reported_above_the_request_fails() -> None:
     the session lives.
     """
     failures = _failures(_run(FakeBackend(reported_idle_timeout=99_999)))
-    assert "CreateSession honours lifetime hints" in failures
+    assert "CreateSession honors lifetime hints" in failures
 
 
 def test_a_float_lifetime_hint_above_the_request_also_fails() -> None:
@@ -311,7 +311,7 @@ def test_a_float_lifetime_hint_above_the_request_also_fails() -> None:
     guard skipped, in precisely the case the check exists to catch.
     """
     failures = _failures(_run(FakeBackend(reported_idle_timeout=99_999.0)))
-    assert "CreateSession honours lifetime hints" in failures
+    assert "CreateSession honors lifetime hints" in failures
 
 
 def test_downloaded_bytes_must_match_what_was_written() -> None:

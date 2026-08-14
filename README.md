@@ -192,7 +192,7 @@ For hot reload against a local `.env`, use `make dev`.
 
 In standalone mode the gateway serves a web admin dashboard at the root URL
 (`http://localhost:8000`). Sign in with your master key to add provider keys,
-browse the model catalogue, set pricing, manage aliases and access (users, keys,
+browse the model catalog, set pricing, manage aliases and access (users, keys,
 budgets), and toggle runtime settings. See the
 [Admin dashboard guide](docs/dashboard.md) for the two-key model, a first-run
 walkthrough, and a page-by-page reference.
@@ -213,7 +213,7 @@ docker compose -f docker-compose.yml -f docker-compose.build.yml up --build
 
 - **Standalone** (default): Otari manages everything locally, its own database, your provider credentials, virtual keys, budgets, and usage. The Quickstart above runs this mode.
 - **Hybrid**: set `OTARI_AI_TOKEN` to the gateway token (`gw_...`) you create
-  in otari.ai for this Otari instance. In otari.ai, go to `Organisation >
+  in otari.ai for this Otari instance. In otari.ai, go to `Organization >
   Gateways`, create or open a gateway, then click `Create token`. otari.ai then
   handles provider routing, auth, and usage tracking and adds multi-provider
   fallback. Local `providers` config is unused in this mode.

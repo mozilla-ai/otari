@@ -4,7 +4,7 @@ The check (`gateway.services.url_safety.validate_mcp_url`) used to run
 synchronously inside a Pydantic `model_validator` at request-body-parse time,
 which surfaced as a 422. It now runs from the async request pipeline (DNS
 resolution must be awaited, and Pydantic validators can't await), so a
-rejected URL surfaces as 400 instead. These tests lock in that behaviour and
+rejected URL surfaces as 400 instead. These tests lock in that behavior and
 confirm the check still runs — no live MCP server or guardrails service is
 needed since the safety check rejects before any network call to either.
 """

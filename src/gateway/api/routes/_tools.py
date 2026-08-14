@@ -67,7 +67,7 @@ _VERSIONED_WEB_SEARCH_PREFIX = "web_search_"
 
 
 def _is_web_search_tool_type(type_value: Any) -> bool:
-    """Recognise the explicit gateway-managed web_search tool type.
+    """Recognize the explicit gateway-managed web_search tool type.
 
     Matches only ``"otari_web_search"``. Provider-named keywords
     (``"web_search"``, ``"web_search_<date>"``) are *not* matched — they pass
@@ -79,7 +79,7 @@ def _is_web_search_tool_type(type_value: Any) -> bool:
 
 
 def _is_provider_web_search_tool_type(type_value: Any) -> bool:
-    """Recognise a provider-named web-search keyword (interception only).
+    """Recognize a provider-named web-search keyword (interception only).
 
     ``"web_search"`` (Claude Code's short form, OpenAI Responses' native type)
     or any ``"web_search_<suffix>"`` variant. Does not match
@@ -112,7 +112,7 @@ def declares_native_web_search(tool_entry: dict[str, Any] | None) -> bool:
 
 
 def _is_code_execution_tool_type(type_value: Any) -> bool:
-    """Recognise the explicit gateway-managed code-execution tool type.
+    """Recognize the explicit gateway-managed code-execution tool type.
 
     Matches only ``"otari_code_execution"``. Provider-named keywords
     (``"code_execution"``, ``"code_interpreter"``, ``"code_execution_<date>"``)
@@ -327,7 +327,7 @@ def _build_web_search_backend(
     config: GatewayConfig | None = None,
     tally: ToolUsageTally | None = None,
 ) -> WebSearchBackend:
-    """Construct a WebSearchBackend honouring env-level + per-tool config.
+    """Construct a WebSearchBackend honoring env-level + per-tool config.
 
     Per-tool entry fields (``max_results``, ``allowed_domains``,
     ``blocked_domains``, ``purpose_hint``) override env-level defaults.

@@ -502,7 +502,7 @@ async def list_models(
             continue
         # A gateway-run tool is priced under the reserved ``otari:`` provider (see
         # ``gateway_tool_pricing_key``). It is not a model: publishing it would put a
-        # selectable entry in the OpenAI-compatible catalogue whose per-request rate
+        # selectable entry in the OpenAI-compatible catalog whose per-request rate
         # reads as a per-million-token price, and calling it would fail.
         if model_key.startswith(f"{GATEWAY_TOOL_PRICING_PROVIDER}:"):
             continue

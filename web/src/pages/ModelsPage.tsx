@@ -41,7 +41,7 @@ const ALIAS_OWNED_BY = "otari";
 // Where a row's price comes from. "configured" is a DB price and the only kind
 // editable here; "default" is the genai-prices fallback; "alias" is inherited
 // from a target; "none" means metered at no cost. "unknown" is the one case the
-// dashboard cannot answer: a model discovery reports that the catalogue did not
+// dashboard cannot answer: a model discovery reports that the catalog did not
 // list, with default pricing on. The gateway would meter it at the fallback rate,
 // but only `GET /v1/models` computes that rate and this row did not come from
 // there, so claiming "not priced" here would be a guess that reads as a fact.
@@ -61,7 +61,7 @@ const MODEL_FILTER_CAPABILITIES: { value: string; label: string; test: (metadata
   { value: "pdf", label: "PDF", test: (m) => Array.isArray(m.input_modalities) && m.input_modalities.includes("pdf") },
 ];
 
-// Per-model capability flags from models.dev, labelled for the detail panel.
+// Per-model capability flags from models.dev, labeled for the detail panel.
 const MODEL_CAPABILITY_LABELS: { key: keyof ModelMetadata; label: string }[] = [
   { key: "reasoning", label: "Reasoning" },
   { key: "tool_call", label: "Tool calling" },
@@ -418,7 +418,7 @@ function PricingInfo() {
   );
 }
 
-// Small labelled key/value used throughout the detail panel.
+// Small labeled key/value used throughout the detail panel.
 function Spec({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
@@ -1085,7 +1085,7 @@ export function ModelsPage() {
   // A provider clicked on the Providers page arrives as ?provider=<instance>,
   // pre-selecting that provider's filter so the list shows only their models.
   // An empty param (e.g. /models?provider=) collapses to "all"; an unknown one
-  // is reset below once the catalogue loads.
+  // is reset below once the catalog loads.
   const [providerFilter, setProviderFilter] = useState(searchParams.get("provider") || "all");
   const [pricingFilter, setPricingFilter] = useState("all");
   const [sourceFilter, setSourceFilter] = useState("all");
@@ -1140,7 +1140,7 @@ export function ModelsPage() {
     };
 
     for (const model of models.data?.data ?? []) {
-      // Aliases are managed on their own page, not part of the model catalogue.
+      // Aliases are managed on their own page, not part of the model catalog.
       if (model.owned_by === ALIAS_OWNED_BY) {
         continue;
       }
@@ -1163,7 +1163,7 @@ export function ModelsPage() {
     for (const key of configured.keys()) {
       // Gateway-run tools (otari:web_search, otari:code_execution) are priced per
       // call, not per million tokens, so they are managed on the Tools & Guardrails
-      // page. Listing them here would put a per-call rate under columns labelled
+      // page. Listing them here would put a per-call rate under columns labeled
       // "$ / 1M" and drag them into the price filters and the comparison chart,
       // where a rate stored as 10000 would rank as the costliest "model" served.
       if (key.startsWith(`${GATEWAY_TOOL_PRICING_PROVIDER}:`)) {
@@ -1186,7 +1186,7 @@ export function ModelsPage() {
         releaseDate: metadataByKey[row.key]?.release_date ?? null,
       }));
     const seen = new Set(out.map((row) => row.key));
-    // These rows exist because discovery reaches a model the catalogue did not list:
+    // These rows exist because discovery reaches a model the catalog did not list:
     // an alias target, which is withheld, or any discovered model at all while
     // `model_discovery` is off. With the genai-prices fallback on, such a model is
     // still metered, so "not priced" would be wrong; the rate is simply not knowable
@@ -1231,7 +1231,7 @@ export function ModelsPage() {
 
   // A ?provider= value seeded from the URL may name a provider with no models,
   // or a stale/misspelled one. The native <select> would then render blank and
-  // the table would show zero rows, a confusing dead end. Once the catalogue has
+  // the table would show zero rows, a confusing dead end. Once the catalog has
   // loaded (options beyond "all"), drop an unknown value back to "all".
   useEffect(() => {
     if (providerFilter === "all" || providerOptions.length <= 1) {
@@ -1400,7 +1400,7 @@ export function ModelsPage() {
     }
   };
 
-  // A backend with no /v1/models endpoint serves models the catalogue never
+  // A backend with no /v1/models endpoint serves models the catalog never
   // lists, so the only way to meter them is a key typed by hand. The stored key
   // is what the server normalized, so the new row is selected by that rather
   // than by the raw input (a legacy provider/model form collapses onto
@@ -1437,7 +1437,7 @@ export function ModelsPage() {
     maxInput !== "" ||
     releaseFilter !== "all";
   // A provider that serves no model listing answers requests for models the
-  // catalogue never shows, so searching for one you just called successfully is
+  // catalog never shows, so searching for one you just called successfully is
   // the moment the gap is felt. Offer to price it right there, seeded with what
   // was typed (from `search`, not the lowercased `query`: model ids are
   // case-sensitive) when that looks like a selector rather than a word.
@@ -1641,7 +1641,7 @@ export function ModelsPage() {
         initialModelKey={customPriceKey ?? ""}
         title="Price a model"
         description={() =>
-          "Meter a model the catalogue does not list, for a provider that serves no model listing. Type the selector you send as model and its rates; the model then appears here as custom, and its usage is costed and counted against budgets."
+          "Meter a model the catalog does not list, for a provider that serves no model listing. Type the selector you send as model and its rates; the model then appears here as custom, and its usage is costed and counted against budgets."
         }
       />
     </div>

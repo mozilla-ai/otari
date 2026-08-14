@@ -330,7 +330,7 @@ components:
     # property of the deployment, so a stale or revoked one surfaces wherever the
     # client happens to call next, most often on a repeated Execute. A generated
     # client that models it on one operation only would treat the same answer
-    # elsewhere as an unrecognised failure.
+    # elsewhere as an unrecognized failure.
     Unauthorized:
       description: |
         Credential missing or rejected, where the deployment requires one.
@@ -352,7 +352,7 @@ components:
   schemas:
     # Every response schema keeps `additionalProperties: true`: the contract
     # grows additively, so a backend MAY return fields not described here and a
-    # consumer MUST ignore the ones it does not recognise rather than rejecting
+    # consumer MUST ignore the ones it does not recognize rather than rejecting
     # the response.
 
     CreateSessionRequest:

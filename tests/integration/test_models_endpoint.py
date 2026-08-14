@@ -93,7 +93,7 @@ def test_list_models_exposes_cache_pricing(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
-    """Cache read/write rates set via /v1/pricing surface on the model catalogue."""
+    """Cache read/write rates set via /v1/pricing surface on the model catalog."""
     client.post(
         "/v1/pricing",
         json={

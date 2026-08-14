@@ -278,7 +278,7 @@ async def test_max_results_truncates(monkeypatch: pytest.MonkeyPatch) -> None:
 @pytest.mark.asyncio
 async def test_provider_options_forwarded_as_query_params(monkeypatch: pytest.MonkeyPatch) -> None:
     """Scalar provider_options become extra /search query params; bools
-    serialise as lowercase strings and None/complex values are dropped."""
+    serialize as lowercase strings and None/complex values are dropped."""
     transport = _patched_async_client(
         {("searxng", "/search"): httpx.Response(200, json=SEARXNG_OK_BODY)},
         monkeypatch,
@@ -632,7 +632,7 @@ def test_max_results_clamps_subone_to_one(bad_value: int) -> None:
 
 
 def test_max_results_clamps_above_cap_to_max_results_cap() -> None:
-    """Values above the cap clamp down (existing behaviour, regression guard)."""
+    """Values above the cap clamp down (existing behavior, regression guard)."""
     from gateway.services.web_search_backend import _MAX_RESULTS_CAP
 
     backend = WebSearchBackend(base_url="http://searxng:8080", max_results=10_000)
@@ -678,7 +678,7 @@ async def test_no_gateway_header_when_auth_token_unset(monkeypatch: pytest.Monke
 async def test_auth_token_not_leaked_to_result_page_fetches(monkeypatch: pytest.MonkeyPatch) -> None:
     """With extraction enabled, X-Gateway-Token rides only the /search call to the
     backend — never the per-result page fetches (headers are per-request). Locks
-    in the no-leak behaviour against future refactors."""
+    in the no-leak behavior against future refactors."""
     transport = _patched_async_client(
         {
             ("searxng", "/search"): httpx.Response(200, json=SEARXNG_OK_BODY),

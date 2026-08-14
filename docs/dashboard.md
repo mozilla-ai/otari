@@ -1,7 +1,7 @@
 # Admin dashboard
 
 Otari ships with a web admin dashboard for operators. It browses the model
-catalogue, sets model pricing, manages routing policies, adds and edits provider API
+catalog, sets model pricing, manages routing policies, adds and edits provider API
 keys, manages users, keys, and budgets, and toggles runtime settings, all
 against the local management API using the master key.
 
@@ -126,7 +126,7 @@ The check lists the provider's models, so a backend that does not implement a
 "No model discovery" rather than "Unreachable": the key may be perfectly good,
 and the provider can still serve requests. Declare the model ids it serves under
 that provider's `models:` key in `config.yml` to have them appear in the
-catalogue. You can also price them one at a time from the dashboard, with no
+catalog. You can also price them one at a time from the dashboard, with no
 config edit or restart: the Models page offers **Price a model** in the warning
 it shows for a provider without discovery, and in its empty state when a search
 finds nothing.
@@ -292,7 +292,7 @@ hand.
   provider's client (a request timeout, custom headers); on the known-provider
   form they sit under Advanced. A backend that can take longer than 10 minutes to
   answer a non-streaming request needs an explicit `{"timeout": 1800}` here.
-- **Models**: browse the model catalogue and set per-model pricing, with specs
+- **Models**: browse the model catalog and set per-model pricing, with specs
   and modality metadata where available (from models.dev). The copy control next
   to a model puts its full `provider:model` id on your clipboard, which is what
   a caller sends as `model`; the name in the table drops the provider prefix.

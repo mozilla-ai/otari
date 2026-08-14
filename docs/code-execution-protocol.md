@@ -123,7 +123,7 @@ near-limit execution is reported as an unreachable backend.
 A backend MAY impose a ceiling on `timeout_seconds`, and MAY either clamp a
 larger value or refuse the request as malformed, so the contract sets no maximum
 of its own. A client that needs a long-running call cannot assume the value it
-sent was honoured.
+sent was honored.
 
 ### DestroySession
 
@@ -257,7 +257,7 @@ upstream shape would be a new contract version, not a silent change to this one.
 This contract evolves **additively**, and both sides MUST tolerate that:
 
 - A backend MAY return fields not described here.
-- A consumer MUST ignore fields it does not recognise, rather than rejecting the
+- A consumer MUST ignore fields it does not recognize, rather than rejecting the
   response. Otari's client models drop unknown keys.
 - A new tool kind, or a new result-block `type`, MAY be added. A client MUST NOT
   reject a result block solely because its `type` is unfamiliar; Otari treats
@@ -329,7 +329,7 @@ part of version 1.
 is the reference backend: a single container, no orchestrator, published as
 `mzdotai/otari-sandbox-container`, and the implementation the contract above was
 read off. It is the one to read when a clause here is ambiguous, and the one to
-start from when building another backend. Two behaviours of it are its own, not
+start from when building another backend. Two behaviors of it are its own, not
 the contract's: it refuses a `timeout_seconds` above 120 rather than clamping it,
 and it never populates the file-reference list.
 
