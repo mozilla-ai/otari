@@ -11,10 +11,8 @@ export default function App() {
     return <Login />;
   }
 
-  // The route table, the shell it renders into (AppShell, the root route's
-  // component) and the per-page code splitting all live in src/routes and are
-  // wired up in src/router.tsx. What is left here is the one thing routing does
-  // not decide: an unauthenticated visitor sees the sign-in screen instead of
-  // any route at all.
+  // Auth gates the router rather than living inside it: signing in is the one
+  // decision no route gets to make. The route table and the shell it renders
+  // into are in src/routes, wired up in src/router.tsx.
   return <RouterProvider router={router} />;
 }

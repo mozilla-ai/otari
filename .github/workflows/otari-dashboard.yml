@@ -61,6 +61,14 @@ jobs:
     - name: Build
       run: npm run build
 
+    # The route tree IS committed (see AGENTS.md), and both steps above rewrite it
+    # in place from web/src/routes/. Without this, adding a route and forgetting to
+    # commit the regenerated file passes CI green: the runner regenerates it, uses
+    # its own copy, and throws it away, leaving the stale one to break the next
+    # person's `npm run typecheck`, which runs tsc alone and never regenerates.
+    - name: Check the committed route tree is up to date
+      run: git diff --exit-code -- src/routeTree.gen.ts
+
   e2e:
     # Browser end-to-end smoke: boot the gateway serving the freshly built bundle
     # (Playwright's webServer, see web/playwright.config.ts) and walk the core

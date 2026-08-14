@@ -11,10 +11,13 @@ key. It is a focused operator tool, not a general-purpose app; keep its footprin
 its conventions consistent with what is already there.
 
 Stack: React 19, TypeScript (`strict`), HeroUI v3 (`@heroui/react`), Tailwind CSS v4,
-TanStack Query, Vite, Vitest + Testing Library. Package manager is **npm**. Layout is flat
-(`web/src/{components,pages,api,lib,auth}`), there is no `features/`/`shared/` architecture,
-no router, no Playwright/screenshot suite, and no analytics. Do not introduce those to match
-some other repo; match what `web/` does.
+TanStack Query, TanStack Router (file-based, `web/src/routes/`), Vite, Vitest + Testing
+Library, Playwright (`web/e2e/`). Package manager is **npm**. Layout is flat
+(`web/src/{components,pages,api,lib,auth,routes}`), there is no `features/`/`shared/`
+architecture, no screenshot suite, and no analytics. Do not introduce those to match
+some other repo; match what `web/` does. Routing conventions (one file per URL, a route
+file exports `Route` and nothing else, the search-param codec, and `renderWithRouter` for
+component tests) live in [web/AGENTS.md](../../../web/AGENTS.md).
 
 Build and check from the repo root:
 

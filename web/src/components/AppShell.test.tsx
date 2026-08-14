@@ -86,9 +86,10 @@ describe("AppShell responsive layout", () => {
 
   it("marks only the current page's nav link as active", async () => {
     // Worth pinning because the router decides this, not the shell: a link is
-    // active when its route is in the current match chain, so the index link is
-    // lit only on the index. The react-router version needed an explicit `end`
-    // to get that, and it would be easy to reintroduce something equivalent.
+    // active when its route is in the current match chain, so "/" lights only on
+    // the index rather than on every page under it. Nothing in the shell opts
+    // into that, which is precisely why a well-meant `activeOptions` could take
+    // it away without looking wrong.
     mockMatchMedia(false);
     const user = userEvent.setup();
     await renderShell();
