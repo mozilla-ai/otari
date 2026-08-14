@@ -11,7 +11,7 @@ import {
   useStoredProviders,
   useUpdateSettings,
 } from "@/api/hooks";
-import type { ConfigField, PricingRefreshPreview, UpdateSettingsRequest } from "@/api/types";
+import type { ConfigField, PricingRefreshPreview, UpdateSettingsRequest } from "@/client";
 import { ErrorBanner, FilterSelect, InfoBanner, PageHeader, PageLoading } from "@/components/ui";
 
 // A single settable field maps onto one key of UpdateSettingsRequest. The keys

@@ -7,7 +7,7 @@ external systems that need to sync usage data (billing, analytics).
 
 import csv
 import io
-from collections.abc import Callable
+from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from time import monotonic
 from typing import Annotated, Any, Literal, NamedTuple, TypeVar, cast
@@ -18,6 +18,7 @@ from sqlalchemy import ColumnElement, and_, case, func, null, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, verify_api_key_or_master_key, verify_master_key
+from gateway.api.routes._billing_schemas import ChargeLine, MeterMap
 from gateway.core.config import GatewayConfig
 from gateway.core.sql import MAX_FILTER_VALUES, match_any, utc_bound
 from gateway.inflight import get_registry
@@ -172,8 +173,10 @@ class UsageEntry(BaseModel):
     cache_read_tokens: int | None
     cache_write_tokens: int | None
     cache_write_1h_tokens: int | None
-    billing_meters: dict[str, Any] | None
-    pricing_breakdown: list[dict[str, float | int | str]] | None
+    # Precise shapes with a permissive fallback arm; see _billing_schemas for why
+    # the fallback is what keeps a row written by an older gateway renderable.
+    billing_meters: MeterMap | None
+    pricing_breakdown: Sequence[ChargeLine] | None
     cost: float | None
     status: str
     error_message: str | None

@@ -69,6 +69,14 @@ jobs:
     - name: Check the committed route tree is up to date
       run: git diff --exit-code -- src/routeTree.gen.ts
 
+    # Same contract for the API client, which is generated from
+    # docs/public/openapi.json (see AGENTS.md). `npm test` regenerates it, so this
+    # catches both a spec change nobody regenerated against and an edit made to the
+    # generated file by hand. Without it the runner would quietly use its own fresh
+    # copy and pass while the committed one described a different API.
+    - name: Check the committed API client is up to date
+      run: git diff --exit-code -- src/client/schema.ts
+
   e2e:
     # Browser end-to-end smoke: boot the gateway serving the freshly built bundle
     # (Playwright's webServer, see web/playwright.config.ts) and walk the core

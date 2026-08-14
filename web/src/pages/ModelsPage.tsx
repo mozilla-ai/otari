@@ -11,7 +11,7 @@ import {
   useSetPricing,
   useSettings,
 } from "@/api/hooks";
-import type { ModelMetadata, PricingTier } from "@/api/types";
+import type { DiscoverableProvider, ModelMetadata, PricingTier } from "@/client";
 import { BulkActionBar } from "@/components/BulkActionBar";
 import { DataTable, type DataTableColumn } from "@/components/DataTable";
 import { isValidModelKey, SetPriceDialog, type ManualRates } from "@/components/SetPriceDialog";
@@ -27,6 +27,7 @@ import {
 } from "@/components/ui";
 import { formatContext, formatCost, formatReleaseDate } from "@/lib/format";
 import { currentPricing, providerFromModelKey } from "@/lib/pricing";
+import { isPricingTier } from "@/client";
 import { resolveSelectedIds, useTableSelection } from "@/lib/tableSelection";
 import { useUrlValue } from "@/lib/urlState";
 
@@ -1006,7 +1007,10 @@ function DiscoveredErrors({
   providers,
   onPriceModel,
 }: {
-  providers: { provider: string; error: string | null; discovery_unsupported: boolean }[];
+  // Typed from the API rather than restated: the discovery response carries
+  // more per-provider detail than this banner reads, and `error` is optional on
+  // the wire, not required-nullable as this once assumed.
+  providers: DiscoverableProvider[];
   /** Opens the hand-pricing dialog seeded with the given key (may be a bare prefix). */
   onPriceModel: (prefill: string) => void;
 }) {
@@ -1150,13 +1154,13 @@ export function ModelsPage() {
         key: model.id,
         model: model.id,
         provider: model.owned_by,
-        contextWindow: model.context_window,
+        contextWindow: model.context_window ?? null,
         inputPrice: model.pricing?.input_price_per_million ?? null,
         outputPrice: model.pricing?.output_price_per_million ?? null,
         cacheReadPrice: model.pricing?.cache_read_price_per_million ?? null,
         cacheWritePrice: model.pricing?.cache_write_price_per_million ?? null,
         cacheWrite1hPrice: model.pricing?.cache_write_1h_price_per_million ?? null,
-        pricingTiers: model.pricing?.pricing_tiers ?? [],
+        pricingTiers: (model.pricing?.pricing_tiers ?? []).filter(isPricingTier),
         source: priceStatus,
       });
     }

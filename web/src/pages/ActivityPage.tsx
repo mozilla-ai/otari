@@ -20,7 +20,8 @@ import type {
   UsageFilters,
   UsageGroupRow,
   UsageMutationSelection,
-} from "@/api/types";
+} from "@/client";
+import { isTokenChargeLine, isUnitChargeLine, type ChargeLine } from "@/client";
 import { ActivityTimeline } from "@/components/ActivityTimeline";
 import { BulkActionBar } from "@/components/BulkActionBar";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
@@ -78,12 +79,11 @@ function formatUnitRate(value: number): string {
 
 // A charge line is discriminated by which rate it carries: token meters price per
 // million, gateway-run tool meters price per call.
-type ChargeLine = NonNullable<UsageEntry["pricing_breakdown"]>[number];
 
 // Token lines first, tool lines after, each group keeping the order the writers
 // emitted. "Billed meters" otherwise reads as an unordered mix once a row has both.
 function sortedBreakdown(lines: readonly ChargeLine[]): ChargeLine[] {
-  return [...lines].sort((a, b) => Number("unit_rate" in a) - Number("unit_rate" in b));
+  return [...lines].sort((a, b) => Number(isUnitChargeLine(a)) - Number(isUnitChargeLine(b)));
 }
 
 // Humanize a millisecond duration: "820 ms", "1.4 s". Null (historical rows,
@@ -886,13 +886,22 @@ function RequestDetail({ entry, onPriceModel }: { entry: UsageEntry; onPriceMode
             Billed meters
           </span>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
-            {sortedBreakdown(entry.pricing_breakdown).map((line) => (
-              <DetailField key={line.meter} label={line.meter.replaceAll("_", " ")}>
-                {"unit_rate" in line
-                  ? `${formatTokens(line.units)} at ${formatUnitRate(line.unit_rate)} each, ${formatUSD(line.cost)}`
-                  : `${formatTokens(line.units)} at ${formatUSD(line.rate_per_million)} / 1M, ${formatUSD(line.cost)}`}
-              </DetailField>
-            ))}
+            {sortedBreakdown(entry.pricing_breakdown).map((line) => {
+              // A line of neither known shape was written by an older gateway.
+              // Its cost is still real, so it is shown as a charge with no rate
+              // rather than rendered through one of the two rate formats, which
+              // would print an undefined rate as "NaN / 1M".
+              const meter = String(line.meter ?? "");
+              return (
+                <DetailField key={meter} label={meter.replaceAll("_", " ")}>
+                  {isUnitChargeLine(line)
+                    ? `${formatTokens(line.units)} at ${formatUnitRate(line.unit_rate)} each, ${formatUSD(line.cost)}`
+                    : isTokenChargeLine(line)
+                      ? `${formatTokens(line.units)} at ${formatUSD(line.rate_per_million)} / 1M, ${formatUSD(line.cost)}`
+                      : formatUSD(Number(line.cost ?? 0))}
+                </DetailField>
+              );
+            })}
           </div>
         </div>
       ) : null}

@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { GatewaySettings } from "@/api/types";
+import type { GatewaySettings } from "@/client";
 import { PricingWarning } from "@/components/PricingWarning";
 import { withRouter } from "@/test/router";
 

@@ -1,4 +1,4 @@
-import type { UsageSeriesPoint, UsageTotals } from "@/api/types";
+import type { UsageSeriesPoint, UsageTotals } from "@/client";
 
 // Derivations shared by the Usage page and the share card. They lived on the page
 // while it was their only consumer; the card publishes the same numbers to the

@@ -3,9 +3,10 @@ import { render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { UsageGroupRow, UsageTotals } from "@/api/types";
+import type { UsageGroupRow, UsageTotals } from "@/client";
 
 import { ShareDialog } from "./ShareDialog";
+import { usageTotals } from "@/test/fixtures";
 
 // jsdom has no canvas, so the rasterizer cannot run for real here; mocked so the
 // dialog's wiring around it is exercisable. The claim that the PNG itself is
@@ -20,7 +21,7 @@ vi.mock("@/lib/shareImage", async (importOriginal) => {
   };
 });
 
-const totals: UsageTotals = {
+const totals: UsageTotals = usageTotals({
   cost: 3.44,
   prompt_tokens: 1_800_000,
   completion_tokens: 460_000,
@@ -33,7 +34,7 @@ const totals: UsageTotals = {
   unpriced_requests: 63,
   billed_input_tokens: 1_800_000,
   billed_output_tokens: 460_000,
-};
+});
 
 const rows: UsageGroupRow[] = [
   { key: "llama-3.3-70b-versatile", cost: 0.2, tokens: 268_459, requests: 96, is_other: false },

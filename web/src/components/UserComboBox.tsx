@@ -2,7 +2,7 @@ import { ComboBox, Description, Input, Label, ListBox, ListBoxItem } from "@hero
 import { useState } from "react";
 import type { ReactNode } from "react";
 
-import type { User } from "@/api/types";
+import type { User } from "@/client";
 
 interface Option {
   id: string;

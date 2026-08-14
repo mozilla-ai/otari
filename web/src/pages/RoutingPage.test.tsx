@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { PolicySpec, RoutingPolicyResponse } from "@/api/types";
+import type { PolicySpec, RoutingPolicyResponse } from "@/client";
 import { RoutingPage } from "@/pages/RoutingPage";
 import { withRouter } from "@/test/router";
 

@@ -1,13 +1,17 @@
 import { describe, expect, it } from "vitest";
 
-import type { UsageGroupRow, UsageSeriesPoint, UsageTotals } from "@/api/types";
+import type { UsageGroupRow, UsageSeriesPoint, UsageTotals } from "@/client";
 
 import { availableStats, cardModels, collapseModelName, heroCandidates, resolveHero } from "./shareCard";
+import { seriesPoint } from "@/test/fixtures";
 
 function row(overrides: Partial<UsageGroupRow> & { key: string | null }): UsageGroupRow {
   return { label: null, cost: 0, tokens: 0, requests: 0, is_other: false, ...overrides };
 }
 
+// Deliberately leaves the newer fields absent. Several tests below assert what
+// happens when a gateway does not send them, and the generated type marks them
+// required, so filling them in would quietly delete the case under test.
 function totals(overrides: Partial<UsageTotals> = {}): UsageTotals {
   return {
     cost: 0,
@@ -20,7 +24,7 @@ function totals(overrides: Partial<UsageTotals> = {}): UsageTotals {
     error_count: 0,
     avg_latency_ms: null,
     ...overrides,
-  };
+  } as UsageTotals;
 }
 
 const series: UsageSeriesPoint[] = [];
@@ -103,7 +107,7 @@ describe("heroCandidates", () => {
   it("excludes cache hit rate, which can appear on the card but never carry it", () => {
     const stats = availableStats({
       totals: totals({ request_count: 7 }),
-      series: [{ bucket_start: "2026-08-01T00:00:00Z", cost: 0, tokens: 0, requests: 1, input_tokens: 100, cache_read_tokens: 40 }],
+      series: [seriesPoint({ bucket_start: "2026-08-01T00:00:00Z", cost: 0, tokens: 0, requests: 1, input_tokens: 100, cache_read_tokens: 40 })],
       hideDollars: false,
     });
     expect(stats.map((s) => s.id)).toContain("cacheHitRate");
@@ -125,7 +129,7 @@ describe("resolveHero", () => {
   it("never falls back to a stat that cannot lead", () => {
     const stats = availableStats({
       totals: totals(),
-      series: [{ bucket_start: "2026-08-01T00:00:00Z", cost: 0, tokens: 0, requests: 1, input_tokens: 100, cache_read_tokens: 40 }],
+      series: [seriesPoint({ bucket_start: "2026-08-01T00:00:00Z", cost: 0, tokens: 0, requests: 1, input_tokens: 100, cache_read_tokens: 40 })],
       hideDollars: false,
     });
     expect(stats.map((s) => s.id)).toEqual(["cacheHitRate"]);

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 
-import type { Budget, ProviderHealthResponse, UsageTotals } from "@/api/types";
+import type { Budget, ProviderHealthResponse } from "@/client";
 import { budgetHealth, errorRateHealth, providerHealthStatus, toStatStatus } from "@/lib/overview";
+import { usageTotals } from "@/test/fixtures";
 
 function budget(over: Partial<Budget>): Budget {
   return {
@@ -18,20 +19,7 @@ function budget(over: Partial<Budget>): Budget {
   };
 }
 
-function totals(over: Partial<UsageTotals>): UsageTotals {
-  return {
-    cost: 0,
-    prompt_tokens: 0,
-    completion_tokens: 0,
-    total_tokens: 0,
-    cache_read_tokens: 0,
-    cache_write_tokens: 0,
-    request_count: 0,
-    error_count: 0,
-    avg_latency_ms: null,
-    ...over,
-  };
-}
+const totals = usageTotals;
 
 describe("errorRateHealth", () => {
   it("is neutral with no requests (no divide-by-zero)", () => {

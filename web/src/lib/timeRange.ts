@@ -1,4 +1,4 @@
-import type { UsageBucket } from "@/api/types";
+import type { UsageBucket } from "@/client";
 
 // Shared time-range vocabulary for the Usage and Activity pages. Both pages used
 // to keep private copies of the preset list (which drifted: "All" meant 30 days

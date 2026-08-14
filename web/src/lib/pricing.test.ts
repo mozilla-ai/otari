@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 
-import type { PricingResponse } from "@/api/types";
+import type { PricingResponse } from "@/client";
 import { currentPricing, providerFromModelKey } from "@/lib/pricing";
 
 function row(overrides: Partial<PricingResponse>): PricingResponse {
@@ -11,6 +11,8 @@ function row(overrides: Partial<PricingResponse>): PricingResponse {
     output_price_per_million: 2,
     cache_read_price_per_million: null,
     cache_write_price_per_million: null,
+    cache_write_1h_price_per_million: null,
+    pricing_tiers: [],
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     ...overrides,

@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
-import type { ConfigField, GatewaySettings, ReencryptProviderCredentialsResult, StoredProvider } from "@/api/types";
+import type { ConfigField, GatewaySettings, ReencryptProviderCredentialsResult, StoredProvider } from "@/client";
 import { AuthProvider } from "@/auth/AuthContext";
 import { SettingsPage, fieldMatches } from "@/pages/SettingsPage";
 

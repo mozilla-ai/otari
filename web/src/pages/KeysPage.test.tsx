@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ApiKey, User } from "@/api/types";
+import type { ApiKey, User } from "@/client";
 import { KeysPage } from "@/pages/KeysPage";
 
 function user(overrides: Partial<User> = {}): User {
@@ -29,6 +29,7 @@ function user(overrides: Partial<User> = {}): User {
 
 function apiKey(overrides: Partial<ApiKey> = {}): ApiKey {
   return {
+    capture_agent_telemetry: null,
     id: "key-1",
     key_prefix: "gw-AbC3dE",
     key_name: "ci-bot",

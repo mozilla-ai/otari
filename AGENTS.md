@@ -66,6 +66,11 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
   enforces a conventional title. Visibility rules live in `RELEASE.md`
   ("Changelog visibility"). Do not hand-edit `CHANGELOG.md`; the release
   workflows regenerate it.
+- The dashboard's API client (`web/src/client/schema.ts`) is generated from
+  `docs/public/openapi.json` and **is** committed, with a CI drift check. It follows the
+  spec: change a response model, regenerate the spec, and regenerate this too
+  (`npm --prefix web run client:generate`, which `npm test` also runs). A spec change
+  left ungenerated means the dashboard is typed against an API the gateway no longer serves.
 - The dashboard's route tree (`web/src/routeTree.gen.ts`) **is** committed, unlike the
   bundle below: `npm run typecheck` runs `tsc` alone and never invokes Vite, so without
   it in the tree a type-check of a fresh clone fails on a missing module. Any

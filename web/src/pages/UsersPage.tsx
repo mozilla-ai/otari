@@ -2,7 +2,7 @@ import { AlertDialog, Button, Card, Chip } from "@heroui/react";
 import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
 
 import { useBudgets, useCreateUser, useDeleteUser, useUpdateUser, useUsers } from "@/api/hooks";
-import type { Budget, CreateUserRequest, UpdateUserRequest, User } from "@/api/types";
+import type { Budget, CreateUserRequest, UpdateUserRequest, User } from "@/client";
 import { BulkActionBar } from "@/components/BulkActionBar";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DataTable, type DataTableColumn } from "@/components/DataTable";

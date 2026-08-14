@@ -738,6 +738,10 @@
         "title": "BatchRequestItem",
         "type": "object"
       },
+      "BillingMeters": {
+        "additionalProperties": true,
+        "type": "object"
+      },
       "Body_create_file_v1_files_post": {
         "properties": {
           "file": {
@@ -3946,17 +3950,24 @@
           },
           "pricing_tiers": {
             "items": {
-              "additionalProperties": {
-                "anyOf": [
-                  {
-                    "type": "number"
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/PricingTier"
+                },
+                {
+                  "additionalProperties": {
+                    "anyOf": [
+                      {
+                        "type": "number"
+                      },
+                      {
+                        "type": "integer"
+                      }
+                    ]
                   },
-                  {
-                    "type": "integer"
-                  }
-                ]
-              },
-              "type": "object"
+                  "type": "object"
+                }
+              ]
             },
             "title": "Pricing Tiers",
             "type": "array"
@@ -5978,6 +5989,51 @@
         "title": "TestServiceResponse",
         "type": "object"
       },
+      "TokenChargeLine": {
+        "additionalProperties": true,
+        "description": "A charge line billed per million tokens.\n\n``rate_per_million`` is the discriminator: its presence (rather than\n``unit_rate``) is what tells a reader, and a renderer, which unit convention\napplies. See ``gateway.services.pricing_service``.",
+        "properties": {
+          "cost": {
+            "description": "USD charged for this line.",
+            "title": "Cost",
+            "type": "number"
+          },
+          "meter": {
+            "description": "What was metered, e.g. 'input' or 'cache_read'.",
+            "title": "Meter",
+            "type": "string"
+          },
+          "rate_per_million": {
+            "description": "USD per million units.",
+            "title": "Rate Per Million",
+            "type": "number"
+          },
+          "units": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "description": "Tokens billed on this meter.",
+            "title": "Units"
+          }
+        },
+        "required": [
+          "meter",
+          "units",
+          "rate_per_million",
+          "cost"
+        ],
+        "title": "TokenChargeLine",
+        "type": "object"
+      },
+      "ToolMeter": {
+        "additionalProperties": true,
+        "type": "object"
+      },
       "ToolSettingField": {
         "description": "One editable tool/guardrail field surfaced to the dashboard.",
         "properties": {
@@ -6080,6 +6136,47 @@
           "data"
         ],
         "title": "ToolsResponse",
+        "type": "object"
+      },
+      "UnitChargeLine": {
+        "additionalProperties": true,
+        "description": "A charge line billed per call, for gateway-run tools and per-request routes.\n\n``unit_rate`` is the discriminator, in the same sense as\n:class:`TokenChargeLine`'s ``rate_per_million``.",
+        "properties": {
+          "cost": {
+            "description": "USD charged for this line.",
+            "title": "Cost",
+            "type": "number"
+          },
+          "meter": {
+            "description": "What was metered, e.g. 'request' or 'web_search_calls'.",
+            "title": "Meter",
+            "type": "string"
+          },
+          "unit_rate": {
+            "description": "USD per call.",
+            "title": "Unit Rate",
+            "type": "number"
+          },
+          "units": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "number"
+              }
+            ],
+            "description": "Calls billed on this meter.",
+            "title": "Units"
+          }
+        },
+        "required": [
+          "meter",
+          "units",
+          "unit_rate",
+          "cost"
+        ],
+        "title": "UnitChargeLine",
         "type": "object"
       },
       "UpdateBudgetRequest": {
@@ -6912,6 +7009,9 @@
           "billing_meters": {
             "anyOf": [
               {
+                "$ref": "#/components/schemas/BillingMeters"
+              },
+              {
                 "additionalProperties": true,
                 "type": "object"
               },
@@ -7029,20 +7129,30 @@
             "anyOf": [
               {
                 "items": {
-                  "additionalProperties": {
-                    "anyOf": [
-                      {
-                        "type": "number"
+                  "anyOf": [
+                    {
+                      "$ref": "#/components/schemas/TokenChargeLine"
+                    },
+                    {
+                      "$ref": "#/components/schemas/UnitChargeLine"
+                    },
+                    {
+                      "additionalProperties": {
+                        "anyOf": [
+                          {
+                            "type": "number"
+                          },
+                          {
+                            "type": "integer"
+                          },
+                          {
+                            "type": "string"
+                          }
+                        ]
                       },
-                      {
-                        "type": "integer"
-                      },
-                      {
-                        "type": "string"
-                      }
-                    ]
-                  },
-                  "type": "object"
+                      "type": "object"
+                    }
+                  ]
                 },
                 "type": "array"
               },

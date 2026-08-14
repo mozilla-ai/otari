@@ -1,4 +1,4 @@
-import type { Budget, ProviderHealthResponse, UsageTotals } from "@/api/types";
+import type { Budget, ProviderHealthResponse, UsageTotals } from "@/client";
 
 // Attention-routing status for an overview tile / the system-status strip.
 // "neutral" means "nothing to judge here" (no data, unlimited, none configured)

@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { InFlightRequest, InFlightResponse, UsageEntry } from "@/api/types";
+import type { InFlightRequest, InFlightResponse, UsageEntry } from "@/client";
 import { ActivityPage } from "@/pages/ActivityPage";
 import { withRouter } from "@/test/router";
 

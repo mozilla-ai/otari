@@ -3,7 +3,7 @@ import { AlertDialog, Button } from "@heroui/react";
 import { ErrorBanner, InfoBanner } from "./ui";
 import { useEffect, useMemo, useRef, useState } from "react";
 
-import type { UsageGroupRow, UsageSeriesPoint, UsageTotals } from "@/api/types";
+import type { UsageGroupRow, UsageSeriesPoint, UsageTotals } from "@/client";
 import { availableStats, cardModels, heroCandidates, resolveHero, type StatId } from "@/lib/shareCard";
 import { canCopyImages, copyBlobAsImage, downloadBlob, rasterize, shareFilename } from "@/lib/shareImage";
 

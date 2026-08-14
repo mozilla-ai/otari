@@ -2,7 +2,7 @@ import { Button, Spinner } from "@heroui/react";
 import { useRef, useState } from "react";
 import type { ReactNode } from "react";
 
-import type { UsageBucket } from "@/api/types";
+import type { UsageBucket } from "@/client";
 import { ChartLegend, TrendChart, type SeriesDef, type StackedPoint } from "@/components/charts";
 import { bucketDurationMs, bucketIndexRange, formatWindowLabel, rangeFromBuckets, type RangePreset } from "@/lib/timeRange";
 

@@ -10,7 +10,7 @@ import {
   useUpdateUser,
   useUsers,
 } from "@/api/hooks";
-import type { Budget, BudgetResetLog, CreateBudgetRequest, User } from "@/api/types";
+import type { Budget, BudgetResetLog, CreateBudgetRequest, User } from "@/client";
 import { BulkActionBar } from "@/components/BulkActionBar";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DataTable, type DataTableColumn } from "@/components/DataTable";

@@ -5,8 +5,9 @@ import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { UsageSummary } from "@/api/types";
+import type { UsageSummary } from "@/client";
 import { UsagePage } from "@/pages/UsagePage";
+import { seriesPoint, usageTotals } from "@/test/fixtures";
 import { withRouter } from "@/test/router";
 
 function summary(overrides: Partial<UsageSummary> = {}): UsageSummary {
@@ -14,17 +15,18 @@ function summary(overrides: Partial<UsageSummary> = {}): UsageSummary {
     start_date: "2026-06-21T00:00:00Z",
     end_date: "2026-07-21T00:00:00Z",
     bucket: "day",
-    totals: {
+    totals: usageTotals({
       cost: 1240.5,
       prompt_tokens: 8_000_000,
       completion_tokens: 4_400_000,
       total_tokens: 12_400_000,
-      cache_read_tokens: 0,
-      cache_write_tokens: 0,
+      // The tokens tile reads the billed total, not total_tokens.
+      billed_input_tokens: 8_000_000,
+      billed_output_tokens: 4_400_000,
       request_count: 84_000,
       error_count: 1_764,
       avg_latency_ms: 820,
-    },
+    }),
     by_model: [
       { key: "gpt-5.6", cost: 820, tokens: 8_000_000, requests: 42_000, is_other: false },
       { key: "claude-sonnet-5", cost: 310, tokens: 3_000_000, requests: 28_000, is_other: false },
@@ -57,9 +59,10 @@ function summary(overrides: Partial<UsageSummary> = {}): UsageSummary {
       { key: "anthropic", cost: 360.5, tokens: 5_400_000, requests: 38_900, is_other: false },
     ],
     by_tool: [],
+    errors_by_status_code: [],
     series: [
-      { bucket_start: "2026-07-19T00:00:00Z", cost: 400, tokens: 4_000_000, requests: 28_000 },
-      { bucket_start: "2026-07-20T00:00:00Z", cost: 840.5, tokens: 8_400_000, requests: 56_000 },
+      seriesPoint({ bucket_start: "2026-07-19T00:00:00Z", cost: 400, tokens: 4_000_000, requests: 28_000 }),
+      seriesPoint({ bucket_start: "2026-07-20T00:00:00Z", cost: 840.5, tokens: 8_400_000, requests: 56_000 }),
     ],
     ...overrides,
   };
@@ -593,17 +596,7 @@ describe("UsagePage", () => {
   it("shows an onboarding empty state when the gateway has no usage", async () => {
     mockApi(
       summary({
-        totals: {
-          cost: 0,
-          prompt_tokens: 0,
-          completion_tokens: 0,
-          total_tokens: 0,
-          cache_read_tokens: 0,
-          cache_write_tokens: 0,
-          request_count: 0,
-          error_count: 0,
-          avg_latency_ms: null,
-        },
+        totals: usageTotals(),
         by_model: [],
         by_user: [],
         series: [],

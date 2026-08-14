@@ -37,7 +37,7 @@ import type {
   StoredProvider,
   TestProviderResult,
   UpdateStoredProviderRequest,
-} from "@/api/types";
+} from "@/client";
 import { Field } from "@/components/Field";
 import { DataTable, type DataTableColumn } from "@/components/DataTable";
 import { ConfirmButton, ErrorBanner, errorMessage, InfoBanner, PageHeader } from "@/components/ui";
@@ -1165,7 +1165,7 @@ export function ProvidersPage() {
           healthy={health.data.healthy}
           degraded={health.data.degraded}
           total={health.data.total}
-          checkedAt={health.data.checked_at}
+          checkedAt={health.data.checked_at ?? null}
         />
       ) : null}
 

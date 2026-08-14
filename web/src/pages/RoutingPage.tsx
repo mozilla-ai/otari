@@ -2,7 +2,7 @@ import { Link } from "@tanstack/react-router";
 import { Button, Card, Chip } from "@heroui/react";
 import { useCallback, useMemo, useState } from "react";
 
-import type { AliasResponse, PolicyGuardrail, PolicySpec, RoutingPolicyResponse } from "@/api/types";
+import type { AliasResponse, PolicyGuardrail, PolicySpec, RoutingPolicyResponse } from "@/client";
 import {
   useAliases,
   useCreateAlias,
@@ -1050,7 +1050,7 @@ export function RoutingPage() {
         candidates={candidatesOf(row.spec)}
         defaultTarget={defaultTargetOf(row.spec)}
         backend={routerBackendOf(row.spec) ?? KNN_BACKEND}
-        scopedUserId={row.user_id}
+        scopedUserId={row.user_id ?? null}
         onClose={() => setExpanded(null)}
       />
     ),
@@ -1100,10 +1100,10 @@ export function RoutingPage() {
         id: "scope",
         header: "Applies to",
         cell: (policy) =>
-          policy.user_id === null ? (
+          (policy.user_id ?? null) === null ? (
             <span className="text-[var(--otari-muted)]">Every caller</span>
           ) : (
-            <CopyableValue value={policy.user_id} label="user id" />
+            <CopyableValue value={policy.user_id ?? ""} label="user id" />
           ),
       },
       {

@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ToolSettingField, ToolSettingsResponse, ToolsResponse } from "@/api/types";
+import type { ToolSettingField, ToolSettingsResponse, ToolsResponse } from "@/client";
 import { ToolsGuardrailsPage } from "@/pages/ToolsGuardrailsPage";
 
 const FIELDS: ToolSettingField[] = [

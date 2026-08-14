@@ -1,7 +1,7 @@
 import { ComboBox, Input, ListBox, ListBoxItem } from "@heroui/react";
 import { type ReactNode, useMemo, useState } from "react";
 
-import type { User } from "@/api/types";
+import type { User } from "@/client";
 
 interface Option {
   id: string;

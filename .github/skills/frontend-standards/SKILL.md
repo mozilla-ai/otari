@@ -17,7 +17,8 @@ Library, Playwright (`web/e2e/`). Package manager is **npm**. Layout is flat
 architecture, no screenshot suite, and no analytics. Do not introduce those to match
 some other repo; match what `web/` does. Routing conventions (one file per URL, a route
 file exports `Route` and nothing else, the search-param codec, and `renderWithRouter` for
-component tests) live in [web/AGENTS.md](../../../web/AGENTS.md).
+component tests) and the generated API client (`web/src/client`, regenerated from the
+OpenAPI spec, never hand-edited) live in [web/AGENTS.md](../../../web/AGENTS.md).
 
 Build and check from the repo root:
 

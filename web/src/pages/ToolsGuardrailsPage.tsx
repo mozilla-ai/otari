@@ -9,7 +9,7 @@ import {
   useTools,
   useUpdateToolSettings,
 } from "@/api/hooks";
-import type { ManagedTool, ToolServiceName, ToolSettingField, UpdateToolSettingsRequest } from "@/api/types";
+import type { ManagedTool, ToolServiceName, ToolSettingField, UpdateToolSettingsRequest } from "@/client";
 import { ErrorBanner, FilterSelect, PageHeader, PageLoading, errorMessage } from "@/components/ui";
 
 // One settable field maps onto one key of the update request; cast at this one

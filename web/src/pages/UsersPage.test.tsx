@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { Budget, User } from "@/api/types";
+import type { Budget, User } from "@/client";
 import { UsersPage } from "@/pages/UsersPage";
 
 function user(overrides: Partial<User> = {}): User {

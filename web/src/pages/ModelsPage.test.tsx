@@ -14,11 +14,12 @@ import type {
   ModelMetadataResponse,
   ModelObject,
   PricingResponse,
-} from "@/api/types";
+} from "@/client";
 import { ModelsPage } from "@/pages/ModelsPage";
 import { withRouter } from "@/test/router";
+import { pricingResponse } from "@/test/fixtures";
 
-const PRICED: PricingResponse = {
+const PRICED: PricingResponse = pricingResponse({
   model_key: "openai:gpt-4o",
   effective_at: "2026-01-01T00:00:00Z",
   input_price_per_million: 2.5,
@@ -27,7 +28,7 @@ const PRICED: PricingResponse = {
   cache_write_price_per_million: null,
   created_at: "2026-01-01T00:00:00Z",
   updated_at: "2026-01-01T00:00:00Z",
-};
+});
 
 const SETTINGS: GatewaySettings = {
   mode: "standalone",
@@ -447,8 +448,8 @@ describe("ModelsPage", () => {
     const withoutModalities = {
       ...METADATA,
       models: {
-        ...METADATA.models,
-        "openai:gpt-4o": { ...METADATA.models["openai:gpt-4o"], input_modalities: undefined },
+        ...(METADATA.models ?? {}),
+        "openai:gpt-4o": { ...(METADATA.models ?? {})["openai:gpt-4o"], input_modalities: undefined },
       },
     } as unknown as ModelMetadataResponse;
     mockApi({ metadata: withoutModalities });

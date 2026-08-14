@@ -10,6 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, verify_api_key_or_master_key, verify_master_key
+from gateway.api.routes.pricing import PricingTier
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import APIKey, ModelPricing
@@ -57,7 +58,13 @@ class ModelPricingInfo(BaseModel):
     cache_read_price_per_million: float | None = None
     cache_write_price_per_million: float | None = None
     cache_write_1h_price_per_million: float | None = None
-    pricing_tiers: list[dict[str, float | int]] = Field(default_factory=list)
+    # The same tiers SetPricingRequest accepts, so the response says what the
+    # request already promised. The permissive arm stays for the same reason as
+    # the billing shapes on a usage row, with one addition specific to here:
+    # dropping it would make Pydantic validate every stored tier against
+    # PricingTier's rules on read, which is validation this field never used to
+    # do, so a rule tightened later would turn old rows into a 500 on /v1/models.
+    pricing_tiers: Sequence[PricingTier | dict[str, float | int]] = Field(default_factory=list)
 
 
 class ModelObject(BaseModel):

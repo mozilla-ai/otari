@@ -1,4 +1,4 @@
-import type { UsageGroupRow, UsageSeriesPoint, UsageTotals } from "@/api/types";
+import type { UsageGroupRow, UsageSeriesPoint, UsageTotals } from "@/client";
 
 import { formatNumber, formatPct, formatTokens, formatUsdHeadline } from "./format";
 import { billedTokenTotal, cacheHitRate, costNeedsCaveat, formatLatency } from "./usageTotals";

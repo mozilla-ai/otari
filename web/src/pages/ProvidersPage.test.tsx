@@ -13,7 +13,7 @@ import type {
   ProviderInfo,
   StoredProvider,
   TestProviderResult,
-} from "@/api/types";
+} from "@/client";
 import { ProvidersPage } from "@/pages/ProvidersPage";
 import { withRouter } from "@/test/router";
 

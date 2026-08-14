@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { Budget, BudgetResetLog, User } from "@/api/types";
+import type { Budget, BudgetResetLog, User } from "@/client";
 import { BudgetsPage } from "@/pages/BudgetsPage";
 
 function testUser(user_id: string): User {

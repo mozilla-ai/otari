@@ -1,4 +1,4 @@
-import type { PricingResponse } from "@/api/types";
+import type { PricingResponse } from "@/client";
 
 export function providerFromModelKey(modelKey: string): string {
   const idx = modelKey.indexOf(":");

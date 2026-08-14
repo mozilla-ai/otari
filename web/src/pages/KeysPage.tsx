@@ -2,7 +2,7 @@ import { Button, Card, Chip } from "@heroui/react";
 import { type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { useCreateKey, useDeleteKey, useKeys, useRotateKey, useUpdateKey, useUsers } from "@/api/hooks";
-import type { ApiKey, CreateKeyRequest, CreateKeyResponse, User } from "@/api/types";
+import type { ApiKey, CreateKeyRequest, CreateKeyResponse, User } from "@/client";
 import { BulkActionBar } from "@/components/BulkActionBar";
 import { ConfirmDialog } from "@/components/ConfirmDialog";
 import { DataTable, type DataTableColumn } from "@/components/DataTable";

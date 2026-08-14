@@ -5,9 +5,10 @@ import userEvent from "@testing-library/user-event";
 import type { ReactElement } from "react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { UsageSummary } from "@/api/types";
+import type { UsageSummary } from "@/client";
 import { localDayKey, OverviewIndex, OverviewPage } from "@/pages/OverviewPage";
 import { withRouter } from "@/test/router";
+import { usageTotals } from "@/test/fixtures";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
@@ -18,7 +19,7 @@ function summary(totals: Partial<UsageSummary["totals"]>): UsageSummary {
     start_date: "2026-06-22T00:00:00Z",
     end_date: "2026-07-22T00:00:00Z",
     bucket: "day",
-    totals: {
+    totals: usageTotals({
       cost: 0,
       prompt_tokens: 0,
       completion_tokens: 0,
@@ -29,7 +30,7 @@ function summary(totals: Partial<UsageSummary["totals"]>): UsageSummary {
       error_count: 0,
       avg_latency_ms: null,
       ...totals,
-    },
+    }),
     by_model: [],
     by_user: [],
     by_api_key: [],
@@ -38,6 +39,7 @@ function summary(totals: Partial<UsageSummary["totals"]>): UsageSummary {
     by_endpoint: [],
     by_provider: [],
     by_tool: [],
+    errors_by_status_code: [],
     series: [],
   };
 }

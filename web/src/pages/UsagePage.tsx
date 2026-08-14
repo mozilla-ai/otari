@@ -12,7 +12,7 @@ import type {
   UsageGroupRow,
   UsageSeriesPoint,
   UsageSummary,
-} from "@/api/types";
+} from "@/client";
 import { ChartLegend, Sparkline, TrendChart, type SeriesDef, type StackedPoint } from "@/components/charts";
 import { ShareDialog } from "@/components/ShareDialog";
 import { DataTable, type DataTableColumn } from "@/components/DataTable";

@@ -13,7 +13,7 @@ import {
   useUsageSummary,
   useUsers,
 } from "@/api/hooks";
-import type { UsageEntry } from "@/api/types";
+import type { UsageEntry } from "@/client";
 import { Sparkline } from "@/components/charts";
 import { DataTable, type DataTableColumn } from "@/components/DataTable";
 import { DeltaHint, ErrorBanner, PageHeader, PageLoading, RefreshButton, StatCard } from "@/components/ui";
