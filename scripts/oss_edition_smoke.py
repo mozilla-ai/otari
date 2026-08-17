@@ -476,8 +476,8 @@ def check_bootstrap(base_url: str) -> None:
         raise SmokeFailure(f"GET /v1/bootstrap did not return an object: {body!r}")
     if body.get("deployment_type") != "standalone" or body.get("session_type") != "local_operator":
         raise SmokeFailure(f"GET /v1/bootstrap does not describe the OSS edition: {body!r}")
-    if not body.get("capabilities"):
-        raise SmokeFailure(f"GET /v1/bootstrap reports no management capabilities: {body!r}")
+    if not body.get("surfaces"):
+        raise SmokeFailure(f"GET /v1/bootstrap reports no management surfaces: {body!r}")
     log("The deployment bootstrap answers without a credential, as standalone")
 
 

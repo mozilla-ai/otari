@@ -66,7 +66,7 @@ describe("App", () => {
       bootstrap({
         deployment_type: "hybrid",
         session_type: "none",
-        capabilities: [],
+        surfaces: [],
         management_url: "https://otari.ai",
       }),
     )

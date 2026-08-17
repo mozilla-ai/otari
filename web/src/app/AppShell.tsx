@@ -13,7 +13,7 @@ import { ConnectionStatus } from "@/app/ConnectionStatus"
 import { UpdatePrompt } from "@/app/UpdatePrompt"
 import { useAuth } from "@/features/auth/AuthContext"
 import { PricingWarning } from "@/features/models/PricingWarning"
-import { useCapabilities } from "@/shared/hooks/useDeployment"
+import { useSurfaces } from "@/shared/hooks/useDeployment"
 
 const MIN_SIDEBAR = 200
 const MAX_SIDEBAR = 480
@@ -79,13 +79,15 @@ interface NavItem {
   section: string
   icon: ReactNode
   /**
-   * The management capability this destination needs, from the deployment
-   * bootstrap. A missing one is ungated: the Overview index is the deployment's
-   * own front page and reads whatever it is allowed to. Hiding a link cannot
-   * grant access to anything; the server still authorizes every request the
-   * page behind it makes.
+   * The management surface this destination needs, from the deployment
+   * bootstrap. Not `capability`, which is otari.ai's nav field for the
+   * entitlement axis; this one is the deployment axis, and both will sit on a
+   * nav entry once the registries converge. A missing one is ungated: the
+   * Overview index is the deployment's own front page and reads whatever it is
+   * allowed to. Hiding a link cannot grant access to anything; the server still
+   * authorizes every request the page behind it makes.
    */
-  capability?: string
+  surface?: string
 }
 
 // Shared by the nav links and the user-guide link below them, so the two agree
@@ -166,7 +168,7 @@ const NAV: NavItem[] = [
   },
   {
     to: "/activity",
-    capability: "usage",
+    surface: "usage",
     section: "observability",
     label: "Activity",
     icon: (
@@ -189,7 +191,7 @@ const NAV: NavItem[] = [
   },
   {
     to: "/usage",
-    capability: "usage",
+    surface: "usage",
     section: "observability",
     label: "Usage",
     icon: (
@@ -212,7 +214,7 @@ const NAV: NavItem[] = [
   },
   {
     to: "/providers",
-    capability: "providers",
+    surface: "providers",
     section: "catalog",
     label: "Providers",
     icon: (
@@ -251,7 +253,7 @@ const NAV: NavItem[] = [
   },
   {
     to: "/users",
-    capability: "users",
+    surface: "users",
     section: "access",
     label: "Users",
     icon: (
@@ -280,7 +282,7 @@ const NAV: NavItem[] = [
   },
   {
     to: "/keys",
-    capability: "keys",
+    surface: "keys",
     section: "access",
     label: "API keys",
     icon: (
@@ -304,7 +306,7 @@ const NAV: NavItem[] = [
   },
   {
     to: "/budgets",
-    capability: "budgets",
+    surface: "budgets",
     section: "access",
     label: "Budgets",
     icon: (
@@ -336,7 +338,7 @@ const NAV: NavItem[] = [
   },
   {
     to: "/models",
-    capability: "models",
+    surface: "models",
     section: "catalog",
     label: "Models",
     icon: (
@@ -355,7 +357,7 @@ const NAV: NavItem[] = [
   },
   {
     to: "/routing",
-    capability: "routing",
+    surface: "routing",
     section: "catalog",
     label: "Routing",
     icon: (
@@ -376,7 +378,7 @@ const NAV: NavItem[] = [
   },
   {
     to: "/tools",
-    capability: "tools",
+    surface: "tools",
     section: "system",
     label: "Tools & Guardrails",
     icon: (
@@ -398,7 +400,7 @@ const NAV: NavItem[] = [
   },
   {
     to: "/settings",
-    capability: "settings",
+    surface: "settings",
     section: "system",
     label: "Settings",
     icon: (
@@ -424,7 +426,7 @@ export function AppShell() {
   const { logout } = useAuth()
   // The deployment decides which destinations exist here, so the sidebar reads
   // it once rather than each page asking what mode it is running in.
-  const hasCapability = useCapabilities()
+  const hostsSurface = useSurfaces()
 
   const asideRef = useRef<HTMLElement>(null)
   const mainRef = useRef<HTMLElement>(null)
@@ -733,7 +735,7 @@ export function AppShell() {
               const items = NAV.filter(
                 (item) =>
                   item.section === section.key &&
-                  (!item.capability || hasCapability(item.capability)),
+                  (!item.surface || hostsSurface(item.surface)),
               )
               if (items.length === 0) {
                 return null

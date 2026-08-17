@@ -314,7 +314,7 @@ describe("AppShell responsive layout", () => {
   })
 })
 
-describe("AppShell capability gating", () => {
+describe("AppShell surface gating", () => {
   afterEach(() => {
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
@@ -325,8 +325,8 @@ describe("AppShell capability gating", () => {
     mockMatchMedia(false)
     await renderShell()
 
-    // Every label, not a sample: a capability misspelled on a NAV entry hides
-    // that destination in every deployment, and only the full list catches it.
+    // Every label, not a sample: a surface misspelled on a NAV entry hides that
+    // destination in every deployment, and only the full list catches it.
     for (const label of [
       "Overview",
       "Activity",
@@ -344,12 +344,12 @@ describe("AppShell capability gating", () => {
     }
   })
 
-  it("hides a destination whose capability the deployment does not serve", async () => {
+  it("hides a destination whose surface the deployment does not host", async () => {
     mockMatchMedia(false)
-    // A capability the bootstrap omits takes its link with it. Both
-    // observability pages read /v1/usage, so both go.
+    // A surface the bootstrap omits takes its link with it. Both observability
+    // pages read /v1/usage, so both go.
     await renderShell(
-      bootstrap({ capabilities: ["models", "providers", "settings"] }),
+      bootstrap({ surfaces: ["models", "providers", "settings"] }),
     )
 
     expect(screen.queryByRole("link", { name: "Activity" })).toBeNull()
@@ -362,7 +362,7 @@ describe("AppShell capability gating", () => {
 
   it("drops a section header once its whole group is gated away", async () => {
     mockMatchMedia(false)
-    await renderShell(bootstrap({ capabilities: ["models"] }))
+    await renderShell(bootstrap({ surfaces: ["models"] }))
 
     // "Observability" labels Activity and Usage; with neither served, an empty
     // heading over nothing is worse than no heading.

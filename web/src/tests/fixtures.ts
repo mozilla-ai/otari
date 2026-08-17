@@ -65,10 +65,10 @@ export function pricingResponse(
   }
 }
 
-// The capability names a standalone gateway serves, kept in step with
-// STANDALONE_CAPABILITIES in src/gateway/api/routes/bootstrap.py. A test that
-// wants a surface hidden overrides `capabilities` rather than editing this.
-const STANDALONE_CAPABILITIES = [
+// The surface names a standalone gateway hosts, kept in step with
+// STANDALONE_SURFACES in src/gateway/api/routes/bootstrap.py. A test that wants
+// a surface hidden overrides `surfaces` rather than editing this.
+const STANDALONE_SURFACES = [
   "budgets",
   "keys",
   "models",
@@ -87,7 +87,7 @@ export function bootstrap(
   return {
     deployment_type: "standalone",
     session_type: "local_operator",
-    capabilities: [...STANDALONE_CAPABILITIES],
+    surfaces: [...STANDALONE_SURFACES],
     management_url: null,
     ...overrides,
   }

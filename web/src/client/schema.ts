@@ -3171,11 +3171,6 @@ export interface components {
          */
         DeploymentBootstrap: {
             /**
-             * Capabilities
-             * @description Management API groups this deployment serves, sorted, which is what its dashboard surfaces gate on. Empty for a hybrid gateway.
-             */
-            capabilities: string[];
-            /**
              * Deployment Type
              * @description Which deployment serves this URL. 'standalone' owns its own data; 'hosted' is otari.ai; 'hybrid' is a gateway attached to otari.ai, which is data-plane only and holds no management surface of its own.
              * @enum {string}
@@ -3192,6 +3187,11 @@ export interface components {
              * @enum {string}
              */
             session_type: "local_operator" | "hosted_user" | "none";
+            /**
+             * Surfaces
+             * @description Management API groups this deployment serves, sorted, which is what its dashboard pages gate on. Named surfaces, not capabilities: capability is otari.ai's word for the entitlement (licensing) axis, and this is the deployment (topology) axis. Empty for a hybrid gateway.
+             */
+            surfaces: string[];
         };
         /**
          * DiscoverableModel

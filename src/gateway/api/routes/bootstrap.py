@@ -33,9 +33,15 @@ SessionType = Literal["local_operator", "hosted_user", "none"]
 # The management API groups a standalone gateway serves, one name per ``/v1/``
 # router the dashboard's surfaces are built on. Naming the groups rather than the
 # pages keeps the list checkable: ``test_deployment_bootstrap`` asserts every
-# name here is a route this app actually mounts, so a capability cannot outlive
-# the API behind it. Several pages share one (Activity and Usage are both views
-# over ``/v1/usage``), and the Overview index needs none.
+# name here is a route this app actually mounts, so a surface cannot outlive the
+# API behind it. Several pages share one (Activity and Usage are both views over
+# ``/v1/usage``), and the Overview index needs none.
+#
+# Deliberately *not* called capabilities. otari.ai already spends that word on
+# the entitlement axis, down to a nav item's ``capability`` field and a
+# ``routing`` entry that means "this org is licensed for routing". This axis
+# answers something else entirely, "does this process host the surface at all",
+# and the two vocabularies meet in one shell at M5. See ARCHITECTURE.md.
 #
 # A hybrid gateway serves none of them: its control plane is otari.ai, and a
 # second management UI beside it is what the deployment contract rules out.
@@ -44,7 +50,7 @@ SessionType = Literal["local_operator", "hosted_user", "none"]
 # hybrid. It travels as a set rather than as a second reading of the mode because
 # the shared shell also runs against a hosted control plane, where the two come
 # apart.
-STANDALONE_CAPABILITIES: tuple[str, ...] = (
+STANDALONE_SURFACES: tuple[str, ...] = (
     "budgets",
     "keys",
     "models",
@@ -74,10 +80,12 @@ class DeploymentBootstrap(BaseModel):
             "account, and 'none' a deployment that issues no management session at all."
         )
     )
-    capabilities: list[str] = Field(
+    surfaces: list[str] = Field(
         description=(
             "Management API groups this deployment serves, sorted, which is what its dashboard "
-            "surfaces gate on. Empty for a hybrid gateway."
+            "pages gate on. Named surfaces, not capabilities: capability is otari.ai's word for "
+            "the entitlement (licensing) axis, and this is the deployment (topology) axis. "
+            "Empty for a hybrid gateway."
         )
     )
     management_url: str | None = Field(
@@ -98,12 +106,12 @@ async def get_bootstrap(config: GatewayConfig = Depends(get_config)) -> Deployme
         return DeploymentBootstrap(
             deployment_type="hybrid",
             session_type="none",
-            capabilities=[],
+            surfaces=[],
             management_url=config.platform_management_url,
         )
     return DeploymentBootstrap(
         deployment_type="standalone",
         session_type="local_operator",
-        capabilities=sorted(STANDALONE_CAPABILITIES),
+        surfaces=sorted(STANDALONE_SURFACES),
         management_url=None,
     )

@@ -4,8 +4,8 @@ import { describe, expect, it, vi } from "vitest"
 
 import {
   DeploymentProvider,
-  useCapabilities,
   useDeployment,
+  useSurfaces,
 } from "@/shared/hooks/useDeployment"
 import { bootstrap } from "@/tests/fixtures"
 
@@ -38,10 +38,10 @@ describe("useDeployment", () => {
   })
 })
 
-describe("useCapabilities", () => {
-  it("reports only what the deployment serves", () => {
-    const { result } = renderHook(() => useCapabilities(), {
-      wrapper: wrapper(bootstrap({ capabilities: ["usage", "models"] })),
+describe("useSurfaces", () => {
+  it("reports only what the deployment hosts", () => {
+    const { result } = renderHook(() => useSurfaces(), {
+      wrapper: wrapper(bootstrap({ surfaces: ["usage", "models"] })),
     })
 
     expect(result.current("usage")).toBe(true)
@@ -49,11 +49,9 @@ describe("useCapabilities", () => {
     expect(result.current("budgets")).toBe(false)
   })
 
-  it("serves nothing on a hybrid gateway", () => {
-    const { result } = renderHook(() => useCapabilities(), {
-      wrapper: wrapper(
-        bootstrap({ deployment_type: "hybrid", capabilities: [] }),
-      ),
+  it("hosts nothing on a hybrid gateway", () => {
+    const { result } = renderHook(() => useSurfaces(), {
+      wrapper: wrapper(bootstrap({ deployment_type: "hybrid", surfaces: [] })),
     })
 
     expect(result.current("usage")).toBe(false)

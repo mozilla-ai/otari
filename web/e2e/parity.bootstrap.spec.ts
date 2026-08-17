@@ -15,8 +15,8 @@ test("the deployment bootstrap is served unauthenticated", async ({
     deployment_type: "standalone",
     session_type: "local_operator",
     // Spelled out rather than derived: this is the list the sidebar gates on,
-    // and a capability that quietly appears or disappears should fail here.
-    capabilities: [
+    // and a surface that quietly appears or disappears should fail here.
+    surfaces: [
       "budgets",
       "keys",
       "models",

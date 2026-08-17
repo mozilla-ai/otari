@@ -163,7 +163,7 @@ The inference and code-execution ports share a shape: a compute-heavy backend be
 
 Three gates decide whether a piece of behavior runs. They **compose but never merge**, because they answer different questions:
 
-- **Deployment capability** is the topology axis: *does the process serving this URL host this surface at all?* It is answered by the deployment bootstrap (`GET /v1/bootstrap`), which the dashboard shell reads once before it renders, and it is the reason a hybrid gateway shows no management UI: its control plane is otari.ai, not itself. Standalone and hosted deployments serve the surface; a data-plane gateway does not.
+- **Surface** is the topology axis: *does the process serving this URL host this surface at all?* It is answered by the deployment bootstrap (`GET /v1/bootstrap`), whose `surfaces` list the dashboard shell reads once before it renders, and it is the reason a hybrid gateway shows no management UI: its control plane is otari.ai, not itself. Standalone and hosted deployments host the surface; a data-plane gateway does not. It is named `surface` and never `capability`, because otari.ai already spends that word on the entitlement axis below, down to a nav item's `capability` field, and the two vocabularies meet in one shell when the control-plane UI converges.
 - **Entitlement** is the licensing axis: *is this capability enabled for this deployment or org at all?* It is scoped per deployment or per org, never per user. It is resolved by `EntitlementPort`, whose core adapter grants every base capability and reports every overlay-only one as absent; a real resolver is an overlay adapter.
 - **Feature flag** is the operational axis: *is this sub-feature of a capability I already hold turned on right now?* It is engineering's controlled-rollout switch, transient by design: once its rollout lands the flag is retired, unlike an entitlement, which is a standing property.
 
@@ -175,7 +175,7 @@ Otari's core provides both gates as mechanisms; a surface composes them. Because
 entitled("routing") AND flag("smart-model-selection-v2")
 ```
 
-A deployment entitled to `routing` still does not get `smart-model-selection-v2` while that flag is off in test. Do not fold one axis into the other: an entitlement is not "a flag that is on for some deployments", a flag is not "a cheap entitlement", and neither is "a deployment that happens to serve this". They are different mechanisms with different scopes and different owners.
+A deployment entitled to `routing` still does not get `smart-model-selection-v2` while that flag is off in test. Do not fold one axis into the other: an entitlement is not "a flag that is on for some deployments", a flag is not "a cheap entitlement", and neither is "a deployment that happens to host this". They are different mechanisms with different scopes and different owners.
 
 ## Cardinal rules for contributors
 

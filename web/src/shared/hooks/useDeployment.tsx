@@ -44,15 +44,20 @@ export function useDeployment(): DeploymentBootstrap {
 }
 
 /**
- * Whether this deployment serves a given management capability.
+ * Whether this deployment hosts a given management surface.
+ *
+ * Surfaces, not capabilities: otari.ai spends "capability" on the entitlement
+ * axis (is this org licensed for it), down to a nav item's `capability` field.
+ * This is the deployment axis (does this process host it at all), and the two
+ * vocabularies meet in one shell at M5. See ARCHITECTURE.md.
  *
  * The client-side half of a gate, so it can only hide a surface, never grant
  * one: the server still authorizes every request behind it.
  */
-export function useCapabilities(): (capability: string) => boolean {
-  const { capabilities } = useDeployment()
+export function useSurfaces(): (surface: string) => boolean {
+  const { surfaces } = useDeployment()
   return useMemo(() => {
-    const available = new Set(capabilities)
-    return (capability: string) => available.has(capability)
-  }, [capabilities])
+    const hosted = new Set(surfaces)
+    return (surface: string) => hosted.has(surface)
+  }, [surfaces])
 }

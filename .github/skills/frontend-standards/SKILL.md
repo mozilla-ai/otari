@@ -55,8 +55,9 @@ Build and check from the repo root:
 - Prefer `undefined` over `null` for absent values in your own types (the API layer may return
   `null`; convert at the boundary).
 - Gate a deployment-dependent surface on the bootstrap, through `useDeployment()` /
-  `useCapabilities()` (`web/src/shared/hooks/useDeployment.tsx`). It is the one place that
-  knows which deployment served the page, and it is read before the first render.
+  `useSurfaces()` (`web/src/shared/hooks/useDeployment.tsx`). It is the one place that
+  knows which deployment served the page, and it is read before the first render. Note the
+  word: a *surface* is the deployment axis, a *capability* is the entitlement axis.
 - Add a Vitest test for any component or helper whose behavior you change (`Foo.tsx` →
   `Foo.test.tsx`, colocated). See [typescript-and-react.md](./typescript-and-react.md#testing).
 

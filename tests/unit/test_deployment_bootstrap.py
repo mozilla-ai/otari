@@ -12,7 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 
 from gateway.api.deps import reset_config
-from gateway.api.routes.bootstrap import STANDALONE_CAPABILITIES
+from gateway.api.routes.bootstrap import STANDALONE_SURFACES
 from gateway.core.config import GatewayConfig
 from gateway.core.database import reset_db
 from gateway.main import create_app
@@ -35,7 +35,7 @@ def _hybrid(**platform: str) -> GatewayConfig:
     )
 
 
-def test_standalone_reports_a_local_operator_and_the_full_capability_set(tmp_path: Path) -> None:
+def test_standalone_reports_a_local_operator_and_the_full_surface_set(tmp_path: Path) -> None:
     app = create_app(_standalone(tmp_path))
 
     with TestClient(app) as client:
@@ -45,7 +45,7 @@ def test_standalone_reports_a_local_operator_and_the_full_capability_set(tmp_pat
     assert response.json() == {
         "deployment_type": "standalone",
         "session_type": "local_operator",
-        "capabilities": sorted(STANDALONE_CAPABILITIES),
+        "surfaces": sorted(STANDALONE_SURFACES),
         "management_url": None,
     }
 
@@ -71,18 +71,18 @@ def test_bootstrap_needs_no_credential(tmp_path: Path) -> None:
     assert anonymous.headers["Cache-Control"] == "private, no-store, no-cache"
 
 
-def test_every_capability_names_a_route_the_gateway_mounts(tmp_path: Path) -> None:
-    """A capability that outlives its API would gate a surface onto a 404."""
+def test_every_surface_names_a_route_the_gateway_mounts(tmp_path: Path) -> None:
+    """A surface that outlives its API would gate a nav item onto a 404."""
     app = create_app(_standalone(tmp_path))
     mounted = {getattr(route, "path", "") for route in app.routes}
 
-    for capability in STANDALONE_CAPABILITIES:
-        assert any(path.startswith(f"/v1/{capability}") for path in mounted), (
-            f"capability {capability!r} names no mounted /v1/ route"
+    for surface in STANDALONE_SURFACES:
+        assert any(path.startswith(f"/v1/{surface}") for path in mounted), (
+            f"surface {surface!r} names no mounted /v1/ route"
         )
 
 
-def test_hybrid_reports_no_session_no_capabilities_and_the_hosted_url(monkeypatch: pytest.MonkeyPatch) -> None:
+def test_hybrid_reports_no_session_no_surfaces_and_the_hosted_url(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OTARI_AI_TOKEN", PLATFORM_TOKEN)
     app = create_app(_hybrid())
 
@@ -93,7 +93,7 @@ def test_hybrid_reports_no_session_no_capabilities_and_the_hosted_url(monkeypatc
     assert response.json() == {
         "deployment_type": "hybrid",
         "session_type": "none",
-        "capabilities": [],
+        "surfaces": [],
         "management_url": "https://otari.ai",
     }
 
