@@ -1,28 +1,33 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { act, render, screen, waitFor } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import type { ReactElement } from "react";
-import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { act, render, screen, waitFor } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import type { ReactElement } from "react"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
-import { UpdatePrompt } from "@/app/UpdatePrompt";
+import { UpdatePrompt } from "@/app/UpdatePrompt"
 
 // The build the fake gateway is currently serving. Tests flip it to stand in
 // for a deploy landing under an already-open tab.
-let servedBuild = "build-a";
+let servedBuild = "build-a"
 
 function mockGateway() {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async () => {
-    return new Response(JSON.stringify({ build: servedBuild, version: "1.0.0" }), {
-      status: 200,
-      headers: { "Content-Type": "application/json" },
-    });
-  });
+    return new Response(
+      JSON.stringify({ build: servedBuild, version: "1.0.0" }),
+      {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      },
+    )
+  })
 }
 
 function renderWithClient(ui: ReactElement) {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>);
-  return client;
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
+  return client
 }
 
 // Resolves once the tab has actually observed a build, which is what fixes the
@@ -30,76 +35,80 @@ function renderWithClient(ui: ReactElement) {
 // not enough: the response may not have landed yet, and the tab would then
 // adopt whatever build arrives first, including a newer one.
 async function waitForLoadedBuild(client: QueryClient, build: string) {
-  await waitFor(() => expect(client.getQueryData(["build"])).toMatchObject({ build }));
+  await waitFor(() =>
+    expect(client.getQueryData(["build"])).toMatchObject({ build }),
+  )
 }
 
 describe("UpdatePrompt", () => {
   // Object.defineProperty on window.location is not undone by restoreAllMocks, so
   // capture and restore the original descriptor to keep the mock from leaking.
-  let originalLocation: PropertyDescriptor | undefined;
+  let originalLocation: PropertyDescriptor | undefined
 
   beforeEach(() => {
-    servedBuild = "build-a";
-  });
+    servedBuild = "build-a"
+  })
   afterEach(() => {
-    vi.restoreAllMocks();
+    vi.restoreAllMocks()
     if (originalLocation) {
-      Object.defineProperty(window, "location", originalLocation);
-      originalLocation = undefined;
+      Object.defineProperty(window, "location", originalLocation)
+      originalLocation = undefined
     }
-  });
+  })
 
   it("stays quiet while the served build matches the loaded one", async () => {
-    mockGateway();
+    mockGateway()
 
-    const client = renderWithClient(<UpdatePrompt />);
-    await waitForLoadedBuild(client, "build-a");
-    await act(() => client.refetchQueries({ queryKey: ["build"] }));
+    const client = renderWithClient(<UpdatePrompt />)
+    await waitForLoadedBuild(client, "build-a")
+    await act(() => client.refetchQueries({ queryKey: ["build"] }))
 
-    expect(screen.queryByText(/An update is available/)).not.toBeInTheDocument();
-  });
+    expect(screen.queryByText(/An update is available/)).not.toBeInTheDocument()
+  })
 
   it("offers a reload once the gateway serves a different build", async () => {
-    const reload = vi.fn();
+    const reload = vi.fn()
     // jsdom's location.reload cannot be spied on directly.
-    originalLocation = Object.getOwnPropertyDescriptor(window, "location");
+    originalLocation = Object.getOwnPropertyDescriptor(window, "location")
     Object.defineProperty(window, "location", {
       configurable: true,
       value: { ...window.location, reload },
-    });
-    mockGateway();
+    })
+    mockGateway()
 
-    const client = renderWithClient(<UpdatePrompt />);
-    await waitForLoadedBuild(client, "build-a");
+    const client = renderWithClient(<UpdatePrompt />)
+    await waitForLoadedBuild(client, "build-a")
 
-    servedBuild = "build-b";
-    await act(() => client.refetchQueries({ queryKey: ["build"] }));
+    servedBuild = "build-b"
+    await act(() => client.refetchQueries({ queryKey: ["build"] }))
 
-    expect(await screen.findByText(/An update is available/)).toBeInTheDocument();
-    await userEvent.click(screen.getByRole("button", { name: "Update now" }));
-    expect(reload).toHaveBeenCalled();
-  });
+    expect(
+      await screen.findByText(/An update is available/),
+    ).toBeInTheDocument()
+    await userEvent.click(screen.getByRole("button", { name: "Update now" }))
+    expect(reload).toHaveBeenCalled()
+  })
 
   it("can be dismissed without reloading", async () => {
-    mockGateway();
+    mockGateway()
 
-    const client = renderWithClient(<UpdatePrompt />);
-    await waitForLoadedBuild(client, "build-a");
+    const client = renderWithClient(<UpdatePrompt />)
+    await waitForLoadedBuild(client, "build-a")
 
-    servedBuild = "build-b";
-    await act(() => client.refetchQueries({ queryKey: ["build"] }));
-    await userEvent.click(await screen.findByRole("button", { name: "Later" }));
+    servedBuild = "build-b"
+    await act(() => client.refetchQueries({ queryKey: ["build"] }))
+    await userEvent.click(await screen.findByRole("button", { name: "Later" }))
 
-    expect(screen.queryByText(/An update is available/)).not.toBeInTheDocument();
-  });
+    expect(screen.queryByText(/An update is available/)).not.toBeInTheDocument()
+  })
 
   it("says nothing when the build check fails", async () => {
     // A gateway that cannot answer must not put a banner in the operator's way.
-    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"));
+    vi.spyOn(globalThis, "fetch").mockRejectedValue(new Error("offline"))
 
-    renderWithClient(<UpdatePrompt />);
-    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled());
+    renderWithClient(<UpdatePrompt />)
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled())
 
-    expect(screen.queryByText(/An update is available/)).not.toBeInTheDocument();
-  });
-});
+    expect(screen.queryByText(/An update is available/)).not.toBeInTheDocument()
+  })
+})

@@ -1,14 +1,13 @@
-import { ComboBox, Input, Label, ListBox, ListBoxItem } from "@heroui/react";
-import { type ReactNode, useMemo } from "react";
-
-import { useDiscoverableModels } from "@/shared/api/hooks";
-import type { DiscoverableModel } from "@/client";
+import { ComboBox, Input, Label, ListBox, ListBoxItem } from "@heroui/react"
+import { type ReactNode, useMemo } from "react"
+import type { DiscoverableModel } from "@/client"
+import { useDiscoverableModels } from "@/shared/api/hooks"
 
 // How many matches to render at once. A single provider can report a few hundred
 // models, and past this the popover is a wall of text nobody scrolls; typing one
 // more character is faster. How many were withheld is reported rather than the
 // list silently ending.
-const MAX_VISIBLE = 50;
+const MAX_VISIBLE = 50
 
 /**
  * Model selector backed by GET /v1/models/discoverable.
@@ -41,45 +40,49 @@ export function ModelComboBox({
   autoFocus,
   isRequired,
 }: {
-  label: string;
-  value: string;
-  onChange: (value: string) => void;
-  description?: ReactNode;
-  placeholder?: string;
-  autoFocus?: boolean;
-  isRequired?: boolean;
+  label: string
+  value: string
+  onChange: (value: string) => void
+  description?: ReactNode
+  placeholder?: string
+  autoFocus?: boolean
+  isRequired?: boolean
 }) {
-  const discoverable = useDiscoverableModels();
+  const discoverable = useDiscoverableModels()
 
   const { visible, total, failed } = useMemo(() => {
-    const query = value.trim().toLowerCase();
-    const providers = discoverable.data?.providers ?? [];
+    const query = value.trim().toLowerCase()
+    const providers = discoverable.data?.providers ?? []
     // Provider order is preserved, so rows still cluster by provider even
     // without section headers.
-    const all: DiscoverableModel[] = providers.flatMap((provider) => provider.models);
-    const hits = query ? all.filter((model) => model.key.toLowerCase().includes(query)) : all;
+    const all: DiscoverableModel[] = providers.flatMap(
+      (provider) => provider.models,
+    )
+    const hits = query
+      ? all.filter((model) => model.key.toLowerCase().includes(query))
+      : all
     return {
       visible: hits.slice(0, MAX_VISIBLE),
       total: hits.length,
       failed: providers.filter((provider) => !provider.ok),
-    };
-  }, [discoverable.data, value]);
+    }
+  }, [discoverable.data, value])
 
   const hint = ((): ReactNode => {
     if (discoverable.isLoading) {
-      return "Loading models from your providers…";
+      return "Loading models from your providers…"
     }
     // A failed provider is worth saying out loud: its models are simply absent
     // from the list, which is indistinguishable from a provider that has none.
     if (failed.length > 0) {
-      const names = failed.map((provider) => provider.provider).join(", ");
-      return `Could not list models for ${names}. Check that provider's credentials, or type the model key directly.`;
+      const names = failed.map((provider) => provider.provider).join(", ")
+      return `Could not list models for ${names}. Check that provider's credentials, or type the model key directly.`
     }
     if (total > visible.length) {
-      return `Showing ${visible.length} of ${total} matches. Keep typing to narrow them.`;
+      return `Showing ${visible.length} of ${total} matches. Keep typing to narrow them.`
     }
-    return description;
-  })();
+    return description
+  })()
 
   return (
     <ComboBox.Root
@@ -98,7 +101,7 @@ export function ModelComboBox({
       onInputChange={onChange}
       onSelectionChange={(key) => {
         if (key != null) {
-          onChange(String(key));
+          onChange(String(key))
         }
       }}
       isRequired={isRequired}
@@ -107,7 +110,9 @@ export function ModelComboBox({
       className="flex max-w-md flex-col gap-1"
     >
       {/* HeroUI marks a required field's label through CSS; see Field. */}
-      <Label className="text-sm font-medium text-[var(--otari-ink)]">{label}</Label>
+      <Label className="text-sm font-medium text-[var(--otari-ink)]">
+        {label}
+      </Label>
       <ComboBox.InputGroup>
         <Input placeholder={placeholder} autoFocus={autoFocus} />
         <ComboBox.Trigger />
@@ -123,7 +128,9 @@ export function ModelComboBox({
           )}
         </ListBox>
       </ComboBox.Popover>
-      {hint ? <span className="text-xs text-[var(--otari-muted)]">{hint}</span> : null}
+      {hint ? (
+        <span className="text-xs text-[var(--otari-muted)]">{hint}</span>
+      ) : null}
     </ComboBox.Root>
-  );
+  )
 }

@@ -1,18 +1,6 @@
-import { Button, Popover } from "@heroui/react";
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import type { ReactNode } from "react";
-
-import {
-  useDeleteUsage,
-  useInFlightRequests,
-  useLiveUsageCount,
-  useSetPricing,
-  useSetUsagePrice,
-  useRequestGroups,
-  useUsageCount,
-  useUsageLogs,
-  useUsageSummary,
-} from "@/shared/api/hooks";
+import { Button, Popover } from "@heroui/react"
+import type { ReactNode } from "react"
+import { useCallback, useEffect, useMemo, useRef, useState } from "react"
 import type {
   InFlightResponse,
   SummaryDimension,
@@ -20,15 +8,32 @@ import type {
   UsageFilters,
   UsageGroupRow,
   UsageMutationSelection,
-} from "@/client";
-import { isTokenChargeLine, isUnitChargeLine, type ChargeLine } from "@/client";
-import { ActivityTimeline } from "@/features/activity/ActivityTimeline";
-import { BulkActionBar } from "@/shared/components/BulkActionBar";
-import { ConfirmDialog } from "@/shared/components/ConfirmDialog";
-import { DataTable, type DataTableColumn } from "@/shared/components/DataTable";
-import { FilterChips, type FilterChip } from "@/shared/components/FilterChips";
-import { SetPriceDialog, type ManualRates } from "@/features/models/SetPriceDialog";
-import { PAGE_SIZE_OPTIONS, TablePagination } from "@/shared/components/TablePagination";
+} from "@/client"
+import { type ChargeLine, isTokenChargeLine, isUnitChargeLine } from "@/client"
+import { ActivityTimeline } from "@/features/activity/ActivityTimeline"
+import {
+  type ManualRates,
+  SetPriceDialog,
+} from "@/features/models/SetPriceDialog"
+import {
+  useDeleteUsage,
+  useInFlightRequests,
+  useLiveUsageCount,
+  useRequestGroups,
+  useSetPricing,
+  useSetUsagePrice,
+  useUsageCount,
+  useUsageLogs,
+  useUsageSummary,
+} from "@/shared/api/hooks"
+import { BulkActionBar } from "@/shared/components/BulkActionBar"
+import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
+import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
+import { type FilterChip, FilterChips } from "@/shared/components/FilterChips"
+import {
+  PAGE_SIZE_OPTIONS,
+  TablePagination,
+} from "@/shared/components/TablePagination"
 import {
   CopyableValue,
   ErrorBanner,
@@ -36,8 +41,11 @@ import {
   FilterSelect,
   PageHeader,
   RefreshButton,
-} from "@/shared/components/ui";
-import { resolveSelectedIds, useTableSelection } from "@/shared/helpers/tableSelection";
+} from "@/shared/components/ui"
+import {
+  resolveSelectedIds,
+  useTableSelection,
+} from "@/shared/helpers/tableSelection"
 import {
   ACTIVITY_DEFAULT_KEY,
   ACTIVITY_PRESETS,
@@ -47,19 +55,23 @@ import {
   isoAgo,
   type RangePreset,
   YEAR_SPAN_S,
-} from "@/shared/helpers/timeRange";
-import { useUrlState } from "@/shared/helpers/urlState";
+} from "@/shared/helpers/timeRange"
+import { useUrlState } from "@/shared/helpers/urlState"
 
 // ---------- formatting ----------
 
-const usd = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 4 });
+const usd = new Intl.NumberFormat(undefined, {
+  style: "currency",
+  currency: "USD",
+  maximumFractionDigits: 4,
+})
 
 function formatUSD(value: number | null): string {
-  return value === null ? "—" : usd.format(value);
+  return value === null ? "—" : usd.format(value)
 }
 
 function formatTokens(value: number | null): string {
-  return value === null ? "—" : value.toLocaleString();
+  return value === null ? "—" : value.toLocaleString()
 }
 
 // A per-call rate, unlike a per-million-token one, is routinely smaller than the
@@ -70,11 +82,11 @@ const usdPrecise = new Intl.NumberFormat(undefined, {
   style: "currency",
   currency: "USD",
   maximumSignificantDigits: 3,
-});
+})
 
 function formatUnitRate(value: number): string {
-  if (value === 0) return usd.format(0);
-  return value < 0.0001 ? usdPrecise.format(value) : usd.format(value);
+  if (value === 0) return usd.format(0)
+  return value < 0.0001 ? usdPrecise.format(value) : usd.format(value)
 }
 
 // A charge line is discriminated by which rate it carries: token meters price per
@@ -83,34 +95,36 @@ function formatUnitRate(value: number): string {
 // Token lines first, tool lines after, each group keeping the order the writers
 // emitted. "Billed meters" otherwise reads as an unordered mix once a row has both.
 function sortedBreakdown(lines: readonly ChargeLine[]): ChargeLine[] {
-  return [...lines].sort((a, b) => Number(isUnitChargeLine(a)) - Number(isUnitChargeLine(b)));
+  return [...lines].sort(
+    (a, b) => Number(isUnitChargeLine(a)) - Number(isUnitChargeLine(b)),
+  )
 }
 
 // Humanize a millisecond duration: "820 ms", "1.4 s". Null (historical rows,
 // batch jobs) renders as an em-dash so the column reads cleanly.
 function formatLatency(ms: number | null): string {
-  if (ms === null) return "—";
-  if (ms < 1000) return `${ms} ms`;
-  return `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} s`;
+  if (ms === null) return "—"
+  if (ms < 1000) return `${ms} ms`
+  return `${(ms / 1000).toFixed(ms < 10_000 ? 2 : 1)} s`
 }
 
 function absolute(iso: string): string {
-  const d = new Date(iso);
-  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString();
+  const d = new Date(iso)
+  return Number.isNaN(d.getTime()) ? iso : d.toLocaleString()
 }
 
 // Relative time reads better in a scan than a full timestamp; the absolute value
 // stays available as a tooltip.
 function timeAgo(iso: string): string {
-  const then = new Date(iso).getTime();
-  if (Number.isNaN(then)) return iso;
-  const secs = Math.max(0, Math.round((Date.now() - then) / 1000));
-  if (secs < 60) return `${secs}s ago`;
-  const mins = Math.round(secs / 60);
-  if (mins < 60) return `${mins}m ago`;
-  const hours = Math.round(mins / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.round(hours / 24)}d ago`;
+  const then = new Date(iso).getTime()
+  if (Number.isNaN(then)) return iso
+  const secs = Math.max(0, Math.round((Date.now() - then) / 1000))
+  if (secs < 60) return `${secs}s ago`
+  const mins = Math.round(secs / 60)
+  if (mins < 60) return `${mins}m ago`
+  const hours = Math.round(mins / 60)
+  if (hours < 24) return `${hours}h ago`
+  return `${Math.round(hours / 24)}d ago`
 }
 
 // ---------- requests in flight ----------
@@ -136,10 +150,10 @@ function timeAgo(iso: string): string {
 // operator is watching rather than a measurement, so sub-second precision is
 // noise. Minutes appear because a stuck local model is the case this exists for.
 function formatElapsed(ms: number): string {
-  const seconds = Math.floor(ms / 1000);
-  if (seconds < 60) return `${seconds}s`;
-  const minutes = Math.floor(seconds / 60);
-  return `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`;
+  const seconds = Math.floor(ms / 1000)
+  if (seconds < 60) return `${seconds}s`
+  const minutes = Math.floor(seconds / 60)
+  return `${minutes}m ${String(seconds % 60).padStart(2, "0")}s`
 }
 
 // The wait, ticking between the 2s polls: on an entry whose whole point is that it
@@ -147,13 +161,17 @@ function formatElapsed(ms: number): string {
 // stalled. Rendered only inside the open live list, so nothing ticks on a page
 // whose operator has not asked to watch one.
 function InFlightWait({ startedAtMs }: { startedAtMs: number }) {
-  const [now, setNow] = useState(() => Date.now());
+  const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
-    const timer = setInterval(() => setNow(Date.now()), 1000);
-    return () => clearInterval(timer);
-  }, []);
+    const timer = setInterval(() => setNow(Date.now()), 1000)
+    return () => clearInterval(timer)
+  }, [])
   // Never negative: a poll can resolve between the tick and the paint.
-  return <span className="tabular-nums">{formatElapsed(Math.max(0, now - startedAtMs))}</span>;
+  return (
+    <span className="tabular-nums">
+      {formatElapsed(Math.max(0, now - startedAtMs))}
+    </span>
+  )
 }
 
 // The live count, and the list behind it. Reports the gateway as a whole and says
@@ -175,11 +193,17 @@ function InFlightWait({ startedAtMs }: { startedAtMs: number }) {
 // them when the request they were watching lands: it stays, reading "0 in flight",
 // until they close it. That is also why the count is controlled rather than left
 // to `DialogTrigger`'s own state, which unmounting would discard.
-function InFlightControl({ data, updatedAt }: { data: InFlightResponse; updatedAt: number }) {
-  const [isOpen, setIsOpen] = useState(false);
-  const shown = data.requests;
-  const hidden = Math.max(0, data.total - shown.length);
-  if (data.total === 0 && !isOpen) return null;
+function InFlightControl({
+  data,
+  updatedAt,
+}: {
+  data: InFlightResponse
+  updatedAt: number
+}) {
+  const [isOpen, setIsOpen] = useState(false)
+  const shown = data.requests
+  const hidden = Math.max(0, data.total - shown.length)
+  if (data.total === 0 && !isOpen) return null
   return (
     <Popover isOpen={isOpen} onOpenChange={setIsOpen}>
       <Button size="sm" variant="outline">
@@ -190,7 +214,9 @@ function InFlightControl({ data, updatedAt }: { data: InFlightResponse; updatedA
             a pulse would suggest activity that is not there. */}
         <span
           className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full motion-reduce:animate-none ${
-            data.total > 0 ? "animate-pulse bg-[var(--otari-brand-dark)]" : "bg-[var(--otari-muted)]"
+            data.total > 0
+              ? "animate-pulse bg-[var(--otari-brand-dark)]"
+              : "bg-[var(--otari-muted)]"
           }`}
           aria-hidden="true"
         />
@@ -199,18 +225,25 @@ function InFlightControl({ data, updatedAt }: { data: InFlightResponse; updatedA
       <Popover.Content placement="bottom end">
         <Popover.Dialog>
           <div className="flex w-80 flex-col gap-2">
-            <Popover.Heading className="text-sm font-medium">In flight</Popover.Heading>
+            <Popover.Heading className="text-sm font-medium">
+              In flight
+            </Popover.Heading>
             <p className="text-xs text-[var(--otari-muted)]">
-              Running right now, across the whole gateway; longest-running first. Not narrowed by the filters above.
+              Running right now, across the whole gateway; longest-running
+              first. Not narrowed by the filters above.
             </p>
             {shown.length === 0 ? (
               <p className="text-sm text-[var(--otari-muted)]">
-                Nothing running right now. Newly settled requests join the log at the next refresh.
+                Nothing running right now. Newly settled requests join the log
+                at the next refresh.
               </p>
             ) : (
               <ul className="flex flex-col gap-1.5">
                 {shown.map((request) => (
-                  <li key={request.id} className="flex items-baseline justify-between gap-3 text-sm">
+                  <li
+                    key={request.id}
+                    className="flex items-baseline justify-between gap-3 text-sm"
+                  >
                     <span className="min-w-0">
                       <span className="block truncate">{request.model}</span>
                       <span className="block truncate text-xs text-[var(--otari-muted)]">
@@ -218,7 +251,9 @@ function InFlightControl({ data, updatedAt }: { data: InFlightResponse; updatedA
                         {request.policy_name ? ` · ${request.policy_name}` : ""}
                       </span>
                     </span>
-                    <InFlightWait startedAtMs={updatedAt - request.elapsed_ms} />
+                    <InFlightWait
+                      startedAtMs={updatedAt - request.elapsed_ms}
+                    />
                   </li>
                 ))}
               </ul>
@@ -227,21 +262,22 @@ function InFlightControl({ data, updatedAt }: { data: InFlightResponse; updatedA
                 concurrency than a live list can usefully show anyway. */}
             {hidden > 0 ? (
               <p className="text-xs text-[var(--otari-muted)]">
-                {hidden.toLocaleString()} further {hidden === 1 ? "request is" : "requests are"} in flight beyond the{" "}
-                {shown.length.toLocaleString()} listed.
+                {hidden.toLocaleString()} further{" "}
+                {hidden === 1 ? "request is" : "requests are"} in flight beyond
+                the {shown.length.toLocaleString()} listed.
               </p>
             ) : null}
           </div>
         </Popover.Dialog>
       </Popover.Content>
     </Popover>
-  );
+  )
 }
 
 // Stable row-key getter and row class so DataTable's per-row cache holds
 // across re-renders (see the DataTable docstring); an inline arrow here would
 // rebuild every row on each selection click.
-const getActivityRowKey = (e: UsageEntry): string => e.id;
+const getActivityRowKey = (e: UsageEntry): string => e.id
 
 // An absorbed attempt is a failure a routing policy recovered from, so the
 // request it belongs to succeeded. Styling it like an error would make a working
@@ -249,10 +285,10 @@ const getActivityRowKey = (e: UsageEntry): string => e.id;
 // out of error_count. Amber says "something happened here" without saying "this
 // request failed".
 const activityRowClassName = (e: UsageEntry): string | undefined => {
-  if (e.status === "error") return "bg-red-50";
-  if (e.status === "absorbed") return "bg-amber-50";
-  return undefined;
-};
+  if (e.status === "error") return "bg-red-50"
+  if (e.status === "absorbed") return "bg-amber-50"
+  return undefined
+}
 
 // ---------- filter option sets ----------
 //
@@ -269,13 +305,13 @@ const STATUS_OPTIONS: { label: string; value: string }[] = [
   // rendered and styled distinctly, so an operator who spots one has to be able
   // to filter to the rest of them.
   { label: "Absorbed", value: "absorbed" },
-];
+]
 
 const PRICED_OPTIONS: { label: string; value: string }[] = [
   { label: "All", value: "" },
   { label: "Priced", value: "true" },
   { label: "Unpriced", value: "false" },
-];
+]
 
 // Gateway-run tools an operator can filter on. "Any tool" also matches MCP tools,
 // whose names come from the caller's own server and so cannot be enumerated here.
@@ -284,26 +320,26 @@ const TOOL_OPTIONS: { label: string; value: string }[] = [
   { label: "Any tool", value: "any" },
   { label: "Web search", value: "web_search" },
   { label: "Code execution", value: "code_execution" },
-];
+]
 
 // The only breakdown this page asks the summary for: whether the window contains
 // gateway-run tool calls, which decides if the Tool filter is worth offering.
-const TOOL_BREAKDOWN: SummaryDimension[] = ["tool"];
+const TOOL_BREAKDOWN: SummaryDimension[] = ["tool"]
 
-const DEFAULT_PAGE_SIZE = 50;
+const DEFAULT_PAGE_SIZE = 50
 
 // The only breakdown this page reads: the in-window models behind the typeahead.
 // The typeahead reads `by_model`; the source picker's option list piggybacks on
 // the same query's `by_source` while no source is picked (see the source
 // suggestion note below), so both breakdowns ride one request.
-const MODEL_AND_SOURCE_BREAKDOWNS: SummaryDimension[] = ["model", "source"];
+const MODEL_AND_SOURCE_BREAKDOWNS: SummaryDimension[] = ["model", "source"]
 
 // The user and key pickers read these two. by_user and by_api_key carry each
 // entity's display name, resolved server-side in the same GROUP BY, so naming an
 // option costs nothing beyond the breakdown itself. The alternative, and what
 // this replaced, was paging the whole users and api_keys tables on every visit.
-const ENTITY_BREAKDOWNS: SummaryDimension[] = ["user", "api_key"];
-const SOURCE_BREAKDOWN: SummaryDimension[] = ["source"];
+const ENTITY_BREAKDOWNS: SummaryDimension[] = ["user", "api_key"]
+const SOURCE_BREAKDOWN: SummaryDimension[] = ["source"]
 
 // All filter + pagination state, with defaults, kept in the URL.
 const URL_DEFAULTS = {
@@ -322,7 +358,7 @@ const URL_DEFAULTS = {
   tool: "",
   page: "0",
   size: String(DEFAULT_PAGE_SIZE),
-} as const;
+} as const
 
 // Resolve the query window. Explicit start_date/end_date bounds (a custom range,
 // or a drill-down from the Usage page) take precedence; otherwise a preset anchors
@@ -338,14 +374,19 @@ function resolveWindow(
   now: number = Date.now(),
 ): { start?: string; end?: string } {
   if (start || end) {
-    return { start: start || undefined, end: end || undefined };
+    return { start: start || undefined, end: end || undefined }
   }
   if (range === CUSTOM_KEY) {
-    return {};
+    return {}
   }
-  const preset = findPreset(ACTIVITY_PRESETS, range) ?? findPreset(ACTIVITY_PRESETS, ACTIVITY_DEFAULT_KEY);
-  const seconds = preset?.seconds ?? null;
-  return { start: seconds == null ? undefined : isoAgo(seconds, now), end: undefined };
+  const preset =
+    findPreset(ACTIVITY_PRESETS, range) ??
+    findPreset(ACTIVITY_PRESETS, ACTIVITY_DEFAULT_KEY)
+  const seconds = preset?.seconds ?? null
+  return {
+    start: seconds == null ? undefined : isoAgo(seconds, now),
+    end: undefined,
+  }
 }
 
 // The histogram extent (what the bars span), which is *not* always the list
@@ -356,12 +397,15 @@ function resolveWindow(
 // silently show a rolling month while the caption reads "All time". The explicit
 // start gives a deterministic, draggable span (the axis shows exactly what it
 // covers) while the list stays all-time.
-function resolveExtentWindow(range: string, now: number = Date.now()): { start?: string; end?: string } {
-  const win = resolveWindow(range, "", "", now);
-  if (win.start) return win;
-  const preset = findPreset(ACTIVITY_PRESETS, range);
-  if (preset?.seconds == null) return { start: isoAgo(YEAR_SPAN_S, now) };
-  return win;
+function resolveExtentWindow(
+  range: string,
+  now: number = Date.now(),
+): { start?: string; end?: string } {
+  const win = resolveWindow(range, "", "", now)
+  if (win.start) return win
+  const preset = findPreset(ACTIVITY_PRESETS, range)
+  if (preset?.seconds == null) return { start: isoAgo(YEAR_SPAN_S, now) }
+  return win
 }
 
 // ---------- small presentational pieces ----------
@@ -374,19 +418,25 @@ function StatusPill({ status }: { status: string }) {
       ? "border-red-200 bg-red-50 text-red-700"
       : status === "absorbed"
         ? "border-amber-200 bg-amber-50 text-amber-700"
-        : "border-[var(--otari-line)] bg-[var(--otari-brand-tint)] text-[var(--otari-brand-dark)]";
+        : "border-[var(--otari-line)] bg-[var(--otari-brand-tint)] text-[var(--otari-brand-dark)]"
   return (
-    <span className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium ${cls}`}>
+    <span
+      className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium ${cls}`}
+    >
       {status}
     </span>
-  );
+  )
 }
 
 // Friendly labels for known provenance sources; unknown sources render their slug.
-const SOURCE_LABELS: Record<string, string> = { gateway: "Gateway", claude_code: "Claude Code", codex: "Codex" };
+const SOURCE_LABELS: Record<string, string> = {
+  gateway: "Gateway",
+  claude_code: "Claude Code",
+  codex: "Codex",
+}
 
 function sourceLabel(source: string): string {
-  return SOURCE_LABELS[source] ?? source;
+  return SOURCE_LABELS[source] ?? source
 }
 
 // ---------- token composition ----------
@@ -398,15 +448,17 @@ function sourceLabel(source: string): string {
 interface TokenComposition {
   // Input tokens billed at the full input rate (the prompt minus whatever was
   // served from, or written to, the cache).
-  fresh: number;
-  cacheRead: number;
-  cacheWrite: number;
-  output: number;
-  total: number;
+  fresh: number
+  cacheRead: number
+  cacheWrite: number
+  output: number
+  total: number
 }
 
 function positive(value: unknown): number {
-  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : 0;
+  return typeof value === "number" && Number.isFinite(value) && value > 0
+    ? value
+    : 0
 }
 
 // Split a row's tokens into fresh input / cache read / cache write / output, or
@@ -424,56 +476,72 @@ function tokenComposition(entry: UsageEntry): TokenComposition | null {
   // while its tokens were never metered (an unpriced model still owes for the
   // searches it ran). Keying off the object's presence would then read every token
   // as 0 and the bar would vanish from a row that has real tokens.
-  const meters = entry.billing_meters ?? null;
+  const meters = entry.billing_meters ?? null
   const meter = (key: string, fallback: number | null): number =>
-    meters && typeof meters[key] === "number" ? positive(meters[key]) : positive(fallback);
-  const totalInput = meter("total_input_tokens", entry.prompt_tokens);
-  const cacheRead = meter("cache_read_tokens", entry.cache_read_tokens);
-  const cacheWrite = meter("cache_write_tokens", entry.cache_write_tokens);
-  const output = meter("completion_tokens", entry.completion_tokens);
-  const fresh = Math.max(0, totalInput - cacheRead - cacheWrite);
-  const total = fresh + cacheRead + cacheWrite + output;
-  return total > 0 ? { fresh, cacheRead, cacheWrite, output, total } : null;
+    meters && typeof meters[key] === "number"
+      ? positive(meters[key])
+      : positive(fallback)
+  const totalInput = meter("total_input_tokens", entry.prompt_tokens)
+  const cacheRead = meter("cache_read_tokens", entry.cache_read_tokens)
+  const cacheWrite = meter("cache_write_tokens", entry.cache_write_tokens)
+  const output = meter("completion_tokens", entry.completion_tokens)
+  const fresh = Math.max(0, totalInput - cacheRead - cacheWrite)
+  const total = fresh + cacheRead + cacheWrite + output
+  return total > 0 ? { fresh, cacheRead, cacheWrite, output, total } : null
 }
 
 // A row's gateway-run tool calls, read out of the reserved `tools` meter namespace.
 // Nested under one key so a caller-named MCP tool can never collide with a token
 // meter (which the billed-token SQL and the bar above both read by name).
-type ToolUsage = { tool: string; billed: number; errors: number; unitRate: number | null };
+type ToolUsage = {
+  tool: string
+  billed: number
+  errors: number
+  unitRate: number | null
+}
 
 function toolUsage(entry: UsageEntry): ToolUsage[] {
-  const nested = entry.billing_meters?.tools;
-  if (!nested || typeof nested !== "object") return [];
+  const nested = entry.billing_meters?.tools
+  if (!nested || typeof nested !== "object") return []
   return Object.entries(nested as Record<string, unknown>)
     .flatMap(([tool, counts]) => {
-      if (!counts || typeof counts !== "object") return [];
-      const record = counts as Record<string, unknown>;
-      const billed = positive(record.billed);
-      const errors = positive(record.errors);
-      if (!billed && !errors) return [];
-      const rate = record.unit_rate;
-      return [{ tool, billed, errors, unitRate: typeof rate === "number" ? rate : null }];
+      if (!counts || typeof counts !== "object") return []
+      const record = counts as Record<string, unknown>
+      const billed = positive(record.billed)
+      const errors = positive(record.errors)
+      if (!billed && !errors) return []
+      const rate = record.unit_rate
+      return [
+        {
+          tool,
+          billed,
+          errors,
+          unitRate: typeof rate === "number" ? rate : null,
+        },
+      ]
     })
-    .sort((a, b) => b.billed - a.billed || a.tool.localeCompare(b.tool));
+    .sort((a, b) => b.billed - a.billed || a.tool.localeCompare(b.tool))
 }
 
 // "web search x3" / "web search x3, 1 failed". The tool name is de-underscored for
 // reading; failures are named rather than folded into the count, because a failed
 // call is not billed and an operator chasing a cost needs that distinction.
 function formatToolUsage(usage: ToolUsage): string {
-  const label = usage.tool.replaceAll("_", " ");
-  const parts = usage.billed ? [`${label} \u00d7${usage.billed}`] : [label];
-  if (usage.errors) parts.push(`${usage.errors} failed`);
-  return parts.join(", ");
+  const label = usage.tool.replaceAll("_", " ")
+  const parts = usage.billed ? [`${label} \u00d7${usage.billed}`] : [label]
+  if (usage.errors) parts.push(`${usage.errors} failed`)
+  return parts.join(", ")
 }
-
 
 // Cost attributable to gateway-run tools on this row, from the rate stored with the
 // row rather than the live price, so a historical row reads as it was billed.
 function toolCost(entry: UsageEntry): number | null {
-  const usages = toolUsage(entry).filter((usage) => usage.unitRate !== null);
-  if (!usages.length) return null;
-  return usages.reduce((sum, usage) => sum + usage.billed * (usage.unitRate ?? 0), 0);
+  const usages = toolUsage(entry).filter((usage) => usage.unitRate !== null)
+  if (!usages.length) return null
+  return usages.reduce(
+    (sum, usage) => sum + usage.billed * (usage.unitRate ?? 0),
+    0,
+  )
 }
 
 // Segment order runs input side first (fresh, then the two cache buckets), then
@@ -484,12 +552,16 @@ function toolCost(entry: UsageEntry): number | null {
 // as a filled bar and a fresh-input row as a dark one. Nothing is encoded by hue,
 // and the tooltip / accessible name carry every number, so the bar adds a shape
 // to scan and removes no information.
-const TOKEN_SEGMENTS: { key: keyof Omit<TokenComposition, "total">; label: string; fill: string }[] = [
+const TOKEN_SEGMENTS: {
+  key: keyof Omit<TokenComposition, "total">
+  label: string
+  fill: string
+}[] = [
   { key: "fresh", label: "Fresh input", fill: "var(--otari-ink)" },
   { key: "cacheRead", label: "Cache read", fill: "var(--otari-brand)" },
   { key: "cacheWrite", label: "Cache write", fill: "var(--otari-brand-soft)" },
   { key: "output", label: "Output", fill: "var(--otari-brand-dark)" },
-];
+]
 
 // The total plus a thin stacked bar of its composition. Widths are SVG rect
 // attributes in a 100-unit viewBox (a dynamic Tailwind `w-[n%]` would not survive
@@ -501,23 +573,28 @@ const TOKEN_SEGMENTS: { key: keyof Omit<TokenComposition, "total">; label: strin
 // higher than the raw `total_tokens` column (which excludes the cache buckets);
 // the raw fields stay visible, unchanged, in the detail panel.
 function TokenBar({ entry }: { entry: UsageEntry }) {
-  const composition = tokenComposition(entry);
+  const composition = tokenComposition(entry)
   if (composition === null) {
-    return <span className="tabular-nums">{formatTokens(entry.total_tokens)}</span>;
+    return (
+      <span className="tabular-nums">{formatTokens(entry.total_tokens)}</span>
+    )
   }
-  const parts = TOKEN_SEGMENTS.map((segment) => ({ ...segment, value: composition[segment.key] }));
+  const parts = TOKEN_SEGMENTS.map((segment) => ({
+    ...segment,
+    value: composition[segment.key],
+  }))
   const summary = parts
     .filter((part) => part.value > 0)
     .map((part) => `${part.label} ${part.value.toLocaleString()}`)
-    .join(", ");
+    .join(", ")
 
-  let offset = 0;
+  let offset = 0
   const rects = parts.map((part) => {
-    const width = (part.value / composition.total) * 100;
-    const rect = { ...part, x: offset, width };
-    offset += width;
-    return rect;
-  });
+    const width = (part.value / composition.total) * 100
+    const rect = { ...part, x: offset, width }
+    offset += width
+    return rect
+  })
 
   return (
     <span className="inline-flex flex-col items-end gap-1" title={summary}>
@@ -532,11 +609,18 @@ function TokenBar({ entry }: { entry: UsageEntry }) {
         {rects
           .filter((rect) => rect.width > 0)
           .map((rect) => (
-            <rect key={rect.key} x={rect.x} y={0} width={rect.width} height={4} fill={rect.fill} />
+            <rect
+              key={rect.key}
+              x={rect.x}
+              y={0}
+              width={rect.width}
+              height={4}
+              fill={rect.fill}
+            />
           ))}
       </svg>
     </span>
-  );
+  )
 }
 
 // ---------- routing ----------
@@ -552,24 +636,26 @@ function TokenBar({ entry }: { entry: UsageEntry }) {
 // `router:<name>`): precise, and meaningless to a reader who has not read the
 // compiler. An unrecognized value is de-underscored rather than dropped, since the
 // set is open by construction (a condition or router name comes from config).
-function selectionReasonLabel(reason: string | null | undefined): string | null {
-  if (!reason) return null;
-  if (reason === "static") return "the policy's only target";
-  if (reason === "default") return "the policy's default target";
-  if (reason === "on_failure") return "a fallback candidate";
+function selectionReasonLabel(
+  reason: string | null | undefined,
+): string | null {
+  if (!reason) return null
+  if (reason === "static") return "the policy's only target"
+  if (reason === "default") return "the policy's default target"
+  if (reason === "on_failure") return "a fallback candidate"
   if (reason.startsWith("condition:")) {
     const keys = reason
       .slice("condition:".length)
       .split(",")
       .filter(Boolean)
-      .join(", ");
-    return keys ? `matched on ${keys}` : "matched a condition";
+      .join(", ")
+    return keys ? `matched on ${keys}` : "matched a condition"
   }
   if (reason.startsWith("router:")) {
-    const name = reason.slice("router:".length);
-    return name ? `chosen by router ${name}` : "chosen by a router";
+    const name = reason.slice("router:".length)
+    return name ? `chosen by router ${name}` : "chosen by a router"
   }
-  return reason.replaceAll("_", " ");
+  return reason.replaceAll("_", " ")
 }
 
 // What a group's request ended up doing, read off its outcome row. Absorbed rows
@@ -577,23 +663,26 @@ function selectionReasonLabel(reason: string | null | undefined): string | null 
 // the outcome: the attempt that served, or the terminal failure.
 interface GroupOutcome {
   /** Qualified target of the attempt that served, or null when none did. */
-  servedBy: string | null;
-  servedPosition: number | null;
+  servedBy: string | null
+  servedPosition: number | null
 }
 
 // Index the outcome of every group represented in `rows`. Built from rows the page
 // already holds first, then filled in from a batched lookup, so the common case
 // (a group's attempts are adjacent in a newest-first list) costs no extra request.
-function indexGroupOutcomes(rows: readonly UsageEntry[]): Map<string, GroupOutcome> {
-  const index = new Map<string, GroupOutcome>();
+function indexGroupOutcomes(
+  rows: readonly UsageEntry[],
+): Map<string, GroupOutcome> {
+  const index = new Map<string, GroupOutcome>()
   for (const row of rows) {
-    if (!row.request_group_id || row.status === "absorbed") continue;
+    if (!row.request_group_id || row.status === "absorbed") continue
     index.set(row.request_group_id, {
       servedBy: row.status === "success" ? pricingSelectorOf(row) : null,
-      servedPosition: row.status === "success" ? (row.attempt_position ?? null) : null,
-    });
+      servedPosition:
+        row.status === "success" ? (row.attempt_position ?? null) : null,
+    })
   }
-  return index;
+  return index
 }
 
 // One line of prose for a row's place in its plan, replacing the "attempt 1/2 ·
@@ -601,38 +690,50 @@ function indexGroupOutcomes(rows: readonly UsageEntry[]): Map<string, GroupOutco
 // about whether the attempt worked, and pointed at no other row. `outcome` is the
 // group's outcome when it is known, which is what lets an absorbed row name the
 // model that served in its place.
-function attemptSentence(entry: UsageEntry, outcome: GroupOutcome | null): string | null {
-  const reason = selectionReasonLabel(entry.selection_reason);
-  const position = entry.attempt_position;
-  const total = entry.attempt_count;
+function attemptSentence(
+  entry: UsageEntry,
+  outcome: GroupOutcome | null,
+): string | null {
+  const reason = selectionReasonLabel(entry.selection_reason)
+  const position = entry.attempt_position
+  const total = entry.attempt_count
   // A policy with one candidate has no plan to place the row in, so the only thing
   // worth saying is why that candidate was picked.
-  if (position == null || total == null || total <= 1) return reason;
-  const attempt = `attempt ${position} of ${total}`;
+  if (position == null || total == null || total <= 1) return reason
+  const attempt = `attempt ${position} of ${total}`
   if (entry.status === "absorbed") {
-    if (outcome?.servedBy) return `${attempt} failed, served by ${outcome.servedBy}`;
+    if (outcome?.servedBy)
+      return `${attempt} failed, served by ${outcome.servedBy}`
     // Not "and so did the rest": the group's outcome row is an error, but the walk
     // may have stopped on it (a non-retryable status, a lock-in) with later
     // candidates never called, which is what that row's own sentence says.
-    if (outcome) return `${attempt} failed, and the request ended in an error`;
-    return `${attempt} failed, fell back`;
+    if (outcome) return `${attempt} failed, and the request ended in an error`
+    return `${attempt} failed, fell back`
   }
   if (entry.status === "error") {
     // The walk stops early on a non-retryable failure, a lock-in, or a
     // gateway-side refusal, so the later candidates were not necessarily tried.
-    return position < total ? `${attempt} failed, no further candidate tried` : `${attempt} failed, plan exhausted`;
+    return position < total
+      ? `${attempt} failed, no further candidate tried`
+      : `${attempt} failed, plan exhausted`
   }
-  return reason ? `served on ${attempt} (${reason})` : `served on ${attempt}`;
+  return reason ? `served on ${attempt} (${reason})` : `served on ${attempt}`
 }
 
 // The Routing column: the policy the caller named, then where this row sits in its
 // plan and how that turned out.
-function RoutingCell({ entry, outcome }: { entry: UsageEntry; outcome: GroupOutcome | null }) {
+function RoutingCell({
+  entry,
+  outcome,
+}: {
+  entry: UsageEntry
+  outcome: GroupOutcome | null
+}) {
   // Blank, not an em-dash, when the request named a plain model. This column is
   // sparse by nature (most rows are unrouted), and a placeholder on every one of
   // them would add noise to every scan while saying nothing.
-  if (entry.policy_name == null) return null;
-  const sentence = attemptSentence(entry, outcome);
+  if (entry.policy_name == null) return null
+  const sentence = attemptSentence(entry, outcome)
   return (
     <span className="flex flex-col leading-tight">
       <span className="text-[var(--otari-ink)]">{entry.policy_name}</span>
@@ -641,17 +742,25 @@ function RoutingCell({ entry, outcome }: { entry: UsageEntry; outcome: GroupOutc
       {/* Wraps rather than truncates: the tail is the part that matters (it names
           the model that served), and a qualified target is routinely longer than
           the column. The Model column wraps for the same reason. */}
-      {sentence ? <span className="text-xs break-words text-[var(--otari-muted)]">{sentence}</span> : null}
+      {sentence ? (
+        <span className="text-xs break-words text-[var(--otari-muted)]">
+          {sentence}
+        </span>
+      ) : null}
     </span>
-  );
+  )
 }
 
 // Per-attempt outcome for the plan table. Terser than the row sentence, which has
 // to stand alone; here the table's shape already says which attempt this is.
 function attemptOutcome(entry: UsageEntry): string {
-  if (entry.status === "absorbed") return entry.status_code === null ? "failed, fell back" : `failed ${entry.status_code}, fell back`;
-  if (entry.status === "error") return entry.status_code === null ? "failed" : `failed ${entry.status_code}`;
-  return "served the request";
+  if (entry.status === "absorbed")
+    return entry.status_code === null
+      ? "failed, fell back"
+      : `failed ${entry.status_code}, fell back`
+  if (entry.status === "error")
+    return entry.status_code === null ? "failed" : `failed ${entry.status_code}`
+  return "served the request"
 }
 
 // Attempts in plan order. `attempt_position` is authoritative; timestamp is the
@@ -659,28 +768,32 @@ function attemptOutcome(entry: UsageEntry): string {
 // share a position (which would be a writer bug, not something to hide).
 function planOrder(rows: readonly UsageEntry[]): UsageEntry[] {
   return [...rows].sort(
-    (a, b) => (a.attempt_position ?? 0) - (b.attempt_position ?? 0) || a.timestamp.localeCompare(b.timestamp),
-  );
+    (a, b) =>
+      (a.attempt_position ?? 0) - (b.attempt_position ?? 0) ||
+      a.timestamp.localeCompare(b.timestamp),
+  )
 }
 
 // The whole plan behind one routed request: every candidate that ran, in order,
 // with the one that served marked. This is the answer to "a fallback fired, so
 // what actually served me", which no single row can give.
 function RoutingPlan({ entry }: { entry: UsageEntry }) {
-  const groupId = entry.request_group_id;
-  const groupIds = groupId ? [groupId] : [];
-  const group = useRequestGroups(groupIds);
+  const groupId = entry.request_group_id
+  const groupIds = groupId ? [groupId] : []
+  const group = useRequestGroups(groupIds)
   // Only rows of this row's own group are the plan. The lookup keeps previous data
   // across a key change, so this is what stops another request's plan from ever
   // being narrated as this one's, whatever the detail panel does with mounting.
-  const siblings = groupId ? (group.data ?? []).filter((row) => row.request_group_id === groupId) : [];
+  const siblings = groupId
+    ? (group.data ?? []).filter((row) => row.request_group_id === groupId)
+    : []
   // Falls back to the row itself while the lookup is in flight (and for a
   // pre-`request_group_id` row, which has no siblings to find), so the section
   // never flashes empty and never claims a one-attempt plan it did not read.
-  const attempts = planOrder(siblings.length ? siblings : [entry]);
-  const complete = siblings.length > 0;
-  const served = attempts.find((attempt) => attempt.status === "success");
-  const total = entry.attempt_count ?? attempts.length;
+  const attempts = planOrder(siblings.length ? siblings : [entry])
+  const complete = siblings.length > 0
+  const served = attempts.find((attempt) => attempt.status === "success")
+  const total = entry.attempt_count ?? attempts.length
 
   // "Loading" only while a lookup is actually outstanding: a failed lookup, or a row
   // that carries no group to look up, would otherwise sit on that line forever.
@@ -694,7 +807,7 @@ function RoutingPlan({ entry }: { entry: UsageEntry }) {
       ? `Served by attempt ${served.attempt_position ?? "?"} of ${total}: ${pricingSelectorOf(served)}`
       : attempts.some((attempt) => attempt.status === "error")
         ? "No candidate served this request."
-        : "This request has no outcome row yet.";
+        : "This request has no outcome row yet."
 
   return (
     <div className="flex flex-col gap-2">
@@ -703,18 +816,33 @@ function RoutingPlan({ entry }: { entry: UsageEntry }) {
       </span>
       <span className="text-sm text-[var(--otari-ink)]">{summary}</span>
       <div className="overflow-x-auto rounded-lg border border-[var(--otari-line)]">
-        <table className="w-full text-xs" aria-label={`Routing plan for policy ${entry.policy_name}`}>
+        <table
+          className="w-full text-xs"
+          aria-label={`Routing plan for policy ${entry.policy_name}`}
+        >
           <thead className="text-[var(--otari-muted)]">
             <tr className="border-b border-[var(--otari-line)]">
-              <th scope="col" className="px-3 py-2 text-left font-medium">#</th>
-              <th scope="col" className="px-3 py-2 text-left font-medium">Target</th>
-              <th scope="col" className="px-3 py-2 text-left font-medium">Selected as</th>
-              <th scope="col" className="px-3 py-2 text-left font-medium">Outcome</th>
+              <th scope="col" className="px-3 py-2 text-left font-medium">
+                #
+              </th>
+              <th scope="col" className="px-3 py-2 text-left font-medium">
+                Target
+              </th>
+              <th scope="col" className="px-3 py-2 text-left font-medium">
+                Selected as
+              </th>
+              <th scope="col" className="px-3 py-2 text-left font-medium">
+                Outcome
+              </th>
               {/* Every attempt's `latency_ms` is measured from the start of the
                   request, not from the start of that attempt, so this is the same
                   "Total time" the row column shows, not a per-candidate duration. */}
-              <th scope="col" className="px-3 py-2 text-right font-medium">Total time</th>
-              <th scope="col" className="px-3 py-2 text-right font-medium">Cost</th>
+              <th scope="col" className="px-3 py-2 text-right font-medium">
+                Total time
+              </th>
+              <th scope="col" className="px-3 py-2 text-right font-medium">
+                Cost
+              </th>
             </tr>
           </thead>
           <tbody>
@@ -722,10 +850,14 @@ function RoutingPlan({ entry }: { entry: UsageEntry }) {
               <tr
                 key={attempt.id}
                 className={`border-t border-[var(--otari-line)] first:border-t-0 ${
-                  attempt.status === "success" ? "bg-[var(--otari-brand-tint)]" : ""
+                  attempt.status === "success"
+                    ? "bg-[var(--otari-brand-tint)]"
+                    : ""
                 }`}
               >
-                <td className="px-3 py-2 tabular-nums">{attempt.attempt_position ?? "?"}</td>
+                <td className="px-3 py-2 tabular-nums">
+                  {attempt.attempt_position ?? "?"}
+                </td>
                 <td className="px-3 py-2 break-all text-[var(--otari-ink)]">
                   {pricingSelectorOf(attempt)}
                   {attempt.id === entry.id ? (
@@ -734,22 +866,31 @@ function RoutingPlan({ entry }: { entry: UsageEntry }) {
                     </span>
                   ) : null}
                 </td>
-                <td className="px-3 py-2">{selectionReasonLabel(attempt.selection_reason) ?? "—"}</td>
-                <td className={`px-3 py-2 ${attempt.status === "success" ? "" : "text-amber-700"}`}>
+                <td className="px-3 py-2">
+                  {selectionReasonLabel(attempt.selection_reason) ?? "—"}
+                </td>
+                <td
+                  className={`px-3 py-2 ${attempt.status === "success" ? "" : "text-amber-700"}`}
+                >
                   {attemptOutcome(attempt)}
                 </td>
-                <td className="px-3 py-2 text-right tabular-nums">{formatLatency(attempt.latency_ms)}</td>
-                <td className="px-3 py-2 text-right tabular-nums">{formatUSD(attempt.cost)}</td>
+                <td className="px-3 py-2 text-right tabular-nums">
+                  {formatLatency(attempt.latency_ms)}
+                </td>
+                <td className="px-3 py-2 text-right tabular-nums">
+                  {formatUSD(attempt.cost)}
+                </td>
               </tr>
             ))}
           </tbody>
         </table>
       </div>
       <span className="text-xs text-[var(--otari-muted)]">
-        Cost and tool charges settle on the attempt that served, so a failed attempt carries its tokens and no charge.
+        Cost and tool charges settle on the attempt that served, so a failed
+        attempt carries its tokens and no charge.
       </span>
     </div>
-  );
+  )
 }
 
 // `copyValue` adds a copy control for the fields that hold an opaque identifier
@@ -761,25 +902,33 @@ function DetailField({
   copyLabel,
   children,
 }: {
-  label: string;
-  copyValue?: string | null;
+  label: string
+  copyValue?: string | null
   /** Overrides the copy control's name where the column heading would misname the
       value: "API key" holds a key id, never key material. */
-  copyLabel?: string;
-  children: ReactNode;
+  copyLabel?: string
+  children: ReactNode
 }) {
   return (
     <div className="flex flex-col gap-0.5">
-      <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--otari-muted)]">{label}</span>
+      <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--otari-muted)]">
+        {label}
+      </span>
       {copyValue ? (
-        <CopyableValue value={copyValue} label={copyLabel ?? label.toLowerCase()} className="text-sm text-[var(--otari-ink)] break-all">
+        <CopyableValue
+          value={copyValue}
+          label={copyLabel ?? label.toLowerCase()}
+          className="text-sm text-[var(--otari-ink)] break-all"
+        >
           {children}
         </CopyableValue>
       ) : (
-        <span className="text-sm text-[var(--otari-ink)] break-all">{children}</span>
+        <span className="text-sm text-[var(--otari-ink)] break-all">
+          {children}
+        </span>
       )}
     </div>
-  );
+  )
 }
 
 // The pricing key a usage row bills against. A row stores the instance and the
@@ -790,8 +939,10 @@ function DetailField({
 // price nothing ever reads. A row whose selector never resolved carries no
 // provider and its model is the raw selector, so that is used as-is.
 function pricingSelectorOf(entry: UsageEntry): string {
-  if (!entry.provider) return entry.model;
-  return entry.model.startsWith(`${entry.provider}:`) ? entry.model : `${entry.provider}:${entry.model}`;
+  if (!entry.provider) return entry.model
+  return entry.model.startsWith(`${entry.provider}:`)
+    ? entry.model
+    : `${entry.provider}:${entry.model}`
 }
 
 // The detail panel for one request: the failure diagnostic plus the metadata
@@ -800,15 +951,21 @@ function pricingSelectorOf(entry: UsageEntry): string {
 // carrying either a fixed gateway rejection string (e.g. a model with no pricing
 // under `require_pricing`) or the raw upstream provider error, so the heading
 // stays "Error" rather than blaming the provider for every failure.
-function RequestDetail({ entry, onPriceModel }: { entry: UsageEntry; onPriceModel: (model: string) => void }) {
+function RequestDetail({
+  entry,
+  onPriceModel,
+}: {
+  entry: UsageEntry
+  onPriceModel: (model: string) => void
+}) {
   // A row with no cost (cost IS NULL, the same test the "Priced?" filter uses)
   // is either a model the gateway has no price for or a request refused before
   // it could be billed. Both are the same fix, and the row holds what the
   // selector was, which a provider without model discovery would never have put
   // in the catalog. A $0 cost is a real price, so it is deliberately not
   // treated as uncosted.
-  const uncosted = entry.cost === null;
-  const pricingKey = pricingSelectorOf(entry);
+  const uncosted = entry.cost === null
+  const pricingKey = pricingSelectorOf(entry)
   return (
     <div className="flex flex-col gap-4 px-4 py-4">
       {entry.error_message ? (
@@ -824,17 +981,35 @@ function RequestDetail({ entry, onPriceModel }: { entry: UsageEntry; onPriceMode
       {/* Routed requests only. Placed above the metadata grid, and above the
           per-row fields, because on a failed attempt it answers the first question
           the failure raises: what served the request instead. */}
-      {entry.policy_name !== null && entry.policy_name !== undefined ? <RoutingPlan entry={entry} /> : null}
+      {entry.policy_name !== null && entry.policy_name !== undefined ? (
+        <RoutingPlan entry={entry} />
+      ) : null}
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
         <DetailField label="Provider">{entry.provider ?? "—"}</DetailField>
         <DetailField label="Endpoint">{entry.endpoint}</DetailField>
         <DetailField label="Source">{sourceLabel(entry.source)}</DetailField>
-        {entry.source_label ? <DetailField label="Session">{entry.source_label}</DetailField> : null}
-        <DetailField label="User" copyValue={entry.user_id} copyLabel="user id">{entry.user_id ?? "—"}</DetailField>
-        <DetailField label="API key" copyValue={entry.api_key_id} copyLabel="api key id">{entry.api_key_id ?? "—"}</DetailField>
-        <DetailField label="Prompt tokens">{formatTokens(entry.prompt_tokens)}</DetailField>
-        <DetailField label="Completion tokens">{formatTokens(entry.completion_tokens)}</DetailField>
-        <DetailField label="Total tokens">{formatTokens(entry.total_tokens)}</DetailField>
+        {entry.source_label ? (
+          <DetailField label="Session">{entry.source_label}</DetailField>
+        ) : null}
+        <DetailField label="User" copyValue={entry.user_id} copyLabel="user id">
+          {entry.user_id ?? "—"}
+        </DetailField>
+        <DetailField
+          label="API key"
+          copyValue={entry.api_key_id}
+          copyLabel="api key id"
+        >
+          {entry.api_key_id ?? "—"}
+        </DetailField>
+        <DetailField label="Prompt tokens">
+          {formatTokens(entry.prompt_tokens)}
+        </DetailField>
+        <DetailField label="Completion tokens">
+          {formatTokens(entry.completion_tokens)}
+        </DetailField>
+        <DetailField label="Total tokens">
+          {formatTokens(entry.total_tokens)}
+        </DetailField>
         {/* The Tokens column's number, spelled out here because it can exceed the
             provider-reported total above: the row's composition counts the cache
             buckets, which an additive-convention provider reports outside the prompt. */}
@@ -863,20 +1038,36 @@ function RequestDetail({ entry, onPriceModel }: { entry: UsageEntry; onPriceMode
             </DetailField>
           </>
         ) : null}
-        <DetailField label="Cache read tokens">{formatTokens(entry.cache_read_tokens)}</DetailField>
-        <DetailField label="Cache write tokens">{formatTokens(entry.cache_write_tokens)}</DetailField>
-        <DetailField label="1h cache writes">{formatTokens(entry.cache_write_1h_tokens ?? null)}</DetailField>
-        <DetailField label="Total time">{formatLatency(entry.latency_ms)}</DetailField>
-        <DetailField label="Request ID" copyValue={entry.id}>{entry.id}</DetailField>
+        <DetailField label="Cache read tokens">
+          {formatTokens(entry.cache_read_tokens)}
+        </DetailField>
+        <DetailField label="Cache write tokens">
+          {formatTokens(entry.cache_write_tokens)}
+        </DetailField>
+        <DetailField label="1h cache writes">
+          {formatTokens(entry.cache_write_1h_tokens ?? null)}
+        </DetailField>
+        <DetailField label="Total time">
+          {formatLatency(entry.latency_ms)}
+        </DetailField>
+        <DetailField label="Request ID" copyValue={entry.id}>
+          {entry.id}
+        </DetailField>
       </div>
       {uncosted ? (
         <div className="flex flex-wrap items-center gap-3">
-          <Button size="sm" variant="outline" onPress={() => onPriceModel(pricingKey)}>
+          <Button
+            size="sm"
+            variant="outline"
+            onPress={() => onPriceModel(pricingKey)}
+          >
             Price this model
           </Button>
           <span className="text-xs text-[var(--otari-muted)]">
-            This request carries no cost. Set a price for <code className="break-all">{pricingKey}</code> so later
-            requests are metered and count against budgets. Rows already logged keep the cost they were served with.
+            This request carries no cost. Set a price for{" "}
+            <code className="break-all">{pricingKey}</code> so later requests
+            are metered and count against budgets. Rows already logged keep the
+            cost they were served with.
           </span>
         </div>
       ) : null}
@@ -891,7 +1082,7 @@ function RequestDetail({ entry, onPriceModel }: { entry: UsageEntry; onPriceMode
               // Its cost is still real, so it is shown as a charge with no rate
               // rather than rendered through one of the two rate formats, which
               // would print an undefined rate as "NaN / 1M".
-              const meter = String(line.meter ?? "");
+              const meter = String(line.meter ?? "")
               return (
                 <DetailField key={meter} label={meter.replaceAll("_", " ")}>
                   {isUnitChargeLine(line)
@@ -900,13 +1091,13 @@ function RequestDetail({ entry, onPriceModel }: { entry: UsageEntry; onPriceMode
                       ? `${formatTokens(line.units)} at ${formatUSD(line.rate_per_million)} / 1M, ${formatUSD(line.cost)}`
                       : formatUSD(Number(line.cost ?? 0))}
                 </DetailField>
-              );
+              )
             })}
           </div>
         </div>
       ) : null}
     </div>
-  );
+  )
 }
 
 // ---------- page ----------
@@ -914,38 +1105,40 @@ function RequestDetail({ entry, onPriceModel }: { entry: UsageEntry; onPriceMode
 export function ActivityPage() {
   // Filter + pagination state lives in the URL, so a filtered view is shareable
   // and survives the back button. `patch` batches related changes into one entry.
-  const url = useUrlState(URL_DEFAULTS);
-  const range = url.get("range");
-  const startParam = url.get("start_date");
-  const endParam = url.get("end_date");
-  const statusFilter = url.get("status");
+  const url = useUrlState(URL_DEFAULTS)
+  const range = url.get("range")
+  const startParam = url.get("start_date")
+  const endParam = url.get("end_date")
+  const statusFilter = url.get("status")
   // The three entity filters hold sets: each is repeatable in the URL and on the
   // wire, so a comparison ("these two models") is one view rather than several, and
   // a drill-down from the analytics page can carry its whole selection across.
-  const modelFilters = url.getAll("model");
-  const userFilters = url.getAll("user_id");
-  const apiKeyFilters = url.getAll("api_key_id");
-  const pricedFilter = url.get("priced");
+  const modelFilters = url.getAll("model")
+  const userFilters = url.getAll("user_id")
+  const apiKeyFilters = url.getAll("api_key_id")
+  const pricedFilter = url.get("priced")
   // Provenance: gateway traffic vs an imported agent source. Set by its own select,
   // or by a drill-down (the pricing alarm links here scoped to gateway traffic).
-  const sourceFilter = url.get("source");
+  const sourceFilter = url.get("source")
   // The Usage-page secondary breakdowns (session / endpoint / provider) drill in
   // the same way: no select of their own, carried as a chip so the scoping is
   // visible and one click removes it.
-  const sessionFilter = url.get("source_label");
-  const endpointFilter = url.get("endpoint");
-  const providerFilter = url.get("provider");
-  const toolFilter = url.get("tool");
-  const page = Math.max(0, url.getNumber("page"));
+  const sessionFilter = url.get("source_label")
+  const endpointFilter = url.get("endpoint")
+  const providerFilter = url.get("provider")
+  const toolFilter = url.get("tool")
+  const page = Math.max(0, url.getNumber("page"))
   // Snap URL-supplied sizes to the nearest offered option: selection latency
   // grows linearly with rows on the page, so an old bookmark with size=500
   // must not resurrect second-long checkbox clicks, and a hand-edited size=0
   // or size=-5 must not reach the API as an invalid limit (or leave the
   // rows-per-page select showing a value it does not offer).
-  const rawPageSize = url.getNumber("size");
+  const rawPageSize = url.getNumber("size")
   const pageSize = PAGE_SIZE_OPTIONS.reduce((best, option) =>
-    Math.abs(option - rawPageSize) < Math.abs(best - rawPageSize) ? option : best,
-  );
+    Math.abs(option - rawPageSize) < Math.abs(best - rawPageSize)
+      ? option
+      : best,
+  )
 
   // Snapshot the window so a rolling preset does not recompute "now" every render
   // (which would churn the query key). Re-anchored when the range selection changes,
@@ -955,40 +1148,49 @@ export function ActivityPage() {
   // already snapshotted the window, so re-anchoring on mount only moves `start` by
   // the milliseconds since, which changes `filters`, which trips the page reset
   // below: a bookmarked or shared `?page=3` URL would silently open on page 1.
-  const selectionKey = `${range}|${startParam}|${endParam}`;
+  const selectionKey = `${range}|${startParam}|${endParam}`
   // One clock reading shared by both initial windows. Taken separately they differ
   // by the milliseconds between the two lines, and since `extentWin` is read second
   // its rolling start is the later one, which made the strict `<` in
   // `winOutsideExtent` true on an ordinary load: the page then framed the window
   // rather than the preset, so no preset was highlighted and a 24h extent bucketed
   // by day instead of by hour. Whether that happened came down to machine load.
-  const [mountClock] = useState(Date.now);
-  const [win, setWin] = useState(() => resolveWindow(range, startParam, endParam, mountClock));
+  const [mountClock] = useState(Date.now)
+  const [win, setWin] = useState(() =>
+    resolveWindow(range, startParam, endParam, mountClock),
+  )
   // The preset extent (ignoring any brushed bounds) that the timeline histogram
   // spans. Snapshotted like `win`, re-anchored when the preset changes: a brushed
   // sub-window must leave the extent alone, or zooming in would drag the frame
   // (and refetch the histogram) along with it.
-  const [extentWin, setExtentWin] = useState(() => resolveExtentWindow(range, mountClock));
+  const [extentWin, setExtentWin] = useState(() =>
+    resolveExtentWindow(range, mountClock),
+  )
   // Both re-anchors share one effect so they also share one clock reading. As two
   // effects they ran in declaration order on a range change, leaving the list
   // window a millisecond behind the extent containing it, which is the same drift
   // described above. The guards are per-window and unchanged: `win` re-anchors for
   // any selection change, `extentWin` only when the preset itself moves.
-  const prevSelectionKey = useRef(selectionKey);
-  const prevRange = useRef(range);
+  const prevSelectionKey = useRef(selectionKey)
+  const prevRange = useRef(range)
   useEffect(() => {
-    const clock = Date.now();
+    const clock = Date.now()
     if (prevSelectionKey.current !== selectionKey) {
-      prevSelectionKey.current = selectionKey;
-      setWin(resolveWindow(range, startParam, endParam, clock));
+      prevSelectionKey.current = selectionKey
+      setWin(resolveWindow(range, startParam, endParam, clock))
     }
     if (prevRange.current !== range) {
-      prevRange.current = range;
-      setExtentWin(resolveExtentWindow(range, clock));
+      prevRange.current = range
+      setExtentWin(resolveExtentWindow(range, clock))
     }
-  }, [selectionKey, range, startParam, endParam]);
+  }, [selectionKey, range, startParam, endParam])
 
-  const priced = pricedFilter === "true" ? true : pricedFilter === "false" ? false : undefined;
+  const priced =
+    pricedFilter === "true"
+      ? true
+      : pricedFilter === "false"
+        ? false
+        : undefined
 
   const filters: UsageFilters = useMemo(
     () => ({
@@ -1018,29 +1220,29 @@ export function ActivityPage() {
       providerFilter,
       priced,
     ],
-  );
+  )
 
-  const selection = useTableSelection();
+  const selection = useTableSelection()
 
   // Any change to the filter set returns to the first page and drops the
   // selection, but not on mount, so a shared URL keeps its page.
-  const filtersKey = JSON.stringify(filters);
-  const prevFiltersKey = useRef(filtersKey);
+  const filtersKey = JSON.stringify(filters)
+  const prevFiltersKey = useRef(filtersKey)
   useEffect(() => {
     if (prevFiltersKey.current !== filtersKey) {
-      prevFiltersKey.current = filtersKey;
-      url.patch({ page: 0 });
-      selection.clear();
+      prevFiltersKey.current = filtersKey
+      url.patch({ page: 0 })
+      selection.clear()
     }
-  }, [filtersKey, url, selection]);
+  }, [filtersKey, url, selection])
 
-  const usage = useUsageLogs(filters, page, pageSize);
-  const count = useUsageCount(filters);
+  const usage = useUsageLogs(filters, page, pageSize)
+  const count = useUsageCount(filters)
 
   // Requests in progress, read unfiltered: the endpoint has no filters, because a
   // request that has not finished has no outcome, cost, or token count to filter
   // on. Reported gateway-wide beside the refresh control, not as rows.
-  const inFlight = useInFlightRequests();
+  const inFlight = useInFlightRequests()
 
   // How far behind the frozen page has fallen. Polled while the count it is
   // compared against is not (see `useUsageCount`), so the difference is "rows that
@@ -1050,8 +1252,8 @@ export function ActivityPage() {
   // bring newer rows into view (they land at the top of page 1), so a badge
   // offering to load them would be a promise the button does not keep; a window
   // that ends in the past can gain no rows at all, so the poll would be pure cost.
-  const newRowsRelevant = page === 0 && !filters.end_date;
-  const liveCount = useLiveUsageCount(filters, newRowsRelevant);
+  const newRowsRelevant = page === 0 && !filters.end_date
+  const liveCount = useLiveUsageCount(filters, newRowsRelevant)
 
   // Model suggestions: models with usage in the window (other filters applied, the
   // model filter omitted so the full list stays offered).
@@ -1079,13 +1281,19 @@ export function ActivityPage() {
       providerFilter,
       toolFilter,
     ],
-  );
+  )
   // Two breakdowns are read here (model typeahead, source picker); the rest are
   // not requested.
-  const modelSummary = useUsageSummary(modelSuggestFilters, "day", MODEL_AND_SOURCE_BREAKDOWNS);
+  const modelSummary = useUsageSummary(
+    modelSuggestFilters,
+    "day",
+    MODEL_AND_SOURCE_BREAKDOWNS,
+  )
   const realGroups = (rows: UsageGroupRow[] | undefined) =>
-    (rows ?? []).filter((r) => !r.is_other && r.key !== null);
-  const modelOptions = realGroups(modelSummary.data?.by_model).map((r) => r.key as string);
+    (rows ?? []).filter((r) => !r.is_other && r.key !== null)
+  const modelOptions = realGroups(modelSummary.data?.by_model).map(
+    (r) => r.key as string,
+  )
 
   // The user and key pickers need their own window: each must keep offering the
   // *other* values of its own dimension, so both entity filters come off. That
@@ -1095,12 +1303,16 @@ export function ActivityPage() {
   const entitySuggestFilters: UsageFilters = useMemo(
     () => ({ ...filters, user_id: undefined, api_key_id: undefined }),
     [filters],
-  );
-  const entitySummary = useUsageSummary(entitySuggestFilters, "day", ENTITY_BREAKDOWNS);
+  )
+  const entitySummary = useUsageSummary(
+    entitySuggestFilters,
+    "day",
+    ENTITY_BREAKDOWNS,
+  )
   const keyOptions = realGroups(entitySummary.data?.by_api_key).map((r) => ({
     value: r.key as string,
     label: r.label ?? `${(r.key as string).slice(0, 8)}…`,
-  }));
+  }))
 
   // Source options: the sources with usage in the window. Like the model
   // suggestions, this must ignore the source filter itself, or picking Claude Code
@@ -1123,15 +1335,26 @@ export function ActivityPage() {
       api_key_id: apiKeyFilters.length > 0 ? apiKeyFilters : undefined,
     }),
     [win, statusFilter, modelFilters, userFilters, apiKeyFilters],
-  );
-  const sourceSummary = useUsageSummary(sourceSuggestFilters, "day", SOURCE_BREAKDOWN, Boolean(sourceFilter));
-  const sourceBreakdown = (sourceFilter ? sourceSummary.data : modelSummary.data)?.by_source;
+  )
+  const sourceSummary = useUsageSummary(
+    sourceSuggestFilters,
+    "day",
+    SOURCE_BREAKDOWN,
+    Boolean(sourceFilter),
+  )
+  const sourceBreakdown = (
+    sourceFilter ? sourceSummary.data : modelSummary.data
+  )?.by_source
   // A drill-down can name a source with no rows in the window; keep it listed so
   // the select shows the filter that is actually applied.
   const sourceOptions = useMemo(() => {
-    const seen = (sourceBreakdown ?? []).filter((r) => !r.is_other && r.key !== null).map((r) => r.key as string);
-    return sourceFilter && !seen.includes(sourceFilter) ? [sourceFilter, ...seen] : seen;
-  }, [sourceBreakdown, sourceFilter]);
+    const seen = (sourceBreakdown ?? [])
+      .filter((r) => !r.is_other && r.key !== null)
+      .map((r) => r.key as string)
+    return sourceFilter && !seen.includes(sourceFilter)
+      ? [sourceFilter, ...seen]
+      : seen
+  }, [sourceBreakdown, sourceFilter])
 
   // The timeline histogram spans the whole preset *extent* (the rolling preset
   // window, independent of any brushed sub-window), so the brush always has
@@ -1140,19 +1363,23 @@ export function ActivityPage() {
   // deterministic window instead of the summary endpoint's hidden 30-day default;
   // the list stays all-time and the caption reflects the true list window, and the
   // brush still narrows it. Entity filters carry over so the bars match what's shown.
-  const extentPreset = findPreset(ACTIVITY_PRESETS, range) ?? findPreset(ACTIVITY_PRESETS, ACTIVITY_DEFAULT_KEY);
+  const extentPreset =
+    findPreset(ACTIVITY_PRESETS, range) ??
+    findPreset(ACTIVITY_PRESETS, ACTIVITY_DEFAULT_KEY)
   // A window reaching outside the preset extent (a drill-down from the Usage
   // page carries its own bounds while the URL's `range` still holds a default)
   // cannot be framed by that extent: the histogram would show unrelated bars
   // and the preset would read as active. Frame the window itself instead, with
   // no preset highlighted; zoom-out falls back to the smallest broader preset.
   const winOutsideExtent = Boolean(
-    win.start && extentWin.start && new Date(win.start).getTime() < new Date(extentWin.start).getTime(),
-  );
-  const extentKey = winOutsideExtent ? CUSTOM_KEY : range;
+    win.start &&
+      extentWin.start &&
+      new Date(win.start).getTime() < new Date(extentWin.start).getTime(),
+  )
+  const extentKey = winOutsideExtent ? CUSTOM_KEY : range
   const extentBucket = winOutsideExtent
     ? bucketForWindow(win.start as string, win.end)
-    : (extentPreset?.bucket ?? "day");
+    : (extentPreset?.bucket ?? "day")
   const contextFilters: UsageFilters = useMemo(
     () => ({
       start_date: winOutsideExtent ? win.start : extentWin.start,
@@ -1183,21 +1410,25 @@ export function ActivityPage() {
       providerFilter,
       priced,
     ],
-  );
+  )
   // The timeline reads `series`; the tool dimension is requested so the Tool filter
   // knows whether this window contains any gateway-run tool calls. With
   // NO_BREAKDOWNS the server returns `by_tool: []` by contract, which left the
   // selector permanently hidden unless a tool filter was already in the URL.
-  const contextSummary = useUsageSummary(contextFilters, extentBucket, TOOL_BREAKDOWN);
+  const contextSummary = useUsageSummary(
+    contextFilters,
+    extentBucket,
+    TOOL_BREAKDOWN,
+  )
   const timelineSeries = (contextSummary.data?.series ?? []).map((p) => ({
     bucketStart: p.bucket_start,
     requests: p.requests,
     // Failed requests render as a red segment on the strip, so dropped traffic
     // shows up while browsing, not only after filtering to status=error.
     errors: p.errors ?? 0,
-  }));
+  }))
 
-  const rows = usage.data ?? [];
+  const rows = usage.data ?? []
 
   // What the live control may report. A failed poll leaves the list unknown, not
   // unchanged: TanStack keeps the last successful payload, so without the
@@ -1206,7 +1437,7 @@ export function ActivityPage() {
   // ago. That is the state `useInFlightRequests` already refuses to cache across
   // mounts, so it must not be reachable by this route either. The failure reaches
   // the operator through the page's error banner instead.
-  const liveNow = inFlight.isError ? undefined : inFlight.data;
+  const liveNow = inFlight.isError ? undefined : inFlight.data
 
   // What served each routed request on this page. Built from the page itself where
   // possible (a group's attempts are written milliseconds apart, so they are
@@ -1215,23 +1446,30 @@ export function ActivityPage() {
   // `absorbed` status (the way an operator investigates fallovers) hides every
   // outcome row by construction, which is precisely when the answer is wanted.
   const { pageOutcomes, unresolvedGroupIds } = useMemo(() => {
-    const known = indexGroupOutcomes(rows);
-    const missing = new Set<string>();
+    const known = indexGroupOutcomes(rows)
+    const missing = new Set<string>()
     for (const row of rows) {
-      if (row.status === "absorbed" && row.request_group_id && !known.has(row.request_group_id)) {
-        missing.add(row.request_group_id);
+      if (
+        row.status === "absorbed" &&
+        row.request_group_id &&
+        !known.has(row.request_group_id)
+      ) {
+        missing.add(row.request_group_id)
       }
     }
-    return { pageOutcomes: known, unresolvedGroupIds: [...missing] };
-  }, [rows]);
-  const unresolvedGroups = useRequestGroups(unresolvedGroupIds);
+    return { pageOutcomes: known, unresolvedGroupIds: [...missing] }
+  }, [rows])
+  const unresolvedGroups = useRequestGroups(unresolvedGroupIds)
   const groupOutcomes = useMemo(() => {
-    if (!unresolvedGroups.data?.length) return pageOutcomes;
-    return new Map([...pageOutcomes, ...indexGroupOutcomes(unresolvedGroups.data)]);
-  }, [pageOutcomes, unresolvedGroups.data]);
+    if (!unresolvedGroups.data?.length) return pageOutcomes
+    return new Map([
+      ...pageOutcomes,
+      ...indexGroupOutcomes(unresolvedGroups.data),
+    ])
+  }, [pageOutcomes, unresolvedGroups.data])
 
-  const totalIsExact = count.isSuccess && !count.isPlaceholderData;
-  const total = totalIsExact ? (count.data?.total ?? 0) : null;
+  const totalIsExact = count.isSuccess && !count.isPlaceholderData
+  const total = totalIsExact ? (count.data?.total ?? 0) : null
 
   // Rows that have landed since this page was drawn, as the gap between the polled
   // count and the pinned one. Clamped at zero because the gap can close from the
@@ -1243,7 +1481,9 @@ export function ActivityPage() {
   // the payload it cached on page 1. Without this the badge would follow the
   // operator forward and offer rows that pressing it cannot bring into view.
   const newRows =
-    newRowsRelevant && total != null && liveCount.data ? Math.max(0, liveCount.data.total - total) : 0;
+    newRowsRelevant && total != null && liveCount.data
+      ? Math.max(0, liveCount.data.total - total)
+      : 0
 
   // Whether the page can still tell newer rows from none. The badge's absence
   // otherwise reads as "nothing has landed", which on a table that no longer moves
@@ -1251,15 +1491,16 @@ export function ActivityPage() {
   // control strip rather than the error banner: the count failing costs the
   // operator a hint, not the log they came for, and `retry: false` means a single
   // blip would otherwise raise a page-level alarm the next poll silently clears.
-  const newRowsUnknown = newRowsRelevant && liveCount.isError;
+  const newRowsUnknown = newRowsRelevant && liveCount.isError
   // Neither the default preset nor the unbounded "All" is itself a filter: only an
   // explicit sub-window or a bounded non-default preset narrows the window, so a
   // brand-new gateway reads "never used" on both its 24h default and on "All",
   // and only a real narrowing reads "filtered empty". (UsagePage can mirror this
   // with a bare `!== default` because it has no unbounded preset; Activity does.)
-  const rangePreset = findPreset(ACTIVITY_PRESETS, range);
+  const rangePreset = findPreset(ACTIVITY_PRESETS, range)
   const timeFiltered =
-    Boolean(startParam || endParam) || (range !== ACTIVITY_DEFAULT_KEY && rangePreset?.seconds != null);
+    Boolean(startParam || endParam) ||
+    (range !== ACTIVITY_DEFAULT_KEY && rangePreset?.seconds != null)
   const anyFilter = Boolean(
     statusFilter ||
       modelFilters.length ||
@@ -1272,16 +1513,18 @@ export function ActivityPage() {
       providerFilter ||
       toolFilter ||
       timeFiltered,
-  );
+  )
 
   // Active entity filters as removable chips (time is driven by the timeline, so
   // it is not a chip). Values show the human label where one exists.
-  const labelFrom = (options: { value: string; label: string }[], value: string) =>
-    options.find((o) => o.value === value)?.label ?? value;
+  const labelFrom = (
+    options: { value: string; label: string }[],
+    value: string,
+  ) => options.find((o) => o.value === value)?.label ?? value
   const userOptionsList = realGroups(entitySummary.data?.by_user).map((r) => ({
     value: r.key as string,
     label: r.label ? `${r.label} (${r.key})` : (r.key as string),
-  }));
+  }))
   const clearEntityFilters = () =>
     url.patch({
       status: "",
@@ -1294,7 +1537,7 @@ export function ActivityPage() {
       endpoint: "",
       provider: "",
       tool: "",
-    });
+    })
   // One chip per picked value of a repeatable filter, each clearing only itself.
   const valueChips = (
     dimension: string,
@@ -1310,53 +1553,137 @@ export function ActivityPage() {
       // Several chips share a dimension, so the value has to be part of the name.
       clearLabel: `Remove ${label} filter ${display(value)}`,
       onClear: () => url.patch({ [param]: values.filter((v) => v !== value) }),
-    }));
+    }))
   const filterChips: FilterChip[] = [
-    ...(statusFilter ? [{ key: "status", label: "Status", value: labelFrom(STATUS_OPTIONS, statusFilter), onClear: () => url.patch({ status: "" }) }] : []),
-    ...(pricedFilter ? [{ key: "priced", label: "Priced", value: labelFrom(PRICED_OPTIONS, pricedFilter), onClear: () => url.patch({ priced: "" }) }] : []),
-    ...valueChips("user", "User", "user_id", userFilters, (v) => labelFrom(userOptionsList, v)),
+    ...(statusFilter
+      ? [
+          {
+            key: "status",
+            label: "Status",
+            value: labelFrom(STATUS_OPTIONS, statusFilter),
+            onClear: () => url.patch({ status: "" }),
+          },
+        ]
+      : []),
+    ...(pricedFilter
+      ? [
+          {
+            key: "priced",
+            label: "Priced",
+            value: labelFrom(PRICED_OPTIONS, pricedFilter),
+            onClear: () => url.patch({ priced: "" }),
+          },
+        ]
+      : []),
+    ...valueChips("user", "User", "user_id", userFilters, (v) =>
+      labelFrom(userOptionsList, v),
+    ),
     ...valueChips("model", "Model", "model", modelFilters, (v) => v),
-    ...valueChips("key", "API key", "api_key_id", apiKeyFilters, (v) => labelFrom(keyOptions, v)),
-    ...(sourceFilter ? [{ key: "source", label: "Source", value: sourceLabel(sourceFilter), onClear: () => url.patch({ source: "" }) }] : []),
-    ...(sessionFilter ? [{ key: "session", label: "Session", value: sessionFilter, onClear: () => url.patch({ source_label: "" }) }] : []),
-    ...(endpointFilter ? [{ key: "endpoint", label: "Endpoint", value: endpointFilter, onClear: () => url.patch({ endpoint: "" }) }] : []),
-    ...(providerFilter ? [{ key: "provider", label: "Provider", value: providerFilter, onClear: () => url.patch({ provider: "" }) }] : []),
-    ...(toolFilter ? [{ key: "tool", label: "Tool", value: labelFrom(TOOL_OPTIONS, toolFilter), onClear: () => url.patch({ tool: "" }) }] : []),
-  ];
+    ...valueChips("key", "API key", "api_key_id", apiKeyFilters, (v) =>
+      labelFrom(keyOptions, v),
+    ),
+    ...(sourceFilter
+      ? [
+          {
+            key: "source",
+            label: "Source",
+            value: sourceLabel(sourceFilter),
+            onClear: () => url.patch({ source: "" }),
+          },
+        ]
+      : []),
+    ...(sessionFilter
+      ? [
+          {
+            key: "session",
+            label: "Session",
+            value: sessionFilter,
+            onClear: () => url.patch({ source_label: "" }),
+          },
+        ]
+      : []),
+    ...(endpointFilter
+      ? [
+          {
+            key: "endpoint",
+            label: "Endpoint",
+            value: endpointFilter,
+            onClear: () => url.patch({ endpoint: "" }),
+          },
+        ]
+      : []),
+    ...(providerFilter
+      ? [
+          {
+            key: "provider",
+            label: "Provider",
+            value: providerFilter,
+            onClear: () => url.patch({ provider: "" }),
+          },
+        ]
+      : []),
+    ...(toolFilter
+      ? [
+          {
+            key: "tool",
+            label: "Tool",
+            value: labelFrom(TOOL_OPTIONS, toolFilter),
+            onClear: () => url.patch({ tool: "" }),
+          },
+        ]
+      : []),
+  ]
 
   // Selection targets imported rows only; enforced gateway rows are disabled so
   // bulk delete / set-price can never reach them.
-  const selectableKeys = useMemo(() => rows.filter((r) => !r.counts_toward_budget).map((r) => r.id), [rows]);
-  const disabledKeys = useMemo(() => rows.filter((r) => r.counts_toward_budget).map((r) => r.id), [rows]);
-  const selectedIds = resolveSelectedIds(selection.selectedKeys, selectableKeys);
-  const pageSelectedCount = selectedIds.length;
-  const hasSelection = selection.allMatching || pageSelectedCount > 0;
+  const selectableKeys = useMemo(
+    () => rows.filter((r) => !r.counts_toward_budget).map((r) => r.id),
+    [rows],
+  )
+  const disabledKeys = useMemo(
+    () => rows.filter((r) => r.counts_toward_budget).map((r) => r.id),
+    [rows],
+  )
+  const selectedIds = resolveSelectedIds(selection.selectedKeys, selectableKeys)
+  const pageSelectedCount = selectedIds.length
+  const hasSelection = selection.allMatching || pageSelectedCount > 0
 
   // Total imported rows matching the filter, for the "select all N" affordance
   // and the bulk-op copy; only fetched once there is a selection.
-  const importedFilters = useMemo<UsageFilters>(() => ({ ...filters, counts_toward_budget: false }), [filters]);
-  const importedCount = useUsageCount(importedFilters, hasSelection);
-  const matchingTotal = importedCount.isSuccess ? (importedCount.data?.total ?? null) : null;
-  const allPageSelected = selectableKeys.length > 0 && pageSelectedCount === selectableKeys.length;
-  const canSelectAllMatching = allPageSelected && matchingTotal != null && matchingTotal > pageSelectedCount;
-  const effectiveCount = selection.allMatching ? (matchingTotal ?? pageSelectedCount) : pageSelectedCount;
+  const importedFilters = useMemo<UsageFilters>(
+    () => ({ ...filters, counts_toward_budget: false }),
+    [filters],
+  )
+  const importedCount = useUsageCount(importedFilters, hasSelection)
+  const matchingTotal = importedCount.isSuccess
+    ? (importedCount.data?.total ?? null)
+    : null
+  const allPageSelected =
+    selectableKeys.length > 0 && pageSelectedCount === selectableKeys.length
+  const canSelectAllMatching =
+    allPageSelected &&
+    matchingTotal != null &&
+    matchingTotal > pageSelectedCount
+  const effectiveCount = selection.allMatching
+    ? (matchingTotal ?? pageSelectedCount)
+    : pageSelectedCount
   // Only offer the selection column when something on the page can actually be
   // selected. A deployment with no imported usage has none: every checkbox would
   // render disabled, which reads as a broken control rather than as "these rows
   // are not eligible". Kept while "all matching" is live so the affordance does
   // not vanish under an operator mid-bulk-op.
-  const showSelection = selectableKeys.length > 0 || selection.allMatching;
+  const showSelection = selectableKeys.length > 0 || selection.allMatching
 
-  const deleteUsage = useDeleteUsage();
-  const setPrice = useSetUsagePrice();
-  const setModelPrice = useSetPricing();
-  const [deleteOpen, setDeleteOpen] = useState(false);
-  const [priceOpen, setPriceOpen] = useState(false);
+  const deleteUsage = useDeleteUsage()
+  const setPrice = useSetUsagePrice()
+  const setModelPrice = useSetPricing()
+  const [deleteOpen, setDeleteOpen] = useState(false)
+  const [priceOpen, setPriceOpen] = useState(false)
   // The model selector whose price is being set from a request detail, or null
   // when that dialog is closed. Distinct from `priceOpen` above, which reprices
   // already-logged imported rows rather than setting a model's price.
-  const [modelPriceKey, setModelPriceKey] = useState<string | null>(null);
-  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [modelPriceKey, setModelPriceKey] = useState<string | null>(null)
+  const [expandedId, setExpandedId] = useState<string | null>(null)
 
   // Inline accordion panel under the clicked row (DataTable renderDetail).
   // Stable (setter-only closure) so the row cache holds; see the DataTable
@@ -1365,7 +1692,9 @@ export function ActivityPage() {
     (entry: UsageEntry) => (
       <div>
         <div className="flex items-center justify-between border-b border-[var(--otari-line)] px-4 py-2">
-          <span className="text-sm font-medium text-[var(--otari-ink)]">Request detail</span>
+          <span className="text-sm font-medium text-[var(--otari-ink)]">
+            Request detail
+          </span>
           <Button size="sm" variant="ghost" onPress={() => setExpandedId(null)}>
             Close
           </Button>
@@ -1374,7 +1703,7 @@ export function ActivityPage() {
       </div>
     ),
     [],
-  );
+  )
 
   // A bulk op targets either the current page selection (ids) or, once the operator
   // opted into "all matching", the filter itself (by_filter). The server scopes
@@ -1405,16 +1734,16 @@ export function ActivityPage() {
           end_date: filters.end_date,
           priced: filters.priced,
         }
-      : { ids: selectedIds };
+      : { ids: selectedIds }
 
   const onDeleteConfirm = () => {
     deleteUsage.mutate(selectionBody(), {
       onSuccess: () => {
-        setDeleteOpen(false);
-        selection.clear();
+        setDeleteOpen(false)
+        selection.clear()
       },
-    });
-  };
+    })
+  }
 
   // Sets the model's own price (a ModelPricing row), which is what future
   // requests are billed at. Deliberately does not touch the rows already logged:
@@ -1426,24 +1755,26 @@ export function ActivityPage() {
         model_key: modelKey,
         input_price_per_million: rates.input_price_per_million,
         output_price_per_million: rates.output_price_per_million,
-        cache_read_price_per_million: rates.cache_read_price_per_million ?? null,
-        cache_write_price_per_million: rates.cache_write_price_per_million ?? null,
+        cache_read_price_per_million:
+          rates.cache_read_price_per_million ?? null,
+        cache_write_price_per_million:
+          rates.cache_write_price_per_million ?? null,
       },
       { onSuccess: () => setModelPriceKey(null) },
-    );
-  };
+    )
+  }
 
   const onSetPrice = (rates: ManualRates) => {
     setPrice.mutate(
       { ...selectionBody(), ...rates },
       {
         onSuccess: () => {
-          setPriceOpen(false);
-          selection.clear();
+          setPriceOpen(false)
+          selection.clear()
         },
       },
-    );
-  };
+    )
+  }
 
   // Refresh means "same view, newer rows", so it deliberately does *not* re-anchor
   // a rolling preset's window. Re-anchoring recomputed "now", which changed
@@ -1453,25 +1784,25 @@ export function ActivityPage() {
   // `pickPreset`). Every window-scoped query is refetched explicitly (see the
   // UsagePage refresh note), since the keys are unchanged by design here.
   const refresh = () => {
-    void usage.refetch();
-    void count.refetch();
+    void usage.refetch()
+    void count.refetch()
     // Re-read alongside the count it is compared against, or the badge would keep
     // offering rows the refresh just loaded. Guarded for the same reason as the
     // source summary below: refetch() ignores `enabled`.
     if (newRowsRelevant) {
-      void liveCount.refetch();
+      void liveCount.refetch()
     }
-    void inFlight.refetch();
-    void contextSummary.refetch();
-    void modelSummary.refetch();
-    void entitySummary.refetch();
+    void inFlight.refetch()
+    void contextSummary.refetch()
+    void modelSummary.refetch()
+    void entitySummary.refetch()
     // Guarded because refetch() ignores `enabled`: without a picked source the
     // query is disabled by design and refetching it would fire a pointless
     // extra summary request.
     if (sourceFilter) {
-      void sourceSummary.refetch();
+      void sourceSummary.refetch()
     }
-  };
+  }
 
   // A rolling preset clears any explicit bounds; a timeline selection sets them
   // (the preset key is left as-is, since it still names the extent).
@@ -1484,27 +1815,33 @@ export function ActivityPage() {
     if (preset.key === range && !startParam && !endParam) {
       // Both windows off one reading, for the same reason as at mount: two reads
       // would leave the list window a millisecond behind the extent it sits in.
-      const clock = Date.now();
-      setWin(resolveWindow(preset.key, "", "", clock));
-      setExtentWin(resolveExtentWindow(preset.key, clock));
-      return;
+      const clock = Date.now()
+      setWin(resolveWindow(preset.key, "", "", clock))
+      setExtentWin(resolveExtentWindow(preset.key, clock))
+      return
     }
-    url.patch({ range: preset.key, start_date: "", end_date: "" });
-  };
-  const pickCustom = (startIso: string, endIso: string) => url.patch({ start_date: startIso, end_date: endIso });
+    url.patch({ range: preset.key, start_date: "", end_date: "" })
+  }
+  const pickCustom = (startIso: string, endIso: string) =>
+    url.patch({ start_date: startIso, end_date: endIso })
 
   // Memoized on its per-render inputs (the key labels and the routing outcomes,
   // both themselves memoized) so DataTable's per-row cache holds: a fresh array
   // every render would rebuild all rows per click.
   const columns = useMemo<DataTableColumn<UsageEntry>[]>(() => {
     const apiKeyLabel = (entry: UsageEntry): string =>
-      entry.api_key_id === null ? "—" : (entry.api_key_name ?? `${entry.api_key_id.slice(0, 8)}…`);
+      entry.api_key_id === null
+        ? "—"
+        : (entry.api_key_name ?? `${entry.api_key_id.slice(0, 8)}…`)
     return [
       {
         id: "time",
         header: "Time",
         cell: (e) => (
-          <span title={absolute(e.timestamp)} className="text-[var(--otari-muted)]">
+          <span
+            title={absolute(e.timestamp)}
+            className="text-[var(--otari-muted)]"
+          >
             {timeAgo(e.timestamp)}
           </span>
         ),
@@ -1519,10 +1856,10 @@ export function ActivityPage() {
         // and push the failure-forward Status pill off a narrow viewport. Text, not
         // color alone, so it survives the same accessibility bar as TokenBar.
         cell: (e) => {
-          const usage = toolUsage(e);
-          if (!usage.length) return e.model;
-          const calls = usage.reduce((sum, u) => sum + u.billed + u.errors, 0);
-          const detail = usage.map(formatToolUsage).join(" \u00b7 ");
+          const usage = toolUsage(e)
+          if (!usage.length) return e.model
+          const calls = usage.reduce((sum, u) => sum + u.billed + u.errors, 0)
+          const detail = usage.map(formatToolUsage).join(" \u00b7 ")
           return (
             <span className="inline-flex items-center gap-1.5">
               {e.model}
@@ -1534,7 +1871,7 @@ export function ActivityPage() {
                 {calls} {calls === 1 ? "tool" : "tools"}
               </span>
             </span>
-          );
+          )
         },
       },
       {
@@ -1544,20 +1881,45 @@ export function ActivityPage() {
         // that turned out. The Model column keeps meaning the model that actually
         // ran (it is the join key for filters and for spend-by-model), so this is
         // additive: together they answer "what did I ask for, and what served it".
-        cell: (e) => <RoutingCell entry={e} outcome={groupOutcomes.get(e.request_group_id ?? "") ?? null} />,
+        cell: (e) => (
+          <RoutingCell
+            entry={e}
+            outcome={groupOutcomes.get(e.request_group_id ?? "") ?? null}
+          />
+        ),
       },
-      { id: "api_key", header: "API key", cell: (e) => <span className="text-[var(--otari-muted)]">{apiKeyLabel(e)}</span> },
-      { id: "tokens", header: "Tokens", align: "end", cell: (e) => <TokenBar entry={e} /> },
-      { id: "cost", header: "Cost", align: "end", cell: (e) => formatUSD(e.cost) },
+      {
+        id: "api_key",
+        header: "API key",
+        cell: (e) => (
+          <span className="text-[var(--otari-muted)]">{apiKeyLabel(e)}</span>
+        ),
+      },
+      {
+        id: "tokens",
+        header: "Tokens",
+        align: "end",
+        cell: (e) => <TokenBar entry={e} />,
+      },
+      {
+        id: "cost",
+        header: "Cost",
+        align: "end",
+        cell: (e) => formatUSD(e.cost),
+      },
       {
         id: "latency",
         header: "Total time",
         align: "end",
         cell: (e) => formatLatency(e.latency_ms),
       },
-      { id: "status", header: "Status", cell: (e) => <StatusPill status={e.status} /> },
-    ];
-  }, [groupOutcomes]);
+      {
+        id: "status",
+        header: "Status",
+        cell: (e) => <StatusPill status={e.status} />,
+      },
+    ]
+  }, [groupOutcomes])
 
   return (
     <div className="flex flex-col gap-6">
@@ -1572,7 +1934,11 @@ export function ActivityPage() {
           important thing to say. It is here at all so a live view that has gone
           quiet is distinguishable from a gateway that has, since the rows are
           dropped on failure rather than left to go stale. */}
-      <ErrorBanner error={usage.error ?? count.error ?? contextSummary.error ?? inFlight.error} />
+      <ErrorBanner
+        error={
+          usage.error ?? count.error ?? contextSummary.error ?? inFlight.error
+        }
+      />
 
       <div className="flex flex-col gap-3">
         <ActivityTimeline
@@ -1580,7 +1946,9 @@ export function ActivityPage() {
           extentKey={extentKey}
           onPreset={pickPreset}
           onSelectRange={pickCustom}
-          onSelectFull={() => (extentPreset ? pickPreset(extentPreset) : undefined)}
+          onSelectFull={() =>
+            extentPreset ? pickPreset(extentPreset) : undefined
+          }
           series={timelineSeries}
           bucket={extentBucket}
           windowStart={win.start}
@@ -1597,9 +1965,19 @@ export function ActivityPage() {
                   stay mounted to keep an open list open across the moment the last
                   request lands. It still goes on a failed poll, where `liveNow` is
                   undefined, since there is nothing trustworthy left to report. */}
-              {liveNow ? <InFlightControl data={liveNow} updatedAt={inFlight.dataUpdatedAt} /> : null}
+              {liveNow ? (
+                <InFlightControl
+                  data={liveNow}
+                  updatedAt={inFlight.dataUpdatedAt}
+                />
+              ) : null}
               {newRows > 0 ? (
-                <Button size="sm" variant="outline" onPress={refresh} isDisabled={usage.isFetching}>
+                <Button
+                  size="sm"
+                  variant="outline"
+                  onPress={refresh}
+                  isDisabled={usage.isFetching}
+                >
                   {newRows.toLocaleString()} new · load
                 </Button>
               ) : null}
@@ -1611,19 +1989,33 @@ export function ActivityPage() {
                   Newer rows unknown
                 </span>
               ) : null}
-              <RefreshButton onRefresh={refresh} isFetching={usage.isFetching} updatedAt={usage.dataUpdatedAt} />
+              <RefreshButton
+                onRefresh={refresh}
+                isFetching={usage.isFetching}
+                updatedAt={usage.dataUpdatedAt}
+              />
             </span>
           }
         />
         <FilterChips chips={filterChips} onClearAll={clearEntityFilters}>
-          <FilterSelect id="filter-status" label="Status" value={statusFilter} onChange={(value) => url.patch({ status: value })}>
+          <FilterSelect
+            id="filter-status"
+            label="Status"
+            value={statusFilter}
+            onChange={(value) => url.patch({ status: value })}
+          >
             {STATUS_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
                 {opt.label}
               </option>
             ))}
           </FilterSelect>
-          <FilterSelect id="filter-priced" label="Priced?" value={pricedFilter} onChange={(value) => url.patch({ priced: value })}>
+          <FilterSelect
+            id="filter-priced"
+            label="Priced?"
+            value={pricedFilter}
+            onChange={(value) => url.patch({ priced: value })}
+          >
             {PRICED_OPTIONS.map((opt) => (
               <option key={opt.value} value={opt.value}>
                 {opt.label}
@@ -1634,7 +2026,12 @@ export function ActivityPage() {
               source select below: a filter whose every option returns nothing is
               noise on the majority of gateways, which run no tools at all. */}
           {toolFilter || contextSummary.data?.by_tool?.length ? (
-            <FilterSelect id="filter-tool" label="Tool" value={toolFilter} onChange={(value) => url.patch({ tool: value })}>
+            <FilterSelect
+              id="filter-tool"
+              label="Tool"
+              value={toolFilter}
+              onChange={(value) => url.patch({ tool: value })}
+            >
               {TOOL_OPTIONS.map((opt) => (
                 <option key={opt.value} value={opt.value}>
                   {opt.label}
@@ -1647,7 +2044,12 @@ export function ActivityPage() {
               filter with a single option is noise. A drill-down that arrives
               with a source applied keeps the select so it stays clearable. */}
           {sourceOptions.length > 1 || sourceFilter ? (
-            <FilterSelect id="filter-source" label="Source" value={sourceFilter} onChange={(value) => url.patch({ source: value })}>
+            <FilterSelect
+              id="filter-source"
+              label="Source"
+              value={sourceFilter}
+              onChange={(value) => url.patch({ source: value })}
+            >
               <option value="">All</option>
               {sourceOptions.map((source) => (
                 <option key={source} value={source}>
@@ -1697,10 +2099,18 @@ export function ActivityPage() {
           onSelectAllMatching={selection.enableAllMatching}
           onClear={selection.clear}
         >
-          <Button size="sm" variant="primary" onPress={() => setPriceOpen(true)}>
+          <Button
+            size="sm"
+            variant="primary"
+            onPress={() => setPriceOpen(true)}
+          >
             Set price
           </Button>
-          <Button size="sm" variant="danger" onPress={() => setDeleteOpen(true)}>
+          <Button
+            size="sm"
+            variant="danger"
+            onPress={() => setDeleteOpen(true)}
+          >
             Delete
           </Button>
         </BulkActionBar>
@@ -1712,12 +2122,18 @@ export function ActivityPage() {
         rows={rows}
         getRowKey={getActivityRowKey}
         isLoading={usage.isLoading}
-        emptyContent={anyFilter ? "No requests match these filters." : "No requests recorded yet."}
+        emptyContent={
+          anyFilter
+            ? "No requests match these filters."
+            : "No requests recorded yet."
+        }
         selectionMode={showSelection ? "multiple" : "none"}
         selectedKeys={selection.selectedKeys}
         onSelectionChange={selection.onSelectionChange}
         disabledKeys={disabledKeys}
-        onRowAction={(key) => setExpandedId((current) => (current === key ? null : key))}
+        onRowAction={(key) =>
+          setExpandedId((current) => (current === key ? null : key))
+        }
         rowClassName={activityRowClassName}
         detailKey={expandedId}
         renderDetail={renderDetail}
@@ -1738,8 +2154,8 @@ export function ActivityPage() {
         // operator can actually navigate, without putting a self-moving number under
         // a table that deliberately holds still.
         onPageChange={(next) => {
-          url.patch({ page: next });
-          void count.refetch();
+          url.patch({ page: next })
+          void count.refetch()
         }}
         onPageSizeChange={(size) => url.patch({ size, page: 0 })}
         isFetching={usage.isFetching}
@@ -1770,7 +2186,9 @@ export function ActivityPage() {
 
       <SetPriceDialog
         isOpen={modelPriceKey !== null}
-        onOpenChange={(open) => setModelPriceKey(open ? (modelPriceKey ?? "") : null)}
+        onOpenChange={(open) =>
+          setModelPriceKey(open ? (modelPriceKey ?? "") : null)
+        }
         isPending={setModelPrice.isPending}
         error={setModelPrice.error}
         onSubmit={onSetModelPrice}
@@ -1782,5 +2200,5 @@ export function ActivityPage() {
         }
       />
     </div>
-  );
+  )
 }

@@ -76,8 +76,14 @@
   border-bottom: 1px solid var(--otari-line);
 }
 .otari-table .table__column,
-.otari-table [role="row"] > [role="presentation"]:first-of-type > .table__column,
-.otari-table [role="row"] > [role="presentation"]:last-of-type > .table__column {
+.otari-table
+  [role="row"]
+  > [role="presentation"]:first-of-type
+  > .table__column,
+.otari-table
+  [role="row"]
+  > [role="presentation"]:last-of-type
+  > .table__column {
   background-color: transparent;
   color: var(--otari-ink);
   font-weight: 600;
@@ -245,7 +251,8 @@
   margin: 0.25rem 0;
 }
 .otari-markdown code {
-  font-family: ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-family:
+    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
   font-size: 0.85em;
   background-color: var(--otari-brand-tint);
   color: var(--otari-brand-dark);
@@ -316,5 +323,6 @@ body {
   margin: 0;
   background-color: var(--otari-bg);
   color: var(--otari-ink);
-  font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+  font-family:
+    ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
 }

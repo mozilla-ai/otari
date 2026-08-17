@@ -1,6 +1,6 @@
-import { Button } from "@heroui/react";
-import { useId, useState } from "react";
-import type { ReactNode } from "react";
+import { Button } from "@heroui/react"
+import type { ReactNode } from "react"
+import { useId, useState } from "react"
 
 // Active filters shown as removable pills, with the pickers tucked behind an
 // "Add filter" toggle. This is the log-tool convention (CloudWatch, Railway):
@@ -9,16 +9,16 @@ import type { ReactNode } from "react";
 
 export interface FilterChip {
   // Stable key for the collection.
-  key: string;
+  key: string
   // The dimension, e.g. "Model".
-  label: string;
+  label: string
   // The human-readable current value, e.g. "gpt-5.6".
-  value: string;
+  value: string
   // Accessible name for the ✕. Defaults to naming the dimension, which is enough
   // while a dimension has one chip; a multi-value filter renders one chip per
   // value and passes a name carrying the value, so the controls stay distinct.
-  clearLabel?: string;
-  onClear: () => void;
+  clearLabel?: string
+  onClear: () => void
 }
 
 export function FilterChips({
@@ -28,19 +28,19 @@ export function FilterChips({
   start,
   end,
 }: {
-  chips: FilterChip[];
+  chips: FilterChip[]
   // The picker controls (comboboxes/selects), revealed by "Add filter".
-  children: ReactNode;
-  onClearAll?: () => void;
+  children: ReactNode
+  onClearAll?: () => void
   // Optional controls sharing the toggle's row: `start` renders before the
   // toggle (e.g. the date preset buttons), `end` is pushed to the right edge
   // (e.g. the window caption and refresh). Keeping them in this row saves a
   // line of vertical space on pages where filters sit beside the range picker.
-  start?: ReactNode;
-  end?: ReactNode;
+  start?: ReactNode
+  end?: ReactNode
 }) {
-  const [open, setOpen] = useState(false);
-  const regionId = useId();
+  const [open, setOpen] = useState(false)
+  const regionId = useId()
 
   return (
     <div className="flex flex-col gap-2">
@@ -68,7 +68,14 @@ export function FilterChips({
               aria-label={chip.clearLabel ?? `Remove ${chip.label} filter`}
               className="ml-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full text-[var(--otari-muted)] outline-none hover:bg-[var(--otari-line)] hover:text-[var(--otari-ink)] focus-visible:ring-2 focus-visible:ring-[var(--otari-brand)]"
             >
-              <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.5" className="h-3 w-3" aria-hidden="true">
+              <svg
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2.5"
+                className="h-3 w-3"
+                aria-hidden="true"
+              >
                 <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" />
               </svg>
             </button>
@@ -79,11 +86,16 @@ export function FilterChips({
             Clear all
           </Button>
         ) : null}
-        {end ? <div className="ml-auto flex items-center gap-3">{end}</div> : null}
+        {end ? (
+          <div className="ml-auto flex items-center gap-3">{end}</div>
+        ) : null}
       </div>
-      <div id={regionId} className={open ? "flex flex-wrap items-end gap-3" : "hidden"}>
+      <div
+        id={regionId}
+        className={open ? "flex flex-wrap items-end gap-3" : "hidden"}
+      >
         {children}
       </div>
     </div>
-  );
+  )
 }

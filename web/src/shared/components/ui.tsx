@@ -1,23 +1,42 @@
-import { Button, Card, ComboBox, Input, Label, ListBox, ListBoxItem, Spinner, Tooltip } from "@heroui/react";
-import { useEffect, useId, useRef, useState } from "react";
-import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react";
-import { Link } from "@tanstack/react-router";
-import type { LinkProps } from "@tanstack/react-router";
+import {
+  Button,
+  Card,
+  ComboBox,
+  Input,
+  Label,
+  ListBox,
+  ListBoxItem,
+  Spinner,
+  Tooltip,
+} from "@heroui/react"
+import type { LinkProps } from "@tanstack/react-router"
+import { Link } from "@tanstack/react-router"
+import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react"
+import { useEffect, useId, useRef, useState } from "react"
 
-import { ApiError } from "@/shared/api/client";
-import { copyToClipboard } from "@/shared/helpers/clipboard";
-import { formatPct, formatRelative } from "@/shared/helpers/format";
+import { ApiError } from "@/shared/api/client"
+import { copyToClipboard } from "@/shared/helpers/clipboard"
+import { formatPct, formatRelative } from "@/shared/helpers/format"
 
 // A tile's attention status. Colors mirror the banner precedent (ErrorBanner
 // red-*, InfoBanner amber-*) and add emerald for the healthy state. Color is
 // never the only signal: a status tile also carries a word/icon via `statusLabel`.
-export type StatStatus = "ok" | "warn" | "alert";
+export type StatStatus = "ok" | "warn" | "alert"
 
 const STAT_STATUS: Record<StatStatus, { accent: string; pill: string }> = {
-  ok: { accent: "border-l-emerald-500", pill: "border-emerald-200 bg-emerald-50 text-emerald-700" },
-  warn: { accent: "border-l-amber-500", pill: "border-amber-200 bg-amber-50 text-amber-800" },
-  alert: { accent: "border-l-red-500", pill: "border-red-200 bg-red-50 text-red-700" },
-};
+  ok: {
+    accent: "border-l-emerald-500",
+    pill: "border-emerald-200 bg-emerald-50 text-emerald-700",
+  },
+  warn: {
+    accent: "border-l-amber-500",
+    pill: "border-amber-200 bg-amber-50 text-amber-800",
+  },
+  alert: {
+    accent: "border-l-red-500",
+    pill: "border-red-200 bg-red-50 text-red-700",
+  },
+}
 
 export function StatCard({
   label,
@@ -28,28 +47,32 @@ export function StatCard({
   chart,
   to,
 }: {
-  label: string;
-  value: ReactNode;
-  hint?: ReactNode;
-  status?: StatStatus;
+  label: string
+  value: ReactNode
+  hint?: ReactNode
+  status?: StatStatus
   // A short word (and/or icon) shown as a pill beside the value. Required to be a
   // non-color signal so status is legible without hue (colorblind operators).
-  statusLabel?: ReactNode;
+  statusLabel?: ReactNode
   // An optional trend visual (e.g. a <Sparkline>) rendered under the value/hint,
   // for KPI tiles that have a bucketed series on the wire.
-  chart?: ReactNode;
+  chart?: ReactNode
   // When set, the whole tile is a keyboard-focusable link to this route.
-  to?: LinkProps["to"];
+  to?: LinkProps["to"]
 }) {
-  const accent = status ? `border-l-4 ${STAT_STATUS[status].accent}` : "";
+  const accent = status ? `border-l-4 ${STAT_STATUS[status].accent}` : ""
   const body = (
     // p-0 on the Card zeroes HeroUI's own card padding so it doesn't stack with
     // Card.Content's, which otherwise doubled the tile's height (most visible at
     // two-up on mobile). Content owns the padding: tighter on mobile, roomier up.
     <Card.Content className="flex flex-col gap-1 p-4 sm:p-5">
-      <span className="text-xs font-medium uppercase tracking-wide text-[var(--otari-muted)]">{label}</span>
+      <span className="text-xs font-medium uppercase tracking-wide text-[var(--otari-muted)]">
+        {label}
+      </span>
       <span className="flex flex-wrap items-center gap-2">
-        <span className="text-xl font-semibold text-[var(--otari-ink)] sm:text-2xl">{value}</span>
+        <span className="text-xl font-semibold text-[var(--otari-ink)] sm:text-2xl">
+          {value}
+        </span>
         {status && statusLabel ? (
           <span
             className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${STAT_STATUS[status].pill}`}
@@ -58,17 +81,21 @@ export function StatCard({
           </span>
         ) : null}
       </span>
-      {hint ? <span className="text-xs text-[var(--otari-muted)]">{hint}</span> : null}
+      {hint ? (
+        <span className="text-xs text-[var(--otari-muted)]">{hint}</span>
+      ) : null}
       {chart ? <div className="mt-2">{chart}</div> : null}
     </Card.Content>
-  );
+  )
   // min-w-0 (not a fixed min) so the tile fits its grid track: with
   // grid-cols-2's minmax(0,1fr) columns, a larger min-width would overflow the
   // track and overlap the neighbouring tile on narrow (mobile) viewports.
-  const cardClass = `flex-1 min-w-0 p-0 ${accent}`;
+  const cardClass = `flex-1 min-w-0 p-0 ${accent}`
   if (to) {
     return (
-      <Card className={`${cardClass} transition-colors hover:border-[var(--otari-brand)]`}>
+      <Card
+        className={`${cardClass} transition-colors hover:border-[var(--otari-brand)]`}
+      >
         <Link
           to={to}
           className="block rounded-[inherit] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--otari-brand)]"
@@ -76,36 +103,36 @@ export function StatCard({
           {body}
         </Link>
       </Card>
-    );
+    )
   }
-  return <Card className={cardClass}>{body}</Card>;
+  return <Card className={cardClass}>{body}</Card>
 }
 
 // Period-over-period change hint. Pairs an arrow glyph with the number (never hue
 // alone) so direction reads without color. null hides it (no comparable previous).
 export function DeltaHint({ fraction }: { fraction: number | null }) {
-  if (fraction === null) return null;
-  const arrow = fraction > 0 ? "▲" : fraction < 0 ? "▼" : "•";
+  if (fraction === null) return null
+  const arrow = fraction > 0 ? "▲" : fraction < 0 ? "▼" : "•"
   return (
     <span className="text-[var(--otari-muted)]">
       {arrow} {formatPct(Math.abs(fraction))} vs prev
     </span>
-  );
+  )
 }
 
 export function errorMessage(error: unknown): string {
   if (error instanceof ApiError) {
-    return error.message;
+    return error.message
   }
   if (error instanceof Error) {
-    return error.message;
+    return error.message
   }
-  return "Something went wrong.";
+  return "Something went wrong."
 }
 
 export function ErrorBanner({ error }: { error: unknown }) {
   if (!error) {
-    return null;
+    return null
   }
   return (
     <div
@@ -114,23 +141,47 @@ export function ErrorBanner({ error }: { error: unknown }) {
     >
       {errorMessage(error)}
     </div>
-  );
+  )
 }
 
-export function InfoBanner({ tone = "info", children }: { tone?: "info" | "warning"; children: ReactNode }) {
+export function InfoBanner({
+  tone = "info",
+  children,
+}: {
+  tone?: "info" | "warning"
+  children: ReactNode
+}) {
   const styles =
     tone === "warning"
       ? "border-amber-200 bg-amber-50 text-amber-800"
-      : "border-[var(--otari-brand)] bg-[var(--otari-brand-tint)] text-[var(--otari-brand-dark)]";
-  return <div className={`rounded-lg border px-4 py-3 text-sm ${styles}`}>{children}</div>;
+      : "border-[var(--otari-brand)] bg-[var(--otari-brand-tint)] text-[var(--otari-brand-dark)]"
+  return (
+    <div className={`rounded-lg border px-4 py-3 text-sm ${styles}`}>
+      {children}
+    </div>
+  )
 }
 
-export function PageHeader({ title, description, action }: { title: string; description?: string; action?: ReactNode }) {
+export function PageHeader({
+  title,
+  description,
+  action,
+}: {
+  title: string
+  description?: string
+  action?: ReactNode
+}) {
   return (
     <div className="flex flex-col gap-3">
       <div>
-        <h1 className="text-xl font-semibold text-[var(--otari-ink)]">{title}</h1>
-        {description ? <p className="mt-1 text-sm text-[var(--otari-muted)]">{description}</p> : null}
+        <h1 className="text-xl font-semibold text-[var(--otari-ink)]">
+          {title}
+        </h1>
+        {description ? (
+          <p className="mt-1 text-sm text-[var(--otari-muted)]">
+            {description}
+          </p>
+        ) : null}
       </div>
       {/* The primary action sits on its own left-aligned row under the heading,
           so it stays near the sidebar the operator just came from rather than
@@ -138,7 +189,7 @@ export function PageHeader({ title, description, action }: { title: string; desc
           natural size instead of stretching in this flex column. */}
       {action ? <div className="flex flex-wrap gap-2">{action}</div> : null}
     </div>
-  );
+  )
 }
 
 // A slowly ticking wall clock, only to keep a relative "updated Ns ago" label
@@ -146,33 +197,33 @@ export function PageHeader({ title, description, action }: { title: string; desc
 // polling (which belongs on a TanStack Query `refetchInterval`): it fetches
 // nothing. Paused while the tab is hidden so a backgrounded dashboard is idle.
 function useDisplayClock(intervalMs: number): number {
-  const [now, setNow] = useState(() => Date.now());
+  const [now, setNow] = useState(() => Date.now())
   useEffect(() => {
-    let timer: ReturnType<typeof setInterval> | undefined;
+    let timer: ReturnType<typeof setInterval> | undefined
     const start = () => {
       if (timer === undefined) {
-        timer = setInterval(() => setNow(Date.now()), intervalMs);
+        timer = setInterval(() => setNow(Date.now()), intervalMs)
       }
-    };
+    }
     const stop = () => {
       if (timer !== undefined) {
-        clearInterval(timer);
-        timer = undefined;
+        clearInterval(timer)
+        timer = undefined
       }
-    };
+    }
     const sync = () => {
-      setNow(Date.now());
-      if (document.visibilityState === "visible") start();
-      else stop();
-    };
-    sync();
-    document.addEventListener("visibilitychange", sync);
+      setNow(Date.now())
+      if (document.visibilityState === "visible") start()
+      else stop()
+    }
+    sync()
+    document.addEventListener("visibilitychange", sync)
     return () => {
-      stop();
-      document.removeEventListener("visibilitychange", sync);
-    };
-  }, [intervalMs]);
-  return now;
+      stop()
+      document.removeEventListener("visibilitychange", sync)
+    }
+  }, [intervalMs])
+  return now
 }
 
 // A refresh control paired with a "last updated" timestamp, so an operator can
@@ -185,17 +236,30 @@ export function RefreshButton({
   updatedAt,
   label = "Refresh",
 }: {
-  onRefresh: () => void;
-  isFetching?: boolean;
-  updatedAt?: number;
-  label?: string;
+  onRefresh: () => void
+  isFetching?: boolean
+  updatedAt?: number
+  label?: string
 }) {
-  const now = useDisplayClock(15_000);
-  const freshness = updatedAt ? formatRelative(new Date(updatedAt).toISOString(), now) : null;
+  const now = useDisplayClock(15_000)
+  const freshness = updatedAt
+    ? formatRelative(new Date(updatedAt).toISOString(), now)
+    : null
   return (
     <span className="inline-flex items-center gap-2">
-      {freshness ? <span className="text-xs text-[var(--otari-muted)]">Updated {freshness}</span> : null}
-      <Button variant="outline" size="sm" isIconOnly isDisabled={isFetching} onPress={onRefresh} aria-label={label}>
+      {freshness ? (
+        <span className="text-xs text-[var(--otari-muted)]">
+          Updated {freshness}
+        </span>
+      ) : null}
+      <Button
+        variant="outline"
+        size="sm"
+        isIconOnly
+        isDisabled={isFetching}
+        onPress={onRefresh}
+        aria-label={label}
+      >
         <svg
           viewBox="0 0 24 24"
           fill="none"
@@ -204,12 +268,16 @@ export function RefreshButton({
           className={`h-4 w-4 ${isFetching ? "animate-spin" : ""}`}
           aria-hidden="true"
         >
-          <path d="M20 11a8 8 0 1 0-.5 4" strokeLinecap="round" strokeLinejoin="round" />
+          <path
+            d="M20 11a8 8 0 1 0-.5 4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
           <path d="M20 4v5h-5" strokeLinecap="round" strokeLinejoin="round" />
         </svg>
       </Button>
     </span>
-  );
+  )
 }
 
 // An identifier the operator needs verbatim (a model id, an alias target, a
@@ -234,13 +302,14 @@ export function CopyableValue({
   children,
 }: {
   /** The exact text a copy yields, which is not always what is rendered. */
-  value: string;
-  label: string;
-  className?: string;
+  value: string
+  label: string
+  className?: string
   /** Defaults to `value`; pass children when the display form differs. */
-  children?: ReactNode;
+  children?: ReactNode
 }) {
-  const keepPressFromRow = (event: { stopPropagation: () => void }) => event.stopPropagation();
+  const keepPressFromRow = (event: { stopPropagation: () => void }) =>
+    event.stopPropagation()
   return (
     <span className="inline-flex items-center gap-1">
       <span
@@ -258,7 +327,7 @@ export function CopyableValue({
       </span>
       <CopyButton value={value} label={label} />
     </span>
-  );
+  )
 }
 
 // A compact copy control for an identifier an operator has to paste elsewhere (a
@@ -276,32 +345,56 @@ export function CopyableValue({
 // renders in an overlay so it is not clipped by the table's scroll container and
 // does not reflow the row it reports on.
 export function CopyButton({ value, label }: { value: string; label: string }) {
-  const [state, setState] = useState<"idle" | "copied" | "failed">("idle");
-  const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+  const [state, setState] = useState<"idle" | "copied" | "failed">("idle")
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  )
 
-  useEffect(() => () => clearTimeout(resetTimer.current), []);
+  useEffect(() => () => clearTimeout(resetTimer.current), [])
 
   const copy = async () => {
-    const copied = await copyToClipboard(value);
-    setState(copied ? "copied" : "failed");
-    clearTimeout(resetTimer.current);
+    const copied = await copyToClipboard(value)
+    setState(copied ? "copied" : "failed")
+    clearTimeout(resetTimer.current)
     // A failure has something to read and act on, so it lingers longer.
-    resetTimer.current = setTimeout(() => setState("idle"), copied ? 1_500 : 5_000);
-  };
+    resetTimer.current = setTimeout(
+      () => setState("idle"),
+      copied ? 1_500 : 5_000,
+    )
+  }
 
   return (
     <Tooltip.Root isOpen={state !== "idle"}>
-      <Button size="sm" variant="ghost" isIconOnly aria-label={`Copy ${label}`} onPress={copy}>
-        <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-3.5 w-3.5" aria-hidden="true">
+      <Button
+        size="sm"
+        variant="ghost"
+        isIconOnly
+        aria-label={`Copy ${label}`}
+        onPress={copy}
+      >
+        <svg
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          className="h-3.5 w-3.5"
+          aria-hidden="true"
+        >
           <rect x="9" y="9" width="11" height="11" rx="2" />
-          <path d="M5 15V5a2 2 0 0 1 2-2h8" strokeLinecap="round" strokeLinejoin="round" />
+          <path
+            d="M5 15V5a2 2 0 0 1 2-2h8"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
         </svg>
       </Button>
       <Tooltip.Content placement="top" showArrow>
-        {state === "failed" ? "Copy blocked, select the value and press Ctrl/Cmd-C" : "Copied!"}
+        {state === "failed"
+          ? "Copy blocked, select the value and press Ctrl/Cmd-C"
+          : "Copied!"}
       </Tooltip.Content>
     </Tooltip.Root>
-  );
+  )
 }
 
 // A first-run / empty-list panel: a Card with a heading, a sentence of context,
@@ -318,34 +411,44 @@ export function EmptyState({
   isActionDisabled,
   children,
 }: {
-  title: string;
+  title: string
   // A plain sentence, rendered in a <p>. Kept to a string (like PageHeader) so a
   // block element can't land inside that paragraph; richer/blockish content goes
   // through `children`, which renders as a sibling instead.
-  description?: string;
-  actionLabel?: string;
-  onAction?: () => void;
-  isActionDisabled?: boolean;
-  children?: ReactNode;
+  description?: string
+  actionLabel?: string
+  onAction?: () => void
+  isActionDisabled?: boolean
+  children?: ReactNode
 }) {
   return (
     <Card>
       <Card.Content className="flex flex-col gap-4 p-6">
         <div>
-          <h2 className="text-lg font-semibold text-[var(--otari-ink)]">{title}</h2>
-          {description ? <p className="mt-1 text-sm text-[var(--otari-muted)]">{description}</p> : null}
+          <h2 className="text-lg font-semibold text-[var(--otari-ink)]">
+            {title}
+          </h2>
+          {description ? (
+            <p className="mt-1 text-sm text-[var(--otari-muted)]">
+              {description}
+            </p>
+          ) : null}
         </div>
         {children}
         {actionLabel && onAction ? (
           <div>
-            <Button variant="primary" isDisabled={isActionDisabled} onPress={onAction}>
+            <Button
+              variant="primary"
+              isDisabled={isActionDisabled}
+              onPress={onAction}
+            >
               {actionLabel}
             </Button>
           </div>
         ) : null}
       </Card.Content>
     </Card>
-  );
+  )
 }
 
 // A full-width loading placeholder for a page (or section) whose content is
@@ -355,11 +458,14 @@ export function EmptyState({
 // wait (and its label) to assistive tech.
 export function PageLoading({ label = "Loading…" }: { label?: string }) {
   return (
-    <div role="status" className="flex items-center justify-center gap-2 px-4 py-10 text-sm text-[var(--otari-muted)]">
+    <div
+      role="status"
+      className="flex items-center justify-center gap-2 px-4 py-10 text-sm text-[var(--otari-muted)]"
+    >
       <Spinner size="sm" />
       <span>{label}</span>
     </div>
-  );
+  )
 }
 
 // A destructive button that requires a second click to confirm, avoiding a
@@ -370,35 +476,45 @@ export function ConfirmButton({
   onConfirm,
   isPending,
 }: {
-  children: ReactNode;
-  confirmLabel: string;
-  onConfirm: () => void;
-  isPending?: boolean;
+  children: ReactNode
+  confirmLabel: string
+  onConfirm: () => void
+  isPending?: boolean
 }) {
-  const [armed, setArmed] = useState(false);
+  const [armed, setArmed] = useState(false)
 
   if (armed) {
     return (
       <span className="inline-flex items-center gap-1">
-        <Button size="sm" variant="danger" isDisabled={isPending} onPress={onConfirm}>
+        <Button
+          size="sm"
+          variant="danger"
+          isDisabled={isPending}
+          onPress={onConfirm}
+        >
           {confirmLabel}
         </Button>
-        <Button size="sm" variant="ghost" isDisabled={isPending} onPress={() => setArmed(false)}>
+        <Button
+          size="sm"
+          variant="ghost"
+          isDisabled={isPending}
+          onPress={() => setArmed(false)}
+        >
           Cancel
         </Button>
       </span>
-    );
+    )
   }
 
   return (
     <Button size="sm" variant="danger-soft" onPress={() => setArmed(true)}>
       {children}
     </Button>
-  );
+  )
 }
 
 const FILTER_SELECT_CLASS =
-  "rounded-lg border border-[var(--otari-line)] bg-[var(--otari-bg)] px-3 py-2 text-sm text-[var(--otari-ink)] focus:border-[var(--otari-brand)] focus:outline-none";
+  "rounded-lg border border-[var(--otari-line)] bg-[var(--otari-bg)] px-3 py-2 text-sm text-[var(--otari-ink)] focus:border-[var(--otari-brand)] focus:outline-none"
 
 // Token-styled native select for page filter bars. Pass `label` (+ `id`) for a
 // visible label, or `ariaLabel` alone for a compact control. Prefer `options`
@@ -413,17 +529,17 @@ export function FilterSelect({
   children,
   disabled,
 }: {
-  id?: string;
-  label?: string;
-  ariaLabel?: string;
-  value: string;
-  onChange: (value: string) => void;
-  options?: { value: string; label: string }[];
-  children?: ReactNode;
-  disabled?: boolean;
+  id?: string
+  label?: string
+  ariaLabel?: string
+  value: string
+  onChange: (value: string) => void
+  options?: { value: string; label: string }[]
+  children?: ReactNode
+  disabled?: boolean
 }) {
-  const fallbackId = useId();
-  const selectId = id ?? (label ? fallbackId : undefined);
+  const fallbackId = useId()
+  const selectId = id ?? (label ? fallbackId : undefined)
   const select = (
     <select
       id={selectId}
@@ -441,19 +557,22 @@ export function FilterSelect({
           ))
         : children}
     </select>
-  );
+  )
 
   if (label) {
     return (
       <div className="flex flex-col gap-1">
-        <label htmlFor={selectId} className="text-xs font-medium text-[var(--otari-muted)]">
+        <label
+          htmlFor={selectId}
+          className="text-xs font-medium text-[var(--otari-muted)]"
+        >
           {label}
         </label>
         {select}
       </div>
-    );
+    )
   }
-  return select;
+  return select
 }
 
 // A type-to-filter combobox for page filter bars, accumulating a set of values.
@@ -476,49 +595,54 @@ export function FilterMultiComboBox({
   maxValues = 50,
   allowsCustom = false,
 }: {
-  label: string;
-  values: string[];
-  onChange: (values: string[]) => void;
-  options: { value: string; label: string }[];
+  label: string
+  values: string[]
+  onChange: (values: string[]) => void
+  options: { value: string; label: string }[]
   // Shown while nothing is picked (e.g. "All users"); once something is, the
   // input reports the size of the selection instead.
-  placeholder?: string;
-  maxVisible?: number;
+  placeholder?: string
+  maxVisible?: number
   // Ceiling on the selection, matching what the analytics endpoints accept for
   // one repeatable filter. Stopping here keeps a 51st pick from failing every
   // query on the page with a 422 the operator cannot read.
-  maxValues?: number;
+  maxValues?: number
   // When true, Enter adds whatever was typed, so a filter whose value space is not
   // enumerable (any model name the log might hold, not just the ones a windowed
   // suggestion list knows) can still be filtered on. The options stay suggestions.
-  allowsCustom?: boolean;
+  allowsCustom?: boolean
 }) {
-  const [text, setText] = useState("");
+  const [text, setText] = useState("")
 
-  const atLimit = values.length >= maxValues;
-  const query = text.trim().toLowerCase();
+  const atLimit = values.length >= maxValues
+  const query = text.trim().toLowerCase()
   const visible = options
     .filter((o) => !values.includes(o.value))
-    .filter((o) => !query || o.value.toLowerCase().includes(query) || o.label.toLowerCase().includes(query))
-    .slice(0, maxVisible);
+    .filter(
+      (o) =>
+        !query ||
+        o.value.toLowerCase().includes(query) ||
+        o.label.toLowerCase().includes(query),
+    )
+    .slice(0, maxVisible)
 
   const add = (value: string) => {
-    if (atLimit || values.includes(value)) return;
-    onChange([...values, value]);
-  };
+    if (atLimit || values.includes(value)) return
+    onChange([...values, value])
+  }
 
   // Free text commits on Enter: react-aria fires no selection for a value that is
   // not in the list, so the key event is the only signal. Skipped while an option is
   // highlighted (aria-activedescendant), because that Enter belongs to the option
   // and committing the partial query beside it would add two values from one press.
   const onInputKeyDown = (event: ReactKeyboardEvent<HTMLInputElement>) => {
-    if (!allowsCustom || event.key !== "Enter") return;
-    if (event.currentTarget.getAttribute("aria-activedescendant")) return;
-    const typed = text.trim();
-    if (!typed) return;
-    add(typed);
-    setText("");
-  };
+    if (!allowsCustom || event.key !== "Enter") return
+    if (event.currentTarget.getAttribute("aria-activedescendant")) return
+    const typed = text.trim()
+    if (!typed) return
+    add(typed)
+    setText("")
+  }
 
   return (
     <ComboBox.Root
@@ -534,13 +658,15 @@ export function FilterMultiComboBox({
       // reads as "full" rather than silently swallowing a click.
       disabledKeys={atLimit ? visible.map((o) => o.value) : []}
       onSelectionChange={(key) => {
-        if (key == null) return;
-        add(String(key));
-        setText("");
+        if (key == null) return
+        add(String(key))
+        setText("")
       }}
       className="flex flex-col gap-1"
     >
-      <Label className="text-xs font-medium text-[var(--otari-muted)]">{label}</Label>
+      <Label className="text-xs font-medium text-[var(--otari-muted)]">
+        {label}
+      </Label>
       <ComboBox.InputGroup>
         <Input
           placeholder={
@@ -563,5 +689,5 @@ export function FilterMultiComboBox({
         </ListBox>
       </ComboBox.Popover>
     </ComboBox.Root>
-  );
+  )
 }

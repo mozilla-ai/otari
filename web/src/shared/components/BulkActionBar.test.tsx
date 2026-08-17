@@ -1,9 +1,9 @@
-import { render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import { Button } from "@heroui/react";
-import { describe, expect, it, vi } from "vitest";
+import { Button } from "@heroui/react"
+import { render, screen } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import { describe, expect, it, vi } from "vitest"
 
-import { BulkActionBar } from "./BulkActionBar";
+import { BulkActionBar } from "./BulkActionBar"
 
 describe("BulkActionBar", () => {
   it("shows the page selection count and actions", () => {
@@ -18,14 +18,14 @@ describe("BulkActionBar", () => {
       >
         <Button size="sm">Delete</Button>
       </BulkActionBar>,
-    );
-    expect(screen.getByText("3 selected")).toBeInTheDocument();
-    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument();
-  });
+    )
+    expect(screen.getByText("3 selected")).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument()
+  })
 
   it("offers select-all-matching when the page is full and more match", async () => {
-    const user = userEvent.setup();
-    const onSelectAllMatching = vi.fn();
+    const user = userEvent.setup()
+    const onSelectAllMatching = vi.fn()
     render(
       <BulkActionBar
         selectedCount={100}
@@ -37,10 +37,12 @@ describe("BulkActionBar", () => {
       >
         <Button size="sm">Delete</Button>
       </BulkActionBar>,
-    );
-    await user.click(screen.getByRole("button", { name: /Select all 4,231 matching/ }));
-    expect(onSelectAllMatching).toHaveBeenCalled();
-  });
+    )
+    await user.click(
+      screen.getByRole("button", { name: /Select all 4,231 matching/ }),
+    )
+    expect(onSelectAllMatching).toHaveBeenCalled()
+  })
 
   it("reads the whole-filter selection when all matching", () => {
     render(
@@ -54,9 +56,13 @@ describe("BulkActionBar", () => {
       >
         <Button size="sm">Delete</Button>
       </BulkActionBar>,
-    );
-    expect(screen.getByText("All 4,231 matching rows selected")).toBeInTheDocument();
+    )
+    expect(
+      screen.getByText("All 4,231 matching rows selected"),
+    ).toBeInTheDocument()
     // The affordance is gone once all-matching is active.
-    expect(screen.queryByRole("button", { name: /Select all/ })).not.toBeInTheDocument();
-  });
-});
+    expect(
+      screen.queryByRole("button", { name: /Select all/ }),
+    ).not.toBeInTheDocument()
+  })
+})

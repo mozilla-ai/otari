@@ -1,22 +1,32 @@
-import { Button, Chip } from "@heroui/react";
-import { useState } from "react";
-
-import { useRouterStatus, useUsers } from "@/shared/api/hooks";
-import { UserComboBox } from "@/features/users/UserComboBox";
-import { ErrorBanner } from "@/shared/components/ui";
+import { Button, Chip } from "@heroui/react"
+import { useState } from "react"
+import { UserComboBox } from "@/features/users/UserComboBox"
+import { useRouterStatus, useUsers } from "@/shared/api/hooks"
+import { ErrorBanner } from "@/shared/components/ui"
 
 /** Records against the seed count, as a bar plus the plain numbers.
  *
  *  The number is the part an operator acts on ("six more examples"), so the bar
  *  never replaces it.
  */
-function Warmth({ records, seed, warm }: { records: number; seed: number; warm: boolean }) {
-  const pct = seed === 0 ? 100 : Math.min(100, Math.round((records / seed) * 100));
+function Warmth({
+  records,
+  seed,
+  warm,
+}: {
+  records: number
+  seed: number
+  warm: boolean
+}) {
+  const pct =
+    seed === 0 ? 100 : Math.min(100, Math.round((records / seed) * 100))
   return (
     <div className="flex items-center gap-3">
       <div className="h-1.5 w-32 overflow-hidden rounded-full bg-[var(--otari-bg)]">
         <div
-          className={warm ? "h-full bg-[var(--otari-brand)]" : "h-full bg-amber-500"}
+          className={
+            warm ? "h-full bg-[var(--otari-brand)]" : "h-full bg-amber-500"
+          }
           style={{ width: `${pct}%` }}
         />
       </div>
@@ -27,7 +37,7 @@ function Warmth({ records, seed, warm }: { records: number; seed: number; warm: 
         {warm ? "routing" : "warming up"}
       </Chip>
     </div>
-  );
+  )
 }
 
 /** How many scored examples a learned policy has, and so whether it can act yet.
@@ -51,18 +61,18 @@ export function RouterReadiness({
   scopedUserId,
   onClose,
 }: {
-  policyName: string;
-  candidates: string[];
-  defaultTarget: string;
-  backend: string;
+  policyName: string
+  candidates: string[]
+  defaultTarget: string
+  backend: string
   /** The user a user-scoped policy belongs to: then it is the only memory in play. */
-  scopedUserId: string | null;
-  onClose: () => void;
+  scopedUserId: string | null
+  onClose: () => void
 }) {
-  const users = useUsers();
-  const [userId, setUserId] = useState<string | null>(scopedUserId);
-  const status = useRouterStatus(userId);
-  const chosen = userId !== null && userId !== "";
+  const users = useUsers()
+  const [userId, setUserId] = useState<string | null>(scopedUserId)
+  const status = useRouterStatus(userId)
+  const chosen = userId !== null && userId !== ""
 
   return (
     <div>
@@ -77,18 +87,24 @@ export function RouterReadiness({
 
       <div className="flex flex-col gap-5 px-4 py-4">
         <div className="flex flex-col gap-1">
-          <span className="text-xs font-medium text-[var(--otari-muted)]">Candidates</span>
+          <span className="text-xs font-medium text-[var(--otari-muted)]">
+            Candidates
+          </span>
           <span className="text-sm text-[var(--otari-ink)]">
-            <code>{backend}</code> ranks {candidates.join(", ")} for each request.
+            <code>{backend}</code> ranks {candidates.join(", ")} for each
+            request.
           </span>
           <span className="text-xs text-[var(--otari-muted)]">
-            <code>{defaultTarget}</code> serves whenever it declines: too few examples, a weakly
-            supported pick, a request carrying tools, or <code>Otari-Router: off</code>.
+            <code>{defaultTarget}</code> serves whenever it declines: too few
+            examples, a weakly supported pick, a request carrying tools, or{" "}
+            <code>Otari-Router: off</code>.
           </span>
         </div>
 
         <div className="flex flex-col gap-2">
-          <span className="text-xs font-medium text-[var(--otari-muted)]">Examples</span>
+          <span className="text-xs font-medium text-[var(--otari-muted)]">
+            Examples
+          </span>
           {scopedUserId === null ? (
             <UserComboBox
               label="Whose memory"
@@ -97,11 +113,16 @@ export function RouterReadiness({
               users={users.data ?? []}
               placeholder="Pick a user…"
               description="Examples are one user's own prompts, so this policy warms once per caller rather than once overall."
-              unknownHint={<span className="text-red-700">No such user. Pick an existing one.</span>}
+              unknownHint={
+                <span className="text-red-700">
+                  No such user. Pick an existing one.
+                </span>
+              }
             />
           ) : (
             <span className="text-xs text-[var(--otari-muted)]">
-              Scoped to user <code>{scopedUserId}</code>, so that is the only memory it can use.
+              Scoped to user <code>{scopedUserId}</code>, so that is the only
+              memory it can use.
             </span>
           )}
 
@@ -116,7 +137,9 @@ export function RouterReadiness({
           ) : status.data ? (
             <div className="flex flex-col gap-2">
               <div className="flex flex-wrap items-center gap-3">
-                <span className="text-sm font-medium text-[var(--otari-ink)]">Default pool</span>
+                <span className="text-sm font-medium text-[var(--otari-ink)]">
+                  Default pool
+                </span>
                 <Warmth
                   records={status.data.default_pool.records}
                   seed={status.data.seed_count}
@@ -124,33 +147,50 @@ export function RouterReadiness({
                 />
               </div>
               {status.data.tasks.map((pool) => (
-                <div key={pool.task_id} className="flex flex-wrap items-center gap-3">
-                  <code className="text-sm text-[var(--otari-ink)]">{pool.task_id}</code>
-                  <Warmth records={pool.records} seed={status.data.seed_count} warm={pool.warm} />
+                <div
+                  key={pool.task_id}
+                  className="flex flex-wrap items-center gap-3"
+                >
+                  <code className="text-sm text-[var(--otari-ink)]">
+                    {pool.task_id}
+                  </code>
+                  <Warmth
+                    records={pool.records}
+                    seed={status.data.seed_count}
+                    warm={pool.warm}
+                  />
                 </div>
               ))}
               {status.data.tasks.length > 0 ? (
                 <span className="text-xs text-[var(--otari-muted)]">
-                  The default pool counts every example this user has, including the ones filed under a
-                  task, so it can be warm while a task partition is not.
+                  The default pool counts every example this user has, including
+                  the ones filed under a task, so it can be warm while a task
+                  partition is not.
                 </span>
               ) : null}
               <span className="text-xs text-[var(--otari-muted)]">
-                Scoring with <code>{status.data.embedding_model}</code>, {status.data.k} nearest examples
-                per decision, cost dial {status.data.alpha}, deciding once per{" "}
-                {status.data.granularity === "trace_sticky" ? "conversation" : "call"}. Change these with
-                the <code>OTARI_ROUTER_*</code> environment variables.
+                Scoring with <code>{status.data.embedding_model}</code>,{" "}
+                {status.data.k} nearest examples per decision, cost dial{" "}
+                {status.data.alpha}, deciding once per{" "}
+                {status.data.granularity === "trace_sticky"
+                  ? "conversation"
+                  : "call"}
+                . Change these with the <code>OTARI_ROUTER_*</code> environment
+                variables.
               </span>
             </div>
           ) : null}
         </div>
 
         <div className="flex flex-col gap-1">
-          <span className="text-xs font-medium text-[var(--otari-muted)]">Adding examples</span>
+          <span className="text-xs font-medium text-[var(--otari-muted)]">
+            Adding examples
+          </span>
           <span className="text-xs text-[var(--otari-muted)]">
             Examples are recorded over the API, with{" "}
-            <code>POST /v1/routing/preferences/rank</code>. Score a batch of prompts from 0 (bad) to 1
-            (great) per candidate; two good answers is the case that lets the cheaper model win. See{" "}
+            <code>POST /v1/routing/preferences/rank</code>. Score a batch of
+            prompts from 0 (bad) to 1 (great) per candidate; two good answers is
+            the case that lets the cheaper model win. See{" "}
             <a
               className="text-[var(--otari-brand)] hover:underline"
               href="https://mozilla-ai.github.io/otari/routing/#teach-it"
@@ -164,5 +204,5 @@ export function RouterReadiness({
         </div>
       </div>
     </div>
-  );
+  )
 }

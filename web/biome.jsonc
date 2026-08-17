@@ -1,15 +1,17 @@
 {
   "$schema": "./node_modules/@biomejs/biome/configuration_schema.json",
 
-  // Biome is here for one job: to check the layer boundary that `src/` is laid out
-  // around, on every PR rather than in review. See AGENTS.md ("Layout").
+  // Biome does three jobs here: it formats, it runs the recommended rules, and it
+  // checks the layer boundary `src/` is laid out around (see AGENTS.md, "Layout").
   //
-  // The formatter is off and the recommended rule set is off with it. Turning either
-  // on would rewrite or flag most of the tree in the same commit that moved it, which
-  // is a different change with a different risk profile; do that on its own if it is
-  // wanted. `noRestrictedImports` below is therefore the whole rule set, and a clean
-  // `npm run lint` means the layers hold, not that the code is otherwise blessed.
-  "formatter": { "enabled": false },
+  // Formatter and rule set are otari-ai/frontend's, deliberately. Their control-plane
+  // UI moves into this repo at M5, so one of the two trees had to adopt the other's
+  // style, and reformatting ~120 files here is cheaper than reformatting 500+ mixed
+  // ones later, inside the port PRs where a whole-file diff would bury the changes
+  // that can actually break something.
+  "formatter": { "indentStyle": "space" },
+  "javascript": { "formatter": { "quoteStyle": "double", "semicolons": "asNeeded" } },
+  "assist": { "actions": { "source": { "organizeImports": "on" } } },
 
   // globals.css is Tailwind v4, whose at-rules (@theme, @custom-variant) Biome
   // refuses to parse unless told they are expected. No CSS rule is enabled, but an
@@ -27,8 +29,12 @@
   "linter": {
     "enabled": true,
     "rules": {
-      "preset": "none",
+      "preset": "recommended",
+      // Off over there, so off here: the configs are meant to stay comparable, and
+      // this tree has 172 non-null assertions, which is its own cleanup.
+      "suspicious": { "noExplicitAny": "off", "noArrayIndexKey": "off" },
       "style": {
+        "noNonNullAssertion": "off",
         // The overlay tree is not in this repo and is not meant to be: an overlay
         // owns its own routes tree in otari-ai, composed onto this base at build
         // time as a sibling of src/ (see ARCHITECTURE.md, and otari-ai's

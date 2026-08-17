@@ -1,9 +1,20 @@
-import { Spinner, Table } from "@heroui/react";
-import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
-import { createPortal } from "react-dom";
-import type { MouseEvent as ReactMouseEvent, PointerEvent as ReactPointerEvent, ReactNode } from "react";
-import { Checkbox as AriaCheckbox } from "react-aria-components";
-import type { Key, Selection, SortDescriptor } from "react-aria-components";
+import { Spinner, Table } from "@heroui/react"
+import type {
+  MouseEvent as ReactMouseEvent,
+  ReactNode,
+  PointerEvent as ReactPointerEvent,
+} from "react"
+import {
+  useCallback,
+  useEffect,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+} from "react"
+import type { Key, Selection, SortDescriptor } from "react-aria-components"
+import { Checkbox as AriaCheckbox } from "react-aria-components"
+import { createPortal } from "react-dom"
 
 // The box visual, split out so it can hold optimistic state: react-aria only
 // reports the new `isSelected` after the whole collection re-renders (O(rows)
@@ -11,27 +22,31 @@ import type { Key, Selection, SortDescriptor } from "react-aria-components";
 // the checkmark feel laggy. On pointerdown the visual flips immediately; the
 // authoritative state catches up and clears the override, and a timeout clears
 // it as a backstop if the press never lands (e.g. drag-away).
-function SelectionBoxVisual({ isSelected, isIndeterminate, isDisabled }: {
-  isSelected: boolean;
-  isIndeterminate: boolean;
-  isDisabled: boolean;
+function SelectionBoxVisual({
+  isSelected,
+  isIndeterminate,
+  isDisabled,
+}: {
+  isSelected: boolean
+  isIndeterminate: boolean
+  isDisabled: boolean
 }) {
-  const [flash, setFlash] = useState<boolean | null>(null);
+  const [flash, setFlash] = useState<boolean | null>(null)
 
   useEffect(() => {
-    if (flash !== null && isSelected === flash) setFlash(null);
-  }, [isSelected, flash]);
+    if (flash !== null && isSelected === flash) setFlash(null)
+  }, [isSelected, flash])
   useEffect(() => {
-    if (flash === null) return;
-    const timer = setTimeout(() => setFlash(null), 600);
-    return () => clearTimeout(timer);
-  }, [flash]);
+    if (flash === null) return
+    const timer = setTimeout(() => setFlash(null), 600)
+    return () => clearTimeout(timer)
+  }, [flash])
 
-  const showChecked = flash ?? (isSelected || isIndeterminate);
+  const showChecked = flash ?? (isSelected || isIndeterminate)
   return (
     <span
       onPointerDown={() => {
-        if (!isDisabled) setFlash(!isSelected);
+        if (!isDisabled) setFlash(!isSelected)
       }}
       className={`flex h-4 w-4 items-center justify-center rounded border transition-colors ${
         showChecked
@@ -40,16 +55,34 @@ function SelectionBoxVisual({ isSelected, isIndeterminate, isDisabled }: {
       } group-data-[focus-visible]:outline-2 group-data-[focus-visible]:outline-[var(--otari-brand)]`}
     >
       {isIndeterminate && flash === null ? (
-        <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={3} aria-hidden>
+        <svg
+          viewBox="0 0 24 24"
+          className="h-3 w-3"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={3}
+          aria-hidden
+        >
           <line x1="6" x2="18" y1="12" y2="12" strokeLinecap="round" />
         </svg>
       ) : showChecked ? (
-        <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth={3} aria-hidden>
-          <polyline points="5 12 10 17 19 7" strokeLinecap="round" strokeLinejoin="round" />
+        <svg
+          viewBox="0 0 24 24"
+          className="h-3 w-3"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={3}
+          aria-hidden
+        >
+          <polyline
+            points="5 12 10 17 19 7"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
         </svg>
       ) : null}
     </span>
-  );
+  )
 }
 
 // react-aria's own Checkbox drives table row/all selection through
@@ -58,12 +91,20 @@ function SelectionBoxVisual({ isSelected, isIndeterminate, isDisabled }: {
 // small styled react-aria Checkbox that matches the --otari tokens.
 function SelectionCheckbox({ ariaLabel }: { ariaLabel: string }) {
   return (
-    <AriaCheckbox slot="selection" aria-label={ariaLabel} className="group inline-flex items-center">
+    <AriaCheckbox
+      slot="selection"
+      aria-label={ariaLabel}
+      className="group inline-flex items-center"
+    >
       {({ isSelected, isIndeterminate, isDisabled }) => (
-        <SelectionBoxVisual isSelected={isSelected} isIndeterminate={isIndeterminate} isDisabled={isDisabled} />
+        <SelectionBoxVisual
+          isSelected={isSelected}
+          isIndeterminate={isIndeterminate}
+          isDisabled={isDisabled}
+        />
       )}
     </AriaCheckbox>
-  );
+  )
 }
 
 // Shared data table for the dashboard, built on HeroUI v3's compound Table
@@ -75,44 +116,44 @@ function SelectionCheckbox({ ariaLabel }: { ariaLabel: string }) {
 
 export interface DataTableColumn<Row> {
   /** Stable column id; also the `SortDescriptor.column` value when sortable. */
-  id: string;
-  header: ReactNode;
-  cell: (row: Row) => ReactNode;
+  id: string
+  header: ReactNode
+  cell: (row: Row) => ReactNode
   /** Right-align numeric columns (header and cells). */
-  align?: "start" | "end";
+  align?: "start" | "end"
   /** Marks the column react-aria announces as the row's header (usually the name). */
-  isRowHeader?: boolean;
-  allowsSorting?: boolean;
+  isRowHeader?: boolean
+  allowsSorting?: boolean
   /** Fixed/initial pixel width; only meaningful when the table is `resizable`. */
-  width?: number;
-  minWidth?: number;
+  width?: number
+  minWidth?: number
 }
 
 export interface DataTableProps<Row> {
   /** Accessible name for the grid (required by react-aria). */
-  ariaLabel: string;
-  columns: DataTableColumn<Row>[];
-  rows: Row[];
-  getRowKey: (row: Row) => string;
+  ariaLabel: string
+  columns: DataTableColumn<Row>[]
+  rows: Row[]
+  getRowKey: (row: Row) => string
   /** Shows a spinner in place of the body while the first page loads. */
-  isLoading?: boolean;
-  emptyContent?: ReactNode;
-  selectionMode?: "none" | "multiple";
-  selectedKeys?: Selection;
-  onSelectionChange?: (keys: Selection) => void;
+  isLoading?: boolean
+  emptyContent?: ReactNode
+  selectionMode?: "none" | "multiple"
+  selectedKeys?: Selection
+  onSelectionChange?: (keys: Selection) => void
   /**
    * Rows that cannot be selected (e.g. enforced usage rows that bulk delete must
    * never touch). `disabledBehavior` is fixed to "selection", so a disabled row
    * still opens its detail on click; only its checkbox is inert.
    */
-  disabledKeys?: Iterable<Key>;
-  sortDescriptor?: SortDescriptor;
-  onSortChange?: (descriptor: SortDescriptor) => void;
+  disabledKeys?: Iterable<Key>
+  sortDescriptor?: SortDescriptor
+  onSortChange?: (descriptor: SortDescriptor) => void
   /** Fired when a row body is activated (click / Enter), for detail drill-in. */
-  onRowAction?: (key: string) => void;
-  rowClassName?: (row: Row) => string | undefined;
+  onRowAction?: (key: string) => void
+  rowClassName?: (row: Row) => string | undefined
   /** Enables draggable column resize handles. */
-  resizable?: boolean;
+  resizable?: boolean
   /**
    * Inline detail: when `detailKey` matches a row's key, `renderDetail(row)`
    * renders as a full-width row directly under that row (accordion style), so
@@ -126,21 +167,22 @@ export interface DataTableProps<Row> {
    * `onRowAction`. Keep `renderDetail` referentially stable like the other
    * render inputs.
    */
-  detailKey?: string | null;
-  renderDetail?: (row: Row) => ReactNode;
+  detailKey?: string | null
+  renderDetail?: (row: Row) => ReactNode
 }
 
-const SELECTION_COLUMN_WIDTH = 44;
+const SELECTION_COLUMN_WIDTH = 44
 
 // Whether the document's text selection is a real (non-empty) one anchored inside
 // `root`. Used to tell "the operator was highlighting an id" from "the operator
 // clicked the row": a plain click leaves a collapsed selection, and a selection
 // made elsewhere on the page is not anchored here.
 function hasTextSelectionIn(root: HTMLElement | null): boolean {
-  if (!root) return false;
-  const selection = document.getSelection();
-  if (!selection || selection.isCollapsed || selection.toString().trim() === "") return false;
-  return selection.anchorNode !== null && root.contains(selection.anchorNode);
+  if (!root) return false
+  const selection = document.getSelection()
+  if (!selection || selection.isCollapsed || selection.toString().trim() === "")
+    return false
+  return selection.anchorNode !== null && root.contains(selection.anchorNode)
 }
 
 // HeroUI's Table.Root is itself a card. Rather than wrap it in a second card
@@ -169,16 +211,21 @@ export function DataTable<Row extends object>({
   detailKey = null,
   renderDetail,
 }: DataTableProps<Row>) {
-  const showSelection = selectionMode === "multiple";
-  const Container = resizable ? Table.ResizableContainer : Table.ScrollContainer;
-  const columnCount = columns.length + (showSelection ? 1 : 0);
+  const showSelection = selectionMode === "multiple"
+  const Container = resizable ? Table.ResizableContainer : Table.ScrollContainer
+  const columnCount = columns.length + (showSelection ? 1 : 0)
 
-  const rootRef = useRef<HTMLDivElement | null>(null);
-  const [detailHost, setDetailHost] = useState<HTMLTableCellElement | null>(null);
+  const rootRef = useRef<HTMLDivElement | null>(null)
+  const [detailHost, setDetailHost] = useState<HTMLTableCellElement | null>(
+    null,
+  )
   const detailRow = useMemo(
-    () => (detailKey != null && renderDetail ? (rows.find((r) => getRowKey(r) === detailKey) ?? null) : null),
+    () =>
+      detailKey != null && renderDetail
+        ? (rows.find((r) => getRowKey(r) === detailKey) ?? null)
+        : null,
     [detailKey, renderDetail, rows, getRowKey],
-  );
+  )
 
   // The portal host, built once per table and reused. Identity has to survive
   // the effect below re-running, which it does on every row change: a fresh
@@ -189,21 +236,24 @@ export function DataTable<Row extends object>({
   // requests in flight, and an expanded row sat there flashing and re-opening on
   // a timer for as long as one was running. Any caller that re-derives its rows
   // on a timer would do the same.
-  const hostRef = useRef<{ row: HTMLTableRowElement; cell: HTMLTableCellElement } | null>(null);
+  const hostRef = useRef<{
+    row: HTMLTableRowElement
+    cell: HTMLTableCellElement
+  } | null>(null)
   const ensureHost = () => {
     if (!hostRef.current) {
-      const row = document.createElement("tr");
-      row.className = "otari-detail-row";
+      const row = document.createElement("tr")
+      row.className = "otari-detail-row"
       // Out of the grid semantics: without this the host is an implicit ARIA row
       // with the detail text as its name, confusing row counts and name lookups.
       // Its content stays in the accessibility tree as ordinary elements.
-      row.setAttribute("role", "presentation");
-      const cell = document.createElement("td");
-      row.appendChild(cell);
-      hostRef.current = { row, cell };
+      row.setAttribute("role", "presentation")
+      const cell = document.createElement("td")
+      row.appendChild(cell)
+      hostRef.current = { row, cell }
     }
-    return hostRef.current;
-  };
+    return hostRef.current
+  }
 
   // Host <tr> management: find the target row by its data-key and position the
   // host right after it. react-aria commits its real rows in a second render
@@ -214,46 +264,49 @@ export function DataTable<Row extends object>({
   // detached as soon as there is no target to sit under, so a vanished target
   // (filtered out, page flipped) leaves nothing behind.
   useLayoutEffect(() => {
-    const root = rootRef.current;
+    const root = rootRef.current
     if (!root || detailKey == null || !detailRow) {
-      hostRef.current?.row.remove();
-      setDetailHost(null);
-      return;
+      hostRef.current?.row.remove()
+      setDetailHost(null)
+      return
     }
-    const { row: hostRow, cell: hostCell } = ensureHost();
-    hostCell.colSpan = columnCount;
+    const { row: hostRow, cell: hostCell } = ensureHost()
+    hostCell.colSpan = columnCount
 
     const tryInsert = (): boolean => {
-      const target = root.querySelector(`tbody tr[data-key="${CSS.escape(detailKey)}"]`);
-      if (!target) return false;
+      const target = root.querySelector(
+        `tbody tr[data-key="${CSS.escape(detailKey)}"]`,
+      )
+      if (!target) return false
       // The optimistic "opening" highlight has served its purpose once the
       // panel actually lands.
-      for (const el of root.querySelectorAll(".otari-detail-opening")) el.classList.remove("otari-detail-opening");
+      for (const el of root.querySelectorAll(".otari-detail-opening"))
+        el.classList.remove("otari-detail-opening")
       // Only move it when it is not already there. Re-inserting an attached
       // node detaches and re-attaches its subtree, which cancels and restarts
       // the reveal animation running inside it.
-      if (target.nextSibling !== hostRow) target.after(hostRow);
-      setDetailHost(hostCell);
-      return true;
-    };
+      if (target.nextSibling !== hostRow) target.after(hostRow)
+      setDetailHost(hostCell)
+      return true
+    }
 
-    let observer: MutationObserver | null = null;
+    let observer: MutationObserver | null = null
     if (!tryInsert()) {
       observer = new MutationObserver(() => {
         if (tryInsert()) {
-          observer?.disconnect();
-          observer = null;
+          observer?.disconnect()
+          observer = null
         }
-      });
-      observer.observe(root, { childList: true, subtree: true });
+      })
+      observer.observe(root, { childList: true, subtree: true })
     }
-    return () => observer?.disconnect();
-  }, [detailKey, detailRow, columnCount, rows, sortDescriptor]);
+    return () => observer?.disconnect()
+  }, [detailKey, detailRow, columnCount, rows, sortDescriptor])
 
   // Detach on unmount. Deliberately not part of the effect above, whose cleanup
   // runs on every dependency change: removing the host there is what made a
   // re-render remount the panel.
-  useEffect(() => () => hostRef.current?.row.remove(), []);
+  useEffect(() => () => hostRef.current?.row.remove(), [])
 
   // Row activation with instant acknowledgment: the detail panel can only land
   // after react-aria's O(rows) interaction render (~1.6 ms/row), so the clicked
@@ -261,30 +314,39 @@ export function DataTable<Row extends object>({
   // when the panel arrives, with a timeout backstop.
   const fireRowAction = useCallback(
     (key: string) => {
-      if (!onRowAction) return;
+      if (!onRowAction) return
       if (renderDetail && key !== detailKey) {
-        const target = rootRef.current?.querySelector(`tbody tr[data-key="${CSS.escape(key)}"]`);
-        target?.classList.add("otari-detail-opening");
-        setTimeout(() => target?.classList.remove("otari-detail-opening"), 1500);
+        const target = rootRef.current?.querySelector(
+          `tbody tr[data-key="${CSS.escape(key)}"]`,
+        )
+        target?.classList.add("otari-detail-opening")
+        setTimeout(() => target?.classList.remove("otari-detail-opening"), 1500)
       }
-      onRowAction(key);
+      onRowAction(key)
     },
     [onRowAction, renderDetail, detailKey],
-  );
+  )
 
   // The row key for an event on an ordinary data cell, or null when the event
   // belongs to something else: checkboxes, buttons, links, inputs, and the detail
   // panel pass through untouched. Only meaningful for tables with a row action.
   const dataCellRowKey = useCallback(
     (e: { target: EventTarget | null }): string | null => {
-      if (!onRowAction) return null;
-      const target = e.target instanceof Element ? e.target : null;
-      if (!target) return null;
-      if (target.closest("label[slot=selection], button, a, input, select, textarea, .otari-detail-row")) return null;
-      return target.closest("tbody tr[data-key]")?.getAttribute("data-key") ?? null;
+      if (!onRowAction) return null
+      const target = e.target instanceof Element ? e.target : null
+      if (!target) return null
+      if (
+        target.closest(
+          "label[slot=selection], button, a, input, select, textarea, .otari-detail-row",
+        )
+      )
+        return null
+      return (
+        target.closest("tbody tr[data-key]")?.getAttribute("data-key") ?? null
+      )
     },
     [onRowAction],
-  );
+  )
 
   // Where rows have a drill-in action, this component owns the pointer sequence on
   // data cells instead of react-aria's row press, for three reasons:
@@ -316,7 +378,7 @@ export function DataTable<Row extends object>({
   // an inline arrow for any of them rebuilds every row on each render.
   const renderRow = useCallback(
     (row: Row) => {
-      const key = getRowKey(row);
+      const key = getRowKey(row)
       return (
         <Table.Row key={key} id={key} className={rowClassName?.(row)}>
           {showSelection ? (
@@ -325,31 +387,36 @@ export function DataTable<Row extends object>({
             </Table.Cell>
           ) : null}
           {columns.map((col) => (
-            <Table.Cell key={col.id} className={col.align === "end" ? "text-right tabular-nums" : undefined}>
+            <Table.Cell
+              key={col.id}
+              className={
+                col.align === "end" ? "text-right tabular-nums" : undefined
+              }
+            >
               {col.cell(row)}
             </Table.Cell>
           ))}
         </Table.Row>
-      );
+      )
     },
     [getRowKey, rowClassName, showSelection, columns],
-  );
+  )
 
   return (
     <Table.Root ref={rootRef} className="otari-table">
       <Container
         className="overflow-x-auto"
         onPointerDownCapture={(e: ReactPointerEvent) => {
-          if (dataCellRowKey(e) != null) e.stopPropagation();
+          if (dataCellRowKey(e) != null) e.stopPropagation()
         }}
         onMouseDownCapture={(e: ReactMouseEvent) => {
           // react-aria falls back to mouse events where PointerEvent is
           // unavailable; the press (and its selection toggle) starts here.
-          if (dataCellRowKey(e) != null) e.stopPropagation();
+          if (dataCellRowKey(e) != null) e.stopPropagation()
         }}
         onClickCapture={(e: ReactMouseEvent) => {
-          const key = dataCellRowKey(e);
-          if (key == null) return;
+          const key = dataCellRowKey(e)
+          if (key == null) return
           // Swallowed either way, so react-aria's row press never fires a second
           // action. A click that ended a text drag inside the table is a
           // selection, not an activation: cells are selectable by design (see
@@ -358,8 +425,8 @@ export function DataTable<Row extends object>({
           // that click only. Deliberately scoped to the click path: the same
           // check in fireRowAction would also swallow Enter on a focused row,
           // which is a deliberate activation even with an id still highlighted.
-          e.stopPropagation();
-          if (!hasTextSelectionIn(rootRef.current)) fireRowAction(key);
+          e.stopPropagation()
+          if (!hasTextSelectionIn(rootRef.current)) fireRowAction(key)
         }}
       >
         <Table.Content
@@ -373,11 +440,16 @@ export function DataTable<Row extends object>({
           disabledKeys={disabledKeys}
           sortDescriptor={sortDescriptor}
           onSortChange={onSortChange}
-          onRowAction={onRowAction ? (key) => fireRowAction(String(key)) : undefined}
+          onRowAction={
+            onRowAction ? (key) => fireRowAction(String(key)) : undefined
+          }
         >
           <Table.Header>
             {showSelection ? (
-              <Table.Column width={SELECTION_COLUMN_WIDTH} minWidth={SELECTION_COLUMN_WIDTH}>
+              <Table.Column
+                width={SELECTION_COLUMN_WIDTH}
+                minWidth={SELECTION_COLUMN_WIDTH}
+              >
                 <SelectionCheckbox ariaLabel="Select all rows" />
               </Table.Column>
             ) : null}
@@ -392,7 +464,9 @@ export function DataTable<Row extends object>({
                 className={col.align === "end" ? "text-right" : undefined}
               >
                 {({ sortDirection }) => (
-                  <div className={`flex items-center gap-1 ${col.align === "end" ? "justify-end" : ""}`}>
+                  <div
+                    className={`flex items-center gap-1 ${col.align === "end" ? "justify-end" : ""}`}
+                  >
                     {col.allowsSorting ? (
                       <Table.SortableColumnHeader sortDirection={sortDirection}>
                         {col.header}
@@ -400,7 +474,9 @@ export function DataTable<Row extends object>({
                     ) : (
                       <span>{col.header}</span>
                     )}
-                    {resizable ? <Table.ColumnResizer className="ml-auto cursor-col-resize px-1" /> : null}
+                    {resizable ? (
+                      <Table.ColumnResizer className="ml-auto cursor-col-resize px-1" />
+                    ) : null}
                   </div>
                 )}
               </Table.Column>
@@ -441,5 +517,5 @@ export function DataTable<Row extends object>({
           )
         : null}
     </Table.Root>
-  );
+  )
 }

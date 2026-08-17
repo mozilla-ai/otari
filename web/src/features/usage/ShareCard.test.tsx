@@ -1,9 +1,13 @@
-import { render, screen } from "@testing-library/react";
-import { describe, expect, it } from "vitest";
-
-import type { CardStat } from "./shareCardData";
-
-import { CARD_SIZES, ShareCard, emWidth, fitHeroSize, truncateModel } from "./ShareCard";
+import { render, screen } from "@testing-library/react"
+import { describe, expect, it } from "vitest"
+import {
+  CARD_SIZES,
+  emWidth,
+  fitHeroSize,
+  ShareCard,
+  truncateModel,
+} from "./ShareCard"
+import type { CardStat } from "./shareCardData"
 
 function renderCard(overrides: Partial<Parameters<typeof ShareCard>[0]> = {}) {
   return render(
@@ -17,64 +21,76 @@ function renderCard(overrides: Partial<Parameters<typeof ShareCard>[0]> = {}) {
       stats={[]}
       {...overrides}
     />,
-  );
+  )
 }
 
 describe("ShareCard", () => {
   it("renders the hero and its label", () => {
-    renderCard();
-    expect(screen.getByText("1,204")).toBeInTheDocument();
-    expect(screen.getByText(/Requests/)).toBeInTheDocument();
-  });
+    renderCard()
+    expect(screen.getByText("1,204")).toBeInTheDocument()
+    expect(screen.getByText(/Requests/)).toBeInTheDocument()
+  })
 
   it("shows an explicit empty state instead of a hole when there is no hero", () => {
-    renderCard({ hero: undefined });
-    expect(screen.getByText("No usage in this range")).toBeInTheDocument();
-  });
+    renderCard({ hero: undefined })
+    expect(screen.getByText("No usage in this range")).toBeInTheDocument()
+  })
 
   it("marks a caveated stat so an unpriced dollar figure is never published bare", () => {
     renderCard({
-      hero: { id: "cost", label: "Spend", value: "$412.00", caveated: true } satisfies CardStat,
-    });
-    expect(screen.getByText("Spend*")).toBeInTheDocument();
-  });
+      hero: {
+        id: "cost",
+        label: "Spend",
+        value: "$412.00",
+        caveated: true,
+      } satisfies CardStat,
+    })
+    expect(screen.getByText("Spend*")).toBeInTheDocument()
+  })
 
   it("prints a legend for the caveat asterisk, which travels with the file", () => {
     renderCard({
       hero: { id: "cost", label: "Spend", value: "$412.00", caveated: true },
       unpricedRequests: 63,
-    });
-    expect(screen.getByText(/63 requests unpriced/)).toBeInTheDocument();
-  });
+    })
+    expect(screen.getByText(/63 requests unpriced/)).toBeInTheDocument()
+  })
 
   it("does not explain a mark the card is not showing", () => {
-    renderCard({ hero: { id: "requests", label: "Requests", value: "7" }, unpricedRequests: 63 });
-    expect(screen.queryByText(/unpriced/)).not.toBeInTheDocument();
-  });
+    renderCard({
+      hero: { id: "requests", label: "Requests", value: "7" },
+      unpricedRequests: 63,
+    })
+    expect(screen.queryByText(/unpriced/)).not.toBeInTheDocument()
+  })
 
   it("hardcodes the otari URL rather than deriving it from the gateway's own host", () => {
-    renderCard();
-    expect(screen.getByText("otari.ai")).toBeInTheDocument();
-  });
+    renderCard()
+    expect(screen.getByText("otari.ai")).toBeInTheDocument()
+  })
 
   it("carries the Otari mark inline, not as an external reference", () => {
-    const { container } = renderCard();
+    const { container } = renderCard()
     // An <img src="/favicon.svg"> would render as nothing once the card is
     // rasterized: that document cannot fetch anything external.
-    const mark = container.querySelector('svg[viewBox="0 0 272 250"]');
-    expect(mark).not.toBeNull();
-    expect(mark?.querySelector("path")).not.toBeNull();
-    expect(container.querySelector("img")).toBeNull();
-  });
+    const mark = container.querySelector('svg[viewBox="0 0 272 250"]')
+    expect(mark).not.toBeNull()
+    expect(mark?.querySelector("path")).not.toBeNull()
+    expect(container.querySelector("img")).toBeNull()
+  })
 
   it("names the scope, so the denominator behind the claim is never ambiguous", () => {
-    renderCard({ scope: "Aug 1 – Aug 7, 2026 · user: ana" });
-    expect(screen.getByText("Aug 1 – Aug 7, 2026 · user: ana")).toBeInTheDocument();
-  });
+    renderCard({ scope: "Aug 1 – Aug 7, 2026 · user: ana" })
+    expect(
+      screen.getByText("Aug 1 – Aug 7, 2026 · user: ana"),
+    ).toBeInTheDocument()
+  })
 
   it("renders both ratios at their exact pixel sizes", () => {
-    const { rerender } = renderCard();
-    expect(screen.getByRole("img", { name: /Usage card/ })).toHaveStyle({ width: `${CARD_SIZES.square.width}px` });
+    const { rerender } = renderCard()
+    expect(screen.getByRole("img", { name: /Usage card/ })).toHaveStyle({
+      width: `${CARD_SIZES.square.width}px`,
+    })
     rerender(
       <ShareCard
         ratio="landscape"
@@ -85,23 +101,36 @@ describe("ShareCard", () => {
         models={[]}
         stats={[]}
       />,
-    );
-    expect(screen.getByRole("img", { name: /Usage card/ })).toHaveStyle({ height: `${CARD_SIZES.landscape.height}px` });
-  });
+    )
+    expect(screen.getByRole("img", { name: /Usage card/ })).toHaveStyle({
+      height: `${CARD_SIZES.landscape.height}px`,
+    })
+  })
 
   it("never renders type below the feed-legibility floor", () => {
     renderCard({
-      models: [{ key: "llama-3.3-70b", label: "llama-3.3-70b", tokens: 700, cost: 0, requests: 3, isOther: false }],
+      models: [
+        {
+          key: "llama-3.3-70b",
+          label: "llama-3.3-70b",
+          tokens: 700,
+          cost: 0,
+          requests: 3,
+          isOther: false,
+        },
+      ],
       stats: [{ id: "requests", label: "Requests", value: "1,204" }],
-    });
-    for (const node of document.querySelectorAll<HTMLElement>("[style*='font-size']")) {
-      const size = Number.parseFloat(node.style.fontSize);
+    })
+    for (const node of document.querySelectorAll<HTMLElement>(
+      "[style*='font-size']",
+    )) {
+      const size = Number.parseFloat(node.style.fontSize)
       if (!Number.isNaN(size)) {
-        expect(size).toBeGreaterThanOrEqual(28);
+        expect(size).toBeGreaterThanOrEqual(28)
       }
     }
-  });
-});
+  })
+})
 
 describe("ShareCard height budget", () => {
   const models = (n: number) =>
@@ -112,63 +141,84 @@ describe("ShareCard height budget", () => {
       cost: 0,
       requests: 1,
       isOther: false,
-    }));
+    }))
 
   // A fixed frame plus fixed row heights broke both ways: three rows left a third
   // of a square card blank, and nine overflowed so flex-shrink collapsed the title
   // to zero height. Rows divide a budget instead.
-  it.each([1, 3, 5, 9])("keeps rows legible and the hero present at %i rows", (n) => {
-    const { container } = renderCard({ models: models(n), stats: [{ id: "requests", label: "Requests", value: "7" }] });
-    // Assert the count first. An earlier version filtered heights to `> 30`
-    // before asserting, which discarded exactly the collapsed row it was meant to
-    // catch and passed over an empty list.
-    const rows = Array.from(container.querySelectorAll<HTMLElement>("[data-share-row]"));
-    expect(rows).toHaveLength(n);
-    for (const row of rows) {
-      expect(Number.parseFloat(row.style.height)).toBeGreaterThanOrEqual(34);
-    }
-    expect(screen.getByText("1,204")).toBeInTheDocument();
-  });
+  it.each([1, 3, 5, 9])(
+    "keeps rows legible and the hero present at %i rows",
+    (n) => {
+      const { container } = renderCard({
+        models: models(n),
+        stats: [{ id: "requests", label: "Requests", value: "7" }],
+      })
+      // Assert the count first. An earlier version filtered heights to `> 30`
+      // before asserting, which discarded exactly the collapsed row it was meant to
+      // catch and passed over an empty list.
+      const rows = Array.from(
+        container.querySelectorAll<HTMLElement>("[data-share-row]"),
+      )
+      expect(rows).toHaveLength(n)
+      for (const row of rows) {
+        expect(Number.parseFloat(row.style.height)).toBeGreaterThanOrEqual(34)
+      }
+      expect(screen.getByText("1,204")).toBeInTheDocument()
+    },
+  )
 
   it("reserves the title's second line before the estimator's own error can clip it", () => {
     // The slot clips what it does not reserve, and emWidth undercounts prose by
     // ~10% against the Arial-metric stacks the card falls back to. A 60-character
     // title measures over one line of a wide card in those fonts, so a slot sized
     // from the bare estimate published a title with its second line missing.
-    const title = "our whole team summer token spend, mostly on our own models";
-    const { container } = renderCard({ ratio: "landscape", title });
-    const slot = container.querySelector<HTMLElement>('[role="img"]')?.children[0] as HTMLElement;
+    const title = "our whole team summer token spend, mostly on our own models"
+    const { container } = renderCard({ ratio: "landscape", title })
+    const slot = container.querySelector<HTMLElement>('[role="img"]')
+      ?.children[0] as HTMLElement
     // Two line boxes, plus the few pixels of ink slack the slot carries.
-    expect(Number.parseFloat(slot.style.height)).toBeGreaterThanOrEqual(2 * Math.round(36 * 1.2));
-    expect(Number.parseFloat(slot.style.height)).toBeLessThan(3 * Math.round(36 * 1.2));
-  });
+    expect(Number.parseFloat(slot.style.height)).toBeGreaterThanOrEqual(
+      2 * Math.round(36 * 1.2),
+    )
+    expect(Number.parseFloat(slot.style.height)).toBeLessThan(
+      3 * Math.round(36 * 1.2),
+    )
+  })
 
   const heroPx = (container: HTMLElement) => {
-    const node = container.querySelector<HTMLElement>('[style*="font-weight: 700"]');
-    return Number.parseFloat(node?.style.fontSize ?? "");
-  };
+    const node = container.querySelector<HTMLElement>(
+      '[style*="font-weight: 700"]',
+    )
+    return Number.parseFloat(node?.style.fontSize ?? "")
+  }
 
   it("gives the hero less height when the list is long, since nothing else can yield", () => {
-    const short = renderCard({ models: models(3) });
-    const shortHero = heroPx(short.container);
-    short.unmount();
+    const short = renderCard({ models: models(3) })
+    const shortHero = heroPx(short.container)
+    short.unmount()
 
-    const long = renderCard({ models: models(9) });
-    expect(heroPx(long.container)).toBeLessThan(shortHero);
-  });
+    const long = renderCard({ models: models(9) })
+    expect(heroPx(long.container)).toBeLessThan(shortHero)
+  })
 
   it("sizes the hero to the value, so a four-figure spend does not run off the card", () => {
     // The bug this replaces: a fixed 200px hero put "$2,390.99" 23px past the edge
     // of a square card, and clean off a wide one.
-    const short = renderCard({ hero: { id: "cost", label: "Spend", value: "$412" } });
-    const shortHero = heroPx(short.container);
-    short.unmount();
+    const short = renderCard({
+      hero: { id: "cost", label: "Spend", value: "$412" },
+    })
+    const shortHero = heroPx(short.container)
+    short.unmount()
 
-    const long = renderCard({ hero: { id: "cost", label: "Spend", value: "$1,234,567.89" } });
-    const longHero = heroPx(long.container);
-    expect(longHero).toBeLessThan(shortHero);
-    expect(emWidth("$1,234,567.89") * longHero).toBeLessThanOrEqual(CARD_SIZES.square.width - 72 * 2);
-  });
+    const long = renderCard({
+      hero: { id: "cost", label: "Spend", value: "$1,234,567.89" },
+    })
+    const longHero = heroPx(long.container)
+    expect(longHero).toBeLessThan(shortHero)
+    expect(emWidth("$1,234,567.89") * longHero).toBeLessThanOrEqual(
+      CARD_SIZES.square.width - 72 * 2,
+    )
+  })
 
   it("keeps the wide card's hero inside its own column", () => {
     const { container } = render(
@@ -181,44 +231,44 @@ describe("ShareCard height budget", () => {
         models={models(5)}
         stats={[{ id: "requests", label: "Requests", value: "12,204" }]}
       />,
-    );
+    )
     // 400 is the hero column; the wide card lays the claim beside the rows, so a
     // hero sized against the full card width would print over them.
-    expect(emWidth("$2,390.99") * heroPx(container)).toBeLessThanOrEqual(400);
-  });
-});
+    expect(emWidth("$2,390.99") * heroPx(container)).toBeLessThanOrEqual(400)
+  })
+})
 
 describe("fitHeroSize", () => {
   it("gives a short value the full cap", () => {
-    expect(fitHeroSize("$412", 936, 168)).toBe(168);
-  });
+    expect(fitHeroSize("$412", 936, 168)).toBe(168)
+  })
 
   it("steps a long value down until it fits", () => {
-    const size = fitHeroSize("$1,234,567.89", 400, 120);
-    expect(size).toBeLessThan(120);
-    expect(emWidth("$1,234,567.89") * size).toBeLessThanOrEqual(400);
-  });
+    const size = fitHeroSize("$1,234,567.89", 400, 120)
+    expect(size).toBeLessThan(120)
+    expect(emWidth("$1,234,567.89") * size).toBeLessThanOrEqual(400)
+  })
 
   it("stops shrinking rather than letting the headline disappear", () => {
-    expect(fitHeroSize("$123,456,789,012,345", 400, 120)).toBe(56);
-  });
+    expect(fitHeroSize("$123,456,789,012,345", 400, 120)).toBe(56)
+  })
 
   it("estimates within a few percent of the real thing", () => {
     // Measured in Chromium at 200px: "$2,390.99" is 959px wide and "12,204" is 660.
-    expect(emWidth("$2,390.99") * 200).toBeCloseTo(959, -2);
-    expect(emWidth("12,204") * 200).toBeCloseTo(660, -2);
-  });
-});
+    expect(emWidth("$2,390.99") * 200).toBeCloseTo(959, -2)
+    expect(emWidth("12,204") * 200).toBeCloseTo(660, -2)
+  })
+})
 
 describe("truncateModel", () => {
   it("truncates in the middle, because a model id is identified by its tail", () => {
-    const truncated = truncateModel("claude-sonnet-4-5-20260514", 20);
-    expect(truncated).toContain("…");
-    expect(truncated.endsWith("20260514")).toBe(true);
-    expect(truncated.length).toBeLessThanOrEqual(20);
-  });
+    const truncated = truncateModel("claude-sonnet-4-5-20260514", 20)
+    expect(truncated).toContain("…")
+    expect(truncated.endsWith("20260514")).toBe(true)
+    expect(truncated.length).toBeLessThanOrEqual(20)
+  })
 
   it("leaves a short name alone", () => {
-    expect(truncateModel("gpt-4o")).toBe("gpt-4o");
-  });
-});
+    expect(truncateModel("gpt-4o")).toBe("gpt-4o")
+  })
+})

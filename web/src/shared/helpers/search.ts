@@ -8,32 +8,32 @@
 // params), so the router is handed this codec and every existing link keeps
 // working unchanged.
 
-export type DashboardSearch = Record<string, string | string[] | undefined>;
+export type DashboardSearch = Record<string, string | string[] | undefined>
 
 export function parseSearch(searchStr: string): DashboardSearch {
-  const params = new URLSearchParams(searchStr);
+  const params = new URLSearchParams(searchStr)
   // Built through a Map so a `?__proto__=x` param lands as an ordinary key:
   // Object.fromEntries defines own properties, where `object[key] = value`
   // would hit the prototype setter instead.
-  const entries = new Map<string, string | string[]>();
+  const entries = new Map<string, string | string[]>()
   for (const key of params.keys()) {
-    if (entries.has(key)) continue;
-    const values = params.getAll(key);
-    entries.set(key, values.length > 1 ? values : values[0]);
+    if (entries.has(key)) continue
+    const values = params.getAll(key)
+    entries.set(key, values.length > 1 ? values : values[0])
   }
-  return Object.fromEntries(entries);
+  return Object.fromEntries(entries)
 }
 
 export function stringifySearch(search: DashboardSearch): string {
-  const params = new URLSearchParams();
+  const params = new URLSearchParams()
   for (const [key, value] of Object.entries(search)) {
-    if (value === undefined) continue;
+    if (value === undefined) continue
     for (const one of Array.isArray(value) ? value : [value]) {
-      params.append(key, String(one));
+      params.append(key, String(one))
     }
   }
-  const query = params.toString();
-  return query ? `?${query}` : "";
+  const query = params.toString()
+  return query ? `?${query}` : ""
 }
 
 /**
@@ -44,6 +44,8 @@ export function stringifySearch(search: DashboardSearch): string {
  * schema per route. It is what lets a link name any param the destination reads
  * without the route restating it.
  */
-export function validateSearch(search: Record<string, unknown>): DashboardSearch {
-  return search as DashboardSearch;
+export function validateSearch(
+  search: Record<string, unknown>,
+): DashboardSearch {
+  return search as DashboardSearch
 }

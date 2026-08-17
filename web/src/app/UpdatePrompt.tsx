@@ -1,7 +1,7 @@
-import { Button } from "@heroui/react";
-import { useRef, useState } from "react";
+import { Button } from "@heroui/react"
+import { useRef, useState } from "react"
 
-import { useDashboardBuild } from "@/shared/api/hooks";
+import { useDashboardBuild } from "@/shared/api/hooks"
 
 // True once the gateway starts serving a different bundle than the one this tab
 // loaded. The comparison is against the first build this tab ever saw rather
@@ -9,24 +9,28 @@ import { useDashboardBuild } from "@/shared/api/hooks";
 // is the question worth asking, and a tab opened after a deploy is already
 // current and must stay quiet.
 export function useUpdateAvailable(): boolean {
-  const { data } = useDashboardBuild();
-  const loadedBuild = useRef<string | null>(null);
+  const { data } = useDashboardBuild()
+  const loadedBuild = useRef<string | null>(null)
 
   if (data && loadedBuild.current === null) {
-    loadedBuild.current = data.build;
+    loadedBuild.current = data.build
   }
-  return data != null && loadedBuild.current != null && data.build !== loadedBuild.current;
+  return (
+    data != null &&
+    loadedBuild.current != null &&
+    data.build !== loadedBuild.current
+  )
 }
 
 // Offers the reload that picks up a new build. Deliberately not a modal: an
 // operator part-way through pricing a model should not be interrupted, and the
 // stale tab keeps working until they choose.
 export function UpdatePrompt() {
-  const updateAvailable = useUpdateAvailable();
-  const [dismissed, setDismissed] = useState(false);
+  const updateAvailable = useUpdateAvailable()
+  const [dismissed, setDismissed] = useState(false)
 
   if (!updateAvailable || dismissed) {
-    return null;
+    return null
   }
 
   // A floating pill centered at the very top, overlapping the header rather than
@@ -40,13 +44,18 @@ export function UpdatePrompt() {
         className="pointer-events-auto mt-1.5 flex items-center gap-3 rounded-full border border-[var(--otari-brand)] bg-[var(--otari-brand-tint)] py-1.5 pr-1.5 pl-4 text-sm text-[var(--otari-brand-dark)] shadow-md"
       >
         <span>
-          <strong className="font-semibold">An update is available.</strong> Reloading keeps you signed in.
+          <strong className="font-semibold">An update is available.</strong>{" "}
+          Reloading keeps you signed in.
         </span>
         {/* A plain reload is enough: the gateway serves index.html with
             no-store, so this fetches the new bundle rather than the cached one,
             and the sign-in lives in an HttpOnly session cookie, which
             survives it. */}
-        <Button size="sm" variant="primary" onPress={() => window.location.reload()}>
+        <Button
+          size="sm"
+          variant="primary"
+          onPress={() => window.location.reload()}
+        >
           Update now
         </Button>
         <Button size="sm" variant="ghost" onPress={() => setDismissed(true)}>
@@ -54,5 +63,5 @@ export function UpdatePrompt() {
         </Button>
       </div>
     </div>
-  );
+  )
 }

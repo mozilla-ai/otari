@@ -1,7 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router";
+import { createFileRoute } from "@tanstack/react-router"
 
-import { RoutingPage } from "@/features/routing/RoutingPage";
+import { RoutingPage } from "@/features/routing/RoutingPage"
 
 export const Route = createFileRoute("/routing")({
   component: RoutingPage,
-});
+})

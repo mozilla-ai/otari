@@ -11,10 +11,17 @@ import {
   Spinner,
   TextArea,
   TextField,
-} from "@heroui/react";
-import { type ReactNode, useEffect, useMemo, useRef, useState } from "react";
-import { Link } from "@tanstack/react-router";
-
+} from "@heroui/react"
+import { Link } from "@tanstack/react-router"
+import { type ReactNode, useEffect, useMemo, useRef, useState } from "react"
+import type {
+  CreateStoredProviderRequest,
+  ProviderHealth,
+  ProviderInfo,
+  StoredProvider,
+  TestProviderResult,
+  UpdateStoredProviderRequest,
+} from "@/client"
 import {
   useCreateStoredProvider,
   useDeleteStoredProvider,
@@ -29,19 +36,17 @@ import {
   useTestStoredProvider,
   useUpdateSettings,
   useUpdateStoredProvider,
-} from "@/shared/api/hooks";
-import type {
-  CreateStoredProviderRequest,
-  ProviderHealth,
-  ProviderInfo,
-  StoredProvider,
-  TestProviderResult,
-  UpdateStoredProviderRequest,
-} from "@/client";
-import { Field } from "@/shared/components/Field";
-import { DataTable, type DataTableColumn } from "@/shared/components/DataTable";
-import { ConfirmButton, ErrorBanner, errorMessage, InfoBanner, PageHeader } from "@/shared/components/ui";
-import { formatRelative } from "@/shared/helpers/format";
+} from "@/shared/api/hooks"
+import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
+import { Field } from "@/shared/components/Field"
+import {
+  ConfirmButton,
+  ErrorBanner,
+  errorMessage,
+  InfoBanner,
+  PageHeader,
+} from "@/shared/components/ui"
+import { formatRelative } from "@/shared/helpers/format"
 
 // A masked, never-prefilled secret input. Native password masking protects
 // Firefox users; self-hosted deployments should use HTTPS to avoid browser warnings.
@@ -52,15 +57,21 @@ function SecretField({
   placeholder,
   description,
 }: {
-  value: string;
-  onChange: (next: string) => void;
-  label: string;
-  placeholder?: string;
-  description?: string;
+  value: string
+  onChange: (next: string) => void
+  label: string
+  placeholder?: string
+  description?: string
 }) {
   return (
-    <TextField value={value} onChange={onChange} className="flex max-w-md flex-col gap-1">
-      <Label className="text-sm font-medium text-[var(--otari-ink)]">{label}</Label>
+    <TextField
+      value={value}
+      onChange={onChange}
+      className="flex max-w-md flex-col gap-1"
+    >
+      <Label className="text-sm font-medium text-[var(--otari-ink)]">
+        {label}
+      </Label>
       <Input
         type="password"
         placeholder={placeholder ?? "sk-…"}
@@ -71,9 +82,13 @@ function SecretField({
         data-1p-ignore
         data-lpignore="true"
       />
-      {description ? <Description className="text-xs text-[var(--otari-muted)]">{description}</Description> : null}
+      {description ? (
+        <Description className="text-xs text-[var(--otari-muted)]">
+          {description}
+        </Description>
+      ) : null}
     </TextField>
-  );
+  )
 }
 
 // client_args is whatever the provider's SDK client constructor takes (timeouts,
@@ -81,27 +96,34 @@ function SecretField({
 // means "none": the API reads an explicit null as "clear it".
 type ClientArgsParse =
   | { ok: true; value: Record<string, unknown> | null }
-  | { ok: false; error: string };
+  | { ok: false; error: string }
 
 function parseClientArgs(text: string): ClientArgsParse {
-  const raw = text.trim();
-  if (raw === "") return { ok: true, value: null };
-  let parsed: unknown;
+  const raw = text.trim()
+  if (raw === "") return { ok: true, value: null }
+  let parsed: unknown
   try {
-    parsed = JSON.parse(raw);
+    parsed = JSON.parse(raw)
   } catch {
-    return { ok: false, error: "Not valid JSON." };
+    return { ok: false, error: "Not valid JSON." }
   }
   if (parsed === null || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return { ok: false, error: 'Must be a JSON object, like {"timeout": 1800}.' };
+    return {
+      ok: false,
+      error: 'Must be a JSON object, like {"timeout": 1800}.',
+    }
   }
-  return { ok: true, value: parsed as Record<string, unknown> };
+  return { ok: true, value: parsed as Record<string, unknown> }
 }
 
 // Render stored client_args back into the textarea, leaving it blank when there
 // are none so an untouched form submits null rather than an empty object.
-function formatClientArgs(args: Record<string, unknown> | null | undefined): string {
-  return args && Object.keys(args).length > 0 ? JSON.stringify(args, null, 2) : "";
+function formatClientArgs(
+  args: Record<string, unknown> | null | undefined,
+): string {
+  return args && Object.keys(args).length > 0
+    ? JSON.stringify(args, null, 2)
+    : ""
 }
 
 // The client_args editor. Options are passed straight to the provider client, so
@@ -111,22 +133,38 @@ function ClientArgsField({
   onChange,
   error,
 }: {
-  value: string;
-  onChange: (next: string) => void;
-  error: string | null;
+  value: string
+  onChange: (next: string) => void
+  error: string | null
 }) {
   return (
-    <TextField value={value} onChange={onChange} isInvalid={error !== null} className="flex max-w-md flex-col gap-1">
-      <Label className="text-sm font-medium text-[var(--otari-ink)]">Client options (JSON)</Label>
-      <TextArea rows={3} placeholder={'{"timeout": 1800}'} spellCheck={false} className="font-mono text-xs" />
-      <Description className={error ? "text-xs text-red-700" : "text-xs text-[var(--otari-muted)]"}>
+    <TextField
+      value={value}
+      onChange={onChange}
+      isInvalid={error !== null}
+      className="flex max-w-md flex-col gap-1"
+    >
+      <Label className="text-sm font-medium text-[var(--otari-ink)]">
+        Client options (JSON)
+      </Label>
+      <TextArea
+        rows={3}
+        placeholder={'{"timeout": 1800}'}
+        spellCheck={false}
+        className="font-mono text-xs"
+      />
+      <Description
+        className={
+          error ? "text-xs text-red-700" : "text-xs text-[var(--otari-muted)]"
+        }
+      >
         {error ??
           // Unlike the API key, these are stored and returned unencrypted, so say
           // so before someone puts a token in a custom header here.
           "Passed to the provider's client, e.g. a request timeout in seconds or custom headers. Stored in plain text, so keep secrets out."}
       </Description>
     </TextField>
-  );
+  )
 }
 
 // A searchable provider picker over the known-provider catalog. Selection sets
@@ -141,35 +179,49 @@ function ProviderComboBox({
   extra = [],
   includeCatalog = true,
 }: {
-  label: string;
-  value: string;
-  onChange: (id: string) => void;
-  description?: ReactNode;
-  placeholder?: string;
-  extra?: { id: string; name: string }[];
+  label: string
+  value: string
+  onChange: (id: string) => void
+  description?: ReactNode
+  placeholder?: string
+  extra?: { id: string; name: string }[]
   // When false, offer only `extra` (e.g. the two API dialects), not the full
   // provider catalog.
-  includeCatalog?: boolean;
+  includeCatalog?: boolean
 }) {
-  const catalog = useProviderCatalog();
+  const catalog = useProviderCatalog()
   const options = useMemo(
-    () => (includeCatalog ? [...extra, ...(catalog.data ?? []).map((p) => ({ id: p.id, name: p.name }))] : extra),
+    () =>
+      includeCatalog
+        ? [
+            ...extra,
+            ...(catalog.data ?? []).map((p) => ({ id: p.id, name: p.name })),
+          ]
+        : extra,
     [catalog.data, extra, includeCatalog],
-  );
+  )
 
   // Seed the input with the selected option's display name. The field owns its
   // text after mount (updated on typing and on selection); syncing it back from
   // `value` on every render would wipe out what the user is typing, since the
   // options array is recreated each render.
-  const [text, setText] = useState(() => options.find((o) => o.id === value)?.name ?? "");
+  const [text, setText] = useState(
+    () => options.find((o) => o.id === value)?.name ?? "",
+  )
 
   // When the input merely shows the current selection, treat the query as empty
   // so opening the dropdown reveals every option, not just the selected one.
-  const selectedName = options.find((o) => o.id === value)?.name ?? "";
-  const query = text.trim() === selectedName.trim() ? "" : text.trim().toLowerCase();
+  const selectedName = options.find((o) => o.id === value)?.name ?? ""
+  const query =
+    text.trim() === selectedName.trim() ? "" : text.trim().toLowerCase()
   const visible = options
-    .filter((o) => !query || o.name.toLowerCase().includes(query) || o.id.toLowerCase().includes(query))
-    .slice(0, 50);
+    .filter(
+      (o) =>
+        !query ||
+        o.name.toLowerCase().includes(query) ||
+        o.id.toLowerCase().includes(query),
+    )
+    .slice(0, 50)
 
   return (
     <ComboBox.Root
@@ -182,18 +234,20 @@ function ProviderComboBox({
       onInputChange={setText}
       onSelectionChange={(key) => {
         if (key != null) {
-          onChange(String(key));
-          setText(options.find((o) => o.id === String(key))?.name ?? "");
+          onChange(String(key))
+          setText(options.find((o) => o.id === String(key))?.name ?? "")
         } else {
           // Selection cleared: clear the parent value too, so the submitted
           // data cannot keep a stale provider after the field is emptied.
-          onChange("");
-          setText("");
+          onChange("")
+          setText("")
         }
       }}
       className="flex max-w-md flex-col gap-1"
     >
-      <Label className="text-sm font-medium text-[var(--otari-ink)]">{label}</Label>
+      <Label className="text-sm font-medium text-[var(--otari-ink)]">
+        {label}
+      </Label>
       <ComboBox.InputGroup>
         {/* Not a credential field: keep browser password managers from offering to fill it.
             Select the text on focus so typing replaces the current selection instead of
@@ -216,17 +270,23 @@ function ProviderComboBox({
           )}
         </ListBox>
       </ComboBox.Popover>
-      {description ? <span className="text-xs text-[var(--otari-muted)]">{description}</span> : null}
+      {description ? (
+        <span className="text-xs text-[var(--otari-muted)]">{description}</span>
+      ) : null}
     </ComboBox.Root>
-  );
+  )
 }
 
 // A "Test connection" button + inline result, testing the form's credentials
 // before they are saved. `getPayload` returns null when the minimum fields for a
 // test are not filled in yet, which disables the button.
-function ConnectionTest({ getPayload }: { getPayload: () => CreateStoredProviderRequest | null }) {
-  const test = useTestProviderCredentials();
-  const payload = getPayload();
+function ConnectionTest({
+  getPayload,
+}: {
+  getPayload: () => CreateStoredProviderRequest | null
+}) {
+  const test = useTestProviderCredentials()
+  const payload = getPayload()
 
   return (
     <div className="flex flex-col gap-1.5">
@@ -234,7 +294,7 @@ function ConnectionTest({ getPayload }: { getPayload: () => CreateStoredProvider
         variant="outline"
         isDisabled={payload === null || test.isPending}
         onPress={() => {
-          if (payload) test.mutate(payload);
+          if (payload) test.mutate(payload)
         }}
       >
         {test.isPending ? "Testing…" : "Test connection"}
@@ -242,11 +302,14 @@ function ConnectionTest({ getPayload }: { getPayload: () => CreateStoredProvider
       {/* aria-live so the connection outcome is announced to assistive tech. */}
       <span role="status" aria-live="polite">
         {test.isPending ? null : test.error ? (
-          <span className="text-xs text-red-700">{errorMessage(test.error)}</span>
+          <span className="text-xs text-red-700">
+            {errorMessage(test.error)}
+          </span>
         ) : test.data ? (
           test.data.ok ? (
             <span className="text-xs font-medium text-green-700">
-              Connected. {test.data.model_count} model{test.data.model_count === 1 ? "" : "s"} available.
+              Connected. {test.data.model_count} model
+              {test.data.model_count === 1 ? "" : "s"} available.
             </span>
           ) : test.data.discovery_unsupported ? (
             // No /v1/models on this backend: the test cannot confirm the key, but
@@ -254,11 +317,14 @@ function ConnectionTest({ getPayload }: { getPayload: () => CreateStoredProvider
             // kept because this is the form where the operator just typed api_base,
             // and a wrong one 404s exactly like an absent listing endpoint.
             <span className="block max-w-md break-words text-xs text-amber-800">
-              This provider does not list models, so the key could not be verified here. Save it and use the provider;
-              declare its model ids under <code>models:</code> to have them show up in the catalog. If you did not
-              expect this, check the provider's reply below.
+              This provider does not list models, so the key could not be
+              verified here. Save it and use the provider; declare its model ids
+              under <code>models:</code> to have them show up in the catalog. If
+              you did not expect this, check the provider's reply below.
               {test.data.error ? (
-                <span className="mt-0.5 block text-[var(--otari-muted)]">{test.data.error}</span>
+                <span className="mt-0.5 block text-[var(--otari-muted)]">
+                  {test.data.error}
+                </span>
               ) : null}
             </span>
           ) : (
@@ -269,37 +335,37 @@ function ConnectionTest({ getPayload }: { getPayload: () => CreateStoredProvider
         ) : null}
       </span>
     </div>
-  );
+  )
 }
 
 // Add a hosted provider whose endpoint is built into the SDK: pick it, paste a
 // key. Name and api_base are only exposed under Advanced.
 function KnownProviderForm({ onClose }: { onClose: () => void }) {
-  const create = useCreateStoredProvider();
-  const [providerId, setProviderId] = useState("");
-  const [apiKey, setApiKey] = useState("");
-  const [showAdvanced, setShowAdvanced] = useState(false);
-  const [apiBase, setApiBase] = useState("");
-  const [name, setName] = useState("");
-  const [clientArgsText, setClientArgsText] = useState("");
-  const clientArgs = parseClientArgs(clientArgsText);
+  const create = useCreateStoredProvider()
+  const [providerId, setProviderId] = useState("")
+  const [apiKey, setApiKey] = useState("")
+  const [showAdvanced, setShowAdvanced] = useState(false)
+  const [apiBase, setApiBase] = useState("")
+  const [name, setName] = useState("")
+  const [clientArgsText, setClientArgsText] = useState("")
+  const clientArgs = parseClientArgs(clientArgsText)
 
   // Autofill hints are fetched lazily for just the selected provider, so the
   // picker itself never imports every provider SDK (issue #365).
-  const detail = useProviderDetail(providerId);
-  const selected = detail.data?.id === providerId ? detail.data : undefined;
+  const detail = useProviderDetail(providerId)
+  const selected = detail.data?.id === providerId ? detail.data : undefined
   // Prefill the (editable) API base with the provider's built-in default once its
   // detail loads, so Advanced shows what will be used. Keyed on the selected
   // provider so it fires once per selection and does not clobber later edits.
   useEffect(() => {
-    if (selected) setApiBase(selected.default_api_base ?? "");
-  }, [selected]);
-  const envKeyPresent = selected?.env_key_present ?? false;
+    if (selected) setApiBase(selected.default_api_base ?? "")
+  }, [selected])
+  const envKeyPresent = selected?.env_key_present ?? false
   // The key is only mandatory when the provider needs one and its env var is not
   // already set on the server; any-llm falls back to that env var otherwise.
-  const needsKey = (selected?.requires_api_key ?? true) && !envKeyPresent;
-  const renamed = name.trim() !== "" && name.trim() !== providerId;
-  const nameHasDelimiter = /[:/]/.test(name);
+  const needsKey = (selected?.requires_api_key ?? true) && !envKeyPresent
+  const renamed = name.trim() !== "" && name.trim() !== providerId
+  const nameHasDelimiter = /[:/]/.test(name)
   // Require the key when the chosen provider says it needs one; keyless local
   // backends (Ollama, llama.cpp) can submit without it.
   const canSubmit =
@@ -307,16 +373,16 @@ function KnownProviderForm({ onClose }: { onClose: () => void }) {
     !nameHasDelimiter &&
     (!needsKey || apiKey.trim() !== "") &&
     clientArgs.ok &&
-    !create.isPending;
+    !create.isPending
   // Hold the section open while something inside it is what's blocking submit,
   // so collapsing it can't leave a disabled button with its reason off screen.
   // A hide requested meanwhile is remembered and applies once the field is fixed.
-  const advancedOpen = showAdvanced || !clientArgs.ok || nameHasDelimiter;
+  const advancedOpen = showAdvanced || !clientArgs.ok || nameHasDelimiter
 
   const submit = () => {
     // The clientArgs.ok half is already covered by canSubmit; it is repeated to
     // narrow the union so `.value` is reachable.
-    if (!canSubmit || !clientArgs.ok) return;
+    if (!canSubmit || !clientArgs.ok) return
     create.mutate(
       {
         instance: renamed ? name.trim() : providerId,
@@ -328,8 +394,8 @@ function KnownProviderForm({ onClose }: { onClose: () => void }) {
         client_args: clientArgs.value,
       },
       { onSuccess: onClose },
-    );
-  };
+    )
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -338,11 +404,11 @@ function KnownProviderForm({ onClose }: { onClose: () => void }) {
         label="Provider"
         value={providerId}
         onChange={(id) => {
-          setProviderId(id);
-          setName("");
+          setProviderId(id)
+          setName("")
           // Clear the API base; the effect above refills it from the provider's
           // built-in default once this provider's detail loads.
-          setApiBase("");
+          setApiBase("")
         }}
         description="Its endpoint is built in."
       />
@@ -365,7 +431,9 @@ function KnownProviderForm({ onClose }: { onClose: () => void }) {
         className="self-start text-xs font-medium text-[var(--otari-brand-dark)]"
         onClick={() => setShowAdvanced((v) => !v)}
       >
-        {advancedOpen ? "Hide advanced" : "Advanced (API base, rename, client options)"}
+        {advancedOpen
+          ? "Hide advanced"
+          : "Advanced (API base, rename, client options)"}
       </button>
       {advancedOpen ? (
         <div className="flex flex-col gap-4">
@@ -384,7 +452,9 @@ function KnownProviderForm({ onClose }: { onClose: () => void }) {
               placeholder={providerId || "instance name"}
               description={
                 nameHasDelimiter ? (
-                  <span className="text-red-700">A name cannot contain “:” or “/”.</span>
+                  <span className="text-red-700">
+                    A name cannot contain “:” or “/”.
+                  </span>
                 ) : (
                   "Rename to run two instances of the same provider."
                 )
@@ -420,26 +490,30 @@ function KnownProviderForm({ onClose }: { onClose: () => void }) {
         />
       </div>
     </div>
-  );
+  )
 }
 
 // Add a self-hosted or OpenAI-compatible endpoint: name it anything, say what
 // API it speaks, and give the base URL (and a key if it needs one).
 function CustomProviderForm({ onClose }: { onClose: () => void }) {
-  const create = useCreateStoredProvider();
-  const [name, setName] = useState("");
-  const [providerType, setProviderType] = useState("openai-compatible");
-  const [apiBase, setApiBase] = useState("");
-  const [apiKey, setApiKey] = useState("");
-  const [clientArgsText, setClientArgsText] = useState("");
-  const clientArgs = parseClientArgs(clientArgsText);
+  const create = useCreateStoredProvider()
+  const [name, setName] = useState("")
+  const [providerType, setProviderType] = useState("openai-compatible")
+  const [apiBase, setApiBase] = useState("")
+  const [apiKey, setApiKey] = useState("")
+  const [clientArgsText, setClientArgsText] = useState("")
+  const clientArgs = parseClientArgs(clientArgsText)
 
-  const nameHasDelimiter = /[:/]/.test(name);
+  const nameHasDelimiter = /[:/]/.test(name)
   const canSubmit =
-    name.trim() !== "" && !nameHasDelimiter && apiBase.trim() !== "" && clientArgs.ok && !create.isPending;
+    name.trim() !== "" &&
+    !nameHasDelimiter &&
+    apiBase.trim() !== "" &&
+    clientArgs.ok &&
+    !create.isPending
 
   const submit = () => {
-    if (!canSubmit || !clientArgs.ok) return;
+    if (!canSubmit || !clientArgs.ok) return
     create.mutate(
       {
         instance: name.trim(),
@@ -449,8 +523,8 @@ function CustomProviderForm({ onClose }: { onClose: () => void }) {
         client_args: clientArgs.value,
       },
       { onSuccess: onClose },
-    );
-  };
+    )
+  }
 
   return (
     <div className="flex flex-col gap-4">
@@ -465,7 +539,9 @@ function CustomProviderForm({ onClose }: { onClose: () => void }) {
           autoFocus
           description={
             nameHasDelimiter ? (
-              <span className="text-red-700">A name cannot contain “:” or “/”.</span>
+              <span className="text-red-700">
+                A name cannot contain “:” or “/”.
+              </span>
             ) : (
               "Call it whatever you want."
             )
@@ -524,13 +600,13 @@ function CustomProviderForm({ onClose }: { onClose: () => void }) {
         />
       </div>
     </div>
-  );
+  )
 }
 
-type ProviderTab = "known" | "custom";
+type ProviderTab = "known" | "custom"
 
 function AddProviderForm({ onClose }: { onClose: () => void }) {
-  const [tab, setTab] = useState<ProviderTab>("known");
+  const [tab, setTab] = useState<ProviderTab>("known")
 
   return (
     <Card>
@@ -559,10 +635,14 @@ function AddProviderForm({ onClose }: { onClose: () => void }) {
             ))}
           </div>
         </div>
-        {tab === "known" ? <KnownProviderForm onClose={onClose} /> : <CustomProviderForm onClose={onClose} />}
+        {tab === "known" ? (
+          <KnownProviderForm onClose={onClose} />
+        ) : (
+          <CustomProviderForm onClose={onClose} />
+        )}
       </Card.Content>
     </Card>
-  );
+  )
 }
 
 function EditProviderForm({
@@ -570,24 +650,26 @@ function EditProviderForm({
   onClose,
   onSaved,
 }: {
-  provider: StoredProvider;
-  onClose: () => void;
+  provider: StoredProvider
+  onClose: () => void
   // Called with the saved instance when a save succeeds, so the page can retire
   // anything that described the credentials as they were. Distinct from onClose,
   // which also fires on cancel, where nothing was written and an existing verdict
   // still holds.
-  onSaved: (instance: string) => void;
+  onSaved: (instance: string) => void
 }) {
-  const update = useUpdateStoredProvider();
-  const [providerType, setProviderType] = useState(provider.provider_type ?? "");
-  const [apiBase, setApiBase] = useState(provider.api_base ?? "");
-  const [replacingKey, setReplacingKey] = useState(false);
-  const [apiKey, setApiKey] = useState("");
-  const [clientArgsText, setClientArgsText] = useState(() => formatClientArgs(provider.client_args));
-  const clientArgs = parseClientArgs(clientArgsText);
+  const update = useUpdateStoredProvider()
+  const [providerType, setProviderType] = useState(provider.provider_type ?? "")
+  const [apiBase, setApiBase] = useState(provider.api_base ?? "")
+  const [replacingKey, setReplacingKey] = useState(false)
+  const [apiKey, setApiKey] = useState("")
+  const [clientArgsText, setClientArgsText] = useState(() =>
+    formatClientArgs(provider.client_args),
+  )
+  const clientArgs = parseClientArgs(clientArgsText)
 
   const submit = () => {
-    if (update.isPending || !clientArgs.ok) return;
+    if (update.isPending || !clientArgs.ok) return
     const body: UpdateStoredProviderRequest = {
       provider_type: providerType.trim() || null,
       api_base: apiBase.trim() || null,
@@ -595,20 +677,20 @@ function EditProviderForm({
       client_args: clientArgs.value,
       // Guard against clobbering a concurrent edit; a 412 tells the operator to reload.
       expected_updated_at: provider.updated_at,
-    };
+    }
     if (replacingKey && apiKey.trim()) {
-      body.api_key = apiKey.trim();
+      body.api_key = apiKey.trim()
     }
     update.mutate(
       { instance: provider.instance, body },
       {
         onSuccess: () => {
-          onSaved(provider.instance);
-          onClose();
+          onSaved(provider.instance)
+          onClose()
         },
       },
-    );
-  };
+    )
+  }
 
   return (
     <Card>
@@ -618,8 +700,18 @@ function EditProviderForm({
         </div>
         <ErrorBanner error={update.error} />
         <div className="grid gap-4 sm:grid-cols-2">
-          <Field label="Provider type" value={providerType} onChange={setProviderType} placeholder="openai" />
-          <Field label="API base" value={apiBase} onChange={setApiBase} placeholder="https://api.openai.com/v1" />
+          <Field
+            label="Provider type"
+            value={providerType}
+            onChange={setProviderType}
+            placeholder="openai"
+          />
+          <Field
+            label="API base"
+            value={apiBase}
+            onChange={setApiBase}
+            placeholder="https://api.openai.com/v1"
+          />
         </div>
         <div className="flex flex-col gap-2">
           {replacingKey ? (
@@ -634,8 +726,8 @@ function EditProviderForm({
                 type="button"
                 className="self-start text-xs font-medium text-[var(--otari-brand-dark)]"
                 onClick={() => {
-                  setReplacingKey(false);
-                  setApiKey("");
+                  setReplacingKey(false)
+                  setApiKey("")
                 }}
               >
                 Keep the current key
@@ -644,9 +736,16 @@ function EditProviderForm({
           ) : (
             <div className="flex items-center gap-3">
               <span className="text-sm text-[var(--otari-muted)]">
-                API key: <code>{provider.last4 ? `••••${provider.last4}` : "none set"}</code>
+                API key:{" "}
+                <code>
+                  {provider.last4 ? `••••${provider.last4}` : "none set"}
+                </code>
               </span>
-              <Button size="sm" variant="outline" onPress={() => setReplacingKey(true)}>
+              <Button
+                size="sm"
+                variant="outline"
+                onPress={() => setReplacingKey(true)}
+              >
                 Replace key
               </Button>
             </div>
@@ -658,7 +757,11 @@ function EditProviderForm({
           error={clientArgs.ok ? null : clientArgs.error}
         />
         <div className="flex gap-2">
-          <Button variant="primary" isDisabled={update.isPending || !clientArgs.ok} onPress={submit}>
+          <Button
+            variant="primary"
+            isDisabled={update.isPending || !clientArgs.ok}
+            onPress={submit}
+          >
             {update.isPending ? "Saving…" : "Save changes"}
           </Button>
           <Button variant="ghost" onPress={onClose}>
@@ -667,45 +770,57 @@ function EditProviderForm({
         </div>
       </Card.Content>
     </Card>
-  );
+  )
 }
 
 interface ProviderRow {
-  instance: string;
-  source: "config" | "stored";
-  stored: StoredProvider | undefined;
-  meta: ProviderInfo | undefined;
+  instance: string
+  source: "config" | "stored"
+  stored: StoredProvider | undefined
+  meta: ProviderInfo | undefined
 }
 
-function buildRows(meta: ProviderInfo[] | undefined, stored: StoredProvider[] | undefined): ProviderRow[] {
-  const storedByInstance = new Map((stored ?? []).map((p) => [p.instance, p]));
-  const metaByInstance = new Map((meta ?? []).map((p) => [p.instance, p]));
-  const instances = new Set<string>([...storedByInstance.keys(), ...metaByInstance.keys()]);
-  return [...instances]
-    .sort()
-    .map((instance) => {
-      const s = storedByInstance.get(instance);
-      return { instance, source: s ? "stored" : "config", stored: s, meta: metaByInstance.get(instance) } as const;
-    });
+function buildRows(
+  meta: ProviderInfo[] | undefined,
+  stored: StoredProvider[] | undefined,
+): ProviderRow[] {
+  const storedByInstance = new Map((stored ?? []).map((p) => [p.instance, p]))
+  const metaByInstance = new Map((meta ?? []).map((p) => [p.instance, p]))
+  const instances = new Set<string>([
+    ...storedByInstance.keys(),
+    ...metaByInstance.keys(),
+  ])
+  return [...instances].sort().map((instance) => {
+    const s = storedByInstance.get(instance)
+    return {
+      instance,
+      source: s ? "stored" : "config",
+      stored: s,
+      meta: metaByInstance.get(instance),
+    } as const
+  })
 }
 
-type TestState = { status: "pending" } | ({ status: "done" } & TestProviderResult);
+type TestState =
+  | { status: "pending" }
+  | ({ status: "done" } & TestProviderResult)
 
 function TestOutcome({ state }: { state: TestState | undefined }) {
-  if (!state) return null;
+  if (!state) return null
   if (state.status === "pending") {
     return (
       <span className="inline-flex items-center gap-1.5 text-xs text-[var(--otari-muted)]">
         <Spinner size="sm" /> Testing…
       </span>
-    );
+    )
   }
   if (state.ok) {
     return (
       <span className="text-xs font-medium text-green-700">
-        Connected. {state.model_count} model{state.model_count === 1 ? "" : "s"} available.
+        Connected. {state.model_count} model{state.model_count === 1 ? "" : "s"}{" "}
+        available.
       </span>
-    );
+    )
   }
   // A backend with no model-listing endpoint cannot be verified this way, but the
   // key is not therefore wrong: say so instead of reporting a failed connection.
@@ -715,16 +830,21 @@ function TestOutcome({ state }: { state: TestState | undefined }) {
   if (state.discovery_unsupported) {
     return (
       <span className="block max-w-xs break-words text-xs text-amber-800">
-        Could not list models, so the key could not be verified. It may still work for requests.
-        {state.error ? <span className="mt-0.5 block text-[var(--otari-muted)]">{state.error}</span> : null}
+        Could not list models, so the key could not be verified. It may still
+        work for requests.
+        {state.error ? (
+          <span className="mt-0.5 block text-[var(--otari-muted)]">
+            {state.error}
+          </span>
+        ) : null}
       </span>
-    );
+    )
   }
   return (
     <span className="block max-w-xs break-words text-xs text-red-700">
       {state.error ?? "Connection failed."}
     </span>
-  );
+  )
 }
 
 // A provider's reachability, from the shared model-discovery health path. Config
@@ -736,31 +856,41 @@ function TestOutcome({ state }: { state: TestState | undefined }) {
 // warning state rather than the red one (issue #447).
 function HealthPill({ health }: { health: ProviderHealth | undefined }) {
   if (!health) {
-    return <span className="text-xs text-[var(--otari-muted)]">—</span>;
+    return <span className="text-xs text-[var(--otari-muted)]">—</span>
   }
-  const degraded = !health.ok && health.discovery_unsupported;
+  const degraded = !health.ok && health.discovery_unsupported
   const styles = health.ok
     ? "border-green-200 bg-green-50 text-green-700"
     : degraded
       ? "border-amber-200 bg-amber-50 text-amber-800"
-      : "border-red-200 bg-red-50 text-red-700";
-  const dot = health.ok ? "bg-green-500" : degraded ? "bg-amber-500" : "bg-red-500";
+      : "border-red-200 bg-red-50 text-red-700"
+  const dot = health.ok
+    ? "bg-green-500"
+    : degraded
+      ? "bg-amber-500"
+      : "bg-red-500"
   // The last-checked time lives in the top summary banner; the row just shows the
   // status. The error (and time) stay available on hover as the pill's tooltip.
-  const checked = health.checked_at ? `Last checked ${formatRelative(health.checked_at)}` : "Not checked yet";
+  const checked = health.checked_at
+    ? `Last checked ${formatRelative(health.checked_at)}`
+    : "Not checked yet"
   const reason = degraded
     ? `${health.error ?? "This provider does not list models."} Requests to it may still work.`
-    : (health.error ?? "Unreachable");
-  const title = health.ok ? checked : `${reason} · ${checked}`;
+    : (health.error ?? "Unreachable")
+  const title = health.ok ? checked : `${reason} · ${checked}`
   return (
     <span
       title={title}
       className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium ${styles}`}
     >
       <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${dot}`} />
-      {health.ok ? "Reachable" : degraded ? "No model discovery" : "Unreachable"}
+      {health.ok
+        ? "Reachable"
+        : degraded
+          ? "No model discovery"
+          : "Unreachable"}
     </span>
-  );
+  )
 }
 
 // A one-line "N of M providers reachable" summary with a live re-check, above the
@@ -774,23 +904,33 @@ function HealthSummary({
   total,
   checkedAt,
 }: {
-  healthy: number;
-  degraded: number;
-  total: number;
-  checkedAt: string | null;
+  healthy: number
+  degraded: number
+  total: number
+  checkedAt: string | null
 }) {
-  const allHealthy = healthy === total;
-  const dot = allHealthy ? "bg-green-500" : healthy + degraded === total ? "bg-amber-500" : "bg-red-500";
-  const recheck = useRecheckProviderHealth();
+  const allHealthy = healthy === total
+  const dot = allHealthy
+    ? "bg-green-500"
+    : healthy + degraded === total
+      ? "bg-amber-500"
+      : "bg-red-500"
+  const recheck = useRecheckProviderHealth()
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--otari-line)] bg-[var(--otari-surface)] px-4 py-2.5 text-sm">
       <span aria-hidden className={`h-2 w-2 rounded-full ${dot}`} />
       <span className="font-medium text-[var(--otari-ink)]">
         {healthy} of {total} provider{total === 1 ? "" : "s"} reachable
       </span>
-      {degraded > 0 ? <span className="text-amber-800">{degraded} without model discovery</span> : null}
+      {degraded > 0 ? (
+        <span className="text-amber-800">
+          {degraded} without model discovery
+        </span>
+      ) : null}
       {checkedAt ? (
-        <span className="text-[var(--otari-muted)]">Last checked {formatRelative(checkedAt)}</span>
+        <span className="text-[var(--otari-muted)]">
+          Last checked {formatRelative(checkedAt)}
+        </span>
       ) : null}
       <Button
         size="sm"
@@ -802,10 +942,18 @@ function HealthSummary({
         {recheck.isPending ? "Re-checking…" : "Re-check all"}
       </Button>
     </div>
-  );
+  )
 }
 
-function Step({ n, title, children }: { n: number; title: string; children: ReactNode }) {
+function Step({
+  n,
+  title,
+  children,
+}: {
+  n: number
+  title: string
+  children: ReactNode
+}) {
   return (
     <li className="flex gap-3">
       <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--otari-brand-tint)] text-xs font-semibold text-[var(--otari-brand-dark)]">
@@ -816,7 +964,7 @@ function Step({ n, title, children }: { n: number; title: string; children: Reac
         <div className="text-[var(--otari-muted)]">{children}</div>
       </div>
     </li>
-  );
+  )
 }
 
 // Shown on first run (no provider configured yet). It disappears the moment a
@@ -828,31 +976,36 @@ function OnboardingPanel({
   enabling,
   secretKeyConfigured,
 }: {
-  onAddProvider: () => void;
-  needsPricing: boolean;
-  onEnablePricing: () => void;
-  enabling: boolean;
-  secretKeyConfigured: boolean;
+  onAddProvider: () => void
+  needsPricing: boolean
+  onEnablePricing: () => void
+  enabling: boolean
+  secretKeyConfigured: boolean
 }) {
   return (
     <Card>
       <Card.Content className="flex flex-col gap-4 p-6">
         <div>
-          <h2 className="text-lg font-semibold text-[var(--otari-ink)]">Welcome to Otari</h2>
+          <h2 className="text-lg font-semibold text-[var(--otari-ink)]">
+            Welcome to Otari
+          </h2>
           <p className="mt-1 text-sm text-[var(--otari-muted)]">
-            You are signed in. Add a provider to start serving models: three quick steps.
+            You are signed in. Add a provider to start serving models: three
+            quick steps.
           </p>
         </div>
         <ol className="flex flex-col gap-3">
           <Step n={1} title="Add a provider">
-            Enter a provider name (like <code>openai</code>) and its API key. Keys are encrypted at rest.
+            Enter a provider name (like <code>openai</code>) and its API key.
+            Keys are encrypted at rest.
           </Step>
           <Step n={2} title="Test the connection">
-            Use <strong>Test</strong> on the provider row to confirm the key works and see how many models it serves.
+            Use <strong>Test</strong> on the provider row to confirm the key
+            works and see how many models it serves.
           </Step>
           <Step n={3} title="Send your first request">
-            Point your app at <code>/v1</code> on this gateway with the API key printed in the server logs
-            (<code>gw-…</code>). See the{" "}
+            Point your app at <code>/v1</code> on this gateway with the API key
+            printed in the server logs (<code>gw-…</code>). See the{" "}
             {/* /welcome is served by the gateway itself, not by a client route, so this
                 stays a plain path anchor: a router Link would resolve to /#/welcome, which
                 the catch-all route sends back to the overview. It leaves the SPA, so open a
@@ -870,7 +1023,8 @@ function OnboardingPanel({
         </ol>
         {needsPricing ? (
           <p className="text-sm text-[var(--otari-muted)]">
-            Tip: <code>require_pricing</code> is on, so requests are rejected until pricing is set.{" "}
+            Tip: <code>require_pricing</code> is on, so requests are rejected
+            until pricing is set.{" "}
             <button
               type="button"
               className="font-medium text-[var(--otari-brand-dark)] disabled:opacity-50"
@@ -883,33 +1037,42 @@ function OnboardingPanel({
           </p>
         ) : null}
         <div>
-          <Button variant="primary" isDisabled={!secretKeyConfigured} onPress={onAddProvider}>
+          <Button
+            variant="primary"
+            isDisabled={!secretKeyConfigured}
+            onPress={onAddProvider}
+          >
             Add your first provider
           </Button>
         </div>
       </Card.Content>
     </Card>
-  );
+  )
 }
 
 export function ProvidersPage() {
-  const meta = useProviders();
-  const stored = useStoredProviders();
-  const settings = useSettings();
-  const health = useProviderHealth();
-  const deleteProvider = useDeleteStoredProvider();
-  const testProvider = useTestStoredProvider();
-  const updateSettings = useUpdateSettings();
+  const meta = useProviders()
+  const stored = useStoredProviders()
+  const settings = useSettings()
+  const health = useProviderHealth()
+  const deleteProvider = useDeleteStoredProvider()
+  const testProvider = useTestStoredProvider()
+  const updateSettings = useUpdateSettings()
 
-  const [addOpen, setAddOpen] = useState(false);
-  const [editing, setEditing] = useState<string | null>(null);
-  const [tests, setTests] = useState<Record<string, TestState>>({});
+  const [addOpen, setAddOpen] = useState(false)
+  const [editing, setEditing] = useState<string | null>(null)
+  const [tests, setTests] = useState<Record<string, TestState>>({})
 
-  const rows = buildRows(meta.data?.providers, stored.data);
-  const healthByInstance = new Map((health.data?.providers ?? []).map((item) => [item.instance, item]));
-  const loading = meta.isLoading || stored.isLoading;
-  const editingProvider = stored.data?.find((p) => p.instance === editing) ?? null;
-  const needsPricing = settings.data?.require_pricing === true && settings.data.default_pricing === false;
+  const rows = buildRows(meta.data?.providers, stored.data)
+  const healthByInstance = new Map(
+    (health.data?.providers ?? []).map((item) => [item.instance, item]),
+  )
+  const loading = meta.isLoading || stored.isLoading
+  const editingProvider =
+    stored.data?.find((p) => p.instance === editing) ?? null
+  const needsPricing =
+    settings.data?.require_pricing === true &&
+    settings.data.default_pricing === false
   // Gate adding providers on the server having OTARI_SECRET_KEY. Fail closed:
   // enabled only while settings are still loading (so the button does not
   // flicker to disabled on first paint) or once a value has actually loaded
@@ -919,8 +1082,8 @@ export function ProvidersPage() {
   // configured (they never gated on it).
   const secretKeyConfigured = settings.data
     ? settings.data.secret_key_configured !== false
-    : !settings.isError;
-  const showOnboarding = !loading && rows.length === 0 && !addOpen;
+    : !settings.isError
+  const showOnboarding = !loading && rows.length === 0 && !addOpen
 
   // Which test run each row is currently showing. A row's result is only worth
   // recording while it is still the answer to the newest thing the operator asked
@@ -930,12 +1093,12 @@ export function ProvidersPage() {
   // retest can start while the previous request is still in flight. A monotonic
   // id per instance is the thing that actually settles it. In a ref because a
   // late callback must read the current value, not the one its render closed over.
-  const testRuns = useRef<Record<string, number>>({});
+  const testRuns = useRef<Record<string, number>>({})
   const startTestRun = (instance: string) => {
-    const run = (testRuns.current[instance] ?? 0) + 1;
-    testRuns.current[instance] = run;
-    return run;
-  };
+    const run = (testRuns.current[instance] ?? 0) + 1
+    testRuns.current[instance] = run
+    return run
+  }
 
   // A test verdict describes the credentials as they were when it ran, so drop
   // it once the provider changes underneath it: otherwise the row keeps showing
@@ -943,24 +1106,24 @@ export function ProvidersPage() {
   // right above it (issue #464). Bumping the run id retires any request still in
   // flight, so a slow test cannot write the old verdict back afterwards.
   const clearTest = (instance: string) => {
-    startTestRun(instance);
+    startTestRun(instance)
     setTests((prev) => {
       // Own-property check: `in` also reports inherited keys, so an instance
       // named after one (`toString`) would read as having a verdict it does not.
-      if (!Object.hasOwn(prev, instance)) return prev;
-      const next = { ...prev };
-      delete next[instance];
-      return next;
-    });
-  };
+      if (!Object.hasOwn(prev, instance)) return prev
+      const next = { ...prev }
+      delete next[instance]
+      return next
+    })
+  }
 
   // Record a result only if its run is still the current one for that row, which
   // rules out both a verdict retired by an edit or delete and one superseded by a
   // later test on the same row.
   const settleTest = (instance: string, run: number, state: TestState) => {
-    if (testRuns.current[instance] !== run) return;
-    setTests((prev) => ({ ...prev, [instance]: state }));
-  };
+    if (testRuns.current[instance] !== run) return
+    setTests((prev) => ({ ...prev, [instance]: state }))
+  }
 
   // Resolve each row's test from its own promise. One useMutation observer serves
   // every row, and TanStack Query detaches it from the previous mutation as soon
@@ -969,11 +1132,11 @@ export function ProvidersPage() {
   // spinning on "Testing…", with its Test button disabled, for the life of the
   // page. The promise from mutateAsync settles regardless of that detach.
   const runTest = async (instance: string) => {
-    const run = startTestRun(instance);
-    setTests((prev) => ({ ...prev, [instance]: { status: "pending" } }));
+    const run = startTestRun(instance)
+    setTests((prev) => ({ ...prev, [instance]: { status: "pending" } }))
     try {
-      const result = await testProvider.mutateAsync(instance);
-      settleTest(instance, run, { status: "done", ...result });
+      const result = await testProvider.mutateAsync(instance)
+      settleTest(instance, run, { status: "done", ...result })
     } catch (error) {
       settleTest(instance, run, {
         status: "done",
@@ -981,9 +1144,9 @@ export function ProvidersPage() {
         model_count: 0,
         error: errorMessage(error),
         discovery_unsupported: false,
-      });
+      })
     }
-  };
+  }
 
   const columns: DataTableColumn<ProviderRow>[] = [
     {
@@ -1032,7 +1195,9 @@ export function ProvidersPage() {
                 ⚠ key unreadable
               </span>
             ) : (
-              <code>{row.stored?.last4 ? `••••${row.stored.last4}` : "none set"}</code>
+              <code>
+                {row.stored?.last4 ? `••••${row.stored.last4}` : "none set"}
+              </code>
             )
           ) : row.meta?.env_key ? (
             <span>
@@ -1044,7 +1209,11 @@ export function ProvidersPage() {
         </span>
       ),
     },
-    { id: "status", header: "Status", cell: (row) => <HealthPill health={healthByInstance.get(row.instance)} /> },
+    {
+      id: "status",
+      header: "Status",
+      cell: (row) => <HealthPill health={healthByInstance.get(row.instance)} />,
+    },
     {
       id: "actions",
       header: "Actions",
@@ -1057,7 +1226,10 @@ export function ProvidersPage() {
                 size="sm"
                 variant="outline"
                 // A row whose key can't be decrypted can't be tested; Edit/Delete still recover it.
-                isDisabled={tests[row.instance]?.status === "pending" || row.stored?.decryptable === false}
+                isDisabled={
+                  tests[row.instance]?.status === "pending" ||
+                  row.stored?.decryptable === false
+                }
                 onPress={() => void runTest(row.instance)}
               >
                 Test
@@ -1066,8 +1238,8 @@ export function ProvidersPage() {
                 size="sm"
                 variant="ghost"
                 onPress={() => {
-                  setAddOpen(false);
-                  setEditing(row.instance);
+                  setAddOpen(false)
+                  setEditing(row.instance)
                 }}
               >
                 Edit
@@ -1077,7 +1249,11 @@ export function ProvidersPage() {
                 isPending={deleteProvider.isPending}
                 // Clear the verdict too: a provider re-added under the same name
                 // is a different provider, and would otherwise inherit it.
-                onConfirm={() => deleteProvider.mutate(row.instance, { onSuccess: () => clearTest(row.instance) })}
+                onConfirm={() =>
+                  deleteProvider.mutate(row.instance, {
+                    onSuccess: () => clearTest(row.instance),
+                  })
+                }
               >
                 Delete
               </ConfirmButton>
@@ -1085,10 +1261,12 @@ export function ProvidersPage() {
             <TestOutcome state={tests[row.instance]} />
           </div>
         ) : (
-          <span className="block text-right text-xs text-[var(--otari-muted)]">managed in config.yml</span>
+          <span className="block text-right text-xs text-[var(--otari-muted)]">
+            managed in config.yml
+          </span>
         ),
     },
-  ];
+  ]
 
   return (
     <div className="flex flex-col gap-6">
@@ -1103,8 +1281,8 @@ export function ProvidersPage() {
               variant="primary"
               isDisabled={!secretKeyConfigured}
               onPress={() => {
-                setEditing(null);
-                setAddOpen(true);
+                setEditing(null)
+                setAddOpen(true)
               }}
             >
               Add provider
@@ -1115,26 +1293,34 @@ export function ProvidersPage() {
 
       <ErrorBanner
         error={
-          meta.error ?? stored.error ?? settings.error ?? health.error ?? updateSettings.error ?? deleteProvider.error
+          meta.error ??
+          stored.error ??
+          settings.error ??
+          health.error ??
+          updateSettings.error ??
+          deleteProvider.error
         }
       />
 
       {!secretKeyConfigured ? (
         <InfoBanner tone="warning">
-          <code>OTARI_SECRET_KEY</code> is not set, so provider keys can't be encrypted at rest and adding providers
-          from the dashboard is disabled. Set it on the server and restart to add providers here. Providers defined in{" "}
-          <code>config.yml</code> keep working without it.
+          <code>OTARI_SECRET_KEY</code> is not set, so provider keys can't be
+          encrypted at rest and adding providers from the dashboard is disabled.
+          Set it on the server and restart to add providers here. Providers
+          defined in <code>config.yml</code> keep working without it.
         </InfoBanner>
       ) : null}
 
       {showOnboarding ? (
         <OnboardingPanel
           onAddProvider={() => {
-            setEditing(null);
-            setAddOpen(true);
+            setEditing(null)
+            setAddOpen(true)
           }}
           needsPricing={needsPricing}
-          onEnablePricing={() => updateSettings.mutate({ default_pricing: true })}
+          onEnablePricing={() =>
+            updateSettings.mutate({ default_pricing: true })
+          }
           enabling={updateSettings.isPending}
           secretKeyConfigured={secretKeyConfigured}
         />
@@ -1147,7 +1333,9 @@ export function ProvidersPage() {
           if it was opened while settings were still loading and the key then turns
           out to be unavailable, retract it so its submit can never reach the create
           mutation. The banner above explains why. */}
-      {addOpen && secretKeyConfigured ? <AddProviderForm onClose={() => setAddOpen(false)} /> : null}
+      {addOpen && secretKeyConfigured ? (
+        <AddProviderForm onClose={() => setAddOpen(false)} />
+      ) : null}
       {editingProvider ? (
         <EditProviderForm
           // Remount when the operator switches rows: the fields are seeded from
@@ -1183,5 +1371,5 @@ export function ProvidersPage() {
         />
       )}
     </div>
-  );
+  )
 }

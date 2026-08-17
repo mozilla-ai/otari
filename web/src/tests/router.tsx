@@ -1,25 +1,29 @@
 import {
-  RouterProvider,
   createMemoryHistory,
   createRootRoute,
   createRoute,
   createRouter,
-} from "@tanstack/react-router";
-import { act, render } from "@testing-library/react";
-import type { ReactElement, ReactNode } from "react";
+  RouterProvider,
+} from "@tanstack/react-router"
+import { act, render } from "@testing-library/react"
+import type { ReactElement, ReactNode } from "react"
 
-import { parseSearch, stringifySearch, validateSearch } from "@/shared/helpers/search";
+import {
+  parseSearch,
+  stringifySearch,
+  validateSearch,
+} from "@/shared/helpers/search"
 
 export interface TestRouterOptions {
   /** Where the router starts, query string included. */
-  url?: string;
+  url?: string
   /** Extra destinations, so a test can observe where a navigation landed. */
-  routes?: { path: string; element: ReactNode }[];
+  routes?: { path: string; element: ReactNode }[]
   /**
    * A layout to render every route inside, for testing the shell itself. It
    * must contain an `<Outlet>`, which is where the routes below it appear.
    */
-  shell?: ReactNode;
+  shell?: ReactNode
 }
 
 /**
@@ -41,25 +45,41 @@ export interface TestRouterOptions {
  * href assertion below pins the path and query but not the shipped hash prefix,
  * so the hash form is asserted in `web/e2e` instead.
  */
-export function withRouter({ url = "/", routes = [], shell }: TestRouterOptions = {}) {
-  const path = url.split("?")[0] || "/";
+export function withRouter({
+  url = "/",
+  routes = [],
+  shell,
+}: TestRouterOptions = {}) {
+  const path = url.split("?")[0] || "/"
   // The wrapper's children are not known until it renders, so the route reads
   // them from here. Safe because the router hooks subscribe to router state
   // themselves: a navigation re-renders the component under test directly,
   // rather than relying on this indirection to propagate anything.
-  const slot: { current: ReactNode } = { current: null };
+  const slot: { current: ReactNode } = { current: null }
 
   const rootRoute = createRootRoute({
     validateSearch,
     component: shell === undefined ? undefined : () => <>{shell}</>,
-  });
-  const subject = createRoute({ getParentRoute: () => rootRoute, path, component: () => <>{slot.current}</> });
+  })
+  const subject = createRoute({
+    getParentRoute: () => rootRoute,
+    path,
+    component: () => <>{slot.current}</>,
+  })
   const probes = routes.map((route) =>
-    createRoute({ getParentRoute: () => rootRoute, path: route.path, component: () => <>{route.element}</> }),
-  );
+    createRoute({
+      getParentRoute: () => rootRoute,
+      path: route.path,
+      component: () => <>{route.element}</>,
+    }),
+  )
   // A splat under every unlisted path, so a link or navigation the test does not
   // care about still resolves instead of failing on a missing route.
-  const rest = createRoute({ getParentRoute: () => rootRoute, path: "$", component: () => null });
+  const rest = createRoute({
+    getParentRoute: () => rootRoute,
+    path: "$",
+    component: () => null,
+  })
 
   const router = createRouter({
     routeTree: rootRoute.addChildren([subject, ...probes, rest]),
@@ -68,12 +88,12 @@ export function withRouter({ url = "/", routes = [], shell }: TestRouterOptions 
     // rewritten) exactly as the browser would read it.
     parseSearch,
     stringifySearch,
-  });
+  })
 
   return function Wrapper({ children }: { children: ReactNode }) {
-    slot.current = children;
-    return <RouterProvider router={router} />;
-  };
+    slot.current = children
+    return <RouterProvider router={router} />
+  }
 }
 
 /**
@@ -85,12 +105,15 @@ export function withRouter({ url = "/", routes = [], shell }: TestRouterOptions 
  * has to flush it first.
  */
 export function flushRouter(): Promise<void> {
-  return act(async () => {});
+  return act(async () => {})
 }
 
 /** `render` into a test router, already mounted. See {@link flushRouter}. */
-export async function renderWithRouter(ui: ReactElement, options: TestRouterOptions = {}) {
-  const result = render(ui, { wrapper: withRouter(options) });
-  await flushRouter();
-  return result;
+export async function renderWithRouter(
+  ui: ReactElement,
+  options: TestRouterOptions = {},
+) {
+  const result = render(ui, { wrapper: withRouter(options) })
+  await flushRouter()
+  return result
 }

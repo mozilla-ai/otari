@@ -1,7 +1,17 @@
-import type { UsageGroupRow, UsageSeriesPoint, UsageTotals } from "@/client";
+import type { UsageGroupRow, UsageSeriesPoint, UsageTotals } from "@/client"
 
-import { formatNumber, formatPct, formatTokens, formatUsdHeadline } from "@/shared/helpers/format";
-import { billedTokenTotal, cacheHitRate, costNeedsCaveat, formatLatency } from "./usageTotals";
+import {
+  formatNumber,
+  formatPct,
+  formatTokens,
+  formatUsdHeadline,
+} from "@/shared/helpers/format"
+import {
+  billedTokenTotal,
+  cacheHitRate,
+  costNeedsCaveat,
+  formatLatency,
+} from "./usageTotals"
 
 // Derivations for the share card. Everything here is pure so the numbers the card
 // publishes can be tested without a browser: the rasterizer cannot run in jsdom,
@@ -9,12 +19,12 @@ import { billedTokenTotal, cacheHitRate, costNeedsCaveat, formatLatency } from "
 
 export interface CardModel {
   /** The model name, or undefined for the server's folded "other" row. */
-  key: string | undefined;
-  label: string;
-  tokens: number;
-  cost: number;
-  requests: number;
-  isOther: boolean;
+  key: string | undefined
+  label: string
+  tokens: number
+  cost: number
+  requests: number
+  isOther: boolean
 }
 
 /**
@@ -38,36 +48,40 @@ export interface CardModel {
  * its prefix, which is honest rather than mangled.
  */
 export function collapseModelName(name: string): string {
-  return name.slice(name.lastIndexOf("/") + 1);
+  return name.slice(name.lastIndexOf("/") + 1)
 }
 
 export function cardModels(rows: UsageGroupRow[]): CardModel[] {
   return rows
     .map((row) => ({
       key: row.is_other ? undefined : (row.key ?? undefined),
-      label: row.is_other ? "other models" : row.key === null ? "(unknown)" : collapseModelName(row.key),
+      label: row.is_other
+        ? "other models"
+        : row.key === null
+          ? "(unknown)"
+          : collapseModelName(row.key),
       tokens: row.tokens,
       cost: row.cost,
       requests: row.requests,
       isOther: row.is_other,
     }))
-    .sort((a, b) => b.tokens - a.tokens);
+    .sort((a, b) => b.tokens - a.tokens)
 }
 
-export type StatId = "cost" | "requests" | "tokens" | "cacheHitRate" | "latency";
+export type StatId = "cost" | "requests" | "tokens" | "cacheHitRate" | "latency"
 
 export interface CardStat {
-  id: StatId;
-  label: string;
-  value: string;
+  id: StatId
+  label: string
+  value: string
   /** True when the value carries a caveat the card must show (currently only unpriced cost). */
-  caveated?: boolean;
+  caveated?: boolean
 }
 
 export interface StatInputs {
-  totals: UsageTotals | undefined;
-  series: UsageSeriesPoint[];
-  hideDollars: boolean;
+  totals: UsageTotals | undefined
+  series: UsageSeriesPoint[]
+  hideDollars: boolean
 }
 
 /**
@@ -80,44 +94,57 @@ export interface StatInputs {
  * normal state for a gateway serving only self-hosted models).
  */
 export function availableStats(inputs: StatInputs): CardStat[] {
-  const { totals, series, hideDollars } = inputs;
-  const stats: CardStat[] = [];
+  const { totals, series, hideDollars } = inputs
+  const stats: CardStat[] = []
   if (totals === undefined) {
-    return stats;
+    return stats
   }
 
   if (!hideDollars && totals.cost > 0) {
     // Headline dollars, not the page's tile format: the card sets this at up to
     // 168px, where "$2,390.99" is a third wider than "$2,391" for two digits that
     // carry nothing at that size.
-    stats.push({ id: "cost", label: "Spend", value: formatUsdHeadline(totals.cost), caveated: costNeedsCaveat(totals) });
+    stats.push({
+      id: "cost",
+      label: "Spend",
+      value: formatUsdHeadline(totals.cost),
+      caveated: costNeedsCaveat(totals),
+    })
   }
   if (totals.request_count > 0) {
-    stats.push({ id: "requests", label: "Requests", value: formatNumber(totals.request_count) });
+    stats.push({
+      id: "requests",
+      label: "Requests",
+      value: formatNumber(totals.request_count),
+    })
   }
-  const billed = billedTokenTotal(totals);
+  const billed = billedTokenTotal(totals)
   if (billed !== undefined && billed > 0) {
-    stats.push({ id: "tokens", label: "Tokens", value: formatTokens(billed) });
+    stats.push({ id: "tokens", label: "Tokens", value: formatTokens(billed) })
   }
-  const hitRate = cacheHitRate(series);
+  const hitRate = cacheHitRate(series)
   if (hitRate !== undefined) {
-    stats.push({ id: "cacheHitRate", label: "Cache hits", value: formatPct(hitRate) });
+    stats.push({
+      id: "cacheHitRate",
+      label: "Cache hits",
+      value: formatPct(hitRate),
+    })
   }
-  const latency = formatLatency(totals.avg_latency_ms);
+  const latency = formatLatency(totals.avg_latency_ms)
   if (latency !== undefined) {
-    stats.push({ id: "latency", label: "Avg latency", value: latency });
+    stats.push({ id: "latency", label: "Avg latency", value: latency })
   }
-  return stats;
+  return stats
 }
 
 // Stats that can appear on the card but never carry it. Cache hit rate is a
 // gateway-tuning number: it means little to a reader outside the deployment and
 // says nothing about what the work was.
-const NON_HERO: readonly StatId[] = ["cacheHitRate"];
+const NON_HERO: readonly StatId[] = ["cacheHitRate"]
 
 /** The stats offered as the card's lead, in descending claim strength. */
 export function heroCandidates(stats: CardStat[]): CardStat[] {
-  return stats.filter((stat) => !NON_HERO.includes(stat.id));
+  return stats.filter((stat) => !NON_HERO.includes(stat.id))
 }
 
 /**
@@ -128,7 +155,10 @@ export function heroCandidates(stats: CardStat[]): CardStat[] {
  * next available stat is promoted, so the card never renders a hole.
  * Undefined only when there is nothing at all to show, which is the empty state.
  */
-export function resolveHero(stats: CardStat[], preferred: StatId): CardStat | undefined {
-  const candidates = heroCandidates(stats);
-  return candidates.find((stat) => stat.id === preferred) ?? candidates[0];
+export function resolveHero(
+  stats: CardStat[],
+  preferred: StatId,
+): CardStat | undefined {
+  const candidates = heroCandidates(stats)
+  return candidates.find((stat) => stat.id === preferred) ?? candidates[0]
 }

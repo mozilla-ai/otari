@@ -1,12 +1,19 @@
-import { ComboBox, Description, Input, Label, ListBox, ListBoxItem } from "@heroui/react";
-import { useState } from "react";
-import type { ReactNode } from "react";
+import {
+  ComboBox,
+  Description,
+  Input,
+  Label,
+  ListBox,
+  ListBoxItem,
+} from "@heroui/react"
+import type { ReactNode } from "react"
+import { useState } from "react"
 
-import type { User } from "@/client";
+import type { User } from "@/client"
 
 interface Option {
-  id: string;
-  name: string;
+  id: string
+  name: string
 }
 
 // A required "owner" picker for a new API key: choose an existing user or type a
@@ -23,27 +30,35 @@ export function UserComboBox({
   placeholder = "Pick a user, or type a new id…",
   unknownHint,
 }: {
-  value: string;
-  onChange: (userId: string) => void;
-  users: User[];
-  description?: ReactNode;
-  label?: ReactNode;
-  placeholder?: string;
+  value: string
+  onChange: (userId: string) => void
+  users: User[]
+  description?: ReactNode
+  label?: ReactNode
+  placeholder?: string
   // What to say when the typed id is not an existing user. Defaults to the
   // keys-page truth (that endpoint creates the user); callers whose endpoint
   // rejects an unknown id must override it rather than promise a creation that
   // will 404.
-  unknownHint?: ReactNode;
+  unknownHint?: ReactNode
 }) {
   const options: Option[] = users
     .filter((u) => !u.user_id.startsWith("apikey-"))
-    .map((u) => ({ id: u.user_id, name: u.alias ? `${u.user_id} (${u.alias})` : u.user_id }));
+    .map((u) => ({
+      id: u.user_id,
+      name: u.alias ? `${u.user_id} (${u.alias})` : u.user_id,
+    }))
 
-  const [text, setText] = useState(value);
-  const query = text.trim().toLowerCase();
+  const [text, setText] = useState(value)
+  const query = text.trim().toLowerCase()
   const visible = options
-    .filter((o) => !query || o.id.toLowerCase().includes(query) || o.name.toLowerCase().includes(query))
-    .slice(0, 50);
+    .filter(
+      (o) =>
+        !query ||
+        o.id.toLowerCase().includes(query) ||
+        o.name.toLowerCase().includes(query),
+    )
+    .slice(0, 50)
 
   // What the input holds is not necessarily the user_id: when an option is picked
   // the ComboBox writes that option's display text back into the input, which
@@ -51,23 +66,21 @@ export function UserComboBox({
   // the canonical id, or the submitted owner would be the label and the keys API
   // would silently create a second user named after it.
   const resolveId = (raw: string): string => {
-    const trimmed = raw.trim();
-    const match = options.find((o) => o.id === trimmed || o.name === trimmed);
-    return match ? match.id : trimmed;
-  };
+    const trimmed = raw.trim()
+    const match = options.find((o) => o.id === trimmed || o.name === trimmed)
+    return match ? match.id : trimmed
+  }
 
-  const selectedId = resolveId(text);
-  const known = options.some((o) => o.id === selectedId);
+  const selectedId = resolveId(text)
+  const known = options.some((o) => o.id === selectedId)
   const creatingHint =
-    selectedId !== "" && !known ? (
-      (unknownHint ?? (
-        <span>
-          Creates a new user <code>{selectedId}</code>.
-        </span>
-      ))
-    ) : (
-      (description ?? "Spend and budgets track against this user.")
-    );
+    selectedId !== "" && !known
+      ? (unknownHint ?? (
+          <span>
+            Creates a new user <code>{selectedId}</code>.
+          </span>
+        ))
+      : (description ?? "Spend and budgets track against this user.")
 
   return (
     <ComboBox.Root
@@ -76,21 +89,23 @@ export function UserComboBox({
       menuTrigger="focus"
       inputValue={text}
       onInputChange={(next) => {
-        setText(next);
-        onChange(resolveId(next));
+        setText(next)
+        onChange(resolveId(next))
       }}
       onSelectionChange={(key) => {
         if (key != null) {
-          const id = String(key);
-          setText(id);
-          onChange(id);
+          const id = String(key)
+          setText(id)
+          onChange(id)
         }
       }}
       // Cap the width so the field and its dropdown trigger stay within easy
       // reach instead of stretching across a wide form.
       className="flex max-w-md flex-col gap-1"
     >
-      <Label className="text-sm font-medium text-[var(--otari-ink)]">{label}</Label>
+      <Label className="text-sm font-medium text-[var(--otari-ink)]">
+        {label}
+      </Label>
       <ComboBox.InputGroup>
         {/* Not a credential field: keep password managers out, and select on focus
             so typing replaces the current value rather than appending. */}
@@ -112,7 +127,9 @@ export function UserComboBox({
           )}
         </ListBox>
       </ComboBox.Popover>
-      <Description className="text-xs text-[var(--otari-muted)]">{creatingHint}</Description>
+      <Description className="text-xs text-[var(--otari-muted)]">
+        {creatingHint}
+      </Description>
     </ComboBox.Root>
-  );
+  )
 }

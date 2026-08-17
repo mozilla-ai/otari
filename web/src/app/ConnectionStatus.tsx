@@ -1,14 +1,14 @@
-import { useQueryClient } from "@tanstack/react-query";
-import { useEffect, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query"
+import { useEffect, useState } from "react"
 
-import { ApiError } from "@/shared/api/client";
+import { ApiError } from "@/shared/api/client"
 
 // apiFetch normalizes an unreachable gateway to ApiError status 0 ("Network
 // error: could not reach the gateway."). A 401/403 is a different failure: the
 // backend answered, it just rejected the key, and that already bounces to
 // sign-in, so it is not "can't connect".
 function isUnreachable(error: unknown): boolean {
-  return error instanceof ApiError && error.status === 0;
+  return error instanceof ApiError && error.status === 0
 }
 
 // True while at least one query is currently failing to reach the gateway. It
@@ -16,18 +16,23 @@ function isUnreachable(error: unknown): boolean {
 // same wherever the operator is standing, and it clears itself the moment a
 // request succeeds again.
 function useGatewayUnreachable(): boolean {
-  const queryClient = useQueryClient();
-  const [unreachable, setUnreachable] = useState(false);
+  const queryClient = useQueryClient()
+  const [unreachable, setUnreachable] = useState(false)
 
   useEffect(() => {
-    const cache = queryClient.getQueryCache();
+    const cache = queryClient.getQueryCache()
     const compute = () =>
-      cache.getAll().some((query) => query.state.status === "error" && isUnreachable(query.state.error));
-    setUnreachable(compute());
-    return cache.subscribe(() => setUnreachable(compute()));
-  }, [queryClient]);
+      cache
+        .getAll()
+        .some(
+          (query) =>
+            query.state.status === "error" && isUnreachable(query.state.error),
+        )
+    setUnreachable(compute())
+    return cache.subscribe(() => setUnreachable(compute()))
+  }, [queryClient])
 
-  return unreachable;
+  return unreachable
 }
 
 // A bottom-right toast that surfaces a lost backend connection at the app level,
@@ -36,9 +41,9 @@ function useGatewayUnreachable(): boolean {
 // dismissible: it is tied to live state and disappears on its own once the
 // gateway responds.
 export function ConnectionStatus() {
-  const unreachable = useGatewayUnreachable();
+  const unreachable = useGatewayUnreachable()
   if (!unreachable) {
-    return null;
+    return null
   }
 
   return (
@@ -55,16 +60,21 @@ export function ConnectionStatus() {
         aria-hidden
         className="mt-0.5 h-5 w-5 shrink-0"
       >
-        <path d="M12 9v4M12 17h.01" strokeLinecap="round" strokeLinejoin="round" />
+        <path
+          d="M12 9v4M12 17h.01"
+          strokeLinecap="round"
+          strokeLinejoin="round"
+        />
         <path
           d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"
           strokeLinejoin="round"
         />
       </svg>
       <span>
-        <strong className="font-semibold">Can’t reach the gateway.</strong> The backend isn’t responding; data won’t
-        load or save until the connection is restored.
+        <strong className="font-semibold">Can’t reach the gateway.</strong> The
+        backend isn’t responding; data won’t load or save until the connection
+        is restored.
       </span>
     </div>
-  );
+  )
 }

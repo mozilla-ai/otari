@@ -1,7 +1,6 @@
-import { createHashHistory, createRouter } from "@tanstack/react-router";
-
-import { parseSearch, stringifySearch } from "@/shared/helpers/search";
-import { routeTree } from "@/routeTree.gen";
+import { createHashHistory, createRouter } from "@tanstack/react-router"
+import { routeTree } from "@/routeTree.gen"
+import { parseSearch, stringifySearch } from "@/shared/helpers/search"
 
 export const router = createRouter({
   routeTree,
@@ -19,10 +18,10 @@ export const router = createRouter({
   defaultPendingComponent: () => <div role="status">Loading page…</div>,
   defaultPendingMs: 0,
   defaultPendingMinMs: 0,
-});
+})
 
 declare module "@tanstack/react-router" {
   interface Register {
-    router: typeof router;
+    router: typeof router
   }
 }

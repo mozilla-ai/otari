@@ -1,37 +1,69 @@
-import { AlertDialog, Button, Card, Chip } from "@heroui/react";
-import { type ReactNode, useCallback, useEffect, useMemo, useState } from "react";
-
-import { useBudgets, useCreateUser, useDeleteUser, useUpdateUser, useUsers } from "@/shared/api/hooks";
-import type { Budget, CreateUserRequest, UpdateUserRequest, User } from "@/client";
-import { BulkActionBar } from "@/shared/components/BulkActionBar";
-import { ConfirmDialog } from "@/shared/components/ConfirmDialog";
-import { DataTable, type DataTableColumn } from "@/shared/components/DataTable";
-import { Field } from "@/shared/components/Field";
-import { accessLabel, ModelScopeControl } from "@/features/models/ModelScopeControl";
-import { CopyableValue, EmptyState, ErrorBanner, FilterSelect, PageHeader } from "@/shared/components/ui";
-import { resolveSelectedIds, useTableSelection } from "@/shared/helpers/tableSelection";
+import { AlertDialog, Button, Card, Chip } from "@heroui/react"
+import {
+  type ReactNode,
+  useCallback,
+  useEffect,
+  useMemo,
+  useState,
+} from "react"
+import type {
+  Budget,
+  CreateUserRequest,
+  UpdateUserRequest,
+  User,
+} from "@/client"
+import {
+  accessLabel,
+  ModelScopeControl,
+} from "@/features/models/ModelScopeControl"
+import {
+  useBudgets,
+  useCreateUser,
+  useDeleteUser,
+  useUpdateUser,
+  useUsers,
+} from "@/shared/api/hooks"
+import { BulkActionBar } from "@/shared/components/BulkActionBar"
+import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
+import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
+import { Field } from "@/shared/components/Field"
+import {
+  CopyableValue,
+  EmptyState,
+  ErrorBanner,
+  FilterSelect,
+  PageHeader,
+} from "@/shared/components/ui"
+import {
+  resolveSelectedIds,
+  useTableSelection,
+} from "@/shared/helpers/tableSelection"
 
 // ---------- formatting ----------
 
-const usd = new Intl.NumberFormat(undefined, { style: "currency", currency: "USD", maximumFractionDigits: 4 });
+const usd = new Intl.NumberFormat(undefined, {
+  style: "currency",
+  currency: "USD",
+  maximumFractionDigits: 4,
+})
 
 function formatUSD(value: number): string {
-  return usd.format(value);
+  return usd.format(value)
 }
 
 // A user auto-created to own a single API key (id "apikey-..."), rather than one
 // an operator named. Shown as such so the list is not full of opaque virtual ids.
 // Stable row-key getter so DataTable's per-row cache holds across re-renders.
-const getUserRowKey = (u: User): string => u.user_id;
+const getUserRowKey = (u: User): string => u.user_id
 
-const isVirtualUser = (userId: string): boolean => userId.startsWith("apikey-");
+const isVirtualUser = (userId: string): boolean => userId.startsWith("apikey-")
 
 function shortId(budgetId: string): string {
-  return budgetId.split("-")[0];
+  return budgetId.split("-")[0]
 }
 
 function budgetLabel(budget: Budget): string {
-  return budget.name ?? shortId(budget.budget_id);
+  return budget.name ?? shortId(budget.budget_id)
 }
 
 // ---------- budget picker ----------
@@ -41,13 +73,16 @@ function BudgetSelect({
   onChange,
   budgets,
 }: {
-  value: string | null;
-  onChange: (budgetId: string | null) => void;
-  budgets: Budget[];
+  value: string | null
+  onChange: (budgetId: string | null) => void
+  budgets: Budget[]
 }) {
   return (
     <div className="flex flex-col gap-1">
-      <label htmlFor="user-budget" className="text-sm font-medium text-[var(--otari-ink)]">
+      <label
+        htmlFor="user-budget"
+        className="text-sm font-medium text-[var(--otari-ink)]"
+      >
         Budget
       </label>
       <select
@@ -60,43 +95,48 @@ function BudgetSelect({
         {budgets.map((b) => (
           <option key={b.budget_id} value={b.budget_id}>
             {budgetLabel(b)}
-            {b.max_budget === null ? " · no limit" : ` · ${formatUSD(b.max_budget)}`}
+            {b.max_budget === null
+              ? " · no limit"
+              : ` · ${formatUSD(b.max_budget)}`}
           </option>
         ))}
       </select>
       <span className="text-xs text-[var(--otari-muted)]">
-        The spending limit this user is held to. Manage budgets on the Budgets page.
+        The spending limit this user is held to. Manage budgets on the Budgets
+        page.
       </span>
     </div>
-  );
+  )
 }
 
 // ---------- create / edit forms (inline cards, matching KeysPage) ----------
 
 function CreateUserForm({ onClose }: { onClose: () => void }) {
-  const create = useCreateUser();
-  const budgets = useBudgets();
-  const [userId, setUserId] = useState("");
-  const [alias, setAlias] = useState("");
-  const [budgetId, setBudgetId] = useState<string | null>(null);
-  const [allowedModels, setAllowedModels] = useState<string[] | null>(null);
-  const [scopeValid, setScopeValid] = useState(true);
+  const create = useCreateUser()
+  const budgets = useBudgets()
+  const [userId, setUserId] = useState("")
+  const [alias, setAlias] = useState("")
+  const [budgetId, setBudgetId] = useState<string | null>(null)
+  const [allowedModels, setAllowedModels] = useState<string[] | null>(null)
+  const [scopeValid, setScopeValid] = useState(true)
 
   const submit = () => {
-    if (create.isPending || !scopeValid || userId.trim() === "") return;
+    if (create.isPending || !scopeValid || userId.trim() === "") return
     const body: CreateUserRequest = {
       user_id: userId.trim(),
       alias: alias.trim() || null,
       budget_id: budgetId,
       allowed_models: allowedModels,
-    };
-    create.mutate(body, { onSuccess: onClose });
-  };
+    }
+    create.mutate(body, { onSuccess: onClose })
+  }
 
   return (
     <Card>
       <Card.Content className="flex flex-col gap-4 p-5">
-        <div className="text-sm font-semibold text-[var(--otari-ink)]">Create user</div>
+        <div className="text-sm font-semibold text-[var(--otari-ink)]">
+          Create user
+        </div>
         <ErrorBanner error={create.error} />
         <div className="grid gap-4 sm:grid-cols-2">
           <Field
@@ -108,16 +148,25 @@ function CreateUserForm({ onClose }: { onClose: () => void }) {
             autoFocus
             description="The identifier callers send as the `user` field; spend and budgets track against it."
           />
-          <Field label="Alias (optional)" value={alias} onChange={setAlias} placeholder="Alice" />
+          <Field
+            label="Alias (optional)"
+            value={alias}
+            onChange={setAlias}
+            placeholder="Alice"
+          />
         </div>
-        <BudgetSelect value={budgetId} onChange={setBudgetId} budgets={budgets.data ?? []} />
+        <BudgetSelect
+          value={budgetId}
+          onChange={setBudgetId}
+          budgets={budgets.data ?? []}
+        />
         <ModelScopeControl
           title="Model access (default for this user's keys)"
           description="The models this user's keys may list and call by default. A key can narrow this, but never exceed it."
           initial={null}
           onChange={(value, valid) => {
-            setAllowedModels(value);
-            setScopeValid(valid);
+            setAllowedModels(value)
+            setScopeValid(valid)
           }}
         />
         <div className="flex gap-2">
@@ -134,26 +183,28 @@ function CreateUserForm({ onClose }: { onClose: () => void }) {
         </div>
       </Card.Content>
     </Card>
-  );
+  )
 }
 
 function EditUserForm({ user, onClose }: { user: User; onClose: () => void }) {
-  const update = useUpdateUser();
-  const budgets = useBudgets();
-  const [alias, setAlias] = useState(user.alias ?? "");
-  const [budgetId, setBudgetId] = useState<string | null>(user.budget_id);
-  const [allowedModels, setAllowedModels] = useState<string[] | null>(user.allowed_models);
-  const [scopeValid, setScopeValid] = useState(true);
+  const update = useUpdateUser()
+  const budgets = useBudgets()
+  const [alias, setAlias] = useState(user.alias ?? "")
+  const [budgetId, setBudgetId] = useState<string | null>(user.budget_id)
+  const [allowedModels, setAllowedModels] = useState<string[] | null>(
+    user.allowed_models,
+  )
+  const [scopeValid, setScopeValid] = useState(true)
 
   const submit = () => {
-    if (update.isPending || !scopeValid) return;
+    if (update.isPending || !scopeValid) return
     const body: UpdateUserRequest = {
       alias: alias.trim() || null,
       budget_id: budgetId,
       allowed_models: allowedModels,
-    };
-    update.mutate({ id: user.user_id, body }, { onSuccess: onClose });
-  };
+    }
+    update.mutate({ id: user.user_id, body }, { onSuccess: onClose })
+  }
 
   return (
     <Card>
@@ -162,19 +213,32 @@ function EditUserForm({ user, onClose }: { user: User; onClose: () => void }) {
           Edit <code>{user.user_id}</code>
         </div>
         <ErrorBanner error={update.error} />
-        <Field label="Alias" value={alias} onChange={setAlias} placeholder="Alice" />
-        <BudgetSelect value={budgetId} onChange={setBudgetId} budgets={budgets.data ?? []} />
+        <Field
+          label="Alias"
+          value={alias}
+          onChange={setAlias}
+          placeholder="Alice"
+        />
+        <BudgetSelect
+          value={budgetId}
+          onChange={setBudgetId}
+          budgets={budgets.data ?? []}
+        />
         <ModelScopeControl
           title="Model access (default for this user's keys)"
           description="The models this user's keys may list and call by default. A key can narrow this, but never exceed it."
           initial={user.allowed_models}
           onChange={(value, valid) => {
-            setAllowedModels(value);
-            setScopeValid(valid);
+            setAllowedModels(value)
+            setScopeValid(valid)
           }}
         />
         <div className="flex gap-2">
-          <Button variant="primary" isDisabled={update.isPending || !scopeValid} onPress={submit}>
+          <Button
+            variant="primary"
+            isDisabled={update.isPending || !scopeValid}
+            onPress={submit}
+          >
             {update.isPending ? "Saving…" : "Save changes"}
           </Button>
           <Button variant="ghost" onPress={onClose}>
@@ -183,7 +247,7 @@ function EditUserForm({ user, onClose }: { user: User; onClose: () => void }) {
         </div>
       </Card.Content>
     </Card>
-  );
+  )
 }
 
 // ---------- inline confirm ----------
@@ -195,33 +259,43 @@ function InlineConfirm({
   isPending,
   onConfirm,
 }: {
-  trigger: string;
-  message: ReactNode;
-  confirmLabel: string;
-  isPending: boolean;
-  onConfirm: () => void;
+  trigger: string
+  message: ReactNode
+  confirmLabel: string
+  isPending: boolean
+  onConfirm: () => void
 }) {
-  const [armed, setArmed] = useState(false);
+  const [armed, setArmed] = useState(false)
   if (!armed) {
     return (
       <Button size="sm" variant="danger-soft" onPress={() => setArmed(true)}>
         {trigger}
       </Button>
-    );
+    )
   }
   return (
     <div className="flex flex-col items-end gap-1.5 rounded-lg border border-amber-200 bg-amber-50 p-2 text-right">
       <span className="max-w-xs text-xs text-amber-800">{message}</span>
       <span className="inline-flex gap-1">
-        <Button size="sm" variant="danger" isDisabled={isPending} onPress={onConfirm}>
+        <Button
+          size="sm"
+          variant="danger"
+          isDisabled={isPending}
+          onPress={onConfirm}
+        >
           {confirmLabel}
         </Button>
-        <Button size="sm" variant="ghost" isDisabled={isPending} onPress={() => setArmed(false)}>
+        <Button
+          size="sm"
+          variant="ghost"
+          isDisabled={isPending}
+          onPress={() => setArmed(false)}
+        >
           Cancel
         </Button>
       </span>
     </div>
-  );
+  )
 }
 
 // ---------- status + access chips ----------
@@ -235,23 +309,23 @@ function StatusChip({ user }: { user: User }) {
     <Chip size="sm" color="accent">
       Active
     </Chip>
-  );
+  )
 }
 
 function AccessChip({ allowed }: { allowed: string[] | null }) {
-  const { text, tone } = accessLabel(allowed);
+  const { text, tone } = accessLabel(allowed)
   const cls =
     tone === "danger"
       ? "text-red-700 font-medium"
       : tone === "muted"
         ? "text-[var(--otari-muted)]"
-        : "text-[var(--otari-brand-dark)] font-medium";
-  const title = allowed && allowed.length > 0 ? allowed.join(", ") : undefined;
+        : "text-[var(--otari-brand-dark)] font-medium"
+  const title = allowed && allowed.length > 0 ? allowed.join(", ") : undefined
   return (
     <span className={`text-xs ${cls}`} title={title}>
       {text}
     </span>
-  );
+  )
 }
 
 // ---------- onboarding ----------
@@ -266,21 +340,21 @@ function AssignBudgetDialog({
   error,
   onAssign,
 }: {
-  isOpen: boolean;
-  onOpenChange: (open: boolean) => void;
-  budgets: Budget[];
-  count: number;
-  isPending: boolean;
-  error: unknown;
-  onAssign: (budgetId: string) => void;
+  isOpen: boolean
+  onOpenChange: (open: boolean) => void
+  budgets: Budget[]
+  count: number
+  isPending: boolean
+  error: unknown
+  onAssign: (budgetId: string) => void
 }) {
-  const [budgetId, setBudgetId] = useState("");
+  const [budgetId, setBudgetId] = useState("")
   // Reset the picker each time the dialog opens so a prior selection is not inherited.
   useEffect(() => {
     if (isOpen) {
-      setBudgetId("");
+      setBudgetId("")
     }
-  }, [isOpen]);
+  }, [isOpen])
   return (
     <AlertDialog isOpen={isOpen} onOpenChange={onOpenChange}>
       {isOpen ? (
@@ -292,7 +366,8 @@ function AssignBudgetDialog({
               </AlertDialog.Header>
               <AlertDialog.Body className="flex flex-col gap-4">
                 <p className="text-sm text-[var(--otari-muted)]">
-                  Assign a budget to {count} selected {count === 1 ? "user" : "users"}.
+                  Assign a budget to {count} selected{" "}
+                  {count === 1 ? "user" : "users"}.
                 </p>
                 <FilterSelect
                   label="Budget"
@@ -300,16 +375,28 @@ function AssignBudgetDialog({
                   onChange={setBudgetId}
                   options={[
                     { value: "", label: "Select a budget…" },
-                    ...budgets.map((b) => ({ value: b.budget_id, label: budgetLabel(b) })),
+                    ...budgets.map((b) => ({
+                      value: b.budget_id,
+                      label: budgetLabel(b),
+                    })),
                   ]}
                 />
                 <ErrorBanner error={error} />
               </AlertDialog.Body>
               <AlertDialog.Footer>
-                <Button variant="ghost" isDisabled={isPending} onPress={() => onOpenChange(false)}>
+                <Button
+                  variant="ghost"
+                  isDisabled={isPending}
+                  onPress={() => onOpenChange(false)}
+                >
                   Cancel
                 </Button>
-                <Button variant="primary" isDisabled={!budgetId} isPending={isPending} onPress={() => onAssign(budgetId)}>
+                <Button
+                  variant="primary"
+                  isDisabled={!budgetId}
+                  isPending={isPending}
+                  onPress={() => onAssign(budgetId)}
+                >
                   Assign
                 </Button>
               </AlertDialog.Footer>
@@ -318,150 +405,182 @@ function AssignBudgetDialog({
         </AlertDialog.Backdrop>
       ) : null}
     </AlertDialog>
-  );
+  )
 }
 
 // ---------- page ----------
 
 export function UsersPage() {
-  const users = useUsers();
-  const budgets = useBudgets();
-  const updateUser = useUpdateUser();
-  const deleteUser = useDeleteUser();
+  const users = useUsers()
+  const budgets = useBudgets()
+  const updateUser = useUpdateUser()
+  const deleteUser = useDeleteUser()
 
-  const [addOpen, setAddOpen] = useState(false);
-  const [editing, setEditing] = useState<string | null>(null);
-  const [showVirtual, setShowVirtual] = useState(false);
+  const [addOpen, setAddOpen] = useState(false)
+  const [editing, setEditing] = useState<string | null>(null)
+  const [showVirtual, setShowVirtual] = useState(false)
 
-  const allRows = users.data ?? [];
-  const loading = users.isLoading;
+  const allRows = users.data ?? []
+  const loading = users.isLoading
   // Virtual users are per-key shadows the API auto-creates; they clutter the list
   // of people/teams you actually manage, so hide them behind a toggle.
-  const virtualCount = allRows.filter((u) => isVirtualUser(u.user_id)).length;
-  const rows = showVirtual ? allRows : allRows.filter((u) => !isVirtualUser(u.user_id));
-  const editingUser = allRows.find((u) => u.user_id === editing) ?? null;
-  const showOnboarding = !loading && rows.length === 0 && !addOpen;
+  const virtualCount = allRows.filter((u) => isVirtualUser(u.user_id)).length
+  const rows = showVirtual
+    ? allRows
+    : allRows.filter((u) => !isVirtualUser(u.user_id))
+  const editingUser = allRows.find((u) => u.user_id === editing) ?? null
+  const showOnboarding = !loading && rows.length === 0 && !addOpen
 
-  const budgetById = useMemo(() => new Map((budgets.data ?? []).map((b) => [b.budget_id, b])), [budgets.data]);
-  const selection = useTableSelection();
-  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
-  const [assignOpen, setAssignOpen] = useState(false);
-  const [bulkError, setBulkError] = useState<unknown>(undefined);
-  const [bulkPending, setBulkPending] = useState(false);
+  const budgetById = useMemo(
+    () => new Map((budgets.data ?? []).map((b) => [b.budget_id, b])),
+    [budgets.data],
+  )
+  const selection = useTableSelection()
+  const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false)
+  const [assignOpen, setAssignOpen] = useState(false)
+  const [bulkError, setBulkError] = useState<unknown>(undefined)
+  const [bulkPending, setBulkPending] = useState(false)
 
-  const selectableKeys = rows.map((u) => u.user_id);
-  const selectedIds = resolveSelectedIds(selection.selectedKeys, selectableKeys);
+  const selectableKeys = rows.map((u) => u.user_id)
+  const selectedIds = resolveSelectedIds(selection.selectedKeys, selectableKeys)
 
   const setBlocked = useCallback(
-    (u: User, blocked: boolean) => updateUser.mutate({ id: u.user_id, body: { blocked } }),
+    (u: User, blocked: boolean) =>
+      updateUser.mutate({ id: u.user_id, body: { blocked } }),
     [updateUser.mutate],
-  );
+  )
 
-  const runBulk = async (action: (id: string) => Promise<unknown>, onDone: () => void) => {
-    setBulkPending(true);
-    setBulkError(undefined);
+  const runBulk = async (
+    action: (id: string) => Promise<unknown>,
+    onDone: () => void,
+  ) => {
+    setBulkPending(true)
+    setBulkError(undefined)
     try {
       for (const id of selectedIds) {
-        await action(id);
+        await action(id)
       }
-      selection.clear();
-      onDone();
+      selection.clear()
+      onDone()
     } catch (error) {
-      setBulkError(error);
+      setBulkError(error)
     } finally {
-      setBulkPending(false);
+      setBulkPending(false)
     }
-  };
+  }
 
   // Memoized on the values the cells actually read so DataTable's per-row
   // cache holds across selection clicks; see the DataTable docstring.
-  const columns = useMemo<DataTableColumn<User>[]>(() => [
-    {
-      id: "user",
-      header: "User",
-      isRowHeader: true,
-      cell: (u) => (
-        <div className="flex flex-col gap-0.5">
-          <span className="inline-flex items-center gap-1.5">
-            {/* The `user` field callers send, and the user_id every management
+  const columns = useMemo<DataTableColumn<User>[]>(
+    () => [
+      {
+        id: "user",
+        header: "User",
+        isRowHeader: true,
+        cell: (u) => (
+          <div className="flex flex-col gap-0.5">
+            <span className="inline-flex items-center gap-1.5">
+              {/* The `user` field callers send, and the user_id every management
                 endpoint and usage filter takes. */}
-            <CopyableValue value={u.user_id} label="user id">
-              <code className="text-xs font-medium text-[var(--otari-ink)]">{u.user_id}</code>
-            </CopyableValue>
-            {isVirtualUser(u.user_id) ? (
-              <Chip size="sm" color="default">
-                virtual
-              </Chip>
+              <CopyableValue value={u.user_id} label="user id">
+                <code className="text-xs font-medium text-[var(--otari-ink)]">
+                  {u.user_id}
+                </code>
+              </CopyableValue>
+              {isVirtualUser(u.user_id) ? (
+                <Chip size="sm" color="default">
+                  virtual
+                </Chip>
+              ) : null}
+            </span>
+            {u.alias ? (
+              <span className="text-xs text-[var(--otari-muted)]">
+                {u.alias}
+              </span>
+            ) : null}
+          </div>
+        ),
+      },
+      { id: "status", header: "Status", cell: (u) => <StatusChip user={u} /> },
+      {
+        id: "budget",
+        header: "Budget",
+        cell: (u) =>
+          u.budget_id ? (
+            <span className="text-[var(--otari-muted)]" title={u.budget_id}>
+              {budgetById.get(u.budget_id)
+                ? budgetLabel(budgetById.get(u.budget_id)!)
+                : shortId(u.budget_id)}
+            </span>
+          ) : (
+            <span className="text-[var(--otari-muted)]">—</span>
+          ),
+      },
+      {
+        id: "spend",
+        header: "Spend",
+        cell: (u) => (
+          <span className="text-[var(--otari-muted)]">
+            {formatUSD(u.spend)}
+            {u.reserved > 0 ? (
+              <span> (+{formatUSD(u.reserved)} held)</span>
             ) : null}
           </span>
-          {u.alias ? <span className="text-xs text-[var(--otari-muted)]">{u.alias}</span> : null}
-        </div>
-      ),
-    },
-    { id: "status", header: "Status", cell: (u) => <StatusChip user={u} /> },
-    {
-      id: "budget",
-      header: "Budget",
-      cell: (u) =>
-        u.budget_id ? (
-          <span className="text-[var(--otari-muted)]" title={u.budget_id}>
-            {budgetById.get(u.budget_id) ? budgetLabel(budgetById.get(u.budget_id)!) : shortId(u.budget_id)}
-          </span>
-        ) : (
-          <span className="text-[var(--otari-muted)]">—</span>
         ),
-    },
-    {
-      id: "spend",
-      header: "Spend",
-      cell: (u) => (
-        <span className="text-[var(--otari-muted)]">
-          {formatUSD(u.spend)}
-          {u.reserved > 0 ? <span> (+{formatUSD(u.reserved)} held)</span> : null}
-        </span>
-      ),
-    },
-    { id: "access", header: "Model access", cell: (u) => <AccessChip allowed={u.allowed_models} /> },
-    {
-      id: "actions",
-      header: "Actions",
-      align: "end",
-      cell: (u) => (
-        <div className="flex items-center justify-end gap-1.5">
-          <Button
-            size="sm"
-            variant="outline"
-            isDisabled={updateUser.isPending}
-            onPress={() => setBlocked(u, !u.blocked)}
-          >
-            {u.blocked ? "Unblock" : "Block"}
-          </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            onPress={() => {
-              setAddOpen(false);
-              setEditing(u.user_id);
-            }}
-          >
-            Edit
-          </Button>
-          <InlineConfirm
-            trigger="Delete"
-            confirmLabel="Delete user"
-            isPending={deleteUser.isPending}
-            message={
-              <>
-                Delete <strong>{u.user_id}</strong>? This deactivates its API keys and hides the user; usage history is
-                preserved.
-              </>
-            }
-            onConfirm={() => deleteUser.mutate(u.user_id)}
-          />
-        </div>
-      ),
-    },
-  ], [budgetById, updateUser.isPending, deleteUser.isPending, deleteUser.mutate, setBlocked]);
+      },
+      {
+        id: "access",
+        header: "Model access",
+        cell: (u) => <AccessChip allowed={u.allowed_models} />,
+      },
+      {
+        id: "actions",
+        header: "Actions",
+        align: "end",
+        cell: (u) => (
+          <div className="flex items-center justify-end gap-1.5">
+            <Button
+              size="sm"
+              variant="outline"
+              isDisabled={updateUser.isPending}
+              onPress={() => setBlocked(u, !u.blocked)}
+            >
+              {u.blocked ? "Unblock" : "Block"}
+            </Button>
+            <Button
+              size="sm"
+              variant="ghost"
+              onPress={() => {
+                setAddOpen(false)
+                setEditing(u.user_id)
+              }}
+            >
+              Edit
+            </Button>
+            <InlineConfirm
+              trigger="Delete"
+              confirmLabel="Delete user"
+              isPending={deleteUser.isPending}
+              message={
+                <>
+                  Delete <strong>{u.user_id}</strong>? This deactivates its API
+                  keys and hides the user; usage history is preserved.
+                </>
+              }
+              onConfirm={() => deleteUser.mutate(u.user_id)}
+            />
+          </div>
+        ),
+      },
+    ],
+    [
+      budgetById,
+      updateUser.isPending,
+      deleteUser.isPending,
+      deleteUser.mutate,
+      setBlocked,
+    ],
+  )
 
   return (
     <div className="flex flex-col gap-6">
@@ -473,8 +592,8 @@ export function UsersPage() {
             <Button
               variant="primary"
               onPress={() => {
-                setEditing(null);
-                setAddOpen(true);
+                setEditing(null)
+                setAddOpen(true)
               }}
             >
               Create user
@@ -483,7 +602,9 @@ export function UsersPage() {
         }
       />
 
-      <ErrorBanner error={users.error ?? updateUser.error ?? deleteUser.error} />
+      <ErrorBanner
+        error={users.error ?? updateUser.error ?? deleteUser.error}
+      />
 
       {showOnboarding ? (
         <EmptyState
@@ -491,15 +612,19 @@ export function UsersPage() {
           description="A user owns API keys and carries the budget and default model access those keys inherit. Create a user here, then issue its keys on the API keys page."
           actionLabel="Create your first user"
           onAction={() => {
-            setEditing(null);
-            setAddOpen(true);
+            setEditing(null)
+            setAddOpen(true)
           }}
         />
       ) : null}
 
       {virtualCount > 0 ? (
         <label className="flex w-fit items-center gap-2 text-xs text-[var(--otari-muted)]">
-          <input type="checkbox" checked={showVirtual} onChange={(e) => setShowVirtual(e.target.checked)} />
+          <input
+            type="checkbox"
+            checked={showVirtual}
+            onChange={(e) => setShowVirtual(e.target.checked)}
+          />
           Show auto-created (virtual) users ({virtualCount})
         </label>
       ) : null}
@@ -507,7 +632,13 @@ export function UsersPage() {
       {addOpen ? <CreateUserForm onClose={() => setAddOpen(false)} /> : null}
       {/* Key on the user id so switching which user is edited remounts the form:
           its fields seed from `user` on mount only. */}
-      {editingUser ? <EditUserForm key={editingUser.user_id} user={editingUser} onClose={() => setEditing(null)} /> : null}
+      {editingUser ? (
+        <EditUserForm
+          key={editingUser.user_id}
+          user={editingUser}
+          onClose={() => setEditing(null)}
+        />
+      ) : null}
 
       {selectedIds.length > 0 ? (
         <BulkActionBar
@@ -518,10 +649,18 @@ export function UsersPage() {
           onSelectAllMatching={() => {}}
           onClear={selection.clear}
         >
-          <Button size="sm" variant="primary" onPress={() => setAssignOpen(true)}>
+          <Button
+            size="sm"
+            variant="primary"
+            onPress={() => setAssignOpen(true)}
+          >
             Assign budget
           </Button>
-          <Button size="sm" variant="danger" onPress={() => setBulkDeleteOpen(true)}>
+          <Button
+            size="sm"
+            variant="danger"
+            onPress={() => setBulkDeleteOpen(true)}
+          >
             Delete
           </Button>
         </BulkActionBar>
@@ -554,7 +693,12 @@ export function UsersPage() {
         confirmLabel="Delete"
         isPending={bulkPending}
         error={bulkError}
-        onConfirm={() => runBulk((id) => deleteUser.mutateAsync(id), () => setBulkDeleteOpen(false))}
+        onConfirm={() =>
+          runBulk(
+            (id) => deleteUser.mutateAsync(id),
+            () => setBulkDeleteOpen(false),
+          )
+        }
       />
 
       <AssignBudgetDialog
@@ -565,9 +709,13 @@ export function UsersPage() {
         isPending={bulkPending}
         error={bulkError}
         onAssign={(budgetId) =>
-          runBulk((id) => updateUser.mutateAsync({ id, body: { budget_id: budgetId } }), () => setAssignOpen(false))
+          runBulk(
+            (id) =>
+              updateUser.mutateAsync({ id, body: { budget_id: budgetId } }),
+            () => setAssignOpen(false),
+          )
         }
       />
     </div>
-  );
+  )
 }

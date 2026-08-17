@@ -1,17 +1,24 @@
-import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { useLocation } from "@tanstack/react-router";
-import { render, screen, waitFor, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
-import type { ReactElement } from "react";
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { useLocation } from "@tanstack/react-router"
+import { render, screen, waitFor, within } from "@testing-library/react"
+import userEvent from "@testing-library/user-event"
+import type { ReactElement } from "react"
+import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type { UsageSummary } from "@/client";
-import { localDayKey, OverviewIndex, OverviewPage } from "@/features/overview/OverviewPage";
-import { withRouter } from "@/tests/router";
-import { usageTotals } from "@/tests/fixtures";
+import type { UsageSummary } from "@/client"
+import {
+  localDayKey,
+  OverviewIndex,
+  OverviewPage,
+} from "@/features/overview/OverviewPage"
+import { usageTotals } from "@/tests/fixtures"
+import { withRouter } from "@/tests/router"
 
 function jsonResponse(body: unknown, status = 200): Response {
-  return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });
+  return new Response(JSON.stringify(body), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  })
 }
 
 function summary(totals: Partial<UsageSummary["totals"]>): UsageSummary {
@@ -41,19 +48,19 @@ function summary(totals: Partial<UsageSummary["totals"]>): UsageSummary {
     by_tool: [],
     errors_by_status_code: [],
     series: [],
-  };
+  }
 }
 
 interface Bodies {
-  today?: Partial<UsageSummary["totals"]>;
-  period?: Partial<UsageSummary["totals"]>;
-  prev?: Partial<UsageSummary["totals"]>;
-  health?: unknown;
-  budgets?: unknown;
-  keys?: unknown;
-  users?: unknown;
-  logs?: unknown;
-  providers?: unknown;
+  today?: Partial<UsageSummary["totals"]>
+  period?: Partial<UsageSummary["totals"]>
+  prev?: Partial<UsageSummary["totals"]>
+  health?: unknown
+  budgets?: unknown
+  keys?: unknown
+  users?: unknown
+  logs?: unknown
+  providers?: unknown
 }
 
 // Order matters: /v1/usage/summary is matched BEFORE the bare /v1/usage logs
@@ -62,151 +69,245 @@ interface Bodies {
 // the Today (bucket=hour) and Last-30d (bucket=day) tiles render distinct values.
 function mockApi(b: Bodies) {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-    const url = String(input);
+    const url = String(input)
     if (url.includes("/v1/usage/summary")) {
-      if (url.includes("bucket=hour")) return jsonResponse(summary(b.today ?? {}));
-      if (url.includes("end_date=")) return jsonResponse(summary(b.prev ?? {}));
-      return jsonResponse(summary(b.period ?? {}));
+      if (url.includes("bucket=hour"))
+        return jsonResponse(summary(b.today ?? {}))
+      if (url.includes("end_date=")) return jsonResponse(summary(b.prev ?? {}))
+      return jsonResponse(summary(b.period ?? {}))
     }
     if (url.includes("/v1/providers/health")) {
-      return jsonResponse(b.health ?? { providers: [], healthy: 0, total: 0, checked_at: null });
+      return jsonResponse(
+        b.health ?? { providers: [], healthy: 0, total: 0, checked_at: null },
+      )
     }
-    if (url.includes("/v1/budgets")) return jsonResponse(b.budgets ?? []);
-    if (url.includes("/v1/keys")) return jsonResponse(b.keys ?? []);
-    if (url.includes("/v1/users")) return jsonResponse(b.users ?? []);
-    if (url.includes("/v1/providers")) return jsonResponse({ providers: b.providers ?? [{ provider: "openai" }] });
-    if (url.includes("/v1/usage")) return jsonResponse(b.logs ?? []);
-    return jsonResponse([]);
-  });
+    if (url.includes("/v1/budgets")) return jsonResponse(b.budgets ?? [])
+    if (url.includes("/v1/keys")) return jsonResponse(b.keys ?? [])
+    if (url.includes("/v1/users")) return jsonResponse(b.users ?? [])
+    if (url.includes("/v1/providers"))
+      return jsonResponse({
+        providers: b.providers ?? [{ provider: "openai" }],
+      })
+    if (url.includes("/v1/usage")) return jsonResponse(b.logs ?? [])
+    return jsonResponse([])
+  })
 }
 
 function LocationProbe() {
-  const loc = useLocation();
-  return <div data-testid="loc">{loc.pathname}</div>;
+  const loc = useLocation()
+  return <div data-testid="loc">{loc.pathname}</div>
 }
 
 function renderPage(ui: ReactElement, initial = "/overview") {
-  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
-  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>, {
-    wrapper: withRouter({ url: initial, routes: [{ path: "/providers", element: <LocationProbe /> }] }),
-  });
+  const client = new QueryClient({
+    defaultOptions: { queries: { retry: false } },
+  })
+  return render(
+    <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
+    {
+      wrapper: withRouter({
+        url: initial,
+        routes: [{ path: "/providers", element: <LocationProbe /> }],
+      }),
+    },
+  )
 }
 
 describe("OverviewPage", () => {
   afterEach(() => {
-    vi.restoreAllMocks();
-    vi.useRealTimers();
-  });
+    vi.restoreAllMocks()
+    vi.useRealTimers()
+  })
 
   it("uses a zero-padded, one-based local calendar date as its refresh key", () => {
-    vi.useFakeTimers();
-    vi.setSystemTime(new Date(2026, 0, 5, 12));
+    vi.useFakeTimers()
+    vi.setSystemTime(new Date(2026, 0, 5, 12))
 
-    expect(localDayKey()).toBe("2026-01-05");
-  });
+    expect(localDayKey()).toBe("2026-01-05")
+  })
 
   it("renders distinct today vs 30-day spend, request volume, and error rate", async () => {
     mockApi({
       today: { cost: 5, request_count: 100, error_count: 1 },
       period: { cost: 200, request_count: 2000, error_count: 40 }, // 2% -> warn
       prev: { cost: 100, request_count: 1000, error_count: 5 },
-    });
-    renderPage(<OverviewPage />);
+    })
+    renderPage(<OverviewPage />)
 
-    expect(await screen.findByText("$5.00")).toBeInTheDocument();
-    expect(await screen.findByText("$200.00")).toBeInTheDocument();
-    expect(screen.getByText("2,000")).toBeInTheDocument();
-    expect(screen.getByText("2.0%")).toBeInTheDocument();
-    expect(screen.getByText("Elevated")).toBeInTheDocument(); // error-rate status word (non-hue)
-  });
+    expect(await screen.findByText("$5.00")).toBeInTheDocument()
+    expect(await screen.findByText("$200.00")).toBeInTheDocument()
+    expect(screen.getByText("2,000")).toBeInTheDocument()
+    expect(screen.getByText("2.0%")).toBeInTheDocument()
+    expect(screen.getByText("Elevated")).toBeInTheDocument() // error-rate status word (non-hue)
+  })
 
   it("renders spend and request-volume sparklines from the 30-day series", async () => {
     const series = [
-      { bucket_start: "2026-07-20T00:00:00Z", cost: 10, tokens: 1000, requests: 100 },
-      { bucket_start: "2026-07-21T00:00:00Z", cost: 20, tokens: 2000, requests: 150 },
-      { bucket_start: "2026-07-22T00:00:00Z", cost: 15, tokens: 1500, requests: 120 },
-    ];
+      {
+        bucket_start: "2026-07-20T00:00:00Z",
+        cost: 10,
+        tokens: 1000,
+        requests: 100,
+      },
+      {
+        bucket_start: "2026-07-21T00:00:00Z",
+        cost: 20,
+        tokens: 2000,
+        requests: 150,
+      },
+      {
+        bucket_start: "2026-07-22T00:00:00Z",
+        cost: 15,
+        tokens: 1500,
+        requests: 120,
+      },
+    ]
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      const url = String(input);
+      const url = String(input)
       if (url.includes("/v1/usage/summary")) {
-        if (url.includes("bucket=hour")) return jsonResponse(summary({ cost: 5 }));
-        if (url.includes("end_date=")) return jsonResponse(summary({ cost: 100 }));
+        if (url.includes("bucket=hour"))
+          return jsonResponse(summary({ cost: 5 }))
+        if (url.includes("end_date="))
+          return jsonResponse(summary({ cost: 100 }))
         // The 30-day (day-bucket, unbounded) query carries the series the tiles chart.
-        return jsonResponse({ ...summary({ cost: 200, request_count: 2000 }), series });
+        return jsonResponse({
+          ...summary({ cost: 200, request_count: 2000 }),
+          series,
+        })
       }
       if (url.includes("/v1/providers/health")) {
-        return jsonResponse({ providers: [], healthy: 1, total: 1, checked_at: null });
+        return jsonResponse({
+          providers: [],
+          healthy: 1,
+          total: 1,
+          checked_at: null,
+        })
       }
-      return jsonResponse([]);
-    });
-    renderPage(<OverviewPage />);
+      return jsonResponse([])
+    })
+    renderPage(<OverviewPage />)
 
-    expect(await screen.findByRole("img", { name: "Spend trend over the last 30 days" })).toBeInTheDocument();
-    expect(screen.getByRole("img", { name: "Request volume trend over the last 30 days" })).toBeInTheDocument();
-  });
+    expect(
+      await screen.findByRole("img", {
+        name: "Spend trend over the last 30 days",
+      }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("img", {
+        name: "Request volume trend over the last 30 days",
+      }),
+    ).toBeInTheDocument()
+  })
 
   it("shows a dash for error rate when there are no requests", async () => {
-    mockApi({ period: { request_count: 0, error_count: 0 } });
-    renderPage(<OverviewPage />);
+    mockApi({ period: { request_count: 0, error_count: 0 } })
+    renderPage(<OverviewPage />)
     // Scope to the error-rate tile: its value is a dash (not a percentage) and it
     // carries no status word when the rate is neutral.
-    const label = await screen.findByText("Error rate, last 30 days");
-    const tile = label.closest("div")!;
-    expect(within(tile).getByText("—")).toBeInTheDocument();
-    expect(within(tile).queryByText("Elevated")).not.toBeInTheDocument();
-    expect(within(tile).queryByText(/%/)).not.toBeInTheDocument();
-  });
+    const label = await screen.findByText("Error rate, last 30 days")
+    const tile = label.closest("div")!
+    expect(within(tile).getByText("—")).toBeInTheDocument()
+    expect(within(tile).queryByText("Elevated")).not.toBeInTheDocument()
+    expect(within(tile).queryByText(/%/)).not.toBeInTheDocument()
+  })
 
   it("computes budget health with cap * user_count and links to budgets", async () => {
     mockApi({
       budgets: [
-        { budget_id: "team", name: "team", max_budget: 10, user_count: 2, total_spend: 25, total_reserved: 0 },
-        { budget_id: "x", name: "x", max_budget: null, user_count: 1, total_spend: 9999, total_reserved: 0 },
+        {
+          budget_id: "team",
+          name: "team",
+          max_budget: 10,
+          user_count: 2,
+          total_spend: 25,
+          total_reserved: 0,
+        },
+        {
+          budget_id: "x",
+          name: "x",
+          max_budget: null,
+          user_count: 1,
+          total_spend: 9999,
+          total_reserved: 0,
+        },
       ],
-    });
-    renderPage(<OverviewPage />);
-    expect(await screen.findByText("125.0%")).toBeInTheDocument(); // 25 / (10*2)
-    expect(screen.getByText("Over budget")).toBeInTheDocument();
-  });
+    })
+    renderPage(<OverviewPage />)
+    expect(await screen.findByText("125.0%")).toBeInTheDocument() // 25 / (10*2)
+    expect(screen.getByText("Over budget")).toBeInTheDocument()
+  })
 
   it("summarizes provider health and surfaces problems in the status strip", async () => {
     mockApi({
-      health: { providers: [], healthy: 2, total: 3, checked_at: "2026-07-22T00:00:00Z" },
-      budgets: [{ budget_id: "team", name: "team", max_budget: 10, user_count: 2, total_spend: 25, total_reserved: 0 }],
-    });
-    renderPage(<OverviewPage />);
+      health: {
+        providers: [],
+        healthy: 2,
+        total: 3,
+        checked_at: "2026-07-22T00:00:00Z",
+      },
+      budgets: [
+        {
+          budget_id: "team",
+          name: "team",
+          max_budget: 10,
+          user_count: 2,
+          total_spend: 25,
+          total_reserved: 0,
+        },
+      ],
+    })
+    renderPage(<OverviewPage />)
     // Provider health has no tile of its own; a degraded state surfaces only via
     // the attention strip, each problem a link.
-    expect(await screen.findByText("1 provider unreachable")).toBeInTheDocument();
-    expect(screen.getByText("1 budget over limit")).toBeInTheDocument();
-  });
+    expect(
+      await screen.findByText("1 provider unreachable"),
+    ).toBeInTheDocument()
+    expect(screen.getByText("1 budget over limit")).toBeInTheDocument()
+  })
 
   it("links each attention problem at the view that explains it", async () => {
     mockApi({
       // 20% errors, past the alert threshold, so the error-rate problem appears
       // alongside the provider one and the strip carries both link shapes.
       period: { request_count: 100, error_count: 20 },
-      health: { providers: [], healthy: 2, total: 3, checked_at: "2026-07-22T00:00:00Z" },
-    });
-    renderPage(<OverviewPage />);
+      health: {
+        providers: [],
+        healthy: 2,
+        total: 3,
+        checked_at: "2026-07-22T00:00:00Z",
+      },
+    })
+    renderPage(<OverviewPage />)
 
     // A bare destination, and one that has to carry a filter with it. The second
     // is the one worth pinning: it is the only place the overview hands the
     // activity log a query, so a link that dropped it would land on an unfiltered
     // log and still look like it worked.
-    expect(await screen.findByRole("link", { name: "1 provider unreachable" })).toHaveAttribute("href", "/providers");
-    expect(screen.getByRole("link", { name: /^error rate/ })).toHaveAttribute("href", "/activity?status=error");
-  });
+    expect(
+      await screen.findByRole("link", { name: "1 provider unreachable" }),
+    ).toHaveAttribute("href", "/providers")
+    expect(screen.getByRole("link", { name: /^error rate/ })).toHaveAttribute(
+      "href",
+      "/activity?status=error",
+    )
+  })
 
   it("hides the status strip when nothing needs attention", async () => {
-    mockApi({ health: { providers: [], healthy: 3, total: 3, checked_at: "2026-07-22T00:00:00Z" } });
-    renderPage(<OverviewPage />);
+    mockApi({
+      health: {
+        providers: [],
+        healthy: 3,
+        total: 3,
+        checked_at: "2026-07-22T00:00:00Z",
+      },
+    })
+    renderPage(<OverviewPage />)
 
     // Wait for the tiles to resolve (spend today + last-30d both read $0.00 here),
     // then confirm no neutral status strip renders when every source is healthy.
-    expect((await screen.findAllByText("$0.00")).length).toBeGreaterThan(0);
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
-  });
+    expect((await screen.findAllByText("$0.00")).length).toBeGreaterThan(0)
+    expect(screen.queryByRole("status")).not.toBeInTheDocument()
+  })
 
   it("renders a recent-activity row with a null-cost entry, then empty state", async () => {
     mockApi({
@@ -230,103 +331,132 @@ describe("OverviewPage", () => {
           latency_ms: 120,
         },
       ],
-    });
-    renderPage(<OverviewPage />);
-    expect(await screen.findByText("gpt-5.6")).toBeInTheDocument();
+    })
+    renderPage(<OverviewPage />)
+    expect(await screen.findByText("gpt-5.6")).toBeInTheDocument()
     // null cost renders as an em-dash, not a crash.
-    expect(screen.getAllByText("—").length).toBeGreaterThan(0);
-  });
+    expect(screen.getAllByText("—").length).toBeGreaterThan(0)
+  })
 
   it("keeps the page up when one tile query fails (per-tile isolation)", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      const url = String(input);
-      if (url.includes("/v1/budgets")) return jsonResponse({ detail: "boom" }, 500);
-      if (url.includes("/v1/usage/summary")) return jsonResponse(summary({ cost: 200, request_count: 10 }));
-      if (url.includes("/v1/providers/health")) return jsonResponse({ providers: [], healthy: 1, total: 1, checked_at: null });
-      return jsonResponse([]);
-    });
-    renderPage(<OverviewPage />);
+      const url = String(input)
+      if (url.includes("/v1/budgets"))
+        return jsonResponse({ detail: "boom" }, 500)
+      if (url.includes("/v1/usage/summary"))
+        return jsonResponse(summary({ cost: 200, request_count: 10 }))
+      if (url.includes("/v1/providers/health"))
+        return jsonResponse({
+          providers: [],
+          healthy: 1,
+          total: 1,
+          checked_at: null,
+        })
+      return jsonResponse([])
+    })
+    renderPage(<OverviewPage />)
     // The spend tiles still render even though budgets errored (per-tile isolation);
     // both Today and Last-30d read $200.00 with this mock, hence findAllByText.
-    expect((await screen.findAllByText("$200.00")).length).toBeGreaterThan(0);
+    expect((await screen.findAllByText("$200.00")).length).toBeGreaterThan(0)
     // ...and the status strip must NOT claim all-clear while a source query failed
     // (it would contradict the error banner). It reads as a neutral load-failure line.
-    expect(screen.queryByText(/All systems normal/)).not.toBeInTheDocument();
-    expect(screen.getByText(/could not be loaded/)).toBeInTheDocument();
-  });
+    expect(screen.queryByText(/All systems normal/)).not.toBeInTheDocument()
+    expect(screen.getByText(/could not be loaded/)).toBeInTheDocument()
+  })
 
   it("hides the status strip while status sources are still loading", async () => {
     // A never-resolving fetch keeps the queries pending.
-    vi.spyOn(globalThis, "fetch").mockImplementation(() => new Promise<Response>(() => {}));
-    renderPage(<OverviewPage />);
-    expect(await screen.findByText("Overview")).toBeInTheDocument();
-    expect(screen.queryByRole("status")).not.toBeInTheDocument();
-  });
-});
+    vi.spyOn(globalThis, "fetch").mockImplementation(
+      () => new Promise<Response>(() => {}),
+    )
+    renderPage(<OverviewPage />)
+    expect(await screen.findByText("Overview")).toBeInTheDocument()
+    expect(screen.queryByRole("status")).not.toBeInTheDocument()
+  })
+})
 
 describe("OverviewIndex routing", () => {
   afterEach(() => {
-    vi.restoreAllMocks();
-  });
+    vi.restoreAllMocks()
+  })
 
   it("renders the overview when a provider is configured", async () => {
-    mockApi({ health: { providers: [], healthy: 1, total: 1, checked_at: null } });
-    renderPage(<OverviewIndex />);
-    expect(await screen.findByText("Overview")).toBeInTheDocument();
-  });
+    mockApi({
+      health: { providers: [], healthy: 1, total: 1, checked_at: null },
+    })
+    renderPage(<OverviewIndex />)
+    expect(await screen.findByText("Overview")).toBeInTheDocument()
+  })
 
   it("shows a getting-started overview and links to providers on a fresh gateway", async () => {
-    mockApi({ providers: [] });
-    const user = userEvent.setup();
-    renderPage(<OverviewIndex />);
+    mockApi({ providers: [] })
+    const user = userEvent.setup()
+    renderPage(<OverviewIndex />)
 
-    expect(await screen.findByText("Get started with Otari")).toBeInTheDocument();
-    expect(screen.getByText("Overview")).toBeInTheDocument();
-    await user.click(screen.getByRole("button", { name: "Add your first provider" }));
-    expect(await screen.findByTestId("loc")).toHaveTextContent("/providers");
-  });
+    expect(
+      await screen.findByText("Get started with Otari"),
+    ).toBeInTheDocument()
+    expect(screen.getByText("Overview")).toBeInTheDocument()
+    await user.click(
+      screen.getByRole("button", { name: "Add your first provider" }),
+    )
+    expect(await screen.findByTestId("loc")).toHaveTextContent("/providers")
+  })
 
   it("reports a failed provider query instead of silently rendering a normal overview", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      const url = String(input);
+      const url = String(input)
       if (url.includes("/v1/providers/health")) {
-        return jsonResponse({ providers: [], healthy: 1, total: 1, checked_at: null });
+        return jsonResponse({
+          providers: [],
+          healthy: 1,
+          total: 1,
+          checked_at: null,
+        })
       }
-      if (url.includes("/v1/usage/summary")) return jsonResponse(summary({}));
-      if (url.includes("/v1/providers")) return jsonResponse({ detail: "providers exploded" }, 500);
-      return jsonResponse([]);
-    });
-    renderPage(<OverviewIndex />);
+      if (url.includes("/v1/usage/summary")) return jsonResponse(summary({}))
+      if (url.includes("/v1/providers"))
+        return jsonResponse({ detail: "providers exploded" }, 500)
+      return jsonResponse([])
+    })
+    renderPage(<OverviewIndex />)
 
     // The failure is surfaced, and the setup state stays neutral: no
     // getting-started block claiming the gateway is fresh, and no silent success.
-    expect(await screen.findByText(/providers exploded/)).toBeInTheDocument();
-    expect(screen.queryByText("Get started with Otari")).not.toBeInTheDocument();
-  });
+    expect(await screen.findByText(/providers exploded/)).toBeInTheDocument()
+    expect(screen.queryByText("Get started with Otari")).not.toBeInTheDocument()
+  })
 
   it("clears the provider-query banner when Refresh retries it", async () => {
     // The providers query is cached for minutes and never refetches on focus, so
     // the page's Refresh has to drive it or the banner outlives the outage.
-    let failProviders = true;
+    let failProviders = true
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      const url = String(input);
+      const url = String(input)
       if (url.includes("/v1/providers/health")) {
-        return jsonResponse({ providers: [], healthy: 1, total: 1, checked_at: null });
+        return jsonResponse({
+          providers: [],
+          healthy: 1,
+          total: 1,
+          checked_at: null,
+        })
       }
-      if (url.includes("/v1/usage/summary")) return jsonResponse(summary({}));
+      if (url.includes("/v1/usage/summary")) return jsonResponse(summary({}))
       if (url.includes("/v1/providers")) {
         return failProviders
           ? jsonResponse({ detail: "providers exploded" }, 500)
-          : jsonResponse({ providers: [{ provider: "openai" }] });
+          : jsonResponse({ providers: [{ provider: "openai" }] })
       }
-      return jsonResponse([]);
-    });
-    const user = userEvent.setup();
-    renderPage(<OverviewIndex />);
+      return jsonResponse([])
+    })
+    const user = userEvent.setup()
+    renderPage(<OverviewIndex />)
 
-    expect(await screen.findByText(/providers exploded/)).toBeInTheDocument();
-    failProviders = false;
-    await user.click(screen.getByRole("button", { name: /refresh/i }));
-    await waitFor(() => expect(screen.queryByText(/providers exploded/)).not.toBeInTheDocument());
-  });
-});
+    expect(await screen.findByText(/providers exploded/)).toBeInTheDocument()
+    failProviders = false
+    await user.click(screen.getByRole("button", { name: /refresh/i }))
+    await waitFor(() =>
+      expect(screen.queryByText(/providers exploded/)).not.toBeInTheDocument(),
+    )
+  })
+})

@@ -1,5 +1,5 @@
-import { Button } from "@heroui/react";
-import type { ReactNode } from "react";
+import { Button } from "@heroui/react"
+import type { ReactNode } from "react"
 
 // Contextual bar shown when a table has a selection. Reads "{n} selected" with a
 // Clear, the action buttons the page supplies, and, when the whole visible page
@@ -14,17 +14,17 @@ import type { ReactNode } from "react";
 
 export interface BulkActionBarProps {
   /** Rows selected on the current page (expanded "all" sentinel). */
-  selectedCount: number;
+  selectedCount: number
   /** True once the operator opted into "all matching this filter". */
-  allMatching: boolean;
+  allMatching: boolean
   /** Total rows matching the filter, for the select-all affordance and label. */
-  matchingTotal: number | null;
+  matchingTotal: number | null
   /** Show the "select all N matching" prompt (page fully selected and more exist). */
-  canSelectAllMatching: boolean;
-  onSelectAllMatching: () => void;
-  onClear: () => void;
+  canSelectAllMatching: boolean
+  onSelectAllMatching: () => void
+  onClear: () => void
   /** Action buttons (Delete, Set price, …). */
-  children: ReactNode;
+  children: ReactNode
 }
 
 export function BulkActionBar({
@@ -38,7 +38,7 @@ export function BulkActionBar({
 }: BulkActionBarProps) {
   const label = allMatching
     ? `All ${(matchingTotal ?? selectedCount).toLocaleString()} matching rows selected`
-    : `${selectedCount.toLocaleString()} selected`;
+    : `${selectedCount.toLocaleString()} selected`
 
   return (
     <div
@@ -46,7 +46,9 @@ export function BulkActionBar({
       aria-label="Bulk actions"
       className="otari-bulk-bar fixed bottom-4 left-1/2 z-40 flex w-[calc(100%-2rem)] max-w-3xl -translate-x-1/2 flex-wrap items-center gap-3 rounded-xl border border-[var(--otari-brand)] bg-[var(--otari-surface)] px-4 py-2.5 shadow-lg"
     >
-      <span className="text-sm font-medium text-[var(--otari-brand-dark)]">{label}</span>
+      <span className="text-sm font-medium text-[var(--otari-brand-dark)]">
+        {label}
+      </span>
       {!allMatching && canSelectAllMatching && matchingTotal != null ? (
         <Button size="sm" variant="ghost" onPress={onSelectAllMatching}>
           Select all {matchingTotal.toLocaleString()} matching this filter
@@ -59,5 +61,5 @@ export function BulkActionBar({
         </Button>
       </div>
     </div>
-  );
+  )
 }

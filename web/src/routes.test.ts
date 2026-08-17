@@ -1,11 +1,11 @@
-import { readFileSync, readdirSync } from "node:fs";
-import { join } from "node:path";
+import { readdirSync, readFileSync } from "node:fs"
+import { join } from "node:path"
 
-import { describe, expect, it } from "vitest";
+import { describe, expect, it } from "vitest"
 
 // Resolved from the Vitest root (web/) rather than import.meta.url, which the
 // jsdom environment reports as an http URL.
-const ROUTES_DIR = join(process.cwd(), "src", "routes");
+const ROUTES_DIR = join(process.cwd(), "src", "routes")
 
 // A route file may export its `Route` and nothing else.
 //
@@ -24,21 +24,23 @@ describe("route files", () => {
   // covering none of them, which is worse than having no guard at all.
   const files = readdirSync(ROUTES_DIR, { recursive: true })
     .map(String)
-    .filter((name) => name.endsWith(".tsx"));
+    .filter((name) => name.endsWith(".tsx"))
 
   it("cover the route tree", () => {
     // A guard on the guard: an empty or moved directory would leave every
     // assertion below vacuously true.
-    expect(files).toContain("__root.tsx");
-    expect(files.length).toBeGreaterThan(10);
-  });
+    expect(files).toContain("__root.tsx")
+    expect(files.length).toBeGreaterThan(10)
+  })
 
   it.each(files)("%s exports Route and nothing else", (file) => {
     const declarations = readFileSync(join(ROUTES_DIR, file), "utf8")
       .split("\n")
-      .filter((line) => line.startsWith("export"));
+      .filter((line) => line.startsWith("export"))
 
-    expect(declarations).toHaveLength(1);
-    expect(declarations[0]).toMatch(/^export const Route = create(RootRoute|FileRoute)\(/);
-  });
-});
+    expect(declarations).toHaveLength(1)
+    expect(declarations[0]).toMatch(
+      /^export const Route = create(RootRoute|FileRoute)\(/,
+    )
+  })
+})

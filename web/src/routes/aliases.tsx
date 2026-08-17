@@ -1,4 +1,4 @@
-import { createFileRoute, redirect } from "@tanstack/react-router";
+import { createFileRoute, redirect } from "@tanstack/react-router"
 
 export const Route = createFileRoute("/aliases")({
   // Aliases were folded into Routing, which lists and manages them as the
@@ -6,6 +6,6 @@ export const Route = createFileRoute("/aliases")({
   // link still pointing at it keep working. In `beforeLoad`, so the page it
   // replaces is never mounted and the dead path leaves no history entry.
   beforeLoad: () => {
-    throw redirect({ to: "/routing", replace: true });
+    throw redirect({ to: "/routing", replace: true })
   },
-});
+})

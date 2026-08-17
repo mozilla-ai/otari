@@ -7,4 +7,4 @@
  * feature's test render against the real providers without importing `@/app`
  * itself. Most page tests need neither and mock `@/shared/api/hooks` outright.
  */
-export { Provider as AppProviders } from "@/app/provider";
+export { Provider as AppProviders } from "@/app/provider"

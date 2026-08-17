@@ -1,6 +1,16 @@
-import { useRef, useState } from "react";
-import type { ReactNode } from "react";
-import { Bar, BarChart, Line, LineChart, ReferenceArea, ResponsiveContainer, Tooltip, XAxis, YAxis } from "recharts";
+import type { ReactNode } from "react"
+import { useRef, useState } from "react"
+import {
+  Bar,
+  BarChart,
+  Line,
+  LineChart,
+  ReferenceArea,
+  ResponsiveContainer,
+  Tooltip,
+  XAxis,
+  YAxis,
+} from "recharts"
 
 // Shared chart primitives for the dashboard, built on recharts. Pages compose
 // these instead of hand-rolling SVG, so tooltips, responsive sizing, axis
@@ -8,26 +18,26 @@ import { Bar, BarChart, Line, LineChart, ReferenceArea, ResponsiveContainer, Too
 // never encoded by hue alone: every multi-series chart renders a legend, and
 // the surrounding tables / captions stay the accessible source of truth.
 
-const BRAND = "var(--otari-brand)";
+const BRAND = "var(--otari-brand)"
 
 // One series of a (possibly stacked) trend chart. `color` is a CSS color,
 // normally one of the fixed `--otari-cat-*` palette slots (validated for CVD
 // separation and surface contrast in globals.css) or a semantic token like
 // `--otari-danger`. Assign palette slots in fixed order, never cycled.
 export interface SeriesDef {
-  key: string;
-  label: string;
-  color: string;
+  key: string
+  label: string
+  color: string
 }
 
 // One x-axis bucket. `x` is the bucket identity (ISO instant for time series);
 // series values live under their `SeriesDef.key`.
-export type StackedPoint = { x: string } & Record<string, number | string>;
+export type StackedPoint = { x: string } & Record<string, number | string>
 
 // One point in a single-series trend: an x-axis/tooltip label and its value.
 export interface ChartPoint {
-  label: string;
-  value: number;
+  label: string
+  value: number
 }
 
 // A series identity swatch. An SVG fill (which accepts var(--otari-*) tokens)
@@ -38,7 +48,7 @@ function SeriesMarker({ color }: { color: string }) {
     <svg aria-hidden viewBox="0 0 8 8" className="h-2 w-2 shrink-0">
       <rect width="8" height="8" rx="1.5" fill={color} />
     </svg>
-  );
+  )
 }
 
 // Tooltip body. recharts clones this element and injects `active`, `payload`,
@@ -54,23 +64,31 @@ export function ChartTooltip({
   formatLabel,
   showTotal = false,
 }: {
-  active?: boolean;
-  label?: ReactNode;
+  active?: boolean
+  label?: ReactNode
   // recharts types a datum's value as `number | string`; guard before formatting.
-  payload?: readonly { value?: number | string; name?: ReactNode; color?: string }[];
-  formatValue: (value: number) => string;
-  formatLabel?: (label: string) => string;
-  showTotal?: boolean;
+  payload?: readonly {
+    value?: number | string
+    name?: ReactNode
+    color?: string
+  }[]
+  formatValue: (value: number) => string
+  formatLabel?: (label: string) => string
+  showTotal?: boolean
 }) {
-  const rows = (payload ?? []).filter((entry) => typeof entry.value === "number");
+  const rows = (payload ?? []).filter(
+    (entry) => typeof entry.value === "number",
+  )
   if (!active || rows.length === 0) {
-    return null;
+    return null
   }
-  const heading = typeof label === "string" && formatLabel ? formatLabel(label) : label;
+  const heading =
+    typeof label === "string" && formatLabel ? formatLabel(label) : label
   // A stack hides its zero series (the row list stays scannable); a single
   // series keeps its zero row so hovering an empty bucket still reads a value.
-  const visible = rows.length > 1 ? rows.filter((entry) => (entry.value as number) > 0) : rows;
-  const total = rows.reduce((sum, entry) => sum + (entry.value as number), 0);
+  const visible =
+    rows.length > 1 ? rows.filter((entry) => (entry.value as number) > 0) : rows
+  const total = rows.reduce((sum, entry) => sum + (entry.value as number), 0)
   return (
     <div className="rounded-md border border-[var(--otari-line)] bg-[var(--otari-surface)] px-2.5 py-1.5 text-xs shadow-sm">
       <div className="text-[var(--otari-muted)]">{heading}</div>
@@ -78,7 +96,9 @@ export function ChartTooltip({
         {visible.map((entry, index) => (
           <div key={index} className="flex items-center justify-between gap-4">
             <span className="flex items-center gap-1.5 text-[var(--otari-muted)]">
-              {rows.length > 1 && entry.color ? <SeriesMarker color={entry.color} /> : null}
+              {rows.length > 1 && entry.color ? (
+                <SeriesMarker color={entry.color} />
+              ) : null}
               {entry.name}
             </span>
             <span className="font-medium tabular-nums text-[var(--otari-ink)]">
@@ -90,40 +110,45 @@ export function ChartTooltip({
       {showTotal && rows.length > 1 ? (
         <div className="mt-1 flex items-center justify-between gap-4 border-t border-[var(--otari-line)] pt-1">
           <span className="text-[var(--otari-muted)]">Total</span>
-          <span className="font-semibold tabular-nums text-[var(--otari-ink)]">{formatValue(total)}</span>
+          <span className="font-semibold tabular-nums text-[var(--otari-ink)]">
+            {formatValue(total)}
+          </span>
         </div>
       ) : null}
     </div>
-  );
+  )
 }
 
 // Legend chips for a multi-series chart: marker + label in text ink (identity
 // rides the marker, never colored text). Single-series charts render no legend;
 // their title names the series.
 export function ChartLegend({ series }: { series: SeriesDef[] }) {
-  if (series.length < 2) return null;
+  if (series.length < 2) return null
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
       {series.map((s) => (
-        <span key={s.key} className="flex items-center gap-1.5 text-xs text-[var(--otari-muted)]">
+        <span
+          key={s.key}
+          className="flex items-center gap-1.5 text-xs text-[var(--otari-muted)]"
+        >
           <SeriesMarker color={s.color} />
           {s.label}
         </span>
       ))}
     </div>
-  );
+  )
 }
 
 // The payload recharts hands to chart-level mouse handlers; only the active
 // bucket index is consumed. It can arrive as a number or numeric string.
 interface ChartMouseState {
-  activeTooltipIndex?: number | string | null;
+  activeTooltipIndex?: number | string | null
 }
 
 function toIndex(state: ChartMouseState | null | undefined): number | null {
-  const raw = state?.activeTooltipIndex;
-  const index = typeof raw === "string" ? Number(raw) : raw;
-  return typeof index === "number" && Number.isFinite(index) ? index : null;
+  const raw = state?.activeTooltipIndex
+  const index = typeof raw === "string" ? Number(raw) : raw
+  return typeof index === "number" && Number.isFinite(index) ? index : null
 }
 
 // A single-or-stacked bar trend over time with the industry-standard time
@@ -151,52 +176,57 @@ export function TrendChart({
   onSelectRange,
   window: windowRange,
 }: {
-  data: StackedPoint[];
-  series: SeriesDef[];
-  formatValue: (value: number) => string;
-  formatXTick?: (x: string) => string;
-  ariaLabel: string;
-  height?: number;
-  showYAxis?: boolean;
-  showTotal?: boolean;
-  onSelectRange?: (startIndex: number, endIndex: number) => void;
-  window?: { startIndex: number; endIndex: number } | null;
+  data: StackedPoint[]
+  series: SeriesDef[]
+  formatValue: (value: number) => string
+  formatXTick?: (x: string) => string
+  ariaLabel: string
+  height?: number
+  showYAxis?: boolean
+  showTotal?: boolean
+  onSelectRange?: (startIndex: number, endIndex: number) => void
+  window?: { startIndex: number; endIndex: number } | null
 }) {
-  const [drag, setDrag] = useState<{ start: number; end: number } | null>(null);
+  const [drag, setDrag] = useState<{ start: number; end: number } | null>(null)
   // Mirror for the commit handlers: mouseup can fire before the last
   // mousemove's setState has re-rendered, and committing from the stale closure
   // would snap to the previous bucket.
-  const dragRef = useRef(drag);
+  const dragRef = useRef(drag)
   const setDragBoth = (next: { start: number; end: number } | null) => {
-    dragRef.current = next;
-    setDrag(next);
-  };
+    dragRef.current = next
+    setDrag(next)
+  }
 
   // Series indices arrive from tooltip state and props computed against
   // whatever length the data had at capture time; clamp every dereference so a
   // shrunken series degrades the highlight instead of blanking the chart.
-  const last = data.length - 1;
-  const clampIndex = (index: number) => Math.min(Math.max(index, 0), Math.max(last, 0));
+  const last = data.length - 1
+  const clampIndex = (index: number) =>
+    Math.min(Math.max(index, 0), Math.max(last, 0))
 
   const commit = () => {
-    const range = dragRef.current;
-    setDragBoth(null);
-    if (!range || !onSelectRange || range.start === range.end) return;
+    const range = dragRef.current
+    setDragBoth(null)
+    if (!range || !onSelectRange || range.start === range.end) return
     // Clamp like the window prop below: the indices were captured from a
     // previous render's tooltip state, and a background refetch landing
     // mid-drag can shrink the series under them.
-    const lo = clampIndex(Math.min(range.start, range.end));
-    const hi = clampIndex(Math.max(range.start, range.end));
-    if (lo === hi) return;
-    onSelectRange(lo, hi);
-  };
+    const lo = clampIndex(Math.min(range.start, range.end))
+    const hi = clampIndex(Math.max(range.start, range.end))
+    if (lo === hi) return
+    onSelectRange(lo, hi)
+  }
 
-  const selectable = Boolean(onSelectRange) && data.length > 1;
+  const selectable = Boolean(onSelectRange) && data.length > 1
   const dimmed =
     windowRange && data.length > 0
-      ? { startIndex: clampIndex(windowRange.startIndex), endIndex: clampIndex(windowRange.endIndex) }
-      : null;
-  const showDimming = dimmed !== null && (dimmed.startIndex > 0 || dimmed.endIndex < last);
+      ? {
+          startIndex: clampIndex(windowRange.startIndex),
+          endIndex: clampIndex(windowRange.endIndex),
+        }
+      : null
+  const showDimming =
+    dimmed !== null && (dimmed.startIndex > 0 || dimmed.endIndex < last)
 
   return (
     // A static chart is an image to AT; one that owns drag selection is not
@@ -213,24 +243,26 @@ export function TrendChart({
           data={data}
           margin={{ top: 4, right: 0, left: 0, bottom: 0 }}
           onMouseDown={(state) => {
-            if (!selectable) return;
-            const index = toIndex(state);
-            if (index !== null) setDragBoth({ start: index, end: index });
+            if (!selectable) return
+            const index = toIndex(state)
+            if (index !== null) setDragBoth({ start: index, end: index })
           }}
           onMouseMove={(state) => {
-            const index = toIndex(state);
-            if (dragRef.current && index !== null) setDragBoth({ ...dragRef.current, end: index });
+            const index = toIndex(state)
+            if (dragRef.current && index !== null)
+              setDragBoth({ ...dragRef.current, end: index })
           }}
           onMouseUp={commit}
           onMouseLeave={commit}
           onTouchStart={(state) => {
-            if (!selectable) return;
-            const index = toIndex(state);
-            if (index !== null) setDragBoth({ start: index, end: index });
+            if (!selectable) return
+            const index = toIndex(state)
+            if (index !== null) setDragBoth({ start: index, end: index })
           }}
           onTouchMove={(state) => {
-            const index = toIndex(state);
-            if (dragRef.current && index !== null) setDragBoth({ ...dragRef.current, end: index });
+            const index = toIndex(state)
+            if (dragRef.current && index !== null)
+              setDragBoth({ ...dragRef.current, end: index })
           }}
           onTouchEnd={commit}
         >
@@ -254,7 +286,13 @@ export function TrendChart({
           ) : null}
           <Tooltip
             cursor={{ fill: "var(--otari-line)", opacity: 0.35 }}
-            content={<ChartTooltip formatValue={formatValue} formatLabel={formatXTick} showTotal={showTotal} />}
+            content={
+              <ChartTooltip
+                formatValue={formatValue}
+                formatLabel={formatXTick}
+                showTotal={showTotal}
+              />
+            }
           />
           {series.map((s) => (
             <Bar
@@ -305,7 +343,7 @@ export function TrendChart({
         </BarChart>
       </ResponsiveContainer>
     </div>
-  );
+  )
 }
 
 // A compact, axis-free trend line for KPI tiles. Conveys shape only: no ticks,
@@ -316,18 +354,28 @@ export function Sparkline({
   ariaLabel,
   height = 32,
 }: {
-  values: number[];
-  ariaLabel: string;
-  height?: number;
+  values: number[]
+  ariaLabel: string
+  height?: number
 }) {
-  const data = values.map((value, index) => ({ index, value }));
+  const data = values.map((value, index) => ({ index, value }))
   return (
     <div role="img" aria-label={ariaLabel} className="w-full">
       <ResponsiveContainer width="100%" height={height}>
-        <LineChart data={data} margin={{ top: 2, right: 2, left: 2, bottom: 2 }}>
-          <Line type="monotone" dataKey="value" stroke={BRAND} strokeWidth={1.5} dot={false} isAnimationActive={false} />
+        <LineChart
+          data={data}
+          margin={{ top: 2, right: 2, left: 2, bottom: 2 }}
+        >
+          <Line
+            type="monotone"
+            dataKey="value"
+            stroke={BRAND}
+            strokeWidth={1.5}
+            dot={false}
+            isAnimationActive={false}
+          />
         </LineChart>
       </ResponsiveContainer>
     </div>
-  );
+  )
 }

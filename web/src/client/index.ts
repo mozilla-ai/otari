@@ -10,12 +10,12 @@
 // The handful of shapes the spec does not describe live in `./local.ts`, with
 // the reason each one is there.
 
-import type { components, operations } from "./schema";
-import type { PolicySpec } from "./local";
+import type { PolicySpec } from "./local"
+import type { components, operations } from "./schema"
 
-export type { components, operations, paths } from "./schema";
+export type { components, operations, paths } from "./schema"
 
-type Schemas = components["schemas"];
+type Schemas = components["schemas"]
 
 /**
  * Make the fields the gateway defaults optional on the way in.
@@ -25,32 +25,38 @@ type Schemas = components["schemas"];
  * that a client may omit it. Applied only where the dashboard actually omits
  * one, so it stays a correction rather than a blanket loosening.
  */
-type Defaulted<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>;
+type Defaulted<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>
 
 // ---------------------------------------------------------------------------
 // Usage and analytics
 // ---------------------------------------------------------------------------
-export type UsageEntry = Schemas["UsageEntry"];
-export type UsageCount = Schemas["UsageCount"];
-export type UsageTotals = Schemas["UsageTotals"];
-export type UsageSummary = Schemas["UsageSummary"];
-export type UsageGroupRow = Schemas["UsageGroupRow"];
-export type UsageSeriesPoint = Schemas["UsageSeriesPoint"];
-export type UsageGroupedSeries = Schemas["UsageGroupedSeries"];
-export type UsageGroupedSeriesPoint = Schemas["UsageGroupedSeriesPoint"];
-export type UsageDeleteResult = Schemas["UsageDeleteResult"];
-export type UsageMutationSelection = Defaulted<Schemas["UsageDeleteRequest"], "by_filter">;
-export type UsageSetPriceRequest = Defaulted<Schemas["UsageSetPriceRequest"], "by_filter">;
-export type UsageSetPriceResult = Schemas["UsageSetPriceResult"];
-export type InFlightRequest = Schemas["InFlightEntry"];
-export type InFlightResponse = Schemas["InFlightResponse"];
+export type UsageEntry = Schemas["UsageEntry"]
+export type UsageCount = Schemas["UsageCount"]
+export type UsageTotals = Schemas["UsageTotals"]
+export type UsageSummary = Schemas["UsageSummary"]
+export type UsageGroupRow = Schemas["UsageGroupRow"]
+export type UsageSeriesPoint = Schemas["UsageSeriesPoint"]
+export type UsageGroupedSeries = Schemas["UsageGroupedSeries"]
+export type UsageGroupedSeriesPoint = Schemas["UsageGroupedSeriesPoint"]
+export type UsageDeleteResult = Schemas["UsageDeleteResult"]
+export type UsageMutationSelection = Defaulted<
+  Schemas["UsageDeleteRequest"],
+  "by_filter"
+>
+export type UsageSetPriceRequest = Defaulted<
+  Schemas["UsageSetPriceRequest"],
+  "by_filter"
+>
+export type UsageSetPriceResult = Schemas["UsageSetPriceResult"]
+export type InFlightRequest = Schemas["InFlightEntry"]
+export type InFlightResponse = Schemas["InFlightResponse"]
 
 // The charge lines on a row's `pricing_breakdown`, which carry either a
 // per-million or a per-call rate.
-export type TokenChargeLine = Schemas["TokenChargeLine"];
-export type UnitChargeLine = Schemas["UnitChargeLine"];
+export type TokenChargeLine = Schemas["TokenChargeLine"]
+export type UnitChargeLine = Schemas["UnitChargeLine"]
 /** One line of a row's `pricing_breakdown`, of whichever of the three shapes. */
-export type ChargeLine = NonNullable<UsageEntry["pricing_breakdown"]>[number];
+export type ChargeLine = NonNullable<UsageEntry["pricing_breakdown"]>[number]
 
 // Which rate a line carries is what says how to read it, and the third arm of
 // the union is a line whose shape the gateway no longer writes (see the spec's
@@ -63,84 +69,106 @@ export type ChargeLine = NonNullable<UsageEntry["pricing_breakdown"]>[number];
 // `unit_rate: "flat"` would otherwise be narrowed to a typed shape and rendered
 // with a non-numeric rate and no units, which is worse than falling through to
 // the untyped branch that shows the recorded cost and nothing it cannot vouch for.
-function hasChargeFields(line: ChargeLine): line is ChargeLine & { meter: string; units: number; cost: number } {
-  if (typeof line !== "object" || line === null) return false;
-  const candidate = line as Record<string, unknown>;
+function hasChargeFields(
+  line: ChargeLine,
+): line is ChargeLine & { meter: string; units: number; cost: number } {
+  if (typeof line !== "object" || line === null) return false
+  const candidate = line as Record<string, unknown>
   return (
     typeof candidate.meter === "string" &&
     typeof candidate.units === "number" &&
     typeof candidate.cost === "number"
-  );
+  )
 }
 export function isUnitChargeLine(line: ChargeLine): line is UnitChargeLine {
-  return hasChargeFields(line) && typeof (line as Record<string, unknown>).unit_rate === "number";
+  return (
+    hasChargeFields(line) &&
+    typeof (line as Record<string, unknown>).unit_rate === "number"
+  )
 }
 export function isTokenChargeLine(line: ChargeLine): line is TokenChargeLine {
-  return hasChargeFields(line) && typeof (line as Record<string, unknown>).rate_per_million === "number";
+  return (
+    hasChargeFields(line) &&
+    typeof (line as Record<string, unknown>).rate_per_million === "number"
+  )
 }
-export type BillingMeters = Schemas["BillingMeters"];
-export type ToolMeter = Schemas["ToolMeter"];
+export type BillingMeters = Schemas["BillingMeters"]
+export type ToolMeter = Schemas["ToolMeter"]
 
 // Query-parameter enums. The spec carries these inline on the operation rather
 // than as named schemas, so they are pinned to the operation instead of being
 // restated as literal unions that could drift.
-type SummaryQuery = NonNullable<operations["usage_summary_v1_usage_summary_get"]["parameters"]["query"]>;
-export type UsageBucket = NonNullable<SummaryQuery["bucket"]>;
-export type SummaryDimension = NonNullable<SummaryQuery["dimensions"]>[number];
-type SeriesQuery = NonNullable<operations["usage_series_v1_usage_series_get"]["parameters"]["query"]>;
-export type UsageGroupBy = NonNullable<SeriesQuery["group_by"]>;
+type SummaryQuery = NonNullable<
+  operations["usage_summary_v1_usage_summary_get"]["parameters"]["query"]
+>
+export type UsageBucket = NonNullable<SummaryQuery["bucket"]>
+export type SummaryDimension = NonNullable<SummaryQuery["dimensions"]>[number]
+type SeriesQuery = NonNullable<
+  operations["usage_series_v1_usage_series_get"]["parameters"]["query"]
+>
+export type UsageGroupBy = NonNullable<SeriesQuery["group_by"]>
 
 // ---------------------------------------------------------------------------
 // Users, keys and budgets
 // ---------------------------------------------------------------------------
-export type User = Schemas["UserResponse"];
-export type CreateUserRequest = Defaulted<Schemas["CreateUserRequest"], "blocked">;
-export type UpdateUserRequest = Schemas["UpdateUserRequest"];
-export type ApiKey = Schemas["KeyInfo"];
-export type CreateKeyRequest = Schemas["CreateKeyRequest"];
-export type CreateKeyResponse = Schemas["CreateKeyResponse"];
-export type UpdateKeyRequest = Schemas["UpdateKeyRequest"];
-export type Budget = Schemas["BudgetResponse"];
-export type CreateBudgetRequest = Schemas["CreateBudgetRequest"];
-export type UpdateBudgetRequest = Schemas["UpdateBudgetRequest"];
-export type BudgetResetLog = Schemas["BudgetResetLogResponse"];
+export type User = Schemas["UserResponse"]
+export type CreateUserRequest = Defaulted<
+  Schemas["CreateUserRequest"],
+  "blocked"
+>
+export type UpdateUserRequest = Schemas["UpdateUserRequest"]
+export type ApiKey = Schemas["KeyInfo"]
+export type CreateKeyRequest = Schemas["CreateKeyRequest"]
+export type CreateKeyResponse = Schemas["CreateKeyResponse"]
+export type UpdateKeyRequest = Schemas["UpdateKeyRequest"]
+export type Budget = Schemas["BudgetResponse"]
+export type CreateBudgetRequest = Schemas["CreateBudgetRequest"]
+export type UpdateBudgetRequest = Schemas["UpdateBudgetRequest"]
+export type BudgetResetLog = Schemas["BudgetResetLogResponse"]
 
 // ---------------------------------------------------------------------------
 // Models, pricing and providers
 // ---------------------------------------------------------------------------
-export type ModelObject = Schemas["ModelObject"];
-export type ModelListResponse = Schemas["ModelListResponse"];
-export type ModelPricingInfo = Schemas["ModelPricingInfo"];
-export type ModelMetadata = Schemas["ModelMetadata"];
-export type ModelMetadataResponse = Schemas["ModelMetadataResponse"];
-export type DiscoverableModel = Schemas["DiscoverableModel"];
-export type DiscoverableProvider = Schemas["DiscoverableProvider"];
-export type DiscoverableModelsResponse = Schemas["DiscoverableModelsResponse"];
-export type PricingResponse = Schemas["PricingResponse"];
-export type PricingTier = Schemas["PricingTier"];
+export type ModelObject = Schemas["ModelObject"]
+export type ModelListResponse = Schemas["ModelListResponse"]
+export type ModelPricingInfo = Schemas["ModelPricingInfo"]
+export type ModelMetadata = Schemas["ModelMetadata"]
+export type ModelMetadataResponse = Schemas["ModelMetadataResponse"]
+export type DiscoverableModel = Schemas["DiscoverableModel"]
+export type DiscoverableProvider = Schemas["DiscoverableProvider"]
+export type DiscoverableModelsResponse = Schemas["DiscoverableModelsResponse"]
+export type PricingResponse = Schemas["PricingResponse"]
+export type PricingTier = Schemas["PricingTier"]
 /** A tier as stored, which may be a shape this client cannot read (see the spec). */
-export type StoredPricingTier = NonNullable<ModelPricingInfo["pricing_tiers"]>[number];
+export type StoredPricingTier = NonNullable<
+  ModelPricingInfo["pricing_tiers"]
+>[number]
 // A tier whose threshold is unreadable cannot take part in choosing a rate, and
 // it already could not: comparing against an absent `min_input_tokens` excluded
 // it anyway. Narrowing says so rather than leaving it to a false comparison.
 export function isPricingTier(tier: StoredPricingTier): tier is PricingTier {
-  return typeof tier === "object" && tier !== null && typeof (tier as PricingTier).min_input_tokens === "number";
+  return (
+    typeof tier === "object" &&
+    tier !== null &&
+    typeof (tier as PricingTier).min_input_tokens === "number"
+  )
 }
-export type SetPricingRequest = Schemas["SetPricingRequest"];
-export type PricingRefreshChange = Schemas["PricingRefreshChangeResponse"];
-export type PricingRefreshPreview = Schemas["PricingRefreshPreviewResponse"];
-export type ProviderInfo = Schemas["ProviderInfoSchema"];
-export type ProviderCapabilities = Schemas["ProviderCapabilitiesSchema"];
-export type ProvidersResponse = Schemas["ProvidersResponse"];
-export type ProviderHealth = Schemas["ProviderHealthSchema"];
-export type ProviderHealthResponse = Schemas["ProviderHealthResponse"];
-export type StoredProvider = Schemas["StoredProviderResponse"];
-export type CreateStoredProviderRequest = Schemas["CreateStoredProviderRequest"];
-export type UpdateStoredProviderRequest = Schemas["UpdateStoredProviderRequest"];
-export type TestProviderResult = Schemas["TestProviderResponse"];
-export type ReencryptProviderCredentialsResult = Schemas["ReencryptProviderCredentialsResponse"];
-export type KnownProvider = Schemas["KnownProviderSchema"];
-export type KnownProviderSummary = Schemas["KnownProviderSummarySchema"];
+export type SetPricingRequest = Schemas["SetPricingRequest"]
+export type PricingRefreshChange = Schemas["PricingRefreshChangeResponse"]
+export type PricingRefreshPreview = Schemas["PricingRefreshPreviewResponse"]
+export type ProviderInfo = Schemas["ProviderInfoSchema"]
+export type ProviderCapabilities = Schemas["ProviderCapabilitiesSchema"]
+export type ProvidersResponse = Schemas["ProvidersResponse"]
+export type ProviderHealth = Schemas["ProviderHealthSchema"]
+export type ProviderHealthResponse = Schemas["ProviderHealthResponse"]
+export type StoredProvider = Schemas["StoredProviderResponse"]
+export type CreateStoredProviderRequest = Schemas["CreateStoredProviderRequest"]
+export type UpdateStoredProviderRequest = Schemas["UpdateStoredProviderRequest"]
+export type TestProviderResult = Schemas["TestProviderResponse"]
+export type ReencryptProviderCredentialsResult =
+  Schemas["ReencryptProviderCredentialsResponse"]
+export type KnownProvider = Schemas["KnownProviderSchema"]
+export type KnownProviderSummary = Schemas["KnownProviderSummarySchema"]
 
 // ---------------------------------------------------------------------------
 // Routing
@@ -149,46 +177,54 @@ export type KnownProviderSummary = Schemas["KnownProviderSummarySchema"];
 // contract declares it a free-form object, so the generated type is
 // `Record<string, unknown>` and the Routing page reads its internals. Everything
 // else on these two comes from the spec.
-export type RoutingPolicyResponse = Omit<Schemas["PolicyResponse"], "spec"> & { spec: PolicySpec };
-export type SetRoutingPolicyRequest = Omit<Schemas["PolicyRequest"], "spec"> & { spec: PolicySpec };
-export type AliasResponse = Schemas["AliasResponse"];
-export type CreateAliasRequest = Schemas["AliasRequest"];
-export type ExplainPolicyRequest = Schemas["ExplainRequest"];
-export type ExplainPolicyResponse = Schemas["ExplainResponse"];
-export type RouterStatus = Schemas["RouterStatus"];
-export type RouterPool = Schemas["PoolStatus"];
-export type LearnedPolicy = Schemas["LearnedPolicy"];
-export type RecordedPool = Schemas["RecordedPool"];
-export type ScoredExample = Schemas["ScoredExample"];
-export type RankCandidatesRequest = Schemas["RankRequest"];
-export type RankCandidatesResponse = Schemas["RankResponse"];
+export type RoutingPolicyResponse = Omit<Schemas["PolicyResponse"], "spec"> & {
+  spec: PolicySpec
+}
+export type SetRoutingPolicyRequest = Omit<Schemas["PolicyRequest"], "spec"> & {
+  spec: PolicySpec
+}
+export type AliasResponse = Schemas["AliasResponse"]
+export type CreateAliasRequest = Schemas["AliasRequest"]
+export type ExplainPolicyRequest = Schemas["ExplainRequest"]
+export type ExplainPolicyResponse = Schemas["ExplainResponse"]
+export type RouterStatus = Schemas["RouterStatus"]
+export type RouterPool = Schemas["PoolStatus"]
+export type LearnedPolicy = Schemas["LearnedPolicy"]
+export type RecordedPool = Schemas["RecordedPool"]
+export type ScoredExample = Schemas["ScoredExample"]
+export type RankCandidatesRequest = Schemas["RankRequest"]
+export type RankCandidatesResponse = Schemas["RankResponse"]
 
 // ---------------------------------------------------------------------------
 // Settings, tools and guardrails
 // ---------------------------------------------------------------------------
-export type GatewaySettings = Schemas["GatewaySettings"];
-export type UpdateSettingsRequest = Schemas["UpdateSettingsRequest"];
-export type ConfigField = Schemas["ConfigField"];
-export type ConfigFieldType = ConfigField["type"];
-export type RotateMasterKeyResponse = Schemas["RotateMasterKeyResponse"];
-export type ManagedTool = Schemas["ManagedTool"];
-export type ToolsResponse = Schemas["ToolsResponse"];
-export type ToolSettingField = Schemas["ToolSettingField"];
-export type ToolSettingType = ToolSettingField["type"];
-export type ToolSettingsResponse = Schemas["ToolSettingsResponse"];
-export type UpdateToolSettingsRequest = Schemas["UpdateToolSettingsRequest"];
-export type TestServiceResponse = Schemas["TestServiceResponse"];
+export type GatewaySettings = Schemas["GatewaySettings"]
+export type UpdateSettingsRequest = Schemas["UpdateSettingsRequest"]
+export type ConfigField = Schemas["ConfigField"]
+export type ConfigFieldType = ConfigField["type"]
+export type RotateMasterKeyResponse = Schemas["RotateMasterKeyResponse"]
+export type ManagedTool = Schemas["ManagedTool"]
+export type ToolsResponse = Schemas["ToolsResponse"]
+export type ToolSettingField = Schemas["ToolSettingField"]
+export type ToolSettingType = ToolSettingField["type"]
+export type ToolSettingsResponse = Schemas["ToolSettingsResponse"]
+export type UpdateToolSettingsRequest = Schemas["UpdateToolSettingsRequest"]
+export type TestServiceResponse = Schemas["TestServiceResponse"]
 
 // ---------------------------------------------------------------------------
 // Search tools
 // ---------------------------------------------------------------------------
-export type SearchProviderInfo = Schemas["SearchProviderSchema"];
-export type StoredSearchTool = Schemas["StoredSearchToolSchema"];
-export type ConfigSearchTool = Schemas["ConfigSearchToolSchema"];
-export type SearchToolsResponse = Schemas["SearchToolsResponse"];
-export type CreateSearchToolRequest = Schemas["CreateSearchToolRequest"];
-export type UpdateSearchToolRequest = Schemas["UpdateSearchToolRequest"];
-export type StreamMissingUsagePolicy = NonNullable<UpdateSettingsRequest["stream_missing_usage_policy"]>;
-export type VisionStrategy = NonNullable<UpdateSettingsRequest["vision_strategy"]>;
+export type SearchProviderInfo = Schemas["SearchProviderSchema"]
+export type StoredSearchTool = Schemas["StoredSearchToolSchema"]
+export type ConfigSearchTool = Schemas["ConfigSearchToolSchema"]
+export type SearchToolsResponse = Schemas["SearchToolsResponse"]
+export type CreateSearchToolRequest = Schemas["CreateSearchToolRequest"]
+export type UpdateSearchToolRequest = Schemas["UpdateSearchToolRequest"]
+export type StreamMissingUsagePolicy = NonNullable<
+  UpdateSettingsRequest["stream_missing_usage_policy"]
+>
+export type VisionStrategy = NonNullable<
+  UpdateSettingsRequest["vision_strategy"]
+>
 
-export type * from "./local";
+export type * from "./local"

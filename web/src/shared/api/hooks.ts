@@ -1,16 +1,11 @@
-import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
-
-import { ApiError, apiFetch, longRequestSignal } from "@/shared/api/client";
-import { isoAgo } from "@/shared/helpers/timeRange";
+import {
+  keepPreviousData,
+  useMutation,
+  useQuery,
+  useQueryClient,
+} from "@tanstack/react-query"
 import type {
   AliasResponse,
-  ExplainPolicyRequest,
-  ExplainPolicyResponse,
-  RoutingPolicyResponse,
-  SetRoutingPolicyRequest,
-  RankCandidatesRequest,
-  RankCandidatesResponse,
-  RouterStatus,
   ApiKey,
   Budget,
   BudgetResetLog,
@@ -20,8 +15,11 @@ import type {
   CreateKeyResponse,
   CreateSearchToolRequest,
   CreateStoredProviderRequest,
+  CreateUserRequest,
   DashboardBuild,
   DiscoverableModelsResponse,
+  ExplainPolicyRequest,
+  ExplainPolicyResponse,
   GatewaySettings,
   InFlightResponse,
   KnownProvider,
@@ -32,11 +30,16 @@ import type {
   PricingResponse,
   ProviderHealthResponse,
   ProvidersResponse,
+  RankCandidatesRequest,
+  RankCandidatesResponse,
   ReencryptProviderCredentialsResult,
   RotateMasterKeyResponse,
+  RouterStatus,
+  RoutingPolicyResponse,
   SearchProviderInfo,
   SearchToolsResponse,
   SetPricingRequest,
+  SetRoutingPolicyRequest,
   StoredProvider,
   StoredSearchTool,
   SummaryDimension,
@@ -48,8 +51,8 @@ import type {
   UpdateKeyRequest,
   UpdateSearchToolRequest,
   UpdateSettingsRequest,
-  UpdateToolSettingsRequest,
   UpdateStoredProviderRequest,
+  UpdateToolSettingsRequest,
   UpdateUserRequest,
   UsageBucket,
   UsageCount,
@@ -63,40 +66,41 @@ import type {
   UsageSetPriceResult,
   UsageSummary,
   User,
-  CreateUserRequest,
-} from "@/client";
+} from "@/client"
+import { ApiError, apiFetch, longRequestSignal } from "@/shared/api/client"
+import { isoAgo } from "@/shared/helpers/timeRange"
 
-const MODELS = "models";
-const PRICING = "pricing";
-const SETTINGS = "settings";
-const TOOL_SETTINGS = "tool-settings";
-const TOOLS = "tools";
-const SEARCH_TOOLS = "search-tools";
-const SEARCH_PROVIDERS = "search-providers";
-const ALIASES = "aliases";
-const ROUTING_POLICIES = "routing-policies";
-const ROUTER_STATUS = "router-status";
+const MODELS = "models"
+const PRICING = "pricing"
+const SETTINGS = "settings"
+const TOOL_SETTINGS = "tool-settings"
+const TOOLS = "tools"
+const SEARCH_TOOLS = "search-tools"
+const SEARCH_PROVIDERS = "search-providers"
+const ALIASES = "aliases"
+const ROUTING_POLICIES = "routing-policies"
+const ROUTER_STATUS = "router-status"
 // Deliberately not nested under MODELS: pricing mutations invalidate that key,
 // and a price change cannot alter which models a provider serves. Sharing the
 // key would fire a live provider call on every save.
-const DISCOVERABLE = "discoverable";
-const PROVIDERS = "providers";
-const PROVIDER_HEALTH = "provider-health";
-const STORED_PROVIDERS = "stored-providers";
-const METADATA = "model-metadata";
-const BUILD = "build";
-const KEYS = "keys";
-const BUDGETS = "budgets";
-const USERS = "users";
-const USAGE = "usage";
+const DISCOVERABLE = "discoverable"
+const PROVIDERS = "providers"
+const PROVIDER_HEALTH = "provider-health"
+const STORED_PROVIDERS = "stored-providers"
+const METADATA = "model-metadata"
+const BUILD = "build"
+const KEYS = "keys"
+const BUDGETS = "budgets"
+const USERS = "users"
+const USAGE = "usage"
 
 // How often an open tab asks whether the app it is running is still the one the
 // gateway serves. Cheap (a hash of one small file) and only while the tab is
 // open, so a minute keeps a deploy from going unnoticed for long.
-const BUILD_POLL_MS = 60_000;
+const BUILD_POLL_MS = 60_000
 // Checking provider health lists models for every configured provider. Keep the
 // automatic probe infrequent; operators can still force an immediate re-check.
-export const PROVIDER_HEALTH_REFRESH_MS = 60 * 60_000;
+export const PROVIDER_HEALTH_REFRESH_MS = 60 * 60_000
 
 // The four queries below are backed by provider or models.dev fan-out
 // gateway-side. That is cached and refreshed in the background now, so they are
@@ -107,7 +111,7 @@ export const PROVIDER_HEALTH_REFRESH_MS = 60 * 60_000;
 // of those queue every other request behind them, including the POST an
 // operator just clicked. Failing once and showing the error is the honest
 // behavior, and it frees the socket.
-const NO_RETRY = { retry: false } as const;
+const NO_RETRY = { retry: false } as const
 
 export function useModels() {
   return useQuery({
@@ -115,7 +119,7 @@ export function useModels() {
     queryKey: [MODELS],
     queryFn: () => apiFetch<ModelListResponse>("/v1/models"),
     staleTime: 60_000,
-  });
+  })
 }
 
 export function useDashboardBuild() {
@@ -130,7 +134,7 @@ export function useDashboardBuild() {
     // A failed check is not worth reporting: the tab keeps working, and the next
     // poll retries anyway.
     retry: false,
-  });
+  })
 }
 
 // Every model the configured credentials can reach, per provider. Distinct from
@@ -146,9 +150,10 @@ export function useDiscoverableModels() {
   return useQuery({
     ...NO_RETRY,
     queryKey: [DISCOVERABLE],
-    queryFn: () => apiFetch<DiscoverableModelsResponse>("/v1/models/discoverable"),
+    queryFn: () =>
+      apiFetch<DiscoverableModelsResponse>("/v1/models/discoverable"),
     staleTime: 5 * 60_000,
-  });
+  })
 }
 
 // Static metadata for every configured provider: capabilities, doc and pricing
@@ -159,7 +164,7 @@ export function useProviders() {
     queryKey: [PROVIDERS],
     queryFn: () => apiFetch<ProvidersResponse>("/v1/providers"),
     staleTime: 5 * 60_000,
-  });
+  })
 }
 
 // Every known provider the add-provider picker can offer: id + display name
@@ -171,7 +176,7 @@ export function useProviderCatalog() {
     queryKey: ["provider-catalog"],
     queryFn: () => apiFetch<KnownProviderSummary[]>("/v1/providers/catalog"),
     staleTime: Infinity,
-  });
+  })
 }
 
 // Autofill hints (credential env var, default endpoint, whether a key is
@@ -182,10 +187,13 @@ export function useProviderCatalog() {
 export function useProviderDetail(providerId: string) {
   return useQuery({
     queryKey: ["provider-catalog", providerId],
-    queryFn: () => apiFetch<KnownProvider>(`/v1/providers/catalog/${encodeURIComponent(providerId)}`),
+    queryFn: () =>
+      apiFetch<KnownProvider>(
+        `/v1/providers/catalog/${encodeURIComponent(providerId)}`,
+      ),
     enabled: providerId !== "",
     staleTime: Infinity,
-  });
+  })
 }
 
 // Every configured provider's reachability, for the health monitor. Backed by
@@ -201,18 +209,19 @@ export function useProviderHealth() {
     queryFn: () => apiFetch<ProviderHealthResponse>("/v1/providers/health"),
     staleTime: PROVIDER_HEALTH_REFRESH_MS,
     refetchInterval: PROVIDER_HEALTH_REFRESH_MS,
-  });
+  })
 }
 
 // Force a live re-check of every provider (clears the gateway's discovery cache),
 // for an explicit "Refresh" action. Writes the fresh result straight into the
 // health query so the table and any summary tile update together.
 export function useRecheckProviderHealth() {
-  const queryClient = useQueryClient();
+  const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: () => apiFetch<ProviderHealthResponse>("/v1/providers/health?refresh=true"),
+    mutationFn: () =>
+      apiFetch<ProviderHealthResponse>("/v1/providers/health?refresh=true"),
     onSuccess: (data) => queryClient.setQueryData([PROVIDER_HEALTH], data),
-  });
+  })
 }
 
 // Providers configured at runtime through the dashboard. Distinct from
@@ -223,61 +232,81 @@ export function useStoredProviders() {
     queryKey: [STORED_PROVIDERS],
     queryFn: () => apiFetch<StoredProvider[]>("/v1/provider-credentials"),
     staleTime: 60_000,
-  });
+  })
 }
 
 // A new or changed provider can change which models the catalog and picker
 // report, so a credential write invalidates those too.
-function invalidateProviderViews(queryClient: ReturnType<typeof useQueryClient>): void {
-  void queryClient.invalidateQueries({ queryKey: [STORED_PROVIDERS] });
-  void queryClient.invalidateQueries({ queryKey: [PROVIDERS] });
-  void queryClient.invalidateQueries({ queryKey: [MODELS] });
-  void queryClient.invalidateQueries({ queryKey: [DISCOVERABLE] });
+function invalidateProviderViews(
+  queryClient: ReturnType<typeof useQueryClient>,
+): void {
+  void queryClient.invalidateQueries({ queryKey: [STORED_PROVIDERS] })
+  void queryClient.invalidateQueries({ queryKey: [PROVIDERS] })
+  void queryClient.invalidateQueries({ queryKey: [MODELS] })
+  void queryClient.invalidateQueries({ queryKey: [DISCOVERABLE] })
   // A credential change can flip a provider's reachability, so the health view
   // must re-check rather than show a verdict from the old key.
-  void queryClient.invalidateQueries({ queryKey: [PROVIDER_HEALTH] });
+  void queryClient.invalidateQueries({ queryKey: [PROVIDER_HEALTH] })
 }
 
 export function useCreateStoredProvider() {
-  const queryClient = useQueryClient();
+  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: CreateStoredProviderRequest) =>
-      apiFetch<StoredProvider>("/v1/provider-credentials", { method: "POST", body: JSON.stringify(body) }),
-    onSuccess: () => invalidateProviderViews(queryClient),
-  });
-}
-
-export function useUpdateStoredProvider() {
-  const queryClient = useQueryClient();
-  return useMutation({
-    mutationFn: ({ instance, body }: { instance: string; body: UpdateStoredProviderRequest }) =>
-      apiFetch<StoredProvider>(`/v1/provider-credentials/${encodeURIComponent(instance)}`, {
-        method: "PATCH",
+      apiFetch<StoredProvider>("/v1/provider-credentials", {
+        method: "POST",
         body: JSON.stringify(body),
       }),
     onSuccess: () => invalidateProviderViews(queryClient),
-  });
+  })
+}
+
+export function useUpdateStoredProvider() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      instance,
+      body,
+    }: {
+      instance: string
+      body: UpdateStoredProviderRequest
+    }) =>
+      apiFetch<StoredProvider>(
+        `/v1/provider-credentials/${encodeURIComponent(instance)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify(body),
+        },
+      ),
+    onSuccess: () => invalidateProviderViews(queryClient),
+  })
 }
 
 export function useDeleteStoredProvider() {
-  const queryClient = useQueryClient();
+  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (instance: string) =>
-      apiFetch<void>(`/v1/provider-credentials/${encodeURIComponent(instance)}`, { method: "DELETE" }),
+      apiFetch<void>(
+        `/v1/provider-credentials/${encodeURIComponent(instance)}`,
+        { method: "DELETE" },
+      ),
     onSuccess: () => invalidateProviderViews(queryClient),
-  });
+  })
 }
 
 export function useReencryptProviderCredentials() {
-  const queryClient = useQueryClient();
+  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: () =>
-      apiFetch<ReencryptProviderCredentialsResult>("/v1/provider-credentials/reencrypt", {
-        method: "POST",
-        signal: longRequestSignal(),
-      }),
+      apiFetch<ReencryptProviderCredentialsResult>(
+        "/v1/provider-credentials/reencrypt",
+        {
+          method: "POST",
+          signal: longRequestSignal(),
+        },
+      ),
     onSuccess: () => invalidateProviderViews(queryClient),
-  });
+  })
 }
 
 // Tests a stored provider's key by listing its models. Read-only on the server,
@@ -285,10 +314,13 @@ export function useReencryptProviderCredentials() {
 export function useTestStoredProvider() {
   return useMutation({
     mutationFn: (instance: string) =>
-      apiFetch<TestProviderResult>(`/v1/provider-credentials/${encodeURIComponent(instance)}/test`, {
-        method: "POST",
-      }),
-  });
+      apiFetch<TestProviderResult>(
+        `/v1/provider-credentials/${encodeURIComponent(instance)}/test`,
+        {
+          method: "POST",
+        },
+      ),
+  })
 }
 
 // Tests credentials from the add/edit form before they are saved. Nothing is
@@ -296,8 +328,11 @@ export function useTestStoredProvider() {
 export function useTestProviderCredentials() {
   return useMutation({
     mutationFn: (body: CreateStoredProviderRequest) =>
-      apiFetch<TestProviderResult>("/v1/provider-credentials/test", { method: "POST", body: JSON.stringify(body) }),
-  });
+      apiFetch<TestProviderResult>("/v1/provider-credentials/test", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+  })
 }
 
 // Per-model metadata (modalities, capabilities, knowledge cutoff) from the
@@ -309,7 +344,7 @@ export function useModelMetadata() {
     queryKey: [METADATA],
     queryFn: () => apiFetch<ModelMetadataResponse>("/v1/models/metadata"),
     staleTime: 10 * 60_000,
-  });
+  })
 }
 
 export function useAliases() {
@@ -317,7 +352,7 @@ export function useAliases() {
     queryKey: [ALIASES],
     queryFn: () => apiFetch<AliasResponse[]>("/v1/aliases"),
     staleTime: 60_000,
-  });
+  })
 }
 
 export function useRoutingPolicies() {
@@ -325,37 +360,50 @@ export function useRoutingPolicies() {
     queryKey: [ROUTING_POLICIES],
     queryFn: () => apiFetch<RoutingPolicyResponse[]>("/v1/routing/policies"),
     staleTime: 60_000,
-  });
+  })
 }
 
 export function useSetRoutingPolicy() {
-  const queryClient = useQueryClient();
+  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: SetRoutingPolicyRequest) =>
-      apiFetch<RoutingPolicyResponse>("/v1/routing/policies", { method: "POST", body: JSON.stringify(body) }),
+      apiFetch<RoutingPolicyResponse>("/v1/routing/policies", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: [ROUTING_POLICIES] });
+      void queryClient.invalidateQueries({ queryKey: [ROUTING_POLICIES] })
       // A policy is listed as a model, so the catalog changes too.
-      void queryClient.invalidateQueries({ queryKey: [MODELS] });
+      void queryClient.invalidateQueries({ queryKey: [MODELS] })
     },
-  });
+  })
 }
 
 export function useDeleteRoutingPolicy() {
-  const queryClient = useQueryClient();
+  const queryClient = useQueryClient()
   return useMutation({
     // Scoped like an alias delete: the same name can exist globally and per user,
     // so a delete must say which. Only a null/absent userId means global, checked
     // explicitly because "" is a legal user id.
-    mutationFn: ({ name, userId }: { name: string; userId?: string | null }) => {
-      const scope = userId == null ? "" : `?user_id=${encodeURIComponent(userId)}`;
-      return apiFetch<void>(`/v1/routing/policies/${encodeURIComponent(name)}${scope}`, { method: "DELETE" });
+    mutationFn: ({
+      name,
+      userId,
+    }: {
+      name: string
+      userId?: string | null
+    }) => {
+      const scope =
+        userId == null ? "" : `?user_id=${encodeURIComponent(userId)}`
+      return apiFetch<void>(
+        `/v1/routing/policies/${encodeURIComponent(name)}${scope}`,
+        { method: "DELETE" },
+      )
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: [ROUTING_POLICIES] });
-      void queryClient.invalidateQueries({ queryKey: [MODELS] });
+      void queryClient.invalidateQueries({ queryKey: [ROUTING_POLICIES] })
+      void queryClient.invalidateQueries({ queryKey: [MODELS] })
     },
-  });
+  })
 }
 
 /** Compile a policy (saved or draft) without dispatching anything.
@@ -369,7 +417,7 @@ export function useExplainPolicy() {
         method: "POST",
         body: JSON.stringify(body),
       }),
-  });
+  })
 }
 
 // --- Learned routing ------------------------------------------------------
@@ -385,15 +433,17 @@ export function useRouterStatus(userId: string | null) {
   return useQuery({
     queryKey: [ROUTER_STATUS, userId],
     queryFn: () =>
-      apiFetch<RouterStatus>(`/v1/routing/status?user_id=${encodeURIComponent(userId ?? "")}`),
+      apiFetch<RouterStatus>(
+        `/v1/routing/status?user_id=${encodeURIComponent(userId ?? "")}`,
+      ),
     enabled: userId !== null && userId !== "",
     staleTime: 30_000,
-  });
+  })
 }
 
 /** Record how well each candidate did, which is what the router later votes over. */
 export function useRankCandidates() {
-  const queryClient = useQueryClient();
+  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: RankCandidatesRequest) =>
       apiFetch<RankCandidatesResponse>("/v1/routing/preferences/rank", {
@@ -403,40 +453,52 @@ export function useRankCandidates() {
     onSuccess: () => {
       // One more example may have crossed the seed count, which changes whether
       // the policy routes at all.
-      void queryClient.invalidateQueries({ queryKey: [ROUTER_STATUS] });
+      void queryClient.invalidateQueries({ queryKey: [ROUTER_STATUS] })
     },
-  });
+  })
 }
 
 export function useCreateAlias() {
-  const queryClient = useQueryClient();
+  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: CreateAliasRequest) =>
-      apiFetch<AliasResponse>("/v1/aliases", { method: "POST", body: JSON.stringify(body) }),
+      apiFetch<AliasResponse>("/v1/aliases", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: [ALIASES] });
+      void queryClient.invalidateQueries({ queryKey: [ALIASES] })
       // An alias is listed as a model, so the catalog changes too.
-      void queryClient.invalidateQueries({ queryKey: [MODELS] });
+      void queryClient.invalidateQueries({ queryKey: [MODELS] })
     },
-  });
+  })
 }
 
 export function useDeleteAlias() {
-  const queryClient = useQueryClient();
+  const queryClient = useQueryClient()
   return useMutation({
     // Scoped: the same name can exist globally and per user, so deleting one
     // must name which. Only a null/absent userId means global; the check is
     // explicit rather than truthy because "" is a legal user id, and treating it
     // as global would delete the wrong row.
-    mutationFn: ({ name, userId }: { name: string; userId?: string | null }) => {
-      const scope = userId == null ? "" : `?user_id=${encodeURIComponent(userId)}`;
-      return apiFetch<void>(`/v1/aliases/${encodeURIComponent(name)}${scope}`, { method: "DELETE" });
+    mutationFn: ({
+      name,
+      userId,
+    }: {
+      name: string
+      userId?: string | null
+    }) => {
+      const scope =
+        userId == null ? "" : `?user_id=${encodeURIComponent(userId)}`
+      return apiFetch<void>(`/v1/aliases/${encodeURIComponent(name)}${scope}`, {
+        method: "DELETE",
+      })
     },
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: [ALIASES] });
-      void queryClient.invalidateQueries({ queryKey: [MODELS] });
+      void queryClient.invalidateQueries({ queryKey: [ALIASES] })
+      void queryClient.invalidateQueries({ queryKey: [MODELS] })
     },
-  });
+  })
 }
 
 export function useSettings() {
@@ -444,27 +506,33 @@ export function useSettings() {
     queryKey: [SETTINGS],
     queryFn: () => apiFetch<GatewaySettings>("/v1/settings"),
     staleTime: 60_000,
-  });
+  })
 }
 
 export function useUpdateSettings() {
-  const queryClient = useQueryClient();
+  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: UpdateSettingsRequest) =>
-      apiFetch<GatewaySettings>("/v1/settings", { method: "PATCH", body: JSON.stringify(body) }),
+      apiFetch<GatewaySettings>("/v1/settings", {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
     onSuccess: (data) => {
-      queryClient.setQueryData([SETTINGS], data);
+      queryClient.setQueryData([SETTINGS], data)
       // Toggling discovery changes which models the catalog and picker report.
-      void queryClient.invalidateQueries({ queryKey: [MODELS] });
-      void queryClient.invalidateQueries({ queryKey: [DISCOVERABLE] });
+      void queryClient.invalidateQueries({ queryKey: [MODELS] })
+      void queryClient.invalidateQueries({ queryKey: [DISCOVERABLE] })
     },
-  });
+  })
 }
 
 export function useRotateMasterKey() {
   return useMutation({
-    mutationFn: () => apiFetch<RotateMasterKeyResponse>("/v1/settings/master-key/rotate", { method: "POST" }),
-  });
+    mutationFn: () =>
+      apiFetch<RotateMasterKeyResponse>("/v1/settings/master-key/rotate", {
+        method: "POST",
+      }),
+  })
 }
 
 export function useToolSettings() {
@@ -472,7 +540,7 @@ export function useToolSettings() {
     queryKey: [TOOL_SETTINGS],
     queryFn: () => apiFetch<ToolSettingsResponse>("/v1/tool-settings"),
     staleTime: 60_000,
-  });
+  })
 }
 
 // The declaration forms this deployment honors. Depends on tool settings
@@ -482,25 +550,28 @@ export function useTools() {
     queryKey: [TOOLS],
     queryFn: () => apiFetch<ToolsResponse>("/v1/tools"),
     staleTime: 60_000,
-  });
+  })
 }
 
 export function useUpdateToolSettings() {
-  const queryClient = useQueryClient();
+  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: UpdateToolSettingsRequest) =>
-      apiFetch<ToolSettingsResponse>("/v1/tool-settings", { method: "PATCH", body: JSON.stringify(body) }),
+      apiFetch<ToolSettingsResponse>("/v1/tool-settings", {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
     onSuccess: (data) => {
-      queryClient.setQueryData([TOOL_SETTINGS], data);
+      queryClient.setQueryData([TOOL_SETTINGS], data)
       // Toggling interception or clearing a backend URL changes which
       // declarations the gateway accepts, so the "how to call" card must refetch.
-      void queryClient.invalidateQueries({ queryKey: [TOOLS] });
+      void queryClient.invalidateQueries({ queryKey: [TOOLS] })
       // A searxng search tool with no api_base of its own inherits web_search_url,
       // which this PATCH may have just changed, so the endpoint a blank box
       // resolves to (and whether one is required at all) has to be re-read.
-      void queryClient.invalidateQueries({ queryKey: [SEARCH_PROVIDERS] });
+      void queryClient.invalidateQueries({ queryKey: [SEARCH_PROVIDERS] })
     },
-  });
+  })
 }
 
 // Search tools served by POST /v1/search: the editable rows plus the read-only
@@ -510,7 +581,7 @@ export function useSearchTools() {
     queryKey: [SEARCH_TOOLS],
     queryFn: () => apiFetch<SearchToolsResponse>("/v1/search-tools"),
     staleTime: 60_000,
-  });
+  })
 }
 
 // Which search providers this build supports, and what each one needs, so the
@@ -520,36 +591,54 @@ export function useSearchProviders() {
     queryKey: [SEARCH_PROVIDERS],
     queryFn: () => apiFetch<SearchProviderInfo[]>("/v1/search-tools/providers"),
     staleTime: 300_000,
-  });
+  })
 }
 
 export function useCreateSearchTool() {
-  const queryClient = useQueryClient();
+  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: CreateSearchToolRequest) =>
-      apiFetch<StoredSearchTool>("/v1/search-tools", { method: "POST", body: JSON.stringify(body) }),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: [SEARCH_TOOLS] }),
-  });
+      apiFetch<StoredSearchTool>("/v1/search-tools", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () =>
+      void queryClient.invalidateQueries({ queryKey: [SEARCH_TOOLS] }),
+  })
 }
 
 export function useUpdateSearchTool() {
-  const queryClient = useQueryClient();
+  const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: ({ name, body }: { name: string; body: UpdateSearchToolRequest }) =>
-      apiFetch<StoredSearchTool>(`/v1/search-tools/${encodeURIComponent(name)}`, {
-        method: "PATCH",
-        body: JSON.stringify(body),
-      }),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: [SEARCH_TOOLS] }),
-  });
+    mutationFn: ({
+      name,
+      body,
+    }: {
+      name: string
+      body: UpdateSearchToolRequest
+    }) =>
+      apiFetch<StoredSearchTool>(
+        `/v1/search-tools/${encodeURIComponent(name)}`,
+        {
+          method: "PATCH",
+          body: JSON.stringify(body),
+        },
+      ),
+    onSuccess: () =>
+      void queryClient.invalidateQueries({ queryKey: [SEARCH_TOOLS] }),
+  })
 }
 
 export function useDeleteSearchTool() {
-  const queryClient = useQueryClient();
+  const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (name: string) => apiFetch<void>(`/v1/search-tools/${encodeURIComponent(name)}`, { method: "DELETE" }),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: [SEARCH_TOOLS] }),
-  });
+    mutationFn: (name: string) =>
+      apiFetch<void>(`/v1/search-tools/${encodeURIComponent(name)}`, {
+        method: "DELETE",
+      }),
+    onSuccess: () =>
+      void queryClient.invalidateQueries({ queryKey: [SEARCH_TOOLS] }),
+  })
 }
 
 // Probe a (typically unsaved) service URL for reachability. Read-only, so it
@@ -557,66 +646,74 @@ export function useDeleteSearchTool() {
 export function useTestService() {
   return useMutation({
     mutationFn: ({ service, url }: { service: string; url: string }) =>
-      apiFetch<TestServiceResponse>(`/v1/tool-settings/${encodeURIComponent(service)}/test`, {
-        method: "POST",
-        body: JSON.stringify({ url }),
-      }),
-  });
+      apiFetch<TestServiceResponse>(
+        `/v1/tool-settings/${encodeURIComponent(service)}/test`,
+        {
+          method: "POST",
+          body: JSON.stringify({ url }),
+        },
+      ),
+  })
 }
 
 // The pricing endpoint caps `limit` at 1000 server-side, so page through it
 // rather than truncating: a gateway with a long price history could otherwise
 // have older rows silently vanish from the models table.
-const PRICING_PAGE_SIZE = 1000;
+const PRICING_PAGE_SIZE = 1000
 
 // Cap the walk so a backend or proxy that ignores `skip` (returning a full page
 // every time) can't spin this into an unbounded request loop. 100 pages is 100k
 // rows, far beyond any realistic price history.
-const PRICING_MAX_PAGES = 100;
+const PRICING_MAX_PAGES = 100
 
 async function fetchAllPricing(): Promise<PricingResponse[]> {
-  const all: PricingResponse[] = [];
+  const all: PricingResponse[] = []
   for (let page = 0; page < PRICING_MAX_PAGES; page += 1) {
     const rows = await apiFetch<PricingResponse[]>(
       `/v1/pricing?skip=${page * PRICING_PAGE_SIZE}&limit=${PRICING_PAGE_SIZE}`,
-    );
-    all.push(...rows);
+    )
+    all.push(...rows)
     if (rows.length < PRICING_PAGE_SIZE) {
-      break;
+      break
     }
   }
-  return all;
+  return all
 }
 
 export function usePricing() {
   return useQuery({
     queryKey: [PRICING],
     queryFn: fetchAllPricing,
-  });
+  })
 }
 
 export function useSetPricing() {
-  const queryClient = useQueryClient();
+  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: SetPricingRequest) =>
-      apiFetch<PricingResponse>("/v1/pricing", { method: "POST", body: JSON.stringify(body) }),
+      apiFetch<PricingResponse>("/v1/pricing", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: [PRICING] });
-      void queryClient.invalidateQueries({ queryKey: [MODELS] });
+      void queryClient.invalidateQueries({ queryKey: [PRICING] })
+      void queryClient.invalidateQueries({ queryKey: [MODELS] })
     },
-  });
+  })
 }
 
 export function useDeletePricing() {
-  const queryClient = useQueryClient();
+  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (modelKey: string) =>
-      apiFetch<void>(`/v1/pricing/${encodeURIComponent(modelKey)}`, { method: "DELETE" }),
+      apiFetch<void>(`/v1/pricing/${encodeURIComponent(modelKey)}`, {
+        method: "DELETE",
+      }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: [PRICING] });
-      void queryClient.invalidateQueries({ queryKey: [MODELS] });
+      void queryClient.invalidateQueries({ queryKey: [PRICING] })
+      void queryClient.invalidateQueries({ queryKey: [MODELS] })
     },
-  });
+  })
 }
 
 // Long deadline: this fetches the upstream snapshot and diffs it against every
@@ -624,44 +721,51 @@ export function useDeletePricing() {
 export function usePreviewPricingRefresh() {
   return useMutation({
     mutationFn: () =>
-      apiFetch<PricingRefreshPreview>("/v1/pricing/refresh", { method: "POST", signal: longRequestSignal() }),
-  });
+      apiFetch<PricingRefreshPreview>("/v1/pricing/refresh", {
+        method: "POST",
+        signal: longRequestSignal(),
+      }),
+  })
 }
 
 export function useConfirmPricingRefresh() {
-  const queryClient = useQueryClient();
+  const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: () => apiFetch("/v1/pricing/refresh/confirm", { method: "POST" }),
+    mutationFn: () =>
+      apiFetch("/v1/pricing/refresh/confirm", { method: "POST" }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: [PRICING] });
-      void queryClient.invalidateQueries({ queryKey: [MODELS] });
-      void queryClient.invalidateQueries({ queryKey: [PROVIDERS] });
+      void queryClient.invalidateQueries({ queryKey: [PRICING] })
+      void queryClient.invalidateQueries({ queryKey: [MODELS] })
+      void queryClient.invalidateQueries({ queryKey: [PROVIDERS] })
     },
-  });
+  })
 }
 
 export function useRejectPricingRefresh() {
   return useMutation({
-    mutationFn: () => apiFetch<void>("/v1/pricing/refresh/reject", { method: "POST" }),
-  });
+    mutationFn: () =>
+      apiFetch<void>("/v1/pricing/refresh/reject", { method: "POST" }),
+  })
 }
 
 // The keys endpoint caps `limit` at 1000 server-side; page through it (capped like
 // pricing) so a gateway with many keys can't have rows silently vanish from the
 // table, and a backend that ignores `skip` can't spin an unbounded loop.
-const KEYS_PAGE_SIZE = 1000;
-const KEYS_MAX_PAGES = 100;
+const KEYS_PAGE_SIZE = 1000
+const KEYS_MAX_PAGES = 100
 
 async function fetchAllKeys(): Promise<ApiKey[]> {
-  const all: ApiKey[] = [];
+  const all: ApiKey[] = []
   for (let page = 0; page < KEYS_MAX_PAGES; page += 1) {
-    const rows = await apiFetch<ApiKey[]>(`/v1/keys?skip=${page * KEYS_PAGE_SIZE}&limit=${KEYS_PAGE_SIZE}`);
-    all.push(...rows);
+    const rows = await apiFetch<ApiKey[]>(
+      `/v1/keys?skip=${page * KEYS_PAGE_SIZE}&limit=${KEYS_PAGE_SIZE}`,
+    )
+    all.push(...rows)
     if (rows.length < KEYS_PAGE_SIZE) {
-      break;
+      break
     }
   }
-  return all;
+  return all
 }
 
 export function useKeys() {
@@ -669,64 +773,77 @@ export function useKeys() {
     queryKey: [KEYS],
     queryFn: fetchAllKeys,
     staleTime: 60_000,
-  });
+  })
 }
 
 // Create returns the plaintext key exactly once (in `key`); the caller reveals it
 // and must never write the response into the query cache.
 export function useCreateKey() {
-  const queryClient = useQueryClient();
+  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: CreateKeyRequest) =>
-      apiFetch<CreateKeyResponse>("/v1/keys", { method: "POST", body: JSON.stringify(body) }),
+      apiFetch<CreateKeyResponse>("/v1/keys", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: [KEYS] }),
-  });
+  })
 }
 
 export function useUpdateKey() {
-  const queryClient = useQueryClient();
+  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({ id, body }: { id: string; body: UpdateKeyRequest }) =>
-      apiFetch<ApiKey>(`/v1/keys/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body) }),
+      apiFetch<ApiKey>(`/v1/keys/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: [KEYS] }),
-  });
+  })
 }
 
 // Regenerate: a new secret for the same key row. The old secret stops working
 // immediately. Returns the new plaintext once, like create.
 export function useRotateKey() {
-  const queryClient = useQueryClient();
+  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (id: string) =>
-      apiFetch<CreateKeyResponse>(`/v1/keys/${encodeURIComponent(id)}/rotate`, { method: "POST" }),
+      apiFetch<CreateKeyResponse>(`/v1/keys/${encodeURIComponent(id)}/rotate`, {
+        method: "POST",
+      }),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: [KEYS] }),
-  });
+  })
 }
 
 export function useDeleteKey() {
-  const queryClient = useQueryClient();
+  const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (id: string) => apiFetch<void>(`/v1/keys/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    mutationFn: (id: string) =>
+      apiFetch<void>(`/v1/keys/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      }),
     onSuccess: () => void queryClient.invalidateQueries({ queryKey: [KEYS] }),
-  });
+  })
 }
 
 // The budgets endpoint caps `limit` at 1000 server-side; page through it (capped
 // like keys/pricing) so a gateway with many budgets can't have rows silently
 // vanish, and a backend that ignores `skip` can't spin an unbounded loop.
-const BUDGETS_PAGE_SIZE = 1000;
-const BUDGETS_MAX_PAGES = 100;
+const BUDGETS_PAGE_SIZE = 1000
+const BUDGETS_MAX_PAGES = 100
 
 async function fetchAllBudgets(): Promise<Budget[]> {
-  const all: Budget[] = [];
+  const all: Budget[] = []
   for (let page = 0; page < BUDGETS_MAX_PAGES; page += 1) {
-    const rows = await apiFetch<Budget[]>(`/v1/budgets?skip=${page * BUDGETS_PAGE_SIZE}&limit=${BUDGETS_PAGE_SIZE}`);
-    all.push(...rows);
+    const rows = await apiFetch<Budget[]>(
+      `/v1/budgets?skip=${page * BUDGETS_PAGE_SIZE}&limit=${BUDGETS_PAGE_SIZE}`,
+    )
+    all.push(...rows)
     if (rows.length < BUDGETS_PAGE_SIZE) {
-      break;
+      break
     }
   }
-  return all;
+  return all
 }
 
 export function useBudgets() {
@@ -734,7 +851,7 @@ export function useBudgets() {
     queryKey: [BUDGETS],
     queryFn: fetchAllBudgets,
     staleTime: 60_000,
-  });
+  })
 }
 
 // Per-user reset history for one budget. Enabled only once a budget id is set
@@ -742,54 +859,71 @@ export function useBudgets() {
 export function useBudgetResetLogs(budgetId: string | null) {
   return useQuery({
     queryKey: [BUDGETS, budgetId, "reset-logs"],
-    queryFn: () => apiFetch<BudgetResetLog[]>(`/v1/budgets/${encodeURIComponent(budgetId as string)}/reset-logs`),
+    queryFn: () =>
+      apiFetch<BudgetResetLog[]>(
+        `/v1/budgets/${encodeURIComponent(budgetId as string)}/reset-logs`,
+      ),
     enabled: budgetId !== null,
     staleTime: 60_000,
-  });
+  })
 }
 
 export function useCreateBudget() {
-  const queryClient = useQueryClient();
+  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: CreateBudgetRequest) =>
-      apiFetch<Budget>("/v1/budgets", { method: "POST", body: JSON.stringify(body) }),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: [BUDGETS] }),
-  });
+      apiFetch<Budget>("/v1/budgets", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () =>
+      void queryClient.invalidateQueries({ queryKey: [BUDGETS] }),
+  })
 }
 
 export function useUpdateBudget() {
-  const queryClient = useQueryClient();
+  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({ id, body }: { id: string; body: UpdateBudgetRequest }) =>
-      apiFetch<Budget>(`/v1/budgets/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body) }),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: [BUDGETS] }),
-  });
+      apiFetch<Budget>(`/v1/budgets/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () =>
+      void queryClient.invalidateQueries({ queryKey: [BUDGETS] }),
+  })
 }
 
 export function useDeleteBudget() {
-  const queryClient = useQueryClient();
+  const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (id: string) => apiFetch<void>(`/v1/budgets/${encodeURIComponent(id)}`, { method: "DELETE" }),
-    onSuccess: () => void queryClient.invalidateQueries({ queryKey: [BUDGETS] }),
-  });
+    mutationFn: (id: string) =>
+      apiFetch<void>(`/v1/budgets/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      }),
+    onSuccess: () =>
+      void queryClient.invalidateQueries({ queryKey: [BUDGETS] }),
+  })
 }
 
 // The users endpoint caps `limit` at 1000 server-side; page through it (capped
 // like keys/budgets) so a gateway with many users can't have rows silently
 // vanish, and a backend that ignores `skip` can't spin an unbounded loop.
-const USERS_PAGE_SIZE = 1000;
-const USERS_MAX_PAGES = 100;
+const USERS_PAGE_SIZE = 1000
+const USERS_MAX_PAGES = 100
 
 async function fetchAllUsers(): Promise<User[]> {
-  const all: User[] = [];
+  const all: User[] = []
   for (let page = 0; page < USERS_MAX_PAGES; page += 1) {
-    const rows = await apiFetch<User[]>(`/v1/users?skip=${page * USERS_PAGE_SIZE}&limit=${USERS_PAGE_SIZE}`);
-    all.push(...rows);
+    const rows = await apiFetch<User[]>(
+      `/v1/users?skip=${page * USERS_PAGE_SIZE}&limit=${USERS_PAGE_SIZE}`,
+    )
+    all.push(...rows)
     if (rows.length < USERS_PAGE_SIZE) {
-      break;
+      break
     }
   }
-  return all;
+  return all
 }
 
 export function useUsers() {
@@ -797,44 +931,55 @@ export function useUsers() {
     queryKey: [USERS],
     queryFn: fetchAllUsers,
     staleTime: 60_000,
-  });
+  })
 }
 
 // Assigning a budget to a user changes that budget's usage rollup, so a user
 // write invalidates the budgets list too.
-function invalidateUserViews(queryClient: ReturnType<typeof useQueryClient>): void {
-  void queryClient.invalidateQueries({ queryKey: [USERS] });
-  void queryClient.invalidateQueries({ queryKey: [BUDGETS] });
+function invalidateUserViews(
+  queryClient: ReturnType<typeof useQueryClient>,
+): void {
+  void queryClient.invalidateQueries({ queryKey: [USERS] })
+  void queryClient.invalidateQueries({ queryKey: [BUDGETS] })
 }
 
 export function useCreateUser() {
-  const queryClient = useQueryClient();
+  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: CreateUserRequest) =>
-      apiFetch<User>("/v1/users", { method: "POST", body: JSON.stringify(body) }),
+      apiFetch<User>("/v1/users", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
     onSuccess: () => invalidateUserViews(queryClient),
-  });
+  })
 }
 
 export function useUpdateUser() {
-  const queryClient = useQueryClient();
+  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: ({ id, body }: { id: string; body: UpdateUserRequest }) =>
-      apiFetch<User>(`/v1/users/${encodeURIComponent(id)}`, { method: "PATCH", body: JSON.stringify(body) }),
+      apiFetch<User>(`/v1/users/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
     onSuccess: () => invalidateUserViews(queryClient),
-  });
+  })
 }
 
 export function useDeleteUser() {
-  const queryClient = useQueryClient();
+  const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (id: string) => apiFetch<void>(`/v1/users/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    mutationFn: (id: string) =>
+      apiFetch<void>(`/v1/users/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      }),
     onSuccess: () => {
-      invalidateUserViews(queryClient);
+      invalidateUserViews(queryClient)
       // Deleting a user deactivates its keys server-side.
-      void queryClient.invalidateQueries({ queryKey: [KEYS] });
+      void queryClient.invalidateQueries({ queryKey: [KEYS] })
     },
-  });
+  })
 }
 
 // ---------- activity / request log ----------
@@ -847,44 +992,48 @@ export function useDeleteUser() {
 // loudly: the page still shows its filter chip and the URL still carries the value,
 // while the request goes out unfiltered and the table quietly shows everything.
 function usageParams(filters: UsageFilters): URLSearchParams {
-  const params = new URLSearchParams();
+  const params = new URLSearchParams()
   // A multi-value filter goes on the wire as a repeated param (the analytics
   // endpoints match any of them); an empty array is no filter at all, not a
   // filter matching nothing.
   const appendAll = (key: string, value: string | string[] | undefined) => {
     for (const one of typeof value === "string" ? [value] : (value ?? [])) {
-      if (one) params.append(key, one);
+      if (one) params.append(key, one)
     }
-  };
-  if (filters.start_date) params.set("start_date", filters.start_date);
-  if (filters.end_date) params.set("end_date", filters.end_date);
-  if (filters.status) params.set("status", filters.status);
-  appendAll("model", filters.model);
-  if (filters.endpoint) params.set("endpoint", filters.endpoint);
-  if (filters.provider) params.set("provider", filters.provider);
-  appendAll("user_id", filters.user_id);
-  appendAll("api_key_id", filters.api_key_id);
-  if (filters.source) params.set("source", filters.source);
-  if (filters.source_label) params.set("source_label", filters.source_label);
-  if (filters.tool) params.set("tool", filters.tool);
-  if (filters.priced !== undefined) params.set("priced", String(filters.priced));
-  if (filters.counts_toward_budget !== undefined) {
-    params.set("counts_toward_budget", String(filters.counts_toward_budget));
   }
-  return params;
+  if (filters.start_date) params.set("start_date", filters.start_date)
+  if (filters.end_date) params.set("end_date", filters.end_date)
+  if (filters.status) params.set("status", filters.status)
+  appendAll("model", filters.model)
+  if (filters.endpoint) params.set("endpoint", filters.endpoint)
+  if (filters.provider) params.set("provider", filters.provider)
+  appendAll("user_id", filters.user_id)
+  appendAll("api_key_id", filters.api_key_id)
+  if (filters.source) params.set("source", filters.source)
+  if (filters.source_label) params.set("source_label", filters.source_label)
+  if (filters.tool) params.set("tool", filters.tool)
+  if (filters.priced !== undefined) params.set("priced", String(filters.priced))
+  if (filters.counts_toward_budget !== undefined) {
+    params.set("counts_toward_budget", String(filters.counts_toward_budget))
+  }
+  return params
 }
 
 // One page of usage-log rows for the Activity viewer, newest first.
 // `placeholderData: keepPreviousData` keeps the current page on screen while the
 // next loads, so paging does not flash empty.
-export function useUsageLogs(filters: UsageFilters, page: number, pageSize: number) {
+export function useUsageLogs(
+  filters: UsageFilters,
+  page: number,
+  pageSize: number,
+) {
   return useQuery({
     queryKey: [USAGE, "list", filters, page, pageSize],
     queryFn: () => {
-      const params = usageParams(filters);
-      params.set("skip", String(page * pageSize));
-      params.set("limit", String(pageSize));
-      return apiFetch<UsageEntry[]>(`/v1/usage?${params.toString()}`);
+      const params = usageParams(filters)
+      params.set("skip", String(page * pageSize))
+      params.set("limit", String(pageSize))
+      return apiFetch<UsageEntry[]>(`/v1/usage?${params.toString()}`)
     },
     placeholderData: keepPreviousData,
     // The log is a snapshot an operator reads, not a feed. On a busy gateway rows
@@ -895,7 +1044,7 @@ export function useUsageLogs(filters: UsageFilters, page: number, pageSize: numb
     // provider's refetch-on-focus default, which is already off (`provider.tsx`).
     // `useLiveUsageCount` is how the page still says that newer rows exist.
     staleTime: 10_000,
-  });
+  })
 }
 
 // Total rows matching the same filters, for the paginator's "N of M". A separate
@@ -907,18 +1056,21 @@ export function useUsageLogs(filters: UsageFilters, page: number, pageSize: numb
 export function useUsageCount(filters: UsageFilters, enabled = true) {
   return useQuery({
     queryKey: [USAGE, "count", filters],
-    queryFn: () => apiFetch<UsageCount>(`/v1/usage/count?${usageParams(filters).toString()}`),
+    queryFn: () =>
+      apiFetch<UsageCount>(
+        `/v1/usage/count?${usageParams(filters).toString()}`,
+      ),
     enabled,
     placeholderData: keepPreviousData,
     staleTime: 10_000,
-  });
+  })
 }
 
 // How often the live row count re-reads. Slow, because nothing on screen moves
 // when it changes: it only sizes the "N new" badge, which an operator glances at
 // rather than watches. TanStack does not poll a backgrounded tab, so an idle
 // dashboard costs nothing.
-const NEW_ROW_POLL_MS = 15_000;
+const NEW_ROW_POLL_MS = 15_000
 
 // The same count as `useUsageCount`, polled, so a frozen page can say how far
 // behind it has fallen without moving a single row.
@@ -931,14 +1083,17 @@ const NEW_ROW_POLL_MS = 15_000;
 export function useLiveUsageCount(filters: UsageFilters, enabled = true) {
   return useQuery({
     queryKey: [USAGE, "count", "live", filters],
-    queryFn: () => apiFetch<UsageCount>(`/v1/usage/count?${usageParams(filters).toString()}`),
+    queryFn: () =>
+      apiFetch<UsageCount>(
+        `/v1/usage/count?${usageParams(filters).toString()}`,
+      ),
     enabled,
     refetchInterval: NEW_ROW_POLL_MS,
     staleTime: 0,
     // A failed count is not worth surfacing: it sits beside a refresh button that
     // fetches the real thing, and the next poll retries anyway.
     retry: false,
-  });
+  })
 }
 
 // How often the in-flight list re-reads. Tight, because it is the only view of a
@@ -946,7 +1101,7 @@ export function useLiveUsageCount(filters: UsageFilters, enabled = true) {
 // taking a while. TanStack does not poll a backgrounded tab
 // (`refetchIntervalInBackground` defaults to false), so an idle dashboard left open
 // costs nothing.
-const IN_FLIGHT_POLL_MS = 2_000;
+const IN_FLIGHT_POLL_MS = 2_000
 
 // Requests the gateway is serving right now, rendered as a live count beside the
 // activity log's refresh control rather than as rows in it: the log is a frozen
@@ -966,13 +1121,14 @@ export function useInFlightRequests() {
     staleTime: 0,
     // Retrying a 404 cannot help: a gateway that does not serve this endpoint
     // never will. Fail fast on it and add no rows rather than re-asking.
-    retry: (failureCount, error) => !(error instanceof ApiError && error.status === 404) && failureCount < 3,
-  });
+    retry: (failureCount, error) =>
+      !(error instanceof ApiError && error.status === 404) && failureCount < 3,
+  })
 }
 
 // How often the rolling failure count re-reads. A dropped-traffic signal is only
 // useful if it moves while the operator watches it.
-const FAILURE_COUNT_POLL_MS = 60_000;
+const FAILURE_COUNT_POLL_MS = 60_000
 
 // Requests that failed within the last `windowSeconds`, as a live count. The
 // window is resolved inside the query function, not in the key, for two reasons:
@@ -991,8 +1147,10 @@ export function useFailureCount(windowSeconds: number, enabled = true) {
         status: "error",
         source: "gateway",
         start_date: isoAgo(windowSeconds),
-      };
-      return apiFetch<UsageCount>(`/v1/usage/count?${usageParams(filters).toString()}`);
+      }
+      return apiFetch<UsageCount>(
+        `/v1/usage/count?${usageParams(filters).toString()}`,
+      )
     },
     enabled,
     refetchInterval: FAILURE_COUNT_POLL_MS,
@@ -1001,7 +1159,7 @@ export function useFailureCount(windowSeconds: number, enabled = true) {
     // A failed count is not worth surfacing: it sits beside its own alarm, and
     // the next poll retries anyway.
     retry: false,
-  });
+  })
 }
 
 // The rows of one or more request groups: every attempt a routed request made,
@@ -1010,27 +1168,27 @@ export function useFailureCount(windowSeconds: number, enabled = true) {
 // hundred rows, so this leaves an order of magnitude of headroom over the largest
 // batch either caller can ask for. It is deliberately not a tight bound: nothing
 // downstream detects truncation, so the limit has to be one no real page reaches.
-const REQUEST_GROUP_PAGE_LIMIT = 1000;
+const REQUEST_GROUP_PAGE_LIMIT = 1000
 
 // Fetched as a batch (the endpoint takes a repeatable `request_group_id`) so a
 // page of the activity log costs one lookup rather than one per row. The key
 // sorts its ids so two callers asking for the same set share a cache entry.
 export function useRequestGroups(groupIds: readonly string[]) {
-  const ids = [...new Set(groupIds)].sort();
+  const ids = [...new Set(groupIds)].sort()
   return useQuery({
     queryKey: [USAGE, "groups", ids],
     queryFn: () => {
-      const params = new URLSearchParams();
-      for (const id of ids) params.append("request_group_id", id);
-      params.set("limit", String(REQUEST_GROUP_PAGE_LIMIT));
-      return apiFetch<UsageEntry[]>(`/v1/usage?${params.toString()}`);
+      const params = new URLSearchParams()
+      for (const id of ids) params.append("request_group_id", id)
+      params.set("limit", String(REQUEST_GROUP_PAGE_LIMIT))
+      return apiFetch<UsageEntry[]>(`/v1/usage?${params.toString()}`)
     },
     enabled: ids.length > 0,
     placeholderData: keepPreviousData,
     // A group is immutable once its request finished, so the only reason to
     // refetch is a group that was still in flight when it was first read.
     staleTime: 30_000,
-  });
+  })
 }
 
 // Delete imported usage rows by selection (ids or by_filter). Only rows the
@@ -1041,7 +1199,7 @@ export function useRequestGroups(groupIds: readonly string[]) {
 // unbounded DELETE server-side, so its duration tracks the number of matched
 // rows. Timing out here would report failure for a delete that committed anyway.
 export function useDeleteUsage() {
-  const queryClient = useQueryClient();
+  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: UsageMutationSelection) =>
       apiFetch<UsageDeleteResult>("/v1/usage", {
@@ -1050,15 +1208,15 @@ export function useDeleteUsage() {
         signal: longRequestSignal(),
       }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: [USAGE] });
+      void queryClient.invalidateQueries({ queryKey: [USAGE] })
     },
-  });
+  })
 }
 
 // Set the cost of imported usage rows from manual per-1M rates. Long deadline
 // for the same reason as the delete: the server reprices every matched row.
 export function useSetUsagePrice() {
-  const queryClient = useQueryClient();
+  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: UsageSetPriceRequest) =>
       apiFetch<UsageSetPriceResult>("/v1/usage/set-price", {
@@ -1067,16 +1225,16 @@ export function useSetUsagePrice() {
         signal: longRequestSignal(),
       }),
     onSuccess: () => {
-      void queryClient.invalidateQueries({ queryKey: [USAGE] });
+      void queryClient.invalidateQueries({ queryKey: [USAGE] })
     },
-  });
+  })
 }
 
 // ---------- usage analytics summary ----------
 
 // Pass this as `dimensions` to read only `totals` / `series`. Named rather than a
 // bare `[]` at each call site so it is clear the omission is deliberate.
-export const NO_BREAKDOWNS: SummaryDimension[] = [];
+export const NO_BREAKDOWNS: SummaryDimension[] = []
 
 // Aggregated spend/tokens/requests for the Usage page. Shares the activity
 // filter serialization and adds the time-series bucket. `enabled` lets a caller
@@ -1099,21 +1257,21 @@ export function useUsageSummary(
   return useQuery({
     queryKey: [USAGE, "summary", filters, bucket, dimensions ?? "all"],
     queryFn: () => {
-      const params = usageParams(filters);
-      params.set("bucket", bucket);
+      const params = usageParams(filters)
+      params.set("bucket", bucket)
       // A repeated query param has no empty-list form, so an empty selection goes
       // on the wire as the server's `none` sentinel.
       if (dimensions) {
         for (const dimension of dimensions.length > 0 ? dimensions : ["none"]) {
-          params.append("dimensions", dimension);
+          params.append("dimensions", dimension)
         }
       }
-      return apiFetch<UsageSummary>(`/v1/usage/summary?${params.toString()}`);
+      return apiFetch<UsageSummary>(`/v1/usage/summary?${params.toString()}`)
     },
     enabled,
     placeholderData: keepPreviousData,
     staleTime: 30_000,
-  });
+  })
 }
 
 // A per-group time series for the stacked analytics chart (top groups by spend
@@ -1128,10 +1286,12 @@ export function useUsageGroupedSeries(
   return useQuery({
     queryKey: [USAGE, "series", filters, bucket, groupBy],
     queryFn: () => {
-      const params = usageParams(filters);
-      params.set("bucket", bucket);
-      params.set("group_by", groupBy as string);
-      return apiFetch<UsageGroupedSeries>(`/v1/usage/series?${params.toString()}`);
+      const params = usageParams(filters)
+      params.set("bucket", bucket)
+      params.set("group_by", groupBy as string)
+      return apiFetch<UsageGroupedSeries>(
+        `/v1/usage/series?${params.toString()}`,
+      )
     },
     enabled: enabled && groupBy !== null,
     placeholderData: keepPreviousData,
@@ -1139,6 +1299,7 @@ export function useUsageGroupedSeries(
     // A 404 is version skew (a gateway older than this dashboard, e.g. not yet
     // restarted onto the build that ships it); retrying cannot fix that, and
     // the page falls back to the ungrouped view with a notice instead.
-    retry: (failureCount, error) => !(error instanceof ApiError && error.status === 404) && failureCount < 3,
-  });
+    retry: (failureCount, error) =>
+      !(error instanceof ApiError && error.status === 404) && failureCount < 3,
+  })
 }

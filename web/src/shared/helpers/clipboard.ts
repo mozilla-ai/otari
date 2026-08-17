@@ -12,13 +12,13 @@ export async function copyToClipboard(
 ): Promise<boolean> {
   if (clipboard) {
     try {
-      await clipboard.writeText(text);
-      return true;
+      await clipboard.writeText(text)
+      return true
     } catch {
       // Permission denied or a detached document: try the legacy path.
     }
   }
-  return legacyCopy(text);
+  return legacyCopy(text)
 }
 
 // Copies from an offscreen textarea, restoring whatever the operator had
@@ -26,32 +26,36 @@ export async function copyToClipboard(
 // need restoring: `select()` focuses the textarea in Chrome, so removing it would
 // otherwise drop focus to <body> and cost a keyboard operator their tab position.
 function legacyCopy(text: string): boolean {
-  const source = document.createElement("textarea");
-  source.value = text;
-  source.readOnly = true;
+  const source = document.createElement("textarea")
+  source.value = text
+  source.readOnly = true
   // Fixed and transparent rather than display:none, which is not selectable.
-  source.style.position = "fixed";
-  source.style.top = "-1000px";
-  source.style.opacity = "0";
-  document.body.appendChild(source);
+  source.style.position = "fixed"
+  source.style.top = "-1000px"
+  source.style.opacity = "0"
+  document.body.appendChild(source)
 
-  const selection = document.getSelection();
-  const previous = selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null;
-  const previousFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
-  source.select();
+  const selection = document.getSelection()
+  const previous =
+    selection && selection.rangeCount > 0 ? selection.getRangeAt(0) : null
+  const previousFocus =
+    document.activeElement instanceof HTMLElement
+      ? document.activeElement
+      : null
+  source.select()
 
-  let copied = false;
+  let copied = false
   try {
-    copied = document.execCommand("copy");
+    copied = document.execCommand("copy")
   } catch {
-    copied = false;
+    copied = false
   }
 
-  source.remove();
+  source.remove()
   if (selection && previous) {
-    selection.removeAllRanges();
-    selection.addRange(previous);
+    selection.removeAllRanges()
+    selection.addRange(previous)
   }
-  previousFocus?.focus();
-  return copied;
+  previousFocus?.focus()
+  return copied
 }

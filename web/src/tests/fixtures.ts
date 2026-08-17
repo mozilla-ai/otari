@@ -6,7 +6,7 @@
 // builder fills the whole shape with neutral values and takes an override for
 // the part under test, so a test states what it is about and nothing else.
 
-import type { PricingResponse, UsageSeriesPoint, UsageTotals } from "@/client";
+import type { PricingResponse, UsageSeriesPoint, UsageTotals } from "@/client"
 
 export function usageTotals(overrides: Partial<UsageTotals> = {}): UsageTotals {
   return {
@@ -24,7 +24,7 @@ export function usageTotals(overrides: Partial<UsageTotals> = {}): UsageTotals {
     unpriced_requests: 0,
     avg_latency_ms: null,
     ...overrides,
-  };
+  }
 }
 
 export function seriesPoint(
@@ -40,7 +40,7 @@ export function seriesPoint(
     cache_read_tokens: 0,
     cache_write_tokens: 0,
     ...overrides,
-  };
+  }
 }
 
 export function pricingResponse(
@@ -57,5 +57,5 @@ export function pricingResponse(
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
     ...overrides,
-  };
+  }
 }
