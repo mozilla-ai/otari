@@ -54,9 +54,9 @@ Small shared primitives already exist. Reuse or extend them instead of duplicati
 | Destructive action without a modal | `ConfirmButton` (two-click arm/confirm) |
 | Filter over a small fixed option set | `FilterSelect` (token-styled native `<select>`) |
 | Filter over a large or open option set | `FilterMultiComboBox` (type-to-filter, holds a set of values; `allowsCustom` when the value space is not enumerable) |
-| Applied filters, each removable | `FilterChips` (`components/FilterChips.tsx`); one chip per value, and pass `clearLabel` so several chips of one dimension stay distinguishable |
-| Form field wrapper | `Field` (`components/Field.tsx`) |
-| Tabular data | `DataTable` (`components/DataTable.tsx`) |
+| Applied filters, each removable | `FilterChips` (`shared/components/FilterChips.tsx`); one chip per value, and pass `clearLabel` so several chips of one dimension stay distinguishable |
+| Form field wrapper | `Field` (`shared/components/Field.tsx`) |
+| Tabular data | `DataTable` (`shared/components/DataTable.tsx`) |
 
 `errorMessage(error)` centralizes turning an `ApiError`/`Error`/unknown into a display string;
 use it rather than reaching into `error.message` yourself.

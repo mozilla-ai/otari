@@ -33,7 +33,7 @@ Consume them through Tailwind arbitrary values:
   what the color is for. Don't add `--otari-teal-500` or `--otari-gray`; if you're tempted, the
   role is missing, not the shade.
 - **Status surfaces are the documented exception.** Alert/banner and status components
-  (`ErrorBanner`, `InfoBanner`, and `StatCard`'s status pills in `components/ui.tsx`) use raw
+  (`ErrorBanner`, `InfoBanner`, and `StatCard`'s status pills in `shared/components/ui.tsx`) use raw
   Tailwind palette classes for their semantic meaning: `red` for danger/error, `amber` for
   warning, and `emerald` for healthy/success (the traffic-light triad). Match that for new
   status elements; don't convert them to `--otari-*` and don't invent brand tokens for them.

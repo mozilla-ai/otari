@@ -98,6 +98,13 @@
       // know nothing about any one domain. It is imported by everything, so an import
       // pointing up from here is a cycle waiting to be discovered, and it is what turns
       // "a primitive" into "a primitive that only works if the usage page is loaded".
+      //
+      // routes/ is in the group as well, which is the one rule here otari-ai/frontend
+      // does not have. A route file names a feature's page, so `shared -> routes` is
+      // `shared -> features` with a step in between, and the group below would not see
+      // it. Nothing in either repo does this today, which is what makes it free to
+      // close: `tests/router.tsx` builds its own route tree rather than importing the
+      // generated one.
       "includes": ["src/shared/**"],
       "linter": {
         "rules": {
@@ -115,9 +122,13 @@
                       "@/features",
                       "@/features/**",
                       "**/../features",
-                      "**/../features/**"
+                      "**/../features/**",
+                      "@/routes",
+                      "@/routes/**",
+                      "**/../routes",
+                      "**/../routes/**"
                     ],
-                    "message": "src/shared may not import src/app or src/features. Shared code is domain-agnostic by definition; if a helper needs a domain type, it belongs to that feature."
+                    "message": "src/shared may not import src/app, src/features, or src/routes. Shared code is domain-agnostic by definition; if a helper needs a domain type, it belongs to that feature. A route is a feature page under another name, so importing one is the same crossing."
                   },
                   {
                     "group": ["@/overlay", "@/overlay/**", "**/overlay", "**/overlay/**"],

@@ -133,8 +133,16 @@ describe("layer boundaries", () => {
     );
     expect(messages).toHaveLength(2);
     for (const message of messages) {
-      expect(message).toMatch(/may not import src\/app or src\/features/);
+      expect(message).toMatch(/may not import src\/app, src\/features, or src\/routes/);
     }
+  });
+
+  it("reject shared code importing a route", () => {
+    // The step-in-between case: a route file names a feature's page, so this is
+    // `shared -> features` with a hop, and the feature group alone would miss it.
+    const messages = rejects("shared", 'import { Route } from "@/routes/usage";\nexport const a = Route;\n');
+    expect(messages).toHaveLength(1);
+    expect(messages[0]).toMatch(/may not import src\/app, src\/features, or src\/routes/);
   });
 
   it("allow shared code importing the generated client and its own layer", () => {
