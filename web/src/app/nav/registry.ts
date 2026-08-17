@@ -167,3 +167,33 @@ export function navItemForPath(pathname: string): NavItem | undefined {
       (item.to !== "/" && pathname.startsWith(`${item.to}/`)),
   )
 }
+
+/** A section that has at least one visible entry, paired with those entries. */
+export interface VisibleNavSection {
+  section: NavSection
+  items: readonly NavItem[]
+}
+
+/**
+ * The sections worth rendering, with the entries worth rendering in them.
+ *
+ * Filters before the caller indexes, which is the point: the sidebar draws its
+ * divider and top margin above every section *after* the first, so keying that
+ * off the registry index would leave a stray top border above the first visible
+ * group once a section ahead of it empties out. Not reachable in this build,
+ * where the index section is ungated and so always renders first, and reachable
+ * as soon as an overlay contributes a section or a gated one empties, which is
+ * the whole point of the seam. `otari-ai/frontend`'s sidebar keys off rendered
+ * position for the same reason.
+ *
+ * A section with no visible entry is dropped whole, heading included: an empty
+ * heading over nothing reads worse than no heading.
+ */
+export function visibleNavSections(
+  sections: readonly NavSection[],
+  isVisible: (item: NavItem) => boolean,
+): VisibleNavSection[] {
+  return sections
+    .map((section) => ({ section, items: section.items.filter(isVisible) }))
+    .filter(({ items }) => items.length > 0)
+}

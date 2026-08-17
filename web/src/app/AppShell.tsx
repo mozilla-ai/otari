@@ -8,7 +8,11 @@ import type {
 } from "react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { ConnectionStatus } from "@/app/ConnectionStatus"
-import { NAV_SECTIONS, navItemForPath } from "@/app/nav/registry"
+import {
+  NAV_SECTIONS,
+  navItemForPath,
+  visibleNavSections,
+} from "@/app/nav/registry"
 import { useNavVisibility } from "@/app/nav/useNavVisibility"
 import { UpdatePrompt } from "@/app/UpdatePrompt"
 import { useAuth } from "@/features/auth/AuthContext"
@@ -97,6 +101,9 @@ export function AppShell() {
   // entry and is never gated.
   const currentItem = navItemForPath(pathname)
   const routeIsGatedOff = currentItem !== undefined && !isVisible(currentItem)
+  // Filtered before it is indexed, so the divider and top margin below key off
+  // the first *rendered* section rather than the first registered one.
+  const visibleSections = visibleNavSections(NAV_SECTIONS, isVisible)
 
   const asideRef = useRef<HTMLElement>(null)
   const mainRef = useRef<HTMLElement>(null)
@@ -401,11 +408,7 @@ export function AppShell() {
               effectiveCollapsed ? "px-2" : "px-3",
             )}
           >
-            {NAV_SECTIONS.map((section, sectionIndex) => {
-              const items = section.items.filter(isVisible)
-              if (items.length === 0) {
-                return null
-              }
+            {visibleSections.map(({ section, items }, sectionIndex) => {
               return (
                 <div
                   key={section.id}

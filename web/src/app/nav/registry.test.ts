@@ -7,8 +7,9 @@ import {
   NAV_ITEMS,
   NAV_SECTIONS,
   navItemForPath,
+  visibleNavSections,
 } from "./registry"
-import type { NavSection } from "./types"
+import type { NavItem, NavSection } from "./types"
 
 describe("nav registry", () => {
   it("exposes the base sections in display order", () => {
@@ -121,6 +122,52 @@ describe("nav registry", () => {
   it("appends nothing in this build", () => {
     // The overlay tree lives in another repo; the seam here stays empty.
     expect(composeNavSections(NAV_SECTIONS, [])).toEqual(NAV_SECTIONS)
+  })
+})
+
+describe("visibleNavSections", () => {
+  const entry = (label: string, surface?: string): NavItem =>
+    ({ to: "/", label, icon: null, surface }) as NavItem
+
+  const sections: NavSection[] = [
+    { id: "first", items: [entry("A", "a")] },
+    { id: "second", items: [entry("B", "b"), entry("C", "c")] },
+    { id: "third", items: [entry("D")] },
+  ]
+
+  const hosting =
+    (...surfaces: string[]) =>
+    (item: NavItem) =>
+      item.surface === undefined || surfaces.includes(item.surface)
+
+  it("keeps only the entries that pass, and drops a section left with none", () => {
+    const visible = visibleNavSections(sections, hosting("b"))
+    expect(visible.map(({ section }) => section.id)).toEqual([
+      "second",
+      "third",
+    ])
+    expect(visible[0].items.map((item) => item.label)).toEqual(["B"])
+  })
+
+  it("indexes by rendered position, not registry position", () => {
+    // The sidebar draws a divider and a top margin above every section after
+    // the first, so the first surviving section has to land at index 0. Keyed
+    // off the registry index instead, a hidden section ahead of it would leave
+    // a stray top border above the first visible group. Not reachable through
+    // today's registry, where the ungated index section always renders first,
+    // and reachable the moment an overlay contributes a section.
+    const visible = visibleNavSections(sections, hosting("c"))
+    expect(visible[0].section.id).toBe("second")
+    expect(visible.findIndex(({ section }) => section.id === "second")).toBe(0)
+  })
+
+  it("returns nothing when every entry is gated away", () => {
+    expect(visibleNavSections([sections[0]], hosting())).toEqual([])
+  })
+
+  it("keeps an entry that declares no gate at all", () => {
+    const visible = visibleNavSections(sections, hosting())
+    expect(visible.map(({ section }) => section.id)).toEqual(["third"])
   })
 })
 
