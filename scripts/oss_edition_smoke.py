@@ -59,10 +59,12 @@ from contextlib import closing, contextmanager
 from dataclasses import dataclass
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
-from typing import Any
+from typing import Any, Literal
 
 MASTER_KEY = "oss-edition-smoke-master-key"
-MASTER_KEY_HEADER = "Otari-Key"
+# One header carries both credentials the smoke presents: the master key on the
+# admin calls, and the created API key on the completion.
+KEY_HEADER = "Otari-Key"
 MODEL = "oss-edition-smoke-model"
 REPLY = "oss-edition-smoke-ok"
 
@@ -72,22 +74,16 @@ REPLY = "oss-edition-smoke-ok"
 FAILING_PREFIX = "/failing"
 WORKING_PREFIX = "/working"
 
-# Environment variables that would select something other than the OSS edition,
-# cleared before the gateway starts so a developer's shell (or a CI secret that
-# grows an export one day) cannot turn this gate into a check of the hybrid
-# build. OTARI_MODE and OTARI_AI_TOKEN each select hybrid mode
-# (GatewayConfig.effective_mode); OTARI_BOOTSTRAP is the planned overlay
-# selector ARCHITECTURE.md describes, cleared now so the gate keeps meaning the
-# same thing the day the setting exists.
-#
-# Matched exactly, never by prefix: OTARI_BOOTSTRAP_API_KEY is an unrelated and
-# perfectly OSS setting (create a first-use API key), and a prefix match would
-# silently disable it here.
-NON_OSS_ENV_VARS = frozenset({"OTARI_AI_TOKEN", "OTARI_MODE", "OTARI_BOOTSTRAP"})
-
-# The platform connection block, which only hybrid mode reads. Prefix-matched:
-# these are all one config section, and none of them mean anything standalone.
-NON_OSS_ENV_PREFIXES = ("OTARI_PLATFORM_",)
+# Everything the gateway reads from the environment is cleared before it starts,
+# so the config file this script writes is the only thing that decides what boots.
+# A developer's exported OTARI_MODE or OTARI_AI_TOKEN would otherwise select
+# hybrid mode (GatewayConfig.effective_mode) and quietly turn the gate into a
+# check of the other edition; OTARI_DATABASE_URL or the CLI's DATABASE_URL would
+# point the run at a database nobody meant to smoke. OTARI_BOOTSTRAP, the overlay
+# selector ARCHITECTURE.md describes, is covered by the same sweep on the day it
+# exists.
+SCRUBBED_ENV_PREFIXES = ("OTARI_",)
+SCRUBBED_ENV_VARS = frozenset({"DATABASE_URL"})
 
 HEALTH_TIMEOUT_SECONDS = 90
 REQUEST_TIMEOUT_SECONDS = 60
@@ -154,7 +150,7 @@ class _MockProviderServer(ThreadingHTTPServer):
         self.unauthorized_calls = 0
         self._lock = threading.Lock()
 
-    def record(self, kind: str) -> None:
+    def record(self, kind: Literal["failing", "working", "unauthorized"]) -> None:
         with self._lock:
             if kind == "failing":
                 self.failing_calls += 1
@@ -172,7 +168,9 @@ class _MockProviderHandler(BaseHTTPRequestHandler):
     # the expected key below are typed.
     server: _MockProviderServer
 
-    def do_POST(self) -> None:  # noqa: N802  (http.server's required spelling)
+    # do_POST, log_message: http.server dictates both spellings.
+    def do_POST(self) -> None:  # noqa: N802
+        # Drain the request body so the connection stays usable for keep-alive.
         self._read_body()
         if not self.path.endswith("/chat/completions"):
             self._respond(404, {"error": {"message": f"mock provider has no route {self.path}"}})
@@ -201,7 +199,7 @@ class _MockProviderHandler(BaseHTTPRequestHandler):
         self.server.record("working")
         self._respond(200, _completion_payload())
 
-    def log_message(self, format: str, *args: Any) -> None:  # noqa: A002  (http.server's signature)
+    def log_message(self, format: str, *args: Any) -> None:  # noqa: A002
         """Stay quiet: the gateway's own log is the interesting one on a failure."""
 
     def _read_body(self) -> bytes:
@@ -257,15 +255,14 @@ def mock_provider(expected_api_key: str) -> Iterator[_MockProviderServer]:
 def oss_edition_env(base_env: dict[str, str], secret_key: str) -> dict[str, str]:
     """Return the environment the OSS edition boots in.
 
-    Every variable that would select another edition is dropped rather than
-    overridden with a benign value: an override still leaves the setting present,
-    and a future setting that treats "present" as "on" would flip the edition
-    without changing this function.
+    Settings are dropped rather than overridden with a benign value: an override
+    still leaves the variable present, and a future setting that reads "present"
+    as "on" would flip the edition without changing this function.
     """
     env = {
         name: value
         for name, value in base_env.items()
-        if name not in NON_OSS_ENV_VARS and not name.startswith(NON_OSS_ENV_PREFIXES)
+        if name not in SCRUBBED_ENV_VARS and not name.startswith(SCRUBBED_ENV_PREFIXES)
     }
     # Provider credentials are encrypted at rest, so storing one (step 4) needs a
     # secret key. Generated per run and thrown away with the database.
@@ -526,7 +523,7 @@ def run_completion(base_url: str, key: str, provider: _MockProviderServer, names
     status, body = _request(
         "POST",
         f"{base_url}/v1/chat/completions",
-        headers={MASTER_KEY_HEADER: key},
+        headers={KEY_HEADER: key},
         payload={
             "model": names.policy,
             "messages": [{"role": "user", "content": "Is the OSS edition alive?"}],
@@ -580,7 +577,7 @@ def check_usage_recorded(base_url: str, admin: dict[str, str], names: Names) -> 
 
 
 def smoke(base_url: str, provider: _MockProviderServer, mock_base_url: str, names: Names) -> None:
-    admin = {MASTER_KEY_HEADER: MASTER_KEY}
+    admin = {KEY_HEADER: MASTER_KEY}
     check_health(base_url)
     key = create_key(base_url, admin, names)
     register_byo_provider(base_url, admin, names, mock_base_url=mock_base_url)

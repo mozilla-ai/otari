@@ -52,22 +52,21 @@ def _post(url: str, *, headers: dict[str, str] | None = None) -> tuple[int, Any]
 # --------------------------------------------------------------------------- #
 
 
-@pytest.mark.parametrize("name", sorted(smoke.NON_OSS_ENV_VARS))
-def test_edition_selecting_env_vars_are_dropped(name: str) -> None:
+@pytest.mark.parametrize(
+    "name",
+    [
+        "OTARI_MODE",  # selects hybrid mode outright
+        "OTARI_AI_TOKEN",  # a platform token selects hybrid mode when mode is unset
+        "OTARI_BOOTSTRAP",  # the planned overlay selector
+        "OTARI_PLATFORM_BASE_URL",  # the platform block, which only hybrid reads
+        "OTARI_DATABASE_URL",  # would smoke a database nobody chose
+        "DATABASE_URL",  # the CLI reads this one for --database-url
+    ],
+)
+def test_gateway_env_settings_are_dropped(name: str) -> None:
     env = smoke.oss_edition_env({name: "set-by-the-developer-shell", "PATH": "/usr/bin"}, "secret")
     assert name not in env
-    assert env["PATH"] == "/usr/bin"
-
-
-def test_platform_block_env_vars_are_dropped() -> None:
-    env = smoke.oss_edition_env({"OTARI_PLATFORM_BASE_URL": "https://otari.ai"}, "secret")
-    assert "OTARI_PLATFORM_BASE_URL" not in env
-
-
-def test_bootstrap_api_key_survives_the_scrub() -> None:
-    """It is an OSS setting whose name merely starts with the overlay selector's."""
-    env = smoke.oss_edition_env({"OTARI_BOOTSTRAP_API_KEY": "false"}, "secret")
-    assert env["OTARI_BOOTSTRAP_API_KEY"] == "false"
+    assert env["PATH"] == "/usr/bin", "only the gateway's own settings are scrubbed"
 
 
 def test_secret_key_is_set_for_credential_storage() -> None:

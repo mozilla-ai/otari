@@ -76,15 +76,22 @@ jobs:
       with:
         python-version: "3.14"
 
-    # The build half of the gate. Nothing downstream installs the artifacts; this
-    # is here because a broken packaging recipe (a module outside the discovered
-    # packages, an unsatisfiable dependency pin) is invisible until someone tries
+    # The build half of the gate: a broken packaging recipe (a module outside the
+    # discovered packages, an unsatisfiable pin) is invisible until someone tries
     # to ship the OSS edition, and otari-docker.yml only finds it after merge.
+    #
+    # The artifacts are proof that the recipe works, and are deliberately not what
+    # gets booted below. A wheel install cannot migrate: alembic/ is not package
+    # data, and _run_migrations resolves it relative to the package
+    # (src/gateway/core/database.py), which only lands next to it in a source
+    # layout. The published image is that source layout (`uv sync` over COPY src,
+    # plus COPY alembic), so booting the same way is what makes this gate resemble
+    # the deployment rather than a distribution nobody ships.
     - name: Build the OSS distribution
       run: uv build
 
-    # Runtime dependencies only. See the header: this is what lets the smoke
-    # detect a dev-only or enterprise-only import on an OSS path.
+    # Runtime dependencies only, no dev group: that is what lets the smoke detect
+    # a dev-only or enterprise-only import on an OSS path.
     - name: Install the OSS edition
       run: uv sync --frozen --no-dev
 
