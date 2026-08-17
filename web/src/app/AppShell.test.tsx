@@ -399,46 +399,27 @@ describe("AppShell entitlement and flag gating", () => {
     window.localStorage.clear()
   })
 
-  it("hides a destination whose capability is not entitled", async () => {
+  it("gates no shipping destination on a capability, so the sidebar is whole", async () => {
     mockMatchMedia(false)
-    // The deployment hosts the routing surface, but the edition is not licensed
-    // for the capability. Two independent axes: either one hides the link.
+    // Withholding every capability changes nothing today: no base entry is
+    // tagged with one, because the routing split ARCHITECTURE.md calls
+    // provisional has not been decided. This is what starts failing the day
+    // someone adds a tag without adding its name to BASE_CAPABILITIES, which
+    // would silently drop a page from the sidebar of every gateway.
     await renderShell(bootstrap(), { entitlements: { capabilities: [] } })
 
-    expect(screen.queryByRole("link", { name: "Routing" })).toBeNull()
-    // Its section survives on the entries that are still entitled.
+    expect(screen.getByRole("link", { name: "Routing" })).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "Models" })).toBeInTheDocument()
     expect(screen.getByText("Catalog")).toBeInTheDocument()
-  })
-
-  it("hides a destination whose surface is absent even when entitled", async () => {
-    mockMatchMedia(false)
-    // The inverse of the case above: licensed for routing, but this process does
-    // not host the surface, so there is no page to license.
-    await renderShell(bootstrap({ surfaces: ["models"] }), {
-      entitlements: { capabilities: ["routing"] },
-    })
-
-    expect(screen.queryByRole("link", { name: "Routing" })).toBeNull()
   })
 
   it("answers a gated-off destination with a panel, not the page", async () => {
     mockMatchMedia(false)
     // A bookmark or a shared URL still lands on the route after its link is
     // gone. Rendering the page anyway would fire requests the server refuses.
-    await renderShell(bootstrap(), {
-      entitlements: { capabilities: [] },
-      url: "/routing",
-    })
-
-    expect(
-      await screen.findByText("Routing is not available here"),
-    ).toBeInTheDocument()
-    expect(screen.queryByText("PAGE CONTENT")).toBeNull()
-  })
-
-  it("answers a destination the deployment does not host the same way", async () => {
-    mockMatchMedia(false)
+    // Driven from the surface axis, the only one a shipping entry declares;
+    // useNavVisibility.test.tsx covers the other two on synthetic entries,
+    // which is where they have users today.
     await renderShell(bootstrap({ surfaces: ["models"] }), {
       url: "/providers",
     })
@@ -451,7 +432,7 @@ describe("AppShell entitlement and flag gating", () => {
 
   it("still renders a destination that passes every axis", async () => {
     mockMatchMedia(false)
-    await renderShell(bootstrap(), { url: "/routing" })
+    await renderShell(bootstrap(), { url: "/providers" })
 
     expect(await screen.findByText("PAGE CONTENT")).toBeInTheDocument()
   })

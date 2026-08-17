@@ -67,18 +67,18 @@ const BASE_NAV_SECTIONS = [
         icon: ProvidersIcon,
       },
       { to: "/models", label: "Models", surface: "models", icon: ModelsIcon },
+      // Deliberately not tagged `capability: "routing"`, though otari.ai's
+      // registry tags its own Routing item that way. ARCHITECTURE.md's
+      // capability lines mark the routing split (how much is core base, how
+      // much an overlay adapter) **provisional**, and say it is a decision for
+      // the maintainers rather than something a contributor assumes. Tagging
+      // this entry would assume it, and would withhold nothing today either
+      // way, since the base grants what it ships. Add the tag when the split is
+      // decided, together with its name in `BASE_CAPABILITIES`.
       {
         to: "/routing",
         label: "Routing",
         surface: "routing",
-        // The one base entry that also carries an entitlement, and the reason
-        // the gate is not dead code here. Routing is a capability in its own
-        // right (ARCHITECTURE.md's capability lines: core base plus an overlay
-        // adapter for richer model selection), and otari.ai's registry already
-        // gates its own Routing item on this same name. The base build entitles
-        // it, so it renders; tagging it now is what keeps one nav entry from
-        // meaning two different things once the registries converge.
-        capability: "routing",
         icon: RoutingIcon,
       },
     ],

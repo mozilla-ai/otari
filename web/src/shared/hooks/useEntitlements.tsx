@@ -47,12 +47,21 @@ export interface Entitlements {
 /**
  * The capabilities Otari's base build ships and therefore entitles.
  *
- * Add a name here when the base grows a capability with UI surface; leave an
- * overlay-only one (billing, for example) out, which is what makes a gate on it
- * hide in this build. A nav entry gated on a capability that is not listed
- * disappears, so the two are kept honest together by `registry.test.ts`.
+ * **Empty, because nothing in the base registry is gated on a capability yet.**
+ * That is not an oversight: the one candidate is routing, and ARCHITECTURE.md
+ * marks how far the core base extends before an overlay adapter takes over as
+ * provisional and not a contributor's to assume. So the base withholds nothing
+ * and declares nothing, and the axis waits for a real decision instead of
+ * anticipating one.
+ *
+ * Add a name here when the base grows a capability with UI surface, at the same
+ * time as the nav entry that gates on it; leave an overlay-only one (billing,
+ * for example) out, which is what makes a gate on it hide in this build. A nav
+ * entry gated on a capability that is not listed disappears from every
+ * deployment, and the two lists live in different files, so `registry.test.ts`
+ * fails when they disagree.
  */
-export const BASE_CAPABILITIES: readonly string[] = ["routing"]
+export const BASE_CAPABILITIES: readonly string[] = []
 
 const BASE_ENTITLEMENTS: Entitlements = {
   capabilities: BASE_CAPABILITIES,

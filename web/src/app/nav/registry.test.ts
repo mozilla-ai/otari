@@ -46,6 +46,15 @@ describe("nav registry", () => {
     }
   })
 
+  it("keeps Routing gated on its surface only", () => {
+    // Pinned because the tag is a decision, not an omission: otari.ai gates its
+    // own Routing item on `capability: "routing"`, so adding it here would look
+    // like a merge fix rather than a call on a provisional split.
+    const routing = NAV_ITEMS.find((item) => item.label === "Routing")
+    expect(routing?.surface).toBe("routing")
+    expect(routing?.capability).toBeUndefined()
+  })
+
   it("leaves the index ungated on all three axes", () => {
     const overview = NAV_ITEMS.find((item) => item.label === "Overview")
     // The deployment's own front page: it reads whatever it is allowed to, so
@@ -67,23 +76,26 @@ describe("nav registry", () => {
     ])
   })
 
-  it("entitles every capability the base registry gates on", () => {
-    // A base entry gated on a capability the base build does not grant would
-    // disappear from the sidebar of every standalone gateway. The two lists are
-    // maintained in different files, so this is what keeps them honest.
-    const gated = NAV_ITEMS.map((item) => item.capability).filter(
-      (capability) => capability !== undefined,
-    )
-    expect(gated).not.toHaveLength(0)
-    for (const capability of gated) {
-      expect(BASE_CAPABILITIES).toContain(capability)
-    }
+  it("gates no base entry on a capability or a flag", () => {
+    // Neither axis has a base user yet. Routing is the one candidate for a
+    // capability, and ARCHITECTURE.md marks that split provisional, so the tag
+    // waits for the decision rather than anticipating it. Flags belong to
+    // whoever is rolling something out, and the base ships none, so a flagged
+    // base entry would be permanently hidden.
+    expect(NAV_ITEMS.every((item) => item.capability === undefined)).toBe(true)
+    expect(NAV_ITEMS.every((item) => item.flag === undefined)).toBe(true)
   })
 
-  it("gates no base entry on a feature flag", () => {
-    // The base build ships no flags, so a flagged entry would be permanently
-    // hidden. Flags belong to whoever is rolling something out.
-    expect(NAV_ITEMS.every((item) => item.flag === undefined)).toBe(true)
+  it("entitles every capability the base registry gates on", () => {
+    // Vacuous while the assertion above holds, and deliberately kept: it arms
+    // itself the moment someone adds the first tag. A base entry gated on a
+    // capability the base build does not grant disappears from the sidebar of
+    // every standalone gateway, and the two lists are maintained in different
+    // files, which is exactly the pair a single commit forgets to update.
+    for (const item of NAV_ITEMS) {
+      if (item.capability === undefined) continue
+      expect(BASE_CAPABILITIES).toContain(item.capability)
+    }
   })
 
   it("appends overlay sections after the base sections", () => {

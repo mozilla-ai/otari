@@ -3,7 +3,10 @@ import { describe, expect, it } from "vitest"
 
 import { EntitlementGate } from "@/shared/components/EntitlementGate"
 import type { Entitlements } from "@/shared/hooks/useEntitlements"
-import { EntitlementProvider } from "@/shared/hooks/useEntitlements"
+import {
+  BASE_CAPABILITIES,
+  EntitlementProvider,
+} from "@/shared/hooks/useEntitlements"
 
 function renderGate(
   gate: React.ReactElement,
@@ -134,23 +137,28 @@ describe("EntitlementGate", () => {
     expect(screen.getByText("NOT AVAILABLE")).toBeInTheDocument()
   })
 
-  it("entitles the base capabilities with no provider above it", () => {
+  it("answers from the base constant with no provider above it", () => {
     // The default context value is the seam's fallback, so the base build wires
-    // nothing up and still gets a working answer.
-    renderGate(
-      <EntitlementGate capability="routing">
-        <p>GATED</p>
-      </EntitlementGate>,
-    )
-    expect(screen.getByText("GATED")).toBeInTheDocument()
-  })
+    // nothing up and still gets an answer. `BASE_CAPABILITIES` is empty today,
+    // which makes the first half of this vacuous and the second half the real
+    // assertion; both survive a name being added to the constant later.
+    for (const capability of BASE_CAPABILITIES) {
+      const { unmount } = renderGate(
+        <EntitlementGate capability={capability}>
+          <p>GATED</p>
+        </EntitlementGate>,
+      )
+      expect(screen.getByText("GATED")).toBeInTheDocument()
+      unmount()
+    }
 
-  it("reports an overlay-only capability as absent with no provider above it", () => {
     renderGate(
       <EntitlementGate capability="billing">
         <p>GATED</p>
       </EntitlementGate>,
     )
+    // Absent from the base constant, so the base build hides it. This is the
+    // fail-closed default: an unknown capability is not entitled.
     expect(screen.queryByText("GATED")).toBeNull()
   })
 })
