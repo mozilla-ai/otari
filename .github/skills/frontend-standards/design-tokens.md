@@ -40,8 +40,29 @@ utilities that resolve through that mapping:
 
 Tokens HeroUI has no counterpart for are registered in the file's `@theme` block, which is
 what generates their utilities: `bg-background-alt`, `bg-surface-alt`, `text-link`,
-`text-link-hover`, the `attention` family, the `code` family, `shadow-elevation-sm/md/lg`,
-`shadow-modal`, and `font-sans` / `font-mono` / `font-display`.
+`text-link-hover`, the `attention` and `info` families, the status `-subtle` fills,
+`bg-primary-subtle`, the `code` family, `shadow-elevation-sm/md/lg`, `shadow-modal`, and
+`font-sans` / `font-mono` / `font-display`.
+
+### HeroUI ships a near-synonym for several of these
+
+`@heroui/styles` has its own `@theme`, so `bg-danger-soft`, `bg-accent-soft`,
+`bg-default-soft`, `bg-background-secondary`, `bg-background-tertiary` and
+`border-border-secondary` are all real classes that nothing in this repo declares. They
+overlap in meaning with our `-subtle` and `-alt` names without being the same thing, and the
+compiler cannot tell you which family a class came from: both spellings work, and only one
+tracks our tokens.
+
+**Use ours.** A HeroUI-named utility bypasses the palette and will not follow a token change.
+The names differ because otari-ai chose `-subtle` and `-alt` before this rehome, and renaming
+here would fork the file the M5 merge depends on.
+
+Two traps follow from the same overlap. A class that *looks* like it belongs to one family may
+belong to neither and silently emit nothing, which is what happened to `bg-danger-subtle` and
+`text-info` before they were registered, and to `bg-content1`, a HeroUI **v2** name that v3
+neither declares nor reads. When adding a utility, add it to `DOCUMENTED_UTILITIES` in
+`src/styles/foundation.test.ts`, and confirm it compiles by building and grepping the emitted
+stylesheet. A class that does not exist raises nothing at any stage.
 
 ## Type scale
 
