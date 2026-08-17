@@ -20,10 +20,13 @@ examples grounded in this dashboard's code, lives in the skill:
    `isPending`, `fullWidth`, `isInvalid`) before a `className`; reserve `className` for
    layout/position. Space siblings with `gap-*` on the parent, not `m-*` on children.
 
-3. **Color comes from the `--otari-*` tokens** in `web/src/styles/globals.css`
-   (`text-[var(--otari-muted)]`, `bg-[var(--otari-surface)]`). Add a token there rather than
-   scattering a hex. Raw Tailwind palette classes are only for status surfaces (`ErrorBanner`,
-   `InfoBanner`). See [design-tokens.md](../skills/frontend-standards/design-tokens.md).
+3. **Color and type come from the semantic tokens** in `web/src/styles/globals.css`, through
+   the utilities they back (`text-muted`, `bg-surface`, `border-border`, `text-danger`,
+   `text-heading`). Add a token there rather than scattering a hex, and add it to both theme
+   blocks. The `--otari-*` variables below the `MIGRATION BRIDGE` marker and the raw Tailwind
+   palette classes in the bridge components (`ErrorBanner`, `InfoBanner`, `StatCard`) are the
+   pre-rehome system: existing call sites keep them, new code must not reach for either. See
+   [design-tokens.md](../skills/frontend-standards/design-tokens.md).
 
 4. **Server state goes through TanStack Query + `apiFetch`.** Fetch via the hooks in
    `web/src/shared/api/hooks.ts`; keep query keys as module constants, set a deliberate `staleTime`,

@@ -41,9 +41,17 @@ If a component exposes a prop for what you want (`variant`, `size`, `isDisabled`
 (`flex`, `gap-*`, `min-w-[…]`, responsive prefixes), not for re-skinning something HeroUI
 already styles.
 
-## Check `shared/components/ui.tsx` before hand-rolling
+## Check the shared primitives before hand-rolling
 
-Small shared primitives already exist. Reuse or extend them instead of duplicating markup:
+`shared/components/ui/` is the rehomed design foundation's primitive directory and is where a
+new primitive goes. It holds `SettingsSection` (a settings page section's header + body) and
+`RowActions` (a table row's trailing button cluster) so far.
+
+Everything in the table below lives one level up, in `shared/components/`, and is a
+**migration bridge**: hand-rolled primitives that predate the foundation and still carry
+`--otari-*` colors. Reuse them rather than duplicating their markup, but don't extend them and
+don't build a new page on one; each leaves with the last page that uses it. See
+[design-tokens.md](./design-tokens.md).
 
 | Need | Use |
 |---|---|
@@ -66,6 +74,6 @@ use it rather than reaching into `error.message` yourself.
 - Space siblings with `gap-*` on the flex/grid parent, not `m-*` on each child.
 - Responsive via Tailwind breakpoints (`sm:`, `md:`, `lg:`) and flex/grid; avoid fixed pixel
   widths for anything that should reflow (`min-w-[180px]` on a wrapping stat card is fine).
-- One component per file for pages and standalone components, colocated with its test. Small
-  shared primitives are the exception: closely related ones live together in
-  `shared/components/ui.tsx` (the primitives listed above), rather than a file each.
+- One component per file for pages and standalone components, colocated with its test. The
+  bridge's `shared/components/ui.tsx` is the one place several closely related primitives
+  share a file; a new primitive under `shared/components/ui/` gets its own.

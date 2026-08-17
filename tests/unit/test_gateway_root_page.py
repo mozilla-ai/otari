@@ -8,6 +8,7 @@ from fastapi.testclient import TestClient
 
 import gateway.main as gateway_main
 from gateway.core.config import GatewayConfig
+from gateway.dashboard import get_dashboard_dir
 from gateway.log_config import logger as gateway_logger
 from gateway.main import create_app
 from gateway.services.secret_box import SecretBoxUnavailableError, generate_secret_key
@@ -18,9 +19,10 @@ def _config(tmp_path: Path, name: str) -> GatewayConfig:
     return GatewayConfig(database_url=f"sqlite:///{database_path}")
 
 
-# What the security middleware gives the PWA assets: public, but a day rather
-# than the immutable year the content-hashed /assets bundles get.
-_PWA_CACHE_CONTROL = "public, max-age=86400"
+# What the security middleware gives the bundle's non-hashed static assets (the
+# PWA manifest and icons, the brand fonts): public, but a day rather than the
+# immutable year the content-hashed /assets bundles get.
+_SHORT_CACHE_CONTROL = "public, max-age=86400"
 
 
 def test_welcome_tutorial_page_is_available(tmp_path: Path) -> None:
@@ -91,7 +93,7 @@ def test_pwa_manifest_and_icons_are_served(tmp_path: Path) -> None:
         index = client.get("/").text
         manifest = client.get("/pwa/manifest.webmanifest")
         assert manifest.status_code == 200
-        assert manifest.headers["cache-control"] == _PWA_CACHE_CONTROL
+        assert manifest.headers["cache-control"] == _SHORT_CACHE_CONTROL
         payload = manifest.json()
         # Every icon the manifest advertises must resolve, or the launcher falls
         # back to a screenshot of the page instead of the Otari mark.
@@ -117,11 +119,11 @@ def test_pwa_manifest_and_icons_are_served(tmp_path: Path) -> None:
         # Pin the policy, not just "cacheable": these filenames are not
         # content-hashed, so a drift to no-cache or a different max-age changes
         # what an installed app re-fetches.
-        assert response.headers["cache-control"] == _PWA_CACHE_CONTROL, src
+        assert response.headers["cache-control"] == _SHORT_CACHE_CONTROL, src
 
     assert apple_icon.status_code == 200
     assert apple_icon.headers["content-type"] == "image/png"
-    assert apple_icon.headers["cache-control"] == _PWA_CACHE_CONTROL
+    assert apple_icon.headers["cache-control"] == _SHORT_CACHE_CONTROL
 
 
 def test_pwa_assets_are_absent_without_dashboard(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -131,6 +133,53 @@ def test_pwa_assets_are_absent_without_dashboard(tmp_path: Path, monkeypatch: py
 
     with TestClient(app) as client:
         response = client.get("/pwa/manifest.webmanifest")
+
+    assert response.status_code == 404
+
+
+@requires_dashboard_bundle
+def test_brand_fonts_and_their_licenses_are_served(tmp_path: Path) -> None:
+    """The dashboard's stylesheet asks for its faces at /fonts/, so this must answer.
+
+    A 404 here is the quietest failure in the bundle: nothing errors, the browser
+    falls back to a system sans, and the dashboard is simply the wrong typeface
+    until someone notices. The license texts ride along because the SIL OFL's
+    redistribution condition is that they travel with the faces they cover, and
+    serving the fonts without them is what breaks that.
+    """
+    fonts_dir = get_dashboard_dir()
+    assert fonts_dir is not None
+    fonts_dir = fonts_dir / "fonts"
+    faces = sorted(path.name for path in fonts_dir.glob("*.woff2"))
+    licenses = sorted(path.name for path in fonts_dir.glob("*-OFL.txt"))
+    assert faces, "the built bundle carries no brand fonts"
+    assert licenses, "the built bundle carries fonts but no license texts"
+
+    app = create_app(_config(tmp_path, "gateway-fonts-test.db"))
+    with TestClient(app) as client:
+        responses = {name: client.get(f"/fonts/{name}") for name in faces + licenses}
+
+    for name in faces:
+        response = responses[name]
+        assert response.status_code == 200, name
+        assert response.headers["content-type"] == "font/woff2", name
+        # Pin the policy, not just "cacheable": these filenames are not
+        # content-hashed, so a drift to no-store would re-fetch every face on
+        # every page load, and a drift to the immutable year would pin a
+        # replaced face in every browser that had seen the old one.
+        assert response.headers["cache-control"] == _SHORT_CACHE_CONTROL, name
+    for name in licenses:
+        assert responses[name].status_code == 200, name
+        assert "SIL OPEN FONT LICENSE" in responses[name].text, name
+
+
+def test_fonts_are_absent_without_dashboard(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The faces ride with the dashboard, so hybrid mode serves none of them."""
+    monkeypatch.setattr(gateway_main, "get_dashboard_dir", lambda: None)
+    app = create_app(_config(tmp_path, "gateway-no-fonts-test.db"))
+
+    with TestClient(app) as client:
+        response = client.get("/fonts/MozillaText-Variable.woff2")
 
     assert response.status_code == 404
 

@@ -1,3 +1,9 @@
+// MIGRATION BRIDGE. Hand-rolled and predating the design foundation rehomed from
+// otari-ai/frontend (src/styles/globals.css, src/shared/components/ui/). This file
+// keeps its `--otari-*` colors so the pages built on it keep rendering, and it
+// leaves with the last of them. Reuse it rather than duplicating its markup, but
+// do not extend it and do not build a new page on it: new work composes
+// @heroui/react with the semantic tokens. See ../../../AGENTS.md.
 import type { ReactNode } from "react"
 import { useRef, useState } from "react"
 import {

@@ -42,10 +42,14 @@ Build and check from the repo root:
 - Reach for a HeroUI component prop (`variant`, `size`, `isDisabled`, `isPending`,
   `fullWidth`, `isInvalid`) before a `className`. `className` is for layout/position, not for
   restyling a component HeroUI already styles. See [components.md](./components.md).
-- Use the `--otari-*` CSS variables for brand/surface/text color
-  (`text-[var(--otari-muted)]`, `bg-[var(--otari-brand-tint)]`), defined once in
-  `web/src/styles/globals.css`. If you need a new brand/surface color, add a token there
-  rather than scattering a hex. See [design-tokens.md](./design-tokens.md).
+- Style from the semantic tokens in `web/src/styles/globals.css`, through the Tailwind
+  utilities they back (`text-muted`, `bg-surface`, `border-border`, `bg-content1`,
+  `text-danger`, `text-heading`). They are the design foundation rehomed from
+  `otari-ai/frontend`, and the HeroUI variable mapping in that file is what makes a bare
+  `<Card>` or `<Chip>` wear the palette with no `className`. Never a raw hex, never a
+  numbered Tailwind palette class. The `--otari-*` variables below the `MIGRATION BRIDGE`
+  marker are the pre-rehome palette: existing call sites keep them, new code must not
+  reach for one. See [design-tokens.md](./design-tokens.md).
 - Fetch server state through TanStack Query hooks in `web/src/shared/api/hooks.ts`. Keep query keys
   as module constants, set a deliberate `staleTime`, and invalidate the affected keys in a
   mutation's `onSuccess`. See [data-fetching.md](./data-fetching.md).
@@ -91,17 +95,21 @@ Build and check from the repo root:
 
 ## A note on status colors
 
-`web/` uses raw Tailwind palette classes for one narrow case: semantic status surfaces. The
-sanctioned triad is `red` for danger/error (`ErrorBanner` uses `border-red-200 bg-red-50
-text-red-700`), `amber` for warning (`InfoBanner`), and `emerald` for healthy/success
-(`StatCard` status pills and the overview all-clear strip). That is the existing convention, so
-match it for new alert/status elements rather than reformatting them into `--otari-*` tokens.
-Everything else (brand, surface, text, borders) uses the `--otari-*` variables. Don't reach for
-`bg-white`/`text-gray-900` for general chrome.
+The foundation names the status roles, so use them: `text-danger` / `bg-danger-subtle` for
+errors, `text-warning` / `bg-warning-subtle` for caution, `text-success` / `bg-success-subtle`
+for healthy, `text-info` / `bg-info-subtle` for neutral notices, and the separate
+`bg-attention` family for "look here" (a required action, an unread marker) as distinct from
+"be careful". Every one of them is defined for both themes.
+
+The bridge components (`ErrorBanner` with `border-red-200 bg-red-50 text-red-700`,
+`InfoBanner` with `amber`, `StatCard`'s `emerald` status pills) still use raw Tailwind palette
+classes. That is the palette this dashboard had before the rehome, not a sanctioned exception:
+leave those call sites alone until their pages are rebuilt, and don't copy the pattern into
+anything new.
 
 ## Topic guides
 
-- [design-tokens.md](./design-tokens.md): the `--otari-*` variables, where they live, when to add one.
-- [components.md](./components.md): HeroUI v3 patterns, props over `className`, the shared UI primitives in `shared/components/ui.tsx`.
+- [design-tokens.md](./design-tokens.md): the semantic tokens, the HeroUI mapping, the type scale, and the `--otari-*` bridge on its way out.
+- [components.md](./components.md): HeroUI v3 patterns, props over `className`, the shared UI primitives in `shared/components/ui/`.
 - [data-fetching.md](./data-fetching.md): TanStack Query conventions: query keys, `staleTime`, invalidation, bounded pagination.
 - [typescript-and-react.md](./typescript-and-react.md): strict TS, `undefined` over `null`, hook/effect hygiene, and Vitest testing.

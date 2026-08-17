@@ -35,6 +35,10 @@ def _make_app() -> FastAPI:
     def pwa_icon() -> str:
         return "png-bytes"
 
+    @app.get("/fonts/MozillaText-Variable.woff2")
+    def brand_font() -> str:
+        return "woff2-bytes"
+
     @app.get("/health")
     def health() -> dict[str, str]:
         return {"status": "healthy"}
@@ -84,6 +88,19 @@ def test_pwa_assets_get_public_cache() -> None:
     """The install manifest and home-screen icons are public, not per-user, responses."""
     with TestClient(_make_app()) as client:
         response = client.get("/pwa/icon-512.png")
+        assert response.headers["Cache-Control"] == "public, max-age=86400"
+        assert "Authorization" not in response.headers.get("Vary", "")
+
+
+def test_brand_fonts_get_public_cache() -> None:
+    """The self-hosted brand faces are public, and the same for every visitor.
+
+    A day rather than the immutable year /assets gets: their filenames are not
+    content-hashed, so a replaced face has to be able to reach a browser that
+    already saw the old one.
+    """
+    with TestClient(_make_app()) as client:
+        response = client.get("/fonts/MozillaText-Variable.woff2")
         assert response.headers["Cache-Control"] == "public, max-age=86400"
         assert "Authorization" not in response.headers.get("Vary", "")
 

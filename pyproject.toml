@@ -100,14 +100,18 @@ include = ["gateway*"]
 # `make dashboard` before building a wheel. A pattern that matches nothing is
 # skipped silently, so a wheel built without it installs cleanly and the gateway
 # degrades to the tutorial page (gateway/dashboard.py). Patterns stay glob-only:
-# Vite decides the filenames, and pwa/ holds the manifest and icons that
-# index.html links (main.py mounts them at /pwa).
+# Vite decides the filenames, while pwa/ holds the manifest and icons that
+# index.html links and fonts/ the brand faces that globals.css asks for, each
+# with the SIL OFL text the license requires to travel with it (main.py mounts
+# them at /pwa and /fonts). A subdirectory needs its own line: these patterns do
+# not recurse, so a bundle directory missing here ships as a 404 at runtime.
 gateway = [
     "templates/*.html",
     "templates/*.svg",
     "static/dashboard/*",
     "static/dashboard/assets/*",
     "static/dashboard/pwa/*",
+    "static/dashboard/fonts/*",
 ]
 
 [tool.ruff]

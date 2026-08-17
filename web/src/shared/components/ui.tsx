@@ -1,3 +1,9 @@
+// MIGRATION BRIDGE. Hand-rolled and predating the design foundation rehomed from
+// otari-ai/frontend (src/styles/globals.css, src/shared/components/ui/). This file
+// keeps its `--otari-*` colors so the pages built on it keep rendering, and it
+// leaves with the last of them. Reuse it rather than duplicating its markup, but
+// do not extend it and do not build a new page on it: new work composes
+// @heroui/react with the semantic tokens. See ../../../AGENTS.md.
 import {
   Button,
   Card,
@@ -23,17 +29,24 @@ import { formatPct, formatRelative } from "@/shared/helpers/format"
 // never the only signal: a status tile also carries a word/icon via `statusLabel`.
 export type StatStatus = "ok" | "warn" | "alert"
 
+// The accent bar is `!`-important because the design foundation gives every
+// HeroUI Card a 1px outline (`.card:not(.card--transparent)` in globals.css),
+// and that rule is unlayered while a Tailwind utility sits in @layer utilities —
+// unlayered always wins, whatever the specificity. Without the bang the
+// shorthand `border:` resets this tile's left edge back to a hairline. It goes
+// away with the tile: a foundation-native StatCard draws the accent from a token
+// rather than from a numbered palette class.
 const STAT_STATUS: Record<StatStatus, { accent: string; pill: string }> = {
   ok: {
-    accent: "border-l-emerald-500",
+    accent: "border-l-emerald-500!",
     pill: "border-emerald-200 bg-emerald-50 text-emerald-700",
   },
   warn: {
-    accent: "border-l-amber-500",
+    accent: "border-l-amber-500!",
     pill: "border-amber-200 bg-amber-50 text-amber-800",
   },
   alert: {
-    accent: "border-l-red-500",
+    accent: "border-l-red-500!",
     pill: "border-red-200 bg-red-50 text-red-700",
   },
 }
@@ -60,7 +73,7 @@ export function StatCard({
   // When set, the whole tile is a keyboard-focusable link to this route.
   to?: LinkProps["to"]
 }) {
-  const accent = status ? `border-l-4 ${STAT_STATUS[status].accent}` : ""
+  const accent = status ? `border-l-4! ${STAT_STATUS[status].accent}` : ""
   const body = (
     // p-0 on the Card zeroes HeroUI's own card padding so it doesn't stack with
     // Card.Content's, which otherwise doubled the tile's height (most visible at
@@ -94,7 +107,9 @@ export function StatCard({
   if (to) {
     return (
       <Card
-        className={`${cardClass} transition-colors hover:border-[var(--otari-brand)]`}
+        // Same reason as the accent above: the foundation's card outline is
+        // unlayered, so the hover tint needs the bang to be seen at all.
+        className={`${cardClass} transition-colors hover:border-[var(--otari-brand)]!`}
       >
         <Link
           to={to}

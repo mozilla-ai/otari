@@ -24,22 +24,22 @@
          to render before the bundle's stylesheet is a certainty: it is the thing
          that covers loading the bundle. The colors read the design tokens where
          globals.css has already loaded and fall back to its values where it has
-         not, so this stays one hex behind --otari-bg rather than a second source
-         of truth for it. -->
+         not, so this stays one hex behind --color-background rather than a second
+         source of truth for it. -->
     <style>
       .app-boot {
         display: flex;
         align-items: center;
         justify-content: center;
         min-height: 100vh;
-        background: var(--otari-bg, #f6f9fa);
+        background: var(--color-background, #ffffff);
       }
       .app-boot-spinner {
         width: 1.75rem;
         height: 1.75rem;
         border-radius: 9999px;
-        border: 2px solid var(--otari-line, #dbe5e8);
-        border-top-color: var(--otari-brand, #4e8295);
+        border: 2px solid var(--color-border, #d6dce1);
+        border-top-color: var(--color-primary, #4a7d8f);
         animation: app-boot-spin 0.7s linear infinite;
       }
       @keyframes app-boot-spin {

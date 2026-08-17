@@ -87,10 +87,11 @@ _CACHEABLE_PATHS = ("/favicon.svg",)
 # immutable; the middleware marks these public and cacheable for a year, since
 # StaticFiles does not set Cache-Control on its own.
 _CACHEABLE_PREFIXES = ("/assets/",)
-# The install manifest and home-screen icons, public like the page that links
-# them. Their names are stable rather than content-hashed, so they get a day of
-# caching like the favicon, not the immutable year /assets gets.
-_SHORT_CACHE_PREFIXES = ("/pwa/",)
+# The install manifest and home-screen icons, and the dashboard's self-hosted
+# brand fonts: public like the page that links them. Their names are stable
+# rather than content-hashed, so they get a day of caching like the favicon, not
+# the immutable year /assets gets.
+_SHORT_CACHE_PREFIXES = ("/pwa/", "/fonts/")
 
 
 class SecurityHeadersMiddleware(BaseHTTPMiddleware):
@@ -452,6 +453,16 @@ def create_app(config: GatewayConfig) -> FastAPI:
         pwa_dir = dashboard_dir / "pwa"
         if pwa_dir.is_dir():
             app.mount("/pwa", StaticFiles(directory=pwa_dir), name="dashboard-pwa")
+        # The dashboard's brand faces, which its stylesheet asks for by absolute
+        # path (/fonts/...). Self-hosted so the page needs no third-party request,
+        # which only holds if this gateway is the one serving them: unmounted, the
+        # faces 404 and the browser silently falls back to a system sans, a
+        # failure nothing in a build or a test would notice. The SIL OFL license
+        # texts sit in the same directory and are served with the faces they
+        # cover, which is the license's own redistribution condition.
+        fonts_dir = dashboard_dir / "fonts"
+        if fonts_dir.is_dir():
+            app.mount("/fonts", StaticFiles(directory=fonts_dir), name="dashboard-fonts")
 
         @app.get("/", include_in_schema=False)
         async def dashboard_index() -> FileResponse:
