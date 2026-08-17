@@ -19,9 +19,52 @@
          insets to sit out of the way. -->
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>Otari Dashboard</title>
+    <!-- Paints the boot state below. A <style> block rather than a Tailwind
+         class (which the frontend standards otherwise rule out) because this has
+         to render before the bundle's stylesheet is a certainty: it is the thing
+         that covers loading the bundle. The colors read the design tokens where
+         globals.css has already loaded and fall back to its values where it has
+         not, so this stays one hex behind --otari-bg rather than a second source
+         of truth for it. -->
+    <style>
+      .app-boot {
+        display: flex;
+        align-items: center;
+        justify-content: center;
+        min-height: 100vh;
+        background: var(--otari-bg, #f6f9fa);
+      }
+      .app-boot-spinner {
+        width: 1.75rem;
+        height: 1.75rem;
+        border-radius: 9999px;
+        border: 2px solid var(--otari-line, #dbe5e8);
+        border-top-color: var(--otari-brand, #4e8295);
+        animation: app-boot-spin 0.7s linear infinite;
+      }
+      @keyframes app-boot-spin {
+        to {
+          transform: rotate(360deg);
+        }
+      }
+      @media (prefers-reduced-motion: reduce) {
+        .app-boot-spinner {
+          animation: none;
+        }
+      }
+    </style>
   </head>
   <body>
-    <div id="root"></div>
+    <!-- Shown until React mounts. `main.tsx` reads GET /v1/bootstrap before it
+         renders anything, so without this the page is blank for that round trip,
+         and for the whole 8s deadline when a gateway accepts the connection and
+         then stalls. `createRoot().render()` clears the container on its first
+         render, so nothing here has to be torn down. -->
+    <div id="root">
+      <div class="app-boot" role="status" aria-label="Loading the dashboard">
+        <div class="app-boot-spinner"></div>
+      </div>
+    </div>
     <script type="module" src="/src/main.tsx"></script>
   </body>
 </html>
