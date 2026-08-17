@@ -534,6 +534,12 @@ body,
   height: 100%;
 }
 
+/* Two copies of this canvas color live outside CSS, because neither can read a
+   custom property: the boot splash in web/index.html (which paints before this
+   stylesheet is a certainty) and `background_color` in
+   web/public/pwa/manifest.webmanifest (the splash an installed app opens on).
+   Nothing fails the build when they drift, so change --color-background and
+   both of those together. */
 body {
   margin: 0;
   padding: 0;
@@ -684,11 +690,12 @@ h6 {
  * ============================================================= */
 
 :root {
-  /* Changing --otari-brand or --otari-bg means changing two copies of the same
-     hex that cannot read a custom property: the `theme-color` meta tag in
-     web/index.html, and `theme_color`/`background_color` in
-     web/public/pwa/manifest.webmanifest (which color the browser and installed
-     app chrome). Nothing fails the build if they drift, so update them here. */
+  /* --otari-brand still has two copies outside CSS that cannot read a custom
+     property: the `theme-color` meta tag in web/index.html and `theme_color` in
+     web/public/pwa/manifest.webmanifest, which color the browser and installed
+     app chrome. They stay on the brand teal rather than --color-primary until
+     the chrome itself moves onto the foundation. The page canvas they used to
+     sit beside is no longer this block's job; see the `body` rule above. */
   --otari-brand: #4e8295;
   --otari-brand-dark: #3c6678;
   /* Mid-step of the brand ramp, between --otari-brand and --otari-line. Exists so

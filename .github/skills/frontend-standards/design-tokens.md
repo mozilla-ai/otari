@@ -54,7 +54,29 @@ text, not its size:
 
 Headings and the display/heading roles are set in Zilla Slab; body and UI text in Mozilla
 Text; keys, IDs, and code in Fira Code. The faces are self-hosted in `web/public/fonts/` under
-SIL OFL 1.1, with each family's license shipped beside it (see the README there).
+SIL OFL 1.1, with each family's license shipped beside it (see the README there), so the
+dashboard's typography needs no third-party request and an air-gapped gateway looks like a
+connected one. Adding a family means adding its license in the same commit;
+`src/styles/fonts.test.ts` fails on a face with no license covering it, a shipped face never
+declared, or a declared face never shipped. Self-hosting also depends on the gateway actually
+serving `/fonts`, which is three pieces of plumbing outside `web/`; the Serving bullet in
+[web/AGENTS.md](../../../web/AGENTS.md) says which, and `tests/unit/test_gateway_root_page.py`
+covers them.
+
+## What stayed in otari-ai
+
+Its marketing type roles, pre-login gradient, activation-modal and border-beam tokens, and
+HubSpot patch dress a public site and a hosted signup that do not exist here.
+
+Its `shared/components/ui/adapters/` layer stayed too, and that one is worth knowing about,
+because it is the obvious thing to reach for and it should not be reached for. It is a HeroUI
+**v2 to v3 compat shim** whose own header marks it for deletion call site by call site over
+there. This dashboard was written against v3 and has no v2 call sites, so importing it would
+mean adopting `react-icons` and a react-hook-form ref bridge to gain a layer already being
+retired, and handing new components a v2-flavored API. Most of that repo's primitives
+(`EmptyState`, `ErrorBoundary`, `HelpIcon`, `CodeBlock`, `ConfirmModal`, `FormModal`,
+`ResponsiveTabs`, `YesNoButtonGroup`) bind to the shim or to `react-icons`, so they wait on the
+same decision. `SettingsSection` and `RowActions`, which need neither, came across unchanged.
 
 ## Rules
 
