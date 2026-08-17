@@ -1,0 +1,94 @@
+name: Otari OSS Edition
+
+# The gate behind ARCHITECTURE.md's central promise: every milestone ships a
+# standalone OSS edition. It builds the distribution, boots it with only Otari's
+# own adapters bound (no overlay bootstrap, no platform token), and runs the
+# smoke suite in scripts/oss_edition_smoke.py, which walks a self-hoster's day
+# one: health probes, an admin user and API key, a BYO provider credential stored
+# at runtime, a routing policy, one fallback-routed completion, and the usage row
+# it wrote.
+#
+# Two things here are deliberate and worth keeping.
+#
+# The environment is runtime-only (`uv sync --frozen --no-dev`), and the smoke
+# script imports nothing but the standard library. A dependency that reached an
+# OSS code path from the dev group, or from an enterprise-only package, fails
+# here rather than passing on a machine that happens to have it installed. That
+# is also why the boot goes through the installed `otari` CLI as a subprocess: a
+# TestClient would prove the app imports, not that the edition starts.
+#
+# It runs against PostgreSQL, which is what a real deployment uses, so a
+# migration that only works on SQLite fails this gate too.
+#
+# Related jobs, kept separate on purpose: otari-tests.yml exercises behavior
+# in-process, otari-docker-build.yml proves the image recipe builds and the
+# container answers its health endpoints. Neither boots the packaged OSS edition
+# and serves a request through it.
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'src/gateway/**'
+      - 'alembic/**'
+      - 'scripts/oss_edition_smoke.py'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/otari-oss-edition.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'src/gateway/**'
+      - 'alembic/**'
+      - 'scripts/oss_edition_smoke.py'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/otari-oss-edition.yml'
+  workflow_dispatch:
+
+jobs:
+  oss-edition:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    services:
+      postgres:
+        image: postgres:17-alpine
+        env:
+          POSTGRES_USER: otari
+          POSTGRES_PASSWORD: otari
+          POSTGRES_DB: otari
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U otari"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+
+    - uses: astral-sh/setup-uv@c771a70e6277c0a99b617c7a806ffedaca235ff9 # v9.0.0
+      with:
+        python-version: "3.14"
+
+    # The build half of the gate. Nothing downstream installs the artifacts; this
+    # is here because a broken packaging recipe (a module outside the discovered
+    # packages, an unsatisfiable dependency pin) is invisible until someone tries
+    # to ship the OSS edition, and otari-docker.yml only finds it after merge.
+    - name: Build the OSS distribution
+      run: uv build
+
+    # Runtime dependencies only. See the header: this is what lets the smoke
+    # detect a dev-only or enterprise-only import on an OSS path.
+    - name: Install the OSS edition
+      run: uv sync --frozen --no-dev
+
+    - name: Boot the OSS edition and smoke it
+      run: >-
+        uv run --frozen --no-dev python scripts/oss_edition_smoke.py
+        --database-url postgresql://otari:otari@127.0.0.1:5432/otari

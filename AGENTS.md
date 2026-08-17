@@ -43,6 +43,17 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
   `@pytest.mark.flaky(reruns=...)` (from `pytest-rerunfailures`) and say why,
   rather than reintroducing a global retry.
 - Integration tests need PostgreSQL: `TEST_DATABASE_URL` if set, otherwise a Testcontainers `postgres:17`, so without Docker the suite cannot start. SQLite is not a fallback even though `_to_async_url` accepts one: the fixtures tear down with `DROP TABLE ... CASCADE`, which SQLite rejects, so every test errors in teardown. With no Docker, point `TEST_DATABASE_URL` at any reachable PostgreSQL instead.
+- The OSS-edition smoke gate (`scripts/oss_edition_smoke.py`, run per PR by
+  `otari-oss-edition.yml`) boots the packaged CLI as a subprocess with no overlay
+  bootstrap and no platform token, then walks health, key creation, a stored BYO
+  provider credential, a fallback-routed completion against a mock provider, and
+  the usage row. Run it locally with
+  `uv run --frozen --no-dev python scripts/oss_edition_smoke.py`; it defaults to a
+  throwaway SQLite file, so it needs no Docker, and `--database-url` points it at
+  PostgreSQL as CI does. Keep it standard-library only and keep it running under
+  `--no-dev`: that is what makes it able to catch a dev-only or enterprise-only
+  import that reached an OSS code path, and a single third-party import in it
+  (httpx, pyyaml) gives that up.
 - Two tests assert the provider-error sanitization by making a real outbound call (`test_error_detail_leakage.py::test_provider_error_does_not_leak_details`, `test_streaming_error_event.py::test_streaming_creation_error_returns_http_error`). With no network egress the upstream fails differently and both report a status mismatch, so treat them as environment noise rather than a regression, and confirm a change against the rest of the suite.
 
 ## Generated Artifacts
