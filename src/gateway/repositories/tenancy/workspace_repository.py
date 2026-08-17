@@ -14,12 +14,13 @@ from gateway.models.tenancy import (
     WorkspaceCreate,
     WorkspaceMember,
     WorkspaceMemberUpdate,
+    WorkspaceUpdate,
 )
 from gateway.repositories.base_repository import BaseRepository
 from gateway.repositories.tenancy.user_repository import user_alphabetical_order
 
 
-class WorkspaceRepository(BaseRepository[Workspace, WorkspaceCreate, WorkspaceCreate]):
+class WorkspaceRepository(BaseRepository[Workspace, WorkspaceCreate, WorkspaceUpdate]):
     """Repository for workspace rows."""
 
     def __init__(self, db: AsyncSession):

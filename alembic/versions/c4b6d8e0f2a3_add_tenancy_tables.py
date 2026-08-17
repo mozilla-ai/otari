@@ -121,6 +121,12 @@ def upgrade() -> None:
             ondelete="SET NULL",
         )
 
+    # After the batch rebuild, so the copy_from definition above (which SQLite
+    # replays to recreate the table) does not have to carry it.
+    op.create_index(
+        op.f("ix_organization_created_by_user_id"), "organization", ["created_by_user_id"], unique=False
+    )
+
     op.create_table(
         "organization_member",
         sa.Column("id", sa.Uuid(), nullable=False),
@@ -163,6 +169,7 @@ def upgrade() -> None:
         sa.UniqueConstraint("organization_id", "name", name="uq_workspace_organization_name"),
     )
     op.create_index(op.f("ix_workspace_organization_id"), "workspace", ["organization_id"], unique=False)
+    op.create_index(op.f("ix_workspace_created_by_user_id"), "workspace", ["created_by_user_id"], unique=False)
 
     op.create_table(
         "workspace_member",
@@ -188,12 +195,17 @@ def downgrade() -> None:
     op.drop_index(op.f("ix_workspace_member_user_id"), table_name="workspace_member")
     op.drop_table("workspace_member")
 
+    op.drop_index(op.f("ix_workspace_created_by_user_id"), table_name="workspace")
     op.drop_index(op.f("ix_workspace_organization_id"), table_name="workspace")
     op.drop_table("workspace")
 
     op.drop_index(op.f("ix_organization_member_user_id"), table_name="organization_member")
     op.drop_index(op.f("ix_organization_member_organization_id"), table_name="organization_member")
     op.drop_table("organization_member")
+
+    # Dropped before the batch rebuild below, which replays a copy_from that does
+    # not carry it.
+    op.drop_index(op.f("ix_organization_created_by_user_id"), table_name="organization")
 
     # Break the cycle in the other direction before either table goes: dropping
     # "user" while "organization" still references it fails on PostgreSQL.

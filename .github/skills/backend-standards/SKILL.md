@@ -101,7 +101,8 @@ A reservation that never settles leaks and permanently shrinks the user's budget
   SQLite does not have. Adding a constraint to an existing table goes through
   `op.batch_alter_table(..., copy_from=<the sa.Table>)`; `copy_from` is what keeps SQLite's
   table rebuild from dropping what reflection could not see. Verify both engines locally
-  (upgrade, downgrade, upgrade), since CI only migrates PostgreSQL.
+  (upgrade, downgrade, upgrade): the integration suite migrates PostgreSQL only, so SQLite is
+  covered only where a test asks for it (`tests/unit/test_tenancy_schema_chain.py` is the pattern).
 
 ## Config & env
 

@@ -179,12 +179,14 @@ class Organization(OrganizationBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtM
     __tablename__ = "organization"
     __table_args__ = (UniqueConstraint("slug", name="uq_organization_slug"),)
 
-    # Declared as an explicit column for one reason: ``use_alter``. This foreign
-    # key closes a cycle (``user.active_organization_id`` points back here), and
-    # without it SQLAlchemy cannot order the two tables, so ``create_all`` warns
-    # and ``drop_all`` raises ``CircularDependencyError`` -- which the test
-    # fixtures' teardown runs. ``use_alter`` moves this one constraint into its
-    # own ALTER, which is also how the migration adds it.
+    # Declared as an explicit column because this foreign key closes a cycle
+    # (``user.active_organization_id`` points back here) and SQLModel's ``Field``
+    # cannot name a constraint. The **name** is what matters: SQLAlchemy breaks a
+    # cycle by emitting the constraint as a separate ALTER, and it can only do
+    # that for a named constraint, so an anonymous one makes ``drop_all`` raise
+    # ``CircularDependencyError`` on PostgreSQL, which the integration fixtures'
+    # teardown runs. ``use_alter`` states the same intent explicitly and is how
+    # the migration adds the constraint.
     created_by_user_id: uuid.UUID | None = Field(
         default=None,
         sa_column=Column(
@@ -197,6 +199,7 @@ class Organization(OrganizationBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtM
                 use_alter=True,
             ),
             nullable=True,
+            index=True,
         ),
     )
 
@@ -392,6 +395,7 @@ class Workspace(WorkspaceBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, 
         foreign_key="user.id",
         ondelete="SET NULL",
         nullable=True,
+        index=True,
     )
     # Edition-invariant schema: nothing in the OSS control plane reads this, and
     # the activation surface that classifies a workspace is hosted depth. It
