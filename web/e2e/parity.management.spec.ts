@@ -84,9 +84,12 @@ test.describe("standalone provider setup", () => {
     await provider.getByRole("button", { name: "Edit" }).click()
     await page.getByLabel("API base").fill("http://127.0.0.1:9/v2")
     await page.getByRole("button", { name: "Save changes" }).click()
-    await expect(
-      page.getByRole("button", { name: "Save changes" }),
-    ).toBeHidden()
+    // Wait on Cancel, not on the button that was just pressed: that one reads
+    // "Saving…" while the request is in flight, so asserting "Save changes" is
+    // hidden passes the instant it is pressed, and the reload below then aborts
+    // the PATCH and loses the edit. Cancel is present for as long as the form is,
+    // and the form closes only in the mutation's onSuccess.
+    await expect(page.getByRole("button", { name: "Cancel" })).toBeHidden()
 
     // Reopening is what proves the edit was persisted rather than only echoed
     // back into a form that never closed. Reload first: the form seeds its fields
