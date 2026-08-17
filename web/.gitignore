@@ -13,3 +13,8 @@ coverage/
 e2e/e2e.db
 e2e/e2e.db-wal
 e2e/e2e.db-shm
+
+# Boundary probes: src/architecture.test.ts plants a module under src/<layer>/ to
+# prove Biome rejects it, and removes it in the same test. Ignored so a run killed
+# mid-test cannot leave one staged.
+src/**/__boundary_probe__/

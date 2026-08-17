@@ -12,10 +12,15 @@ its conventions consistent with what is already there.
 
 Stack: React 19, TypeScript (`strict`), HeroUI v3 (`@heroui/react`), Tailwind CSS v4,
 TanStack Query, TanStack Router (file-based, `web/src/routes/`), Vite, Vitest + Testing
-Library, Playwright (`web/e2e/`). Package manager is **npm**. Layout is flat
-(`web/src/{components,pages,api,lib,auth,routes}`), there is no `features/`/`shared/`
-architecture, no screenshot suite, and no analytics. Do not introduce those to match
-some other repo; match what `web/` does. Routing conventions (one file per URL, a route
+Library, Playwright (`web/e2e/`). Package manager is **npm**. Layout is layered:
+`web/src/features/<domain>/` for a domain's page and the parts only it uses, `shared/`
+for what no domain owns (`api/`, `lib/`, `ui/`, `test/`), `app/` for the composition
+root, plus `routes/` and the generated `client/`. Three import rules are lint-enforced
+(a feature may not import `app/`; `shared/` may not import `features/` or `app/`;
+nothing imports an overlay tree): run `npm --prefix web run lint`, and read the Layout
+bullet in [web/AGENTS.md](../../../web/AGENTS.md) before adding a directory. There is
+still no screenshot suite and no analytics; do not add them to match some other repo.
+Routing conventions (one file per URL, a route
 file exports `Route` and nothing else, the search-param codec, and `renderWithRouter` for
 component tests) and the generated API client (`web/src/client`, regenerated from the
 OpenAPI spec, never hand-edited) live in [web/AGENTS.md](../../../web/AGENTS.md).
@@ -25,6 +30,7 @@ Build and check from the repo root:
 - `make dashboard` (`npm --prefix web ci && npm --prefix web run build`). Output goes to
   the gitignored `src/gateway/static/dashboard/`; there is nothing to commit. Build only
   when you need to run the dashboard locally; Docker builds it in its own Node stage.
+- `npm --prefix web run lint` (the layer boundaries; see web/AGENTS.md)
 - `npm --prefix web run typecheck`
 - `npm --prefix web test`
 
@@ -39,7 +45,7 @@ Build and check from the repo root:
   (`text-[var(--otari-muted)]`, `bg-[var(--otari-brand-tint)]`), defined once in
   `web/src/styles/globals.css`. If you need a new brand/surface color, add a token there
   rather than scattering a hex. See [design-tokens.md](./design-tokens.md).
-- Fetch server state through TanStack Query hooks in `web/src/api/hooks.ts`. Keep query keys
+- Fetch server state through TanStack Query hooks in `web/src/shared/api/hooks.ts`. Keep query keys
   as module constants, set a deliberate `staleTime`, and invalidate the affected keys in a
   mutation's `onSuccess`. See [data-fetching.md](./data-fetching.md).
 - Bound every paginated read. `fetchAllPricing` walks pages behind a hard `PRICING_MAX_PAGES`
@@ -61,7 +67,7 @@ Build and check from the repo root:
 - Manual polling with bare `setInterval`/`setTimeout`. Use TanStack Query's `refetchInterval`
   (see `useDashboardBuild`).
 - A raw `fetch()` for **authenticated** management requests. Go through `apiFetch` in
-  `web/src/api/client.ts`, so the Bearer key, error extraction, and 401/403 sign-out handling
+  `web/src/shared/api/client.ts`, so the Bearer key, error extraction, and 401/403 sign-out handling
   stay in one place. (The sanctioned exception is `validateMasterKey`, which raw-`fetch`es a
   master-key-gated endpoint to check a candidate key *before* it becomes the stored `masterKey`.)
 - Client-side filtering/sorting/pagination of large server datasets when the endpoint can do
@@ -81,6 +87,6 @@ Everything else (brand, surface, text, borders) uses the `--otari-*` variables. 
 ## Topic guides
 
 - [design-tokens.md](./design-tokens.md): the `--otari-*` variables, where they live, when to add one.
-- [components.md](./components.md): HeroUI v3 patterns, props over `className`, the shared UI primitives in `components/ui.tsx`.
+- [components.md](./components.md): HeroUI v3 patterns, props over `className`, the shared UI primitives in `shared/ui/ui.tsx`.
 - [data-fetching.md](./data-fetching.md): TanStack Query conventions: query keys, `staleTime`, invalidation, bounded pagination.
 - [typescript-and-react.md](./typescript-and-react.md): strict TS, `undefined` over `null`, hook/effect hygiene, and Vitest testing.

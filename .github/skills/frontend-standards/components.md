@@ -16,7 +16,7 @@ wrong here.
 | Button intent | `color="danger"` | `variant="danger"` |
 | Disabled | `isLoading` for disabled | `isDisabled` / `isPending` |
 
-Real example from `components/ui.tsx`:
+Real example from `shared/ui/ui.tsx`:
 
 ```tsx
 import { Button, Card } from "@heroui/react";
@@ -41,7 +41,7 @@ If a component exposes a prop for what you want (`variant`, `size`, `isDisabled`
 (`flex`, `gap-*`, `min-w-[…]`, responsive prefixes), not for re-skinning something HeroUI
 already styles.
 
-## Check `components/ui.tsx` before hand-rolling
+## Check `shared/ui/ui.tsx` before hand-rolling
 
 Small shared primitives already exist. Reuse or extend them instead of duplicating markup:
 
@@ -68,4 +68,4 @@ use it rather than reaching into `error.message` yourself.
   widths for anything that should reflow (`min-w-[180px]` on a wrapping stat card is fine).
 - One component per file for pages and standalone components, colocated with its test. Small
   shared primitives are the exception: closely related ones live together in
-  `components/ui.tsx` (the primitives listed above), rather than a file each.
+  `shared/ui/ui.tsx` (the primitives listed above), rather than a file each.

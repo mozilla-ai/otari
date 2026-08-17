@@ -1,7 +1,7 @@
 # Data fetching: TanStack Query
 
-All *authenticated* server state flows through TanStack Query hooks in `web/src/api/hooks.ts`,
-which call `apiFetch` from `web/src/api/client.ts`. Don't call `fetch()` directly for
+All *authenticated* server state flows through TanStack Query hooks in `web/src/shared/api/hooks.ts`,
+which call `apiFetch` from `web/src/shared/api/client.ts`. Don't call `fetch()` directly for
 authenticated management requests, and never mirror server state into `useState`. (The one
 exception is pre-auth candidate-key validation, described under "The API boundary" below.)
 

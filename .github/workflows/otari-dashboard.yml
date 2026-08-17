@@ -5,7 +5,7 @@ on:
     branches: [ main, develop ]
     paths:
       - 'web/**'
-      # The dashboard bundles this guide (web/src/pages/DocsPage.tsx), so a change
+      # The dashboard bundles this guide (web/src/features/docs/DocsPage.tsx), so a change
       # to it changes the built app; build and test it.
       - 'docs/dashboard.md'
       # The committed API client is generated from the spec, so a spec change is a
@@ -22,7 +22,7 @@ on:
     branches: [ main ]
     paths:
       - 'web/**'
-      # The dashboard bundles this guide (web/src/pages/DocsPage.tsx), so a change
+      # The dashboard bundles this guide (web/src/features/docs/DocsPage.tsx), so a change
       # to it changes the built app; build and test it.
       - 'docs/dashboard.md'
       # The committed API client is generated from the spec, so a spec change is a
@@ -59,6 +59,13 @@ jobs:
 
     - name: Install dependencies
       run: npm ci
+
+    # Biome, enabled for the layer boundary and nothing else (web/biome.jsonc): a
+    # feature may not import the composition root, shared/ may not import either, and
+    # nothing may import an overlay's tree. Before this step the layout was a
+    # convention a reviewer had to notice; now a violation cannot merge.
+    - name: Lint layer boundaries
+      run: npm run lint
 
     - name: Type-check
       run: npm run typecheck

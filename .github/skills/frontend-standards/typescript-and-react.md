@@ -36,7 +36,7 @@ TypeScript runs in `strict` mode; `npm --prefix web run typecheck` must pass. Re
 ## Testing
 
 Vitest + Testing Library (`@testing-library/react`, `@testing-library/user-event`,
-`@testing-library/jest-dom` via `web/src/test/setup.ts`). Run `npm --prefix web test`.
+`@testing-library/jest-dom` via `web/src/shared/test/setup.ts`). Run `npm --prefix web test`.
 
 - **Colocate**: `Foo.tsx` → `Foo.test.tsx`, `format.ts` → `format.test.ts`.
 - **Query the way a user would**: `getByRole`, `getByLabelText`, `getByText`. Avoid

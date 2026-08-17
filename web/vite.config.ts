@@ -101,7 +101,7 @@ export default defineConfig({
   test: {
     environment: "jsdom",
     globals: true,
-    setupFiles: ["./src/test/setup.ts"],
+    setupFiles: ["./src/shared/test/setup.ts"],
     css: true,
     // Vitest owns the component tests under src/; the Playwright specs in e2e/
     // run in a real browser and must not be collected here.

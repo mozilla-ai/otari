@@ -12,8 +12,26 @@ storage.
 
 - React 19 + TypeScript, built with Vite
 - HeroUI v3 (`@heroui/react`, `@heroui/styles`) on Tailwind CSS v4
-- TanStack Query for data fetching
+- TanStack Query for data fetching, TanStack Router (file-based) for routes
 - Vitest + Testing Library for tests
+- Biome for the layer-boundary lint (`npm run lint`), and nothing else
+
+## Layout
+
+`src/` is four layers:
+
+| Directory | Holds | May import |
+| --- | --- | --- |
+| `features/<domain>/` | A domain's page, the parts only it uses, its tests | `shared/`, `client/`, other features |
+| `shared/` | `api/` transport and query hooks, `lib/` helpers, `ui/` primitives, `test/` harnesses | `client/`, itself |
+| `app/` | The composition root: entry, providers, router, shell chrome | anything |
+| `routes/` | One file per URL, naming a feature's page | anything |
+
+`client/` is generated from the OpenAPI spec and `styles/globals.css` is the one
+stylesheet. `npm run lint` fails a PR that has a feature importing `app/`, or
+`shared/` importing either of the layers above it; `src/architecture.test.ts`
+proves the lint still rejects each of those. See
+[AGENTS.md](./AGENTS.md) for the reasoning.
 
 ## Develop
 
@@ -21,6 +39,7 @@ storage.
 cd web
 npm install
 npm run dev        # Vite dev server on :5173, proxying the API to :8000
+npm run lint       # layer boundaries only; see Layout above
 npm run typecheck
 npm test
 ```
@@ -63,13 +82,13 @@ Who builds it instead:
 - A wheel ships the dashboard only if the bundle was built before
   `uv build`; `make dashboard` first if you need one that does.
 
-CI (`.github/workflows/otari-dashboard.yml`) type-checks, tests, and builds on
-every change under `web/`.
+CI (`.github/workflows/otari-dashboard.yml`) lints, type-checks, tests, and
+builds on every change under `web/`.
 
 ## How it is served
 
 In standalone mode the gateway serves `index.html` at `/` and the hashed assets
 under `/assets` (see `src/gateway/main.py` and `src/gateway/dashboard.py`). The
-app uses client-side section switching rather than a router, so no server-side
+app routes on hash history (`/#/models`, `/#/usage`), so no server-side
 catch-all route is needed. In hybrid mode there is no local management API, so
 the root keeps serving the get-started tutorial instead.
