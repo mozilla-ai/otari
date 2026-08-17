@@ -206,5 +206,20 @@ def test_test_suite_importing_the_overlay_is_flagged(tmp_path: Path) -> None:
     ]
 
 
+def test_main_discovers_tests_root_and_fails_on_overlay_import(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Unlike the check_file() tests above, this exercises main() itself: that
+    # it walks TESTS_ROOT (not just GATEWAY_ROOT) and resolves those paths
+    # against REPO_ROOT, using the gateway-composed overlay spelling.
+    _write(tmp_path, "src/gateway/__init__.py", "")
+    _write(tmp_path, "tests/unit/test_thing.py", "from gateway.overlay.billing import charge\n")
+    monkeypatch.setattr(check, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(check, "SRC_ROOT", tmp_path / "src")
+    monkeypatch.setattr(check, "GATEWAY_ROOT", tmp_path / "src" / "gateway")
+    monkeypatch.setattr(check, "TESTS_ROOT", tmp_path / "tests")
+    assert check.main() == 1
+
+
 def test_real_gateway_tree_is_clean() -> None:
     assert check.main() == 0
