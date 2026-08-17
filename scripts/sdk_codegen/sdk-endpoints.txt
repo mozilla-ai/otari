@@ -160,3 +160,25 @@ DELETE /v1/search-tools/{name}                  # not yet wrapped
 POST /v1/search-tools/reencrypt                 # not yet wrapped
 # Settings
 POST /v1/settings/master-key/rotate             # not yet wrapped
+# Tenancy: organizations, workspaces, and their memberships. The dashboard's
+# tenancy pages are the consumer; an SDK caller acts inside one workspace with a
+# key that already names it, so none of these is an SDK surface yet. Move to
+# [covered] if a shell grows an admin client.
+GET /v1/organizations/me                                    # dashboard-only
+POST /v1/organizations/me                                   # dashboard-only
+PATCH /v1/organizations/me                                  # dashboard-only
+DELETE /v1/organizations/me                                 # dashboard-only
+GET /v1/organizations/me/memberships                        # dashboard-only
+POST /v1/organizations/me/switch                            # dashboard-only
+GET /v1/organizations/me/members                            # dashboard-only
+PATCH /v1/organizations/me/members/{organization_member_id} # dashboard-only
+DELETE /v1/organizations/me/members/{organization_member_id} # dashboard-only
+POST /v1/workspaces                                         # dashboard-only
+GET /v1/workspaces                                          # dashboard-only
+GET /v1/workspaces/{workspace_id}                           # dashboard-only
+PATCH /v1/workspaces/{workspace_id}                         # dashboard-only
+DELETE /v1/workspaces/{workspace_id}                        # dashboard-only
+GET /v1/workspaces/{workspace_id}/members                   # dashboard-only
+POST /v1/workspaces/{workspace_id}/members/{user_id}        # dashboard-only
+PATCH /v1/workspaces/{workspace_id}/members/{user_id}       # dashboard-only
+DELETE /v1/workspaces/{workspace_id}/members/{user_id}      # dashboard-only

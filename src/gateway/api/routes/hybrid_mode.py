@@ -59,3 +59,18 @@ async def providers_disabled() -> None:
 @router.api_route("/v1/pricing", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
 async def pricing_disabled() -> None:
     _raise_disabled()
+
+
+# Tenancy is the clearest case of the rule above: a hybrid gateway holds no
+# tenancy state at all, because the platform's control plane is where its
+# organizations and workspaces live.
+@router.api_route("/v1/organizations/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+@router.api_route("/v1/organizations", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+async def organizations_disabled() -> None:
+    _raise_disabled()
+
+
+@router.api_route("/v1/workspaces/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+@router.api_route("/v1/workspaces", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+async def workspaces_disabled() -> None:
+    _raise_disabled()

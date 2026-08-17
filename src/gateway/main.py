@@ -6,7 +6,7 @@ from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from typing_extensions import override
@@ -64,6 +64,7 @@ from gateway.services.search_tool_store_service import (
     run_search_tool_refresher,
 )
 from gateway.services.secret_box import validate_secret_key
+from gateway.services.tenancy.errors import TenancyError
 from gateway.services.tool_settings_service import apply_overrides_from_db as apply_tool_overrides_from_db
 from gateway.version import __version__
 
@@ -366,6 +367,19 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
     return lifespan
 
 
+async def _tenancy_error_handler(_: Request, exc: Exception) -> Response:
+    """Render a tenancy domain error as the status it carries.
+
+    One handler for the whole family, so a rehomed service keeps raising domain
+    errors and no tenancy route needs a try/except (see
+    `gateway.services.tenancy.errors`). The body matches FastAPI's own
+    ``HTTPException`` shape, so a client cannot tell which layer answered.
+    """
+    if not isinstance(exc, TenancyError):  # pragma: no cover - registered for TenancyError only
+        raise exc
+    return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
+
+
 def create_app(config: GatewayConfig) -> FastAPI:
     """Create and configure FastAPI application."""
 
@@ -548,6 +562,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
     app.state.gateway_mode = config.effective_mode
 
     register_routers(app, config)
+    app.add_exception_handler(TenancyError, _tenancy_error_handler)
 
     if config.enable_metrics:
         from gateway.metrics import metrics_endpoint

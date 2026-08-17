@@ -281,6 +281,36 @@ into something a text-only local model can read.
 | `DELETE` | `/v1/users/{user_id}` | Soft-delete a user and deactivate their keys. | Master key |
 | `GET` | `/v1/users/{user_id}/usage` | Get usage history for a user. | Master key |
 
+### Organizations
+
+Tenancy above users and keys; see [Access control](access-control.md#organizations-and-workspaces). Every path is scoped to the caller's active organization, which the first master-key request provisions.
+
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| `GET` | `/v1/organizations/me` | Get the active organization and the caller's role in it. | Master key |
+| `POST` | `/v1/organizations/me` | Create an organization and switch into it. | Master key |
+| `PATCH` | `/v1/organizations/me` | Rename the active organization. | Master key |
+| `DELETE` | `/v1/organizations/me` | Delete the active organization. | Master key |
+| `GET` | `/v1/organizations/me/memberships` | List the organizations the caller belongs to. | Master key |
+| `POST` | `/v1/organizations/me/switch` | Switch the active organization. | Master key |
+| `GET` | `/v1/organizations/me/members` | List the active organization's members. | Master key |
+| `PATCH` | `/v1/organizations/me/members/{organization_member_id}` | Change a member's role or status. | Master key |
+| `DELETE` | `/v1/organizations/me/members/{organization_member_id}` | Remove a member (suspends the membership). | Master key |
+
+### Workspaces
+
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| `POST` | `/v1/workspaces` | Create a workspace in the active organization. | Master key |
+| `GET` | `/v1/workspaces` | List the workspaces the caller can see. | Master key |
+| `GET` | `/v1/workspaces/{workspace_id}` | Get a specific workspace. | Master key |
+| `PATCH` | `/v1/workspaces/{workspace_id}` | Rename a workspace or change its description. | Master key |
+| `DELETE` | `/v1/workspaces/{workspace_id}` | Delete a workspace and its memberships. | Master key |
+| `GET` | `/v1/workspaces/{workspace_id}/members` | List a workspace's members. | Master key |
+| `POST` | `/v1/workspaces/{workspace_id}/members/{user_id}` | Add an organization member to a workspace. | Master key |
+| `PATCH` | `/v1/workspaces/{workspace_id}/members/{user_id}` | Change a workspace member's role. | Master key |
+| `DELETE` | `/v1/workspaces/{workspace_id}/members/{user_id}` | Remove a workspace member. | Master key |
+
 ### Budget management
 
 | Method | Path | Description | Auth |

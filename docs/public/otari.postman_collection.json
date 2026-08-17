@@ -1613,6 +1613,273 @@
     {
       "item": [
         {
+          "name": "Get Active Organization Context",
+          "request": {
+            "description": "Get the caller's active organization and their standing in it.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me"
+            }
+          }
+        },
+        {
+          "name": "Create Organization",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"name\": \"string\"\n}"
+            },
+            "description": "Create an organization owned by the caller, and switch them into it.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me"
+            }
+          }
+        },
+        {
+          "name": "Update Active Organization",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"name\": \"string\"\n}"
+            },
+            "description": "Rename the caller's active organization.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me"
+            }
+          }
+        },
+        {
+          "name": "Delete Active Organization",
+          "request": {
+            "description": "Delete the caller's active organization. Owners only.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me"
+            }
+          }
+        },
+        {
+          "name": "List Active Organization Members",
+          "request": {
+            "description": "List the members of the caller's active organization.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "members"
+              ],
+              "query": [
+                {
+                  "description": "Number of records to skip",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "Maximum number of records to return",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/members?skip=&limit="
+            }
+          }
+        },
+        {
+          "name": "Update Active Organization Member",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"role\": \"string\",\n  \"status\": \"string\"\n}"
+            },
+            "description": "Change a member's role or status. Organization owners and admins only.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "members",
+                ":organization_member_id"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/members/:organization_member_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "organization_member_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Remove Active Organization Member",
+          "request": {
+            "description": "Remove a member by suspending their membership, keeping their history resolvable.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "members",
+                ":organization_member_id"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/members/:organization_member_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "organization_member_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Organization Memberships",
+          "request": {
+            "description": "List every organization the caller is an active member of.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "memberships"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/memberships"
+            }
+          }
+        },
+        {
+          "name": "Switch Active Organization",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"organization_id\": \"00000000-0000-0000-0000-000000000000\"\n}"
+            },
+            "description": "Point the caller at another organization they are a member of.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "switch"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/switch"
+            }
+          }
+        }
+      ],
+      "name": "organizations"
+    },
+    {
+      "item": [
+        {
           "name": "List Pricing",
           "request": {
             "description": "List all model pricing.",
@@ -3696,6 +3963,323 @@
         }
       ],
       "name": "users"
+    },
+    {
+      "item": [
+        {
+          "name": "List Workspaces",
+          "request": {
+            "description": "List the workspaces the caller can see in their organization.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspaces"
+              ],
+              "query": [
+                {
+                  "description": "Number of records to skip",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "Maximum number of records to return",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/workspaces?skip=&limit="
+            }
+          }
+        },
+        {
+          "name": "Create Workspace",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"name\": \"string\"\n}"
+            },
+            "description": "Create a workspace in the caller's organization. Owners and admins only.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspaces"
+              ],
+              "raw": "{{baseUrl}}/v1/workspaces"
+            }
+          }
+        },
+        {
+          "name": "Get Workspace",
+          "request": {
+            "description": "Get one workspace.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspaces",
+                ":workspace_id"
+              ],
+              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Workspace",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"description\": \"string\",\n  \"name\": \"string\"\n}"
+            },
+            "description": "Rename a workspace or change its description.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspaces",
+                ":workspace_id"
+              ],
+              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Workspace",
+          "request": {
+            "description": "Delete a workspace and its memberships. Organization owners and admins only.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspaces",
+                ":workspace_id"
+              ],
+              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Workspace Members",
+          "request": {
+            "description": "List a workspace's members.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "members"
+              ],
+              "query": [
+                {
+                  "description": "Number of records to skip",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "Maximum number of records to return",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/members?skip=&limit=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Add Workspace Member",
+          "request": {
+            "description": "Add an existing organization member to a workspace.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "members",
+                ":user_id"
+              ],
+              "query": [
+                {
+                  "description": "Role to assign: owner, admin, member, or viewer.",
+                  "disabled": true,
+                  "key": "role",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/members/:user_id?role=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "user_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Workspace Member Role",
+          "request": {
+            "description": "Change a workspace member's role.",
+            "header": [],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "members",
+                ":user_id"
+              ],
+              "query": [
+                {
+                  "description": "Role to assign: owner, admin, member, or viewer.",
+                  "disabled": false,
+                  "key": "role",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/members/:user_id?role=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "user_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Remove Workspace Member",
+          "request": {
+            "description": "Remove a member from a workspace. Idempotent.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "members",
+                ":user_id"
+              ],
+              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/members/:user_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "user_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "workspaces"
     }
   ],
   "variable": [

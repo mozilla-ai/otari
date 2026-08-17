@@ -84,6 +84,16 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         await self.db.refresh(user)
         return user
 
+    async def get_by_active_organization(self, organization_id: uuid.UUID) -> list[User]:
+        """Return every identity currently pointed at this organization.
+
+        The organization-delete path reads this: ``active_organization_id`` is
+        NOT NULL with no delete rule, so those rows have to be repointed before
+        the organization can go.
+        """
+        result = await self.db.execute(select(User).where(col(User.active_organization_id) == organization_id))
+        return list(result.scalars().all())
+
     async def set_active_organization(self, user: User, organization_id: uuid.UUID) -> User:
         """Stage a change of the identity's active organization."""
         user.active_organization_id = organization_id

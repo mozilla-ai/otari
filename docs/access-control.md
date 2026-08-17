@@ -90,6 +90,21 @@ Assign a budget to a user by setting `budget_id` on the user (at create time or 
 
 The enforcement strategy is configurable with `OTARI_BUDGET_STRATEGY` (`for_update` row-lock, `cas` compare-and-swap, or `disabled`); see [Configuration](configuration.md).
 
+## Organizations and workspaces
+
+Otari is growing a tenancy layer above the users, keys, and budgets described here: an **organization** owns **workspaces**, and identities join both as members with a fixed role (`owner`, `admin`, `member`, or `viewer`). It is available today over the API (`/v1/organizations/*` and `/v1/workspaces/*`, master-key authenticated like the rest of this guide); the dashboard pages for it are still being built.
+
+Nothing is required to set it up. The first master-key-authenticated request provisions a default organization, a default workspace, and one owner identity representing the operator, and every later request resolves that same identity. Organization owners and admins can create further workspaces, add existing organization members to them, and manage roles; a workspace's own owners and admins can manage the workspace they belong to.
+
+Two rules exist to stop a tenancy from becoming unmanageable, and both answer `400`:
+
+- an organization always keeps at least one active owner, so the last owner cannot be demoted or removed;
+- an identity always belongs to at least one organization, so the last one cannot be deleted.
+
+Removing a member suspends their membership rather than deleting it, which keeps their past usage attributable.
+
+This layer does not yet gate request-plane spend: keys, budgets, and usage still key on the `user_id` described above. Bringing the two together is the reconciliation tracked in [mozilla-ai/otari-ai#1452](https://github.com/mozilla-ai/otari-ai/issues/1452).
+
 ## See also
 
 - [Admin dashboard](dashboard.md): the same users, keys, and budgets in the browser UI.

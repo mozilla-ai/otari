@@ -72,7 +72,14 @@ def test_hybrid_mode_disables_dashboard_management_endpoints(monkeypatch: pytest
 
     expected = {"detail": "This endpoint is not available in hybrid mode. Manage this resource via the platform UI."}
     with TestClient(app) as client:
-        for path in ("/v1/settings", "/v1/aliases", "/v1/providers", "/v1/pricing"):
+        for path in (
+            "/v1/settings",
+            "/v1/aliases",
+            "/v1/providers",
+            "/v1/pricing",
+            "/v1/organizations/me",
+            "/v1/workspaces",
+        ):
             response = client.get(path)
             assert response.status_code == 404, path
             assert response.json() == expected, path

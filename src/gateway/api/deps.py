@@ -14,11 +14,13 @@ from gateway.core.database import create_session, get_db
 from gateway.log_config import logger
 from gateway.metrics import record_auth_failure
 from gateway.models.entities import APIKey
+from gateway.models.tenancy import User as TenancyUser
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, is_valid_dashboard_session
 from gateway.services.file_store import FileStore
 from gateway.services.log_writer import LogWriter
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
 from gateway.services.routing import clear_router_backend_cache
+from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 
 # Legacy module-level fallback. Config now lives on ``app.state.config`` (set in
 # ``create_app``); ``get_config`` reads from the request's app state and only
@@ -369,6 +371,30 @@ async def get_db_if_needed(
         yield db
 
 
+async def get_current_identity(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    _master_key: Annotated[str | None, Depends(verify_master_key)],
+) -> TenancyUser:
+    """Resolve the tenancy identity acting on this request.
+
+    Standalone Otari authenticates an operator with the master key (or the
+    dashboard session cookie minted from it), which names no user, while every
+    tenancy surface needs an identity with an active organization and a role.
+    Depending on ``verify_master_key`` first keeps the credential check exactly
+    where the rest of the management API has it; the identity behind that
+    credential is the deployment's bootstrap operator, provisioned on first use
+    (otari-ai#1716 option A, see `gateway.services.tenancy.provisioning_service`).
+
+    Per-session identities land with the sign-in flow that retires the master key
+    as a login. Until then every authenticated caller is the one operator, which
+    is what a single-tenant standalone deployment already means.
+    """
+    return await ensure_bootstrap_identity(db)
+
+
+CurrentIdentity = Annotated[TenancyUser, Depends(get_current_identity)]
+
+
 def get_log_writer(request: Request) -> LogWriter:
     writer: LogWriter = request.app.state.log_writer
     return writer
@@ -381,7 +407,9 @@ def get_file_store(request: Request) -> FileStore:
 
 
 __all__ = [
+    "CurrentIdentity",
     "get_config",
+    "get_current_identity",
     "get_db",
     "reset_config",
     "set_config",
