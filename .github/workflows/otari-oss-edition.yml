@@ -24,6 +24,13 @@ name: Otari OSS Edition
 # in-process, otari-docker-build.yml proves the image recipe builds and the
 # container answers its health endpoints. Neither boots the packaged OSS edition
 # and serves a request through it.
+#
+# Path-filtered to the inputs that can change what boots: the app, the migrations
+# the boot runs (alembic.ini included, since `otari migrate` shells out to the
+# alembic CLI, which reads it), dependency resolution, and the gate itself. A PR
+# that touches none of them cannot fail this, so it is not run on one. That also
+# keeps the job off the critical path of docs-only and web/-only PRs, which is
+# why it is not wired up as a required status check.
 
 on:
   push:
@@ -31,6 +38,7 @@ on:
     paths:
       - 'src/gateway/**'
       - 'alembic/**'
+      - 'alembic.ini'
       - 'scripts/oss_edition_smoke.py'
       - 'pyproject.toml'
       - 'uv.lock'
@@ -40,6 +48,7 @@ on:
     paths:
       - 'src/gateway/**'
       - 'alembic/**'
+      - 'alembic.ini'
       - 'scripts/oss_edition_smoke.py'
       - 'pyproject.toml'
       - 'uv.lock'
