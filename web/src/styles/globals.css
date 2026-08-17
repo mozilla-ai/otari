@@ -73,7 +73,7 @@
  * have to land on this palette without a reconciliation pass.
  *
  * Components consume these via Tailwind utilities (bg-background,
- * text-foreground, text-muted, border-border, bg-content1, etc.)
+ * text-foreground, text-muted, border-border, bg-surface, etc.)
  * — those utilities resolve through HeroUI variables that we
  * alias to the --color-* tokens below.
  *
@@ -205,17 +205,20 @@
    * up this palette without a single className. Do NOT consume
    * --background/--foreground from component code directly —
    * use Tailwind utilities (bg-background, text-foreground,
-   * text-muted, border-border, bg-content1/2/3, bg-default,
-   * bg-accent, bg-success, etc.).
+   * text-muted, border-border, bg-surface, bg-surface-alt,
+   * bg-default, bg-accent, text-success, etc.).
+   *
+   * Upstream's `--content1` … `--content4` are deliberately not
+   * carried over: HeroUI v3 neither declares nor reads them (they
+   * are a v2 name), so the four lines were inert and the
+   * `bg-content1` they implied was never a class. Do not restore
+   * them from otari-ai/frontend/src/index.css without checking
+   * `@heroui/styles` still ignores them.
    * ────────────────────────────────────────────────────────── */
   --background: var(--color-background);
   --foreground: var(--color-text);
   --muted: var(--color-text-muted);
   --border: var(--color-border);
-  --content1: var(--color-surface);
-  --content2: var(--color-surface-muted);
-  --content3: var(--color-surface-subtle);
-  --content4: var(--color-surface-subtle);
   --default: var(--color-background-muted);
   --default-foreground: var(--color-text);
   --accent: var(--color-primary);
@@ -351,10 +354,6 @@
   --foreground: var(--color-text);
   --muted: var(--color-text-muted);
   --border: var(--color-border);
-  --content1: var(--color-surface);
-  --content2: var(--color-surface-muted);
-  --content3: var(--color-surface-subtle);
-  --content4: var(--color-surface-subtle);
   --default: var(--color-background-muted);
   --default-foreground: var(--color-text);
   --accent: var(--color-primary);
@@ -430,6 +429,24 @@
   --color-attention-subtle: var(--color-attention-subtle);
   --color-attention-foreground: var(--color-attention-foreground);
   --color-attention-border: var(--color-attention-border);
+  /* The status roles need registering even though the theme blocks declare
+   * them, and the split is easy to get wrong: HeroUI's own mapping generates
+   * `text-success` / `text-warning` / `text-danger` (they ride `--success` and
+   * friends), but it has no notion of `info` at all and no notion of a soft
+   * fill, so `bg-success-subtle` and `text-info` are classes only if they are
+   * declared here. A token that is declared, documented, and unregistered
+   * produces no CSS and no error; `foundation.test.ts` holds the two lists
+   * together so the next one cannot go missing the same way. */
+  --color-info: var(--color-info);
+  --color-info-subtle: var(--color-info-subtle);
+  --color-info-foreground: var(--color-info-foreground);
+  --color-success-subtle: var(--color-success-subtle);
+  --color-warning-subtle: var(--color-warning-subtle);
+  --color-danger-subtle: var(--color-danger-subtle);
+  /* Selected and soft-selected backgrounds. Also what `::selection` paints, so
+   * leaving it unregistered made the one token with a visible in-CSS consumer
+   * unreachable from a call site. */
+  --color-primary-subtle: var(--color-primary-subtle);
   --color-code-surface: var(--color-code-surface);
   --color-code-border: var(--color-code-border);
   --color-code-control: var(--color-code-control);

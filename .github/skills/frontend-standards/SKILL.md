@@ -43,7 +43,7 @@ Build and check from the repo root:
   `fullWidth`, `isInvalid`) before a `className`. `className` is for layout/position, not for
   restyling a component HeroUI already styles. See [components.md](./components.md).
 - Style from the semantic tokens in `web/src/styles/globals.css`, through the Tailwind
-  utilities they back (`text-muted`, `bg-surface`, `border-border`, `bg-content1`,
+  utilities they back (`text-muted`, `bg-surface`, `border-border`, `bg-surface-alt`,
   `text-danger`, `text-heading`). They are the design foundation rehomed from
   `otari-ai/frontend`, and the HeroUI variable mapping in that file is what makes a bare
   `<Card>` or `<Chip>` wear the palette with no `className`. Never a raw hex, never a

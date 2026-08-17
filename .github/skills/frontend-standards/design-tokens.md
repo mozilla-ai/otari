@@ -26,14 +26,14 @@ never for its appearance:
 ## How they reach the screen
 
 Don't consume the tokens by name. Each theme block aliases HeroUI's own variables to them
-(`--background` → `--color-background`, `--content1` → `--color-surface`, `--default` →
+(`--background` → `--color-background`, `--surface` → `--color-surface`, `--default` →
 `--color-background-muted`, `--accent` → `--color-primary`, and so on), which is what makes a
 bare HeroUI component wear the palette with no styling at the call site. Consume the Tailwind
 utilities that resolve through that mapping:
 
 ```tsx
 <span className="text-muted">…</span>
-<div className="border border-border bg-content1">…</div>
+<div className="border border-border bg-surface">…</div>
 <p className="text-danger">…</p>
 <Card>…</Card>   {/* already on --color-surface, with a 1px --color-border outline */}
 ```
