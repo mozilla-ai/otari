@@ -16,16 +16,26 @@
   "assist": { "actions": { "source": { "organizeImports": "on" } } },
 
   // globals.css is Tailwind v4, whose at-rules (@theme, @custom-variant) Biome
-  // refuses to parse unless told they are expected. No CSS rule is enabled, but an
-  // unparseable file is itself an error, so lint would fail on a file it has nothing
-  // to say about.
+  // refuses to parse unless told they are expected. The recommended preset below
+  // brings CSS rules with it and the formatter reaches the file too, so it has to
+  // parse; without this an unparseable file is itself an error.
   "css": { "parser": { "tailwindDirectives": true } },
 
   "files": {
-    // Generated: the route tree (from src/routes/) and the API client (from
-    // docs/public/openapi.json). Both are committed, neither is edited by hand, and
-    // both are free to import across any line the generator chooses.
-    "includes": ["src/**", "!src/routeTree.gen.ts", "!src/client/schema.ts"]
+    // Everything hand-written under web/: src/, the Playwright specs, and the two
+    // build configs. The exclusions are the generated pair, the route tree (from
+    // src/routes/) and the API client (from docs/public/openapi.json). Both are
+    // committed and neither is edited by hand, so formatting them would only fight
+    // the drift checks that guard them, and they are free to import across any line
+    // the generator chooses.
+    "includes": [
+      "src/**",
+      "e2e/**",
+      "vite.config.ts",
+      "playwright.config.ts",
+      "!src/routeTree.gen.ts",
+      "!src/client/schema.ts"
+    ]
   },
 
   "linter": {

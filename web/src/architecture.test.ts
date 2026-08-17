@@ -255,7 +255,11 @@ describe("the boundary check is wired up", () => {
     const pkg = JSON.parse(readFileSync(join(WEB, "package.json"), "utf8")) as {
       scripts: Record<string, string>
     }
-    expect(pkg.scripts.lint).toContain("biome lint")
+    // `biome check` is the linter, the formatter, and the assists in one pass, so
+    // it still runs the boundary rules. `--write` is deliberately not in it: that
+    // one rewrites the tree instead of failing on it, and belongs to `lint:fix`.
+    expect(pkg.scripts.lint).toContain("biome check")
+    expect(pkg.scripts.lint).not.toContain("--write")
   })
 
   it("runs in the dashboard workflow", () => {

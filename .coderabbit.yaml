@@ -127,9 +127,9 @@ reviews:
       mode: warning
 
   tools:
-    # CI already runs ruff (lint) and mypy (strict) on the source, so the
-    # equivalent CodeRabbit tools stay off to avoid duplicate signal in PR
-    # comments. There is no frontend, so biome and eslint stay off too.
+    # CI already runs ruff (lint) and mypy (strict) on the source, and biome on
+    # web/, so the equivalent CodeRabbit tools stay off to avoid duplicate signal
+    # in PR comments. eslint stays off because the frontend does not use it.
     ruff:
       enabled: false
     biome:

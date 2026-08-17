@@ -1,6 +1,6 @@
-import { expect, type Page } from "@playwright/test";
+import { expect, type Page } from "@playwright/test"
 
-import { authHeaders, expectOk } from "./helpers";
+import { authHeaders, expectOk } from "./helpers"
 
 // The fixture the behavioral-parity specs read.
 //
@@ -38,10 +38,10 @@ export const PARITY = {
     // above so deleting it cannot make an earlier assertion unreproducible.
     scratch: { provider: "groq", model: "scratch-parity-model" },
   },
-} as const;
+} as const
 
-export const PRICED_MODEL_KEY = `${PARITY.models.priced.provider}:${PARITY.models.priced.model}`;
-export const UNPRICED_MODEL_KEY = `${PARITY.models.unpriced.provider}:${PARITY.models.unpriced.model}`;
+export const PRICED_MODEL_KEY = `${PARITY.models.priced.provider}:${PARITY.models.priced.model}`
+export const UNPRICED_MODEL_KEY = `${PARITY.models.unpriced.provider}:${PARITY.models.unpriced.model}`
 
 // Row counts, exported so the specs assert against the fixture rather than
 // against a number repeated in three files.
@@ -50,33 +50,33 @@ export const COUNTS = {
   unpriced: 6,
   errors: 3,
   scratch: 4,
-} as const;
+} as const
 
 // Every seeded row lands inside this many hours of now, so all of them fall in
 // Activity's default 24h window (and therefore in Usage's default 30d one).
-const WINDOW_HOURS = 20;
+const WINDOW_HOURS = 20
 
 interface SeedEvent {
-  source_event_id: string;
-  timestamp: string;
-  provider: string;
-  model: string;
-  status?: "success" | "error";
-  input_tokens?: number;
-  output_tokens?: number;
-  cache_read_tokens?: number;
-  cache_write_tokens?: number;
-  duration_ms?: number;
-  session_label?: string;
-  user_id?: string;
+  source_event_id: string
+  timestamp: string
+  provider: string
+  model: string
+  status?: "success" | "error"
+  input_tokens?: number
+  output_tokens?: number
+  cache_read_tokens?: number
+  cache_write_tokens?: number
+  duration_ms?: number
+  session_label?: string
+  user_id?: string
 }
 
 // Spread `count` events across the window, newest first. A fixed step (rather
 // than a random or a clock-derived offset) keeps the histogram, the bucket
 // counts and the paging order identical on every run.
 function spread(count: number, index: number): string {
-  const step = (WINDOW_HOURS * 3_600_000) / (count + 1);
-  return new Date(Date.now() - (index + 1) * step).toISOString();
+  const step = (WINDOW_HOURS * 3_600_000) / (count + 1)
+  return new Date(Date.now() - (index + 1) * step).toISOString()
 }
 
 function pricedEvents(): SeedEvent[] {
@@ -93,7 +93,7 @@ function pricedEvents(): SeedEvent[] {
     duration_ms: 420 + i,
     session_label: PARITY.sessions.heavy,
     user_id: PARITY.users.heavy,
-  }));
+  }))
 }
 
 function unpricedEvents(): SeedEvent[] {
@@ -106,7 +106,7 @@ function unpricedEvents(): SeedEvent[] {
     duration_ms: 1_800 + i,
     session_label: PARITY.sessions.light,
     user_id: PARITY.users.light,
-  }));
+  }))
 }
 
 // Failures carry no tokens: an error before the provider replied is the shape
@@ -120,7 +120,7 @@ function errorEvents(): SeedEvent[] {
     duration_ms: 90 + i,
     session_label: PARITY.sessions.light,
     user_id: PARITY.users.light,
-  }));
+  }))
 }
 
 function scratchEvents(): SeedEvent[] {
@@ -132,7 +132,7 @@ function scratchEvents(): SeedEvent[] {
     output_tokens: 20,
     duration_ms: 200 + i,
     user_id: PARITY.users.light,
-  }));
+  }))
 }
 
 // Create the users the imported rows attribute to. Ingestion rejects usage for a
@@ -147,9 +147,9 @@ async function ensureUsers(page: Page): Promise<void> {
     const created = await page.request.post("/v1/users", {
       headers: authHeaders,
       data: { user_id: userId },
-    });
+    })
     if (created.status() !== 409) {
-      await expectOk(created, `create user ${userId}`);
+      await expectOk(created, `create user ${userId}`)
     }
   }
 }
@@ -160,7 +160,7 @@ async function ensureUsers(page: Page): Promise<void> {
 // have no positive case at all. Fixed rather than derived from the clock because
 // a pricing row is keyed by `effective_at`, so a clock-derived value writes a new
 // revision on every run instead of reusing the one already there.
-const PRICE_EFFECTIVE_AT = "2020-01-01T00:00:00.000Z";
+const PRICE_EFFECTIVE_AT = "2020-01-01T00:00:00.000Z"
 
 // Price one of the two models.
 async function ensurePricing(page: Page): Promise<void> {
@@ -174,8 +174,8 @@ async function ensurePricing(page: Page): Promise<void> {
       cache_write_price_per_million: 3.75,
       effective_at: PRICE_EFFECTIVE_AT,
     },
-  });
-  await expectOk(priced, `price ${PRICED_MODEL_KEY}`);
+  })
+  await expectOk(priced, `price ${PRICED_MODEL_KEY}`)
 }
 
 /**
@@ -184,27 +184,36 @@ async function ensurePricing(page: Page): Promise<void> {
  * duplicates instead of doubling the row counts the specs assert on.
  */
 export async function seedParityUsage(page: Page): Promise<void> {
-  await ensureUsers(page);
-  await ensurePricing(page);
+  await ensureUsers(page)
+  await ensurePricing(page)
 
-  const events = [...pricedEvents(), ...unpricedEvents(), ...errorEvents(), ...scratchEvents()];
+  const events = [
+    ...pricedEvents(),
+    ...unpricedEvents(),
+    ...errorEvents(),
+    ...scratchEvents(),
+  ]
   const seeded = await page.request.post("/v1/usage/external-events", {
     headers: authHeaders,
     data: { source: PARITY.source, events },
-  });
-  await expectOk(seeded, "seed parity usage");
+  })
+  await expectOk(seeded, "seed parity usage")
 
   // A per-event rejection is reported inside a 200, so the status alone does not
   // say the fixture landed: an event the ingest could not attribute leaves the
   // counts short and surfaces three files later as an unexplained off-by-N.
   const result = (await seeded.json()) as {
-    accepted: number;
-    duplicate: number;
-    rejected: number;
-    errors: unknown[];
-  };
-  expect(result.rejected, `rejected events: ${JSON.stringify(result.errors)}`).toBe(0);
-  expect(result.accepted + result.duplicate, "every seeded event has to be stored or already present").toBe(
-    events.length,
-  );
+    accepted: number
+    duplicate: number
+    rejected: number
+    errors: unknown[]
+  }
+  expect(
+    result.rejected,
+    `rejected events: ${JSON.stringify(result.errors)}`,
+  ).toBe(0)
+  expect(
+    result.accepted + result.duplicate,
+    "every seeded event has to be stored or already present",
+  ).toBe(events.length)
 }

@@ -1,4 +1,4 @@
-import { defineConfig, devices } from "@playwright/test";
+import { defineConfig, devices } from "@playwright/test"
 
 // End-to-end tests for the dashboard, run against a real gateway serving the
 // built bundle (booted by `webServer` below). Component behavior is covered by
@@ -67,4 +67,4 @@ export default defineConfig({
     stdout: "pipe",
     stderr: "pipe",
   },
-});
+})

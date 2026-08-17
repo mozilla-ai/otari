@@ -1,21 +1,26 @@
-import { expect, type APIResponse, type Locator, type Page } from "@playwright/test";
+import {
+  type APIResponse,
+  expect,
+  type Locator,
+  type Page,
+} from "@playwright/test"
 
 // Matches web/e2e/otari.yml. The login step needs a known key.
-export const MASTER_KEY = "e2e-master-key";
+export const MASTER_KEY = "e2e-master-key"
 
 // Scope link lookups to the sidebar navigation landmark. The Overview landing
 // page has tile-links whose names substring-collide with sidebar items (e.g.
 // "Providers healthy", "Active users", "No budgets configured"), so an unscoped
 // getByRole("link", { name }) is ambiguous there.
-export const nav = (page: Page): Locator => page.getByRole("navigation");
+export const nav = (page: Page): Locator => page.getByRole("navigation")
 
 export async function login(page: Page): Promise<void> {
-  await page.goto("/");
-  await page.locator('input[type="password"]').fill(MASTER_KEY);
-  await page.locator('input[type="password"]').press("Enter");
+  await page.goto("/")
+  await page.locator('input[type="password"]').fill(MASTER_KEY)
+  await page.locator('input[type="password"]').press("Enter")
   // The sidebar appears once authenticated, regardless of the index landing
   // page.
-  await expect(nav(page).getByRole("link", { name: "Providers" })).toBeVisible();
+  await expect(nav(page).getByRole("link", { name: "Providers" })).toBeVisible()
 }
 
 // The dashboard authenticates with a session cookie, but the seeding and
@@ -25,19 +30,25 @@ export async function login(page: Page): Promise<void> {
 export const authHeaders = {
   Authorization: `Bearer ${MASTER_KEY}`,
   "Content-Type": "application/json",
-} as const;
+} as const
 
 // Open a client route directly. The router runs on hash history, so a
 // filtered view is a hash URL and its query string is what `useUrlState` reads.
 export async function gotoRoute(page: Page, route: string): Promise<void> {
-  await page.goto(`/#${route}`);
+  await page.goto(`/#${route}`)
 }
 
 // Fail with the server's own body rather than a bare status code: a 422 from the
 // content-free ingest schema names the offending field, and losing that turns a
 // seeding typo into an unexplained assertion failure three tests later.
-export async function expectOk(response: APIResponse, what: string): Promise<void> {
-  expect(response.ok(), `${what}: ${response.status()} ${await response.text()}`).toBe(true);
+export async function expectOk(
+  response: APIResponse,
+  what: string,
+): Promise<void> {
+  expect(
+    response.ok(),
+    `${what}: ${response.status()} ${await response.text()}`,
+  ).toBe(true)
 }
 
 // ---------- filters ----------
@@ -50,12 +61,12 @@ export async function openFilterPickers(page: Page): Promise<void> {
   // One control under two names, so waiting on it covers a page that has not
   // painted yet. A bare `isVisible()` on "Add filter" does not wait, so straight
   // after a navigation it reports false and the region is never opened.
-  const toggle = page.getByRole("button", { name: /^(Add filter|Done)$/ });
-  await expect(toggle).toBeVisible();
+  const toggle = page.getByRole("button", { name: /^(Add filter|Done)$/ })
+  await expect(toggle).toBeVisible()
   if ((await toggle.innerText()).trim() === "Add filter") {
-    await toggle.click();
+    await toggle.click()
   }
-  await expect(page.getByRole("button", { name: "Done" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Done" })).toBeVisible()
 }
 
 // An applied filter renders as a chip carrying its dimension and value, whatever
@@ -65,7 +76,7 @@ export function filterChip(page: Page, label: string, value: string): Locator {
   return page
     .locator("span")
     .filter({ hasText: new RegExp(`^${escapeRegExp(`${label}:${value}`)}$`) })
-    .first();
+    .first()
 }
 
 // Put a combobox's suggestion popover away, and wait until it is actually gone.
@@ -76,18 +87,22 @@ export function filterChip(page: Page, label: string, value: string): Locator {
 // reads as absent. Blur as well as Escape, because these boxes open on focus and
 // committing a value clears the query, which re-opens the list under the cursor.
 export async function dismissComboBox(box: Locator): Promise<void> {
-  await box.press("Escape");
-  await box.blur();
-  await expect(box).not.toHaveAttribute("aria-expanded", "true");
+  await box.press("Escape")
+  await box.blur()
+  await expect(box).not.toHaveAttribute("aria-expanded", "true")
 }
 
 // Commit a value into one of the multi-value filter comboboxes. They allow
 // custom values, so Enter is what commits a typed id.
-export async function addFilterValue(page: Page, label: string, value: string): Promise<void> {
-  const box = page.getByRole("combobox", { name: label });
-  await box.fill(value);
-  await box.press("Enter");
-  await dismissComboBox(box);
+export async function addFilterValue(
+  page: Page,
+  label: string,
+  value: string,
+): Promise<void> {
+  const box = page.getByRole("combobox", { name: label })
+  await box.fill(value)
+  await box.press("Enter")
+  await dismissComboBox(box)
 }
 
 // ---------- tables ----------
@@ -97,7 +112,7 @@ export async function addFilterValue(page: Page, label: string, value: string): 
 // than one, so a locator has to be scoped; scoping on the aria-label rather than
 // on the role keeps one helper working for both shapes.
 export function table(page: Page, ariaLabel: string): Locator {
-  return page.locator(`[aria-label="${ariaLabel}"]`);
+  return page.locator(`[aria-label="${ariaLabel}"]`)
 }
 
 // Data rows only. The header is a `row` too, so it is excluded by requiring the
@@ -107,7 +122,7 @@ export function table(page: Page, ariaLabel: string): Locator {
 export function tableRows(page: Page, ariaLabel: string): Locator {
   return table(page, ariaLabel)
     .getByRole("row")
-    .filter({ has: page.getByRole("rowheader") });
+    .filter({ has: page.getByRole("rowheader") })
 }
 
 // ---------- stat tiles ----------
@@ -117,10 +132,16 @@ export function tableRows(page: Page, ariaLabel: string): Locator {
 // label. Scoped to `within` where a bare label would also match a table column
 // header of the same name (Usage has both a "Requests" tile and a "Requests"
 // column).
-export function tileValue(page: Page, label: string, within?: Locator): Locator {
-  return (within ?? page).getByText(label, { exact: true }).locator("xpath=following-sibling::span[1]");
+export function tileValue(
+  page: Page,
+  label: string,
+  within?: Locator,
+): Locator {
+  return (within ?? page)
+    .getByText(label, { exact: true })
+    .locator("xpath=following-sibling::span[1]")
 }
 
 function escapeRegExp(value: string): string {
-  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return value.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")
 }
