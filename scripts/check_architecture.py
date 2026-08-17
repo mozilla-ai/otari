@@ -6,6 +6,7 @@ Enforces:
 2. API route purity: routes must not use the sync ORM layer (sqlalchemy.orm).
 3. Repository boundaries: repositories must not import services or the API layer.
 4. Naming conventions: repository modules end in _repository.py.
+5. OSS/enterprise boundary: OSS code must not import the enterprise overlay.
 
 Usage:
     uv run python scripts/check_architecture.py
@@ -23,6 +24,7 @@ from typing import TypedDict
 REPO_ROOT = Path(__file__).resolve().parent.parent
 SRC_ROOT = REPO_ROOT / "src"
 GATEWAY_ROOT = SRC_ROOT / "gateway"
+TESTS_ROOT = REPO_ROOT / "tests"
 
 
 class LayerRule(TypedDict):
@@ -40,6 +42,26 @@ class LayerRule(TypedDict):
 # gateway/api/routes answers to a gateway/api entry as well as its own; a nested
 # layer can add restrictions but cannot opt out of an enclosing layer's.
 RULES: dict[str, LayerRule] = {
+    # OSS -> enterprise boundary. Keyed at the gateway root so it covers every
+    # layer, ports and adapters included; nothing legitimately in this tree
+    # matches. The overlay (e.g. otari.ai's enterprise adapters) is imported
+    # as "overlay.*" today; a build that composes it into the gateway
+    # namespace instead would spell it "gateway.overlay.*". Both are
+    # forbidden, so an OSS file that reaches for an enterprise concept fails
+    # the build rather than waiting on review, whichever way the overlay is
+    # composed.
+    "gateway": {
+        "allowed": [],
+        "forbidden": ["gateway.overlay", "overlay"],
+        "description": "OSS base",
+    },
+    # The OSS test suite answers to the same boundary: a test of overlay
+    # behavior belongs in the overlay's own suite, not here.
+    "tests": {
+        "allowed": [],
+        "forbidden": ["gateway.overlay", "overlay"],
+        "description": "OSS test suite",
+    },
     "gateway/services": {
         "allowed": ["gateway.repositories", "gateway.models", "gateway.core", "gateway.auth"],
         "forbidden": ["gateway.api"],
@@ -179,10 +201,13 @@ def check_naming_conventions(src_root: Path) -> list[str]:
 
 
 def main() -> int:
-    """Run the architecture checks over the gateway package."""
-    if not GATEWAY_ROOT.is_dir():
-        print(f"❌ Gateway package not found at {GATEWAY_ROOT}")
-        return 1
+    """Run the architecture checks over the gateway package and the OSS test suite."""
+    # Both must exist: silently skipping either would let its rules (including
+    # the OSS/enterprise boundary) stop enforcing while the check stays green.
+    for required_root in (GATEWAY_ROOT, TESTS_ROOT):
+        if not required_root.is_dir():
+            print(f"❌ Expected directory not found at {required_root}")
+            return 1
 
     import_violations: list[tuple[Path, int, str, str]] = []
     for py_file in sorted(GATEWAY_ROOT.rglob("*.py")):
@@ -190,6 +215,14 @@ def main() -> int:
             continue
         import_violations.extend(
             (py_file, lineno, module, message) for lineno, module, message in check_file(py_file, SRC_ROOT)
+        )
+    # tests/ sits beside src/, not under it, so its relative paths (and the
+    # "tests" rule key above) are rooted at the repo root instead.
+    for py_file in sorted(TESTS_ROOT.rglob("*.py")):
+        if "__pycache__" in py_file.parts:
+            continue
+        import_violations.extend(
+            (py_file, lineno, module, message) for lineno, module, message in check_file(py_file, REPO_ROOT)
         )
 
     naming_violations = check_naming_conventions(SRC_ROOT)
