@@ -1,7 +1,7 @@
 import { keepPreviousData, useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 
 import { ApiError, apiFetch, longRequestSignal } from "@/shared/api/client";
-import { isoAgo } from "@/shared/lib/timeRange";
+import { isoAgo } from "@/shared/helpers/timeRange";
 import type {
   AliasResponse,
   ExplainPolicyRequest,

@@ -15,7 +15,7 @@ import type {
   TestProviderResult,
 } from "@/client";
 import { ProvidersPage } from "@/features/providers/ProvidersPage";
-import { withRouter } from "@/shared/test/router";
+import { withRouter } from "@/tests/router";
 
 const CAPS = {
   streaming: false,

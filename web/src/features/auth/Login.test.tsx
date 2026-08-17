@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { useAuth } from "@/features/auth/AuthContext";
 import { Login } from "@/features/auth/Login";
-import { AuthHarness } from "./testHarness";
+import { AppProviders } from "@/tests/providers";
 
 function Harness() {
   const { isAuthenticated } = useAuth();
@@ -40,9 +40,9 @@ describe("Login", () => {
     const user = userEvent.setup();
 
     render(
-      <AuthHarness>
+      <AppProviders>
         <Harness />
-      </AuthHarness>,
+      </AppProviders>,
     );
 
     await user.type(screen.getByLabelText("Master key"), "sk-correct");
@@ -62,9 +62,9 @@ describe("Login", () => {
 
   it("links to the auth-free welcome page", () => {
     render(
-      <AuthHarness>
+      <AppProviders>
         <Harness />
-      </AuthHarness>,
+      </AppProviders>,
     );
 
     const link = screen.getByRole("link", { name: /welcome/i });
@@ -76,9 +76,9 @@ describe("Login", () => {
     const user = userEvent.setup();
 
     render(
-      <AuthHarness>
+      <AppProviders>
         <Harness />
-      </AuthHarness>,
+      </AppProviders>,
     );
 
     await user.type(screen.getByLabelText("Master key"), "sk-wrong");
@@ -105,9 +105,9 @@ describe("Login", () => {
     const user = userEvent.setup();
 
     render(
-      <AuthHarness>
+      <AppProviders>
         <SignOutThenLoginHarness />
-      </AuthHarness>,
+      </AppProviders>,
     );
 
     await user.click(screen.getByRole("button", { name: "Sign out" }));

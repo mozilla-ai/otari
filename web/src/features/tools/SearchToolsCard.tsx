@@ -9,7 +9,7 @@ import {
   useUpdateSearchTool,
 } from "@/shared/api/hooks";
 import type { ConfigSearchTool, SearchProviderInfo, StoredSearchTool } from "@/client";
-import { ConfirmButton, ErrorBanner, FilterSelect, errorMessage } from "@/shared/ui/ui";
+import { ConfirmButton, ErrorBanner, FilterSelect, errorMessage } from "@/shared/components/ui";
 
 // Search tools are what POST /v1/search dispatches against. They used to be
 // declarable only in a config file, so a deployment configured entirely through

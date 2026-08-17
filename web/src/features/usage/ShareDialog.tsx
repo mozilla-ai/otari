@@ -1,6 +1,6 @@
 import { AlertDialog, Button } from "@heroui/react";
 
-import { ErrorBanner, InfoBanner } from "@/shared/ui/ui";
+import { ErrorBanner, InfoBanner } from "@/shared/components/ui";
 import { useEffect, useMemo, useRef, useState } from "react";
 
 import type { UsageGroupRow, UsageSeriesPoint, UsageTotals } from "@/client";

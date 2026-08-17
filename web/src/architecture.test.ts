@@ -97,6 +97,14 @@ describe("layer boundaries", () => {
     expect(rejects("features", 'import { nav } from "@/overlay";\nexport const a = nav;\n')).toHaveLength(1);
   });
 
+  it("allow a third-party specifier that merely has an app segment", () => {
+    // Why the relative form is `**/../app/**` and not `**/app/**`: the broad
+    // spelling also rejects a package path, which would read as a puzzling
+    // failure with a message about a layer the import has nothing to do with.
+    const messages = rejects("features", 'import { core } from "some-pkg/app/core";\nexport const a = core;\n');
+    expect(messages).toEqual([]);
+  });
+
   it("allow a feature importing shared code, the client, and another feature", () => {
     // Feature-to-feature is deliberate, not an oversight: the keys page picks models,
     // the budgets page picks users, and routing does both. What the layout forbids is
@@ -104,7 +112,7 @@ describe("layer boundaries", () => {
     const messages = rejects(
       "features",
       [
-        'import { formatPct } from "@/shared/lib/format";',
+        'import { formatPct } from "@/shared/helpers/format";',
         'import type { User } from "@/client";',
         'import { UserComboBox } from "@/features/users/UserComboBox";',
         "export const a = [formatPct, UserComboBox] as const;",
@@ -152,6 +160,17 @@ describe("layer boundaries", () => {
     expect(messages[0]).toMatch(/may import the overlay tree/);
   });
 
+  it("allow a test harness to reach the composition root", () => {
+    // src/tests/ is deliberately outside the overrides. A harness exists to mount
+    // what the app mounts, so it is the one place that has to reach `@/app`, and
+    // it is how a feature's test gets the real providers without importing them.
+    // Everything else about it is still checked: the overlay rule applies here too.
+    expect(
+      rejects("tests", 'import { Provider } from "@/app/provider";\nexport const a = Provider;\n'),
+    ).toEqual([]);
+    expect(rejects("tests", 'import { nav } from "@/overlay/nav";\nexport const a = nav;\n')).toHaveLength(1);
+  });
+
   it("allow the composition root to import features", () => {
     const messages = rejects(
       "app",
@@ -189,6 +208,6 @@ describe("the layout", () => {
       .filter((entry) => entry.isDirectory())
       .map((entry) => entry.name)
       .sort();
-    expect(dirs).toEqual(["app", "client", "features", "routes", "shared", "styles"]);
+    expect(dirs).toEqual(["app", "client", "features", "routes", "shared", "styles", "tests"]);
   });
 });

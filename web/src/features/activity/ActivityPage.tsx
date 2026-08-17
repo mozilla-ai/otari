@@ -23,12 +23,12 @@ import type {
 } from "@/client";
 import { isTokenChargeLine, isUnitChargeLine, type ChargeLine } from "@/client";
 import { ActivityTimeline } from "@/features/activity/ActivityTimeline";
-import { BulkActionBar } from "@/shared/ui/BulkActionBar";
-import { ConfirmDialog } from "@/shared/ui/ConfirmDialog";
-import { DataTable, type DataTableColumn } from "@/shared/ui/DataTable";
-import { FilterChips, type FilterChip } from "@/shared/ui/FilterChips";
+import { BulkActionBar } from "@/shared/components/BulkActionBar";
+import { ConfirmDialog } from "@/shared/components/ConfirmDialog";
+import { DataTable, type DataTableColumn } from "@/shared/components/DataTable";
+import { FilterChips, type FilterChip } from "@/shared/components/FilterChips";
 import { SetPriceDialog, type ManualRates } from "@/features/models/SetPriceDialog";
-import { PAGE_SIZE_OPTIONS, TablePagination } from "@/shared/ui/TablePagination";
+import { PAGE_SIZE_OPTIONS, TablePagination } from "@/shared/components/TablePagination";
 import {
   CopyableValue,
   ErrorBanner,
@@ -36,8 +36,8 @@ import {
   FilterSelect,
   PageHeader,
   RefreshButton,
-} from "@/shared/ui/ui";
-import { resolveSelectedIds, useTableSelection } from "@/shared/lib/tableSelection";
+} from "@/shared/components/ui";
+import { resolveSelectedIds, useTableSelection } from "@/shared/helpers/tableSelection";
 import {
   ACTIVITY_DEFAULT_KEY,
   ACTIVITY_PRESETS,
@@ -47,8 +47,8 @@ import {
   isoAgo,
   type RangePreset,
   YEAR_SPAN_S,
-} from "@/shared/lib/timeRange";
-import { useUrlState } from "@/shared/lib/urlState";
+} from "@/shared/helpers/timeRange";
+import { useUrlState } from "@/shared/helpers/urlState";
 
 // ---------- formatting ----------
 
@@ -257,7 +257,7 @@ const activityRowClassName = (e: UsageEntry): string | undefined => {
 // ---------- filter option sets ----------
 //
 // The time presets and window math are shared with the Usage page via
-// `@/shared/lib/timeRange` (see the ActivityTimeline selector). Activity keeps a
+// `@/shared/helpers/timeRange` (see the ActivityTimeline selector). Activity keeps a
 // truthful "All": its raw list endpoint applies no default and no clamp, so an
 // omitted start really is all-time.
 

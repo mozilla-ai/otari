@@ -38,10 +38,10 @@ import type {
   TestProviderResult,
   UpdateStoredProviderRequest,
 } from "@/client";
-import { Field } from "@/shared/ui/Field";
-import { DataTable, type DataTableColumn } from "@/shared/ui/DataTable";
-import { ConfirmButton, ErrorBanner, errorMessage, InfoBanner, PageHeader } from "@/shared/ui/ui";
-import { formatRelative } from "@/shared/lib/format";
+import { Field } from "@/shared/components/Field";
+import { DataTable, type DataTableColumn } from "@/shared/components/DataTable";
+import { ConfirmButton, ErrorBanner, errorMessage, InfoBanner, PageHeader } from "@/shared/components/ui";
+import { formatRelative } from "@/shared/helpers/format";
 
 // A masked, never-prefilled secret input. Native password masking protects
 // Firefox users; self-hosted deployments should use HTTPS to avoid browser warnings.

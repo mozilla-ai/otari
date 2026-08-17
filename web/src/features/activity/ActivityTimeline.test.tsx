@@ -2,7 +2,7 @@ import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { describe, expect, it, vi } from "vitest";
 
-import { USAGE_PRESETS } from "@/shared/lib/timeRange";
+import { USAGE_PRESETS } from "@/shared/helpers/timeRange";
 import { ActivityTimeline, type TimelinePoint } from "./ActivityTimeline";
 
 const SERIES: TimelinePoint[] = [

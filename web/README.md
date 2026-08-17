@@ -18,20 +18,24 @@ storage.
 
 ## Layout
 
-`src/` is four layers:
+`src/` is four layers plus a test corner:
 
 | Directory | Holds | May import |
 | --- | --- | --- |
 | `features/<domain>/` | A domain's page, the parts only it uses, its tests | `shared/`, `client/`, other features |
-| `shared/` | `api/` transport and query hooks, `lib/` helpers, `ui/` primitives, `test/` harnesses | `client/`, itself |
-| `app/` | The composition root: entry, providers, router, shell chrome | any layer here |
+| `shared/` | `components/` primitives, `helpers/` pure functions, `api/` transport and query hooks | `client/`, itself |
+| `app/` | The composition root: providers, router, shell chrome | any layer here |
 | `routes/` | One file per URL, naming a feature's page | any layer here |
+| `tests/` | Test harnesses; outside the boundary, so a harness may mount the app's providers | any layer here |
 
-`client/` is generated from the OpenAPI spec and `styles/globals.css` is the one
-stylesheet. `npm run lint` fails a PR that has a feature importing `app/`, or
-`shared/` importing either of the layers above it. No layer, including `app/` and
-`routes/`, may import an overlay's tree. `src/architecture.test.ts` proves the
-lint still rejects each of those. See
+`client/` is generated from the OpenAPI spec, `main.tsx` is the entry, and
+`styles/globals.css` is the one stylesheet. This is `otari-ai/frontend/src`'s
+layout, because that control-plane UI moves into this repo at M5.
+
+`npm run lint` fails a PR that has a feature importing `app/`, or `shared/`
+importing either of the layers above it. No layer may import an overlay's tree,
+which lives in `otari-ai` and is composed onto this base at build time.
+`src/architecture.test.ts` proves the lint still rejects each of those. See
 [AGENTS.md](./AGENTS.md) for the reasoning.
 
 ## Develop

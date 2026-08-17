@@ -1,7 +1,7 @@
 import { Button, Spinner } from "@heroui/react";
 import { useEffect, useId, useState } from "react";
 
-import { FilterSelect } from "@/shared/ui/ui";
+import { FilterSelect } from "@/shared/components/ui";
 
 // Shared pager for the dashboard tables: rows-per-page on the left, a truthful
 // "range of total" summary in the middle, and first / prev / type-a-page / next

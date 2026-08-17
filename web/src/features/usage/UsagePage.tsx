@@ -13,10 +13,10 @@ import type {
   UsageSeriesPoint,
   UsageSummary,
 } from "@/client";
-import { ChartLegend, Sparkline, TrendChart, type SeriesDef, type StackedPoint } from "@/shared/ui/charts";
+import { ChartLegend, Sparkline, TrendChart, type SeriesDef, type StackedPoint } from "@/shared/components/charts";
 import { ShareDialog } from "@/features/usage/ShareDialog";
-import { DataTable, type DataTableColumn } from "@/shared/ui/DataTable";
-import { FilterChips, type FilterChip } from "@/shared/ui/FilterChips";
+import { DataTable, type DataTableColumn } from "@/shared/components/DataTable";
+import { FilterChips, type FilterChip } from "@/shared/components/FilterChips";
 import {
   DeltaHint,
   EmptyState,
@@ -26,9 +26,9 @@ import {
   PageHeader,
   RefreshButton,
   StatCard,
-} from "@/shared/ui/ui";
-import { deltaFraction, formatNumber, formatPct, formatTokens, formatUsd } from "@/shared/lib/format";
-import type { DashboardSearch } from "@/shared/lib/search";
+} from "@/shared/components/ui";
+import { deltaFraction, formatNumber, formatPct, formatTokens, formatUsd } from "@/shared/helpers/format";
+import type { DashboardSearch } from "@/shared/helpers/search";
 import { billedTokenTotal, cacheSums, formatLatency } from "@/features/usage/usageTotals";
 import {
   bucketForWindow,
@@ -39,13 +39,13 @@ import {
   type RangePreset,
   USAGE_DEFAULT_KEY,
   USAGE_PRESETS,
-} from "@/shared/lib/timeRange";
+} from "@/shared/helpers/timeRange";
 
 // ---------- formatting ----------
 
 // Compact currency (formatUsd), token counts (formatTokens), percentages
 // (formatPct) and the period-over-period helpers (deltaFraction / DeltaHint) are
-// shared with the overview page from @/shared/lib/format and @/shared/ui/ui. Only the
+// shared with the overview page from @/shared/helpers/format and @/shared/components/ui. Only the
 // two formatters specific to this page stay local.
 function formatBucketLabel(iso: string, bucket: UsageBucket): string {
   const d = new Date(iso);
@@ -58,7 +58,7 @@ function formatBucketLabel(iso: string, bucket: UsageBucket): string {
 
 // ---------- window presets ----------
 //
-// The time presets and window math live in `@/shared/lib/timeRange` and are shared
+// The time presets and window math live in `@/shared/helpers/timeRange` and are shared
 // with the Activity page. 30d default: a spend investigation is usually monthly.
 
 const DEFAULT_PRESET = findPreset(USAGE_PRESETS, USAGE_DEFAULT_KEY) as RangePreset;

@@ -3,7 +3,7 @@ import userEvent from "@testing-library/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { useAuth } from "@/features/auth/AuthContext";
-import { AuthHarness } from "./testHarness";
+import { AppProviders } from "@/tests/providers";
 
 function Harness() {
   const { isAuthenticated, isSigningOut, logout } = useAuth();
@@ -44,9 +44,9 @@ describe("AuthProvider", () => {
     window.localStorage.setItem("otari.dashboard.hasSession", "1");
 
     render(
-      <AuthHarness>
+      <AppProviders>
         <Harness />
-      </AuthHarness>,
+      </AppProviders>,
     );
 
     expect(screen.getByRole("button", { name: "Sign out" })).toBeInTheDocument();
@@ -54,9 +54,9 @@ describe("AuthProvider", () => {
 
   it("starts signed out when no session marker is present", () => {
     render(
-      <AuthHarness>
+      <AppProviders>
         <Harness />
-      </AuthHarness>,
+      </AppProviders>,
     );
 
     expect(screen.getByText("SIGNED OUT")).toBeInTheDocument();
@@ -68,9 +68,9 @@ describe("AuthProvider", () => {
     const user = userEvent.setup();
 
     render(
-      <AuthHarness>
+      <AppProviders>
         <Harness />
-      </AuthHarness>,
+      </AppProviders>,
     );
 
     await user.click(screen.getByRole("button", { name: "Sign out" }));
@@ -93,9 +93,9 @@ describe("AuthProvider", () => {
     const user = userEvent.setup();
 
     render(
-      <AuthHarness>
+      <AppProviders>
         <Harness />
-      </AuthHarness>,
+      </AppProviders>,
     );
 
     await user.click(screen.getByRole("button", { name: "Sign out" }));
@@ -131,9 +131,9 @@ describe("AuthProvider", () => {
     const user = userEvent.setup();
 
     render(
-      <AuthHarness>
+      <AppProviders>
         <RepeatableLogoutHarness />
-      </AuthHarness>,
+      </AppProviders>,
     );
 
     const trigger = screen.getByRole("button", { name: "Trigger logout" });

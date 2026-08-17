@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it, vi } from "vitest";
 
-import { ChartLegend, ChartTooltip, Sparkline, TrendChart, type SeriesDef } from "@/shared/ui/charts";
+import { ChartLegend, ChartTooltip, Sparkline, TrendChart, type SeriesDef } from "@/shared/components/charts";
 
 const COST_SERIES: SeriesDef[] = [{ key: "cost", label: "Cost", color: "var(--otari-brand)" }];
 const STACK_SERIES: SeriesDef[] = [

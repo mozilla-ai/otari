@@ -13,13 +13,13 @@ import {
   useToolSettings,
   useUsers,
 } from "@/shared/api/hooks";
-import { DataTable, type DataTableColumn } from "@/shared/ui/DataTable";
+import { DataTable, type DataTableColumn } from "@/shared/components/DataTable";
 import { RouterReadiness } from "@/features/routing/RouterReadiness";
-import { Field } from "@/shared/ui/Field";
+import { Field } from "@/shared/components/Field";
 import { ModelComboBox } from "@/features/models/ModelComboBox";
 import { UserComboBox } from "@/features/users/UserComboBox";
-import { ConfirmButton, CopyableValue, EmptyState, ErrorBanner, PageHeader } from "@/shared/ui/ui";
-import { useUrlValue } from "@/shared/lib/urlState";
+import { ConfirmButton, CopyableValue, EmptyState, ErrorBanner, PageHeader } from "@/shared/components/ui";
+import { useUrlValue } from "@/shared/helpers/urlState";
 
 /** A row on this page: either a routing policy or a stored/config alias.
  *

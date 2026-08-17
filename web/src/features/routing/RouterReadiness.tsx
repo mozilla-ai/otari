@@ -3,7 +3,7 @@ import { useState } from "react";
 
 import { useRouterStatus, useUsers } from "@/shared/api/hooks";
 import { UserComboBox } from "@/features/users/UserComboBox";
-import { ErrorBanner } from "@/shared/ui/ui";
+import { ErrorBanner } from "@/shared/components/ui";
 
 /** Records against the seed count, as a bar plus the plain numbers.
  *

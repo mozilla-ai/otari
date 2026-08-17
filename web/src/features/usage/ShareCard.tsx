@@ -1,5 +1,5 @@
 import type { CardModel, CardStat } from "./shareCardData";
-import { formatNumber, formatTokens } from "@/shared/lib/format";
+import { formatNumber, formatTokens } from "@/shared/helpers/format";
 
 // The card is rasterized to a PNG and posted publicly, which makes it a different
 // medium from the dashboard it draws on, and the differences are load-bearing:

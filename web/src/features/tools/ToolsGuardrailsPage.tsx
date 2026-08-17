@@ -11,7 +11,7 @@ import {
 } from "@/shared/api/hooks";
 import type { ManagedTool, ToolServiceName, ToolSettingField, UpdateToolSettingsRequest } from "@/client";
 import { SearchToolsCard } from "@/features/tools/SearchToolsCard";
-import { ErrorBanner, FilterSelect, PageHeader, PageLoading, errorMessage } from "@/shared/ui/ui";
+import { ErrorBanner, FilterSelect, PageHeader, PageLoading, errorMessage } from "@/shared/components/ui";
 
 // One settable field maps onto one key of the update request; cast at this one
 // boundary (the keys come from the backend's field list).

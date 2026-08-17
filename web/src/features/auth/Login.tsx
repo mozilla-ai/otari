@@ -3,7 +3,7 @@ import { useState } from "react";
 
 import { createSession } from "@/shared/api/client";
 import { useAuth } from "@/features/auth/AuthContext";
-import { ErrorBanner } from "@/shared/ui/ui";
+import { ErrorBanner } from "@/shared/components/ui";
 
 export function Login() {
   const { login, isSigningOut } = useAuth();

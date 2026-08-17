@@ -14,10 +14,10 @@ import {
   useUsers,
 } from "@/shared/api/hooks";
 import type { UsageEntry } from "@/client";
-import { Sparkline } from "@/shared/ui/charts";
-import { DataTable, type DataTableColumn } from "@/shared/ui/DataTable";
-import { DeltaHint, ErrorBanner, PageHeader, PageLoading, RefreshButton, StatCard } from "@/shared/ui/ui";
-import { deltaFraction, formatNumber, formatPct, formatRelative, formatUsd } from "@/shared/lib/format";
+import { Sparkline } from "@/shared/components/charts";
+import { DataTable, type DataTableColumn } from "@/shared/components/DataTable";
+import { DeltaHint, ErrorBanner, PageHeader, PageLoading, RefreshButton, StatCard } from "@/shared/components/ui";
+import { deltaFraction, formatNumber, formatPct, formatRelative, formatUsd } from "@/shared/helpers/format";
 import { budgetHealth, errorRateHealth, providerHealthStatus, toStatStatus } from "@/features/overview/overview";
 
 const DAY_MS = 86_400_000;

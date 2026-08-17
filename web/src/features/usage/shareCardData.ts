@@ -1,6 +1,6 @@
 import type { UsageGroupRow, UsageSeriesPoint, UsageTotals } from "@/client";
 
-import { formatNumber, formatPct, formatTokens, formatUsdHeadline } from "@/shared/lib/format";
+import { formatNumber, formatPct, formatTokens, formatUsdHeadline } from "@/shared/helpers/format";
 import { billedTokenTotal, cacheHitRate, costNeedsCaveat, formatLatency } from "./usageTotals";
 
 // Derivations for the share card. Everything here is pure so the numbers the card

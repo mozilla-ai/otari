@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { InFlightRequest, InFlightResponse, UsageEntry } from "@/client";
 import { ActivityPage } from "@/features/activity/ActivityPage";
-import { withRouter } from "@/shared/test/router";
+import { withRouter } from "@/tests/router";
 
 function entry(overrides: Partial<UsageEntry> = {}): UsageEntry {
   return {

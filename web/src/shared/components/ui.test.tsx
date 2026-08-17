@@ -11,7 +11,7 @@ import {
   PageLoading,
   RefreshButton,
   StatCard,
-} from "@/shared/ui/ui";
+} from "@/shared/components/ui";
 
 describe("StatCard", () => {
   it("renders its label and value", () => {

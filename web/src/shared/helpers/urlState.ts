@@ -1,7 +1,7 @@
 import { useNavigate, useSearch } from "@tanstack/react-router";
 import { useCallback } from "react";
 
-import type { DashboardSearch } from "@/shared/lib/search";
+import type { DashboardSearch } from "@/shared/helpers/search";
 
 // Keep table filter/pagination state in the URL query string, so a filtered view
 // is shareable and survives the back button. Values equal to their default are

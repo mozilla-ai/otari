@@ -1,7 +1,7 @@
 import { AlertDialog, Button } from "@heroui/react";
 import type { ReactNode } from "react";
 
-import { ErrorBanner } from "@/shared/ui/ui";
+import { ErrorBanner } from "@/shared/components/ui";
 
 // A controlled confirm dialog for destructive bulk actions (delete a set of
 // rows, etc.). Controlled via `isOpen` so a page can open it from a bulk-action

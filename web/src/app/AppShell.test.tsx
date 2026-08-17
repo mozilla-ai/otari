@@ -4,7 +4,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import { AppShell } from "@/app/AppShell";
 import { Provider } from "@/app/provider";
-import { renderWithRouter } from "@/shared/test/router";
+import { renderWithRouter } from "@/tests/router";
 
 // jsdom has no layout engine, so `md:hidden` / responsive classes never take
 // effect. The mobile-vs-desktop branch keys off window.matchMedia instead, which

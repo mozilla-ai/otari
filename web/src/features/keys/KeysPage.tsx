@@ -3,14 +3,14 @@ import { type KeyboardEvent as ReactKeyboardEvent, type ReactNode, useCallback, 
 
 import { useCreateKey, useDeleteKey, useKeys, useRotateKey, useUpdateKey, useUsers } from "@/shared/api/hooks";
 import type { ApiKey, CreateKeyRequest, CreateKeyResponse, User } from "@/client";
-import { BulkActionBar } from "@/shared/ui/BulkActionBar";
-import { ConfirmDialog } from "@/shared/ui/ConfirmDialog";
-import { DataTable, type DataTableColumn } from "@/shared/ui/DataTable";
-import { Field } from "@/shared/ui/Field";
+import { BulkActionBar } from "@/shared/components/BulkActionBar";
+import { ConfirmDialog } from "@/shared/components/ConfirmDialog";
+import { DataTable, type DataTableColumn } from "@/shared/components/DataTable";
+import { Field } from "@/shared/components/Field";
 import { accessLabel, ModelScopeControl } from "@/features/models/ModelScopeControl";
 import { UserComboBox } from "@/features/users/UserComboBox";
-import { EmptyState, ErrorBanner, InfoBanner, PageHeader } from "@/shared/ui/ui";
-import { resolveSelectedIds, useTableSelection } from "@/shared/lib/tableSelection";
+import { EmptyState, ErrorBanner, InfoBanner, PageHeader } from "@/shared/components/ui";
+import { resolveSelectedIds, useTableSelection } from "@/shared/helpers/tableSelection";
 
 // ---------- helpers ----------
 

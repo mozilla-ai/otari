@@ -16,8 +16,8 @@ import type {
   PricingResponse,
 } from "@/client";
 import { ModelsPage } from "@/features/models/ModelsPage";
-import { withRouter } from "@/shared/test/router";
-import { pricingResponse } from "@/shared/test/fixtures";
+import { withRouter } from "@/tests/router";
+import { pricingResponse } from "@/tests/fixtures";
 
 const PRICED: PricingResponse = pricingResponse({
   model_key: "openai:gpt-4o",

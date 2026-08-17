@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { PolicySpec, RoutingPolicyResponse } from "@/client";
 import { RoutingPage } from "@/features/routing/RoutingPage";
-import { withRouter } from "@/shared/test/router";
+import { withRouter } from "@/tests/router";
 
 const policy = (
   name: string,

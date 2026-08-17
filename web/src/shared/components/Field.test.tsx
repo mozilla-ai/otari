@@ -1,7 +1,7 @@
 import { render, screen } from "@testing-library/react";
 import { describe, expect, it } from "vitest";
 
-import { Field } from "@/shared/ui/Field";
+import { Field } from "@/shared/components/Field";
 
 describe("Field", () => {
   it("caps its width so inputs don't stretch across a wide form", () => {

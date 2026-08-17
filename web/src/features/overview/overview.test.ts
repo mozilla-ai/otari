@@ -2,7 +2,7 @@ import { describe, expect, it } from "vitest";
 
 import type { Budget, ProviderHealthResponse } from "@/client";
 import { budgetHealth, errorRateHealth, providerHealthStatus, toStatStatus } from "@/features/overview/overview";
-import { usageTotals } from "@/shared/test/fixtures";
+import { usageTotals } from "@/tests/fixtures";
 
 function budget(over: Partial<Budget>): Budget {
   return {

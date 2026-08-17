@@ -34,7 +34,7 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
 ## Lint / Typecheck
 - Run lint checks with `make lint`; it runs the architecture check and then Ruff. **Ruff alone is not equivalent.**
 - The architecture check (`scripts/check_architecture.py`, also `make check-architecture`) enforces the `src/gateway/` layer rules: services must not import the API layer, repositories must not import services or the API layer, API routes must not import `sqlalchemy.orm`, and repository modules end in `_repository.py`.
-- The dashboard has its own boundary lint, and `make lint` does not run it: `npm --prefix web run lint` (Biome, `web/biome.jsonc`) enforces the `web/src/` layer rules, the frontend counterpart to the architecture check above. CI runs it in `otari-dashboard.yml`. Biome is enabled for that and nothing else: no formatter, no other rule.
+- The dashboard has its own boundary lint, and `make lint` does not run it: `npm --prefix web run lint` (Biome, `web/biome.jsonc`) enforces the `web/src/` layer rules, the frontend counterpart to the architecture check above, and a deliberate copy of `otari-ai/frontend/biome.json`, whose pages move into `web/` at M5. CI runs it in `otari-dashboard.yml`. Biome is enabled for that and nothing else: no formatter, no other rule.
 - If introducing a formatter/linter, keep changes in a separate PR unless requested.
 
 ## Test Notes

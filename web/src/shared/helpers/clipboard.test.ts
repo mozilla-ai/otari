@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import { copyToClipboard } from "@/shared/lib/clipboard";
+import { copyToClipboard } from "@/shared/helpers/clipboard";
 
 // jsdom implements no clipboard at all: neither navigator.clipboard nor
 // document.execCommand exists, so each path is installed per test.

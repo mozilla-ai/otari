@@ -8,7 +8,7 @@ import {
 import { act, render } from "@testing-library/react";
 import type { ReactElement, ReactNode } from "react";
 
-import { parseSearch, stringifySearch, validateSearch } from "@/shared/lib/search";
+import { parseSearch, stringifySearch, validateSearch } from "@/shared/helpers/search";
 
 export interface TestRouterOptions {
   /** Where the router starts, query string included. */

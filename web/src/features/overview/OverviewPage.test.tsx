@@ -7,8 +7,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { UsageSummary } from "@/client";
 import { localDayKey, OverviewIndex, OverviewPage } from "@/features/overview/OverviewPage";
-import { withRouter } from "@/shared/test/router";
-import { usageTotals } from "@/shared/test/fixtures";
+import { withRouter } from "@/tests/router";
+import { usageTotals } from "@/tests/fixtures";
 
 function jsonResponse(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), { status, headers: { "Content-Type": "application/json" } });

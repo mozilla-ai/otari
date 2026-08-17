@@ -3,7 +3,7 @@ import { describe, expect, it } from "vitest";
 import type { UsageGroupRow, UsageSeriesPoint, UsageTotals } from "@/client";
 
 import { availableStats, cardModels, collapseModelName, heroCandidates, resolveHero } from "./shareCardData";
-import { seriesPoint } from "@/shared/test/fixtures";
+import { seriesPoint } from "@/tests/fixtures";
 
 function row(overrides: Partial<UsageGroupRow> & { key: string | null }): UsageGroupRow {
   return { label: null, cost: 0, tokens: 0, requests: 0, is_other: false, ...overrides };

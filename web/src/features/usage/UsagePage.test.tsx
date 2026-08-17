@@ -7,8 +7,8 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { UsageSummary } from "@/client";
 import { UsagePage } from "@/features/usage/UsagePage";
-import { seriesPoint, usageTotals } from "@/shared/test/fixtures";
-import { withRouter } from "@/shared/test/router";
+import { seriesPoint, usageTotals } from "@/tests/fixtures";
+import { withRouter } from "@/tests/router";
 
 function summary(overrides: Partial<UsageSummary> = {}): UsageSummary {
   return {

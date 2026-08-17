@@ -5,8 +5,8 @@ import { Link } from "@tanstack/react-router";
 import type { LinkProps } from "@tanstack/react-router";
 
 import { ApiError } from "@/shared/api/client";
-import { copyToClipboard } from "@/shared/lib/clipboard";
-import { formatPct, formatRelative } from "@/shared/lib/format";
+import { copyToClipboard } from "@/shared/helpers/clipboard";
+import { formatPct, formatRelative } from "@/shared/helpers/format";
 
 // A tile's attention status. Colors mirror the banner precedent (ErrorBanner
 // red-*, InfoBanner amber-*) and add emerald for the healthy state. Color is

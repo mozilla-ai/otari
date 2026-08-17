@@ -12,10 +12,11 @@ its conventions consistent with what is already there.
 
 Stack: React 19, TypeScript (`strict`), HeroUI v3 (`@heroui/react`), Tailwind CSS v4,
 TanStack Query, TanStack Router (file-based, `web/src/routes/`), Vite, Vitest + Testing
-Library, Playwright (`web/e2e/`). Package manager is **npm**. Layout is layered:
+Library, Playwright (`web/e2e/`). Package manager is **npm**. Layout mirrors
+`otari-ai/frontend/src`, whose control-plane UI moves into this repo at M5:
 `web/src/features/<domain>/` for a domain's page and the parts only it uses, `shared/`
-for what no domain owns (`api/`, `lib/`, `ui/`, `test/`), `app/` for the composition
-root, plus `routes/` and the generated `client/`. Three import rules are lint-enforced
+for what no domain owns (`components/`, `helpers/`, `api/`), `app/` for the composition
+root, plus `routes/`, `tests/` and the generated `client/`. Three import rules are lint-enforced
 (a feature may not import `app/`; `shared/` may not import `features/` or `app/`;
 nothing imports an overlay tree): run `npm --prefix web run lint`, and read the Layout
 bullet in [web/AGENTS.md](../../../web/AGENTS.md) before adding a directory. There is
@@ -87,6 +88,6 @@ Everything else (brand, surface, text, borders) uses the `--otari-*` variables. 
 ## Topic guides
 
 - [design-tokens.md](./design-tokens.md): the `--otari-*` variables, where they live, when to add one.
-- [components.md](./components.md): HeroUI v3 patterns, props over `className`, the shared UI primitives in `shared/ui/ui.tsx`.
+- [components.md](./components.md): HeroUI v3 patterns, props over `className`, the shared UI primitives in `shared/components/ui.tsx`.
 - [data-fetching.md](./data-fetching.md): TanStack Query conventions: query keys, `staleTime`, invalidation, bounded pagination.
 - [typescript-and-react.md](./typescript-and-react.md): strict TS, `undefined` over `null`, hook/effect hygiene, and Vitest testing.

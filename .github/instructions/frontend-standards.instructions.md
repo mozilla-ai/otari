@@ -39,7 +39,9 @@ examples grounded in this dashboard's code, lives in the skill:
 
 6. **New code lands in a layer.** A domain's page and the parts only it uses go in
    `web/src/features/<domain>/`; something no domain owns goes in `web/src/shared/`
-   (`api/`, `lib/`, `ui/`, `test/`); only `web/src/app/` composes the tree. A feature may not
+   (`components/`, `helpers/`, `api/`); test harnesses go in `web/src/tests/`; only
+   `web/src/app/` composes the tree. The layout mirrors `otari-ai/frontend/src`, so
+   prefer its names for a new directory. A feature may not
    import `app/`, and `shared/` may not import `features/` or `app/`. `npm run lint` (Biome)
    rejects both, so flag placement in review rather than leaving it to the lint to reject
    after the fact. Adding a directory directly under `src/` needs a rule to go with it.

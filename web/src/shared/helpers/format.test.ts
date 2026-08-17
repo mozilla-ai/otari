@@ -10,7 +10,7 @@ import {
   formatTokens,
   formatUsd,
   formatUsdHeadline,
-} from "@/shared/lib/format";
+} from "@/shared/helpers/format";
 
 describe("formatNumber", () => {
   it("groups thousands and handles nullish values", () => {

@@ -1,8 +1,8 @@
 import { AlertDialog, Button, Input, Label, TextField } from "@heroui/react";
 import { useEffect, useState } from "react";
 
-import { Field } from "@/shared/ui/Field";
-import { ErrorBanner, InfoBanner } from "@/shared/ui/ui";
+import { Field } from "@/shared/components/Field";
+import { ErrorBanner, InfoBanner } from "@/shared/components/ui";
 
 // Per-1M rates entered by an operator to reprice imported usage rows. Input and
 // output are required; the cache rates are optional (blank folds those tokens

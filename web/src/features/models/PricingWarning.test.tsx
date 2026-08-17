@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 import type { GatewaySettings } from "@/client";
 import { PricingWarning } from "@/features/models/PricingWarning";
-import { withRouter } from "@/shared/test/router";
+import { withRouter } from "@/tests/router";
 
 const BASE: GatewaySettings = {
   mode: "standalone",

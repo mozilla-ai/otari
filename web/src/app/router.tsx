@@ -1,6 +1,6 @@
 import { createHashHistory, createRouter } from "@tanstack/react-router";
 
-import { parseSearch, stringifySearch } from "@/shared/lib/search";
+import { parseSearch, stringifySearch } from "@/shared/helpers/search";
 import { routeTree } from "@/routeTree.gen";
 
 export const router = createRouter({

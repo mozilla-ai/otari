@@ -15,7 +15,7 @@ exception is pre-auth candidate-key validation, described under "The API boundar
   registered unauthorized handler (drops the key, bounces to sign-in) and throws.
 
 Because 401/403 are handled centrally, hooks don't need to. The query client
-(`web/src/shared/api/queryClient.ts`) also **never retries** an `ApiError` with status 401/403 (they won't
+(`web/src/app/provider.tsx`) also **never retries** an `ApiError` with status 401/403 (they won't
 fix themselves) and retries other failures twice.
 
 The one deliberate raw-`fetch` exception is **pre-auth**: `validateMasterKey` (`client.ts`)

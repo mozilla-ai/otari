@@ -3,8 +3,8 @@ import { useRef, useState } from "react";
 import type { ReactNode } from "react";
 
 import type { UsageBucket } from "@/client";
-import { ChartLegend, TrendChart, type SeriesDef, type StackedPoint } from "@/shared/ui/charts";
-import { bucketDurationMs, bucketIndexRange, formatWindowLabel, rangeFromBuckets, type RangePreset } from "@/shared/lib/timeRange";
+import { ChartLegend, TrendChart, type SeriesDef, type StackedPoint } from "@/shared/components/charts";
+import { bucketDurationMs, bucketIndexRange, formatWindowLabel, rangeFromBuckets, type RangePreset } from "@/shared/helpers/timeRange";
 
 // A request-volume histogram that doubles as the time-range selector for the
 // Activity page (the context strip pattern CloudWatch Logs Insights, Kibana,

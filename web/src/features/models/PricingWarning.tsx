@@ -3,8 +3,8 @@ import { useState } from "react";
 import { Link } from "@tanstack/react-router";
 
 import { useFailureCount, useSettings, useUpdateSettings } from "@/shared/api/hooks";
-import { InfoBanner } from "@/shared/ui/ui";
-import { HOUR_S } from "@/shared/lib/timeRange";
+import { InfoBanner } from "@/shared/components/ui";
+import { HOUR_S } from "@/shared/helpers/timeRange";
 
 // A gateway-wide alarm, shown on every management page: when `require_pricing` is
 // on but `default_pricing` is off, every request for an unpriced model is being

@@ -6,7 +6,7 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { UsageGroupRow, UsageTotals } from "@/client";
 
 import { ShareDialog } from "./ShareDialog";
-import { usageTotals } from "@/shared/test/fixtures";
+import { usageTotals } from "@/tests/fixtures";
 
 // jsdom has no canvas, so the rasterizer cannot run for real here; mocked so the
 // dialog's wiring around it is exercisable. The claim that the PNG itself is

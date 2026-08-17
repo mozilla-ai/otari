@@ -12,10 +12,10 @@ import {
   useSettings,
 } from "@/shared/api/hooks";
 import type { DiscoverableProvider, ModelMetadata, PricingTier } from "@/client";
-import { BulkActionBar } from "@/shared/ui/BulkActionBar";
-import { DataTable, type DataTableColumn } from "@/shared/ui/DataTable";
+import { BulkActionBar } from "@/shared/components/BulkActionBar";
+import { DataTable, type DataTableColumn } from "@/shared/components/DataTable";
 import { isValidModelKey, SetPriceDialog, type ManualRates } from "@/features/models/SetPriceDialog";
-import { TablePagination } from "@/shared/ui/TablePagination";
+import { TablePagination } from "@/shared/components/TablePagination";
 import {
   ConfirmButton,
   CopyableValue,
@@ -24,12 +24,12 @@ import {
   FilterSelect,
   InfoBanner,
   PageHeader,
-} from "@/shared/ui/ui";
-import { formatContext, formatCost, formatReleaseDate } from "@/shared/lib/format";
+} from "@/shared/components/ui";
+import { formatContext, formatCost, formatReleaseDate } from "@/shared/helpers/format";
 import { currentPricing, providerFromModelKey } from "@/features/models/pricing";
 import { isPricingTier } from "@/client";
-import { resolveSelectedIds, useTableSelection } from "@/shared/lib/tableSelection";
-import { useUrlValue } from "@/shared/lib/urlState";
+import { resolveSelectedIds, useTableSelection } from "@/shared/helpers/tableSelection";
+import { useUrlValue } from "@/shared/helpers/urlState";
 
 // `owned_by` the gateway stamps on a configured alias (ALIAS_OWNED_BY in
 // src/gateway/api/routes/models.py). Aliases are display names declared in

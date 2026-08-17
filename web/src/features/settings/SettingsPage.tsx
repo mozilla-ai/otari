@@ -12,7 +12,7 @@ import {
   useUpdateSettings,
 } from "@/shared/api/hooks";
 import type { ConfigField, PricingRefreshPreview, UpdateSettingsRequest } from "@/client";
-import { ErrorBanner, FilterSelect, InfoBanner, PageHeader, PageLoading } from "@/shared/ui/ui";
+import { ErrorBanner, FilterSelect, InfoBanner, PageHeader, PageLoading } from "@/shared/components/ui";
 
 // A single settable field maps onto one key of UpdateSettingsRequest. The keys
 // come from the backend's `settable` marking, so cast at this one boundary.
