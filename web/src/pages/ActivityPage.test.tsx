@@ -1345,23 +1345,21 @@ describe("ActivityPage gateway-run tools", () => {
     expect(screen.queryByText(/NaN/)).not.toBeInTheDocument();
   });
 
-  it("does not read a legacy line's rate just because the key is there", async () => {
-    // A stored line can carry `unit_rate` as something other than a number. The
-    // guard checks the shape rather than the key, so this falls to the untyped
-    // branch instead of rendering "NaN each".
-    mockApi({
-      rows: [
-        entry({
-          cost: 1,
-          pricing_breakdown: [{ meter: "odd", units: "many", unit_rate: "flat", cost: 1 }],
-        }),
-      ],
-    });
+  it.each([
+    { id: "a non-numeric rate", line: { meter: "odd", units: "many", unit_rate: "flat", cost: 1 } },
+    // Copilot's case on #606: the discriminator is present and the field it
+    // implies is missing outright, so a guard keyed on the key alone narrows it
+    // and the renderer quotes a rate over no units at all.
+    { id: "no units at all", line: { meter: "legacy", unit_rate: "flat", cost: 1 } },
+  ])("does not read a legacy line's rate just because the key is there: $id", async ({ line }) => {
+    // The guard checks the shape it promises rather than the discriminator, so
+    // both fall to the untyped branch instead of rendering "NaN each".
+    mockApi({ rows: [entry({ cost: 1, pricing_breakdown: [line] })] });
     renderPage(<ActivityPage />);
 
     await userEvent.click(await screen.findByText("gpt-4o"));
-    const line = (await screen.findByText("odd")).closest("div")!;
-    expect(within(line).queryByText(/each|NaN/)).not.toBeInTheDocument();
+    const rendered = (await screen.findByText(String(line.meter))).closest("div")!;
+    expect(within(rendered).queryByText(/each|NaN/)).not.toBeInTheDocument();
   });
 
   it("shows tool counts and cost in the request detail", async () => {
