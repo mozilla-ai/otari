@@ -43,6 +43,23 @@ per request (the same reason `gateway_active_requests` is instrumented there).
 ## Built-in tools vs pass-through
 Only `otari_*` tool types are run by the gateway; every other tool type is forwarded to the provider untouched (`src/gateway/api/routes/_tools.py`). `otari_code_execution` → `SandboxBackend` (`services/sandbox_backend.py`), `otari_web_search` → `WebSearchBackend` (`services/web_search_backend.py`). The agentic tool/MCP loop lives in `services/mcp_loop.py`. Request-level guardrails (`services/guardrails.py`) are a caller-opted, input-side check run before the provider; SSRF checks for outbound URLs live in `services/url_safety.py`.
 
+## Runtime credential stores
+Two tables let an operator configure at runtime what previously needed `config.yml`, and both
+follow one shape: a service overlays stored rows onto the config object, keeping a per-config
+baseline so the overlay is recomputed rather than compounded, refreshed by a TTL refresher
+wired into the lifespan, standalone-only.
+
+- `services/provider_store_service.py` overlays `provider_credentials` onto `config.providers`
+  (baseline on `config._provider_baseline`). `services/secret_box.py` encrypts the keys with
+  `OTARI_SECRET_KEY` (Fernet), and `services/master_key_service.py` generates and prints a
+  master key on first run when none is set (hash in `runtime_settings`). Keys are write-only
+  over the API: a response carries `last4` and nothing more.
+- `services/search_tool_store_service.py` overlays `search_tool_credentials` onto
+  `config.search_tools` (baseline on `config._search_tool_baseline`), which is what lets
+  `POST /v1/search` work with no config file. Tools defined in the config file stay read-only.
+
+Their pages are in [../../web/AGENTS.md](../../web/AGENTS.md).
+
 ## Data, sessions, migrations
 ORM entities are in `src/gateway/models/entities.py` (User, APIKey, Budget, UsageLog, ModelPricing, BudgetResetLog). The async engine/session factory and `init_db` live in `src/gateway/core/database.py`; routes get a session via the `get_db` dependency, non-request code uses `create_session()`. Alembic migrations are in `alembic/versions/` and run on startup when `auto_migrate` is set.
 

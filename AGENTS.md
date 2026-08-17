@@ -20,6 +20,15 @@ Detailed, task-scoped guidance lives outside this file so it loads only when rel
 
 The `.claude/skills` directory symlinks to `.github/skills`, so the same skills are available to Claude and to GitHub Copilot from one source.
 
+**Adding guidance: pick the narrowest layer that covers it, and link rather than restate.**
+This file is loaded every session, so it carries only what applies repo-wide plus the pointers
+above. A scoped `AGENTS.md` (`web/`, `src/gateway/`) describes the structure of its directory,
+loaded when you work there. A skill carries the house style for writing code inside that
+structure, loaded on demand. `.github/instructions/` is the one place restatement is expected,
+because it loads for a different reader (Copilot review) that never sees the rest. Everywhere
+else, a fact told in two layers is a fact that will go stale in one of them, and the stale copy
+is the one someone believes.
+
 ## Architecture (Big Picture)
 For the open-core OSS/enterprise seam (ports, adapters, the capability lines, and the rules for keeping the boundary), see [ARCHITECTURE.md](ARCHITECTURE.md). It is a north-star document describing the intended architecture, so ground current-state work in `src/gateway/`.
 
@@ -34,7 +43,7 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
 ## Lint / Typecheck
 - Run lint checks with `make lint`; it runs the architecture check and then Ruff. **Ruff alone is not equivalent.**
 - The architecture check (`scripts/check_architecture.py`, also `make check-architecture`) enforces the `src/gateway/` layer rules: services must not import the API layer, repositories must not import services or the API layer, API routes must not import `sqlalchemy.orm`, and repository modules end in `_repository.py`.
-- The dashboard has its own boundary lint, and `make lint` does not run it: `npm --prefix web run lint` (Biome, `web/biome.jsonc`) enforces the `web/src/` layer rules, the frontend counterpart to the architecture check above, and a deliberate copy of `otari-ai/frontend/biome.json`, whose pages move into `web/` at M5. CI runs it in `otari-dashboard.yml`. Biome also formats `web/` and runs its recommended rules, with the same config as otari-ai/frontend; `npm --prefix web run lint:fix` writes, `lint` only reports.
+- **`make lint` does not touch the dashboard.** `npm --prefix web run lint` is its counterpart (Biome: formatting, recommended rules, and the `web/src/` layer boundaries), run separately in CI. See [web/AGENTS.md](web/AGENTS.md) for what those boundaries are and why the config mirrors `otari-ai/frontend`.
 - If introducing a formatter/linter, keep changes in a separate PR unless requested.
 
 ## Test Notes
@@ -79,30 +88,17 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
   enforces a conventional title. Visibility rules live in `RELEASE.md`
   ("Changelog visibility"). Do not hand-edit `CHANGELOG.md`; the release
   workflows regenerate it.
-- The dashboard's API client (`web/src/client/schema.ts`) is generated from
-  `docs/public/openapi.json` and **is** committed, with a CI drift check. It follows the
-  spec: change a response model, regenerate the spec, and regenerate this too
-  (`npm --prefix web run client:generate`, which `npm test` also runs). A spec change
-  left ungenerated means the dashboard is typed against an API the gateway no longer serves.
-- The dashboard's route tree (`web/src/routeTree.gen.ts`) **is** committed, unlike the
-  bundle below: `npm run typecheck` runs `tsc` alone and never invokes Vite, so without
-  it in the tree a type-check of a fresh clone fails on a missing module. Any
-  `npm test` or `npm run build` regenerates it from `web/src/routes/`, so adding a
-  route and not committing the regenerated file shows up as a dirty working tree.
-- The dashboard bundle (`src/gateway/static/dashboard/`) is **not** committed; it is
-  gitignored and built on demand (`make dashboard`), and the Docker image builds it in
-  its own Node stage. Vite content-hashes every asset filename, so committing it made
-  any two branches touching `web/src` conflict by construction. Nothing to rebuild or
-  commit after a `web/src` or `docs/dashboard.md` change; run `make dashboard` only when
-  you need to *see* the dashboard locally or to build a wheel that ships it. See
-  [web/AGENTS.md](web/AGENTS.md).
+- The dashboard has three more, and [web/AGENTS.md](web/AGENTS.md) owns them: its API client
+  (`web/src/client/schema.ts`) and route tree (`web/src/routeTree.gen.ts`) are generated **and
+  committed**, each with a CI drift check, while the bundle (`src/gateway/static/dashboard/`)
+  is generated and **not** committed. A change under `web/src` therefore sometimes leaves a
+  file to commit and never leaves a bundle to commit.
 
 ## Repository Conventions
-- Use `TYPE_CHECKING` for type-only imports when helpful (`routes/_helpers.py`).
-- Avoid adding comments unless logic is non-obvious; keep docstrings concise and meaningful for public functions/classes.
-- Preserve security posture: do not leak internals in public error responses.
-- Service-specific exceptions live alongside their service modules in `src/gateway/services/` (e.g. `UnsafeURLError`, `GuardrailsNotReachableError`).
-- Do not log secrets, tokens, or raw API keys (bootstrap exception is intentional one-time behavior).
+- Prefer minimal, targeted edits over broad refactors, and match the import order and typing style of the file you are in (`TYPE_CHECKING` for type-only imports where it helps, as in `routes/_helpers.py`).
+- Add a comment only where the logic is not obvious; keep docstrings concise and meaningful on public functions and classes.
+- Preserve security-relevant behavior: header parsing, auth checks, and the error-detail boundary. Do not leak internals in public error responses, and never log secrets, tokens, or raw API keys (the one-time bootstrap key print is the deliberate exception).
+- Keep test additions next to the behavior they cover: unit for pure logic, integration for route or database behavior.
 - CI runs Python 3.14 (`.github/workflows/otari-tests.yml`), matching the Docker image; the package still supports 3.13+ (`requires-python = ">=3.13"`).
 
 ## Change Validation Checklist
@@ -111,10 +107,8 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
 - If you touched config loading, run config/env tests in `tests/integration`.
 - If you touched CLI behavior, run `tests/unit/test_gateway_cli.py`.
 - If you touched auth headers or key handling, run key-management and auth-related tests.
-- If OpenAPI-affecting code changed, regenerate and commit **both** generated
-  artifacts, then verify with `make openapi-check` **and** `make postman-check`.
-  A route docstring counts as OpenAPI-affecting: its text lands in the spec and
-  in the Postman collection.
+- If OpenAPI-affecting code changed, including a route docstring, regenerate and commit **both**
+  generated artifacts (see Generated Artifacts above).
 
 ## Writing style
 
@@ -134,9 +128,3 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
   third-party product's own name. `cancelled` is therefore left alone repo-wide:
   it names an asyncio method and a CI conclusion far more often than it appears
   as prose, and splitting the spelling by context would read as a typo either way.
-
-## Notes for Agents
-- Prefer minimal, targeted edits over broad refactors.
-- Maintain import order and existing typing style in touched files.
-- Preserve security-relevant behavior (header parsing, auth checks, error detail boundaries).
-- Keep test additions close to changed behavior (unit for pure logic, integration for route/database behavior).
