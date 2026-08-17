@@ -1,9 +1,3 @@
-// MIGRATION BRIDGE. Hand-rolled and predating the design foundation rehomed from
-// otari-ai/frontend (src/styles/globals.css, src/shared/components/ui/). This file
-// keeps its `--otari-*` colors so the pages built on it keep rendering, and it
-// leaves with the last of them. Reuse it rather than duplicating its markup, but
-// do not extend it and do not build a new page on it: new work composes
-// @heroui/react with the semantic tokens. See ../../../AGENTS.md.
 import { Button } from "@heroui/react"
 import type { ReactNode } from "react"
 import { useId, useState } from "react"
@@ -64,15 +58,15 @@ export function FilterChips({
         {chips.map((chip) => (
           <span
             key={chip.key}
-            className="inline-flex items-center gap-1 rounded-full border border-[var(--otari-line)] bg-[var(--otari-brand-tint)] py-0.5 pl-2.5 pr-1 text-xs text-[var(--otari-brand-dark)]"
+            className="inline-flex items-center gap-1.5 rounded-full border border-border bg-primary-subtle py-0.5 pl-2.5 pr-1 text-xs text-primary-subtle-foreground"
           >
-            <span className="text-[var(--otari-muted)]">{chip.label}:</span>
+            <span className="text-muted">{chip.label}:</span>
             <span className="font-medium">{chip.value}</span>
             <button
               type="button"
               onClick={chip.onClear}
               aria-label={chip.clearLabel ?? `Remove ${chip.label} filter`}
-              className="ml-0.5 inline-flex h-4 w-4 items-center justify-center rounded-full text-[var(--otari-muted)] outline-none hover:bg-[var(--otari-line)] hover:text-[var(--otari-ink)] focus-visible:ring-2 focus-visible:ring-[var(--otari-brand)]"
+              className="inline-flex h-4 w-4 items-center justify-center rounded-full text-muted outline-none hover:bg-surface-subtle hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
             >
               <svg
                 viewBox="0 0 24 24"

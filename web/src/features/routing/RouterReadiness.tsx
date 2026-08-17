@@ -22,15 +22,13 @@ function Warmth({
     seed === 0 ? 100 : Math.min(100, Math.round((records / seed) * 100))
   return (
     <div className="flex items-center gap-3">
-      <div className="h-1.5 w-32 overflow-hidden rounded-full bg-[var(--otari-bg)]">
+      <div className="h-1.5 w-32 overflow-hidden rounded-full bg-surface-alt">
         <div
-          className={
-            warm ? "h-full bg-[var(--otari-brand)]" : "h-full bg-amber-500"
-          }
+          className={warm ? "h-full bg-accent" : "h-full bg-warning"}
           style={{ width: `${pct}%` }}
         />
       </div>
-      <span className="text-sm text-[var(--otari-ink)]">
+      <span className="text-sm text-foreground">
         {records} / {seed} examples
       </span>
       <Chip size="sm" color={warm ? "accent" : "default"}>
@@ -76,8 +74,8 @@ export function RouterReadiness({
 
   return (
     <div>
-      <div className="flex items-center justify-between border-b border-[var(--otari-line)] px-4 py-2">
-        <span className="text-sm font-medium text-[var(--otari-ink)]">
+      <div className="flex items-center justify-between border-b border-border px-4 py-2">
+        <span className="text-sm font-medium text-foreground">
           Examples for <code>{policyName}</code>
         </span>
         <Button size="sm" variant="ghost" onPress={onClose}>
@@ -87,14 +85,12 @@ export function RouterReadiness({
 
       <div className="flex flex-col gap-5 px-4 py-4">
         <div className="flex flex-col gap-1">
-          <span className="text-xs font-medium text-[var(--otari-muted)]">
-            Candidates
-          </span>
-          <span className="text-sm text-[var(--otari-ink)]">
+          <span className="text-xs font-medium text-muted">Candidates</span>
+          <span className="text-sm text-foreground">
             <code>{backend}</code> ranks {candidates.join(", ")} for each
             request.
           </span>
-          <span className="text-xs text-[var(--otari-muted)]">
+          <span className="text-xs text-muted">
             <code>{defaultTarget}</code> serves whenever it declines: too few
             examples, a weakly supported pick, a request carrying tools, or{" "}
             <code>Otari-Router: off</code>.
@@ -102,9 +98,7 @@ export function RouterReadiness({
         </div>
 
         <div className="flex flex-col gap-2">
-          <span className="text-xs font-medium text-[var(--otari-muted)]">
-            Examples
-          </span>
+          <span className="text-xs font-medium text-muted">Examples</span>
           {scopedUserId === null ? (
             <UserComboBox
               label="Whose memory"
@@ -114,13 +108,13 @@ export function RouterReadiness({
               placeholder="Pick a user…"
               description="Examples are one user's own prompts, so this policy warms once per caller rather than once overall."
               unknownHint={
-                <span className="text-red-700">
+                <span className="text-danger">
                   No such user. Pick an existing one.
                 </span>
               }
             />
           ) : (
-            <span className="text-xs text-[var(--otari-muted)]">
+            <span className="text-xs text-muted">
               Scoped to user <code>{scopedUserId}</code>, so that is the only
               memory it can use.
             </span>
@@ -129,15 +123,15 @@ export function RouterReadiness({
           <ErrorBanner error={status.error} />
 
           {!chosen ? (
-            <span className="text-sm text-[var(--otari-muted)]">
+            <span className="text-sm text-muted">
               Pick a user to see how warm this policy&apos;s memory is.
             </span>
           ) : status.isLoading ? (
-            <span className="text-sm text-[var(--otari-muted)]">Loading…</span>
+            <span className="text-sm text-muted">Loading…</span>
           ) : status.data ? (
             <div className="flex flex-col gap-2">
               <div className="flex flex-wrap items-center gap-3">
-                <span className="text-sm font-medium text-[var(--otari-ink)]">
+                <span className="text-sm font-medium text-foreground">
                   Default pool
                 </span>
                 <Warmth
@@ -151,7 +145,7 @@ export function RouterReadiness({
                   key={pool.task_id}
                   className="flex flex-wrap items-center gap-3"
                 >
-                  <code className="text-sm text-[var(--otari-ink)]">
+                  <code className="text-sm text-foreground">
                     {pool.task_id}
                   </code>
                   <Warmth
@@ -162,13 +156,13 @@ export function RouterReadiness({
                 </div>
               ))}
               {status.data.tasks.length > 0 ? (
-                <span className="text-xs text-[var(--otari-muted)]">
+                <span className="text-xs text-muted">
                   The default pool counts every example this user has, including
                   the ones filed under a task, so it can be warm while a task
                   partition is not.
                 </span>
               ) : null}
-              <span className="text-xs text-[var(--otari-muted)]">
+              <span className="text-xs text-muted">
                 Scoring with <code>{status.data.embedding_model}</code>,{" "}
                 {status.data.k} nearest examples per decision, cost dial{" "}
                 {status.data.alpha}, deciding once per{" "}
@@ -183,16 +177,16 @@ export function RouterReadiness({
         </div>
 
         <div className="flex flex-col gap-1">
-          <span className="text-xs font-medium text-[var(--otari-muted)]">
+          <span className="text-xs font-medium text-muted">
             Adding examples
           </span>
-          <span className="text-xs text-[var(--otari-muted)]">
+          <span className="text-xs text-muted">
             Examples are recorded over the API, with{" "}
             <code>POST /v1/routing/preferences/rank</code>. Score a batch of
             prompts from 0 (bad) to 1 (great) per candidate; two good answers is
             the case that lets the cheaper model win. See{" "}
             <a
-              className="text-[var(--otari-brand)] hover:underline"
+              className="text-accent hover:underline"
               href="https://mozilla-ai.github.io/otari/routing/#teach-it"
               target="_blank"
               rel="noreferrer"

@@ -23,9 +23,11 @@ examples grounded in this dashboard's code, lives in the skill:
 3. **Color and type come from the semantic tokens** in `web/src/styles/globals.css`, through
    the utilities they back (`text-muted`, `bg-surface`, `border-border`, `text-danger`,
    `text-heading`). Add a token there rather than scattering a hex, and add it to both theme
-   blocks. The `--otari-*` variables below the `MIGRATION BRIDGE` marker and the raw Tailwind
-   palette classes in the bridge components (`ErrorBanner`, `InfoBanner`, `StatCard`) are the
-   pre-rehome system: existing call sites keep them, new code must not reach for either. See
+   blocks. A raw hex, a numbered Tailwind palette class, and `bg-white` / `text-black` all
+   fail `web/src/styles/foundation.test.ts`, over the whole of `web/src`. Two pairings are
+   easy to get wrong: a status word wears its own color on its own subtle fill
+   (`text-danger` on `bg-danger-subtle`), but brand text on the brand tint takes
+   `text-primary-subtle-foreground`, not `text-accent`. See
    [design-tokens.md](../skills/frontend-standards/design-tokens.md).
 
 4. **Server state goes through TanStack Query + `apiFetch`.** Fetch via the hooks in

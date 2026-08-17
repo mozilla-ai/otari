@@ -133,35 +133,39 @@ const GROUP_OPTIONS: { value: "" | UsageGroupBy; label: string }[] = [
 // same order, and same tokens as the Activity page's per-row bar, so the two
 // surfaces read as one system.
 const COMPOSITION_SERIES: SeriesDef[] = [
-  { key: "fresh", label: "Fresh input", color: "var(--otari-ink)" },
-  { key: "cache_read", label: "Cache read", color: "var(--otari-brand)" },
+  { key: "fresh", label: "Fresh input", color: "var(--color-chart-ramp-1)" },
+  {
+    key: "cache_read",
+    label: "Cache read",
+    color: "var(--color-chart-ramp-3)",
+  },
   {
     key: "cache_write",
     label: "Cache write",
-    color: "var(--otari-brand-soft)",
+    color: "var(--color-chart-ramp-4)",
   },
-  { key: "output", label: "Output", color: "var(--otari-brand-dark)" },
+  { key: "output", label: "Output", color: "var(--color-chart-ramp-2)" },
 ]
 
 const REQUEST_SERIES: SeriesDef[] = [
-  { key: "success", label: "Succeeded", color: "var(--otari-brand)" },
-  { key: "errors", label: "Failed", color: "var(--otari-danger)" },
+  { key: "success", label: "Succeeded", color: "var(--color-primary)" },
+  { key: "errors", label: "Failed", color: "var(--color-danger)" },
 ]
 
 // The fixed categorical palette for grouped series (validated in globals.css);
 // slot order is the CVD-safety mechanism, so groups take slots in server rank
 // order and the fold always wears the neutral.
 const CAT_COLORS = [
-  "var(--otari-cat-1)",
-  "var(--otari-cat-2)",
-  "var(--otari-cat-3)",
-  "var(--otari-cat-4)",
-  "var(--otari-cat-5)",
-  "var(--otari-cat-6)",
-  "var(--otari-cat-7)",
-  "var(--otari-cat-8)",
+  "var(--color-chart-cat-1)",
+  "var(--color-chart-cat-2)",
+  "var(--color-chart-cat-3)",
+  "var(--color-chart-cat-4)",
+  "var(--color-chart-cat-5)",
+  "var(--color-chart-cat-6)",
+  "var(--color-chart-cat-7)",
+  "var(--color-chart-cat-8)",
 ]
-const OTHER_COLOR = "var(--otari-cat-other)"
+const OTHER_COLOR = "var(--color-chart-cat-other)"
 
 function metricFormatter(metric: ChartMetric): (value: number) => string {
   return metric === "cost"
@@ -221,16 +225,16 @@ function BreakdownTable({
         const share = totalCost > 0 ? row.cost / totalCost : 0
         return (
           <div className="flex flex-col gap-1">
-            <span className="truncate text-[var(--otari-ink)]">
+            <span className="truncate text-foreground">
               {row.is_other
                 ? `Other (${row.requests.toLocaleString()} req)`
                 : row.key === null
                   ? unknownLabel
                   : row.key}
             </span>
-            <span className="h-1 w-full overflow-hidden rounded-full bg-[var(--otari-line)]">
+            <span className="h-1 w-full overflow-hidden rounded-full bg-surface-subtle">
               <span
-                className="block h-full rounded-full bg-[var(--otari-brand)]"
+                className="block h-full rounded-full bg-accent"
                 style={{ width: `${Math.min(100, share * 100)}%` }}
               />
             </span>
@@ -243,9 +247,7 @@ function BreakdownTable({
       header: "Requests",
       align: "end",
       cell: (row) => (
-        <span className="text-[var(--otari-muted)]">
-          {formatNumber(row.requests)}
-        </span>
+        <span className="text-muted">{formatNumber(row.requests)}</span>
       ),
     },
     {
@@ -253,9 +255,7 @@ function BreakdownTable({
       header: "Tokens",
       align: "end",
       cell: (row) => (
-        <span className="text-[var(--otari-muted)]">
-          {formatTokens(row.tokens)}
-        </span>
+        <span className="text-muted">{formatTokens(row.tokens)}</span>
       ),
     },
     {
@@ -263,7 +263,7 @@ function BreakdownTable({
       header: "Spend",
       align: "end",
       cell: (row) => (
-        <span className="text-[var(--otari-ink)]">{formatUsd(row.cost)}</span>
+        <span className="text-foreground">{formatUsd(row.cost)}</span>
       ),
     },
   ]
@@ -322,12 +322,12 @@ function ToolBreakdownTable({
         const share = totalCost > 0 ? row.cost / totalCost : 0
         return (
           <div className="flex flex-col gap-1">
-            <span className="truncate text-[var(--otari-ink)]">
+            <span className="truncate text-foreground">
               {row.tool.replaceAll("_", " ")}
             </span>
-            <span className="h-1 w-full overflow-hidden rounded-full bg-[var(--otari-line)]">
+            <span className="h-1 w-full overflow-hidden rounded-full bg-surface-subtle">
               <span
-                className="block h-full rounded-full bg-[var(--otari-brand)]"
+                className="block h-full rounded-full bg-accent"
                 style={{ width: `${Math.min(100, share * 100)}%` }}
               />
             </span>
@@ -340,9 +340,7 @@ function ToolBreakdownTable({
       header: "Calls",
       align: "end",
       cell: (row) => (
-        <span className="text-[var(--otari-muted)]">
-          {formatNumber(row.calls)}
-        </span>
+        <span className="text-muted">{formatNumber(row.calls)}</span>
       ),
     },
     {
@@ -350,13 +348,7 @@ function ToolBreakdownTable({
       header: "Failed",
       align: "end",
       cell: (row) => (
-        <span
-          className={
-            row.errors
-              ? "text-[var(--otari-danger)]"
-              : "text-[var(--otari-muted)]"
-          }
-        >
+        <span className={row.errors ? "text-danger" : "text-muted"}>
           {formatNumber(row.errors)}
         </span>
       ),
@@ -366,9 +358,7 @@ function ToolBreakdownTable({
       header: "Requests",
       align: "end",
       cell: (row) => (
-        <span className="text-[var(--otari-muted)]">
-          {formatNumber(row.requests)}
-        </span>
+        <span className="text-muted">{formatNumber(row.requests)}</span>
       ),
     },
     {
@@ -376,7 +366,7 @@ function ToolBreakdownTable({
       header: "Spend",
       align: "end",
       cell: (row) => (
-        <span className="text-[var(--otari-ink)]">{formatUsd(row.cost)}</span>
+        <span className="text-foreground">{formatUsd(row.cost)}</span>
       ),
     },
   ]
@@ -824,7 +814,7 @@ export function UsagePage() {
     const single: SeriesDef = {
       key: metric,
       label: METRIC_TABS.find((t) => t.key === metric)?.label ?? metric,
-      color: "var(--otari-brand)",
+      color: "var(--color-primary)",
     }
     return {
       series: [single],
@@ -1002,7 +992,7 @@ export function UsagePage() {
         ))}
         end={
           <>
-            <span className="text-xs text-[var(--otari-muted)]">
+            <span className="text-xs text-muted">
               Showing {formatWindowLabel(effectiveStart, effectiveEnd)} · UTC
             </span>
             <RefreshButton
@@ -1057,7 +1047,7 @@ export function UsagePage() {
               value={totals ? formatUsd(totals.cost) : "—"}
               hint={
                 totals ? (
-                  <span className="text-[var(--otari-muted)]">
+                  <span className="text-muted">
                     <DeltaHint fraction={costDelta} />
                     {totals.unpriced_requests
                       ? `${costDelta !== null ? " · " : ""}${formatNumber(totals.unpriced_requests)} unpriced`
@@ -1079,7 +1069,7 @@ export function UsagePage() {
               value={totals ? formatNumber(totals.request_count) : "—"}
               hint={
                 totals ? (
-                  <span className="text-[var(--otari-muted)]">
+                  <span className="text-muted">
                     {formatPct(errorRate)} errors
                     {prevTotals ? (
                       <>
@@ -1130,7 +1120,7 @@ export function UsagePage() {
               value={cacheHitRate !== null ? formatPct(cacheHitRate) : "—"}
               hint={
                 totals ? (
-                  <span className="text-[var(--otari-muted)]">
+                  <span className="text-muted">
                     {cacheHitRate !== null && prevCacheHitRate !== undefined ? (
                       <>
                         <DeltaHint
@@ -1169,7 +1159,7 @@ export function UsagePage() {
           </div>
 
           {/* The analytics chart: metric × group-by, brushable. */}
-          <div className="flex flex-col gap-3 rounded-xl border border-[var(--otari-line)] bg-[var(--otari-surface)] p-4">
+          <div className="flex flex-col gap-3 rounded-xl border border-border bg-surface p-4">
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div className="inline-flex gap-1.5">
                 {METRIC_TABS.map((tab) => (
@@ -1214,7 +1204,7 @@ export function UsagePage() {
               </div>
             </div>
             {groupingUnsupported ? (
-              <div className="rounded-md border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+              <div className="rounded-md border border-warning bg-warning-subtle px-3 py-2 text-xs text-warning">
                 The running gateway predates grouped series, so the chart shows
                 ungrouped totals. Restart the gateway on this build to enable
                 grouping.
@@ -1226,7 +1216,7 @@ export function UsagePage() {
                 <Spinner size="sm" />
               </div>
             ) : chart.data.length === 0 ? (
-              <div className="flex h-64 items-center justify-center text-sm text-[var(--otari-muted)]">
+              <div className="flex h-64 items-center justify-center text-sm text-muted">
                 No data in this range.
               </div>
             ) : (
@@ -1249,7 +1239,7 @@ export function UsagePage() {
                     area is TrendChart's drag-to-zoom target and a button there
                     would swallow the drag. Only rendered inside this branch, so a
                     range with no data offers no share affordance at all. */}
-                <figcaption className="flex items-start justify-between gap-3 text-xs text-[var(--otari-muted)]">
+                <figcaption className="flex items-start justify-between gap-3 text-xs text-muted">
                   <span>
                     {formatValue(peak)} peak · {chart.data.length}{" "}
                     {bucket === "hour" ? "hours" : "days"} (times in UTC) · drag
@@ -1318,7 +1308,7 @@ export function UsagePage() {
           <div className="grid gap-6 xl:grid-cols-2">
             <div className="flex flex-col gap-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <h2 className="text-sm font-semibold text-[var(--otari-ink)]">
+                <h2 className="text-sm font-semibold text-foreground">
                   Spend by {activePrimary.label.toLowerCase()}
                 </h2>
                 <div className="inline-flex gap-1.5">
@@ -1351,7 +1341,7 @@ export function UsagePage() {
             </div>
             <div className="flex flex-col gap-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <h2 className="text-sm font-semibold text-[var(--otari-ink)]">
+                <h2 className="text-sm font-semibold text-foreground">
                   Spend by {activeSecondary.label.toLowerCase()}
                 </h2>
                 <div className="inline-flex gap-1.5">
@@ -1389,12 +1379,12 @@ export function UsagePage() {
               table asking to be explained, and where it does appear it answers a
               question none of the other tables can ("what did search cost me"). */}
           {toolRows.length ? (
-            <div className="rounded-2xl border border-[var(--otari-line)] bg-[var(--otari-surface)] p-4">
+            <div className="rounded-2xl border border-border bg-surface p-4">
               <div className="mb-3 flex flex-col gap-1">
-                <h2 className="text-sm font-semibold text-[var(--otari-ink)]">
+                <h2 className="text-sm font-semibold text-foreground">
                   Gateway-run tools
                 </h2>
-                <p className="text-xs text-[var(--otari-muted)]">
+                <p className="text-xs text-muted">
                   Tools Otari ran itself, billed per call. MCP tools are not
                   listed here: their names come from your own server, so they
                   appear on each request instead.

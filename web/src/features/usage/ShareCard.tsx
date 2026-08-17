@@ -9,14 +9,16 @@ import type { CardModel, CardStat } from "./shareCardData"
 //    fall below FLOOR_PX at 1080, which is roughly 13px once the feed scales it
 //    down. That rule is what caps the payload at a hero, three model rows, and
 //    three secondary stats: everything else was unreadable anyway.
-//  - Its own palette, not the app's tokens. `--otari-surface` is #ffffff, so a
+//  - Its own palette, not the app's tokens. `--color-surface` is #ffffff, so a
 //    token-driven card dissolves into a light-mode timeline and reads as exactly
 //    the screenshot this feature exists to beat. These constants are card-local on
-//    purpose: they are not a dashboard dark mode (the app has no dark token set)
-//    and must not grow into one.
-//  - Literal colors, no `var(--otari-*)`. Custom properties do not resolve inside
+//    purpose: the foundation's dark theme dresses the dashboard on a dark display,
+//    while these two dress an image posted into someone else's timeline, so the
+//    card's `theme` prop is the poster's choice and not the viewer's.
+//  - Literal colors, no `var(--color-*)`. Custom properties do not resolve inside
 //    an SVG document loaded through an `<img>` element, which is how this is
-//    rasterized, so a token reference here renders as nothing.
+//    rasterized, so a token reference here renders as nothing. This file is the
+//    one documented exception to the no-raw-hex rule in foundation.test.ts.
 
 export const CARD_SIZES = {
   square: { width: 1080, height: 1080 },

@@ -23,10 +23,10 @@ export function HybridLanding() {
         <Card.Content className="flex flex-col items-center gap-4 p-7 text-center">
           <img src="/favicon.svg" alt="Otari" className="h-12 w-12" />
           <div>
-            <h1 className="text-lg font-semibold text-[var(--otari-ink)]">
+            <h1 className="text-lg font-semibold text-foreground">
               Connected to otari.ai
             </h1>
-            <p className="mt-1 text-sm text-[var(--otari-muted)]">
+            <p className="mt-1 text-sm text-muted">
               This gateway serves requests. Its providers, routing, budgets and
               usage are managed on otari.ai.
             </p>
@@ -36,7 +36,7 @@ export function HybridLanding() {
               href={management_url}
               target="_blank"
               rel="noreferrer"
-              className="text-sm font-medium text-[var(--otari-brand-dark)]"
+              className="text-sm font-medium text-link hover:text-link-hover"
             >
               Open otari.ai
             </Link>

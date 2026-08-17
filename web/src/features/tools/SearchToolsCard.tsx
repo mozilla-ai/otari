@@ -26,7 +26,7 @@ import {
 // operator can see every tool a caller could name.
 
 const INPUT_CLASS =
-  "rounded-md border border-[var(--otari-line)] bg-[var(--otari-surface)] px-2 py-1 text-sm focus:border-[var(--otari-brand)] focus:outline-none disabled:opacity-50"
+  "rounded-md border border-border bg-surface px-2 py-1 text-sm focus:border-accent focus:outline-none disabled:opacity-50"
 
 function Badge({
   tone,
@@ -37,8 +37,8 @@ function Badge({
 }) {
   const className =
     tone === "warn"
-      ? "border-amber-200 bg-amber-50 text-amber-700"
-      : "border-[var(--otari-line)] bg-[var(--otari-surface)] text-[var(--otari-muted)]"
+      ? "border-warning bg-warning-subtle text-warning"
+      : "border-border bg-surface text-muted"
   return (
     <span
       className={`rounded-full border px-2 py-0.5 text-xs font-medium ${className}`}
@@ -109,9 +109,7 @@ function StoredToolRow({
   return (
     <div className="flex flex-col gap-2 py-4">
       <div className="flex flex-wrap items-center gap-2">
-        <code className="text-sm font-medium text-[var(--otari-ink)]">
-          {tool.name}
-        </code>
+        <code className="text-sm font-medium text-foreground">{tool.name}</code>
         <Badge tone="muted">{tool.provider}</Badge>
         {tool.last4 ? (
           <Badge tone="muted">{`key ····${tool.last4}`}</Badge>
@@ -168,7 +166,7 @@ function StoredToolRow({
         </ConfirmButton>
       </div>
       {error ? (
-        <span className="break-words text-xs text-red-700">{error}</span>
+        <span className="break-words text-xs text-danger">{error}</span>
       ) : null}
     </div>
   )
@@ -177,16 +175,14 @@ function StoredToolRow({
 function ConfigToolRow({ tool }: { tool: ConfigSearchTool }) {
   return (
     <div className="flex flex-wrap items-center gap-2 py-4">
-      <code className="text-sm font-medium text-[var(--otari-ink)]">
-        {tool.name}
-      </code>
+      <code className="text-sm font-medium text-foreground">{tool.name}</code>
       <Badge tone="muted">{tool.provider}</Badge>
       <Badge tone="muted">Config file</Badge>
       {tool.has_api_key ? <Badge tone="muted">key set</Badge> : null}
       {tool.shadowed ? (
         <Badge tone="warn">Overridden by the stored tool of this name</Badge>
       ) : null}
-      <span className="text-xs text-[var(--otari-muted)]">
+      <span className="text-xs text-muted">
         {tool.api_base ?? "no api_base declared"} · editable only where the
         config file is defined
       </span>
@@ -245,7 +241,7 @@ function AddToolForm({
 
   return (
     <div className="flex flex-col gap-2 py-4">
-      <span className="text-sm font-medium text-[var(--otari-ink)]">
+      <span className="text-sm font-medium text-foreground">
         Add a search tool
       </span>
       <div className="flex flex-wrap items-end gap-2">
@@ -305,7 +301,7 @@ function AddToolForm({
           {create.isPending ? "Adding…" : "Add"}
         </Button>
       </div>
-      <span className="text-xs text-[var(--otari-muted)]">
+      <span className="text-xs text-muted">
         Callers name the tool in{" "}
         <code className="font-mono">search_tool_name</code>, or in the{" "}
         <code className="font-mono">POST /v1/search/{"{tool}"}</code> path.
@@ -313,7 +309,7 @@ function AddToolForm({
         <code className="font-mono">OTARI_SECRET_KEY</code> set on the gateway.
       </span>
       {error ? (
-        <span className="break-words text-xs text-red-700">{error}</span>
+        <span className="break-words text-xs text-danger">{error}</span>
       ) : null}
     </div>
   )
@@ -332,10 +328,8 @@ export function SearchToolsCard({
 
   return (
     <section className="flex flex-col gap-2">
-      <h2 className="text-sm font-semibold text-[var(--otari-ink)]">
-        Search tools
-      </h2>
-      <p className="text-sm text-[var(--otari-muted)]">
+      <h2 className="text-sm font-semibold text-foreground">Search tools</h2>
+      <p className="text-sm text-muted">
         The tools <code className="font-mono">POST /v1/search</code> dispatches
         against. A searxng tool that declares no backend URL uses the web-search
         URL above, so one entry here exposes the same backend on the direct
@@ -343,7 +337,7 @@ export function SearchToolsCard({
       </p>
       <ErrorBanner error={tools.error ?? providers.error} />
       <Card>
-        <Card.Content className="flex flex-col divide-y divide-[var(--otari-line)] px-5 py-1">
+        <Card.Content className="flex flex-col divide-y divide-border px-5 py-1">
           {stored.map((tool) => (
             <StoredToolRow
               key={tool.name}
@@ -358,7 +352,7 @@ export function SearchToolsCard({
           {stored.length === 0 &&
           fromConfig.length === 0 &&
           !tools.isLoading ? (
-            <p className="py-4 text-sm text-[var(--otari-muted)]">
+            <p className="py-4 text-sm text-muted">
               No search tools configured, so{" "}
               <code className="font-mono">POST /v1/search</code> refuses every
               request.

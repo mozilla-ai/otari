@@ -84,9 +84,8 @@ const navLinkClass = (collapsed: boolean) =>
     "flex items-center rounded-lg py-2 text-sm font-medium transition-colors",
     collapsed ? "justify-center px-0" : "gap-3 px-3",
   )
-const NAV_ACTIVE = "bg-[var(--otari-brand-tint)] text-[var(--otari-brand-dark)]"
-const NAV_INACTIVE =
-  "text-[var(--otari-muted)] hover:bg-[var(--otari-bg)] hover:text-[var(--otari-ink)]"
+const NAV_ACTIVE = "bg-primary-subtle text-primary-subtle-foreground"
+const NAV_INACTIVE = "text-muted hover:bg-surface-alt hover:text-foreground"
 
 export function AppShell() {
   const { logout } = useAuth()
@@ -283,13 +282,13 @@ export function AppShell() {
         type="button"
         inert={backgroundInert}
         onClick={skipToMain}
-        className="sr-only focus:not-sr-only focus:absolute focus:top-3 focus:left-3 focus:z-50 focus:rounded-lg focus:border focus:border-[var(--otari-brand)] focus:bg-[var(--otari-surface)] focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-[var(--otari-brand-dark)] focus:shadow-md focus:outline-none"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-3 focus:left-3 focus:z-50 focus:rounded-lg focus:border focus:border-accent focus:bg-surface focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-link focus:shadow-md focus:outline-none"
       >
         Skip to main content
       </button>
       <header
         inert={backgroundInert}
-        className="flex shrink-0 items-center justify-between border-b border-[var(--otari-line)] bg-[var(--otari-surface)] px-5 py-3"
+        className="flex shrink-0 items-center justify-between border-b border-border bg-surface px-5 py-3"
       >
         <div className="flex items-center gap-2.5">
           <button
@@ -299,7 +298,7 @@ export function AppShell() {
             aria-label={mobileNavOpen ? "Close navigation" : "Open navigation"}
             aria-expanded={mobileNavOpen}
             aria-controls="app-sidebar"
-            className="-ml-1 flex h-8 w-8 items-center justify-center rounded-lg text-[var(--otari-muted)] transition-colors hover:bg-[var(--otari-bg)] hover:text-[var(--otari-ink)] md:hidden"
+            className="-ml-1 flex h-8 w-8 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-alt hover:text-foreground md:hidden"
           >
             <svg
               aria-hidden="true"
@@ -317,9 +316,7 @@ export function AppShell() {
             </svg>
           </button>
           <img src="/favicon.svg" alt="" className="h-7 w-7 shrink-0" />
-          <span className="text-base font-semibold text-[var(--otari-ink)]">
-            Otari
-          </span>
+          <span className="text-base font-semibold text-foreground">Otari</span>
         </div>
         <Button
           size="sm"
@@ -342,7 +339,7 @@ export function AppShell() {
           <div
             aria-hidden="true"
             onClick={() => setMobileNavOpen(false)}
-            className="fixed inset-0 z-30 bg-black/40 md:hidden"
+            className="fixed inset-0 z-30 bg-backdrop/40 md:hidden"
           />
         ) : null}
         {/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: the role is conditional (dialog on mobile), which the rule cannot evaluate */}
@@ -360,7 +357,7 @@ export function AppShell() {
           onKeyDown={isMobile && mobileNavOpen ? trapFocus : undefined}
           style={isMobile ? undefined : { width }}
           className={clsx(
-            "flex flex-col border-r border-[var(--otari-line)] bg-[var(--otari-surface)] focus:outline-none",
+            "flex flex-col border-r border-border bg-surface focus:outline-none",
             isMobile
               ? clsx(
                   "fixed inset-y-0 left-0 z-40 w-[17rem] shadow-xl transition-transform duration-200",
@@ -382,7 +379,7 @@ export function AppShell() {
             aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
             aria-pressed={collapsed}
             title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-            className="absolute -right-3 top-4 z-30 hidden h-6 w-6 items-center justify-center rounded-full border border-[var(--otari-line)] bg-[var(--otari-surface)] text-[var(--otari-muted)] shadow-sm transition-colors hover:border-[var(--otari-brand)] hover:text-[var(--otari-brand-dark)] md:flex"
+            className="absolute -right-3 top-4 z-30 hidden h-6 w-6 items-center justify-center rounded-full border border-border bg-surface text-muted shadow-sm transition-colors hover:border-accent hover:text-accent md:flex"
           >
             <svg
               aria-hidden="true"
@@ -419,13 +416,13 @@ export function AppShell() {
                       header of its own (e.g. Settings) to set it off from the group
                       above. */}
                   {!effectiveCollapsed && section.label ? (
-                    <div className="px-3 pb-1 text-[11px] font-semibold tracking-wider text-[var(--otari-muted)] uppercase">
+                    <div className="px-3 pb-1 text-[11px] font-semibold tracking-wider text-muted uppercase">
                       {section.label}
                     </div>
                   ) : null}
                   {sectionIndex > 0 &&
                   (effectiveCollapsed || !section.label) ? (
-                    <div className="mx-1 mb-2 border-t border-[var(--otari-line)]" />
+                    <div className="mx-1 mb-2 border-t border-border" />
                   ) : null}
                   <div className="flex flex-col gap-1">
                     {items.map((item) => (
@@ -493,7 +490,7 @@ export function AppShell() {
               rel="noreferrer"
               title="otari.ai: the hosted Otari gateway"
               className={clsx(
-                "flex items-center rounded-lg py-2 text-xs font-medium text-[var(--otari-muted)] transition-colors hover:bg-[var(--otari-bg)] hover:text-[var(--otari-brand-dark)]",
+                "flex items-center rounded-lg py-2 text-xs font-medium text-muted transition-colors hover:bg-surface-alt hover:text-link",
                 effectiveCollapsed
                   ? "mx-2 justify-center px-0"
                   : "mx-3 gap-2 px-3",
@@ -535,8 +532,8 @@ export function AppShell() {
               onKeyDown={nudgeResize}
               className={clsx(
                 "absolute top-0 right-0 z-10 h-full w-1.5 cursor-col-resize touch-none transition-colors",
-                "hover:bg-[var(--otari-brand)] focus-visible:bg-[var(--otari-brand)] focus:outline-none",
-                resizing ? "bg-[var(--otari-brand)]" : "bg-transparent",
+                "hover:bg-accent focus-visible:bg-accent focus:outline-none",
+                resizing ? "bg-accent" : "bg-transparent",
               )}
             />
           )}

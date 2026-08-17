@@ -124,8 +124,8 @@ export function ModelScopeControl({
       onClick={() => chooseMode(value)}
       className={
         mode === value
-          ? "rounded-md bg-white px-3 py-1.5 text-sm font-medium text-[var(--otari-ink)] shadow-sm"
-          : "rounded-md px-3 py-1.5 text-sm text-[var(--otari-muted)] hover:text-[var(--otari-ink)]"
+          ? "rounded-md bg-surface px-3 py-1.5 text-sm font-medium text-foreground shadow-sm"
+          : "rounded-md px-3 py-1.5 text-sm text-muted hover:text-foreground"
       }
     >
       {label}
@@ -138,22 +138,20 @@ export function ModelScopeControl({
   return (
     <div className="flex flex-col gap-3">
       <div>
-        <span className="text-sm font-medium text-[var(--otari-ink)]">
-          {title}
-        </span>
-        <p className="text-xs text-[var(--otari-muted)]">
+        <span className="text-sm font-medium text-foreground">{title}</span>
+        <p className="text-xs text-muted">
           {description ??
             "Which models this key may list and call. The master key is never restricted, so blocking a key cannot lock you out of the dashboard."}
         </p>
       </div>
-      <div className="flex w-fit items-center gap-1 rounded-lg bg-[var(--otari-bg)] p-1">
+      <div className="flex w-fit items-center gap-1 rounded-lg bg-surface-alt p-1">
         {modeButton("any", anyLabel)}
         {modeButton("only", "Only selected")}
         {modeButton("block", "Block all")}
       </div>
 
       {mode === "block" ? (
-        <div className="rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs text-amber-800">
+        <div className="rounded-lg border border-warning bg-warning-subtle px-3 py-2 text-xs text-warning">
           Blocked from <strong>every</strong> model until you change this
           access.
         </div>
@@ -163,21 +161,21 @@ export function ModelScopeControl({
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap gap-1.5">
             {entries.length === 0 ? (
-              <span className="text-xs text-[var(--otari-muted)]">
+              <span className="text-xs text-muted">
                 Pick at least one model below, or choose “Block all”.
               </span>
             ) : (
               entries.map((entry) => (
                 <span
                   key={entry}
-                  className="inline-flex items-center gap-1 rounded-full bg-[var(--otari-brand-tint)] px-2.5 py-1 font-mono text-xs text-[var(--otari-brand-dark)]"
+                  className="inline-flex items-center gap-1 rounded-full bg-primary-subtle px-2.5 py-1 font-mono text-xs text-primary-subtle-foreground"
                 >
                   {entry}
                   <button
                     type="button"
                     aria-label={`Remove ${entry}`}
                     onClick={() => removeEntry(entry)}
-                    className="text-[var(--otari-brand-dark)] hover:text-red-700"
+                    className="text-primary-subtle-foreground hover:text-danger"
                   >
                     ×
                   </button>
@@ -186,7 +184,7 @@ export function ModelScopeControl({
             )}
           </div>
           {catalogEmpty ? (
-            <span className="text-xs text-[var(--otari-muted)]">
+            <span className="text-xs text-muted">
               No providers or models discovered yet. Configure a provider first,
               then scope this key.
             </span>

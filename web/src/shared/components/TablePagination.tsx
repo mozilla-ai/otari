@@ -1,9 +1,3 @@
-// MIGRATION BRIDGE. Hand-rolled and predating the design foundation rehomed from
-// otari-ai/frontend (src/styles/globals.css, src/shared/components/ui/). This file
-// keeps its `--otari-*` colors so the pages built on it keep rendering, and it
-// leaves with the last of them. Reuse it rather than duplicating its markup, but
-// do not extend it and do not build a new page on it: new work composes
-// @heroui/react with the semantic tokens. See ../../../AGENTS.md.
 import { Button, Spinner } from "@heroui/react"
 import { useEffect, useId, useState } from "react"
 
@@ -94,10 +88,7 @@ export function TablePagination({
   return (
     <div className="flex flex-wrap items-center justify-between gap-3">
       <div className="flex items-center gap-2">
-        <label
-          htmlFor={sizeSelectId}
-          className="text-sm text-[var(--otari-muted)]"
-        >
+        <label htmlFor={sizeSelectId} className="text-sm text-muted">
           Rows
         </label>
         <FilterSelect
@@ -114,9 +105,7 @@ export function TablePagination({
       </div>
 
       <div className="flex items-center gap-3">
-        <span className="text-sm text-[var(--otari-muted)] tabular-nums">
-          {summary}
-        </span>
+        <span className="text-sm text-muted tabular-nums">{summary}</span>
         <div className="flex items-center gap-1">
           <Button
             size="sm"
@@ -136,7 +125,7 @@ export function TablePagination({
           >
             ‹
           </Button>
-          <span className="inline-flex items-center gap-1 text-sm text-[var(--otari-muted)]">
+          <span className="inline-flex items-center gap-1 text-sm text-muted">
             <input
               aria-label="Page number"
               inputMode="numeric"
@@ -150,7 +139,7 @@ export function TablePagination({
                 }
               }}
               onBlur={commitPage}
-              className="w-12 rounded-lg border border-[var(--otari-line)] bg-[var(--otari-bg)] px-2 py-1 text-center text-sm text-[var(--otari-ink)] tabular-nums focus:border-[var(--otari-brand)] focus:outline-none"
+              className="w-12 rounded-lg border border-border bg-surface-alt px-2 py-1 text-center text-sm text-foreground tabular-nums focus:border-accent focus:outline-none"
             />
             {pageCount != null ? (
               <span className="tabular-nums">

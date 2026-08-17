@@ -37,9 +37,10 @@ Build and check from the repo root:
   restyling a component HeroUI already styles. See [components.md](./components.md).
 - Style from the semantic tokens in `web/src/styles/globals.css`, through the utilities they
   back (`text-muted`, `bg-surface`, `border-border`, `text-danger`, `text-heading`). Never a raw
-  hex, never a numbered Tailwind palette class, and never an `--otari-*` variable from below the
-  `MIGRATION BRIDGE` marker. [design-tokens.md](./design-tokens.md) has the families, the HeroUI
-  mapping, and the near-synonym utilities HeroUI ships that look like ours and are not.
+  hex, never a numbered Tailwind palette class, never `bg-white` / `text-black`;
+  `src/styles/foundation.test.ts` fails on all three, over the whole of `web/src`.
+  [design-tokens.md](./design-tokens.md) has the families, the HeroUI mapping, the validated
+  chart palettes, and the near-synonym utilities HeroUI ships that look like ours and are not.
 - Fetch server state through the TanStack Query hooks in `web/src/shared/api/hooks.ts`, and bound
   every "fetch everything" walk with a hard page cap. See [data-fetching.md](./data-fetching.md)
   for query keys, `staleTime`, invalidation, and the `fetchAllPricing` shape.
@@ -82,15 +83,17 @@ for healthy, `text-info` / `bg-info-subtle` for neutral notices, and the separat
 `bg-attention` family for "look here" (a required action, an unread marker) as distinct from
 "be careful". Every one of them is defined for both themes.
 
-The bridge components (`ErrorBanner` with `border-red-200 bg-red-50 text-red-700`,
-`InfoBanner` with `amber`, `StatCard`'s `emerald` status pills) still use raw Tailwind palette
-classes. That is the palette this dashboard had before the rehome, not a sanctioned exception:
-leave those call sites alone until their pages are rebuilt, and don't copy the pattern into
-anything new.
+Two pairings are worth knowing because the obvious guess is wrong. **A status word on its own
+subtle fill wears the status color** (`text-danger` on `bg-danger-subtle`), and the light
+theme's danger, warning, and attention values are a step darker than otari-ai's swatches for
+exactly that reason: at the original values those pairings sat between 3.2:1 and 4.4:1, under
+AA for the small text a pill uses. **Brand text on the brand tint does not follow that rule**:
+`--color-primary` on `--color-primary-subtle` is 3.8:1, so a chip or an active nav item takes
+`text-primary-subtle-foreground` instead.
 
 ## Topic guides
 
-- [design-tokens.md](./design-tokens.md): the semantic tokens, the HeroUI mapping, the type scale, and the `--otari-*` bridge on its way out.
+- [design-tokens.md](./design-tokens.md): the semantic tokens, the HeroUI mapping, the type scale, and the validated chart palettes.
 - [components.md](./components.md): HeroUI v3 patterns, props over `className`, the shared UI primitives in `shared/components/ui/`.
 - [data-fetching.md](./data-fetching.md): TanStack Query conventions: query keys, `staleTime`, invalidation, bounded pagination.
 - [typescript-and-react.md](./typescript-and-react.md): strict TS, `undefined` over `null`, hook/effect hygiene, and Vitest testing.

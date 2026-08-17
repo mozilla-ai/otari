@@ -1,9 +1,3 @@
-// MIGRATION BRIDGE. Hand-rolled and predating the design foundation rehomed from
-// otari-ai/frontend (src/styles/globals.css, src/shared/components/ui/). This file
-// keeps its `--otari-*` colors so the pages built on it keep rendering, and it
-// leaves with the last of them. Reuse it rather than duplicating its markup, but
-// do not extend it and do not build a new page on it: new work composes
-// @heroui/react with the semantic tokens. See ../../../AGENTS.md.
 import { Spinner, Table } from "@heroui/react"
 import type {
   MouseEvent as ReactMouseEvent,
@@ -56,9 +50,9 @@ function SelectionBoxVisual({
       }}
       className={`flex h-4 w-4 items-center justify-center rounded border transition-colors ${
         showChecked
-          ? "border-[var(--otari-brand)] bg-[var(--otari-brand)] text-white"
-          : "border-[var(--otari-line)] bg-[var(--otari-surface)]"
-      } group-data-[focus-visible]:outline-2 group-data-[focus-visible]:outline-[var(--otari-brand)]`}
+          ? "border-accent bg-accent text-accent-foreground"
+          : "border-border bg-surface"
+      } group-data-[focus-visible]:outline-2 group-data-[focus-visible]:outline-accent`}
     >
       {isIndeterminate && flash === null ? (
         <svg
@@ -495,7 +489,7 @@ export function DataTable<Row extends object>({
             items={isLoading && rows.length === 0 ? [] : rows}
             dependencies={[renderRow]}
             renderEmptyState={() => (
-              <div className="px-4 py-10 text-center text-[var(--otari-muted)]">
+              <div className="px-4 py-10 text-center text-muted">
                 {isLoading ? (
                   <span className="inline-flex items-center gap-2">
                     <Spinner size="sm" /> Loading…

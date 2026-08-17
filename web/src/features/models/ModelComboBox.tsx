@@ -110,9 +110,7 @@ export function ModelComboBox({
       className="flex max-w-md flex-col gap-1"
     >
       {/* HeroUI marks a required field's label through CSS; see Field. */}
-      <Label className="text-sm font-medium text-[var(--otari-ink)]">
-        {label}
-      </Label>
+      <Label className="text-sm font-medium text-foreground">{label}</Label>
       <ComboBox.InputGroup>
         <Input placeholder={placeholder} autoFocus={autoFocus} />
         <ComboBox.Trigger />
@@ -128,9 +126,7 @@ export function ModelComboBox({
           )}
         </ListBox>
       </ComboBox.Popover>
-      {hint ? (
-        <span className="text-xs text-[var(--otari-muted)]">{hint}</span>
-      ) : null}
+      {hint ? <span className="text-xs text-muted">{hint}</span> : null}
     </ComboBox.Root>
   )
 }

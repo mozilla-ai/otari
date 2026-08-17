@@ -355,7 +355,7 @@ function MoneyInput({
       aria-label={ariaLabel}
       value={value}
       onChange={(event) => onChange(event.target.value)}
-      className="w-28 rounded-md border border-[var(--otari-line)] bg-white px-2 py-1 text-right text-sm tabular-nums focus:border-[var(--otari-brand)] focus:outline-none"
+      className="w-28 rounded-md border border-field-border bg-field px-2 py-1 text-right text-sm tabular-nums focus:border-accent focus:outline-none"
     />
   )
 }
@@ -395,13 +395,13 @@ function PricingTierEditor({
   }
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-[var(--otari-line)] p-3">
+    <div className="flex flex-col gap-2 rounded-lg border border-border p-3">
       <div className="flex items-center justify-between gap-3">
         <div>
-          <div className="text-xs font-medium text-[var(--otari-ink)]">
+          <div className="text-xs font-medium text-foreground">
             Long-context price tiers
           </div>
-          <p className="text-xs text-[var(--otari-muted)]">
+          <p className="text-xs text-muted">
             At a threshold, listed rates replace the base rate for the whole
             request.
           </p>
@@ -413,9 +413,9 @@ function PricingTierEditor({
       {tiers.map((tier) => (
         <div
           key={tier.id}
-          className="flex flex-wrap items-end gap-2 border-t border-[var(--otari-line)] pt-2"
+          className="flex flex-wrap items-end gap-2 border-t border-border pt-2"
         >
-          <label className="flex flex-col gap-1 text-xs text-[var(--otari-muted)]">
+          <label className="flex flex-col gap-1 text-xs text-muted">
             Context ≥ tokens
             <input
               type="number"
@@ -427,10 +427,10 @@ function PricingTierEditor({
               onChange={(event) =>
                 update(tier.id, "minInputTokens", event.target.value)
               }
-              className="w-28 rounded-md border border-[var(--otari-line)] bg-white px-2 py-1 text-right text-sm tabular-nums focus:border-[var(--otari-brand)] focus:outline-none"
+              className="w-28 rounded-md border border-field-border bg-field px-2 py-1 text-right text-sm tabular-nums focus:border-accent focus:outline-none"
             />
           </label>
-          <label className="flex flex-col gap-1 text-xs text-[var(--otari-muted)]">
+          <label className="flex flex-col gap-1 text-xs text-muted">
             Input
             <MoneyInput
               value={tier.input}
@@ -438,7 +438,7 @@ function PricingTierEditor({
               ariaLabel="Tier input price"
             />
           </label>
-          <label className="flex flex-col gap-1 text-xs text-[var(--otari-muted)]">
+          <label className="flex flex-col gap-1 text-xs text-muted">
             Output
             <MoneyInput
               value={tier.output}
@@ -446,7 +446,7 @@ function PricingTierEditor({
               ariaLabel="Tier output price"
             />
           </label>
-          <label className="flex flex-col gap-1 text-xs text-[var(--otari-muted)]">
+          <label className="flex flex-col gap-1 text-xs text-muted">
             Cache read
             <MoneyInput
               value={tier.cacheRead}
@@ -454,7 +454,7 @@ function PricingTierEditor({
               ariaLabel="Tier cache read price"
             />
           </label>
-          <label className="flex flex-col gap-1 text-xs text-[var(--otari-muted)]">
+          <label className="flex flex-col gap-1 text-xs text-muted">
             Cache write
             <MoneyInput
               value={tier.cacheWrite}
@@ -462,7 +462,7 @@ function PricingTierEditor({
               ariaLabel="Tier cache write price"
             />
           </label>
-          <label className="flex flex-col gap-1 text-xs text-[var(--otari-muted)]">
+          <label className="flex flex-col gap-1 text-xs text-muted">
             1h write
             <MoneyInput
               value={tier.cacheWrite1h}
@@ -501,11 +501,9 @@ function SourceChip({ source }: { source: PriceSource }) {
     )
   }
   if (source === "unknown") {
-    return (
-      <span className="text-xs text-[var(--otari-muted)]">rate unknown</span>
-    )
+    return <span className="text-xs text-muted">rate unknown</span>
   }
-  return <span className="text-xs text-[var(--otari-muted)]">not priced</span>
+  return <span className="text-xs text-muted">not priced</span>
 }
 
 // A small info affordance: an "i" bubble that reveals a tooltip on hover or
@@ -531,8 +529,8 @@ function InfoTooltip({
         aria-describedby={tipId}
         className={`inline-flex h-4 w-4 items-center justify-center rounded-full border text-[10px] leading-none ${
           tone === "warning"
-            ? "border-[#c2843a] text-[#b45309]"
-            : "border-[var(--otari-line)] text-[var(--otari-muted)] hover:border-[var(--otari-brand)] hover:text-[var(--otari-brand)]"
+            ? "border-warning text-warning"
+            : "border-border text-muted hover:border-accent hover:text-accent"
         }`}
       >
         i
@@ -540,7 +538,7 @@ function InfoTooltip({
       <span
         id={tipId}
         role="tooltip"
-        className="pointer-events-none absolute top-full right-0 z-20 mt-1.5 w-72 rounded-lg border border-[var(--otari-line)] bg-[var(--otari-surface)] px-3 py-2 text-left text-xs font-normal whitespace-normal break-words text-[var(--otari-ink)] opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+        className="pointer-events-none absolute top-full right-0 z-20 mt-1.5 w-72 rounded-lg border border-border bg-surface px-3 py-2 text-left text-xs font-normal whitespace-normal break-words text-foreground opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
       >
         {children}
       </span>
@@ -578,8 +576,8 @@ function PricingInfo() {
 function Spec({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
-      <span className="text-xs text-[var(--otari-muted)]">{label}</span>
-      <span className="text-right text-sm text-[var(--otari-ink)] tabular-nums">
+      <span className="text-xs text-muted">{label}</span>
+      <span className="text-right text-sm text-foreground tabular-nums">
         {value}
       </span>
     </div>
@@ -595,7 +593,7 @@ function PanelSection({
 }) {
   return (
     <div className="flex flex-col gap-2">
-      <span className="text-xs font-semibold uppercase tracking-wide text-[var(--otari-muted)]">
+      <span className="text-xs font-semibold uppercase tracking-wide text-muted">
         {title}
       </span>
       {children}
@@ -660,9 +658,7 @@ function PanelPriceEditor({ row }: { row: ModelRow }) {
     return (
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between gap-2">
-          <span className="text-xs text-[var(--otari-muted)]">
-            Input $ / 1M
-          </span>
+          <span className="text-xs text-muted">Input $ / 1M</span>
           <MoneyInput
             value={input}
             onChange={setInput}
@@ -670,9 +666,7 @@ function PanelPriceEditor({ row }: { row: ModelRow }) {
           />
         </div>
         <div className="flex items-center justify-between gap-2">
-          <span className="text-xs text-[var(--otari-muted)]">
-            Output $ / 1M
-          </span>
+          <span className="text-xs text-muted">Output $ / 1M</span>
           <MoneyInput
             value={output}
             onChange={setOutput}
@@ -680,9 +674,7 @@ function PanelPriceEditor({ row }: { row: ModelRow }) {
           />
         </div>
         <div className="flex items-center justify-between gap-2">
-          <span className="text-xs text-[var(--otari-muted)]">
-            Cache read $ / 1M
-          </span>
+          <span className="text-xs text-muted">Cache read $ / 1M</span>
           <MoneyInput
             value={cacheRead}
             onChange={setCacheRead}
@@ -690,9 +682,7 @@ function PanelPriceEditor({ row }: { row: ModelRow }) {
           />
         </div>
         <div className="flex items-center justify-between gap-2">
-          <span className="text-xs text-[var(--otari-muted)]">
-            Cache write $ / 1M
-          </span>
+          <span className="text-xs text-muted">Cache write $ / 1M</span>
           <MoneyInput
             value={cacheWrite}
             onChange={setCacheWrite}
@@ -700,9 +690,7 @@ function PanelPriceEditor({ row }: { row: ModelRow }) {
           />
         </div>
         <div className="flex items-center justify-between gap-2">
-          <span className="text-xs text-[var(--otari-muted)]">
-            1h cache write $ / 1M
-          </span>
+          <span className="text-xs text-muted">1h cache write $ / 1M</span>
           <MoneyInput
             value={cacheWrite1h}
             onChange={setCacheWrite1h}
@@ -729,7 +717,7 @@ function PanelPriceEditor({ row }: { row: ModelRow }) {
           </Button>
         </div>
         {setPricing.error ? (
-          <span className="text-xs text-red-700">
+          <span className="text-xs text-danger">
             {errorMessage(setPricing.error)}
           </span>
         ) : null}
@@ -804,7 +792,7 @@ function PanelPriceEditor({ row }: { row: ModelRow }) {
           </>
         ) : null}
         {deletePricing.error ? (
-          <span className="text-xs text-red-700">
+          <span className="text-xs text-danger">
             {errorMessage(deletePricing.error)}
           </span>
         ) : null}
@@ -838,7 +826,7 @@ function ModelDetailPanel({
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <h2 className="text-base font-semibold break-all text-[var(--otari-ink)]">
+              <h2 className="text-base font-semibold break-all text-foreground">
                 {row.model}
               </h2>
               {metadata?.deprecated ? (
@@ -847,41 +835,35 @@ function ModelDetailPanel({
                 </Chip>
               ) : null}
             </div>
-            <p className="mt-1 text-xs break-all text-[var(--otari-muted)]">
+            <p className="mt-1 text-xs break-all text-muted">
               Selector:{" "}
               <CopyableValue value={row.key} label="model id">
                 <code>{row.key}</code>
               </CopyableValue>
             </p>
             {metadata?.family ? (
-              <p className="text-xs text-[var(--otari-muted)]">
-                {metadata.family}
-              </p>
+              <p className="text-xs text-muted">{metadata.family}</p>
             ) : null}
           </div>
           <button
             type="button"
             aria-label="Close model details"
             onClick={onClose}
-            className="-mt-1 -mr-1 shrink-0 rounded-md px-1.5 py-0.5 text-lg leading-none text-[var(--otari-muted)] hover:bg-[var(--otari-bg)] hover:text-[var(--otari-ink)]"
+            className="-mt-1 -mr-1 shrink-0 rounded-md px-1.5 py-0.5 text-lg leading-none text-muted hover:bg-surface-alt hover:text-foreground"
           >
             ✕
           </button>
         </div>
 
         {metadata?.description ? (
-          <p className="text-sm text-[var(--otari-ink)]">
-            {metadata.description}
-          </p>
+          <p className="text-sm text-foreground">{metadata.description}</p>
         ) : null}
 
         <PanelSection title="Pricing">
           <div className="flex items-center gap-2">
             <SourceChip source={row.source} />
             {row.isDiscovered ? null : (
-              <span className="text-xs text-[var(--otari-muted)]">
-                not discovered
-              </span>
+              <span className="text-xs text-muted">not discovered</span>
             )}
           </div>
           <PanelPriceEditor key={row.key} row={row} />
@@ -912,9 +894,9 @@ function ModelDetailPanel({
 
         <PanelSection title="Modalities">
           {inputModalities.length === 0 && outputModalities.length === 0 ? (
-            <span className="text-sm text-[var(--otari-muted)]">Unknown.</span>
+            <span className="text-sm text-muted">Unknown.</span>
           ) : (
-            <div className="flex flex-col gap-1.5 text-xs text-[var(--otari-muted)]">
+            <div className="flex flex-col gap-1.5 text-xs text-muted">
               <div className="flex flex-wrap items-center gap-1">
                 <span>In:</span>
                 {inputModalities.map((m) => (
@@ -945,7 +927,7 @@ function ModelDetailPanel({
               ))}
             </div>
           ) : (
-            <span className="text-sm text-[var(--otari-muted)]">
+            <span className="text-sm text-muted">
               {metadataAvailable
                 ? "None reported."
                 : "Extended metadata unavailable (models.dev disabled or unreachable)."}
@@ -974,7 +956,7 @@ function SearchInput({
       onChange={(event) => onChange(event.target.value)}
       placeholder={placeholder}
       aria-label={placeholder}
-      className="w-full max-w-xs rounded-md border border-[var(--otari-line)] bg-white px-3 py-1.5 text-sm focus:border-[var(--otari-brand)] focus:outline-none"
+      className="w-full max-w-xs rounded-md border border-field-border bg-field px-3 py-1.5 text-sm focus:border-accent focus:outline-none"
     />
   )
 }
@@ -1063,10 +1045,10 @@ function InlinePriceForm({
   return (
     <div className="flex flex-col gap-3 px-4 py-3">
       <div className="flex flex-wrap items-center gap-3">
-        <span className="text-xs font-medium break-all text-[var(--otari-muted)]">
+        <span className="text-xs font-medium break-all text-muted">
           {row.key}
         </span>
-        <label className="flex items-center gap-1.5 text-xs text-[var(--otari-muted)]">
+        <label className="flex items-center gap-1.5 text-xs text-muted">
           Input $ / 1M
           <MoneyInput
             value={input}
@@ -1074,7 +1056,7 @@ function InlinePriceForm({
             ariaLabel={`Input price for ${row.key}`}
           />
         </label>
-        <label className="flex items-center gap-1.5 text-xs text-[var(--otari-muted)]">
+        <label className="flex items-center gap-1.5 text-xs text-muted">
           Output $ / 1M
           <MoneyInput
             value={output}
@@ -1082,7 +1064,7 @@ function InlinePriceForm({
             ariaLabel={`Output price for ${row.key}`}
           />
         </label>
-        <label className="flex items-center gap-1.5 text-xs text-[var(--otari-muted)]">
+        <label className="flex items-center gap-1.5 text-xs text-muted">
           Cache read $ / 1M
           <MoneyInput
             value={cacheRead}
@@ -1090,7 +1072,7 @@ function InlinePriceForm({
             ariaLabel={`Cache read price for ${row.key}`}
           />
         </label>
-        <label className="flex items-center gap-1.5 text-xs text-[var(--otari-muted)]">
+        <label className="flex items-center gap-1.5 text-xs text-muted">
           Cache write $ / 1M
           <MoneyInput
             value={cacheWrite}
@@ -1098,7 +1080,7 @@ function InlinePriceForm({
             ariaLabel={`Cache write price for ${row.key}`}
           />
         </label>
-        <label className="flex items-center gap-1.5 text-xs text-[var(--otari-muted)]">
+        <label className="flex items-center gap-1.5 text-xs text-muted">
           1h cache write $ / 1M
           <MoneyInput
             value={cacheWrite1h}
@@ -1141,7 +1123,7 @@ function InlinePriceForm({
           </span>
         ) : null}
         {setPricing.error || deletePricing.error ? (
-          <span className="text-xs text-red-700">
+          <span className="text-xs text-danger">
             {errorMessage(setPricing.error ?? deletePricing.error)}
           </span>
         ) : null}
@@ -1174,7 +1156,7 @@ function PriceCell({
     <button
       type="button"
       aria-label={`Edit ${label} price for ${rowKey}`}
-      className="tabular-nums hover:text-[var(--otari-brand-dark)] hover:underline"
+      className="tabular-nums hover:text-link hover:underline"
       onClick={(event) => {
         event.stopPropagation()
         onEdit()
@@ -1186,7 +1168,7 @@ function PriceCell({
   return (
     <span className="inline-flex items-center justify-end gap-1">
       {number(primary, primaryLabel)}
-      <span className="text-[var(--otari-muted)]">/</span>
+      <span className="text-muted">/</span>
       {number(secondary, secondaryLabel)}
     </span>
   )
@@ -1216,7 +1198,7 @@ function CachingCell({
     <button
       type="button"
       aria-label={`Edit caching price for ${rowKey}`}
-      className="max-w-44 text-right text-xs leading-5 text-[var(--otari-muted)] hover:text-[var(--otari-brand-dark)] hover:underline"
+      className="max-w-44 text-right text-xs leading-5 text-muted hover:text-link hover:underline"
       onClick={(event) => {
         event.stopPropagation()
         onEdit()
@@ -1245,7 +1227,7 @@ function PricingPolicyCell({
     <button
       type="button"
       aria-label={`Edit pricing policy for ${row.key}`}
-      className="max-w-40 text-right text-xs leading-5 text-[var(--otari-muted)] hover:text-[var(--otari-brand-dark)] hover:underline"
+      className="max-w-40 text-right text-xs leading-5 text-muted hover:text-link hover:underline"
       onClick={(event) => {
         event.stopPropagation()
         onEdit()
@@ -1316,9 +1298,7 @@ function ModelTable({
       {
         id: "provider",
         header: "Provider",
-        cell: (row) => (
-          <span className="text-[var(--otari-muted)]">{row.provider}</span>
-        ),
+        cell: (row) => <span className="text-muted">{row.provider}</span>,
       },
       {
         id: "input",
@@ -1369,7 +1349,7 @@ function ModelTable({
 
   const rowClassName = useCallback(
     (row: ModelRow) =>
-      row.key === selectedKey ? "bg-[var(--otari-brand-tint)]" : undefined,
+      row.key === selectedKey ? "bg-primary-subtle" : undefined,
     [selectedKey],
   )
 
@@ -1950,7 +1930,7 @@ export function ModelsPage() {
           ? "No models match your filters."
           : "No models yet. Add a provider on the Providers page."}
       </span>
-      <span className="text-xs text-[var(--otari-muted)]">
+      <span className="text-xs text-muted">
         A provider that serves no model listing still answers requests, so a
         model you can call may not be listed here.
       </span>
@@ -2105,8 +2085,8 @@ export function ModelsPage() {
           {pricingRow ? (
             <Card>
               <Card.Content className="p-0">
-                <div className="flex items-center justify-between border-b border-[var(--otari-line)] px-4 py-2">
-                  <span className="text-sm font-medium text-[var(--otari-ink)]">
+                <div className="flex items-center justify-between border-b border-border px-4 py-2">
+                  <span className="text-sm font-medium text-foreground">
                     Edit pricing
                   </span>
                   <Button

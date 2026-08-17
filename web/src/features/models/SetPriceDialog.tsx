@@ -36,9 +36,7 @@ function RateField({
       isRequired={isRequired}
       className="flex flex-col gap-1"
     >
-      <Label className="text-sm font-medium text-[var(--otari-ink)]">
-        {label}
-      </Label>
+      <Label className="text-sm font-medium text-foreground">{label}</Label>
       <Input inputMode="decimal" placeholder="0.00" autoFocus={autoFocus} />
     </TextField>
   )
@@ -164,9 +162,7 @@ export function SetPriceDialog({
                 <AlertDialog.Heading>{title}</AlertDialog.Heading>
               </AlertDialog.Header>
               <AlertDialog.Body className="flex flex-col gap-4">
-                <p className="text-sm text-[var(--otari-muted)]">
-                  {description(targetCount)}
-                </p>
+                <p className="text-sm text-muted">{description(targetCount)}</p>
                 {collectModelKey ? (
                   <Field
                     label="Model key"

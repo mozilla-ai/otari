@@ -260,7 +260,7 @@ export function ShareDialog(props: ShareDialogProps) {
               </AlertDialog.Heading>
             </AlertDialog.Header>
             <AlertDialog.Body className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto">
-              <p className="text-xs text-[var(--otari-muted)]">
+              <p className="text-xs text-muted">
                 The card shows the window and filters currently applied above.
                 Change them on the page to change what it says.
               </p>
@@ -281,10 +281,10 @@ export function ShareDialog(props: ShareDialogProps) {
                     <img
                       src={preview}
                       alt="Preview of the usage card that will be shared"
-                      className="h-auto w-full rounded-md border border-[var(--otari-line)]"
+                      className="h-auto w-full rounded-md border border-border"
                     />
                   ) : (
-                    <div className="flex aspect-square w-full items-center justify-center rounded-md border border-dashed border-[var(--otari-line)] text-xs text-[var(--otari-muted)]">
+                    <div className="flex aspect-square w-full items-center justify-center rounded-md border border-dashed border-border text-xs text-muted">
                       Rendering preview…
                     </div>
                   )}
@@ -314,7 +314,7 @@ export function ShareDialog(props: ShareDialogProps) {
                       value={presentation.title}
                       maxLength={TITLE_MAX}
                       onChange={(event) => set("title", event.target.value)}
-                      className="w-full rounded-md border border-[var(--otari-line)] px-2 py-1 text-sm"
+                      className="w-full rounded-md border border-border px-2 py-1 text-sm"
                       aria-label="Card title"
                     />
                   </Field>
@@ -396,9 +396,7 @@ export function ShareDialog(props: ShareDialogProps) {
             </AlertDialog.Body>
             <AlertDialog.Footer className="flex flex-wrap items-center gap-2">
               {notice !== undefined ? (
-                <span className="mr-auto text-xs text-[var(--otari-brand)]">
-                  {notice}
-                </span>
+                <span className="mr-auto text-xs text-accent">{notice}</span>
               ) : null}
               <Button variant="ghost" onPress={onClose}>
                 Close
@@ -471,9 +469,7 @@ function Field({
 }) {
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-xs font-medium text-[var(--otari-muted)]">
-        {label}
-      </span>
+      <span className="text-xs font-medium text-muted">{label}</span>
       {children}
     </div>
   )

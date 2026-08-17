@@ -41,10 +41,10 @@ export function Login() {
           <div className="flex flex-col items-center gap-3 text-center">
             <img src="/favicon.svg" alt="Otari" className="h-12 w-12" />
             <div>
-              <h1 className="text-lg font-semibold text-[var(--otari-ink)]">
+              <h1 className="text-lg font-semibold text-foreground">
                 Otari Dashboard
               </h1>
-              <p className="mt-1 text-sm text-[var(--otari-muted)]">
+              <p className="mt-1 text-sm text-muted">
                 Sign in with your master key to browse models, set pricing, and
                 manage settings.
               </p>
@@ -70,7 +70,7 @@ export function Login() {
               isRequired
               className="flex flex-col gap-1"
             >
-              <Label className="text-sm font-medium text-[var(--otari-ink)]">
+              <Label className="text-sm font-medium text-foreground">
                 Master key
               </Label>
               <Input
@@ -79,8 +79,8 @@ export function Login() {
                 autoComplete="off"
               />
             </TextField>
-            <details className="text-xs text-[var(--otari-muted)]">
-              <summary className="cursor-pointer font-medium text-[var(--otari-brand-dark)]">
+            <details className="text-xs text-muted">
+              <summary className="cursor-pointer font-medium text-link hover:text-link-hover">
                 First run? Where to find your key
               </summary>
               <p className="mt-2 leading-relaxed">
@@ -105,15 +105,15 @@ export function Login() {
             </Button>
           </form>
 
-          <p className="text-center text-xs text-[var(--otari-muted)]">
+          <p className="text-center text-xs text-muted">
             The key is sent once to this gateway and exchanged for a session
             cookie; it is never stored in the browser.
           </p>
 
-          <div className="border-t border-[var(--otari-line)] pt-4 text-center">
+          <div className="border-t border-border pt-4 text-center">
             <Link
               href="/welcome"
-              className="text-sm font-medium text-[var(--otari-brand-dark)]"
+              className="text-sm font-medium text-link hover:text-link-hover"
             >
               New to Otari? Open the welcome guide
             </Link>

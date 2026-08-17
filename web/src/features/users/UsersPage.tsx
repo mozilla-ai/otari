@@ -81,7 +81,7 @@ function BudgetSelect({
     <div className="flex flex-col gap-1">
       <label
         htmlFor="user-budget"
-        className="text-sm font-medium text-[var(--otari-ink)]"
+        className="text-sm font-medium text-foreground"
       >
         Budget
       </label>
@@ -89,7 +89,7 @@ function BudgetSelect({
         id="user-budget"
         value={value ?? ""}
         onChange={(e) => onChange(e.target.value || null)}
-        className="w-full rounded-lg border border-[var(--otari-line)] bg-[var(--otari-bg)] px-3 py-2 text-sm text-[var(--otari-ink)]"
+        className="w-full rounded-lg border border-border bg-surface-alt px-3 py-2 text-sm text-foreground"
       >
         <option value="">No budget (unlimited)</option>
         {budgets.map((b) => (
@@ -101,7 +101,7 @@ function BudgetSelect({
           </option>
         ))}
       </select>
-      <span className="text-xs text-[var(--otari-muted)]">
+      <span className="text-xs text-muted">
         The spending limit this user is held to. Manage budgets on the Budgets
         page.
       </span>
@@ -134,9 +134,7 @@ function CreateUserForm({ onClose }: { onClose: () => void }) {
   return (
     <Card>
       <Card.Content className="flex flex-col gap-4 p-5">
-        <div className="text-sm font-semibold text-[var(--otari-ink)]">
-          Create user
-        </div>
+        <div className="text-sm font-semibold text-foreground">Create user</div>
         <ErrorBanner error={create.error} />
         <div className="grid gap-4 sm:grid-cols-2">
           <Field
@@ -209,7 +207,7 @@ function EditUserForm({ user, onClose }: { user: User; onClose: () => void }) {
   return (
     <Card>
       <Card.Content className="flex flex-col gap-4 p-5">
-        <div className="text-sm font-semibold text-[var(--otari-ink)]">
+        <div className="text-sm font-semibold text-foreground">
           Edit <code>{user.user_id}</code>
         </div>
         <ErrorBanner error={update.error} />
@@ -274,8 +272,8 @@ function InlineConfirm({
     )
   }
   return (
-    <div className="flex flex-col items-end gap-1.5 rounded-lg border border-amber-200 bg-amber-50 p-2 text-right">
-      <span className="max-w-xs text-xs text-amber-800">{message}</span>
+    <div className="flex flex-col items-end gap-1.5 rounded-lg border border-warning bg-warning-subtle p-2 text-right">
+      <span className="max-w-xs text-xs text-warning">{message}</span>
       <span className="inline-flex gap-1">
         <Button
           size="sm"
@@ -316,10 +314,10 @@ function AccessChip({ allowed }: { allowed: string[] | null }) {
   const { text, tone } = accessLabel(allowed)
   const cls =
     tone === "danger"
-      ? "text-red-700 font-medium"
+      ? "text-danger font-medium"
       : tone === "muted"
-        ? "text-[var(--otari-muted)]"
-        : "text-[var(--otari-brand-dark)] font-medium"
+        ? "text-muted"
+        : "text-accent font-medium"
   const title = allowed && allowed.length > 0 ? allowed.join(", ") : undefined
   return (
     <span className={`text-xs ${cls}`} title={title}>
@@ -365,7 +363,7 @@ function AssignBudgetDialog({
                 <AlertDialog.Heading>Assign budget</AlertDialog.Heading>
               </AlertDialog.Header>
               <AlertDialog.Body className="flex flex-col gap-4">
-                <p className="text-sm text-[var(--otari-muted)]">
+                <p className="text-sm text-muted">
                   Assign a budget to {count} selected{" "}
                   {count === 1 ? "user" : "users"}.
                 </p>
@@ -483,7 +481,7 @@ export function UsersPage() {
               {/* The `user` field callers send, and the user_id every management
                 endpoint and usage filter takes. */}
               <CopyableValue value={u.user_id} label="user id">
-                <code className="text-xs font-medium text-[var(--otari-ink)]">
+                <code className="text-xs font-medium text-foreground">
                   {u.user_id}
                 </code>
               </CopyableValue>
@@ -494,9 +492,7 @@ export function UsersPage() {
               ) : null}
             </span>
             {u.alias ? (
-              <span className="text-xs text-[var(--otari-muted)]">
-                {u.alias}
-              </span>
+              <span className="text-xs text-muted">{u.alias}</span>
             ) : null}
           </div>
         ),
@@ -507,20 +503,20 @@ export function UsersPage() {
         header: "Budget",
         cell: (u) =>
           u.budget_id ? (
-            <span className="text-[var(--otari-muted)]" title={u.budget_id}>
+            <span className="text-muted" title={u.budget_id}>
               {budgetById.get(u.budget_id)
                 ? budgetLabel(budgetById.get(u.budget_id)!)
                 : shortId(u.budget_id)}
             </span>
           ) : (
-            <span className="text-[var(--otari-muted)]">—</span>
+            <span className="text-muted">—</span>
           ),
       },
       {
         id: "spend",
         header: "Spend",
         cell: (u) => (
-          <span className="text-[var(--otari-muted)]">
+          <span className="text-muted">
             {formatUSD(u.spend)}
             {u.reserved > 0 ? (
               <span> (+{formatUSD(u.reserved)} held)</span>
@@ -619,7 +615,7 @@ export function UsersPage() {
       ) : null}
 
       {virtualCount > 0 ? (
-        <label className="flex w-fit items-center gap-2 text-xs text-[var(--otari-muted)]">
+        <label className="flex w-fit items-center gap-2 text-xs text-muted">
           <input
             type="checkbox"
             checked={showVirtual}

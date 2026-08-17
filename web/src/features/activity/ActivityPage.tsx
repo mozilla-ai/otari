@@ -214,9 +214,7 @@ function InFlightControl({
             a pulse would suggest activity that is not there. */}
         <span
           className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full motion-reduce:animate-none ${
-            data.total > 0
-              ? "animate-pulse bg-[var(--otari-brand-dark)]"
-              : "bg-[var(--otari-muted)]"
+            data.total > 0 ? "animate-pulse bg-accent" : "bg-muted"
           }`}
           aria-hidden="true"
         />
@@ -228,12 +226,12 @@ function InFlightControl({
             <Popover.Heading className="text-sm font-medium">
               In flight
             </Popover.Heading>
-            <p className="text-xs text-[var(--otari-muted)]">
+            <p className="text-xs text-muted">
               Running right now, across the whole gateway; longest-running
               first. Not narrowed by the filters above.
             </p>
             {shown.length === 0 ? (
-              <p className="text-sm text-[var(--otari-muted)]">
+              <p className="text-sm text-muted">
                 Nothing running right now. Newly settled requests join the log
                 at the next refresh.
               </p>
@@ -246,7 +244,7 @@ function InFlightControl({
                   >
                     <span className="min-w-0">
                       <span className="block truncate">{request.model}</span>
-                      <span className="block truncate text-xs text-[var(--otari-muted)]">
+                      <span className="block truncate text-xs text-muted">
                         {request.user_id ?? "—"}
                         {request.policy_name ? ` · ${request.policy_name}` : ""}
                       </span>
@@ -261,7 +259,7 @@ function InFlightControl({
             {/* Only when the endpoint's cap actually bit, which takes more
                 concurrency than a live list can usefully show anyway. */}
             {hidden > 0 ? (
-              <p className="text-xs text-[var(--otari-muted)]">
+              <p className="text-xs text-muted">
                 {hidden.toLocaleString()} further{" "}
                 {hidden === 1 ? "request is" : "requests are"} in flight beyond
                 the {shown.length.toLocaleString()} listed.
@@ -285,8 +283,8 @@ const getActivityRowKey = (e: UsageEntry): string => e.id
 // out of error_count. Amber says "something happened here" without saying "this
 // request failed".
 const activityRowClassName = (e: UsageEntry): string | undefined => {
-  if (e.status === "error") return "bg-red-50"
-  if (e.status === "absorbed") return "bg-amber-50"
+  if (e.status === "error") return "bg-danger-subtle"
+  if (e.status === "absorbed") return "bg-warning-subtle"
   return undefined
 }
 
@@ -415,10 +413,10 @@ function resolveExtentWindow(
 function StatusPill({ status }: { status: string }) {
   const cls =
     status === "error"
-      ? "border-red-200 bg-red-50 text-red-700"
+      ? "border-danger bg-danger-subtle text-danger"
       : status === "absorbed"
-        ? "border-amber-200 bg-amber-50 text-amber-700"
-        : "border-[var(--otari-line)] bg-[var(--otari-brand-tint)] text-[var(--otari-brand-dark)]"
+        ? "border-warning bg-warning-subtle text-warning"
+        : "border-border bg-primary-subtle text-primary-subtle-foreground"
   return (
     <span
       className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium ${cls}`}
@@ -557,10 +555,14 @@ const TOKEN_SEGMENTS: {
   label: string
   fill: string
 }[] = [
-  { key: "fresh", label: "Fresh input", fill: "var(--otari-ink)" },
-  { key: "cacheRead", label: "Cache read", fill: "var(--otari-brand)" },
-  { key: "cacheWrite", label: "Cache write", fill: "var(--otari-brand-soft)" },
-  { key: "output", label: "Output", fill: "var(--otari-brand-dark)" },
+  { key: "fresh", label: "Fresh input", fill: "var(--color-chart-ramp-1)" },
+  { key: "cacheRead", label: "Cache read", fill: "var(--color-chart-ramp-3)" },
+  {
+    key: "cacheWrite",
+    label: "Cache write",
+    fill: "var(--color-chart-ramp-4)",
+  },
+  { key: "output", label: "Output", fill: "var(--color-chart-ramp-2)" },
 ]
 
 // The total plus a thin stacked bar of its composition. Widths are SVG rect
@@ -604,7 +606,7 @@ function TokenBar({ entry }: { entry: UsageEntry }) {
         preserveAspectRatio="none"
         role="img"
         aria-label={`Token composition: ${summary}`}
-        className="h-1.5 w-20 overflow-hidden rounded-full bg-[var(--otari-brand-tint)]"
+        className="h-1.5 w-20 overflow-hidden rounded-full bg-primary-subtle"
       >
         {rects
           .filter((rect) => rect.width > 0)
@@ -736,16 +738,14 @@ function RoutingCell({
   const sentence = attemptSentence(entry, outcome)
   return (
     <span className="flex flex-col leading-tight">
-      <span className="text-[var(--otari-ink)]">{entry.policy_name}</span>
+      <span className="text-foreground">{entry.policy_name}</span>
       {/* Non-color signal: the outcome is spelled out, so the amber row tint is
           never the only thing carrying the meaning. */}
       {/* Wraps rather than truncates: the tail is the part that matters (it names
           the model that served), and a qualified target is routinely longer than
           the column. The Model column wraps for the same reason. */}
       {sentence ? (
-        <span className="text-xs break-words text-[var(--otari-muted)]">
-          {sentence}
-        </span>
+        <span className="text-xs break-words text-muted">{sentence}</span>
       ) : null}
     </span>
   )
@@ -811,17 +811,17 @@ function RoutingPlan({ entry }: { entry: UsageEntry }) {
 
   return (
     <div className="flex flex-col gap-2">
-      <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--otari-muted)]">
+      <span className="text-[11px] font-medium uppercase tracking-wide text-muted">
         Routing plan · {entry.policy_name}
       </span>
-      <span className="text-sm text-[var(--otari-ink)]">{summary}</span>
-      <div className="overflow-x-auto rounded-lg border border-[var(--otari-line)]">
+      <span className="text-sm text-foreground">{summary}</span>
+      <div className="overflow-x-auto rounded-lg border border-border">
         <table
           className="w-full text-xs"
           aria-label={`Routing plan for policy ${entry.policy_name}`}
         >
-          <thead className="text-[var(--otari-muted)]">
-            <tr className="border-b border-[var(--otari-line)]">
+          <thead className="text-muted">
+            <tr className="border-b border-border">
               <th scope="col" className="px-3 py-2 text-left font-medium">
                 #
               </th>
@@ -849,19 +849,17 @@ function RoutingPlan({ entry }: { entry: UsageEntry }) {
             {attempts.map((attempt) => (
               <tr
                 key={attempt.id}
-                className={`border-t border-[var(--otari-line)] first:border-t-0 ${
-                  attempt.status === "success"
-                    ? "bg-[var(--otari-brand-tint)]"
-                    : ""
+                className={`border-t border-border first:border-t-0 ${
+                  attempt.status === "success" ? "bg-primary-subtle" : ""
                 }`}
               >
                 <td className="px-3 py-2 tabular-nums">
                   {attempt.attempt_position ?? "?"}
                 </td>
-                <td className="px-3 py-2 break-all text-[var(--otari-ink)]">
+                <td className="px-3 py-2 break-all text-foreground">
                   {pricingSelectorOf(attempt)}
                   {attempt.id === entry.id ? (
-                    <span className="ml-2 rounded-full border border-[var(--otari-line)] px-1.5 py-0.5 text-[10px] text-[var(--otari-muted)]">
+                    <span className="ml-2 rounded-full border border-border px-1.5 py-0.5 text-[10px] text-muted">
                       this row
                     </span>
                   ) : null}
@@ -870,7 +868,7 @@ function RoutingPlan({ entry }: { entry: UsageEntry }) {
                   {selectionReasonLabel(attempt.selection_reason) ?? "—"}
                 </td>
                 <td
-                  className={`px-3 py-2 ${attempt.status === "success" ? "" : "text-amber-700"}`}
+                  className={`px-3 py-2 ${attempt.status === "success" ? "" : "text-warning"}`}
                 >
                   {attemptOutcome(attempt)}
                 </td>
@@ -885,7 +883,7 @@ function RoutingPlan({ entry }: { entry: UsageEntry }) {
           </tbody>
         </table>
       </div>
-      <span className="text-xs text-[var(--otari-muted)]">
+      <span className="text-xs text-muted">
         Cost and tool charges settle on the attempt that served, so a failed
         attempt carries its tokens and no charge.
       </span>
@@ -911,21 +909,19 @@ function DetailField({
 }) {
   return (
     <div className="flex flex-col gap-0.5">
-      <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--otari-muted)]">
+      <span className="text-[11px] font-medium uppercase tracking-wide text-muted">
         {label}
       </span>
       {copyValue ? (
         <CopyableValue
           value={copyValue}
           label={copyLabel ?? label.toLowerCase()}
-          className="text-sm text-[var(--otari-ink)] break-all"
+          className="text-sm text-foreground break-all"
         >
           {children}
         </CopyableValue>
       ) : (
-        <span className="text-sm text-[var(--otari-ink)] break-all">
-          {children}
-        </span>
+        <span className="text-sm text-foreground break-all">{children}</span>
       )}
     </div>
   )
@@ -970,10 +966,10 @@ function RequestDetail({
     <div className="flex flex-col gap-4 px-4 py-4">
       {entry.error_message ? (
         <div className="flex flex-col gap-1.5">
-          <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--otari-muted)]">
+          <span className="text-[11px] font-medium uppercase tracking-wide text-muted">
             Error{entry.status_code !== null ? ` (${entry.status_code})` : ""}
           </span>
-          <pre className="max-h-48 overflow-auto rounded-lg border border-red-200 bg-red-50 p-3 text-xs whitespace-pre-wrap break-all text-red-700">
+          <pre className="max-h-48 overflow-auto rounded-lg border border-danger bg-danger-subtle p-3 text-xs whitespace-pre-wrap break-all text-danger">
             {entry.error_message}
           </pre>
         </div>
@@ -1027,7 +1023,7 @@ function RequestDetail({
             <DetailField label="Tool cost">
               {toolCost(entry) === null ? (
                 <span
-                  className="text-[var(--otari-warning-ink,var(--otari-muted))]"
+                  className="text-warning"
                   title="No per-request price is configured for this tool, so its calls were recorded at zero cost. Set one on the Tools & Guardrails screen."
                 >
                   unpriced
@@ -1063,7 +1059,7 @@ function RequestDetail({
           >
             Price this model
           </Button>
-          <span className="text-xs text-[var(--otari-muted)]">
+          <span className="text-xs text-muted">
             This request carries no cost. Set a price for{" "}
             <code className="break-all">{pricingKey}</code> so later requests
             are metered and count against budgets. Rows already logged keep the
@@ -1073,7 +1069,7 @@ function RequestDetail({
       ) : null}
       {entry.pricing_breakdown?.length ? (
         <div className="flex flex-col gap-2">
-          <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--otari-muted)]">
+          <span className="text-[11px] font-medium uppercase tracking-wide text-muted">
             Billed meters
           </span>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
@@ -1691,8 +1687,8 @@ export function ActivityPage() {
   const renderDetail = useCallback(
     (entry: UsageEntry) => (
       <div>
-        <div className="flex items-center justify-between border-b border-[var(--otari-line)] px-4 py-2">
-          <span className="text-sm font-medium text-[var(--otari-ink)]">
+        <div className="flex items-center justify-between border-b border-border px-4 py-2">
+          <span className="text-sm font-medium text-foreground">
             Request detail
           </span>
           <Button size="sm" variant="ghost" onPress={() => setExpandedId(null)}>
@@ -1838,10 +1834,7 @@ export function ActivityPage() {
         id: "time",
         header: "Time",
         cell: (e) => (
-          <span
-            title={absolute(e.timestamp)}
-            className="text-[var(--otari-muted)]"
-          >
+          <span title={absolute(e.timestamp)} className="text-muted">
             {timeAgo(e.timestamp)}
           </span>
         ),
@@ -1868,7 +1861,7 @@ export function ActivityPage() {
                   the count inside is a summary of it. */}
               <span
                 role="img"
-                className="inline-flex items-center rounded-full border border-[var(--otari-line)] bg-[var(--otari-brand-tint)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--otari-brand-dark)]"
+                className="inline-flex items-center rounded-full border border-border bg-primary-subtle px-1.5 py-0.5 text-[11px] font-medium text-primary-subtle-foreground"
                 title={detail}
                 aria-label={`Gateway tools: ${detail}`}
               >
@@ -1895,9 +1888,7 @@ export function ActivityPage() {
       {
         id: "api_key",
         header: "API key",
-        cell: (e) => (
-          <span className="text-[var(--otari-muted)]">{apiKeyLabel(e)}</span>
-        ),
+        cell: (e) => <span className="text-muted">{apiKeyLabel(e)}</span>,
       },
       {
         id: "tokens",
@@ -1987,7 +1978,7 @@ export function ActivityPage() {
               ) : null}
               {newRowsUnknown ? (
                 <span
-                  className="text-xs text-[var(--otari-muted)]"
+                  className="text-xs text-muted"
                   title="The row count could not be read, so this page cannot tell whether newer requests have landed. Refresh to load whatever is there."
                 >
                   Newer rows unknown

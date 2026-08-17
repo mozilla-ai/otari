@@ -127,9 +127,7 @@ function PeriodPicker({
 
   return (
     <div className="flex flex-col gap-2">
-      <span className="text-sm font-medium text-[var(--otari-ink)]">
-        Reset period
-      </span>
+      <span className="text-sm font-medium text-foreground">Reset period</span>
       <div className="flex flex-wrap gap-2">
         {PERIOD_PRESETS.map((preset) => (
           <Button
@@ -176,7 +174,7 @@ function PeriodPicker({
             placeholder="14"
             description={
               invalidDays ? (
-                <span className="text-red-700">
+                <span className="text-danger">
                   Enter a whole number of days.
                 </span>
               ) : (
@@ -186,7 +184,7 @@ function PeriodPicker({
           />
         </div>
       ) : null}
-      <span className="text-xs text-[var(--otari-muted)]">
+      <span className="text-xs text-muted">
         Spend returns to zero each period. A user&rsquo;s clock starts when the
         budget is assigned to them.
       </span>
@@ -251,9 +249,7 @@ function BudgetForm({
   return (
     <Card>
       <Card.Content className="flex flex-col gap-4 p-5">
-        <div className="text-sm font-semibold text-[var(--otari-ink)]">
-          {title}
-        </div>
+        <div className="text-sm font-semibold text-foreground">{title}</div>
         <ErrorBanner error={error} />
         <Field
           label="Name (optional)"
@@ -272,7 +268,7 @@ function BudgetForm({
             parsed.valid ? (
               "The most a single user on this budget may spend per period. Leave blank for no limit."
             ) : (
-              <span className="text-red-700">
+              <span className="text-danger">
                 Enter a non-negative number, or leave blank for no limit.
               </span>
             )
@@ -312,18 +308,14 @@ function BudgetForm({
 // collectively allowed (cap × users). A bar only when both are meaningful.
 function UsageCell({ budget }: { budget: Budget }) {
   if (budget.user_count === 0) {
-    return (
-      <span className="text-xs text-[var(--otari-muted)]">
-        No users assigned
-      </span>
-    )
+    return <span className="text-xs text-muted">No users assigned</span>
   }
   const spent = budget.total_spend
   if (budget.max_budget === null) {
     return (
-      <span className="text-xs text-[var(--otari-ink)]">
+      <span className="text-xs text-foreground">
         {formatUSD(spent)} spent
-        <span className="text-[var(--otari-muted)]"> · no limit</span>
+        <span className="text-muted"> · no limit</span>
       </span>
     )
   }
@@ -333,13 +325,11 @@ function UsageCell({ budget }: { budget: Budget }) {
   return (
     <div className="flex min-w-[140px] flex-col gap-1">
       <div className="flex items-baseline justify-between gap-2 text-xs">
-        <span className="text-[var(--otari-ink)]">{formatUSD(spent)}</span>
-        <span className="text-[var(--otari-muted)]">
-          of {formatUSD(allocated)}
-        </span>
+        <span className="text-foreground">{formatUSD(spent)}</span>
+        <span className="text-muted">of {formatUSD(allocated)}</span>
       </div>
       <div
-        className="h-1.5 w-full overflow-hidden rounded-full bg-[var(--otari-line)]"
+        className="h-1.5 w-full overflow-hidden rounded-full bg-surface-subtle"
         role="progressbar"
         aria-valuenow={Math.round(pct)}
         aria-valuemin={0}
@@ -347,7 +337,7 @@ function UsageCell({ budget }: { budget: Budget }) {
         aria-label="Aggregate spend against total allocation"
       >
         <div
-          className={`h-full rounded-full ${over ? "bg-red-500" : "bg-[var(--otari-brand)]"}`}
+          className={`h-full rounded-full ${over ? "bg-danger" : "bg-accent"}`}
           style={{ width: `${Math.max(pct, over ? 100 : 2)}%` }}
         />
       </div>
@@ -362,7 +352,7 @@ function ResetHistory({ budgetId }: { budgetId: string }) {
 
   if (logs.isLoading) {
     return (
-      <div className="flex items-center gap-2 px-4 py-4 text-sm text-[var(--otari-muted)]">
+      <div className="flex items-center gap-2 px-4 py-4 text-sm text-muted">
         <Spinner size="sm" /> Loading reset history…
       </div>
     )
@@ -377,7 +367,7 @@ function ResetHistory({ budgetId }: { budgetId: string }) {
   const rows = logs.data ?? []
   if (rows.length === 0) {
     return (
-      <div className="px-4 py-4 text-sm text-[var(--otari-muted)]">
+      <div className="px-4 py-4 text-sm text-muted">
         No resets recorded yet for this budget.
       </div>
     )
@@ -385,7 +375,7 @@ function ResetHistory({ budgetId }: { budgetId: string }) {
   return (
     <div className="overflow-x-auto px-4 py-3">
       <table className="w-full border-collapse text-xs">
-        <thead className="text-left text-[var(--otari-muted)]">
+        <thead className="text-left text-muted">
           <tr>
             <th className="py-1.5 pr-4 font-medium">User</th>
             <th className="py-1.5 pr-4 font-medium">Spend cleared</th>
@@ -395,17 +385,17 @@ function ResetHistory({ budgetId }: { budgetId: string }) {
         </thead>
         <tbody>
           {rows.map((log: BudgetResetLog) => (
-            <tr key={log.id} className="border-t border-[var(--otari-line)]">
+            <tr key={log.id} className="border-t border-border">
               <td className="py-1.5 pr-4">
                 <code>{log.user_id ?? "—"}</code>
               </td>
-              <td className="py-1.5 pr-4 text-[var(--otari-ink)]">
+              <td className="py-1.5 pr-4 text-foreground">
                 {formatUSD(log.previous_spend)}
               </td>
-              <td className="py-1.5 pr-4 text-[var(--otari-muted)]">
+              <td className="py-1.5 pr-4 text-muted">
                 {absolute(log.reset_at)}
               </td>
-              <td className="py-1.5 text-[var(--otari-muted)]">
+              <td className="py-1.5 text-muted">
                 {absolute(log.next_reset_at)}
               </td>
             </tr>
@@ -439,8 +429,8 @@ function InlineDelete({
     )
   }
   return (
-    <div className="flex flex-col items-end gap-1.5 rounded-lg border border-amber-200 bg-amber-50 p-2 text-right">
-      <span className="max-w-xs text-xs text-amber-800">
+    <div className="flex flex-col items-end gap-1.5 rounded-lg border border-warning bg-warning-subtle p-2 text-right">
+      <span className="max-w-xs text-xs text-warning">
         Delete <strong>{label}</strong>? Users keep their spend but lose this
         limit. Cannot be undone.
       </span>
@@ -539,18 +529,13 @@ export function BudgetsPage() {
         isRowHeader: true,
         cell: (b) => (
           <div className="flex flex-col gap-0.5">
-            <span className="font-medium text-[var(--otari-ink)]">
-              {b.name ?? (
-                <span className="text-[var(--otari-muted)]">(unnamed)</span>
-              )}
+            <span className="font-medium text-foreground">
+              {b.name ?? <span className="text-muted">(unnamed)</span>}
             </span>
             {/* Only a prefix is rendered, so the id an API call needs is not on the
               page in full; the copy hands over the whole thing. */}
             <CopyableValue value={b.budget_id} label="budget id">
-              <code
-                className="text-[11px] text-[var(--otari-muted)]"
-                title={b.budget_id}
-              >
+              <code className="text-[11px] text-muted" title={b.budget_id}>
                 {shortId(b.budget_id)}
               </code>
             </CopyableValue>
@@ -562,7 +547,7 @@ export function BudgetsPage() {
         header: "Limit (per user)",
         cell: (b) =>
           b.max_budget === null ? (
-            <span className="text-[var(--otari-muted)]">Unlimited</span>
+            <span className="text-muted">Unlimited</span>
           ) : (
             formatUSD(b.max_budget)
           ),
@@ -571,7 +556,7 @@ export function BudgetsPage() {
         id: "reset",
         header: "Reset",
         cell: (b) => (
-          <span className="text-[var(--otari-muted)]">
+          <span className="text-muted">
             {formatDuration(b.budget_duration_sec)}
           </span>
         ),
@@ -579,9 +564,7 @@ export function BudgetsPage() {
       {
         id: "users",
         header: "Users",
-        cell: (b) => (
-          <span className="text-[var(--otari-muted)]">{b.user_count}</span>
-        ),
+        cell: (b) => <span className="text-muted">{b.user_count}</span>,
       },
       { id: "usage", header: "Usage", cell: (b) => <UsageCell budget={b} /> },
       {
@@ -804,8 +787,8 @@ export function BudgetsPage() {
       {historyBudget ? (
         <Card>
           <Card.Content className="p-0">
-            <div className="flex items-center justify-between border-b border-[var(--otari-line)] px-4 py-2">
-              <span className="text-sm font-medium text-[var(--otari-ink)]">
+            <div className="flex items-center justify-between border-b border-border px-4 py-2">
+              <span className="text-sm font-medium text-foreground">
                 Reset history — {budgetLabel(historyBudget)}
               </span>
               <Button

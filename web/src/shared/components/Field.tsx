@@ -1,9 +1,3 @@
-// MIGRATION BRIDGE. Hand-rolled and predating the design foundation rehomed from
-// otari-ai/frontend (src/styles/globals.css, src/shared/components/ui/). This file
-// keeps its `--otari-*` colors so the pages built on it keep rendering, and it
-// leaves with the last of them. Reuse it rather than duplicating its markup, but
-// do not extend it and do not build a new page on it: new work composes
-// @heroui/react with the semantic tokens. See ../../../AGENTS.md.
 import { Description, Input, Label, TextField } from "@heroui/react"
 import type { ReactNode } from "react"
 
@@ -38,16 +32,12 @@ export function Field({
     >
       {/* No manual "*": HeroUI marks a required field's label through CSS
           ([data-required=true] > .label::after), so adding one renders two. */}
-      <Label className="text-sm font-medium text-[var(--otari-ink)]">
-        {label}
-      </Label>
+      <Label className="text-sm font-medium text-foreground">{label}</Label>
       <Input type={type} placeholder={placeholder} autoFocus={autoFocus} />
       {description ? (
         // HeroUI's Description renders through the TextField's "description" slot,
         // so it is wired to the input via aria-describedby (a raw span is not).
-        <Description className="text-xs text-[var(--otari-muted)]">
-          {description}
-        </Description>
+        <Description className="text-xs text-muted">{description}</Description>
       ) : null}
     </TextField>
   )

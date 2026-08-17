@@ -135,14 +135,12 @@ function CopyField({
   }
 
   const shared =
-    "w-full rounded-lg border border-[var(--otari-line)] bg-[var(--otari-bg)] px-3 py-2 font-mono text-xs text-[var(--otari-ink)]"
+    "w-full rounded-lg border border-border bg-surface-alt px-3 py-2 font-mono text-xs text-foreground"
 
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-[var(--otari-muted)]">
-          {label}
-        </span>
+        <span className="text-xs font-medium text-muted">{label}</span>
         <Button size="sm" variant="outline" onPress={copy}>
           {copied ? "Copied" : "Copy"}
         </Button>
@@ -166,11 +164,11 @@ function CopyField({
         />
       )}
       {/* Announce only the "Copied" event, never the secret itself. */}
-      <span aria-live="polite" className="text-xs text-green-700">
+      <span aria-live="polite" className="text-xs text-success">
         {copied ? "Copied to clipboard." : ""}
       </span>
       {selectHint ? (
-        <span className="text-xs text-[var(--otari-muted)]">
+        <span className="text-xs text-muted">
           Selected. Press Ctrl/Cmd-C to copy.
         </span>
       ) : null}
@@ -242,7 +240,7 @@ function RevealSecretModal({
 
   return (
     <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-black/40 p-4"
+      className="fixed inset-0 z-50 flex items-center justify-center bg-backdrop/40 p-4"
       role="presentation"
     >
       <div
@@ -251,28 +249,25 @@ function RevealSecretModal({
         aria-modal="true"
         aria-labelledby="reveal-title"
         onKeyDown={onKeyDown}
-        className="flex max-h-[90vh] w-full max-w-2xl flex-col gap-4 overflow-y-auto rounded-xl bg-[var(--otari-surface)] p-6 shadow-xl"
+        className="flex max-h-[90vh] w-full max-w-2xl flex-col gap-4 overflow-y-auto rounded-xl bg-surface p-6 shadow-xl"
       >
-        <h2
-          id="reveal-title"
-          className="text-lg font-semibold text-[var(--otari-ink)]"
-        >
+        <h2 id="reveal-title" className="text-lg font-semibold text-foreground">
           {title}
         </h2>
         <InfoBanner tone="warning">
           Copy this key now. For security it is shown only once and cannot be
           retrieved later. If you lose it, use Regenerate to issue a new secret.
         </InfoBanner>
-        <p className="text-xs text-[var(--otari-muted)]">
+        <p className="text-xs text-muted">
           Model access: {accessLabel(result.allowed_models).text}.
         </p>
         <CopyField label="Secret key" value={secret} fieldRef={secretRef} />
         <div className="flex flex-col gap-2">
           <div>
-            <div className="text-sm font-medium text-[var(--otari-ink)]">
+            <div className="text-sm font-medium text-foreground">
               Make your first call
             </div>
-            <p className="text-xs text-[var(--otari-muted)]">
+            <p className="text-xs text-muted">
               Replace <code>your-model</code> with a model from the Models page.
             </p>
           </div>
@@ -315,8 +310,8 @@ function InlineConfirm({
   }
 
   return (
-    <div className="flex flex-col items-end gap-1.5 rounded-lg border border-amber-200 bg-amber-50 p-2 text-right">
-      <span className="max-w-xs text-xs text-amber-800">{message}</span>
+    <div className="flex flex-col items-end gap-1.5 rounded-lg border border-warning bg-warning-subtle p-2 text-right">
+      <span className="max-w-xs text-xs text-warning">{message}</span>
       <span className="inline-flex gap-1">
         <Button
           size="sm"
@@ -347,7 +342,7 @@ function OwnerAccessNote({ userId, users }: { userId: string; users: User[] }) {
   const id = userId.trim()
   if (id === "") {
     return (
-      <p className="text-xs text-[var(--otari-muted)]">
+      <p className="text-xs text-muted">
         Choose an owner above to see the models this key can inherit.
       </p>
     )
@@ -355,7 +350,7 @@ function OwnerAccessNote({ userId, users }: { userId: string; users: User[] }) {
   const owner = users.find((u) => u.user_id === id)
   if (!owner) {
     return (
-      <p className="text-xs text-[var(--otari-muted)]">
+      <p className="text-xs text-muted">
         New user <code>{id}</code> starts unrestricted, so this key may allow
         any model.
       </p>
@@ -367,11 +362,9 @@ function OwnerAccessNote({ userId, users }: { userId: string; users: User[] }) {
       ? owner.allowed_models.join(", ")
       : null
   return (
-    <p className="text-xs text-[var(--otari-muted)]">
+    <p className="text-xs text-muted">
       Owner <code>{id}</code> allows{" "}
-      <span className="font-medium text-[var(--otari-ink)]">
-        {text.toLowerCase()}
-      </span>
+      <span className="font-medium text-foreground">{text.toLowerCase()}</span>
       {entries ? (
         <>
           {" ("}
@@ -394,19 +387,17 @@ function BudgetExemptToggle({
   onChange: (value: boolean) => void
 }) {
   return (
-    <label className="flex items-start gap-2 rounded-lg border border-[var(--otari-line)] p-3 text-sm">
+    <label className="flex items-start gap-2 rounded-lg border border-border p-3 text-sm">
       <input
         type="checkbox"
         checked={checked}
         onChange={(e) => onChange(e.target.checked)}
-        className="mt-0.5 h-4 w-4 accent-[var(--otari-brand)]"
+        className="mt-0.5 h-4 w-4 accent-accent"
         aria-label="Exempt this key from budget"
       />
       <span className="flex flex-col gap-0.5">
-        <span className="font-medium text-[var(--otari-ink)]">
-          Exempt from budget
-        </span>
-        <span className="text-xs text-[var(--otari-muted)]">
+        <span className="font-medium text-foreground">Exempt from budget</span>
+        <span className="text-xs text-muted">
           Requests on this key are logged with their cost but never counted
           toward the owner&apos;s budget or spend, and never blocked by it.
         </span>
@@ -428,10 +419,7 @@ function UserMismatchPicker({
   const selectId = "key-reject-user-mismatch"
   return (
     <div className="flex flex-col gap-1">
-      <label
-        htmlFor={selectId}
-        className="text-sm font-medium text-[var(--otari-ink)]"
-      >
+      <label htmlFor={selectId} className="text-sm font-medium text-foreground">
         Mismatched <code>user</code> field
       </label>
       <select
@@ -442,13 +430,13 @@ function UserMismatchPicker({
             e.target.value === "inherit" ? null : e.target.value === "reject",
           )
         }
-        className="w-full rounded-lg border border-[var(--otari-line)] bg-[var(--otari-bg)] px-3 py-2 text-sm text-[var(--otari-ink)]"
+        className="w-full rounded-lg border border-border bg-surface-alt px-3 py-2 text-sm text-foreground"
       >
         <option value="inherit">Use the deployment setting (default)</option>
         <option value="reject">Always reject (403)</option>
         <option value="accept">Always accept</option>
       </select>
-      <span className="text-xs text-[var(--otari-muted)]">
+      <span className="text-xs text-muted">
         What happens when a request on this key names a different{" "}
         <code>user</code> than its owner. Accept it for clients that send
         telemetry there rather than an identity, such as Claude Code. Spend
@@ -508,7 +496,7 @@ function CreateKeyForm({
   return (
     <Card>
       <Card.Content className="flex flex-col gap-4 p-5">
-        <div className="text-sm font-semibold text-[var(--otari-ink)]">
+        <div className="text-sm font-semibold text-foreground">
           Create API key
         </div>
         <ErrorBanner error={create.error} />
@@ -528,7 +516,7 @@ function CreateKeyForm({
             type="datetime-local"
             description={
               expiresInPast ? (
-                <span className="text-red-700">
+                <span className="text-danger">
                   That time is in the past; the key would be rejected
                   immediately.
                 </span>
@@ -545,13 +533,13 @@ function CreateKeyForm({
         />
         <button
           type="button"
-          className="self-start text-xs font-medium text-[var(--otari-brand-dark)]"
+          className="self-start text-xs font-medium text-link hover:text-link-hover"
           onClick={() => setShowAdvanced((v) => !v)}
         >
           {showAdvanced ? "Hide advanced" : "Advanced"}
         </button>
         {showAdvanced ? (
-          <div className="flex flex-col gap-4 rounded-lg border border-[var(--otari-line)] p-4">
+          <div className="flex flex-col gap-4 rounded-lg border border-border p-4">
             <OwnerAccessNote userId={userId} users={users.data ?? []} />
             <ModelScopeControl
               title="Restrict this key's models"
@@ -632,7 +620,7 @@ function EditKeyForm({
   return (
     <Card>
       <Card.Content className="flex flex-col gap-4 p-5">
-        <div className="text-sm font-semibold text-[var(--otari-ink)]">
+        <div className="text-sm font-semibold text-foreground">
           Edit <code>{apiKey.key_name ?? apiKey.id}</code>
         </div>
         <ErrorBanner error={update.error} />
@@ -717,10 +705,10 @@ function AccessChip({ allowed }: { allowed: string[] | null }) {
   const { text, tone } = accessLabel(allowed)
   const cls =
     tone === "danger"
-      ? "text-red-700 font-medium"
+      ? "text-danger font-medium"
       : tone === "muted"
-        ? "text-[var(--otari-muted)]"
-        : "text-[var(--otari-brand-dark)] font-medium"
+        ? "text-muted"
+        : "text-accent font-medium"
   // Surface the exact entries on hover; the count would mislead (a wildcard is many).
   const title = allowed && allowed.length > 0 ? allowed.join(", ") : undefined
   return (
@@ -804,16 +792,14 @@ export function KeysPage() {
         isRowHeader: true,
         cell: (k) => (
           <div className="flex flex-col gap-0.5">
-            <span className="font-medium text-[var(--otari-ink)]">
-              {k.key_name ?? (
-                <span className="text-[var(--otari-muted)]">(unnamed)</span>
-              )}
+            <span className="font-medium text-foreground">
+              {k.key_name ?? <span className="text-muted">(unnamed)</span>}
             </span>
             <div className="flex flex-wrap items-center gap-1">
               <AccessChip allowed={k.allowed_models} />
               {k.exclude_from_budget ? (
                 <span
-                  className="inline-flex items-center rounded-full border border-[var(--otari-line)] bg-[var(--otari-brand-tint)] px-2 py-0.5 text-xs font-medium text-[var(--otari-brand-dark)]"
+                  className="inline-flex items-center rounded-full border border-border bg-primary-subtle px-2 py-0.5 text-xs font-medium text-primary-subtle-foreground"
                   title="Requests on this key are logged with cost but never counted toward budget"
                 >
                   Budget-exempt
@@ -821,7 +807,7 @@ export function KeysPage() {
               ) : null}
               {k.reject_user_mismatch === null ? null : (
                 <span
-                  className="inline-flex items-center rounded-full border border-[var(--otari-line)] bg-[var(--otari-brand-tint)] px-2 py-0.5 text-xs font-medium text-[var(--otari-brand-dark)]"
+                  className="inline-flex items-center rounded-full border border-border bg-primary-subtle px-2 py-0.5 text-xs font-medium text-primary-subtle-foreground"
                   title={
                     k.reject_user_mismatch
                       ? "This key always rejects a request naming a different user, whatever the deployment setting says"
@@ -849,16 +835,14 @@ export function KeysPage() {
               virtual
             </Chip>
           ) : (
-            <code className="text-xs text-[var(--otari-muted)]">
-              {k.user_id ?? "—"}
-            </code>
+            <code className="text-xs text-muted">{k.user_id ?? "—"}</code>
           ),
       },
       {
         id: "key",
         header: "Key",
         cell: (k) => (
-          <code className="text-xs text-[var(--otari-muted)]">
+          <code className="text-xs text-muted">
             {k.key_prefix ? `${k.key_prefix}…` : "—"}
           </code>
         ),
@@ -867,16 +851,14 @@ export function KeysPage() {
         id: "created",
         header: "Created",
         cell: (k) => (
-          <span className="text-[var(--otari-muted)]">
-            {absolute(k.created_at)}
-          </span>
+          <span className="text-muted">{absolute(k.created_at)}</span>
         ),
       },
       {
         id: "last_used",
         header: "Last used",
         cell: (k) => (
-          <span className="text-[var(--otari-muted)]">
+          <span className="text-muted">
             {relative(k.last_used_at) ?? "never"}
           </span>
         ),
@@ -886,7 +868,7 @@ export function KeysPage() {
         header: "Expires",
         cell: (k) => (
           <span
-            className="text-[var(--otari-muted)]"
+            className="text-muted"
             title={
               k.expires_at ? new Date(k.expires_at).toLocaleString() : undefined
             }

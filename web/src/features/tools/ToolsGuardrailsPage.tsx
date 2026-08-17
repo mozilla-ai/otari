@@ -101,7 +101,7 @@ function SaveToast({ message }: { message: string | null }) {
     <div
       role="status"
       aria-live="polite"
-      className="fixed right-4 bottom-4 z-50 flex items-center gap-2 rounded-lg border border-green-200 bg-green-50 px-4 py-3 text-sm font-medium text-green-700 shadow-lg"
+      className="fixed right-4 bottom-4 z-50 flex items-center gap-2 rounded-lg border border-success bg-success-subtle px-4 py-3 text-sm font-medium text-success shadow-lg"
     >
       <svg
         viewBox="0 0 24 24"
@@ -123,7 +123,7 @@ function SaveToast({ message }: { message: string | null }) {
 }
 
 const INPUT_CLASS =
-  "rounded-md border border-[var(--otari-line)] bg-[var(--otari-surface)] px-2 py-1 text-sm focus:border-[var(--otari-brand)] focus:outline-none disabled:opacity-50"
+  "rounded-md border border-border bg-surface px-2 py-1 text-sm focus:border-accent focus:outline-none disabled:opacity-50"
 
 // Every field renders as one grid row with three fixed-width tracks:
 // label | input (16rem) | actions (10rem). Because the input and action tracks
@@ -144,7 +144,7 @@ const MESSAGE_CELL = "flex flex-col gap-1 sm:col-span-2 sm:col-start-2"
 
 function SaveError({ message }: { message?: string }) {
   if (!message) return null
-  return <span className="break-words text-xs text-red-700">{message}</span>
+  return <span className="break-words text-xs text-danger">{message}</span>
 }
 
 function FieldLabel({
@@ -156,17 +156,11 @@ function FieldLabel({
 }) {
   return (
     <div className="min-w-0 sm:col-start-1">
-      <code className="text-sm font-medium text-[var(--otari-ink)]">
-        {field.key}
-      </code>
+      <code className="text-sm font-medium text-foreground">{field.key}</code>
       {field.description ? (
-        <p className="mt-1 text-sm text-[var(--otari-muted)]">
-          {field.description}
-        </p>
+        <p className="mt-1 text-sm text-muted">{field.description}</p>
       ) : null}
-      {help ? (
-        <p className="mt-1 text-xs text-[var(--otari-muted)]">{help}</p>
-      ) : null}
+      {help ? <p className="mt-1 text-xs text-muted">{help}</p> : null}
     </div>
   )
 }
@@ -253,11 +247,11 @@ function UrlRow({
           className="block break-words text-xs"
         >
           {test.isPending || !resultMatches ? null : test.error ? (
-            <span className="text-red-700">{errorMessage(test.error)}</span>
+            <span className="text-danger">{errorMessage(test.error)}</span>
           ) : test.data ? (
             <span
               className={
-                test.data.ok ? "font-medium text-green-700" : "text-red-700"
+                test.data.ok ? "font-medium text-success" : "text-danger"
               }
             >
               {test.data.reason}
@@ -427,10 +421,10 @@ function ToolPriceRow({
   return (
     <div className={ROW_CLASS}>
       <div className="flex flex-col gap-0.5">
-        <span className="text-sm font-medium text-[var(--otari-ink)]">
+        <span className="text-sm font-medium text-foreground">
           Price per call
         </span>
-        <span className="text-xs text-[var(--otari-muted)]">
+        <span className="text-xs text-muted">
           {configured === null ? (
             <>
               Not priced. Calls are recorded but billed nothing, and with{" "}
@@ -447,7 +441,7 @@ function ToolPriceRow({
         </span>
       </div>
       <div className="flex items-center gap-1.5 sm:col-start-2 sm:justify-self-end">
-        <span className="text-xs text-[var(--otari-muted)]">USD</span>
+        <span className="text-xs text-muted">USD</span>
         <input
           type="number"
           min="0"
@@ -539,32 +533,30 @@ function HowToCallCard({ tool }: { tool: ManagedTool }) {
   return (
     <div className="flex flex-col gap-3 py-4">
       <div className="flex flex-wrap items-center gap-2">
-        <code className="text-sm font-medium text-[var(--otari-ink)]">
-          {tool.id}
-        </code>
+        <code className="text-sm font-medium text-foreground">{tool.id}</code>
         {tool.available ? null : (
-          <span className="rounded-full border border-amber-200 bg-amber-50 px-2 py-0.5 text-xs font-medium text-amber-700">
+          <span className="rounded-full border border-warning bg-warning-subtle px-2 py-0.5 text-xs font-medium text-warning">
             No backend configured
           </span>
         )}
       </div>
-      <p className="text-sm text-[var(--otari-muted)]">{tool.description}</p>
+      <p className="text-sm text-muted">{tool.description}</p>
       <div className="flex flex-col gap-1">
-        <span className="text-xs font-medium text-[var(--otari-ink)]">
+        <span className="text-xs font-medium text-foreground">
           Accepted tools[].type
         </span>
         <div className="flex flex-wrap gap-1.5">
           {tool.accepted_types.map((type) => (
             <code
               key={type}
-              className="rounded border border-[var(--otari-line)] bg-[var(--otari-surface)] px-1.5 py-0.5 text-xs"
+              className="rounded border border-border bg-surface px-1.5 py-0.5 text-xs"
             >
               {type}
             </code>
           ))}
         </div>
       </div>
-      <pre className="overflow-x-auto rounded-md border border-[var(--otari-line)] bg-[var(--otari-surface)] p-3 text-xs">
+      <pre className="overflow-x-auto rounded-md border border-border bg-surface p-3 text-xs">
         <code>{`POST /v1/chat/completions\n${JSON.stringify(request, null, 2)}`}</code>
       </pre>
     </div>
@@ -723,14 +715,12 @@ export function ToolsGuardrailsPage() {
         return (
           <Fragment key={service.key}>
             <section className="flex flex-col gap-2">
-              <h2 className="text-sm font-semibold text-[var(--otari-ink)]">
+              <h2 className="text-sm font-semibold text-foreground">
                 {service.label}
               </h2>
-              <p className="text-sm text-[var(--otari-muted)]">
-                {service.blurb}
-              </p>
+              <p className="text-sm text-muted">{service.blurb}</p>
               <Card>
-                <Card.Content className="flex flex-col divide-y divide-[var(--otari-line)] px-5 py-1">
+                <Card.Content className="flex flex-col divide-y divide-border px-5 py-1">
                   {service.pricingKey ? (
                     <ToolPriceRow
                       pricingKey={service.pricingKey}

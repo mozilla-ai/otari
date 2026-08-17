@@ -301,8 +301,8 @@ function ScopePicker({
       onClick={() => onChange(value ? "" : null)}
       className={
         scoped === value
-          ? "rounded-md bg-white px-3 py-1.5 text-sm font-medium text-[var(--otari-ink)] shadow-sm"
-          : "rounded-md px-3 py-1.5 text-sm text-[var(--otari-muted)] hover:text-[var(--otari-ink)]"
+          ? "rounded-md bg-surface px-3 py-1.5 text-sm font-medium text-foreground shadow-sm"
+          : "rounded-md px-3 py-1.5 text-sm text-muted hover:text-foreground"
       }
     >
       {label}
@@ -312,16 +312,14 @@ function ScopePicker({
   return (
     <div className="flex flex-col gap-3">
       <div>
-        <span className="text-sm font-medium text-[var(--otari-ink)]">
-          Applies to
-        </span>
-        <p className="text-xs text-[var(--otari-muted)]">
+        <span className="text-sm font-medium text-foreground">Applies to</span>
+        <p className="text-xs text-muted">
           A global policy resolves for every caller. A user-scoped one resolves
           only for that user, and takes precedence over a global policy of the
           same name.
         </p>
       </div>
-      <div className="flex w-fit items-center gap-1 rounded-lg bg-[var(--otari-bg)] p-1">
+      <div className="flex w-fit items-center gap-1 rounded-lg bg-surface-alt p-1">
         {modeButton(false, "Every caller")}
         {modeButton(true, "One user")}
       </div>
@@ -334,7 +332,7 @@ function ScopePicker({
           placeholder="Pick a user…"
           description="Only this user resolves the policy."
           unknownHint={
-            <span className="text-red-700">
+            <span className="text-danger">
               No such user. Pick an existing one.
             </span>
           }
@@ -362,10 +360,8 @@ function ModeToggle({
 }) {
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-sm font-medium text-[var(--otari-ink)]">
-        {label}
-      </span>
-      <div className="flex w-fit items-center gap-1 rounded-lg bg-[var(--otari-bg)] p-1">
+      <span className="text-sm font-medium text-foreground">{label}</span>
+      <div className="flex w-fit items-center gap-1 rounded-lg bg-surface-alt p-1">
         {MODE_VALUES.map((mode) => (
           <button
             key={mode}
@@ -374,8 +370,8 @@ function ModeToggle({
             onClick={() => onChange(mode)}
             className={
               value === mode
-                ? "rounded-md bg-white px-3 py-1 text-sm font-medium text-[var(--otari-ink)] shadow-sm"
-                : "rounded-md px-3 py-1 text-sm text-[var(--otari-muted)] hover:text-[var(--otari-ink)]"
+                ? "rounded-md bg-surface px-3 py-1 text-sm font-medium text-foreground shadow-sm"
+                : "rounded-md px-3 py-1 text-sm text-muted hover:text-foreground"
             }
           >
             {mode}
@@ -383,7 +379,7 @@ function ModeToggle({
         ))}
       </div>
       {hint === undefined ? null : (
-        <span className="text-xs text-[var(--otari-muted)]">{hint}</span>
+        <span className="text-xs text-muted">{hint}</span>
       )}
     </div>
   )
@@ -624,7 +620,7 @@ function PolicyForm({
     <div className="flex flex-col gap-4">
       <Card>
         <Card.Content className="flex flex-col gap-5 p-5">
-          <div className="text-sm font-semibold text-[var(--otari-ink)]">
+          <div className="text-sm font-semibold text-foreground">
             {editing ? (
               <>
                 Edit {existing.kind === "alias" ? "alias" : "policy"}{" "}
@@ -645,13 +641,11 @@ function PolicyForm({
           <div className="grid gap-4 sm:grid-cols-2">
             {editingAlias ? (
               <div className="flex flex-col gap-1">
-                <span className="text-sm font-medium text-[var(--otari-ink)]">
+                <span className="text-sm font-medium text-foreground">
                   Alias name
                 </span>
-                <code className="text-sm text-[var(--otari-muted)]">
-                  {previousName}
-                </code>
-                <span className="text-xs text-[var(--otari-muted)]">
+                <code className="text-sm text-muted">{previousName}</code>
+                <span className="text-xs text-muted">
                   An alias name is its key and cannot be changed here. Delete
                   and recreate to change it.
                 </span>
@@ -669,7 +663,7 @@ function PolicyForm({
                 autoFocus={!editing}
                 description={
                   nameHasDelimiter ? (
-                    <span className="text-red-700">
+                    <span className="text-danger">
                       A policy name cannot contain “:” or “/”.
                     </span>
                   ) : renaming ? (
@@ -688,19 +682,19 @@ function PolicyForm({
             )}
             {routed ? (
               <div className="flex flex-col gap-1">
-                <span className="text-sm font-medium text-[var(--otari-ink)]">
+                <span className="text-sm font-medium text-foreground">
                   Serves
                 </span>
-                <span className="text-sm text-[var(--otari-ink)]">
+                <span className="text-sm text-foreground">
                   {effectiveTarget.trim() === "" ? (
-                    <span className="text-[var(--otari-muted)]">
+                    <span className="text-muted">
                       whichever model you mark below
                     </span>
                   ) : (
                     <code>{effectiveTarget}</code>
                   )}
                 </span>
-                <span className="text-xs text-[var(--otari-muted)]">
+                <span className="text-xs text-muted">
                   {weighted
                     ? "The split picks per request, so this policy has no single target. The model marked below is what serves a caller who opts out."
                     : "A router picks per request, so this policy has no single target. The model marked below is what serves when the router does not choose."}
@@ -718,7 +712,7 @@ function PolicyForm({
           </div>
 
           {editing ? (
-            <p className="text-xs text-[var(--otari-muted)]">
+            <p className="text-xs text-muted">
               Who this applies to is the other half of the key. It cannot be
               changed here: delete and recreate to move it between scopes.
             </p>
@@ -728,12 +722,12 @@ function PolicyForm({
 
           {/* Conditional tier-down */}
           {conditions.length > 0 ? (
-            <div className="flex flex-col gap-3 rounded-lg border border-[var(--otari-line)] p-3">
+            <div className="flex flex-col gap-3 rounded-lg border border-border p-3">
               <div>
-                <span className="text-sm font-medium text-[var(--otari-ink)]">
+                <span className="text-sm font-medium text-foreground">
                   Instead, when the budget fills up
                 </span>
-                <p className="text-xs text-[var(--otari-muted)]">
+                <p className="text-xs text-muted">
                   Checked before the model above. A threshold must be under 100:
                   the budget gate refuses a request before selection once the
                   cap is reached, so a rule at 100 could never fire.
@@ -755,7 +749,7 @@ function PolicyForm({
                     }
                     description={
                       condition.threshold >= 100 ? (
-                        <span className="text-red-700">Must be under 100.</span>
+                        <span className="text-danger">Must be under 100.</span>
                       ) : undefined
                     }
                   />
@@ -792,14 +786,14 @@ function PolicyForm({
               models, one of them per request". What differs is who decides, and
               whether a share sits next to each entry. */}
           {candidates.length > 0 ? (
-            <div className="flex flex-col gap-3 rounded-lg border border-[var(--otari-line)] p-3">
+            <div className="flex flex-col gap-3 rounded-lg border border-border p-3">
               <div>
-                <span className="text-sm font-medium text-[var(--otari-ink)]">
+                <span className="text-sm font-medium text-foreground">
                   {weighted
                     ? "Split traffic between"
                     : "The router chooses between"}
                 </span>
-                <p className="text-xs text-[var(--otari-muted)]">
+                <p className="text-xs text-muted">
                   {weighted
                     ? "Each request goes to one of these, drawn in proportion to its share. Shares are relative, so 70 and 30 mean the same as 7 and 3. No pricing needed."
                     : "For each request, the cheapest of these that past scoring says is good enough. Every model here needs pricing, because the router weighs quality against cost."}
@@ -845,7 +839,7 @@ function PolicyForm({
                       />
                     </div>
                   ) : null}
-                  <label className="flex items-center gap-2 pb-2 text-xs text-[var(--otari-ink)]">
+                  <label className="flex items-center gap-2 pb-2 text-xs text-foreground">
                     <input
                       type="radio"
                       name="router-safe-choice"
@@ -872,7 +866,7 @@ function PolicyForm({
                   </Button>
                 </div>
               ))}
-              <p className="text-xs text-[var(--otari-muted)]">
+              <p className="text-xs text-muted">
                 {weighted ? (
                   <>
                     The marked model serves a caller who sends{" "}
@@ -892,14 +886,14 @@ function PolicyForm({
                 )}
               </p>
               {candidates.length < 2 ? (
-                <p className="text-xs text-red-700">
+                <p className="text-xs text-danger">
                   Name at least two models.{" "}
                   {weighted ? "Splitting traffic one way" : "Ranking one"} is
                   not a routing decision.
                 </p>
               ) : null}
               {duplicateCandidate ? (
-                <p className="text-xs text-red-700">
+                <p className="text-xs text-danger">
                   Name each model once.{" "}
                   {weighted
                     ? "A model listed twice has one share, not two, so the split saved would not be the one shown."
@@ -907,12 +901,12 @@ function PolicyForm({
                 </p>
               ) : null}
               {weighted && !weightsWellFormed ? (
-                <p className="text-xs text-red-700">
+                <p className="text-xs text-danger">
                   Every share is a number of zero or more. Use 0 to drain a
                   model without removing it.
                 </p>
               ) : weighted && !splitReady ? (
-                <p className="text-xs text-red-700">
+                <p className="text-xs text-danger">
                   Give at least one model a share above zero, or this policy can
                   never send traffic anywhere but its marked model.
                 </p>
@@ -923,8 +917,8 @@ function PolicyForm({
                   disabled={atCandidateCap}
                   className={
                     atCandidateCap
-                      ? "cursor-not-allowed text-sm text-[var(--otari-muted)] opacity-60"
-                      : "text-sm text-[var(--otari-brand)] hover:underline"
+                      ? "cursor-not-allowed text-sm text-muted opacity-60"
+                      : "text-sm text-accent hover:underline"
                   }
                   onClick={() => {
                     setCandidates((prev) => [...prev, ""])
@@ -936,7 +930,7 @@ function PolicyForm({
                   + Another model
                 </button>
                 {atCandidateCap ? (
-                  <span className="text-xs text-[var(--otari-muted)]">
+                  <span className="text-xs text-muted">
                     A policy dispatches at most {MAX_CANDIDATES} models,
                     counting the fallback chain. Remove a fallback to add
                     another.
@@ -948,12 +942,12 @@ function PolicyForm({
 
           {/* Failure chain */}
           {chain.length > 0 ? (
-            <div className="flex flex-col gap-3 rounded-lg border border-[var(--otari-line)] p-3">
+            <div className="flex flex-col gap-3 rounded-lg border border-border p-3">
               <div>
-                <span className="text-sm font-medium text-[var(--otari-ink)]">
+                <span className="text-sm font-medium text-foreground">
                   If that fails, try
                 </span>
-                <p className="text-xs text-[var(--otari-muted)]">
+                <p className="text-xs text-muted">
                   Tried in order after a retryable failure. Not tried once
                   tokens have started streaming, or after a 400/401/403, which
                   every provider would reject the same way.
@@ -989,15 +983,15 @@ function PolicyForm({
                   disabled={atCandidateCap}
                   className={
                     atCandidateCap
-                      ? "cursor-not-allowed text-sm text-[var(--otari-muted)] opacity-60"
-                      : "text-sm text-[var(--otari-brand)] hover:underline"
+                      ? "cursor-not-allowed text-sm text-muted opacity-60"
+                      : "text-sm text-accent hover:underline"
                   }
                   onClick={() => setChain((prev) => [...prev, ""])}
                 >
                   + Another fallback
                 </button>
                 {atCandidateCap ? (
-                  <span className="text-xs text-[var(--otari-muted)]">
+                  <span className="text-xs text-muted">
                     A policy dispatches at most {MAX_CANDIDATES} models in
                     total.
                   </span>
@@ -1008,17 +1002,17 @@ function PolicyForm({
 
           {/* Guardrails */}
           {guardrails.length > 0 ? (
-            <div className="flex flex-col gap-3 rounded-lg border border-[var(--otari-line)] p-3">
+            <div className="flex flex-col gap-3 rounded-lg border border-border p-3">
               <div>
-                <span className="text-sm font-medium text-[var(--otari-ink)]">
+                <span className="text-sm font-medium text-foreground">
                   Always check
                 </span>
-                <p className="text-xs text-[var(--otari-muted)]">
+                <p className="text-xs text-muted">
                   Runs on every request through this policy. Callers can add
                   their own guardrails but cannot weaken these.
                 </p>
                 {guardrails_.configured ? null : (
-                  <p className="mt-1 text-xs text-amber-700">
+                  <p className="mt-1 text-xs text-warning">
                     No guardrails service is configured, so these cannot run.
                     With `if the service is down` set to block, every request
                     through this policy is refused until one is configured.{" "}
@@ -1083,7 +1077,7 @@ function PolicyForm({
                   </div>
                   {guardrail.mode === "block" &&
                   (guardrail.on_unavailable ?? "block") === "block" ? (
-                    <div className="text-xs text-amber-700">
+                    <div className="text-xs text-warning">
                       With both set to block, a guardrails-service outage
                       rejects every request through this policy, ahead of any
                       fallback above.
@@ -1100,7 +1094,7 @@ function PolicyForm({
             {conditions.length === 0 ? (
               <button
                 type="button"
-                className="text-[var(--otari-brand)] hover:underline"
+                className="text-accent hover:underline"
                 onClick={() => setConditions([{ threshold: 80, target: "" }])}
               >
                 + Tier down when the budget fills up
@@ -1109,7 +1103,7 @@ function PolicyForm({
             {chain.length === 0 ? (
               <button
                 type="button"
-                className="text-[var(--otari-brand)] hover:underline"
+                className="text-accent hover:underline"
                 onClick={() => setChain([""])}
               >
                 + Add a fallback chain
@@ -1118,7 +1112,7 @@ function PolicyForm({
             {candidates.length === 0 ? (
               <button
                 type="button"
-                className="text-[var(--otari-brand)] hover:underline"
+                className="text-accent hover:underline"
                 // Seeded with the policy's own target, marked as the safe choice, so
                 // the pool starts from the model this policy already serves and the
                 // operator adds the cheaper one rather than restating everything.
@@ -1135,7 +1129,7 @@ function PolicyForm({
             {candidates.length === 0 ? (
               <button
                 type="button"
-                className="text-[var(--otari-brand)] hover:underline"
+                className="text-accent hover:underline"
                 // An even split of the policy's own target with one more provider:
                 // the neutral starting point for load balancing, which the operator
                 // then skews. Seeding 90/10 would be guessing at a canary.
@@ -1166,8 +1160,8 @@ function PolicyForm({
                   }
                   className={
                     guardrails_.configured
-                      ? "text-[var(--otari-brand)] hover:underline"
-                      : "cursor-not-allowed text-[var(--otari-muted)] opacity-60"
+                      ? "text-accent hover:underline"
+                      : "cursor-not-allowed text-muted opacity-60"
                   }
                   onClick={() =>
                     setGuardrails([
@@ -1180,14 +1174,11 @@ function PolicyForm({
                 {guardrails_.configured ? null : (
                   <span
                     id="guardrails-unavailable"
-                    className="text-xs text-[var(--otari-muted)]"
+                    className="text-xs text-muted"
                   >
                     No guardrails service is configured, so there would be
                     nothing to call.{" "}
-                    <Link
-                      to="/tools"
-                      className="text-[var(--otari-brand)] hover:underline"
-                    >
+                    <Link to="/tools" className="text-accent hover:underline">
                       Set one up in Tools &amp; Guardrails
                     </Link>
                     .
@@ -1208,11 +1199,11 @@ function PolicyForm({
             <Button variant="ghost" onPress={onClose}>
               Cancel
             </Button>
-            <span className="text-xs text-[var(--otari-muted)]">
+            <span className="text-xs text-muted">
               In effect for new requests within 30s.
             </span>
             {routed && !weighted ? (
-              <span className="text-xs text-[var(--otari-muted)]">
+              <span className="text-xs text-muted">
                 A new router serves the model above until it has scored
                 examples. Recording them is an API job for now (
                 <code>POST /v1/routing/preferences/rank</code>); open{" "}
@@ -1220,14 +1211,14 @@ function PolicyForm({
               </span>
             ) : null}
             {weighted ? (
-              <span className="text-xs text-[var(--otari-muted)]">
+              <span className="text-xs text-muted">
                 Each request is drawn independently, so the shares hold over
                 traffic rather than over any ten requests, and they behave the
                 same behind any number of replicas.
               </span>
             ) : null}
             {outgrewAlias ? (
-              <span className="text-xs text-amber-700">
+              <span className="text-xs text-warning">
                 An alias holds one target. To add a fallback, a condition, or a
                 guardrail, delete this alias and create a policy with the same
                 name.
@@ -1302,7 +1293,7 @@ export function RoutingPage() {
         header: "Serves",
         cell: (policy) => (
           <div className="flex items-center gap-2">
-            <span className="text-sm text-[var(--otari-ink)]">
+            <span className="text-sm text-foreground">
               {servesSummary(policy)}
             </span>
             {candidatesOf(policy.spec).length > 0 ? (
@@ -1323,9 +1314,9 @@ export function RoutingPage() {
         cell: (policy) => {
           const guardrails = policy.spec.guardrails ?? []
           if (guardrails.length === 0)
-            return <span className="text-[var(--otari-muted)]">–</span>
+            return <span className="text-muted">–</span>
           return (
-            <span className="text-sm text-[var(--otari-ink)]">
+            <span className="text-sm text-foreground">
               {guardrails
                 .map((guardrail) => `${guardrail.profile} (${guardrail.mode})`)
                 .join(", ")}
@@ -1338,7 +1329,7 @@ export function RoutingPage() {
         header: "Applies to",
         cell: (policy) =>
           (policy.user_id ?? null) === null ? (
-            <span className="text-[var(--otari-muted)]">Every caller</span>
+            <span className="text-muted">Every caller</span>
           ) : (
             <CopyableValue value={policy.user_id ?? ""} label="user id" />
           ),
@@ -1392,9 +1383,7 @@ export function RoutingPage() {
           return policy.source === "config" ? (
             <div className="flex items-center justify-end gap-2">
               {readiness}
-              <span className="text-xs text-[var(--otari-muted)]">
-                set in config.yml
-              </span>
+              <span className="text-xs text-muted">set in config.yml</span>
             </div>
           ) : (
             <div className="flex items-center justify-end gap-2">
@@ -1415,7 +1404,7 @@ export function RoutingPage() {
                   Edit
                 </Button>
               ) : (
-                <span className="text-xs text-[var(--otari-muted)]">
+                <span className="text-xs text-muted">
                   Uses options this form cannot show yet. Edit it through the
                   API so nothing is lost.
                 </span>
@@ -1490,7 +1479,7 @@ export function RoutingPage() {
       !aliases.isLoading &&
       !adding ? (
         <EmptyState title="No routing policies yet">
-          <ol className="flex list-decimal flex-col gap-1 pl-5 text-sm text-[var(--otari-muted)]">
+          <ol className="flex list-decimal flex-col gap-1 pl-5 text-sm text-muted">
             <li>
               Create a policy and point it at the model that should normally
               serve.

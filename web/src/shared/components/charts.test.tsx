@@ -10,11 +10,11 @@ import {
 } from "@/shared/components/charts"
 
 const COST_SERIES: SeriesDef[] = [
-  { key: "cost", label: "Cost", color: "var(--otari-brand)" },
+  { key: "cost", label: "Cost", color: "var(--color-primary)" },
 ]
 const STACK_SERIES: SeriesDef[] = [
-  { key: "success", label: "Succeeded", color: "var(--otari-brand)" },
-  { key: "errors", label: "Failed", color: "var(--otari-danger)" },
+  { key: "success", label: "Succeeded", color: "var(--color-primary)" },
+  { key: "errors", label: "Failed", color: "var(--color-danger)" },
 ]
 
 describe("TrendChart", () => {

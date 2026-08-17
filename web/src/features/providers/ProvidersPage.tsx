@@ -69,9 +69,7 @@ function SecretField({
       onChange={onChange}
       className="flex max-w-md flex-col gap-1"
     >
-      <Label className="text-sm font-medium text-[var(--otari-ink)]">
-        {label}
-      </Label>
+      <Label className="text-sm font-medium text-foreground">{label}</Label>
       <Input
         type="password"
         placeholder={placeholder ?? "sk-…"}
@@ -83,9 +81,7 @@ function SecretField({
         data-lpignore="true"
       />
       {description ? (
-        <Description className="text-xs text-[var(--otari-muted)]">
-          {description}
-        </Description>
+        <Description className="text-xs text-muted">{description}</Description>
       ) : null}
     </TextField>
   )
@@ -144,7 +140,7 @@ function ClientArgsField({
       isInvalid={error !== null}
       className="flex max-w-md flex-col gap-1"
     >
-      <Label className="text-sm font-medium text-[var(--otari-ink)]">
+      <Label className="text-sm font-medium text-foreground">
         Client options (JSON)
       </Label>
       <TextArea
@@ -154,9 +150,7 @@ function ClientArgsField({
         className="font-mono text-xs"
       />
       <Description
-        className={
-          error ? "text-xs text-red-700" : "text-xs text-[var(--otari-muted)]"
-        }
+        className={error ? "text-xs text-danger" : "text-xs text-muted"}
       >
         {error ??
           // Unlike the API key, these are stored and returned unencrypted, so say
@@ -245,9 +239,7 @@ function ProviderComboBox({
       }}
       className="flex max-w-md flex-col gap-1"
     >
-      <Label className="text-sm font-medium text-[var(--otari-ink)]">
-        {label}
-      </Label>
+      <Label className="text-sm font-medium text-foreground">{label}</Label>
       <ComboBox.InputGroup>
         {/* Not a credential field: keep browser password managers from offering to fill it.
             Select the text on focus so typing replaces the current selection instead of
@@ -271,7 +263,7 @@ function ProviderComboBox({
         </ListBox>
       </ComboBox.Popover>
       {description ? (
-        <span className="text-xs text-[var(--otari-muted)]">{description}</span>
+        <span className="text-xs text-muted">{description}</span>
       ) : null}
     </ComboBox.Root>
   )
@@ -302,12 +294,12 @@ function ConnectionTest({
       {/* aria-live so the connection outcome is announced to assistive tech. */}
       <span role="status" aria-live="polite">
         {test.isPending ? null : test.error ? (
-          <span className="text-xs text-red-700">
+          <span className="text-xs text-danger">
             {errorMessage(test.error)}
           </span>
         ) : test.data ? (
           test.data.ok ? (
-            <span className="text-xs font-medium text-green-700">
+            <span className="text-xs font-medium text-success">
               Connected. {test.data.model_count} model
               {test.data.model_count === 1 ? "" : "s"} available.
             </span>
@@ -316,19 +308,19 @@ function ConnectionTest({
             // it is not evidence the key is wrong either (issue #447). The error is
             // kept because this is the form where the operator just typed api_base,
             // and a wrong one 404s exactly like an absent listing endpoint.
-            <span className="block max-w-md break-words text-xs text-amber-800">
+            <span className="block max-w-md break-words text-xs text-warning">
               This provider does not list models, so the key could not be
               verified here. Save it and use the provider; declare its model ids
               under <code>models:</code> to have them show up in the catalog. If
               you did not expect this, check the provider's reply below.
               {test.data.error ? (
-                <span className="mt-0.5 block text-[var(--otari-muted)]">
+                <span className="mt-0.5 block text-muted">
                   {test.data.error}
                 </span>
               ) : null}
             </span>
           ) : (
-            <span className="block max-w-md break-words text-xs text-red-700">
+            <span className="block max-w-md break-words text-xs text-danger">
               {test.data.error ?? "Connection failed."}
             </span>
           )
@@ -428,7 +420,7 @@ function KnownProviderForm({ onClose }: { onClose: () => void }) {
       />
       <button
         type="button"
-        className="self-start text-xs font-medium text-[var(--otari-brand-dark)]"
+        className="self-start text-xs font-medium text-link hover:text-link-hover"
         onClick={() => setShowAdvanced((v) => !v)}
       >
         {advancedOpen
@@ -452,7 +444,7 @@ function KnownProviderForm({ onClose }: { onClose: () => void }) {
               placeholder={providerId || "instance name"}
               description={
                 nameHasDelimiter ? (
-                  <span className="text-red-700">
+                  <span className="text-danger">
                     A name cannot contain “:” or “/”.
                   </span>
                 ) : (
@@ -539,7 +531,7 @@ function CustomProviderForm({ onClose }: { onClose: () => void }) {
           autoFocus
           description={
             nameHasDelimiter ? (
-              <span className="text-red-700">
+              <span className="text-danger">
                 A name cannot contain “:” or “/”.
               </span>
             ) : (
@@ -612,7 +604,7 @@ function AddProviderForm({ onClose }: { onClose: () => void }) {
     <Card>
       <Card.Content className="flex flex-col gap-4 p-5">
         <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1 rounded-lg bg-[var(--otari-bg)] p-1">
+          <div className="flex items-center gap-1 rounded-lg bg-surface-alt p-1">
             {(
               [
                 ["known", "Known provider"],
@@ -626,8 +618,8 @@ function AddProviderForm({ onClose }: { onClose: () => void }) {
                 onClick={() => setTab(id)}
                 className={
                   tab === id
-                    ? "rounded-md bg-white px-3 py-1.5 text-sm font-medium text-[var(--otari-ink)] shadow-sm"
-                    : "rounded-md px-3 py-1.5 text-sm text-[var(--otari-muted)] hover:text-[var(--otari-ink)]"
+                    ? "rounded-md bg-surface px-3 py-1.5 text-sm font-medium text-foreground shadow-sm"
+                    : "rounded-md px-3 py-1.5 text-sm text-muted hover:text-foreground"
                 }
               >
                 {label}
@@ -695,7 +687,7 @@ function EditProviderForm({
   return (
     <Card>
       <Card.Content className="flex flex-col gap-4 p-5">
-        <div className="text-sm font-semibold text-[var(--otari-ink)]">
+        <div className="text-sm font-semibold text-foreground">
           Edit <code>{provider.instance}</code>
         </div>
         <ErrorBanner error={update.error} />
@@ -724,7 +716,7 @@ function EditProviderForm({
               />
               <button
                 type="button"
-                className="self-start text-xs font-medium text-[var(--otari-brand-dark)]"
+                className="self-start text-xs font-medium text-link hover:text-link-hover"
                 onClick={() => {
                   setReplacingKey(false)
                   setApiKey("")
@@ -735,7 +727,7 @@ function EditProviderForm({
             </>
           ) : (
             <div className="flex items-center gap-3">
-              <span className="text-sm text-[var(--otari-muted)]">
+              <span className="text-sm text-muted">
                 API key:{" "}
                 <code>
                   {provider.last4 ? `••••${provider.last4}` : "none set"}
@@ -809,14 +801,14 @@ function TestOutcome({ state }: { state: TestState | undefined }) {
   if (!state) return null
   if (state.status === "pending") {
     return (
-      <span className="inline-flex items-center gap-1.5 text-xs text-[var(--otari-muted)]">
+      <span className="inline-flex items-center gap-1.5 text-xs text-muted">
         <Spinner size="sm" /> Testing…
       </span>
     )
   }
   if (state.ok) {
     return (
-      <span className="text-xs font-medium text-green-700">
+      <span className="text-xs font-medium text-success">
         Connected. {state.model_count} model{state.model_count === 1 ? "" : "s"}{" "}
         available.
       </span>
@@ -829,19 +821,17 @@ function TestOutcome({ state }: { state: TestState | undefined }) {
   // away.
   if (state.discovery_unsupported) {
     return (
-      <span className="block max-w-xs break-words text-xs text-amber-800">
+      <span className="block max-w-xs break-words text-xs text-warning">
         Could not list models, so the key could not be verified. It may still
         work for requests.
         {state.error ? (
-          <span className="mt-0.5 block text-[var(--otari-muted)]">
-            {state.error}
-          </span>
+          <span className="mt-0.5 block text-muted">{state.error}</span>
         ) : null}
       </span>
     )
   }
   return (
-    <span className="block max-w-xs break-words text-xs text-red-700">
+    <span className="block max-w-xs break-words text-xs text-danger">
       {state.error ?? "Connection failed."}
     </span>
   )
@@ -850,25 +840,21 @@ function TestOutcome({ state }: { state: TestState | undefined }) {
 // A provider's reachability, from the shared model-discovery health path. Config
 // providers (no per-row Test button) get a status here too, not just stored ones.
 // Semantic status surface: raw Tailwind palette classes, matching TestOutcome and
-// ErrorBanner rather than the --otari-* chrome. A provider that answers no model
+// ErrorBanner rather than the page's own chrome. A provider that answers no model
 // listing (its backend never implemented /v1/models) is not unreachable: only
 // discovery is broken, and it may still serve requests, so it gets the amber
 // warning state rather than the red one (issue #447).
 function HealthPill({ health }: { health: ProviderHealth | undefined }) {
   if (!health) {
-    return <span className="text-xs text-[var(--otari-muted)]">—</span>
+    return <span className="text-xs text-muted">—</span>
   }
   const degraded = !health.ok && health.discovery_unsupported
   const styles = health.ok
-    ? "border-green-200 bg-green-50 text-green-700"
+    ? "border-success bg-success-subtle text-success"
     : degraded
-      ? "border-amber-200 bg-amber-50 text-amber-800"
-      : "border-red-200 bg-red-50 text-red-700"
-  const dot = health.ok
-    ? "bg-green-500"
-    : degraded
-      ? "bg-amber-500"
-      : "bg-red-500"
+      ? "border-warning bg-warning-subtle text-warning"
+      : "border-danger bg-danger-subtle text-danger"
+  const dot = health.ok ? "bg-success" : degraded ? "bg-warning" : "bg-danger"
   // The last-checked time lives in the top summary banner; the row just shows the
   // status. The error (and time) stay available on hover as the pill's tooltip.
   const checked = health.checked_at
@@ -911,24 +897,22 @@ function HealthSummary({
 }) {
   const allHealthy = healthy === total
   const dot = allHealthy
-    ? "bg-green-500"
+    ? "bg-success"
     : healthy + degraded === total
-      ? "bg-amber-500"
-      : "bg-red-500"
+      ? "bg-warning"
+      : "bg-danger"
   const recheck = useRecheckProviderHealth()
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-[var(--otari-line)] bg-[var(--otari-surface)] px-4 py-2.5 text-sm">
+    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-surface px-4 py-2.5 text-sm">
       <span aria-hidden className={`h-2 w-2 rounded-full ${dot}`} />
-      <span className="font-medium text-[var(--otari-ink)]">
+      <span className="font-medium text-foreground">
         {healthy} of {total} provider{total === 1 ? "" : "s"} reachable
       </span>
       {degraded > 0 ? (
-        <span className="text-amber-800">
-          {degraded} without model discovery
-        </span>
+        <span className="text-warning">{degraded} without model discovery</span>
       ) : null}
       {checkedAt ? (
-        <span className="text-[var(--otari-muted)]">
+        <span className="text-muted">
           Last checked {formatRelative(checkedAt)}
         </span>
       ) : null}
@@ -956,12 +940,12 @@ function Step({
 }) {
   return (
     <li className="flex gap-3">
-      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-[var(--otari-brand-tint)] text-xs font-semibold text-[var(--otari-brand-dark)]">
+      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary-subtle text-xs font-semibold text-primary-subtle-foreground">
         {n}
       </span>
       <div className="text-sm">
-        <div className="font-medium text-[var(--otari-ink)]">{title}</div>
-        <div className="text-[var(--otari-muted)]">{children}</div>
+        <div className="font-medium text-foreground">{title}</div>
+        <div className="text-muted">{children}</div>
       </div>
     </li>
   )
@@ -986,10 +970,10 @@ function OnboardingPanel({
     <Card>
       <Card.Content className="flex flex-col gap-4 p-6">
         <div>
-          <h2 className="text-lg font-semibold text-[var(--otari-ink)]">
+          <h2 className="text-lg font-semibold text-foreground">
             Welcome to Otari
           </h2>
-          <p className="mt-1 text-sm text-[var(--otari-muted)]">
+          <p className="mt-1 text-sm text-muted">
             You are signed in. Add a provider to start serving models: three
             quick steps.
           </p>
@@ -1014,7 +998,7 @@ function OnboardingPanel({
               href="/welcome"
               target="_blank"
               rel="noreferrer"
-              className="font-medium text-[var(--otari-brand-dark)]"
+              className="font-medium text-link hover:text-link-hover"
             >
               quickstart
             </a>
@@ -1022,12 +1006,12 @@ function OnboardingPanel({
           </Step>
         </ol>
         {needsPricing ? (
-          <p className="text-sm text-[var(--otari-muted)]">
+          <p className="text-sm text-muted">
             Tip: <code>require_pricing</code> is on, so requests are rejected
             until pricing is set.{" "}
             <button
               type="button"
-              className="font-medium text-[var(--otari-brand-dark)] disabled:opacity-50"
+              className="font-medium text-link hover:text-link-hover disabled:opacity-50"
               disabled={enabling}
               onClick={onEnablePricing}
             >
@@ -1157,7 +1141,7 @@ export function ProvidersPage() {
         <Link
           to="/models"
           search={{ provider: row.instance }}
-          className="font-medium text-[var(--otari-ink)] hover:text-[var(--otari-brand-dark)] hover:underline"
+          className="font-medium text-foreground hover:text-link hover:underline"
         >
           {row.instance}
         </Link>
@@ -1167,7 +1151,7 @@ export function ProvidersPage() {
       id: "type",
       header: "Type",
       cell: (row) => (
-        <span className="text-[var(--otari-muted)]">
+        <span className="text-muted">
           {row.meta?.provider_type ?? row.stored?.provider_type ?? row.instance}
         </span>
       ),
@@ -1185,11 +1169,11 @@ export function ProvidersPage() {
       id: "api_key",
       header: "API key",
       cell: (row) => (
-        <span className="text-[var(--otari-muted)]">
+        <span className="text-muted">
           {row.source === "stored" ? (
             row.stored && !row.stored.decryptable ? (
               <span
-                className="text-amber-700"
+                className="text-warning"
                 title="This key can't be decrypted with the current OTARI_SECRET_KEY. Replace the key, or restore the original OTARI_SECRET_KEY."
               >
                 ⚠ key unreadable
@@ -1261,7 +1245,7 @@ export function ProvidersPage() {
             <TestOutcome state={tests[row.instance]} />
           </div>
         ) : (
-          <span className="block text-right text-xs text-[var(--otari-muted)]">
+          <span className="block text-right text-xs text-muted">
             managed in config.yml
           </span>
         ),

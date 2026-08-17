@@ -134,12 +134,25 @@
      labels under-contrast. Use `#4A7D8F` instead: visually
      indistinguishable from the brand swatch (<2 ΔE) but lands at
      4.51:1 against white so white-on-primary button text clears AA.
-     Hover steps toward the Deep Teal, active lands on it.            */
+     Hover steps toward the Deep Teal, active lands on it.
+
+     Two copies of this value live outside CSS, because neither can read a
+     custom property: the `theme-color` meta tag in web/index.html and
+     `theme_color` in web/public/pwa/manifest.webmanifest, which tint the
+     browser and installed-app chrome. `foundation.test.ts` reads all three
+     and fails when they disagree, so change them together.           */
   --color-primary: #4a7d8f; /* primary CTAs, links, focus rings (brand Teal, AA-tuned) */
   --color-primary-hover: #3f6d7e;
   --color-primary-active: #0d475a; /* brand Deep Teal */
   --color-primary-subtle: #e3edf1; /* selected/soft backgrounds */
   --color-primary-foreground: #ffffff; /* text/icons on primary bg */
+  /* Text on the subtle fill, which is a different question from text on the
+     solid one and does not have the same answer. `--color-primary` itself
+     lands at 3.8:1 on `--color-primary-subtle`, so the obvious reading —
+     "the brand color, on the brand tint" — is under AA for the small text
+     these chips and active nav items are set in. This is the Deep Teal, at
+     8.4:1 on that fill. */
+  --color-primary-subtle-foreground: #0d475a;
 
   /* ── Link & focus ───────────────────────────────────────────────────────
    * Link is a muted teal — clearly distinct from the brand teal accent
@@ -157,14 +170,24 @@
      WCAG AA — the lighter `#2E7D5C` on `#D2E7D4` was only 3.8:1, the
      darker `#1F6648` lands at ~5.2:1. Info shifts to a clearly bluer
      hue so it stays visually distinct from primary teal in adjacent
-     surfaces (badges, alerts, banners).                             */
+     surfaces (badges, alerts, banners).
+
+     Warning and danger are one step darker than the swatches they were
+     rehomed at, for the reason success is already where it is: a status
+     word is normally set in its own color on its own `-subtle` fill, and
+     `#B07D00` on `#FAF1DA` was 3.2:1 while `#CF2E3E` on `#FBE9EB` was
+     4.4:1 — both under WCAG AA for the small text these banners and pills
+     use. `#8A6200` and `#C22836` land at 4.9:1 on those fills and read the
+     same hue, and both improve their solid-fill pairing too (white on
+     either clears 5.4:1), which is why warning's foreground moves to white
+     alongside: near-black on the darker amber would not have.          */
   --color-success: #1f6648;
   --color-success-subtle: #d2e7d4;
   --color-success-foreground: #ffffff;
-  --color-warning: #b07d00;
+  --color-warning: #8a6200;
   --color-warning-subtle: #faf1da;
-  --color-warning-foreground: #15171c;
-  --color-danger: #cf2e3e; /* clear cherry-red */
+  --color-warning-foreground: #ffffff;
+  --color-danger: #c22836; /* clear cherry-red */
   --color-danger-subtle: #fbe9eb;
   --color-danger-foreground: #ffffff;
   --color-info: #2a6bbe;
@@ -174,9 +197,13 @@
   /* ── Attention (warm accent) — see the @theme block for intent. Warm
    *    amber-orange that pops against the cool UI; reserved for
    *    action-required banners + new/unread indicators. ─────────────── */
-  --color-attention: #c2680f;
+  /* One step darker than the rehomed swatch, for the same reason as warning
+     and danger above: `#C2680F` on `#FBEEDE` was 3.5:1, this is 4.7:1. */
+  --color-attention: #a4560a;
   --color-attention-subtle: #fbeede;
-  --color-attention-foreground: #15171c;
+  /* White, for the same reason warning's moved: near-black on the darkened
+     attention fill is 3.4:1, white is 5.4:1. */
+  --color-attention-foreground: #ffffff;
   --color-attention-border: #ecc187;
 
   /* ── Backdrop — modal/popover dimming. Dark in both themes so a fixed
@@ -199,6 +226,45 @@
   --color-code-border: #354148;
   --color-code-control: #2c363c; /* a control (copy button) on that surface */
   --color-code-foreground: #e8edf0;
+
+  /* ── Data visualization — otari's own family, with no counterpart in
+   *    otari-ai/frontend yet; it is the one place this file deliberately
+   *    grows past its source, because the dashboard charts and that repo
+   *    has none. A series fill is read against a plot rather than against
+   *    text, so the ratios the status and text tokens are tuned for say
+   *    nothing about whether two adjacent bars are separable. Both sets are
+   *    validated per theme with the data-viz palette checker (lightness
+   *    band, chroma floor, adjacent-pair CVD separation, normal-vision
+   *    floor, contrast against the chart surface): a value here is a
+   *    checked result, not a shade someone liked.
+   *
+   *    `cat-1` … `cat-8` are the categorical slots for grouped series.
+   *    Assign them in this fixed order and never cycle — the CVD margins
+   *    are computed on adjacent pairs in exactly this order, so re-ordering
+   *    or wrapping around invalidates them. A ninth group folds into
+   *    `cat-other`, the deliberately neutral slot, which is the one
+   *    exempt from the chroma floor because "everything else" is not an
+   *    identity.
+   *
+   *    `ramp-1` … `ramp-4` are one hue at four lightnesses, strongest
+   *    first, for a part-to-whole bar whose segments are ordered rather
+   *    than categorical (the billed token composition on Activity and
+   *    Usage). Strongest means most prominent, so light runs dark → pale
+   *    and dark runs pale → dark; step 4 has to stay clear of the surface
+   *    either way, or the last segment reads as an empty bar. ────────── */
+  --color-chart-cat-1: #08899f;
+  --color-chart-cat-2: #b76522;
+  --color-chart-cat-3: #8560ac;
+  --color-chart-cat-4: #47a34e;
+  --color-chart-cat-5: #9d486c;
+  --color-chart-cat-6: #0871c1;
+  --color-chart-cat-7: #a9912b;
+  --color-chart-cat-8: #a64450;
+  --color-chart-cat-other: #8b969b;
+  --color-chart-ramp-1: #14242c;
+  --color-chart-ramp-2: #3c6678;
+  --color-chart-ramp-3: #4e8295;
+  --color-chart-ramp-4: #8fb2bf;
 
   /* ── HeroUI variable mapping ───────────────────────────────
    * Internal plumbing, and the reason a HeroUI component picks
@@ -225,6 +291,7 @@
   --accent-foreground: var(--color-primary-foreground);
   --focus: var(--color-focus);
   --link: var(--color-link);
+  --backdrop: var(--color-backdrop);
   --success: var(--color-success);
   --success-foreground: var(--color-success-foreground);
   --warning: var(--color-warning);
@@ -307,6 +374,10 @@
   --color-primary-active: #4e8295;
   --color-primary-subtle: #142b34; /* dark teal selection / soft fill */
   --color-primary-foreground: #0a1419;
+  /* Same role as the light block's, and the reason it is not simply the
+     brand-on-tint pairing is the same: the contrast direction inverts here,
+     so this is a lifted teal rather than the Deep Teal (8.2:1 on the fill). */
+  --color-primary-subtle-foreground: #9bc9d9;
 
   /* ── Link & focus — light teal-slate, mirrors the light-mode restraint ──── */
   --color-link: #9bb3bf;
@@ -349,6 +420,29 @@
   --color-code-control: #2c363c;
   --color-code-foreground: #e8edf0;
 
+  /* Data visualization — the light block's slots re-derived for this
+     surface rather than reused: hue and slot order are held fixed (so a
+     series keeps its identity across a theme switch) while chroma is lifted
+     and lightness re-targeted into the dark band, then the whole set is put
+     back through the checker against `--color-surface`. See the light block
+     for what the two families are and the rules for assigning them. */
+  --color-chart-cat-1: #00a5c1;
+  --color-chart-cat-2: #b95200;
+  --color-chart-cat-3: #a877db;
+  --color-chart-cat-4: #008f19;
+  --color-chart-cat-5: #d76696;
+  --color-chart-cat-6: #0075dc;
+  --color-chart-cat-7: #af9000;
+  --color-chart-cat-8: #c04154;
+  /* The neutral fold-in slot is the one value that holds across both
+     themes: it already clears each surface, and a "not one of the named
+     groups" bucket that changed hue with the theme would read as a group. */
+  --color-chart-cat-other: #8b969b;
+  --color-chart-ramp-1: #e2edf1;
+  --color-chart-ramp-2: #a8ccd8;
+  --color-chart-ramp-3: #7cb2c5;
+  --color-chart-ramp-4: #54808f;
+
   /* HeroUI mapping mirrors the light block. */
   --background: var(--color-background);
   --foreground: var(--color-text);
@@ -360,6 +454,7 @@
   --accent-foreground: var(--color-primary-foreground);
   --focus: var(--color-focus);
   --link: var(--color-link);
+  --backdrop: var(--color-backdrop);
   --success: var(--color-success);
   --success-foreground: var(--color-success-foreground);
   --warning: var(--color-warning);
@@ -416,6 +511,10 @@
   --font-display: "Zilla Slab", Georgia, serif;
   --color-background-alt: var(--color-background-muted);
   --color-surface-alt: var(--color-surface-muted);
+  /* The deepest surface step, which HeroUI only exposes under its own
+   * `surface-tertiary` name. Registered so the tracks a progress bar or a
+   * switch sits in have a fill token rather than borrowing `--color-border`. */
+  --color-surface-subtle: var(--color-surface-subtle);
   --color-link: var(--color-link);
   --color-link-hover: var(--color-link-hover);
   /* Attention — warm high-attention accent that pops against the cool UI.
@@ -447,6 +546,7 @@
    * leaving it unregistered made the one token with a visible in-CSS consumer
    * unreachable from a call site. */
   --color-primary-subtle: var(--color-primary-subtle);
+  --color-primary-subtle-foreground: var(--color-primary-subtle-foreground);
   --color-code-surface: var(--color-code-surface);
   --color-code-border: var(--color-code-border);
   --color-code-control: var(--color-code-control);
@@ -555,8 +655,8 @@ body,
    custom property: the boot splash in web/index.html (which paints before this
    stylesheet is a certainty) and `background_color` in
    web/public/pwa/manifest.webmanifest (the splash an installed app opens on).
-   Nothing fails the build when they drift, so change --color-background and
-   both of those together. */
+   `foundation.test.ts` reads both and fails when they disagree with this token,
+   so change all three together. */
 body {
   margin: 0;
   padding: 0;
@@ -688,69 +788,23 @@ h6 {
 }
 
 /* =============================================================
- * MIGRATION BRIDGE — everything below this line is on its way out.
+ * Dashboard component styles.
  *
- * The `--otari-*` variables and the component rules that consume
- * them are this dashboard's original, pre-rehome visual system.
- * They are kept, at their original values, only so the ~600
- * existing call sites keep rendering while their pages are rebuilt
- * on the foundation above. See ../../AGENTS.md.
+ * The rules that cannot be written as a utility at the call
+ * site, because they reach inside a HeroUI component's own DOM,
+ * outrank an inline style, or drive a keyframe. Everything here
+ * consumes the tokens above; a color in this section is always a
+ * `var(--color-*)`.
  *
- * Rules for this section:
- *   - Nothing new may consume an `--otari-*` variable, and nothing
- *     new may be added to it. New work uses the semantic tokens.
- *   - A rule leaves when its last call site does. When the last
- *     one goes, delete this whole section.
- *   - Do not "fix" these values to match the foundation. A
- *     half-converted palette is worse than two clearly separated
- *     ones, and converting a page is what retires its tokens.
+ * They sit after the `@heroui/styles` import, so they win the
+ * cascade on their own specificity and almost nothing here needs
+ * `!important`.
+ *
+ * The `otari-` prefix on these class names is a namespace, not a
+ * leftover: it keeps an app-owned hook from colliding with a
+ * HeroUI or Tailwind class. It has nothing to do with the
+ * retired `--otari-*` palette.
  * ============================================================= */
-
-:root {
-  /* --otari-brand still has two copies outside CSS that cannot read a custom
-     property: the `theme-color` meta tag in web/index.html and `theme_color` in
-     web/public/pwa/manifest.webmanifest, which color the browser and installed
-     app chrome. They stay on the brand teal rather than --color-primary until
-     the chrome itself moves onto the foundation. The page canvas they used to
-     sit beside is no longer this block's job; see the `body` rule above. */
-  --otari-brand: #4e8295;
-  --otari-brand-dark: #3c6678;
-  /* Mid-step of the brand ramp, between --otari-brand and --otari-line. Exists so
-     a small multi-part mark (the Activity token-composition bar) can shade its
-     segments by one hue at four legible lightnesses instead of by four hues. It
-     is deliberately darker than --otari-line: a hairline token used as a data
-     fill sits at ~1.2:1 against the surrounding surface, which reads as an empty
-     bar rather than a segment. */
-  --otari-brand-soft: #8fb2bf;
-  --otari-brand-tint: #eaf1f3;
-  --otari-ink: #14242c;
-  --otari-muted: #5b6b73;
-  --otari-line: #dbe5e8;
-  --otari-surface: #ffffff;
-  --otari-bg: #f6f9fa;
-  /* Categorical chart palette for grouped series (top-8 + other), slot 1 first.
-     Not hand-picked: generated in OKLCH around the brand hue and validated with
-     the data-viz palette checker on the white chart surface (lightness band,
-     chroma floor, adjacent-pair CVD separation >= 8, normal-vision floor >= 15,
-     contrast >= 3:1). Assign slots in this fixed order, never cycled; the ninth
-     and later groups fold into "other", which wears the neutral below. */
-  --otari-cat-1: #08899f;
-  --otari-cat-2: #b76522;
-  --otari-cat-3: #8560ac;
-  --otari-cat-4: #47a34e;
-  --otari-cat-5: #9d486c;
-  --otari-cat-6: #0871c1;
-  --otari-cat-7: #a9912b;
-  --otari-cat-8: #a64450;
-  --otari-cat-other: #8b969b;
-  /* Error fill for status-stacked charts (the red of the status triad at chart
-     strength: red-600, 4.0:1 on the white surface). Reserved for error marks,
-     never a series color. */
-  --otari-danger: #dc2626;
-  /* Foreground for code inside the dark code blocks in the bundled user guide
-     (DocsPage). A near-white that reads on the --otari-ink block background. */
-  --otari-code-ink: #e8eef0;
-}
 
 /* Shared DataTable styling (HeroUI's Table).
 
@@ -761,23 +815,21 @@ h6 {
    by making `.otari-table` the single card: neutralize the variant's surface,
    radius, and padding, then own the container styling here. The header fills to
    the edges and the root's `overflow: hidden` clips it (and the last row) to one
-   12px radius, so header and card share the same corner. Rules are scoped to
-   `.otari-table` and placed after the `@heroui/styles` import, so they win the
-   cascade without `!important`.
+   12px radius, so header and card share the same corner.
 
    Column selectors are replicated with the `.otari-table` prefix so they outrank
    HeroUI's own first/last-column radius rules (which are more specific than a
    bare `.table__column`). */
 .otari-table.table-root {
-  background-color: var(--otari-surface);
-  border: 1px solid var(--otari-line);
+  background-color: var(--color-surface);
+  border: 1px solid var(--color-border);
   border-radius: 0.75rem; /* rounded-xl */
   padding: 0;
   overflow: hidden;
 }
 .otari-table .table__header {
-  background-color: var(--otari-brand-tint);
-  border-bottom: 1px solid var(--otari-line);
+  background-color: var(--color-primary-subtle);
+  border-bottom: 1px solid var(--color-border);
 }
 .otari-table .table__column,
 .otari-table
@@ -789,7 +841,7 @@ h6 {
   > [role="presentation"]:last-of-type
   > .table__column {
   background-color: transparent;
-  color: var(--otari-ink);
+  color: var(--color-text);
   font-weight: 600;
   border-radius: 0;
 }
@@ -797,10 +849,10 @@ h6 {
   content: none;
 }
 .otari-table .table__row .table__cell {
-  border-color: var(--otari-line);
+  border-color: var(--color-border);
 }
 .otari-table .table__row:hover .table__cell {
-  background-color: var(--otari-bg);
+  background-color: var(--color-surface-muted);
 }
 
 /* Let the text in a row be highlighted with the mouse (issue #478). Two things
@@ -833,13 +885,13 @@ h6 {
    popping in and shoving the rows below. */
 .otari-table .otari-detail-row > td {
   padding: 0;
-  border-bottom: 1px solid var(--otari-line);
-  background-color: var(--otari-bg);
+  border-bottom: 1px solid var(--color-border);
+  background-color: var(--color-surface-muted);
 }
 /* Same-frame acknowledgment of a row click while react-aria's interaction
    render (linear in page size) catches up and the panel slides in. */
 .otari-table .otari-detail-opening .table__cell {
-  background-color: var(--otari-brand-tint);
+  background-color: var(--color-primary-subtle);
 }
 .otari-detail-reveal {
   display: grid;
@@ -887,10 +939,12 @@ h6 {
 
 /* Rendered Markdown for the bundled user guide (DocsPage). There is no Tailwind
    typography plugin in web/, so the guide's prose is styled here, scoped to
-   `.otari-markdown`, using the same --otari-* tokens as the rest of the shell.
-   Rules live after the @heroui/styles import so they win without !important. */
+   `.otari-markdown`, on the same tokens as the rest of the shell. Its headings
+   pick up Zilla Slab from the global h1–h6 rule, and its code the Fira Code
+   stack, so the guide is set in the dashboard's own faces rather than in a
+   second stack declared here. */
 .otari-markdown {
-  color: var(--otari-ink);
+  color: var(--color-text);
   font-size: 0.875rem;
   line-height: 1.65;
 }
@@ -901,7 +955,7 @@ h6 {
 .otari-markdown h2,
 .otari-markdown h3,
 .otari-markdown h4 {
-  color: var(--otari-ink);
+  color: var(--color-text);
   font-weight: 600;
   line-height: 1.3;
 }
@@ -913,7 +967,7 @@ h6 {
   font-size: 1.25rem;
   margin: 2rem 0 0.5rem;
   padding-bottom: 0.3rem;
-  border-bottom: 1px solid var(--otari-line);
+  border-bottom: 1px solid var(--color-border);
 }
 .otari-markdown h3 {
   font-size: 1.05rem;
@@ -927,15 +981,14 @@ h6 {
   margin: 0.75rem 0;
 }
 .otari-markdown a {
-  color: var(--otari-brand-dark);
+  color: var(--color-link);
   text-decoration: underline;
   text-underline-offset: 2px;
 }
 .otari-markdown a:hover {
-  /* Thicken the underline on hover rather than lightening the text: at this
-     size/weight WCAG 1.4.3 needs 4.5:1, and --otari-brand (#4e8295) is only
-     4.24:1 on the card, so keep the 6.2:1 --otari-brand-dark and signal hover
-     another way. */
+  /* Thicken the underline rather than lightening the text: `--color-link` is
+     the role tuned to clear 4.5:1 on the card in both themes, and a hover tint
+     that lifted it would trade a contrast guarantee for a hover cue. */
   text-decoration-thickness: 2px;
 }
 .otari-markdown ul,
@@ -957,24 +1010,25 @@ h6 {
   margin: 0.25rem 0;
 }
 .otari-markdown code {
-  font-family:
-    ui-monospace, SFMono-Regular, "SF Mono", Menlo, Consolas, monospace;
+  font-family: var(--font-mono);
   font-size: 0.85em;
-  background-color: var(--otari-brand-tint);
-  color: var(--otari-brand-dark);
+  /* Tinted chip, text ink. Coloring the text with the brand instead would put
+     a mid-tone teal on a pale teal, which clears AA in neither theme. */
+  background-color: var(--color-primary-subtle);
+  color: var(--color-text);
   padding: 0.1rem 0.35rem;
   border-radius: 0.35rem;
 }
 .otari-markdown pre {
   margin: 1rem 0;
   padding: 0.85rem 1rem;
-  background-color: var(--otari-ink);
+  background-color: var(--color-code-surface);
   border-radius: 0.6rem;
   overflow-x: auto;
 }
 .otari-markdown pre code {
   background-color: transparent;
-  color: var(--otari-code-ink);
+  color: var(--color-code-foreground);
   padding: 0;
   border-radius: 0;
   font-size: 0.82rem;
@@ -983,13 +1037,13 @@ h6 {
 .otari-markdown blockquote {
   margin: 1rem 0;
   padding: 0.25rem 0 0.25rem 1rem;
-  border-left: 3px solid var(--otari-brand);
-  color: var(--otari-muted);
+  border-left: 3px solid var(--color-primary);
+  color: var(--color-text-muted);
 }
 .otari-markdown hr {
   margin: 1.5rem 0;
   border: 0;
-  border-top: 1px solid var(--otari-line);
+  border-top: 1px solid var(--color-border);
 }
 /* The horizontal scroll lives on a wrapper (see DocsPage's table override) so
    the <table> keeps its native display and a11y semantics. */
@@ -1005,17 +1059,17 @@ h6 {
 .otari-markdown th,
 /* biome-ignore lint/style/noDescendingSpecificity: the earlier, more specific td rule is scoped to .otari-table, so these two never apply to the same cell */
 .otari-markdown td {
-  border: 1px solid var(--otari-line);
+  border: 1px solid var(--color-border);
   padding: 0.4rem 0.7rem;
   text-align: left;
   vertical-align: top;
 }
 .otari-markdown th {
-  background-color: var(--otari-brand-tint);
-  color: var(--otari-ink);
+  background-color: var(--color-primary-subtle);
+  color: var(--color-text);
   font-weight: 600;
 }
 .otari-markdown tbody tr:hover td,
 .otari-markdown tr:hover td {
-  background-color: var(--otari-bg);
+  background-color: var(--color-surface-muted);
 }

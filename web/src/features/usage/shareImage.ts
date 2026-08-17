@@ -11,7 +11,7 @@
 //     non-Latin-1 character, and the title field is free text, so one emoji would
 //     break rasterization.
 //  3. The node must carry every style inline and use literal colors. Custom
-//     properties (var(--otari-*)) do not resolve inside an <img>-loaded SVG
+//     properties (var(--color-*)) do not resolve inside an <img>-loaded SVG
 //     document, so a token reference renders as nothing. ShareCard is built to
 //     this constraint deliberately.
 

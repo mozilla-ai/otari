@@ -1,9 +1,3 @@
-// MIGRATION BRIDGE. Hand-rolled and predating the design foundation rehomed from
-// otari-ai/frontend (src/styles/globals.css, src/shared/components/ui/). This file
-// keeps its `--otari-*` colors so the pages built on it keep rendering, and it
-// leaves with the last of them. Reuse it rather than duplicating its markup, but
-// do not extend it and do not build a new page on it: new work composes
-// @heroui/react with the semantic tokens. See ../../../AGENTS.md.
 import type { ReactNode } from "react"
 import { useRef, useState } from "react"
 import {
@@ -24,12 +18,13 @@ import {
 // never encoded by hue alone: every multi-series chart renders a legend, and
 // the surrounding tables / captions stay the accessible source of truth.
 
-const BRAND = "var(--otari-brand)"
+const BRAND = "var(--color-primary)"
 
 // One series of a (possibly stacked) trend chart. `color` is a CSS color,
-// normally one of the fixed `--otari-cat-*` palette slots (validated for CVD
-// separation and surface contrast in globals.css) or a semantic token like
-// `--otari-danger`. Assign palette slots in fixed order, never cycled.
+// normally one of the fixed `--color-chart-cat-*` slots or a step of
+// `--color-chart-ramp-*` (both validated per theme in globals.css), or a
+// semantic token like `--color-danger`. Assign categorical slots in fixed
+// order, never cycled.
 export interface SeriesDef {
   key: string
   label: string
@@ -46,7 +41,7 @@ export interface ChartPoint {
   value: number
 }
 
-// A series identity swatch. An SVG fill (which accepts var(--otari-*) tokens)
+// A series identity swatch. An SVG fill (which accepts var(--color-*) tokens)
 // rather than an inline background-color style, per the dashboard's no-inline-
 // styles convention.
 function SeriesMarker({ color }: { color: string }) {
@@ -96,27 +91,27 @@ export function ChartTooltip({
     rows.length > 1 ? rows.filter((entry) => (entry.value as number) > 0) : rows
   const total = rows.reduce((sum, entry) => sum + (entry.value as number), 0)
   return (
-    <div className="rounded-md border border-[var(--otari-line)] bg-[var(--otari-surface)] px-2.5 py-1.5 text-xs shadow-sm">
-      <div className="text-[var(--otari-muted)]">{heading}</div>
+    <div className="rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs shadow-sm">
+      <div className="text-muted">{heading}</div>
       <div className="mt-0.5 flex flex-col gap-0.5">
         {visible.map((entry, index) => (
           <div key={index} className="flex items-center justify-between gap-4">
-            <span className="flex items-center gap-1.5 text-[var(--otari-muted)]">
+            <span className="flex items-center gap-1.5 text-muted">
               {rows.length > 1 && entry.color ? (
                 <SeriesMarker color={entry.color} />
               ) : null}
               {entry.name}
             </span>
-            <span className="font-medium tabular-nums text-[var(--otari-ink)]">
+            <span className="font-medium tabular-nums text-foreground">
               {formatValue(entry.value as number)}
             </span>
           </div>
         ))}
       </div>
       {showTotal && rows.length > 1 ? (
-        <div className="mt-1 flex items-center justify-between gap-4 border-t border-[var(--otari-line)] pt-1">
-          <span className="text-[var(--otari-muted)]">Total</span>
-          <span className="font-semibold tabular-nums text-[var(--otari-ink)]">
+        <div className="mt-1 flex items-center justify-between gap-4 border-t border-border pt-1">
+          <span className="text-muted">Total</span>
+          <span className="font-semibold tabular-nums text-foreground">
             {formatValue(total)}
           </span>
         </div>
@@ -135,7 +130,7 @@ export function ChartLegend({ series }: { series: SeriesDef[] }) {
       {series.map((s) => (
         <span
           key={s.key}
-          className="flex items-center gap-1.5 text-xs text-[var(--otari-muted)]"
+          className="flex items-center gap-1.5 text-xs text-muted"
         >
           <SeriesMarker color={s.color} />
           {s.label}
@@ -280,7 +275,7 @@ export function TrendChart({
             interval="preserveStartEnd"
             minTickGap={40}
             tickFormatter={formatXTick}
-            tick={{ fontSize: 10, fill: "var(--otari-muted)" }}
+            tick={{ fontSize: 10, fill: "var(--color-text-muted)" }}
           />
           {showYAxis ? (
             <YAxis
@@ -288,11 +283,11 @@ export function TrendChart({
               tickLine={false}
               axisLine={false}
               tickFormatter={(value: number) => formatValue(value)}
-              tick={{ fontSize: 10, fill: "var(--otari-muted)" }}
+              tick={{ fontSize: 10, fill: "var(--color-text-muted)" }}
             />
           ) : null}
           <Tooltip
-            cursor={{ fill: "var(--otari-line)", opacity: 0.35 }}
+            cursor={{ fill: "var(--color-border)", opacity: 0.35 }}
             content={
               <ChartTooltip
                 formatValue={formatValue}
@@ -308,7 +303,7 @@ export function TrendChart({
               name={s.label}
               stackId="stack"
               fill={s.color}
-              stroke="var(--otari-surface)"
+              stroke="var(--color-surface)"
               strokeWidth={series.length > 1 ? 1 : 0}
               // Rounded data-ends only when nothing stacks on top; rounding
               // every stacked segment would fake gaps inside a column.
@@ -323,7 +318,7 @@ export function TrendChart({
             <ReferenceArea
               x1={data[0].x}
               x2={data[dimmed.startIndex - 1].x}
-              fill="var(--otari-bg)"
+              fill="var(--color-surface-muted)"
               fillOpacity={0.75}
               stroke="none"
             />
@@ -332,7 +327,7 @@ export function TrendChart({
             <ReferenceArea
               x1={data[dimmed.endIndex + 1].x}
               x2={data[data.length - 1].x}
-              fill="var(--otari-bg)"
+              fill="var(--color-surface-muted)"
               fillOpacity={0.75}
               stroke="none"
             />

@@ -61,11 +61,9 @@ export function UserMultiSelect({
   return (
     <div className="flex flex-col gap-2">
       <div>
-        <span className="text-sm font-medium text-[var(--otari-ink)]">
-          {label}
-        </span>
+        <span className="text-sm font-medium text-foreground">{label}</span>
         {description ? (
-          <p className="text-xs text-[var(--otari-muted)]">{description}</p>
+          <p className="text-xs text-muted">{description}</p>
         ) : null}
       </div>
       {value.length > 0 ? (
@@ -73,14 +71,14 @@ export function UserMultiSelect({
           {value.map((id) => (
             <span
               key={id}
-              className="inline-flex items-center gap-1 rounded-full bg-[var(--otari-brand-tint)] px-2.5 py-1 font-mono text-xs text-[var(--otari-brand-dark)]"
+              className="inline-flex items-center gap-1 rounded-full bg-primary-subtle px-2.5 py-1 font-mono text-xs text-primary-subtle-foreground"
             >
               {id}
               <button
                 type="button"
                 aria-label={`Remove ${id}`}
                 onClick={() => remove(id)}
-                className="text-[var(--otari-brand-dark)] hover:text-red-700"
+                className="text-primary-subtle-foreground hover:text-danger"
               >
                 ×
               </button>
@@ -89,7 +87,7 @@ export function UserMultiSelect({
         </div>
       ) : null}
       {options.length === 0 ? (
-        <span className="text-xs text-[var(--otari-muted)]">
+        <span className="text-xs text-muted">
           No users yet. Create users first, then assign them here or from the
           Users page.
         </span>

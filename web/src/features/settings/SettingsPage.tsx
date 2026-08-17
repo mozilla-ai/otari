@@ -78,11 +78,11 @@ function Toggle({
       disabled={disabled}
       onClick={() => onChange(!checked)}
       className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
-        checked ? "bg-[var(--otari-brand)]" : "bg-[var(--otari-line)]"
+        checked ? "bg-accent" : "bg-surface-subtle"
       }`}
     >
       <span
-        className={`inline-block h-5 w-5 transform rounded-full bg-white shadow transition-transform ${
+        className={`inline-block h-5 w-5 transform rounded-full bg-surface shadow transition-transform ${
           checked ? "translate-x-5" : "translate-x-0.5"
         }`}
       />
@@ -140,7 +140,7 @@ function NumberSetting({
         value={draft}
         disabled={disabled}
         onChange={(event) => setDraft(event.target.value)}
-        className="w-28 rounded-md border border-[var(--otari-line)] bg-white px-2 py-1 text-right text-sm tabular-nums focus:border-[var(--otari-brand)] focus:outline-none disabled:opacity-50"
+        className="w-28 rounded-md border border-field-border bg-field px-2 py-1 text-right text-sm tabular-nums focus:border-accent focus:outline-none disabled:opacity-50"
       />
       <Button
         size="sm"
@@ -184,7 +184,7 @@ function TextSetting({
         disabled={disabled}
         placeholder="unset"
         onChange={(event) => setDraft(event.target.value)}
-        className="w-56 rounded-md border border-[var(--otari-line)] bg-white px-2 py-1 text-sm focus:border-[var(--otari-brand)] focus:outline-none disabled:opacity-50"
+        className="w-56 rounded-md border border-field-border bg-field px-2 py-1 text-sm focus:border-accent focus:outline-none disabled:opacity-50"
       />
       <Button
         size="sm"
@@ -229,10 +229,10 @@ function SettingControl({
   if (!field.settable) {
     return (
       <div className="flex items-center gap-2">
-        <span className="text-sm tabular-nums text-[var(--otari-ink)]">
+        <span className="text-sm tabular-nums text-foreground">
           {formatValue(field)}
         </span>
-        <span className="rounded-full border border-[var(--otari-line)] px-2 py-0.5 text-xs text-[var(--otari-muted)]">
+        <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted">
           startup-only
         </span>
       </div>
@@ -296,13 +296,9 @@ function ConfigRow({
   return (
     <div className="flex items-start justify-between gap-6 py-4">
       <div className="min-w-0">
-        <code className="text-sm font-medium text-[var(--otari-ink)]">
-          {field.key}
-        </code>
+        <code className="text-sm font-medium text-foreground">{field.key}</code>
         {field.description ? (
-          <p className="mt-1 text-sm text-[var(--otari-muted)]">
-            {field.description}
-          </p>
+          <p className="mt-1 text-sm text-muted">{field.description}</p>
         ) : null}
       </div>
       <div className="shrink-0 pt-0.5">
@@ -344,9 +340,7 @@ function CopyField({
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-[var(--otari-muted)]">
-          New master key
-        </span>
+        <span className="text-xs font-medium text-muted">New master key</span>
         <Button size="sm" variant="outline" onPress={copy}>
           {copied ? "Copied" : "Copy"}
         </Button>
@@ -363,14 +357,11 @@ function CopyField({
         data-1p-ignore
         data-lpignore="true"
       />
-      <span
-        aria-live="polite"
-        className="text-xs text-[var(--otari-brand-dark)]"
-      >
+      <span aria-live="polite" className="text-xs text-success">
         {copied ? "Copied to clipboard." : ""}
       </span>
       {selectHint ? (
-        <span className="text-xs text-[var(--otari-muted)]">
+        <span className="text-xs text-muted">
           Selected. Press Ctrl/Cmd-C to copy.
         </span>
       ) : null}
@@ -417,7 +408,7 @@ function MasterKeyRotationDialog({
                   Copy this key now. It is shown once and cannot be retrieved
                   again after you close this dialog.
                 </InfoBanner>
-                <p className="text-sm text-[var(--otari-muted)]">
+                <p className="text-sm text-muted">
                   The previous master key has stopped working. This browser tab
                   now uses the new key.
                 </p>
@@ -430,7 +421,7 @@ function MasterKeyRotationDialog({
                   Other signed-in dashboard sessions will need the new key to
                   continue.
                 </InfoBanner>
-                <p className="text-sm text-[var(--otari-muted)]">
+                <p className="text-sm text-muted">
                   The replacement key will be shown once. Save it before closing
                   the next screen.
                 </p>
@@ -503,10 +494,10 @@ function MasterKeyRow({ source }: { source: "configured" | "generated" }) {
     <div className="flex flex-col gap-4 py-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <code className="text-sm font-medium text-[var(--otari-ink)]">
+          <code className="text-sm font-medium text-foreground">
             master_key
           </code>
-          <p className="mt-1 max-w-3xl text-sm text-[var(--otari-muted)]">
+          <p className="mt-1 max-w-3xl text-sm text-muted">
             {isGenerated
               ? "This gateway uses its first-run generated dashboard key. Regeneration invalidates the current key immediately."
               : "This gateway uses a key managed through OTARI_MASTER_KEY or config.yml. Rotate it in configuration, then restart the gateway."}
@@ -553,10 +544,10 @@ function SecretKeyRow() {
     <div className="flex flex-col gap-4 py-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <code className="text-sm font-medium text-[var(--otari-ink)]">
+          <code className="text-sm font-medium text-foreground">
             OTARI_SECRET_KEY
           </code>
-          <p className="mt-1 max-w-3xl text-sm text-[var(--otari-muted)]">
+          <p className="mt-1 max-w-3xl text-sm text-muted">
             Generate a new key with <code>uv run otari gen-secret-key</code>,
             then restart with{" "}
             <code>OTARI_SECRET_KEY=&lt;new-key&gt;,&lt;old-key&gt;</code>.
@@ -588,11 +579,7 @@ function SecretKeyRow() {
         </InfoBanner>
       ) : null}
       {result ? (
-        <p
-          className="text-sm text-[var(--otari-muted)]"
-          role="status"
-          aria-live="polite"
-        >
+        <p className="text-sm text-muted" role="status" aria-live="polite">
           Re-encrypted {result.reencrypted} provider key
           {result.reencrypted === 1 ? "" : "s"}.
           {result.unreadable > 0
@@ -600,7 +587,7 @@ function SecretKeyRow() {
             : " All decryptable stored keys now use the primary secret key."}
         </p>
       ) : !storedProviders.isLoading && !hasStoredKeys ? (
-        <p className="text-sm text-[var(--otari-muted)]">
+        <p className="text-sm text-muted">
           No stored provider keys need re-encryption.
         </p>
       ) : null}
@@ -615,12 +602,11 @@ function SecurityKeysSection({
 }) {
   return (
     <section className="flex flex-col gap-2">
-      <h2 className="text-sm font-semibold text-[var(--otari-ink)]">
-        Credential security{" "}
-        <span className="font-normal text-[var(--otari-muted)]">(2)</span>
+      <h2 className="text-sm font-semibold text-foreground">
+        Credential security <span className="font-normal text-muted">(2)</span>
       </h2>
       <Card>
-        <Card.Content className="flex flex-col divide-y divide-[var(--otari-line)] px-5 py-1">
+        <Card.Content className="flex flex-col divide-y divide-border px-5 py-1">
           <MasterKeyRow source={masterKeySource} />
           <SecretKeyRow />
         </Card.Content>
@@ -652,7 +638,7 @@ function PricingRefreshDialog({
             </AlertDialog.Heading>
           </AlertDialog.Header>
           <AlertDialog.Body className="flex flex-col gap-4">
-            <p className="text-sm text-[var(--otari-muted)]">
+            <p className="text-sm text-muted">
               {preview.added_count} added, {preview.changed_count} changed, and{" "}
               {preview.removed_count} removed upstream model prices. The
               accepted catalog is saved in the database with source{" "}
@@ -661,7 +647,7 @@ function PricingRefreshDialog({
               {preview.protected_model_count === 1 ? "" : "s"} remain unchanged.
             </p>
             {preview.changes.length > 0 ? (
-              <ul className="max-h-60 list-disc overflow-auto pl-5 text-sm text-[var(--otari-ink)]">
+              <ul className="max-h-60 list-disc overflow-auto pl-5 text-sm text-foreground">
                 {preview.changes.map((change) => (
                   <li key={change.model_key}>
                     {change.model_key}: {change.change}
@@ -670,7 +656,7 @@ function PricingRefreshDialog({
               </ul>
             ) : null}
             {preview.changes_truncated ? (
-              <p className="text-xs text-[var(--otari-muted)]">
+              <p className="text-xs text-muted">
                 Only the first 100 changes are shown.
               </p>
             ) : null}
@@ -706,17 +692,17 @@ function PricingRefreshSection() {
 
   return (
     <section className="flex flex-col gap-2">
-      <h2 className="text-sm font-semibold text-[var(--otari-ink)]">
+      <h2 className="text-sm font-semibold text-foreground">
         Default pricing catalog
       </h2>
       <Card>
         <Card.Content className="flex flex-col gap-4 p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
-              <div className="text-sm font-medium text-[var(--otari-ink)]">
+              <div className="text-sm font-medium text-foreground">
                 genai-prices defaults
               </div>
-              <p className="mt-1 max-w-3xl text-sm text-[var(--otari-muted)]">
+              <p className="mt-1 max-w-3xl text-sm text-muted">
                 Fetch the latest upstream catalog, review the proposed change
                 summary, then accept or reject it. Accepted data is stored as{" "}
                 <code>genai-prices</code>; custom prices remain separate and
@@ -841,43 +827,41 @@ export function SettingsPage() {
           onKeyDown={(event) => {
             if (event.key === "Escape") setSearch("")
           }}
-          className="min-w-0 flex-1 rounded-lg border border-[var(--otari-line)] bg-[var(--otari-bg)] px-3 py-2 text-sm text-[var(--otari-ink)] focus:border-[var(--otari-brand)] focus:outline-none"
+          className="min-w-0 flex-1 rounded-lg border border-border bg-surface-alt px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
         />
-        <label className="flex items-center gap-2 text-sm text-[var(--otari-muted)]">
+        <label className="flex items-center gap-2 text-sm text-muted">
           <input
             type="checkbox"
             checked={settableOnly}
             onChange={(event) => setSettableOnly(event.target.checked)}
-            className="h-4 w-4 accent-[var(--otari-brand)]"
+            className="h-4 w-4 accent-accent"
           />
           Settable only
         </label>
       </div>
 
       {data ? (
-        <p className="text-xs text-[var(--otari-muted)]">
+        <p className="text-xs text-muted">
           Showing {filtered.length} of {allFields.length} settings
         </p>
       ) : null}
 
       {data && filtered.length === 0 ? (
-        <p className="text-sm text-[var(--otari-muted)]">
-          No settings match your search.
-        </p>
+        <p className="text-sm text-muted">No settings match your search.</p>
       ) : null}
 
       {settings.isLoading ? <PageLoading /> : null}
 
       {groups.map((group) => (
         <section key={group.name} className="flex flex-col gap-2">
-          <h2 className="text-sm font-semibold text-[var(--otari-ink)]">
+          <h2 className="text-sm font-semibold text-foreground">
             {group.name}{" "}
-            <span className="font-normal text-[var(--otari-muted)]">
+            <span className="font-normal text-muted">
               ({group.fields.length})
             </span>
           </h2>
           <Card>
-            <Card.Content className="flex flex-col divide-y divide-[var(--otari-line)] px-5 py-1">
+            <Card.Content className="flex flex-col divide-y divide-border px-5 py-1">
               {group.fields.map((field) => (
                 <ConfigRow
                   key={field.key}
@@ -898,7 +882,7 @@ export function SettingsPage() {
       ) : null}
 
       {data ? (
-        <p className="text-xs text-[var(--otari-muted)]">
+        <p className="text-xs text-muted">
           Mode: {data.mode} · Version {data.version}
           {data.require_pricing ? " · require_pricing on" : ""}
         </p>

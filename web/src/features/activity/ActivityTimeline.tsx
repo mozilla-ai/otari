@@ -76,17 +76,17 @@ function formatTick(iso: string, bucket: UsageBucket): string {
 const SUCCESS_SERIES: SeriesDef = {
   key: "success",
   label: "Succeeded",
-  color: "var(--otari-brand)",
+  color: "var(--color-primary)",
 }
 const ERROR_SERIES: SeriesDef = {
   key: "errors",
   label: "Failed",
-  color: "var(--otari-danger)",
+  color: "var(--color-danger)",
 }
 const PLAIN_SERIES: SeriesDef = {
   key: "requests",
   label: "Requests",
-  color: "var(--otari-brand)",
+  color: "var(--color-primary)",
 }
 
 export function ActivityTimeline({
@@ -267,23 +267,21 @@ export function ActivityTimeline({
           </Button>
         ))}
         <div className="ml-auto flex items-center gap-3">
-          <span className="text-xs text-[var(--otari-muted)]">
-            Showing {label} · UTC
-          </span>
+          <span className="text-xs text-muted">Showing {label} · UTC</span>
           {action}
         </div>
       </div>
 
-      <div className="rounded-xl border border-[var(--otari-line)] bg-[var(--otari-surface)] p-2">
+      <div className="rounded-xl border border-border bg-surface p-2">
         <div className="flex items-center justify-between gap-2 px-1 pb-1">
           <span className="flex items-center gap-3">
-            <span className="text-[11px] font-medium uppercase tracking-wide text-[var(--otari-muted)]">
+            <span className="text-[11px] font-medium uppercase tracking-wide text-muted">
               Requests / {bucket === "hour" ? "hour" : "day"}
             </span>
             <ChartLegend series={chartSeries} />
           </span>
           <div className="flex items-center gap-1.5">
-            <span className="hidden text-[11px] text-[var(--otari-muted)] sm:inline">
+            <span className="hidden text-[11px] text-muted sm:inline">
               drag across the chart to zoom
             </span>
             <Button
@@ -341,7 +339,7 @@ export function ActivityTimeline({
             <Spinner size="sm" />
           </div>
         ) : n === 0 ? (
-          <div className="flex h-[90px] items-center justify-center text-xs text-[var(--otari-muted)]">
+          <div className="flex h-[90px] items-center justify-center text-xs text-muted">
             No activity in this range.
           </div>
         ) : (
@@ -362,7 +360,7 @@ export function ActivityTimeline({
             {zoomed || panSel ? (
               <div
                 ref={railRef}
-                className="relative h-2.5 w-full rounded-full bg-[var(--otari-bg)]"
+                className="relative h-2.5 w-full rounded-full bg-surface-alt"
               >
                 <div
                   role="slider"
@@ -372,7 +370,7 @@ export function ActivityTimeline({
                   aria-valuenow={Math.min(sel.startIndex, panMax)}
                   aria-valuetext={`Window starting at ${formatTick(starts[sel.startIndex] ?? starts[0], bucket)}`}
                   tabIndex={0}
-                  className="absolute inset-y-0 cursor-grab touch-none rounded-full bg-[var(--otari-brand)]/40 outline-none hover:bg-[var(--otari-brand)]/60 focus-visible:ring-2 focus-visible:ring-[var(--otari-brand)] active:cursor-grabbing"
+                  className="absolute inset-y-0 cursor-grab touch-none rounded-full bg-accent/40 outline-none hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-accent active:cursor-grabbing"
                   style={{
                     left: `${loPct}%`,
                     width: `${Math.max(2, hiPct - loPct)}%`,

@@ -1,9 +1,3 @@
-// MIGRATION BRIDGE. Hand-rolled and predating the design foundation rehomed from
-// otari-ai/frontend (src/styles/globals.css, src/shared/components/ui/). This file
-// keeps its `--otari-*` colors so the pages built on it keep rendering, and it
-// leaves with the last of them. Reuse it rather than duplicating its markup, but
-// do not extend it and do not build a new page on it: new work composes
-// @heroui/react with the semantic tokens. See ../../../AGENTS.md.
 import { AlertDialog, Button } from "@heroui/react"
 import type { ReactNode } from "react"
 
@@ -45,7 +39,7 @@ export function ConfirmDialog({
                 <AlertDialog.Heading>{heading}</AlertDialog.Heading>
               </AlertDialog.Header>
               <AlertDialog.Body className="flex flex-col gap-4">
-                <div className="text-sm text-[var(--otari-muted)]">{body}</div>
+                <div className="text-sm text-muted">{body}</div>
                 <ErrorBanner error={error} />
               </AlertDialog.Body>
               <AlertDialog.Footer>

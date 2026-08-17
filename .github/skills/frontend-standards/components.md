@@ -47,11 +47,10 @@ already styles.
 new primitive goes. It holds `SettingsSection` (a settings page section's header + body) and
 `RowActions` (a table row's trailing button cluster) so far.
 
-Everything in the table below lives one level up, in `shared/components/`, and is a
-**migration bridge**: hand-rolled primitives that predate the foundation and still carry
-`--otari-*` colors. Reuse them rather than duplicating their markup, but don't extend them and
-don't build a new page on one; each leaves with the last page that uses it. See
-[design-tokens.md](./design-tokens.md).
+Everything in the table below lives one level up, in `shared/components/`. These are
+hand-rolled rather than rehomed (they predate the foundation and have no otari-ai
+counterpart), but they are on the semantic tokens like everything else, so reuse them rather
+than duplicating their markup. See [design-tokens.md](./design-tokens.md).
 
 | Need | Use |
 |---|---|
@@ -74,6 +73,6 @@ use it rather than reaching into `error.message` yourself.
 - Space siblings with `gap-*` on the flex/grid parent, not `m-*` on each child.
 - Responsive via Tailwind breakpoints (`sm:`, `md:`, `lg:`) and flex/grid; avoid fixed pixel
   widths for anything that should reflow (`min-w-[180px]` on a wrapping stat card is fine).
-- One component per file for pages and standalone components, colocated with its test. The
-  bridge's `shared/components/ui.tsx` is the one place several closely related primitives
-  share a file; a new primitive under `shared/components/ui/` gets its own.
+- One component per file for pages and standalone components, colocated with its test.
+  `shared/components/ui.tsx` is the one place several closely related primitives share a
+  file; a new primitive under `shared/components/ui/` gets its own.

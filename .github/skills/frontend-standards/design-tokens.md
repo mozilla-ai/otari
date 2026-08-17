@@ -15,13 +15,14 @@ never for its appearance:
 | Surfaces | `--color-background`, `--color-background-muted`, `--color-background-subtle`, `--color-surface`, `--color-surface-muted`, `--color-surface-subtle` |
 | Text | `--color-text`, `--color-text-muted`, `--color-text-subtle`, `--color-text-on-primary`, `--color-text-on-inverse` |
 | Borders | `--color-border`, `--color-border-strong`, `--color-border-subtle` |
-| Brand | `--color-primary`, `--color-primary-hover`, `--color-primary-active`, `--color-primary-subtle`, `--color-primary-foreground` |
+| Brand | `--color-primary`, `--color-primary-hover`, `--color-primary-active`, `--color-primary-subtle`, `--color-primary-foreground`, `--color-primary-subtle-foreground` |
 | Link & focus | `--color-link`, `--color-link-hover`, `--color-focus` |
 | Status | `--color-success`, `--color-warning`, `--color-danger`, `--color-info`, each with a `-subtle` fill and a `-foreground` |
 | Attention | `--color-attention` (+ `-subtle`, `-foreground`, `-border`) |
 | Code | `--color-code-surface`, `--color-code-border`, `--color-code-control`, `--color-code-foreground` |
 | Elevation | `--shadow-sm/md/lg`, `--shadow-modal` |
 | Fields | `--field-background`, `--field-border`, `--field-border-width` |
+| Data viz | `--color-chart-cat-1` … `-8` + `-other`, `--color-chart-ramp-1` … `-4` |
 
 ## How they reach the screen
 
@@ -39,10 +40,22 @@ utilities that resolve through that mapping:
 ```
 
 Tokens HeroUI has no counterpart for are registered in the file's `@theme` block, which is
-what generates their utilities: `bg-background-alt`, `bg-surface-alt`, `text-link`,
-`text-link-hover`, the `attention` and `info` families, the status `-subtle` fills,
-`bg-primary-subtle`, the `code` family, `shadow-elevation-sm/md/lg`, `shadow-modal`, and
-`font-sans` / `font-mono` / `font-display`.
+what generates their utilities: `bg-background-alt`, `bg-surface-alt`,
+`bg-surface-subtle`, `text-link`, `text-link-hover`, the `attention` and `info` families, the
+status `-subtle` fills, `bg-primary-subtle`, `text-primary-subtle-foreground`, the `code`
+family, `shadow-elevation-sm/md/lg`, `shadow-modal`, and `font-sans` / `font-mono` /
+`font-display`.
+
+Two of those name a pairing rather than a color, and are the ones easiest to get wrong.
+**Text on a `-subtle` fill is not the fill's own color**: `text-primary-subtle-foreground` is
+what goes on `bg-primary-subtle` (the brand teal on the brand tint is 3.8:1, under AA), while
+`text-danger` / `text-warning` / `text-success` / `text-attention` *are* the right ink on
+their own subtle fills, because those four are tuned to clear 4.5:1 there. And the second is
+that a hover step has to move away from what it sits on: the shell chrome is painted with
+`bg-surface`, so a nav item hovers to `bg-surface-alt`. `--color-background-muted` is the
+token whose comment claims the chrome, and the shell deliberately does not use it, because
+`bg-primary-subtle` and that silver are a shade apart and an active nav item disappears
+against it.
 
 ### HeroUI ships a near-synonym for several of these
 
@@ -116,18 +129,35 @@ same decision. `SettingsSection` and `RowActions`, which need neither, came acro
 - **Keep it recognizable as `otari-ai/frontend/src/index.css`.** The control-plane pages land
   here at M5 and have to land on this palette without a reconciliation pass, so a divergence
   in a token's name, value, or reasoning comment costs more than it looks like it does.
+## Chart colors
 
-## The `--otari-*` bridge
+Series fills are their own family because a mark is read against a plot, not against text:
+WCAG says nothing about whether two adjacent bars are separable, and CVD separation says
+nothing about legibility. Both sets are validated **per theme** with the data-viz palette
+checker, so a value there is a checked result rather than a shade someone liked.
 
-Everything below the `MIGRATION BRIDGE` marker in `globals.css` is the dashboard's
-pre-rehome palette (`--otari-brand`, `--otari-ink`, `--otari-muted`, `--otari-line`, the
-categorical chart slots) plus the component rules that consume it. It is kept, at its
-original values, only so the existing call sites keep rendering while their pages are rebuilt
-on the foundation. Same for the files in `web/src/shared/components/` carrying the matching
-header comment.
+- `--color-chart-cat-1` ... `-8` are the categorical slots for grouped series. Assign them in
+  that order and **never cycle**: the margins are computed on adjacent pairs in exactly this
+  order. A ninth group folds into `--color-chart-cat-other`.
+- `--color-chart-ramp-1` ... `-4` are one hue at four lightnesses, **strongest first**, for a
+  part-to-whole bar whose segments are ordered rather than categorical (the billed token
+  composition on Activity and Usage). Light runs dark to pale, dark runs pale to dark.
 
-Nothing new may consume an `--otari-*` variable and nothing new may be added to the block;
-`foundation.test.ts` fails if one is declared above the marker. Don't "fix" the values toward
-the foundation either: a half-converted palette is worse than two clearly separated ones, and
-converting a page is what retires its tokens. When the last call site goes, so does the whole
-section.
+Consume them as `var(--color-chart-...)` in the `SeriesDef.color` or SVG `fill` a chart takes,
+not as a Tailwind class; they are deliberately not registered in `@theme`, because no
+component should be painting a background with a series color. Changing one means re-running
+the checker for both themes, not adjusting it by eye.
+
+## The retired `--otari-*` palette
+
+The dashboard used to have its own pre-rehome palette (`--otari-brand`, `--otari-ink`,
+`--otari-muted`, `--otari-line`, the categorical chart slots) behind a `MIGRATION BRIDGE`
+marker in `globals.css`, with the hand-rolled primitives that consumed it. It is gone: every
+page is on the foundation, and `foundation.test.ts` fails if an `--otari-*` variable is
+declared again. If you find yourself wanting one, the role is missing from the foundation, so
+add the role.
+
+The `otari-` prefix that survives on a handful of **class** names (`.otari-table`,
+`.otari-markdown`, `.otari-detail-row`, `.otari-bulk-bar`) is unrelated: it is the app's
+namespace for a hook that has to reach inside a HeroUI component's DOM, and those rules
+consume `--color-*` like everything else.

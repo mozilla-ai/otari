@@ -1,9 +1,3 @@
-// MIGRATION BRIDGE. Hand-rolled and predating the design foundation rehomed from
-// otari-ai/frontend (src/styles/globals.css, src/shared/components/ui/). This file
-// keeps its `--otari-*` colors so the pages built on it keep rendering, and it
-// leaves with the last of them. Reuse it rather than duplicating its markup, but
-// do not extend it and do not build a new page on it: new work composes
-// @heroui/react with the semantic tokens. See ../../../AGENTS.md.
 import {
   Button,
   Card,
@@ -24,8 +18,7 @@ import { ApiError } from "@/shared/api/client"
 import { copyToClipboard } from "@/shared/helpers/clipboard"
 import { formatPct, formatRelative } from "@/shared/helpers/format"
 
-// A tile's attention status. Colors mirror the banner precedent (ErrorBanner
-// red-*, InfoBanner amber-*) and add emerald for the healthy state. Color is
+// A tile's attention status, on the foundation's three status roles. Color is
 // never the only signal: a status tile also carries a word/icon via `statusLabel`.
 export type StatStatus = "ok" | "warn" | "alert"
 
@@ -33,21 +26,19 @@ export type StatStatus = "ok" | "warn" | "alert"
 // HeroUI Card a 1px outline (`.card:not(.card--transparent)` in globals.css),
 // and that rule is unlayered while a Tailwind utility sits in @layer utilities —
 // unlayered always wins, whatever the specificity. Without the bang the
-// shorthand `border:` resets this tile's left edge back to a hairline. It goes
-// away with the tile: a foundation-native StatCard draws the accent from a token
-// rather than from a numbered palette class.
+// shorthand `border:` resets this tile's left edge back to a hairline.
 const STAT_STATUS: Record<StatStatus, { accent: string; pill: string }> = {
   ok: {
-    accent: "border-l-emerald-500!",
-    pill: "border-emerald-200 bg-emerald-50 text-emerald-700",
+    accent: "border-l-success!",
+    pill: "border-success bg-success-subtle text-success",
   },
   warn: {
-    accent: "border-l-amber-500!",
-    pill: "border-amber-200 bg-amber-50 text-amber-800",
+    accent: "border-l-warning!",
+    pill: "border-warning bg-warning-subtle text-warning",
   },
   alert: {
-    accent: "border-l-red-500!",
-    pill: "border-red-200 bg-red-50 text-red-700",
+    accent: "border-l-danger!",
+    pill: "border-danger bg-danger-subtle text-danger",
   },
 }
 
@@ -79,11 +70,11 @@ export function StatCard({
     // Card.Content's, which otherwise doubled the tile's height (most visible at
     // two-up on mobile). Content owns the padding: tighter on mobile, roomier up.
     <Card.Content className="flex flex-col gap-1 p-4 sm:p-5">
-      <span className="text-xs font-medium uppercase tracking-wide text-[var(--otari-muted)]">
+      <span className="text-xs font-medium uppercase tracking-wide text-muted">
         {label}
       </span>
       <span className="flex flex-wrap items-center gap-2">
-        <span className="text-xl font-semibold text-[var(--otari-ink)] sm:text-2xl">
+        <span className="text-xl font-semibold text-foreground sm:text-2xl">
           {value}
         </span>
         {status && statusLabel ? (
@@ -94,9 +85,7 @@ export function StatCard({
           </span>
         ) : null}
       </span>
-      {hint ? (
-        <span className="text-xs text-[var(--otari-muted)]">{hint}</span>
-      ) : null}
+      {hint ? <span className="text-xs text-muted">{hint}</span> : null}
       {chart ? <div className="mt-2">{chart}</div> : null}
     </Card.Content>
   )
@@ -109,11 +98,11 @@ export function StatCard({
       <Card
         // Same reason as the accent above: the foundation's card outline is
         // unlayered, so the hover tint needs the bang to be seen at all.
-        className={`${cardClass} transition-colors hover:border-[var(--otari-brand)]!`}
+        className={`${cardClass} transition-colors hover:border-accent!`}
       >
         <Link
           to={to}
-          className="block rounded-[inherit] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--otari-brand)]"
+          className="block rounded-[inherit] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
         >
           {body}
         </Link>
@@ -129,7 +118,7 @@ export function DeltaHint({ fraction }: { fraction: number | null }) {
   if (fraction === null) return null
   const arrow = fraction > 0 ? "▲" : fraction < 0 ? "▼" : "•"
   return (
-    <span className="text-[var(--otari-muted)]">
+    <span className="text-muted">
       {arrow} {formatPct(Math.abs(fraction))} vs prev
     </span>
   )
@@ -152,7 +141,7 @@ export function ErrorBanner({ error }: { error: unknown }) {
   return (
     <div
       role="alert"
-      className="rounded-lg border border-red-200 bg-red-50 px-4 py-3 text-sm text-red-700"
+      className="rounded-lg border border-danger bg-danger-subtle px-4 py-3 text-sm text-danger"
     >
       {errorMessage(error)}
     </div>
@@ -168,8 +157,8 @@ export function InfoBanner({
 }) {
   const styles =
     tone === "warning"
-      ? "border-amber-200 bg-amber-50 text-amber-800"
-      : "border-[var(--otari-brand)] bg-[var(--otari-brand-tint)] text-[var(--otari-brand-dark)]"
+      ? "border-warning bg-warning-subtle text-warning"
+      : "border-accent bg-primary-subtle text-primary-subtle-foreground"
   return (
     <div className={`rounded-lg border px-4 py-3 text-sm ${styles}`}>
       {children}
@@ -189,13 +178,9 @@ export function PageHeader({
   return (
     <div className="flex flex-col gap-3">
       <div>
-        <h1 className="text-xl font-semibold text-[var(--otari-ink)]">
-          {title}
-        </h1>
+        <h1 className="text-xl font-semibold text-foreground">{title}</h1>
         {description ? (
-          <p className="mt-1 text-sm text-[var(--otari-muted)]">
-            {description}
-          </p>
+          <p className="mt-1 text-sm text-muted">{description}</p>
         ) : null}
       </div>
       {/* The primary action sits on its own left-aligned row under the heading,
@@ -263,9 +248,7 @@ export function RefreshButton({
   return (
     <span className="inline-flex items-center gap-2">
       {freshness ? (
-        <span className="text-xs text-[var(--otari-muted)]">
-          Updated {freshness}
-        </span>
+        <span className="text-xs text-muted">Updated {freshness}</span>
       ) : null}
       <Button
         variant="outline"
@@ -441,13 +424,9 @@ export function EmptyState({
     <Card>
       <Card.Content className="flex flex-col gap-4 p-6">
         <div>
-          <h2 className="text-lg font-semibold text-[var(--otari-ink)]">
-            {title}
-          </h2>
+          <h2 className="text-lg font-semibold text-foreground">{title}</h2>
           {description ? (
-            <p className="mt-1 text-sm text-[var(--otari-muted)]">
-              {description}
-            </p>
+            <p className="mt-1 text-sm text-muted">{description}</p>
           ) : null}
         </div>
         {children}
@@ -476,7 +455,7 @@ export function PageLoading({ label = "Loading…" }: { label?: string }) {
   return (
     <div
       role="status"
-      className="flex items-center justify-center gap-2 px-4 py-10 text-sm text-[var(--otari-muted)]"
+      className="flex items-center justify-center gap-2 px-4 py-10 text-sm text-muted"
     >
       <Spinner size="sm" />
       <span>{label}</span>
@@ -530,7 +509,7 @@ export function ConfirmButton({
 }
 
 const FILTER_SELECT_CLASS =
-  "rounded-lg border border-[var(--otari-line)] bg-[var(--otari-bg)] px-3 py-2 text-sm text-[var(--otari-ink)] focus:border-[var(--otari-brand)] focus:outline-none"
+  "rounded-lg border border-border bg-surface-alt px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
 
 // Token-styled native select for page filter bars. Pass `label` (+ `id`) for a
 // visible label, or `ariaLabel` alone for a compact control. Prefer `options`
@@ -578,10 +557,7 @@ export function FilterSelect({
   if (label) {
     return (
       <div className="flex flex-col gap-1">
-        <label
-          htmlFor={selectId}
-          className="text-xs font-medium text-[var(--otari-muted)]"
-        >
+        <label htmlFor={selectId} className="text-xs font-medium text-muted">
           {label}
         </label>
         {select}
@@ -680,9 +656,7 @@ export function FilterMultiComboBox({
       }}
       className="flex flex-col gap-1"
     >
-      <Label className="text-xs font-medium text-[var(--otari-muted)]">
-        {label}
-      </Label>
+      <Label className="text-xs font-medium text-muted">{label}</Label>
       <ComboBox.InputGroup>
         <Input
           placeholder={

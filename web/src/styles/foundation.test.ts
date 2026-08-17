@@ -8,11 +8,6 @@ import { describe, expect, it } from "vitest"
 const WEB = process.cwd()
 const CSS = readFileSync(join(WEB, "src", "styles", "globals.css"), "utf8")
 
-// The line that separates the rehomed design foundation from the pre-rehome
-// `--otari-*` system it is replacing. Everything above it is the foundation;
-// everything below is on its way out.
-const BRIDGE_MARKER = "MIGRATION BRIDGE"
-
 /**
  * The text of one top-level block, from `selector {` to the `}` that closes it
  * in the first column. Every block in globals.css is written that way, so a
@@ -59,6 +54,7 @@ const HEROUI_VARIABLES = [
   "--accent-foreground",
   "--focus",
   "--link",
+  "--backdrop",
   "--success",
   "--success-foreground",
   "--warning",
@@ -159,10 +155,22 @@ describe("design foundation tokens", () => {
     ["bg-primary-subtle", "ours"],
     ["bg-attention", "ours"],
     ["bg-attention-subtle", "ours"],
+    ["text-attention", "ours"],
+    ["border-attention-border", "ours"],
     ["bg-background-alt", "ours"],
     ["bg-surface-alt", "ours"],
+    ["bg-surface-subtle", "ours"],
     ["text-link", "ours"],
+    ["text-link-hover", "ours"],
+    ["text-primary-subtle-foreground", "ours"],
     ["bg-code-surface", "ours"],
+    ["text-accent", "heroui"],
+    ["bg-accent", "heroui"],
+    ["text-accent-foreground", "heroui"],
+    ["bg-muted", "heroui"],
+    ["bg-field", "heroui"],
+    ["border-field-border", "heroui"],
+    ["bg-backdrop", "heroui"],
   ]
 
   it.each(DOCUMENTED_UTILITIES.filter(([, owner]) => owner === "ours"))(
@@ -175,50 +183,113 @@ describe("design foundation tokens", () => {
     },
   )
 
-  it("fences the pre-rehome tokens below the migration bridge", () => {
-    // The bridge is allowed to exist; it is not allowed to spread. A new
-    // `--otari-*` declared up in the foundation would be a third palette
-    // growing inside the file that is meant to be retiring the second one.
-    const bridge = CSS.indexOf(BRIDGE_MARKER)
-    expect(
-      bridge,
-      "globals.css has no migration bridge marker",
-    ).toBeGreaterThan(-1)
-    const strays = [...CSS.slice(0, bridge).matchAll(/(--otari-[a-z0-9-]+):/g)]
+  it("keeps the retired pre-rehome palette retired", () => {
+    // The `--otari-*` palette this dashboard was built on is gone, and the one
+    // way it comes back is somebody reintroducing a variable rather than
+    // finding the role they need. Class names keeping the `otari-` namespace
+    // (`.otari-table`, `.otari-markdown`) are not that and are matched around.
+    const strays = [...CSS.matchAll(/(--otari-[a-z0-9-]+)\s*:/g)]
     expect(strays.map((match) => match[1])).toEqual([])
+  })
+
+  // The handful of places a token value has to be repeated as a literal, because
+  // the file reading it cannot read a custom property: the `theme-color` meta tag
+  // and the boot splash in index.html (which paints before this stylesheet is a
+  // certainty), and the manifest an installed app opens on. Each of those files
+  // carried a comment saying nothing enforced the copy. Something does now.
+  describe("literal copies of a token outside CSS", () => {
+    const HTML = readFileSync(join(WEB, "index.html"), "utf8")
+    const MANIFEST = readFileSync(
+      join(WEB, "public", "pwa", "manifest.webmanifest"),
+      "utf8",
+    )
+    /** A light-theme token's value, failing rather than comparing `undefined`. */
+    const light = (token: string) => {
+      const value = LIGHT.get(token)
+      expect(value, `${token} is not declared in the light theme`).toBeDefined()
+      return value as string
+    }
+
+    it.each([
+      ["--color-background", "background"],
+      ["--color-border", "border"],
+      ["--color-primary", "primary"],
+    ])("index.html falls back to %s", (token) => {
+      // `var(--color-x, #literal)`: the fallback is what paints before
+      // globals.css has loaded, so a drifted one is a flash of the wrong color.
+      expect(HTML).toContain(`var(${token}, ${light(token)})`)
+    })
+
+    it("index.html tints the browser chrome with --color-primary", () => {
+      expect(HTML).toContain(
+        `<meta name="theme-color" content="${light("--color-primary")}" />`,
+      )
+    })
+
+    it("the web app manifest matches the canvas and the brand", () => {
+      const manifest = JSON.parse(MANIFEST) as Record<string, string>
+      expect(manifest.background_color).toBe(light("--color-background"))
+      expect(manifest.theme_color).toBe(light("--color-primary"))
+    })
   })
 })
 
-describe("shared/components/ui", () => {
-  const UI_DIR = join(WEB, "src", "shared", "components", "ui")
-  const sources = readdirSync(UI_DIR, { recursive: true })
-    .map(String)
-    .filter((name) => name.endsWith(".tsx") && !name.endsWith(".test.tsx"))
+describe("semantic tokens only", () => {
+  // Every source file that styles anything, which is the whole of `src` now
+  // that there is no bridge tree left to be exempt. This used to be scoped to
+  // `shared/components/ui/` because the hand-rolled primitives beside it
+  // predated the foundation; they are on it now, so the exemption has no
+  // subject and the rule is the repo's.
+  const SRC = join(WEB, "src")
+  // The one deliberate exception, and it says why at the top of the file: the
+  // share card is rasterized through an <img>-loaded SVG document, where a
+  // custom property does not resolve, so its palette has to be literal.
+  const EXCEPTIONS = new Set(["features/usage/ShareCard.tsx"])
+  const sources = readdirSync(SRC, { recursive: true })
+    .map((name) => String(name).replaceAll("\\", "/"))
+    .filter(
+      (name) =>
+        /\.tsx?$/.test(name) &&
+        !/\.test\.tsx?$/.test(name) &&
+        !EXCEPTIONS.has(name),
+    )
 
-  it("covers the primitives directory", () => {
-    // A guard on the guard: an emptied or moved directory would leave the two
-    // assertions below passing over nothing at all.
-    expect(sources.length).toBeGreaterThan(0)
+  it("covers the source tree", () => {
+    // A guard on the guard: a moved directory or a broken filter would leave
+    // the assertions below passing over nothing at all.
+    expect(sources.length).toBeGreaterThan(50)
   })
 
-  // This is the directory new work is built from, so it is the one place where
-  // "semantic tokens only, no hardcoded palette colors" can be enforced rather
-  // than asked for. The bridge components in the parent directory predate the
-  // rule and are exempt by being outside it; converting one is what moves it in.
   it.each(sources)("styles %s from semantic tokens only", (name) => {
-    const source = readFileSync(join(UI_DIR, name), "utf8")
+    const source = readFileSync(join(SRC, name), "utf8")
+    // Six or eight digits anywhere, three or four only when quoted or in a
+    // Tailwind arbitrary value: `#478` in "issue #478" is a ticket, not a color,
+    // and this file's whole job is to be trusted rather than muted.
     expect(
       source,
       "a raw hex color belongs in globals.css as a token",
-    ).not.toMatch(/#[0-9a-fA-F]{3,8}\b/)
+    ).not.toMatch(
+      /["'`[]#(?:[0-9a-fA-F]{3,4}|[0-9a-fA-F]{6}|[0-9a-fA-F]{8})\b|#(?:[0-9a-fA-F]{6}|[0-9a-fA-F]{8})\b/,
+    )
     // bg-red-500, text-gray-900, border-emerald-200: Tailwind's numbered
     // palette. A status color is a token (`text-danger`, `bg-success-subtle`),
-    // not a shade picked at the call site.
+    // not a shade picked at the call site, and a numbered class is invisible to
+    // the dark theme. The optional side/axis segment matters: `border-l-red-500`
+    // is the same mistake and slipped past a version of this pattern that only
+    // knew `border-`.
     expect(
       source,
       "a numbered Tailwind palette class is not a token",
     ).not.toMatch(
-      /\b(?:bg|text|border|ring|fill|stroke|from|via|to|outline|decoration|shadow|accent|caret|divide|placeholder)-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\d{2,3}\b/,
+      /\b(?:bg|text|border|ring|fill|stroke|from|via|to|outline|decoration|shadow|accent|caret|divide|placeholder)(?:-[tblrsexy])?-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\d{2,3}\b/,
+    )
+    // `bg-white` / `text-black` are the same problem without a number: a
+    // literal that never follows the theme.
+    expect(
+      source,
+      "bg-white / text-black do not follow the theme; use a surface or text token",
+    ).not.toMatch(
+      /\b(?:bg|text|border|ring|fill|stroke|from|via|to|outline|decoration|shadow|accent|caret|divide|placeholder)(?:-[tblrsexy])?-(?:white|black)\b/,
     )
   })
 })

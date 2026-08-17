@@ -364,10 +364,10 @@ function GettingStartedPanel() {
     <Card>
       <Card.Content className="flex flex-col gap-3 p-6">
         <div>
-          <h2 className="text-lg font-semibold text-[var(--otari-ink)]">
+          <h2 className="text-lg font-semibold text-foreground">
             Get started with Otari
           </h2>
-          <p className="mt-1 text-sm text-[var(--otari-muted)]">
+          <p className="mt-1 text-sm text-muted">
             Add a provider to begin serving models. Once it is configured, this
             page will show your gateway&rsquo;s traffic, spend, and health.
           </p>
@@ -391,7 +391,7 @@ function NeutralStrip({ text }: { text: string }) {
   return (
     <div
       role="status"
-      className="flex items-center gap-2 rounded-xl border border-[var(--otari-line)] bg-[var(--otari-bg)] px-4 py-3 text-sm text-[var(--otari-muted)]"
+      className="flex items-center gap-2 rounded-xl border border-border bg-surface-alt px-4 py-3 text-sm text-muted"
     >
       {text}
     </div>
@@ -473,23 +473,28 @@ function SystemStatusStrip({
     return null
   }
 
+  // The attention family rather than warning: every entry here names something
+  // to go and do, and "look here" is what separates attention from caution in
+  // the foundation's two warm roles.
   return (
     <div
       role="alert"
-      className="flex flex-col gap-2 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 sm:flex-row sm:flex-wrap sm:items-center"
+      className="flex flex-col gap-2 rounded-xl border border-attention-border bg-attention-subtle px-4 py-3 text-sm text-attention sm:flex-row sm:flex-wrap sm:items-center"
     >
       <span className="font-medium">Needs attention:</span>
       {problems.map((p, i) => (
         <span key={p.text} className="flex items-center gap-2">
           {i > 0 ? (
-            <span aria-hidden className="text-amber-400">
+            <span aria-hidden className="opacity-60">
               ·
             </span>
           ) : null}
           <Link
             to={p.to}
             search={p.search}
-            className="underline underline-offset-2 hover:text-amber-950"
+            // Thicken the underline on hover rather than lightening the text:
+            // the color here is already the one tuned to clear AA on this fill.
+            className="underline underline-offset-2 hover:decoration-2"
           >
             {p.text}
           </Link>
@@ -525,7 +530,7 @@ function RecentActivity({
       header: "Time",
       cell: (entry) => (
         <span
-          className="text-[var(--otari-muted)]"
+          className="text-muted"
           title={new Date(entry.timestamp).toLocaleString()}
         >
           {formatRelative(entry.timestamp)}
@@ -536,9 +541,7 @@ function RecentActivity({
       id: "model",
       header: "Model",
       isRowHeader: true,
-      cell: (entry) => (
-        <span className="text-[var(--otari-ink)]">{entry.model}</span>
-      ),
+      cell: (entry) => <span className="text-foreground">{entry.model}</span>,
     },
     {
       id: "cost",
@@ -553,10 +556,10 @@ function RecentActivity({
         <span
           className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${
             entry.status === "error"
-              ? "border-red-200 bg-red-50 text-red-700"
+              ? "border-danger bg-danger-subtle text-danger"
               : entry.status === "absorbed"
-                ? "border-amber-200 bg-amber-50 text-amber-700"
-                : "border-[var(--otari-line)] bg-[var(--otari-brand-tint)] text-[var(--otari-brand-dark)]"
+                ? "border-warning bg-warning-subtle text-warning"
+                : "border-border bg-primary-subtle text-primary-subtle-foreground"
           }`}
         >
           {statusWord(entry.status)}
@@ -568,12 +571,12 @@ function RecentActivity({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-[var(--otari-ink)]">
+        <h2 className="text-sm font-semibold text-foreground">
           Recent activity
         </h2>
         <Link
           to="/activity"
-          className="text-sm text-[var(--otari-brand-dark)] hover:underline"
+          className="text-sm text-link hover:text-link-hover hover:underline"
         >
           View all →
         </Link>
