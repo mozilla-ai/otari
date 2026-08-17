@@ -92,8 +92,11 @@ builds on every change under `web/`.
 
 ## How it is served
 
-In standalone mode the gateway serves `index.html` at `/` and the hashed assets
-under `/assets` (see `src/gateway/main.py` and `src/gateway/dashboard.py`). The
-app routes on hash history (`/#/models`, `/#/usage`), so no server-side
-catch-all route is needed. In hybrid mode there is no local management API, so
-the root keeps serving the get-started tutorial instead.
+The gateway serves `index.html` at `/` and the hashed assets under `/assets`
+(see `src/gateway/main.py` and `src/gateway/dashboard.py`). The app routes on
+hash history (`/#/models`, `/#/usage`), so no server-side catch-all route is
+needed. Both modes serve the same bundle: the page asks `GET /v1/bootstrap`
+which deployment it reached, and a hybrid gateway, having no local management
+API, boots into the data-plane landing page instead of the management shell.
+Without a built bundle the root falls back to the get-started tutorial in
+either mode.

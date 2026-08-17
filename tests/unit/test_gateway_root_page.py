@@ -268,14 +268,21 @@ def test_hybrid_mode_serves_no_install_manifest(tmp_path: Path, monkeypatch: pyt
 
     A hybrid gateway's root is a status page for a control plane that lives
     elsewhere, so an installed icon named "Otari Dashboard" would promise
-    management this deployment does not have.
+    management this deployment does not have. The index still links the manifest,
+    so what stops the install offer is this 404, which must not be cached: /pwa/
+    carries a day of caching for the icons it usually serves, and a day-long 404
+    would outlive a switch to standalone and keep the prompt away from a
+    deployment that had since started offering it.
     """
     monkeypatch.setenv("OTARI_AI_TOKEN", "gw-test-token")
     monkeypatch.setattr(gateway_main, "get_dashboard_dir", lambda: _fake_bundle(tmp_path))
     app = create_app(_hybrid_config(tmp_path, "gateway-hybrid-pwa-test.db"))
 
     with TestClient(app) as client:
-        assert client.get("/pwa/manifest.webmanifest").status_code == 404
+        response = client.get("/pwa/manifest.webmanifest")
+
+    assert response.status_code == 404
+    assert response.headers["cache-control"] == "private, no-store, no-cache"
 
     reset_config()
     reset_db()

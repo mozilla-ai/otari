@@ -111,9 +111,15 @@ class SecurityHeadersMiddleware(BaseHTTPMiddleware):
         path = request.url.path
         if path.startswith(_PUBLIC_PREFIXES):
             return response
-        if path.startswith(_CACHEABLE_PREFIXES):
+        # A cacheable path's policy describes its content, so it applies only to a
+        # response that carries any: an error under it is a fact about right now.
+        # A hybrid gateway serves no /pwa/, and a day-long 404 there would outlive
+        # a switch to standalone, keeping the install prompt away from a
+        # deployment that had since started offering it.
+        serves_content = response.status_code < 400
+        if serves_content and path.startswith(_CACHEABLE_PREFIXES):
             response.headers.setdefault("Cache-Control", "public, max-age=31536000, immutable")
-        elif path in _CACHEABLE_PATHS or path.startswith(_SHORT_CACHE_PREFIXES):
+        elif serves_content and (path in _CACHEABLE_PATHS or path.startswith(_SHORT_CACHE_PREFIXES)):
             response.headers.setdefault("Cache-Control", "public, max-age=86400")
         else:
             response.headers["Cache-Control"] = "private, no-store, no-cache"
