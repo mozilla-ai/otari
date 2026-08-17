@@ -110,6 +110,7 @@ request through otari.ai's hosted gateway instead.
 | Provider credentials | In config or env vars | Your keys in the otari.ai vault, or mozilla.ai-managed models |
 | API key management | `/v1/keys` endpoints | Through otari.ai |
 | User/budget management | `/v1/users`, `/v1/budgets` | Through otari.ai |
+| Organizations and workspaces | `/v1/organizations`, `/v1/workspaces` | Through otari.ai |
 | Usage tracking | Local database | Reported to otari.ai |
 | Multi-provider fallback | No | Yes |
 | Available API routes | Full Otari API surface | Health, deployment bootstrap, chat completions, messages, and responses |

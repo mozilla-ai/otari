@@ -136,7 +136,17 @@ async def _provision(db: AsyncSession) -> User:
         role="owner",
     )
 
-    db.add(RuntimeSetting(key=BOOTSTRAP_IDENTITY_KEY, value=str(operator.id)))
+    # Upsert rather than insert: a marker whose value no longer resolves (an
+    # unreadable id, or one naming a row that is gone) is what
+    # ``_load_marked_identity`` reports as "no identity yet", and it says it will
+    # re-provision. Adding a second row with the same primary key would instead
+    # raise, be swallowed as a lost race, and leave every later request answering
+    # 500 with nothing able to clear it.
+    marker = await db.get(RuntimeSetting, BOOTSTRAP_IDENTITY_KEY)
+    if marker is None:
+        db.add(RuntimeSetting(key=BOOTSTRAP_IDENTITY_KEY, value=str(operator.id)))
+    else:
+        marker.value = str(operator.id)
     await db.commit()
     await db.refresh(operator)
     logger.info("Provisioned the default organization and operator identity on first boot")

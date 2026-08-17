@@ -17,6 +17,7 @@ two-row insert here.
 
 import uuid
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.models.tenancy import (
@@ -41,6 +42,7 @@ from gateway.services.tenancy.errors import (
     WorkspaceAlreadyExistsError,
     WorkspaceMemberAlreadyExistsError,
     WorkspaceMemberNotFoundError,
+    WorkspaceNameRequiredError,
     WorkspaceNotFoundError,
 )
 from gateway.services.tenancy.organization_service import OrganizationService
@@ -101,6 +103,19 @@ class WorkspaceService:
             raise InvalidRoleError(role, WORKSPACE_MEMBER_ROLES)
         return role
 
+    @staticmethod
+    def _validated_name(name: str | None) -> str:
+        """Reject a null or blank workspace name for the same reason as a role.
+
+        ``name`` also lands on a table model, and the column is NOT NULL with no
+        minimum length, so an explicit ``null`` reached the database as an
+        integrity error and an empty string stored a nameless workspace.
+        """
+        trimmed = (name or "").strip()
+        if not trimmed:
+            raise WorkspaceNameRequiredError
+        return trimmed
+
     async def _require_workspace_management_access(self, *, user: User, workspace: Workspace) -> None:
         """Allow an organization owner/admin, or an owner/admin of this workspace."""
         organization_membership = await self.organizations.members.get_active_by_organization_and_user(
@@ -128,17 +143,25 @@ class WorkspaceService:
             organization=organization,
         )
 
-        if await self.workspaces.get_by_organization_and_name(organization.id, workspace_create.name) is not None:
-            raise WorkspaceAlreadyExistsError(workspace_create.name)
+        name = self._validated_name(workspace_create.name)
+        if await self.workspaces.get_by_organization_and_name(organization.id, name) is not None:
+            raise WorkspaceAlreadyExistsError(name)
 
-        workspace = await self.workspaces.create_workspace(
-            name=workspace_create.name,
-            description=workspace_create.description,
-            organization_id=organization.id,
-            created_by_user_id=user.id,
-        )
-        await self.members.create(workspace_id=workspace.id, user_id=user.id, role="owner")
-        await self.db.commit()
+        # The pre-check above races the insert, so the unique constraint is what
+        # actually decides. Without this the loser of that race answers 500
+        # instead of the 409 the pre-check would have given it.
+        try:
+            workspace = await self.workspaces.create_workspace(
+                name=name,
+                description=workspace_create.description,
+                organization_id=organization.id,
+                created_by_user_id=user.id,
+            )
+            await self.members.create(workspace_id=workspace.id, user_id=user.id, role="owner")
+            await self.db.commit()
+        except IntegrityError:
+            await self.db.rollback()
+            raise WorkspaceAlreadyExistsError(name) from None
 
         return WorkspacePublic.model_validate(workspace)
 
@@ -186,14 +209,20 @@ class WorkspaceService:
         await self._require_workspace_management_access(user=user, workspace=workspace)
 
         update_data = workspace_update.model_dump(exclude_unset=True)
-        new_name = update_data.get("name")
-        if new_name is not None and new_name != workspace.name:
-            clash = await self.workspaces.get_by_organization_and_name(workspace.organization_id, new_name)
-            if clash is not None:
-                raise WorkspaceAlreadyExistsError(new_name)
+        if "name" in update_data:
+            new_name = self._validated_name(update_data["name"])
+            update_data["name"] = new_name
+            if new_name != workspace.name:
+                clash = await self.workspaces.get_by_organization_and_name(workspace.organization_id, new_name)
+                if clash is not None:
+                    raise WorkspaceAlreadyExistsError(new_name)
 
-        updated = await self.workspaces.update_workspace(workspace, update_data)
-        await self.db.commit()
+        try:
+            updated = await self.workspaces.update_workspace(workspace, update_data)
+            await self.db.commit()
+        except IntegrityError:
+            await self.db.rollback()
+            raise WorkspaceAlreadyExistsError(str(update_data.get("name", workspace.name))) from None
         return WorkspacePublic.model_validate(updated)
 
     async def delete_workspace(self, *, user: User, workspace_id: uuid.UUID) -> None:
@@ -254,8 +283,14 @@ class WorkspaceService:
         if await self.members.get_by_workspace_and_user(workspace.id, user_id) is not None:
             raise WorkspaceMemberAlreadyExistsError(user_id)
 
-        member = await self.members.create(workspace_id=workspace.id, user_id=user_id, role=role)
-        await self.db.commit()
+        # As in create_workspace: the pre-check races the insert, and the unique
+        # constraint is what actually decides.
+        try:
+            member = await self.members.create(workspace_id=workspace.id, user_id=user_id, role=role)
+            await self.db.commit()
+        except IntegrityError:
+            await self.db.rollback()
+            raise WorkspaceMemberAlreadyExistsError(user_id) from None
         return WorkspaceMemberPublic.model_validate(member)
 
     async def update_member_role(

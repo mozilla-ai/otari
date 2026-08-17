@@ -104,6 +104,19 @@ class InvalidRoleError(TenancyValidationError):
         super().__init__(f"Invalid role '{role}'; expected one of {', '.join(sorted(allowed))}")
 
 
+class WorkspaceNameRequiredError(TenancyValidationError):
+    """A workspace name that is absent, null, or blank once trimmed.
+
+    ``Workspace.name`` is NOT NULL and carries no minimum length, and SQLModel
+    skips validation when constructing a table instance, so without this a
+    ``{"name": null}`` update reaches the column as a NOT NULL violation and a
+    ``{"name": ""}`` create stores a nameless workspace.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("A workspace name is required")
+
+
 class LastOrganizationError(TenancyValidationError):
     """Deleting this organization would leave an identity with none at all."""
 
@@ -130,5 +143,6 @@ __all__ = [
     "WorkspaceAlreadyExistsError",
     "WorkspaceMemberAlreadyExistsError",
     "WorkspaceMemberNotFoundError",
+    "WorkspaceNameRequiredError",
     "WorkspaceNotFoundError",
 ]

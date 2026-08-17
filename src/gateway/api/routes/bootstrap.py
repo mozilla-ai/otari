@@ -54,12 +54,14 @@ STANDALONE_SURFACES: tuple[str, ...] = (
     "budgets",
     "keys",
     "models",
+    "organizations",
     "providers",
     "routing",
     "settings",
     "tools",
     "usage",
     "users",
+    "workspaces",
 )
 
 

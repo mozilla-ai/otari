@@ -72,12 +72,14 @@ const STANDALONE_SURFACES = [
   "budgets",
   "keys",
   "models",
+  "organizations",
   "providers",
   "routing",
   "settings",
   "tools",
   "usage",
   "users",
+  "workspaces",
 ]
 
 /** The deployment bootstrap, standalone by default. See useDeployment. */

@@ -192,11 +192,18 @@ class OrganizationService:
         The membership check is the tenant boundary for this endpoint, the only
         one that accepts an organization id from the request: an id the caller is
         not an active member of is refused rather than switched to.
+
+        Both refusals answer 404, for the reason `errors.py` gives: an
+        organization the caller is not a member of must not be distinguishable
+        from one that does not exist, or the pair of statuses is an existence
+        oracle over other tenants' organizations.
         """
         organization = await self.organizations.get(organization_id)
         if organization is None:
             raise OrganizationNotFoundError(organization_id)
-        membership = await self._require_active_membership(user, organization)
+        membership = await self.members.get_active_by_organization_and_user(organization.id, user.id)
+        if membership is None:
+            raise OrganizationNotFoundError(organization_id)
 
         await self.users.set_active_organization(user, organization.id)
         await self.db.commit()

@@ -16,8 +16,10 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from gateway.models.entities import RuntimeSetting
 from gateway.models.tenancy import Organization, OrganizationMember, User
 from gateway.services.tenancy.provisioning_service import (
+    BOOTSTRAP_IDENTITY_KEY,
     DEFAULT_ORGANIZATION_NAME,
     DEFAULT_WORKSPACE_NAME,
 )
@@ -109,6 +111,34 @@ def test_provisioning_is_idempotent(
     assert first["organization_member_id"] == second["organization_member_id"]
     assert db_session.query(Organization).count() == 1
     assert db_session.query(User).count() == 1
+
+
+def test_a_marker_that_no_longer_resolves_re_provisions(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """An unresolvable marker must self-heal, not wedge the deployment.
+
+    The marker naming the operator identity is the only thing that makes
+    provisioning idempotent, so a value that no longer resolves has to be
+    replaced rather than inserted beside itself, which would collide on the
+    primary key and leave every later request answering 500 forever.
+    """
+    _context(client, master_key_header)
+    session = db_session_factory()
+    try:
+        marker = session.get(RuntimeSetting, BOOTSTRAP_IDENTITY_KEY)
+        assert marker is not None
+        marker.value = "not-a-uuid"
+        session.commit()
+    finally:
+        session.close()
+
+    recovered = client.get("/v1/organizations/me", headers=master_key_header)
+
+    assert recovered.status_code == 200, recovered.text
+    assert recovered.json()["role"] == "owner"
 
 
 def test_the_dashboard_session_cookie_also_authenticates(
@@ -224,6 +254,35 @@ def test_switching_to_an_unknown_organization_is_not_found(
     response = client.post(
         "/v1/organizations/me/switch",
         json={"organization_id": str(uuid.uuid4())},
+        headers=master_key_header,
+    )
+
+    assert response.status_code == 404
+
+
+def test_an_organization_you_do_not_belong_to_is_indistinguishable_from_a_missing_one(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """Switch is the one endpoint taking a tenant id from the request.
+
+    Answering 403 for "exists but not yours" and 404 for "does not exist" would
+    make the pair an existence oracle over other tenants' organizations.
+    """
+    _context(client, master_key_header)
+    session = db_session_factory()
+    try:
+        stranger = Organization(name="Stranger", slug="stranger")
+        session.add(stranger)
+        session.commit()
+        stranger_id = stranger.id
+    finally:
+        session.close()
+
+    response = client.post(
+        "/v1/organizations/me/switch",
+        json={"organization_id": str(stranger_id)},
         headers=master_key_header,
     )
 
@@ -446,6 +505,34 @@ def test_renaming_onto_an_existing_workspace_name_conflicts(
     )
 
     assert response.status_code == 409
+
+
+def test_a_workspace_name_is_required(client: TestClient, master_key_header: dict[str, str]) -> None:
+    """``name`` is NOT NULL with no minimum length, and a table model skips validation.
+
+    The generated client types the update's ``name`` as ``string | null``, so a
+    form clearing the field sends an explicit null; before the service checked,
+    that reached the column as an integrity error rather than a 400.
+    """
+    workspace = client.post("/v1/workspaces", json={"name": "Research"}, headers=master_key_header).json()
+
+    blank_create = client.post("/v1/workspaces", json={"name": "   "}, headers=master_key_header)
+    null_update = client.patch(
+        f"/v1/workspaces/{workspace['id']}",
+        json={"name": None},
+        headers=master_key_header,
+    )
+
+    assert blank_create.status_code == 400
+    assert null_update.status_code == 400
+    assert client.get(f"/v1/workspaces/{workspace['id']}", headers=master_key_header).json()["name"] == "Research"
+
+
+def test_workspace_names_are_trimmed(client: TestClient, master_key_header: dict[str, str]) -> None:
+    created = client.post("/v1/workspaces", json={"name": "  Research  "}, headers=master_key_header)
+
+    assert created.status_code == 201, created.text
+    assert created.json()["name"] == "Research"
 
 
 def test_an_unknown_workspace_is_not_found(client: TestClient, master_key_header: dict[str, str]) -> None:
