@@ -325,7 +325,21 @@ describe("AppShell capability gating", () => {
     mockMatchMedia(false)
     await renderShell()
 
-    for (const label of ["Overview", "Activity", "Usage", "Providers"]) {
+    // Every label, not a sample: a capability misspelled on a NAV entry hides
+    // that destination in every deployment, and only the full list catches it.
+    for (const label of [
+      "Overview",
+      "Activity",
+      "Usage",
+      "Providers",
+      "Users",
+      "API keys",
+      "Budgets",
+      "Models",
+      "Routing",
+      "Tools & Guardrails",
+      "Settings",
+    ]) {
       expect(screen.getByRole("link", { name: label })).toBeInTheDocument()
     }
   })
@@ -340,7 +354,7 @@ describe("AppShell capability gating", () => {
 
     expect(screen.queryByRole("link", { name: "Activity" })).toBeNull()
     expect(screen.queryByRole("link", { name: "Usage" })).toBeNull()
-    expect(screen.queryByRole("link", { name: "Keys" })).toBeNull()
+    expect(screen.queryByRole("link", { name: "API keys" })).toBeNull()
     // Ungated and still present: the index is the deployment's front page.
     expect(screen.getByRole("link", { name: "Overview" })).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "Providers" })).toBeInTheDocument()

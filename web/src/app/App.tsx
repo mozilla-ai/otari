@@ -55,9 +55,13 @@ function DeploymentRoot() {
     return <HybridLanding />
   }
 
-  // Only a local-operator deployment signs in here; a hosted session is minted
-  // by otari.ai's own flow, which this build never serves.
-  if (session_type === "local_operator" && !isAuthenticated) {
+  // Any deployment that issues a session needs one before the shell renders.
+  // Only the local operator signs in *here*, since a hosted session is minted by
+  // otari.ai's own flow, so a hosted deployment reaching this line is a routing
+  // bug to fix when that half lands. Gating on "issues no session" rather than on
+  // "issues this one" is what makes that bug a wrong screen instead of an
+  // unauthenticated shell whose every query 401s in a loop.
+  if (session_type !== "none" && !isAuthenticated) {
     return <Login />
   }
 

@@ -242,6 +242,7 @@ These are only relevant when running connected to [otari.ai](https://otari.ai). 
 | Variable | Default | Description |
 |----------|---------|-------------|
 | `OTARI_AI_TOKEN` | none | Otari token from otari.ai (enables platform connection) |
+| `PLATFORM_MANAGEMENT_URL` | `https://otari.ai` | Control plane a connected gateway points its operator at, published by `GET /v1/bootstrap`. Must be an absolute `http(s)` URL; the gateway refuses to start otherwise |
 | `PLATFORM_RESOLVE_TIMEOUT_MS` | `5000` | Timeout for provider resolution calls |
 | `PLATFORM_USAGE_TIMEOUT_MS` | `5000` | Timeout for usage reporting calls |
 | `PLATFORM_USAGE_MAX_RETRIES` | `3` | Max retries for transient usage reporting failures |

@@ -15,15 +15,18 @@ self-hoster walks on day one:
 2. Readiness reports no ``mode``, which is what standalone looks like: hybrid
    mode stamps ``mode: hybrid`` on both health payloads, so the absence is the
    assertion that no platform token selected the other edition behind our back.
-3. Create a user, then an API key for it (master-key admin surface).
-4. Register a BYO provider credential at runtime, which is stored encrypted.
-5. Create a routing policy whose default candidate fails and whose ``on_failure``
+3. ``/v1/bootstrap`` answers with no credential and reports ``standalone``. It is
+   the first request a browser makes, and a second statement of which edition
+   booted.
+4. Create a user, then an API key for it (master-key admin surface).
+5. Register a BYO provider credential at runtime, which is stored encrypted.
+6. Create a routing policy whose default candidate fails and whose ``on_failure``
    candidate is that BYO provider.
-6. Send one chat completion at the policy. It can only succeed by failing over to
+7. Send one chat completion at the policy. It can only succeed by failing over to
    the BYO candidate and presenting the stored key to the provider, so a 200 with
    the expected body proves credential storage, routing, fallback, and dispatch
    all work in the OSS edition.
-7. The usage row for that request is readable back through ``/v1/usage``.
+8. The usage row for that request is readable back through ``/v1/usage``.
 
 Both provider endpoints are a mock OpenAI-compatible server this script runs, so
 the gate needs no provider secret and runs identically on a fork PR.
@@ -459,6 +462,25 @@ def check_health(base_url: str) -> None:
     log("Health probes answer, and the edition is standalone")
 
 
+def check_bootstrap(base_url: str) -> None:
+    """Assert the deployment bootstrap answers, uncredentialed, as standalone.
+
+    This is the first request any browser makes, before it holds a credential, so
+    it is checked without one. It is also a second, independent statement of
+    which edition booted: an enterprise or platform-connected build answers
+    something other than ``standalone`` here.
+    """
+    status, body = _request("GET", f"{base_url}/v1/bootstrap")
+    _expect(status, 200, "GET /v1/bootstrap", body)
+    if not isinstance(body, dict):
+        raise SmokeFailure(f"GET /v1/bootstrap did not return an object: {body!r}")
+    if body.get("deployment_type") != "standalone" or body.get("session_type") != "local_operator":
+        raise SmokeFailure(f"GET /v1/bootstrap does not describe the OSS edition: {body!r}")
+    if not body.get("capabilities"):
+        raise SmokeFailure(f"GET /v1/bootstrap reports no management capabilities: {body!r}")
+    log("The deployment bootstrap answers without a credential, as standalone")
+
+
 def create_key(base_url: str, admin: dict[str, str], names: Names) -> str:
     """Create a user and an API key for it, and return the raw key."""
     status, body = _request(
@@ -579,6 +601,7 @@ def check_usage_recorded(base_url: str, admin: dict[str, str], names: Names) -> 
 def smoke(base_url: str, provider: _MockProviderServer, mock_base_url: str, names: Names) -> None:
     admin = {KEY_HEADER: MASTER_KEY}
     check_health(base_url)
+    check_bootstrap(base_url)
     key = create_key(base_url, admin, names)
     register_byo_provider(base_url, admin, names, mock_base_url=mock_base_url)
     create_fallback_policy(base_url, admin, names)

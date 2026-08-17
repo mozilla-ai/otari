@@ -17,8 +17,17 @@ if (!container) {
 // gateway's landing page, and painting one of those only to swap it for another
 // is worse than waiting one same-origin round trip. A failure hands App null,
 // which says the gateway is unreachable instead of guessing a deployment.
+// Shorter than apiFetch's 30s default, because nothing at all is on screen until
+// this settles: a stalled gateway or proxy would otherwise hold a blank page for
+// half a minute before the error state appears. A refused connection fails fast
+// and never reaches this deadline; a healthy gateway answers immediately, since
+// the route reads configuration and touches no database.
+const BOOTSTRAP_TIMEOUT_MS = 8_000
+
 function loadBootstrap(): Promise<DeploymentBootstrap | null> {
-  return apiFetch<DeploymentBootstrap>("/v1/bootstrap").catch(() => null)
+  return apiFetch<DeploymentBootstrap>("/v1/bootstrap", {
+    signal: AbortSignal.timeout(BOOTSTRAP_TIMEOUT_MS),
+  }).catch(() => null)
 }
 
 void loadBootstrap().then((bootstrap) => {
