@@ -57,11 +57,26 @@ export type ChargeLine = NonNullable<UsageEntry["pricing_breakdown"]>[number];
 // TokenChargeLine / UnitChargeLine). These guards live here rather than at the
 // one call site because the union is the generated client's, and a renderer that
 // assumed two arms would print an undefined rate for the third.
+//
+// They check the fields they promise rather than just the discriminator's
+// presence. The permissive arm is any object at all, so a legacy line carrying
+// `unit_rate: "flat"` would otherwise be narrowed to a typed shape and rendered
+// with a non-numeric rate and no units, which is worse than falling through to
+// the untyped branch that shows the recorded cost and nothing it cannot vouch for.
+function hasChargeFields(line: ChargeLine): line is ChargeLine & { meter: string; units: number; cost: number } {
+  if (typeof line !== "object" || line === null) return false;
+  const candidate = line as Record<string, unknown>;
+  return (
+    typeof candidate.meter === "string" &&
+    typeof candidate.units === "number" &&
+    typeof candidate.cost === "number"
+  );
+}
 export function isUnitChargeLine(line: ChargeLine): line is UnitChargeLine {
-  return typeof line === "object" && line !== null && "unit_rate" in line;
+  return hasChargeFields(line) && typeof (line as Record<string, unknown>).unit_rate === "number";
 }
 export function isTokenChargeLine(line: ChargeLine): line is TokenChargeLine {
-  return typeof line === "object" && line !== null && "rate_per_million" in line;
+  return hasChargeFields(line) && typeof (line as Record<string, unknown>).rate_per_million === "number";
 }
 export type BillingMeters = Schemas["BillingMeters"];
 export type ToolMeter = Schemas["ToolMeter"];

@@ -80,9 +80,14 @@ export interface PolicySpec {
 // Not served by the gateway's API at all.
 // ---------------------------------------------------------------------------
 
-/** `/dashboard-build.json`, a static file Vite emits beside the bundle. */
+/**
+ * `/dashboard-build.json`, served by the gateway outside the OpenAPI surface
+ * (`include_in_schema=False`), so this declaration is its only client contract.
+ * Both fields are real: see the route in `src/gateway/main.py`.
+ */
 export interface DashboardBuild {
   build: string;
+  version: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -121,7 +126,11 @@ export interface UsageFilters {
   priced?: boolean;
   // Gateway-run tool usage. "any" matches any tool (including MCP tools, whose
   // names come from the caller's server); a name matches that tool specifically.
-  tool?: "any" | "web_search" | "code_execution";
+  // "any" matches any tool; anything else is a specific tool name. Not a literal
+  // union: MCP tool names come from the caller's own server, so the set is open
+  // and pinning it to the two built-ins forced a cast at the one call site that
+  // drills into a named tool.
+  tool?: string;
   // Budget participation: false scopes to imported rows (the bulk-op target set).
   counts_toward_budget?: boolean;
 }

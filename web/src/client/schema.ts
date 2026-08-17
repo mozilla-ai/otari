@@ -5289,7 +5289,7 @@ export interface components {
             policy_name?: string | null;
             /** Pricing Breakdown */
             pricing_breakdown: (components["schemas"]["TokenChargeLine"] | components["schemas"]["UnitChargeLine"] | {
-                [key: string]: number | string;
+                [key: string]: unknown;
             })[] | null;
             /** Prompt Tokens */
             prompt_tokens: number | null;

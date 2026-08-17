@@ -1085,7 +1085,7 @@ export function UsagePage() {
               <ToolBreakdownTable
                 rows={toolRows}
                 totalCost={totals?.cost ?? 0}
-                onDrill={(tool) => drillTo({ tool: tool as NonNullable<UsageFilters["tool"]> })}
+                onDrill={(tool) => drillTo({ tool })}
                 loading={summary.isLoading}
               />
             </div>

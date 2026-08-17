@@ -7542,19 +7542,7 @@
                       "$ref": "#/components/schemas/UnitChargeLine"
                     },
                     {
-                      "additionalProperties": {
-                        "anyOf": [
-                          {
-                            "type": "number"
-                          },
-                          {
-                            "type": "integer"
-                          },
-                          {
-                            "type": "string"
-                          }
-                        ]
-                      },
+                      "additionalProperties": true,
                       "type": "object"
                     }
                   ]

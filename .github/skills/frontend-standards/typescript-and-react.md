@@ -13,7 +13,11 @@ TypeScript runs in `strict` mode; `npm --prefix web run typecheck` must pass. Re
 - **Named imports**, not namespace imports (`import * as …`).
 - Take the API surface from the generated client (`import type { … } from "@/client"`,
   regenerated from the OpenAPI spec) and thread those types through `apiFetch<T>(…)`;
-  don't fetch into `any` and don't hand-write a wire shape (see [web/AGENTS.md](../../../web/AGENTS.md)).
+  don't fetch into `any` and don't hand-write a wire shape. The one sanctioned
+  exception is `web/src/client/local.ts`, for the few shapes the spec does not
+  describe (routing-policy bodies, `/dashboard-build.json`, `UsageFilters`), and each
+  entry there says why; adding to it is a decision, not a shortcut. See
+  [web/AGENTS.md](../../../web/AGENTS.md).
 - Let inference work for locals; annotate function signatures and exported values.
 
 ## React

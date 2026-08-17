@@ -242,14 +242,39 @@ describe("UsagePage", () => {
     expect(screen.getByText(/5\.1M read · 2\.7M written/)).toBeInTheDocument();
   });
 
-  it("shows no hit rate when the billed input breakdown is unavailable", async () => {
-    // An older gateway (vite dev against a stale build) omits billed_input_tokens.
-    mockApi(summary());
+  it("shows no hit rate when the window carries no input-token composition", async () => {
+    // The rate is series cache reads over series input tokens, so what makes it
+    // uncomputable is a window with no input composition, which is what an older
+    // gateway (vite dev against a stale build) returns.
+    //
+    // Cache reads are present on purpose: without them the tile reads "—" for
+    // want of a numerator and the denominator never matters, which is how this
+    // passed while naming a field it does not read.
+    const noComposition = [
+      seriesPoint({ bucket_start: "2026-07-19T00:00:00Z", cache_read_tokens: 2_000_000 }),
+      seriesPoint({ bucket_start: "2026-07-20T00:00:00Z", cache_read_tokens: 3_100_000 }),
+    ];
+    mockApi(summary({ series: noComposition }));
     renderPage(<UsagePage />);
 
     await screen.findByText("$1,240.50");
     const tile = screen.getByText("Cache hit rate").closest("div")!;
     expect(within(tile).getByText("—")).toBeInTheDocument();
+  });
+
+  it("computes the hit rate once the window has input tokens to divide by", async () => {
+    // The other side of the branch above, so the em-dash case is pinned to the
+    // missing composition rather than to anything else about the fixture.
+    const withComposition = [
+      seriesPoint({ bucket_start: "2026-07-19T00:00:00Z", input_tokens: 4_000_000, cache_read_tokens: 2_000_000 }),
+      seriesPoint({ bucket_start: "2026-07-20T00:00:00Z", input_tokens: 6_000_000, cache_read_tokens: 3_000_000 }),
+    ];
+    mockApi(summary({ series: withComposition }));
+    renderPage(<UsagePage />);
+
+    await screen.findByText("$1,240.50");
+    const tile = screen.getByText("Cache hit rate").closest("div")!;
+    expect(within(tile).getByText("50.0%")).toBeInTheDocument();
   });
 
   it("groups the chart by a dimension via the grouped series endpoint", async () => {

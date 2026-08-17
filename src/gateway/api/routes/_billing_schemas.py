@@ -115,7 +115,12 @@ class BillingMeters(TypedDict, total=False):
 # but never once used to validate. Trying them in order means a line that matches
 # is parsed as what it is, and only a line that matches neither falls through.
 ChargeLine = Annotated[
-    TokenChargeLine | UnitChargeLine | dict[str, float | int | str],
+    # `dict[str, Any]`, not a narrower value type: the arm exists to accept a line
+    # whose shape nobody can inspect now, so constraining what its values may hold
+    # defeats it. A stored line carrying a null, a list or a nested object was
+    # rejected by every arm and took the whole usage page down with a 500, which is
+    # the exact failure this is here to prevent.
+    TokenChargeLine | UnitChargeLine | dict[str, Any],
     Field(union_mode="left_to_right"),
 ]
 MeterMap = Annotated[BillingMeters | dict[str, Any], Field(union_mode="left_to_right")]

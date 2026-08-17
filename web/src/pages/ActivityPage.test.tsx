@@ -1316,6 +1316,54 @@ describe("ActivityPage gateway-run tools", () => {
     expect(within(row).getByRole("img", { name: /Token composition/ })).toBeInTheDocument();
   });
 
+  it("reads each charge line by the rate it carries, and neither by the other", async () => {
+    // Three shapes reach this renderer: a per-million line, a per-call line, and
+    // a line from an older gateway that matches neither. The third is the one
+    // worth pinning: rendered through either rate format it would print an
+    // undefined rate, so it shows the cost it did record and nothing more.
+    mockApi({
+      rows: [
+        entry({
+          cost: 0.09,
+          pricing_breakdown: [
+            { meter: "web_search_calls", units: 3, unit_rate: 0.01, cost: 0.03 },
+            { meter: "input", units: 20_000, rate_per_million: 3, cost: 0.06 },
+            { meter: "mystery", units: 5, cost: 0.5 },
+          ],
+        }),
+      ],
+    });
+    renderPage(<ActivityPage />);
+
+    await userEvent.click(await screen.findByText("gpt-4o"));
+    await screen.findByText("Billed meters");
+    // Per-million for the token line, per-call for the tool line.
+    expect(screen.getByText(/20,000 at \$3\.00 \/ 1M/)).toBeInTheDocument();
+    expect(screen.getByText(/3 at \$0\.01 each/)).toBeInTheDocument();
+    // The legacy line shows the cost it recorded, with no rate invented for it.
+    expect(screen.getByText("$0.50")).toBeInTheDocument();
+    expect(screen.queryByText(/NaN/)).not.toBeInTheDocument();
+  });
+
+  it("does not read a legacy line's rate just because the key is there", async () => {
+    // A stored line can carry `unit_rate` as something other than a number. The
+    // guard checks the shape rather than the key, so this falls to the untyped
+    // branch instead of rendering "NaN each".
+    mockApi({
+      rows: [
+        entry({
+          cost: 1,
+          pricing_breakdown: [{ meter: "odd", units: "many", unit_rate: "flat", cost: 1 }],
+        }),
+      ],
+    });
+    renderPage(<ActivityPage />);
+
+    await userEvent.click(await screen.findByText("gpt-4o"));
+    const line = (await screen.findByText("odd")).closest("div")!;
+    expect(within(line).queryByText(/each|NaN/)).not.toBeInTheDocument();
+  });
+
   it("shows tool counts and cost in the request detail", async () => {
     mockApi({
       rows: [

@@ -138,6 +138,26 @@ def test_a_partial_tool_entry_still_validates() -> None:
     assert row.billing_meters["tools"]["code_execution"] == {"billed": 2}
 
 
+@pytest.mark.parametrize(
+    "value",
+    [
+        pytest.param(None, id="null"),
+        pytest.param({"nested": 1}, id="nested-object"),
+        pytest.param(["a", "b"], id="list"),
+    ],
+)
+def test_a_legacy_line_may_hold_any_json_value(value: object) -> None:
+    """The fallback arm accepts whatever a line was written with.
+
+    Constraining its value type defeats the point: a stored line carrying a null,
+    a list or a nested object matched no arm and failed the whole row, turning one
+    unreadable line into a 500 for the usage page.
+    """
+    legacy = {"meter": "mystery", "units": 5, "cost": 0.5, "extra": value}
+    dumped = entry(pricing_breakdown=[legacy]).model_dump(mode="json")["pricing_breakdown"]
+    assert dumped == [legacy]
+
+
 def test_a_line_that_is_not_an_object_is_still_rejected() -> None:
     """The fallback is permissive about shape, not about type.
 
@@ -192,6 +212,7 @@ def test_the_shapes_reach_the_published_spec() -> None:
     assert "rate_per_million" in schemas["TokenChargeLine"]["properties"]
     assert "unit_rate" in schemas["UnitChargeLine"]["properties"]
     assert set(schemas["TokenChargeLine"]["required"]) == {"meter", "units", "rate_per_million", "cost"}
+    assert set(schemas["UnitChargeLine"]["required"]) == {"meter", "units", "unit_rate", "cost"}
 
     # And the union is what a client narrows on, so a row's breakdown has to
     # offer both named shapes rather than only the permissive arm.
