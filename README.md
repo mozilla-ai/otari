@@ -254,7 +254,7 @@ A guardrail is a request-level check Otari runs on the input before the provider
 
 ## API surface
 
-Three core generation surfaces, plus management and health endpoints. The three surfaces and `/health` work in both standalone and hybrid mode. The management endpoints and the remaining OpenAI-compatible endpoints are standalone-only.
+Three core generation surfaces, plus management and health endpoints. The three surfaces, `/health`, and `/v1/bootstrap` work in both standalone and hybrid mode. The management endpoints and the remaining OpenAI-compatible endpoints are standalone-only.
 
 - `POST /v1/chat/completions`: OpenAI Chat Completions
 - `POST /v1/responses`: OpenAI Responses API
@@ -262,6 +262,7 @@ Three core generation surfaces, plus management and health endpoints. The three 
 - `GET/POST /v1/keys`, `/v1/users`, `/v1/budgets`, `/v1/pricing`: management
 - `GET /v1/usage`: usage tracking
 - `GET /health`: health checks (optional Prometheus `/metrics`)
+- `GET /v1/bootstrap`: which deployment this is, read by the dashboard before it renders
 
 Embeddings, moderations, rerank, images, audio, batches, and models round out the OpenAI-compatible surface. Full schema in `docs/public/openapi.json`.
 

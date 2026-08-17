@@ -23,7 +23,7 @@ storage.
 | Directory | Holds | May import |
 | --- | --- | --- |
 | `features/<domain>/` | A domain's page, the parts only it uses, its tests | `shared/`, `client/`, other features |
-| `shared/` | `components/` primitives, `helpers/` pure functions, `api/` transport and query hooks | `client/`, itself |
+| `shared/` | `components/` primitives, `helpers/` pure functions, `api/` transport and query hooks, `hooks/` cross-cutting React state | `client/`, itself |
 | `app/` | The composition root: providers, router, shell chrome | any layer here |
 | `routes/` | One file per URL, naming a feature's page | any layer here |
 | `tests/` | Test harnesses; outside the boundary, so a harness may mount the app's providers | any layer here |

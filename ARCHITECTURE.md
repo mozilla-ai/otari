@@ -159,12 +159,15 @@ The **provisional** rows (RBAC, SSO, routing) share one open question: how deep 
 
 The inference and code-execution ports share a shape: a compute-heavy backend behind a port, chosen by the control plane, executed in the data plane. Self-hosting is a first-class path in the core, not a degraded one. In the resolve protocol this seam is already latent: `managed: false` with an `api_base` is the self-hosted path, and `managed: true` is a hosted, metered backend (see [docs/modes.md](docs/modes.md)).
 
-## Entitlements and feature flags
+## Deployment, entitlements, and feature flags
 
-Two gates decide whether a piece of behavior runs. They **compose but never merge**, because they answer different questions:
+Three gates decide whether a piece of behavior runs. They **compose but never merge**, because they answer different questions:
 
+- **Deployment capability** is the topology axis: *does the process serving this URL host this surface at all?* It is answered by the deployment bootstrap (`GET /v1/bootstrap`), which the dashboard shell reads once before it renders, and it is the reason a hybrid gateway shows no management UI: its control plane is otari.ai, not itself. Standalone and hosted deployments serve the surface; a data-plane gateway does not.
 - **Entitlement** is the licensing axis: *is this capability enabled for this deployment or org at all?* It is scoped per deployment or per org, never per user. It is resolved by `EntitlementPort`, whose core adapter grants every base capability and reports every overlay-only one as absent; a real resolver is an overlay adapter.
 - **Feature flag** is the operational axis: *is this sub-feature of a capability I already hold turned on right now?* It is engineering's controlled-rollout switch, transient by design: once its rollout lands the flag is retired, unlike an entitlement, which is a standing property.
+
+The first is about *where the code is running*, the second about *what this customer bought*, the third about *what engineering has switched on*. All three are client-side conveniences over server-side authorization: hiding a surface never grants access to it, and the server authorizes every request behind one regardless.
 
 Otari's core provides both gates as mechanisms; a surface composes them. Because the core entitles every base capability, a check written in the core usually just tests a flag. The composed check is one an overlay surface writes, since it gates a capability that is not universally entitled. An overlay surface for smart model selection, for example, checks both, in this order:
 
@@ -172,7 +175,7 @@ Otari's core provides both gates as mechanisms; a surface composes them. Because
 entitled("routing") AND flag("smart-model-selection-v2")
 ```
 
-A deployment entitled to `routing` still does not get `smart-model-selection-v2` while that flag is off in test. Do not fold one axis into the other: an entitlement is not "a flag that is on for some deployments", and a flag is not "a cheap entitlement". They are different mechanisms with different scopes and different owners.
+A deployment entitled to `routing` still does not get `smart-model-selection-v2` while that flag is off in test. Do not fold one axis into the other: an entitlement is not "a flag that is on for some deployments", a flag is not "a cheap entitlement", and neither is "a deployment that happens to serve this". They are different mechanisms with different scopes and different owners.
 
 ## Cardinal rules for contributors
 
