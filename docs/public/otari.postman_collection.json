@@ -652,6 +652,29 @@
     {
       "item": [
         {
+          "name": "Get Bootstrap",
+          "request": {
+            "description": "Return the deployment context the dashboard shell renders from.\n\nPublic: the shell fetches this before it knows whether it can authenticate.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "bootstrap"
+              ],
+              "raw": "{{baseUrl}}/v1/bootstrap"
+            }
+          }
+        }
+      ],
+      "name": "bootstrap"
+    },
+    {
+      "item": [
+        {
           "name": "List Budgets",
           "request": {
             "description": "List all budgets with pagination.",

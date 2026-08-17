@@ -2,6 +2,7 @@ import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any, Callable
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request, Response
 from fastapi.middleware.cors import CORSMiddleware
@@ -71,6 +72,13 @@ _PUBLIC_PREFIXES = ("/health",)
 # session cookie (sign-out) rather than the header schemes; the OpenAPI
 # security stamp below skips them. They still get the no-store cache headers.
 _COOKIE_AUTH_PREFIXES = ("/v1/auth/session",)
+# Paths that carry no credential at all. The deployment bootstrap is what tells a
+# browser whether signing in is even possible here, so requiring a credential to
+# read it would be circular. Listed separately from _PUBLIC_PREFIXES because
+# these still get the no-store cache headers: the answer changes with the
+# deployment's configuration, and a shared cache must not pin one gateway's to
+# another's.
+_UNAUTHENTICATED_PREFIXES = ("/v1/bootstrap",)
 # Public, unauthenticated static assets that shared caches may keep. Paths here
 # set their own Cache-Control at the route (favicon.svg), so the middleware only
 # fills one in when it is missing.
@@ -123,6 +131,14 @@ def _validate_platform_config(config: GatewayConfig) -> None:
         raise ValueError(msg)
     if config.providers:
         msg = "Local provider credentials are not supported in hybrid mode"
+        raise ValueError(msg)
+    # The deployment bootstrap publishes this to the browser as a link target, so
+    # a scheme that is not http(s) would be a script URL in an operator's own
+    # config. Rejected at boot rather than dropped per request, so a typo is a
+    # startup error instead of a landing page that silently loses its link.
+    management_url = urlsplit(config.platform_management_url)
+    if management_url.scheme not in {"http", "https"} or not management_url.netloc:
+        msg = "platform.management_url must be an absolute http(s) URL"
         raise ValueError(msg)
 
 
@@ -394,7 +410,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
         }
 
         for path, path_item in openapi_schema.get("paths", {}).items():
-            if path.startswith(_PUBLIC_PREFIXES) or path.startswith(_COOKIE_AUTH_PREFIXES):
+            if path.startswith(_PUBLIC_PREFIXES + _COOKIE_AUTH_PREFIXES + _UNAUTHENTICATED_PREFIXES):
                 continue
             for operation in path_item.values():
                 if isinstance(operation, dict):

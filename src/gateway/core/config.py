@@ -45,6 +45,12 @@ CONVERSATION_HEADER = "Otari-Conversation-Id"
 # influence it. Submit the matching label via the /rank task_id.
 ROUTER_TASK_HEADER = "Otari-Router-Task"
 DEFAULT_PLATFORM_BASE_URL = "https://api.otari.ai/api/v1"
+# Where a hybrid gateway's control plane lives for a person, as opposed to
+# DEFAULT_PLATFORM_BASE_URL above, which is where it lives for the gateway. The
+# deployment bootstrap hands this to the browser so a hybrid landing page can
+# link to the dashboard that actually manages this gateway; an operator pointed
+# at a staging platform overrides it with platform.management_url.
+DEFAULT_PLATFORM_MANAGEMENT_URL = "https://otari.ai"
 PLATFORM_TOKEN_ENV_VAR = "OTARI_AI_TOKEN"
 # User-facing config env vars use the OTARI_ prefix (e.g. OTARI_MASTER_KEY,
 # OTARI_PORT), which is also the native pydantic prefix below.
@@ -836,6 +842,19 @@ class GatewayConfig(BaseSettings):
         return self._resolve_platform_token()
 
     @property
+    def platform_management_url(self) -> str:
+        """The otari.ai dashboard URL a hybrid gateway points its operator at.
+
+        Not a credential and not the resolve/report base URL: it is the human
+        destination the deployment bootstrap publishes so a hybrid landing page
+        can link to the control plane that owns this gateway.
+        """
+        configured = self.platform.get("management_url")
+        if isinstance(configured, str) and configured.strip():
+            return configured.strip()
+        return DEFAULT_PLATFORM_MANAGEMENT_URL
+
+    @property
     def configured_mode(self) -> str | None:
         """The explicitly set mode (normalized), or None when unset/blank."""
         normalized = (self.mode or "").strip().lower()
@@ -1443,6 +1462,7 @@ def _apply_platform_env_overrides(config: dict[str, Any]) -> None:
 
     env_mappings: dict[str, tuple[str, type[Any]]] = {
         "PLATFORM_BASE_URL": ("base_url", str),
+        "PLATFORM_MANAGEMENT_URL": ("management_url", str),
         "PLATFORM_RESOLVE_TIMEOUT_MS": ("resolve_timeout_ms", int),
         "PLATFORM_USAGE_TIMEOUT_MS": ("usage_timeout_ms", int),
         "PLATFORM_USAGE_MAX_RETRIES": ("usage_max_retries", int),

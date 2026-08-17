@@ -6,7 +6,12 @@
 // builder fills the whole shape with neutral values and takes an override for
 // the part under test, so a test states what it is about and nothing else.
 
-import type { PricingResponse, UsageSeriesPoint, UsageTotals } from "@/client"
+import type {
+  DeploymentBootstrap,
+  PricingResponse,
+  UsageSeriesPoint,
+  UsageTotals,
+} from "@/client"
 
 export function usageTotals(overrides: Partial<UsageTotals> = {}): UsageTotals {
   return {
@@ -56,6 +61,34 @@ export function pricingResponse(
     pricing_tiers: [],
     created_at: "2026-01-01T00:00:00Z",
     updated_at: "2026-01-01T00:00:00Z",
+    ...overrides,
+  }
+}
+
+// The capability names a standalone gateway serves, kept in step with
+// STANDALONE_CAPABILITIES in src/gateway/api/routes/bootstrap.py. A test that
+// wants a surface hidden overrides `capabilities` rather than editing this.
+const STANDALONE_CAPABILITIES = [
+  "budgets",
+  "keys",
+  "models",
+  "providers",
+  "routing",
+  "settings",
+  "tools",
+  "usage",
+  "users",
+]
+
+/** The deployment bootstrap, standalone by default. See useDeployment. */
+export function bootstrap(
+  overrides: Partial<DeploymentBootstrap> = {},
+): DeploymentBootstrap {
+  return {
+    deployment_type: "standalone",
+    session_type: "local_operator",
+    capabilities: [...STANDALONE_CAPABILITIES],
+    management_url: null,
     ...overrides,
   }
 }

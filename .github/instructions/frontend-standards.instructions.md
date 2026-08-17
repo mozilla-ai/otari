@@ -46,6 +46,13 @@ examples grounded in this dashboard's code, lives in the skill:
    rejects both, so flag placement in review rather than leaving it to the lint to reject
    after the fact. Adding a directory directly under `src/` needs a rule to go with it.
 
-7. **Tests for changed behavior.** Colocated Vitest tests (`Foo.tsx` → `Foo.test.tsx`) that
+7. **Deployment differences come from the bootstrap.** A surface that only some deployments
+   serve gates on `useCapabilities()` / `useDeployment()` (`web/src/shared/hooks/useDeployment.tsx`),
+   which `main.tsx` fills from `GET /v1/bootstrap` before the first render. Flag a page component
+   that reads the gateway's mode itself, or infers it from an endpoint's 404: that is the
+   scattered mode check the bootstrap replaced. Hiding a surface client-side is a convenience,
+   never an authorization; the server still has to enforce it.
+
+8. **Tests for changed behavior.** Colocated Vitest tests (`Foo.tsx` → `Foo.test.tsx`) that
    query the way a user would (`getByRole`/`getByLabelText`/`getByText`, not `getByTestId`),
    render real providers, and mock only the network boundary (`apiFetch`), not the hooks.

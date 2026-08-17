@@ -2224,6 +2224,59 @@
         "title": "CreateUserRequest",
         "type": "object"
       },
+      "DeploymentBootstrap": {
+        "description": "What the dashboard shell needs before it can render anything.",
+        "properties": {
+          "capabilities": {
+            "description": "Management API groups this deployment serves, sorted, which is what its dashboard surfaces gate on. Empty for a hybrid gateway.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Capabilities",
+            "type": "array"
+          },
+          "deployment_type": {
+            "description": "Which deployment serves this URL. 'standalone' owns its own data; 'hosted' is otari.ai; 'hybrid' is a gateway attached to otari.ai, which is data-plane only and holds no management surface of its own.",
+            "enum": [
+              "standalone",
+              "hosted",
+              "hybrid"
+            ],
+            "title": "Deployment Type",
+            "type": "string"
+          },
+          "management_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where the authoritative control plane lives when it is not this deployment. Set for a hybrid gateway so its landing page can link to otari.ai; null otherwise.",
+            "title": "Management Url"
+          },
+          "session_type": {
+            "description": "The kind of session this deployment issues, not whether the caller holds one. 'local_operator' is the standalone master-key sign-in, 'hosted_user' an otari.ai account, and 'none' a deployment that issues no management session at all.",
+            "enum": [
+              "local_operator",
+              "hosted_user",
+              "none"
+            ],
+            "title": "Session Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "deployment_type",
+          "session_type",
+          "capabilities",
+          "management_url"
+        ],
+        "title": "DeploymentBootstrap",
+        "type": "object"
+      },
       "DiscoverableModel": {
         "description": "A model one provider instance reports as available.",
         "properties": {
@@ -9954,6 +10007,28 @@
         "summary": "Retrieve Batch Results",
         "tags": [
           "batches"
+        ]
+      }
+    },
+    "/v1/bootstrap": {
+      "get": {
+        "description": "Return the deployment context the dashboard shell renders from.\n\nPublic: the shell fetches this before it knows whether it can authenticate.",
+        "operationId": "get_bootstrap_v1_bootstrap_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeploymentBootstrap"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Get Bootstrap",
+        "tags": [
+          "bootstrap"
         ]
       }
     },

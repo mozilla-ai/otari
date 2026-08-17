@@ -437,6 +437,28 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/bootstrap": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Bootstrap
+         * @description Return the deployment context the dashboard shell renders from.
+         *
+         *     Public: the shell fetches this before it knows whether it can authenticate.
+         */
+        get: operations["get_bootstrap_v1_bootstrap_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/budgets": {
         parameters: {
             query?: never;
@@ -3142,6 +3164,34 @@ export interface components {
              * @description Unique user identifier
              */
             user_id: string;
+        };
+        /**
+         * DeploymentBootstrap
+         * @description What the dashboard shell needs before it can render anything.
+         */
+        DeploymentBootstrap: {
+            /**
+             * Capabilities
+             * @description Management API groups this deployment serves, sorted, which is what its dashboard surfaces gate on. Empty for a hybrid gateway.
+             */
+            capabilities: string[];
+            /**
+             * Deployment Type
+             * @description Which deployment serves this URL. 'standalone' owns its own data; 'hosted' is otari.ai; 'hybrid' is a gateway attached to otari.ai, which is data-plane only and holds no management surface of its own.
+             * @enum {string}
+             */
+            deployment_type: "standalone" | "hosted" | "hybrid";
+            /**
+             * Management Url
+             * @description Where the authoritative control plane lives when it is not this deployment. Set for a hybrid gateway so its landing page can link to otari.ai; null otherwise.
+             */
+            management_url: string | null;
+            /**
+             * Session Type
+             * @description The kind of session this deployment issues, not whether the caller holds one. 'local_operator' is the standalone master-key sign-in, 'hosted_user' an otari.ai account, and 'none' a deployment that issues no management session at all.
+             * @enum {string}
+             */
+            session_type: "local_operator" | "hosted_user" | "none";
         };
         /**
          * DiscoverableModel
@@ -6340,6 +6390,26 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    get_bootstrap_v1_bootstrap_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeploymentBootstrap"];
+                };
             };
         };
     };

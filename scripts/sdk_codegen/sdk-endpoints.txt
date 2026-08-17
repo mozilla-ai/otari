@@ -108,6 +108,9 @@ GET /v1/budgets/{budget_id}/reset-logs          # not yet wrapped
 # --- Second wave of gateway endpoints (added after the initial manifest) ---
 # Dashboard session auth: browser cookie flow for the admin UI, not an SDK surface.
 POST /v1/auth/session                           # dashboard-only
+# Deployment bootstrap: tells the dashboard shell which deployment served it, so
+# it exists for a browser deciding what to render. An SDK already knows.
+GET /v1/bootstrap                               # dashboard-only
 DELETE /v1/auth/session                         # dashboard-only
 # OTLP ingest: OpenTelemetry collector receivers, not an SDK surface.
 POST /v1/logs                                   # otel ingest

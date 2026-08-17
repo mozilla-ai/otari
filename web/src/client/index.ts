@@ -28,6 +28,16 @@ type Schemas = components["schemas"]
 type Defaulted<T, K extends keyof T> = Omit<T, K> & Partial<Pick<T, K>>
 
 // ---------------------------------------------------------------------------
+// Deployment bootstrap
+//
+// The first thing the shell reads, and the only response it reads before it
+// knows whether it can authenticate at all.
+// ---------------------------------------------------------------------------
+export type DeploymentBootstrap = Schemas["DeploymentBootstrap"]
+export type DeploymentType = DeploymentBootstrap["deployment_type"]
+export type SessionType = DeploymentBootstrap["session_type"]
+
+// ---------------------------------------------------------------------------
 // Usage and analytics
 // ---------------------------------------------------------------------------
 export type UsageEntry = Schemas["UsageEntry"]

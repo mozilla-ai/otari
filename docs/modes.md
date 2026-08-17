@@ -35,6 +35,13 @@ whereas a locally issued Otari API key (standalone mode) uses a hyphen
 (`gw-...`). They are different credential types that differ by one character,
 so take care not to confuse them.
 
+A connected gateway publishes where its control plane lives, at
+`GET /v1/bootstrap`, so the dashboard can link an operator to it. That is
+[otari.ai](https://otari.ai) by default; set `PLATFORM_MANAGEMENT_URL` (or
+`platform.management_url` in the config file) to point at a different one, for
+example a staging platform. It must be an absolute `http(s)` URL, and the
+gateway refuses to start if it is not. This is a link target, never a credential.
+
 ### What otari.ai handles
 
 - **Provider routing**: otari.ai resolves which provider and credentials to use for each request, including multi-provider fallback.
@@ -105,7 +112,8 @@ request through otari.ai's hosted gateway instead.
 | User/budget management | `/v1/users`, `/v1/budgets` | Through otari.ai |
 | Usage tracking | Local database | Reported to otari.ai |
 | Multi-provider fallback | No | Yes |
-| Available API routes | Full Otari API surface | Health, chat completions, messages, and responses |
+| Available API routes | Full Otari API surface | Health, deployment bootstrap, chat completions, messages, and responses |
+| Admin dashboard | Served at `/` | Managed on otari.ai; the gateway holds no local management UI |
 
 ## How Otari talks to otari.ai
 

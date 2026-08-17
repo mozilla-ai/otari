@@ -54,6 +54,9 @@ Build and check from the repo root:
   new "fetch everything" hook.
 - Prefer `undefined` over `null` for absent values in your own types (the API layer may return
   `null`; convert at the boundary).
+- Gate a deployment-dependent surface on the bootstrap, through `useDeployment()` /
+  `useCapabilities()` (`web/src/shared/hooks/useDeployment.tsx`). It is the one place that
+  knows which deployment served the page, and it is read before the first render.
 - Add a Vitest test for any component or helper whose behavior you change (`Foo.tsx` →
   `Foo.test.tsx`, colocated). See [typescript-and-react.md](./typescript-and-react.md#testing).
 
@@ -74,6 +77,9 @@ Build and check from the repo root:
 - Client-side filtering/sorting/pagination of large server datasets when the endpoint can do
   it. (Small, already-loaded lists rendered in a `Table` are fine.)
 - `getByTestId` when a semantic query (`getByRole`, `getByLabelText`, `getByText`) works.
+- A page component that branches on the gateway's mode (reading `/v1/settings`'s `mode`, or
+  probing whether a management endpoint 404s). The deployment bootstrap answers that once,
+  for the whole shell; see the rule above.
 
 ## A note on status colors
 

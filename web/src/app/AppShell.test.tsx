@@ -4,6 +4,9 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { AppShell } from "@/app/AppShell"
 import { Provider } from "@/app/provider"
+import type { DeploymentBootstrap } from "@/client"
+import { DeploymentProvider } from "@/shared/hooks/useDeployment"
+import { bootstrap } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
 
 // jsdom has no layout engine, so `md:hidden` / responsive classes never take
@@ -41,12 +44,14 @@ function mockMatchMedia(matches: boolean, options: { legacy?: boolean } = {}) {
 // AppShell is the root route's component in the real tree, so it renders its
 // page through an <Outlet>. Here it is the component under test and the pages
 // are the router's children, which is what makes clicking a nav link swap them.
-function renderShell() {
+function renderShell(deployment: DeploymentBootstrap = bootstrap()) {
   return renderWithRouter(<div>OVERVIEW PAGE</div>, {
     url: "/",
     shell: (
       <Provider>
-        <AppShell />
+        <DeploymentProvider value={deployment}>
+          <AppShell />
+        </DeploymentProvider>
       </Provider>
     ),
     routes: [{ path: "/providers", element: <div>PROVIDERS PAGE</div> }],
@@ -306,5 +311,48 @@ describe("AppShell responsive layout", () => {
     expect(
       screen.getByRole("button", { name: "Open navigation" }),
     ).toHaveAttribute("aria-expanded", "false")
+  })
+})
+
+describe("AppShell capability gating", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+    window.localStorage.clear()
+  })
+
+  it("renders every destination the deployment serves", async () => {
+    mockMatchMedia(false)
+    await renderShell()
+
+    for (const label of ["Overview", "Activity", "Usage", "Providers"]) {
+      expect(screen.getByRole("link", { name: label })).toBeInTheDocument()
+    }
+  })
+
+  it("hides a destination whose capability the deployment does not serve", async () => {
+    mockMatchMedia(false)
+    // A capability the bootstrap omits takes its link with it. Both
+    // observability pages read /v1/usage, so both go.
+    await renderShell(
+      bootstrap({ capabilities: ["models", "providers", "settings"] }),
+    )
+
+    expect(screen.queryByRole("link", { name: "Activity" })).toBeNull()
+    expect(screen.queryByRole("link", { name: "Usage" })).toBeNull()
+    expect(screen.queryByRole("link", { name: "Keys" })).toBeNull()
+    // Ungated and still present: the index is the deployment's front page.
+    expect(screen.getByRole("link", { name: "Overview" })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Providers" })).toBeInTheDocument()
+  })
+
+  it("drops a section header once its whole group is gated away", async () => {
+    mockMatchMedia(false)
+    await renderShell(bootstrap({ capabilities: ["models"] }))
+
+    // "Observability" labels Activity and Usage; with neither served, an empty
+    // heading over nothing is worse than no heading.
+    expect(screen.queryByText("Observability")).toBeNull()
+    expect(screen.getByText("Catalog")).toBeInTheDocument()
   })
 })

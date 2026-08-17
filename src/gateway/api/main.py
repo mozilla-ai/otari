@@ -6,6 +6,7 @@ from gateway.api.routes import (
     audio,
     auth_session,
     batches,
+    bootstrap,
     budgets,
     chat,
     embeddings,
@@ -38,6 +39,10 @@ from gateway.core.config import GatewayConfig
 def register_routers(app: FastAPI, config: GatewayConfig) -> None:
     app.include_router(chat.router)
     app.include_router(health.router)
+    # Registered in both modes on purpose: the deployment bootstrap is how a
+    # browser learns which mode it reached, so it is the one management-adjacent
+    # route a hybrid gateway still answers.
+    app.include_router(bootstrap.router)
     # /v1/messages and /v1/responses now support hybrid mode (multi-attempt
     # fallback + usage reporting), so they're registered in both modes.
     app.include_router(messages.router)
