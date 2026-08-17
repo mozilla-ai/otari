@@ -1,0 +1,495 @@
+"""Tenancy: organizations, workspaces, and the identities that belong to them.
+
+The reconciled control plane's tenancy core, rehomed from the platform
+(`otari-ai` `backend/app/models/`) as part of the M5 strangle. Five tables, one
+graph: an ``organization`` owns ``workspace`` rows, and ``user`` rows join both
+through ``organization_member`` and ``workspace_member``.
+
+**Why SQLModel here and plain SQLAlchemy in `entities.py`.** SQLModel is
+SQLAlchemy underneath, so these classes bind to the gateway's ``AsyncSession``
+unchanged while keeping the ``Create``/``Update``/``Public`` schema layer the
+routes and the generated dashboard client are built on. Converting them to
+`entities.py`'s declarative style would have rewritten every endpoint contract
+in the slice for no behavioral gain. `entities.py` stays as it is: the two
+styles coexist deliberately, and new *gateway* tables still belong there.
+
+**One MetaData, two styles.** `entities.py`'s ``Base`` shares
+``SQLModel.metadata`` (see the note there), so Alembic, ``create_all`` and
+``drop_all`` see one schema no matter which style declared a table.
+
+Three deliberate departures from the platform's models, applied on arrival:
+
+- **Timestamps are timezone-aware.** The platform's mixins annotate
+  ``created_at``/``updated_at`` as a bare ``datetime`` (so SQLAlchemy renders a
+  naive column) while their ``default_factory`` writes an aware
+  ``datetime.now(UTC)`` into it: the offset is silently dropped on the way in,
+  and the value reads back as local-looking UTC. That is a latent bug, not a
+  style difference, so it is fixed here rather than carried, matching the
+  gateway's ``DateTime(timezone=True)`` house style.
+- **``email`` is a plain nullable string, not ``EmailStr``.** A standalone
+  operator identity is a label, not a sign-in address (M4: "local identities
+  have no email"), and every reader here must already tolerate its absence, so
+  the annotation says so rather than being widened at each call site.
+- **Hosted-only columns are not carried**, with one exception:
+  ``workspace.activation_classification`` stays, because the reconciled schema
+  is edition-invariant (the overlay contributes adapters and routers, never
+  tables), so a hosted surface's column has to live here or nowhere.
+
+No ORM ``relationship()`` is declared on purpose. Lazy loading on an
+``AsyncSession`` raises ``MissingGreenlet`` at the point of attribute access
+rather than at the query, so this slice joins explicitly in its repositories,
+exactly as the platform's own tenancy models do.
+"""
+
+import uuid
+from datetime import UTC, datetime
+from typing import Any, Literal
+
+from pydantic import field_validator
+from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, UniqueConstraint, Uuid, func
+from sqlmodel import Field, SQLModel
+
+ORGANIZATION_MEMBER_ROLES = {"owner", "admin", "member", "viewer"}
+ORGANIZATION_MEMBER_STATUSES = {"active", "invited", "suspended"}
+WORKSPACE_MEMBER_ROLES = {"owner", "admin", "member", "viewer"}
+WORKSPACE_MEMBER_STATUSES = {"active", "invited", "suspended"}
+
+WorkspaceActivationClassification = Literal["eligible", "internal", "automated", "migrated", "enterprise_assisted"]
+
+# Roles that may manage an organization or a workspace. Fixed roles are the
+# settled OSS line; anything finer-grained is overlay depth.
+MANAGEMENT_ROLES = frozenset({"owner", "admin"})
+
+
+def _validate_membership(value: str, *, allowed: set[str], kind: str) -> str:
+    if value not in allowed:
+        msg = f"Invalid {kind}: {value}"
+        raise ValueError(msg)
+    return value
+
+
+def _timestamp_field(*, default_factory: Any = None, column_kwargs: dict[str, Any]) -> Any:
+    """Build a timezone-aware timestamp field.
+
+    Two things are worked around here, once, instead of at five inheriting
+    tables. SQLModel's ``Field`` overloads type ``sa_type`` as a *class*, while
+    ``timezone=True`` only exists on an *instance* of ``DateTime`` (the runtime
+    accepts either and hands it straight to ``Column``). And the type has to
+    arrive as ``sa_type`` rather than a ready-made ``sa_column``, because a
+    ``Column`` instance declared on a mixin cannot be attached to more than one
+    table; ``sa_type`` plus kwargs lets SQLModel build a fresh column per model.
+    """
+    return Field(  # type: ignore[call-overload]
+        default_factory=default_factory,
+        sa_type=DateTime(timezone=True),
+        sa_column_kwargs=column_kwargs,
+    )
+
+
+class PrimaryKeyMixin:
+    """A UUID primary key, rendered as CHAR(32) on SQLite and native on PostgreSQL."""
+
+    id: uuid.UUID = Field(default_factory=uuid.uuid4, primary_key=True)
+
+
+class CreatedAtMixin:
+    """Creation timestamp, defaulted in Python and in the database."""
+
+    created_at: datetime = _timestamp_field(
+        default_factory=lambda: datetime.now(UTC),
+        column_kwargs={"server_default": func.now()},
+    )
+
+
+class UpdatedAtMixin:
+    """Last-modification timestamp, stamped by the database on update."""
+
+    updated_at: datetime | None = _timestamp_field(column_kwargs={"onupdate": func.now()})
+
+
+# =============================================================================
+# Identity
+# =============================================================================
+
+
+class UserBase(SQLModel):
+    """Fields an identity carries on the wire."""
+
+    email: str | None = Field(default=None, max_length=255)
+    is_active: bool = True
+    is_superuser: bool = False
+    full_name: str | None = Field(default=None, max_length=255)
+
+
+class User(UserBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
+    """An identity in the reconciled control plane.
+
+    Not to be confused with `entities.User`, the gateway's own string-keyed
+    per-request spend identity. Both exist during the strangle: M4 re-parents
+    the gateway's rows onto this table through the identity bridge, and the
+    legacy table contracts away one milestone after parity, at which point this
+    is the only ``User``.
+
+    ``email`` is nullable and unique. PostgreSQL and SQLite both allow repeated
+    NULLs in a unique index, so email-less local identities coexist without
+    weakening uniqueness for the addresses that do exist.
+    """
+
+    __tablename__ = "user"
+
+    email: str | None = Field(default=None, unique=True, index=True, max_length=255)
+    # NOT NULL: every identity is always looking at exactly one organization,
+    # which is what lets the tenancy routes resolve a scope from the caller
+    # alone. Provisioning therefore creates the organization first.
+    active_organization_id: uuid.UUID = Field(foreign_key="organization.id", index=True)
+
+
+# =============================================================================
+# Organizations
+# =============================================================================
+
+
+class OrganizationBase(SQLModel):
+    name: str = Field(max_length=255)
+    slug: str = Field(max_length=255)
+
+
+class OrganizationCreate(OrganizationBase):
+    pass
+
+
+class OrganizationUpdate(SQLModel):
+    name: str | None = Field(default=None, max_length=255)
+    slug: str | None = Field(default=None, max_length=255)
+
+
+class OrganizationPublic(OrganizationBase):
+    id: uuid.UUID
+    created_by_user_id: uuid.UUID | None = None
+    created_at: datetime
+    updated_at: datetime | None = None
+
+
+class OrganizationsPublic(SQLModel):
+    data: list[OrganizationPublic]
+    count: int
+
+
+class Organization(OrganizationBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
+    __tablename__ = "organization"
+    __table_args__ = (UniqueConstraint("slug", name="uq_organization_slug"),)
+
+    # Declared as an explicit column for one reason: ``use_alter``. This foreign
+    # key closes a cycle (``user.active_organization_id`` points back here), and
+    # without it SQLAlchemy cannot order the two tables, so ``create_all`` warns
+    # and ``drop_all`` raises ``CircularDependencyError`` -- which the test
+    # fixtures' teardown runs. ``use_alter`` moves this one constraint into its
+    # own ALTER, which is also how the migration adds it.
+    created_by_user_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(
+            "created_by_user_id",
+            Uuid(),
+            ForeignKey(
+                "user.id",
+                name="fk_organization_created_by_user_id",
+                ondelete="SET NULL",
+                use_alter=True,
+            ),
+            nullable=True,
+        ),
+    )
+
+
+class OrganizationMembershipContextPublic(SQLModel):
+    """An organization plus the caller's standing in it.
+
+    What every tenancy page reads first: which organization it is looking at,
+    and what the caller may do there.
+    """
+
+    organization_member_id: uuid.UUID
+    role: str
+    status: str
+    organization: OrganizationPublic
+    # Whether the dashboard may offer the BYO provider-keys surface. The
+    # platform answers "does this org have a self-hosted gateway attached", which
+    # in a standalone deployment is always yes: the deployment reading this *is*
+    # that gateway. Kept on the contract, rather than dropped as a constant, so
+    # the ported page reads the same field in both editions.
+    byo_provider_keys_allowed: bool = False
+
+
+class OrganizationMembershipContextsPublic(SQLModel):
+    data: list[OrganizationMembershipContextPublic]
+    count: int
+
+
+class OrganizationSwitchRequest(SQLModel):
+    organization_id: uuid.UUID
+
+
+class OrganizationCreateRequest(SQLModel):
+    name: str = Field(min_length=1, max_length=255)
+
+
+class ActiveOrganizationUpdateRequest(SQLModel):
+    name: str = Field(min_length=1, max_length=255)
+
+
+class OrganizationMemberBase(SQLModel):
+    organization_id: uuid.UUID = Field(foreign_key="organization.id", ondelete="CASCADE", index=True)
+    user_id: uuid.UUID = Field(foreign_key="user.id", ondelete="CASCADE", index=True)
+    role: str = Field(default="member", max_length=32)
+    status: str = Field(default="active", max_length=32)
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, value: str) -> str:
+        return _validate_membership(value, allowed=ORGANIZATION_MEMBER_ROLES, kind="organization role")
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, value: str) -> str:
+        return _validate_membership(value, allowed=ORGANIZATION_MEMBER_STATUSES, kind="organization member status")
+
+
+class OrganizationMemberCreate(OrganizationMemberBase):
+    pass
+
+
+class OrganizationMemberUpdate(SQLModel):
+    role: str | None = Field(default=None, max_length=32)
+    status: str | None = Field(default=None, max_length=32)
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _validate_membership(value, allowed=ORGANIZATION_MEMBER_ROLES, kind="organization role")
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _validate_membership(value, allowed=ORGANIZATION_MEMBER_STATUSES, kind="organization member status")
+
+
+class OrganizationMemberPublic(OrganizationMemberBase):
+    id: uuid.UUID
+    created_at: datetime
+    updated_at: datetime | None = None
+
+
+class OrganizationMembersPublic(SQLModel):
+    data: list[OrganizationMemberPublic]
+    count: int
+
+
+class ActiveOrganizationMemberPublic(SQLModel):
+    """A member row joined to the identity behind it, as the roster shows it.
+
+    Field-for-field the platform's shape, so the ported roster page is not
+    rewritten around a new contract, with two consequences of the OSS line:
+    ``email`` is nullable here (a local operator identity has no sign-in
+    address), and ``invitation_id`` is always null until the invitation flow
+    rehomes, which is what fills it.
+    """
+
+    organization_member_id: uuid.UUID | None = None
+    user_id: uuid.UUID | None = None
+    invitation_id: uuid.UUID | None = None
+    email: str | None = None
+    full_name: str | None = None
+    role: str
+    status: str
+    created_at: datetime
+    updated_at: datetime | None = None
+
+
+class ActiveOrganizationMembersPublic(SQLModel):
+    data: list[ActiveOrganizationMemberPublic]
+    count: int
+
+
+class ActiveOrganizationMemberUpdateRequest(SQLModel):
+    role: str | None = Field(default=None, max_length=32)
+    status: str | None = Field(default=None, max_length=32)
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _validate_membership(value, allowed=ORGANIZATION_MEMBER_ROLES, kind="organization role")
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _validate_membership(value, allowed=ORGANIZATION_MEMBER_STATUSES, kind="organization member status")
+
+
+class OrganizationMember(OrganizationMemberBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
+    __tablename__ = "organization_member"
+    __table_args__ = (
+        UniqueConstraint(
+            "organization_id",
+            "user_id",
+            name="uq_organization_member_organization_user",
+        ),
+    )
+
+
+# =============================================================================
+# Workspaces
+# =============================================================================
+
+
+class WorkspaceBase(SQLModel):
+    name: str = Field(max_length=255)
+    description: str | None = Field(default=None, max_length=1024)
+
+
+class WorkspaceCreate(WorkspaceBase):
+    pass
+
+
+class WorkspaceUpdate(SQLModel):
+    name: str | None = Field(default=None, max_length=255)
+    description: str | None = Field(default=None, max_length=1024)
+
+
+class WorkspacePublic(WorkspaceBase):
+    id: uuid.UUID
+    organization_id: uuid.UUID
+    created_by_user_id: uuid.UUID | None = None
+    created_at: datetime
+    updated_at: datetime | None = None
+
+
+class WorkspacesPublic(SQLModel):
+    data: list[WorkspacePublic]
+    count: int
+
+
+class Workspace(WorkspaceBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
+    __tablename__ = "workspace"
+    __table_args__ = (
+        UniqueConstraint("organization_id", "name", name="uq_workspace_organization_name"),
+        CheckConstraint(
+            "activation_classification IN ('eligible', 'internal', 'automated', 'migrated', 'enterprise_assisted')",
+            name="check_workspace_activation_classification",
+        ),
+    )
+
+    organization_id: uuid.UUID = Field(foreign_key="organization.id", ondelete="CASCADE", index=True)
+    created_by_user_id: uuid.UUID | None = Field(
+        default=None,
+        foreign_key="user.id",
+        ondelete="SET NULL",
+        nullable=True,
+    )
+    # Edition-invariant schema: nothing in the OSS control plane reads this, and
+    # the activation surface that classifies a workspace is hosted depth. It
+    # lives here because the overlay adds no tables of its own, so the column
+    # has to exist in the one schema both editions boot.
+    activation_classification: str = Field(default="eligible", max_length=32)
+
+
+class WorkspaceMemberBase(SQLModel):
+    workspace_id: uuid.UUID = Field(foreign_key="workspace.id", ondelete="CASCADE", index=True)
+    user_id: uuid.UUID = Field(foreign_key="user.id", ondelete="CASCADE", index=True)
+    role: str = Field(default="member", max_length=32)
+    status: str = Field(default="active", max_length=32)
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, value: str) -> str:
+        return _validate_membership(value, allowed=WORKSPACE_MEMBER_ROLES, kind="workspace role")
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, value: str) -> str:
+        return _validate_membership(value, allowed=WORKSPACE_MEMBER_STATUSES, kind="workspace member status")
+
+
+class WorkspaceMemberCreate(WorkspaceMemberBase):
+    pass
+
+
+class WorkspaceMemberUpdate(SQLModel):
+    role: str | None = Field(default=None, max_length=32)
+    status: str | None = Field(default=None, max_length=32)
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _validate_membership(value, allowed=WORKSPACE_MEMBER_ROLES, kind="workspace role")
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        return _validate_membership(value, allowed=WORKSPACE_MEMBER_STATUSES, kind="workspace member status")
+
+
+class WorkspaceMemberPublic(WorkspaceMemberBase):
+    id: uuid.UUID
+    created_at: datetime
+    updated_at: datetime | None = None
+
+
+class WorkspaceMembersPublic(SQLModel):
+    data: list[WorkspaceMemberPublic]
+    count: int
+
+
+class WorkspaceMember(WorkspaceMemberBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
+    __tablename__ = "workspace_member"
+    __table_args__ = (UniqueConstraint("workspace_id", "user_id", name="uq_workspace_member_workspace_user"),)
+
+
+__all__ = [
+    "MANAGEMENT_ROLES",
+    "ORGANIZATION_MEMBER_ROLES",
+    "ORGANIZATION_MEMBER_STATUSES",
+    "WORKSPACE_MEMBER_ROLES",
+    "WORKSPACE_MEMBER_STATUSES",
+    "ActiveOrganizationMemberPublic",
+    "ActiveOrganizationMemberUpdateRequest",
+    "ActiveOrganizationMembersPublic",
+    "ActiveOrganizationUpdateRequest",
+    "Organization",
+    "OrganizationCreate",
+    "OrganizationCreateRequest",
+    "OrganizationMember",
+    "OrganizationMemberCreate",
+    "OrganizationMemberPublic",
+    "OrganizationMemberUpdate",
+    "OrganizationMembersPublic",
+    "OrganizationMembershipContextPublic",
+    "OrganizationMembershipContextsPublic",
+    "OrganizationPublic",
+    "OrganizationSwitchRequest",
+    "OrganizationUpdate",
+    "OrganizationsPublic",
+    "User",
+    "Workspace",
+    "WorkspaceActivationClassification",
+    "WorkspaceCreate",
+    "WorkspaceMember",
+    "WorkspaceMemberCreate",
+    "WorkspaceMemberPublic",
+    "WorkspaceMemberUpdate",
+    "WorkspaceMembersPublic",
+    "WorkspacePublic",
+    "WorkspaceUpdate",
+    "WorkspacesPublic",
+]

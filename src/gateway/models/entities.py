@@ -4,10 +4,22 @@ from typing import Any
 
 from sqlalchemy import JSON, DateTime, ForeignKey, Index, Text, UniqueConstraint, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
+from sqlmodel import SQLModel
 
 
 class Base(DeclarativeBase):
-    """Base class for SQLAlchemy models."""
+    """Base class for SQLAlchemy models.
+
+    Shares ``SQLModel.metadata`` so the reconciled control plane's SQLModel
+    tables (`gateway.models.tenancy`) and the gateway's own declarative tables
+    land in one collection. That is what lets Alembic keep a single
+    ``target_metadata``, and ``create_all``/``drop_all`` cover the whole schema,
+    without either style having to know the other exists. The two classes keep
+    separate declarative *registries*, so a same-named model on either side
+    (``User``, during the strangle) resolves unambiguously.
+    """
+
+    metadata = SQLModel.metadata
 
 
 def _epoch_seconds(value: datetime | None) -> int | None:

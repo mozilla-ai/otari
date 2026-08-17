@@ -36,6 +36,30 @@ count = (await db.execute(select(func.count()).select_from(ModelPricing))).scala
 - Sessions come from the `get_db` dependency in routes; non-request code uses
   `create_session()` (`core/database.py`). Don't open ad-hoc engines.
 
+## The SQLModel half: the reconciled control plane's tables
+
+`models/tenancy.py` (organizations, workspaces, identities, memberships) is SQLModel rather
+than `entities.py`'s declarative style, because its `Create`/`Update`/`Public` schemas are the
+endpoint contracts the generated dashboard client is built from. Same session, same chain, three
+extra rules:
+
+- **Wrap every column reference in `sqlmodel.col()`.** On a SQLModel class the attribute's
+  static type is the annotation, so `col(Organization.slug) == slug` typechecks where
+  `Organization.slug == slug` reads as `bool` and mypy rejects it. Applies to `where`,
+  `order_by`, `join` conditions, and `.in_(...)`.
+- **Inherit `BaseRepository`** (`repositories/base_repository.py`) for `get`/`get_all`/`create`/
+  `update`/`delete`/`count`, and put tenancy repositories in `repositories/tenancy/`. Every
+  repository write **flushes and never commits**: the service owns the commit boundary, because
+  it is the layer that knows when a unit of work is complete.
+- **Declare no `relationship()`.** Lazy loading raises `MissingGreenlet` on an `AsyncSession` at
+  attribute access rather than at the query; join explicitly and return
+  `(model, related)` tuples instead.
+
+A column that needs a SQLAlchemy construct `Field()` cannot express (`use_alter`, a custom type
+instance) takes an explicit `sa_column=Column(...)`, but never on a mixin: one `Column` instance
+cannot attach to more than one table, so a shared mixin passes `sa_type` plus
+`sa_column_kwargs` and lets SQLModel build a fresh column per model.
+
 ## Layering
 
 - **Routes** (`api/routes/`) stay thin: parse the request, resolve identity, call a service,
@@ -72,6 +96,12 @@ A reservation that never settles leaks and permanently shrinks the user's budget
 - Every foreign key needs an explicit `ondelete` policy; index it (`index=True`), see the
   performance instructions. Account deletion must leave no orphaned billable rows.
 - Provide a real, reversible `downgrade()`.
+- The chain runs on SQLite *and* PostgreSQL, so keep it dialect-neutral: `sa.func.now()` rather
+  than a literal `now()`/`CURRENT_TIMESTAMP`, and no `ALTER TABLE ... ADD CONSTRAINT`, which
+  SQLite does not have. Adding a constraint to an existing table goes through
+  `op.batch_alter_table(..., copy_from=<the sa.Table>)`; `copy_from` is what keeps SQLite's
+  table rebuild from dropping what reflection could not see. Verify both engines locally
+  (upgrade, downgrade, upgrade), since CI only migrates PostgreSQL.
 
 ## Config & env
 
