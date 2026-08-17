@@ -24,13 +24,14 @@ storage.
 | --- | --- | --- |
 | `features/<domain>/` | A domain's page, the parts only it uses, its tests | `shared/`, `client/`, other features |
 | `shared/` | `api/` transport and query hooks, `lib/` helpers, `ui/` primitives, `test/` harnesses | `client/`, itself |
-| `app/` | The composition root: entry, providers, router, shell chrome | anything |
-| `routes/` | One file per URL, naming a feature's page | anything |
+| `app/` | The composition root: entry, providers, router, shell chrome | any layer here |
+| `routes/` | One file per URL, naming a feature's page | any layer here |
 
 `client/` is generated from the OpenAPI spec and `styles/globals.css` is the one
 stylesheet. `npm run lint` fails a PR that has a feature importing `app/`, or
-`shared/` importing either of the layers above it; `src/architecture.test.ts`
-proves the lint still rejects each of those. See
+`shared/` importing either of the layers above it. No layer, including `app/` and
+`routes/`, may import an overlay's tree. `src/architecture.test.ts` proves the
+lint still rejects each of those. See
 [AGENTS.md](./AGENTS.md) for the reasoning.
 
 ## Develop

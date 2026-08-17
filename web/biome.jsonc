@@ -35,15 +35,20 @@
         // one file reaches into it, Otari's core stops standing alone and the
         // breakage shows up in a build nobody here runs.
         //
-        // Each group lists the alias form and the relative form. Imports in this
-        // codebase all use `@/`, but a boundary rule that a `../../` dodges is
-        // not a boundary rule.
+        // Each group lists the alias form and the relative form, and each of those
+        // both with and without a trailing segment. Imports in this codebase all use
+        // `@/`, but a boundary rule that a `../../` dodges is not a boundary rule,
+        // and `@/app/**` alone does not match a bare `@/app` the day a layer grows
+        // an index.ts. The cost of covering the relative form is that `**/app/**`
+        // also matches a third-party specifier with an `app` segment
+        // (`some-pkg/app/core`); nothing here imports one, and the day something
+        // does, the message will say why it was rejected.
         "noRestrictedImports": {
           "level": "error",
           "options": {
             "patterns": [
               {
-                "group": ["@/overlay/**", "**/overlay/**"],
+                "group": ["@/overlay", "@/overlay/**", "**/overlay", "**/overlay/**"],
                 "message": "Nothing in Otari's core may import the overlay tree. An overlay registers itself through the seams the core exposes (the nav registry, the container); the core never reaches the other way."
               }
             ]
@@ -71,11 +76,11 @@
               "options": {
                 "patterns": [
                   {
-                    "group": ["@/app/**", "**/app/**"],
+                    "group": ["@/app", "@/app/**", "**/app", "**/app/**"],
                     "message": "A feature may not import the composition root (src/app). Anything a feature and the shell both need belongs in src/shared; anything the shell needs from a feature, the shell imports."
                   },
                   {
-                    "group": ["@/overlay/**", "**/overlay/**"],
+                    "group": ["@/overlay", "@/overlay/**", "**/overlay", "**/overlay/**"],
                     "message": "Nothing in Otari's core may import the overlay tree. An overlay registers itself through the seams the core exposes (the nav registry, the container); the core never reaches the other way."
                   }
                 ]
@@ -99,11 +104,11 @@
               "options": {
                 "patterns": [
                   {
-                    "group": ["@/app/**", "**/app/**", "@/features/**", "**/features/**"],
+                    "group": ["@/app", "@/app/**", "**/app", "**/app/**", "@/features", "@/features/**", "**/features", "**/features/**"],
                     "message": "src/shared may not import src/app or src/features. Shared code is domain-agnostic by definition; if a helper needs a domain type, it belongs to that feature."
                   },
                   {
-                    "group": ["@/overlay/**", "**/overlay/**"],
+                    "group": ["@/overlay", "@/overlay/**", "**/overlay", "**/overlay/**"],
                     "message": "Nothing in Otari's core may import the overlay tree. An overlay registers itself through the seams the core exposes (the nav registry, the container); the core never reaches the other way."
                   }
                 ]

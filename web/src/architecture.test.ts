@@ -87,6 +87,16 @@ describe("layer boundaries", () => {
     expect(messages).toHaveLength(1);
   });
 
+  it("reject a feature importing a layer by its bare specifier", () => {
+    // `@/app/**` matches nothing without a trailing segment, so a barrel
+    // (`src/app/index.ts`) would reopen the boundary the day someone adds one.
+    // Every group lists the bare form alongside the subpath form.
+    expect(rejects("features", 'import { router } from "@/app";\nexport const a = router;\n')).toHaveLength(1);
+    expect(rejects("features", 'import { router } from "../../app";\nexport const a = router;\n')).toHaveLength(1);
+    expect(rejects("shared", 'import { UsagePage } from "@/features";\nexport const a = UsagePage;\n')).toHaveLength(1);
+    expect(rejects("features", 'import { nav } from "@/overlay";\nexport const a = nav;\n')).toHaveLength(1);
+  });
+
   it("allow a feature importing shared code, the client, and another feature", () => {
     // Feature-to-feature is deliberate, not an oversight: the keys page picks models,
     // the budgets page picks users, and routing does both. What the layout forbids is

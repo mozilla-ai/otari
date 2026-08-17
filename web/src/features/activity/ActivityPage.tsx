@@ -257,7 +257,7 @@ const activityRowClassName = (e: UsageEntry): string | undefined => {
 // ---------- filter option sets ----------
 //
 // The time presets and window math are shared with the Usage page via
-// `@/lib/timeRange` (see the ActivityTimeline selector). Activity keeps a
+// `@/shared/lib/timeRange` (see the ActivityTimeline selector). Activity keeps a
 // truthful "All": its raw list endpoint applies no default and no clamp, so an
 // omitted start really is all-time.
 

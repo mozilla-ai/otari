@@ -45,7 +45,7 @@ import {
 
 // Compact currency (formatUsd), token counts (formatTokens), percentages
 // (formatPct) and the period-over-period helpers (deltaFraction / DeltaHint) are
-// shared with the overview page from @/lib/format and @/components/ui. Only the
+// shared with the overview page from @/shared/lib/format and @/shared/ui/ui. Only the
 // two formatters specific to this page stay local.
 function formatBucketLabel(iso: string, bucket: UsageBucket): string {
   const d = new Date(iso);
@@ -58,7 +58,7 @@ function formatBucketLabel(iso: string, bucket: UsageBucket): string {
 
 // ---------- window presets ----------
 //
-// The time presets and window math live in `@/lib/timeRange` and are shared
+// The time presets and window math live in `@/shared/lib/timeRange` and are shared
 // with the Activity page. 30d default: a spend investigation is usually monthly.
 
 const DEFAULT_PRESET = findPreset(USAGE_PRESETS, USAGE_DEFAULT_KEY) as RangePreset;
