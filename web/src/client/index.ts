@@ -37,6 +37,17 @@ export type DeploymentBootstrap = Schemas["DeploymentBootstrap"]
 export type DeploymentType = DeploymentBootstrap["deployment_type"]
 export type SessionType = DeploymentBootstrap["session_type"]
 
+/**
+ * `GET /health`, which the hybrid landing page reads for its two status rows.
+ *
+ * A flat string map rather than a named schema, because the route returns one:
+ * `status` always, plus `mode` and `platform_reachable` ("yes" / "no") when the
+ * gateway is attached to a control plane. Pinned to the operation rather than
+ * restated, so a key that changes shows up here.
+ */
+export type GatewayHealth =
+  operations["health_check_health_get"]["responses"][200]["content"]["application/json"]
+
 // ---------------------------------------------------------------------------
 // Usage and analytics
 // ---------------------------------------------------------------------------

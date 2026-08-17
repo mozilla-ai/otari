@@ -20,6 +20,7 @@ import type {
   DiscoverableModelsResponse,
   ExplainPolicyRequest,
   ExplainPolicyResponse,
+  GatewayHealth,
   GatewaySettings,
   InFlightResponse,
   KnownProvider,
@@ -89,6 +90,7 @@ const PROVIDER_HEALTH = "provider-health"
 const STORED_PROVIDERS = "stored-providers"
 const METADATA = "model-metadata"
 const BUILD = "build"
+const HEALTH = "health"
 const KEYS = "keys"
 const BUDGETS = "budgets"
 const USERS = "users"
@@ -98,6 +100,12 @@ const USAGE = "usage"
 // gateway serves. Cheap (a hash of one small file) and only while the tab is
 // open, so a minute keeps a deploy from going unnoticed for long.
 const BUILD_POLL_MS = 60_000
+// How often the hybrid landing page re-asks whether this gateway is up and can
+// still reach its control plane. That pair is the only thing on that page which
+// changes, and it is the reason to leave the page open, so it ticks faster than
+// the build check. The gateway bounds its own upstream probe (`resolve_timeout_ms`),
+// so a stalled control plane answers "no" rather than piling up requests.
+const HEALTH_POLL_MS = 15_000
 // Checking provider health lists models for every configured provider. Keep the
 // automatic probe infrequent; operators can still force an immediate re-check.
 export const PROVIDER_HEALTH_REFRESH_MS = 60 * 60_000
@@ -134,6 +142,29 @@ export function useDashboardBuild() {
     // A failed check is not worth reporting: the tab keeps working, and the next
     // poll retries anyway.
     retry: false,
+  })
+}
+
+/**
+ * Whether this gateway is answering, and whether it can reach its control plane.
+ *
+ * `/health` is public and served in both modes, which is what makes it the one
+ * read a hybrid gateway's landing page can make: it hosts no management API, so
+ * every other endpoint the dashboard knows is a 404 there. A failure is the
+ * answer here rather than an error to retry past, so the page can say the
+ * gateway is not responding on the first attempt instead of ~three requests
+ * later.
+ */
+export function useGatewayHealth() {
+  return useQuery({
+    ...NO_RETRY,
+    queryKey: [HEALTH],
+    queryFn: () => apiFetch<GatewayHealth>("/health"),
+    refetchInterval: HEALTH_POLL_MS,
+    // A tab left open in the background holds the stalest answer of all, so ask
+    // again the moment someone looks at it.
+    refetchOnWindowFocus: true,
+    staleTime: 0,
   })
 }
 

@@ -111,10 +111,13 @@ def test_hybrid_mode_omits_model_management_endpoints(monkeypatch: pytest.Monkey
     reset_db()
 
 
-def test_hybrid_mode_root_serves_tutorial(monkeypatch: pytest.MonkeyPatch) -> None:
-    # Hybrid has no local management API, so the root serves the get-started
-    # tutorial rather than the admin dashboard SPA.
+def test_hybrid_mode_root_falls_back_to_tutorial_without_a_bundle(monkeypatch: pytest.MonkeyPatch) -> None:
+    # Hybrid serves the same dashboard bundle as standalone (it renders the
+    # data-plane landing page there), so an unbuilt checkout degrades the same
+    # way: the get-started tutorial at the root. Pinned with the bundle absent so
+    # the assertion does not depend on whether this checkout happens to have one.
     monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
+    monkeypatch.setattr("gateway.main.get_dashboard_dir", lambda: None)
 
     config = GatewayConfig(
         mode="hybrid",

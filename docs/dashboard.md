@@ -5,10 +5,12 @@ catalog, sets model pricing, manages routing policies, adds and edits provider A
 keys, manages users, keys, and budgets, and toggles runtime settings, all
 against the local management API using the master key.
 
-The dashboard is a **standalone-mode** feature. In standalone mode Otari serves
-the dashboard at the gateway root (`/`). In hybrid mode there is no local
-management API, so the root keeps serving the get-started tutorial (`/welcome`)
-instead. Everything below assumes standalone mode.
+The management pages are a **standalone-mode** feature. In standalone mode Otari
+serves the whole dashboard at the gateway root (`/`). A gateway connected to
+otari.ai serves the same page there, but it hosts no local management API, so
+what it shows is a landing page: whether the gateway is healthy, whether it can
+reach otari.ai, the base URL to point a client at, and a link to otari.ai, where
+that gateway is managed. Everything below assumes standalone mode.
 
 ## The two-key model
 
@@ -441,5 +443,5 @@ put it behind HTTPS, as the security notes below describe.
   field, including `OTARI_MASTER_KEY` and `OTARI_SECRET_KEY`.
 - [Quickstart](quickstart.md): get the gateway running and make your first
   request.
-- [Modes](modes.md): standalone versus hybrid, and why the dashboard is
+- [Modes](modes.md): standalone versus hybrid, and why the management pages are
   standalone-only.

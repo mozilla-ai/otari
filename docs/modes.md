@@ -113,7 +113,7 @@ request through otari.ai's hosted gateway instead.
 | Usage tracking | Local database | Reported to otari.ai |
 | Multi-provider fallback | No | Yes |
 | Available API routes | Full Otari API surface | Health, deployment bootstrap, chat completions, messages, and responses |
-| Admin dashboard | Served at `/` | Managed on otari.ai; the gateway holds no local management UI |
+| Admin dashboard | Served at `/` | `/` is a landing page: gateway health, otari.ai connection, the client base URL, and a link to otari.ai, which is where the gateway is managed |
 
 ## How Otari talks to otari.ai
 

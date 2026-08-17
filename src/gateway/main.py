@@ -434,11 +434,15 @@ def create_app(config: GatewayConfig) -> FastAPI:
             headers={"Cache-Control": "public, max-age=86400"},
         )
 
-    # The admin dashboard drives the standalone-only management API (models,
-    # pricing, aliases, settings); in hybrid mode there is none, so the root keeps
-    # serving the tutorial. The dashboard is a single-page app, so a static mount
-    # for /assets plus an index.html at / is all it needs (navigation is client-side).
-    dashboard_dir = get_dashboard_dir() if not config.is_hybrid_mode else None
+    # The same bundle is the root in both modes, because the mode is not this
+    # process's decision to make in the filesystem: the page reads /v1/bootstrap
+    # and renders either the management shell (standalone) or the data-plane
+    # landing page (hybrid), which is what keeps "which surfaces exist here" in
+    # one answer rather than two. A hybrid gateway still hosts no management API;
+    # the page it serves says so and links to otari.ai. The dashboard is a
+    # single-page app, so a static mount for /assets plus an index.html at / is
+    # all it needs (navigation is client-side).
+    dashboard_dir = get_dashboard_dir()
     if dashboard_dir is not None:
         index_file = dashboard_dir / "index.html"
         app.mount(
@@ -448,10 +452,13 @@ def create_app(config: GatewayConfig) -> FastAPI:
         )
         # Installing the dashboard to a phone home screen needs the manifest and
         # the PNG icons it points at (index.html links them from /pwa/). Only the
-        # standalone dashboard is an app worth installing, so this rides along
-        # with it rather than being served in hybrid mode next to the tutorial.
+        # standalone dashboard is an app worth installing: a hybrid gateway's root
+        # is a status page for a control plane that lives elsewhere, and an
+        # installed icon named "Otari Dashboard" would promise the wrong thing. The
+        # index still links the manifest there, which 404s and simply means no
+        # browser offers the install.
         pwa_dir = dashboard_dir / "pwa"
-        if pwa_dir.is_dir():
+        if pwa_dir.is_dir() and not config.is_hybrid_mode:
             app.mount("/pwa", StaticFiles(directory=pwa_dir), name="dashboard-pwa")
         # The dashboard's brand faces, which its stylesheet asks for by absolute
         # path (/fonts/...). Self-hosted so the page needs no third-party request,
@@ -477,18 +484,16 @@ def create_app(config: GatewayConfig) -> FastAPI:
         async def dashboard_build() -> dict[str, str]:
             return {"build": get_dashboard_build_id(dashboard_dir), "version": __version__}
     else:
-        # Hybrid mode has no local management API, so the tutorial is the intended
-        # root there and there is nothing to report. In standalone mode a missing
-        # bundle means nobody built it, which is the ordinary state of a source
-        # checkout now that the bundle is gitignored rather than committed. Say so
-        # once at startup, so "/" serving the tutorial reads as a build step not
-        # taken rather than as a broken dashboard.
-        if not config.is_hybrid_mode:
-            logger.info(
-                'No dashboard bundle found at gateway/%s, so "/" serves the get-started tutorial '
-                "(the API is unaffected). Run `make dashboard` to build it; the Docker image builds it for you.",
-                DASHBOARD_PACKAGE_PATH,
-            )
+        # A missing bundle means nobody built it, which is the ordinary state of a
+        # source checkout now that the bundle is gitignored rather than committed.
+        # Say so once at startup, so "/" serving the tutorial reads as a build step
+        # not taken rather than as a broken dashboard. Reported in both modes, since
+        # a hybrid gateway now serves the same bundle as its landing page.
+        logger.info(
+            'No dashboard bundle found at gateway/%s, so "/" serves the get-started tutorial '
+            "(the API is unaffected). Run `make dashboard` to build it; the Docker image builds it for you.",
+            DASHBOARD_PACKAGE_PATH,
+        )
 
         @app.get("/", response_class=HTMLResponse, include_in_schema=False)
         async def root_index() -> str:
