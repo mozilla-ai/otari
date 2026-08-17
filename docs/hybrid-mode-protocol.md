@@ -41,6 +41,8 @@ older gateways.
 For example, the otari.ai resolve response also carries `workspace_id`,
 `organization_id`, `provider_key_id`, and `allowed_models`. Otari does not read
 these today, so they are intentionally absent from the shapes documented here.
+`user_id` (below) is the one exception: Otari reads it when present, but a
+peer omitting it is exactly as valid as any other unrecognized field.
 
 When the operator points Otari's web-search backend at the platform
 (`OTARI_WEB_SEARCH_URL` under `base_url`), Otari also sends `X-Gateway-Token`
@@ -71,6 +73,7 @@ Content-Type: application/json
 {
   "request_id": "01HXY...",
   "fallback_enabled": true,
+  "user_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
   "attempts": [
     {
       "attempt_id": "01HX1...",
@@ -161,6 +164,14 @@ own behavior.
 `attempts` MUST contain at least one entry. An empty list is treated as a
 platform bug and surfaced as `502 Bad Gateway`.
 
+`user_id` (optional) identifies the platform identity that owns the
+`X-User-Token` presented for this call, i.e. the token's creator. It is a
+stable, opaque string; Otari does not assume any particular format and never
+tries to parse it. Absent on older peers, which is exactly as valid as a peer
+omitting any other unrecognized field: nothing that reads this field may
+require it. When present, it is Otari's only way to key its own per-caller
+gateway-side state (aliases, routing memory, files, batches) in hybrid mode.
+
 ### Response: single-attempt shape
 
 Otari also accepts a flat payload:
@@ -179,7 +190,9 @@ Otari also accepts a flat payload:
 Otari maps this onto a single-attempt route (`attempts = [{...}]`,
 `fallback_enabled = false`) and behaves as it always has: no retry loop, errors
 propagate to the client. New platform implementations should prefer the
-multi-attempt shape.
+multi-attempt shape. `user_id` has no legacy mirror here, the same treatment
+as `extra_params`: a peer old enough to still emit this shape predates the
+field entirely.
 
 ### Failure
 

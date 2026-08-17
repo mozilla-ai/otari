@@ -122,6 +122,13 @@ class ResolvedRoute(BaseModel):
     request_id: str
     fallback_enabled: bool
     attempts: list[ResolvedAttempt]
+    # The platform identity that owns the presented X-User-Token, when the peer
+    # supplies one (see docs/hybrid-mode-protocol.md's Extension policy). An
+    # opaque string, never parsed; absent for peers that predate the field or
+    # simply don't send it. This is the only per-caller identity hybrid mode
+    # has, so it is what gateway-side survivals (aliases, routing memory,
+    # files, batches) key their own state on there.
+    user_id: str | None = None
 
 
 class _AttemptFailure(NamedTuple):
@@ -564,12 +571,16 @@ def _parse_resolve_payload(payload: dict[str, Any]) -> ResolvedRoute:
             )
             for att in attempts_payload
         ]
+        raw_user_id = payload.get("user_id")
         return ResolvedRoute(
             request_id=str(payload["request_id"]),
             fallback_enabled=bool(payload.get("fallback_enabled", False)),
             attempts=attempts,
+            user_id=str(raw_user_id) if raw_user_id is not None else None,
         )
 
+    # Legacy single-attempt shape predates user_id entirely, same treatment as
+    # extra_params (see the class docstring above): no legacy mirror to read.
     correlation_id = str(payload["correlation_id"])
     return ResolvedRoute(
         request_id=correlation_id,
