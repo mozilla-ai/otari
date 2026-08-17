@@ -43,8 +43,9 @@ The per-request flow (auth → budget → dispatch → reconciliation) spans sev
   `@pytest.mark.flaky(reruns=...)` (from `pytest-rerunfailures`) and say why,
   rather than reintroducing a global retry.
 - Integration tests need PostgreSQL: `TEST_DATABASE_URL` if set, otherwise a Testcontainers `postgres:17`, so without Docker the suite cannot start. SQLite is not a fallback even though `_to_async_url` accepts one: the fixtures tear down with `DROP TABLE ... CASCADE`, which SQLite rejects, so every test errors in teardown. With no Docker, point `TEST_DATABASE_URL` at any reachable PostgreSQL instead.
-- The OSS-edition smoke gate (`scripts/oss_edition_smoke.py`, run per PR by
-  `otari-oss-edition.yml`) boots the packaged CLI as a subprocess with no overlay
+- The OSS-edition smoke gate (`scripts/oss_edition_smoke.py`, run by
+  `otari-oss-edition.yml` on any PR touching the app, the migrations, or dependency
+  resolution) boots the packaged CLI as a subprocess with no overlay
   bootstrap and no platform token, then walks health, key creation, a stored BYO
   provider credential, a fallback-routed completion against a mock provider, and
   the usage row. Run it locally with

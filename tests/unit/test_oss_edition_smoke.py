@@ -60,6 +60,9 @@ def _post(url: str, *, headers: dict[str, str] | None = None) -> tuple[int, Any]
         "OTARI_BOOTSTRAP",  # the planned overlay selector
         "OTARI_PLATFORM_BASE_URL",  # the platform block, which only hybrid reads
         "OTARI_DATABASE_URL",  # would smoke a database nobody chose
+        # A name the scrub has never heard of, so a regression from the prefix
+        # sweep to a fixed allowlist of the names above fails here.
+        "OTARI_SETTING_ADDED_NEXT_YEAR",
         "DATABASE_URL",  # the CLI reads this one for --database-url
     ],
 )
