@@ -305,7 +305,7 @@ describe("ModelsPage", () => {
     await screen.findByText("openai:gpt-4o");
 
     // The explanation lives in a tooltip anchored to the pricing header, reached
-    // via a labelled info trigger, rather than a persistent banner.
+    // via a labeled info trigger, rather than a persistent banner.
     expect(within(table()).getByRole("button", { name: /How unpriced models are metered/ })).toBeInTheDocument();
     const tip = within(table()).getByRole("tooltip");
     expect(tip).toHaveTextContent(/Default pricing is on/);
@@ -392,7 +392,7 @@ describe("ModelsPage", () => {
     renderWithClient(<ModelsPage />, "/models?provider=doesnotexist");
     await screen.findByText("anthropic:claude-sonnet-4");
 
-    // A stale/misspelled ?provider= resets to "all" once the catalogue loads,
+    // A stale/misspelled ?provider= resets to "all" once the catalog loads,
     // so the select is usable and every provider's models remain visible.
     expect(screen.getByLabelText("Filter by provider")).toHaveValue("all");
     expect(within(table()).getByText("anthropic:claude-sonnet-4")).toBeInTheDocument();
@@ -865,7 +865,7 @@ describe("ModelsPage", () => {
     });
   });
 
-  // -- pricing a model the catalogue does not list --------------------------
+  // -- pricing a model the catalog does not list --------------------------
 
   it("prices the searched selector when nothing matches, seeded from the search box", async () => {
     const created: PricingResponse = {
@@ -875,7 +875,7 @@ describe("ModelsPage", () => {
       output_price_per_million: 0.6,
     };
     // The pricing list is read per request, so appending on POST models the
-    // refetch that puts the hand-priced model into the catalogue.
+    // refetch that puts the hand-priced model into the catalog.
     const pricingRows = [PRICED];
     const fetchMock = mockApi({
       pricing: pricingRows,
@@ -977,7 +977,7 @@ describe("ModelsPage", () => {
     expect(within(await screen.findByRole("alertdialog")).getByLabelText("Model key")).toHaveValue("");
   });
 
-  // A model the catalogue withheld (an alias target) still reaches the table
+  // A model the catalog withheld (an alias target) still reaches the table
   // through the discovery endpoint, and the price the gateway would charge for it
   // does not come with it. Calling that "not priced" claims free metering for a
   // model the fallback bills, which is the one thing the pricing table must not

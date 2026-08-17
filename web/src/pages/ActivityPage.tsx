@@ -805,7 +805,7 @@ function RequestDetail({ entry, onPriceModel }: { entry: UsageEntry; onPriceMode
   // is either a model the gateway has no price for or a request refused before
   // it could be billed. Both are the same fix, and the row holds what the
   // selector was, which a provider without model discovery would never have put
-  // in the catalogue. A $0 cost is a real price, so it is deliberately not
+  // in the catalog. A $0 cost is a real price, so it is deliberately not
   // treated as uncosted.
   const uncosted = entry.cost === null;
   const pricingKey = pricingSelectorOf(entry);
@@ -1517,7 +1517,7 @@ export function ActivityPage() {
         // The tool marker lives here rather than in a column of its own: a ninth
         // column would compete with the token bar for the row's only graphic slot
         // and push the failure-forward Status pill off a narrow viewport. Text, not
-        // colour alone, so it survives the same accessibility bar as TokenBar.
+        // color alone, so it survives the same accessibility bar as TokenBar.
         cell: (e) => {
           const usage = toolUsage(e);
           if (!usage.length) return e.model;

@@ -73,7 +73,7 @@ echo ">> Encoding GIF from $WEBM"
 # Encode at 1080 wide while the README displays it at 720, so it stays crisp on
 # high-DPI screens (the same 1.5x density the previous hero GIF used). START_TRIM
 # drops the brief initial Overview loading skeleton so the GIF opens on populated
-# content. The flat dashboard UI needs few colors, so a 64-colour palette plus a
+# content. The flat dashboard UI needs few colors, so a 64-color palette plus a
 # gifsicle lossy pass roughly halves the file with no visible loss. Note: 12fps
 # is smaller than 10fps here because the diff-based GIF stores smaller
 # frame-to-frame rectangles when there is less motion per frame.

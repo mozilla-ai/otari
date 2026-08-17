@@ -91,7 +91,7 @@ POST /v1/provider-credentials/test              # not yet wrapped
 PATCH /v1/provider-credentials/{instance}       # not yet wrapped
 DELETE /v1/provider-credentials/{instance}      # not yet wrapped
 POST /v1/provider-credentials/{instance}/test   # not yet wrapped
-# Providers catalogue
+# Providers catalog
 GET /v1/providers                               # not yet wrapped
 GET /v1/providers/catalog                       # not yet wrapped
 # Runtime settings

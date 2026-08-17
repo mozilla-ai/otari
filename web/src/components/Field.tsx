@@ -12,7 +12,7 @@ interface FieldProps {
   autoFocus?: boolean;
 }
 
-// A labelled single-line text input built from HeroUI's TextField primitives.
+// A labeled single-line text input built from HeroUI's TextField primitives.
 export function Field({
   label,
   value,

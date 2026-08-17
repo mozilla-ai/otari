@@ -476,7 +476,7 @@ async def test_the_record_read_is_bounded_and_takes_the_newest() -> None:
     """
     backend = _backend(router_max_records_per_user=25)
     assert backend._read_limit == 25
-    # Eviction off is not a licence for an unbounded read.
+    # Eviction off is not a license for an unbounded read.
     assert _backend(router_max_records_per_user=0)._read_limit == 5000
 
 

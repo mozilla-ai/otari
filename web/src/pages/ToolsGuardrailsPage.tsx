@@ -336,7 +336,7 @@ function NumberRow({
 // convention is right for the wire and hostile at a keyboard, so this row speaks in
 // dollars per call and does the 1e6 conversion itself. Same reason it lives here
 // rather than on the Models page: a tool is not a model, and the Models editor is
-// labelled per million tokens throughout.
+// labeled per million tokens throughout.
 const PER_MILLION = 1_000_000;
 
 function ToolPriceRow({
@@ -467,7 +467,7 @@ function BoolRow({
 // the contract is otherwise invisible: nothing on the page told an operator that
 // `otari_web_search` is the type to declare, or that turning interception on also
 // makes `web_search_20250305` work. Rendered from GET /v1/tools, so it reports
-// what this deployment currently honours rather than a static example.
+// what this deployment currently honors rather than a static example.
 function HowToCallCard({ tool }: { tool: ManagedTool }) {
   const request = {
     model: "anthropic:claude-sonnet-4-6",

@@ -792,7 +792,7 @@ def test_status_reports_each_pool_independently(client: TestClient) -> None:
 
     status = _status(client)
 
-    # The default pool counts every record the user has, labelled or not.
+    # The default pool counts every record the user has, labeled or not.
     assert status["default_pool"] == {"records": 9, "warm": True}
     pools = {pool["task_id"]: pool for pool in status["tasks"]}
     assert pools["math"] == {"task_id": "math", "records": 4, "warm": True}

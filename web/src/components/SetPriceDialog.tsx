@@ -65,7 +65,7 @@ export interface SetPriceDialogProps {
   description?: (count: number) => string;
   /**
    * Also collect the model key the rates apply to, for pricing a model that is
-   * not in the catalogue (a provider without model discovery). The trimmed key
+   * not in the catalog (a provider without model discovery). The trimmed key
    * is passed to `onSubmit`; without this the second argument is an empty string.
    */
   collectModelKey?: boolean;

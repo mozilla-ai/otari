@@ -1054,7 +1054,7 @@ describe("ActivityPage", () => {
 
   it("frames the active preset when the two initial windows are read a millisecond apart", async () => {
     // `win` and `extentWin` each derive a rolling start from their own clock read,
-    // and `extentWin` is initialised second, so its start is the later of the two
+    // and `extentWin` is initialized second, so its start is the later of the two
     // whenever the render straddles a millisecond. That is not a drill-down, and
     // must not be read as one: doing so framed the window instead of the preset,
     // dropping the preset highlight and bucketing a 24h extent by day. A monotonic

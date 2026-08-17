@@ -209,7 +209,7 @@ class WebSearchBackend:
         # Clamp to [1, _MAX_RESULTS_CAP]. Sub-1 values (e.g. ``0`` or ``-1``
         # from a misconfigured env var) would otherwise reach
         # ``results[: self._max_results]`` and produce surprising slicing
-        # behaviour (empty list or "drop the last hit") instead of a useful
+        # behavior (empty list or "drop the last hit") instead of a useful
         # bound.
         self._max_results = max(1, min(max_results, _MAX_RESULTS_CAP))
         self._allowed_domains = tuple(d.lower() for d in allowed_domains)
@@ -343,7 +343,7 @@ class WebSearchBackend:
         configured ``provider_options`` are forwarded as additional query
         params so the backend (the adapter) can interpret provider-specific
         knobs; the gateway does not interpret these keys itself. Only scalar
-        values (str / int / float / bool) are forwarded — bools serialise as
+        values (str / int / float / bool) are forwarded — bools serialize as
         lowercase ``"true"`` / ``"false"`` — and None / complex values are
         skipped. Reserved gateway-controlled params (``q`` / ``format`` /
         ``engines``) are never overridable by ``provider_options``.

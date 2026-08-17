@@ -262,9 +262,9 @@ the discovered models, including any target you aliased.
 
 A [routing policy](routing.md) does **not** withhold its targets, which is where it
 parts company with an alias. The policy name is listed as its own entry, and every
-selector it can reach stays in the catalogue as itself. Withholding them was tried
+selector it can reach stays in the catalog as itself. Withholding them was tried
 and reverted: a policy can name up to five selectors (its head plus an `on_failure`
-chain), so one failover policy could empty most of a catalogue, and a candidate
+chain), so one failover policy could empty most of a catalog, and a candidate
 priced by the [genai-prices fallback](configuration.md) then disappeared from the
 dashboard together with its rate. `GET /v1/models/{key}` never withheld them
 either, so nothing was really being kept off the wire.
@@ -331,12 +331,12 @@ The rules that follow from it:
 - Target-hiding follows the scope. A global alias hides its target from
   everyone's listing; a user-scoped one hides it from that user's listing only, so
   another caller may still see the real model (subject to their own model access).
-  If you are using aliases to curate one catalogue for everybody, keep those
+  If you are using aliases to curate one catalog for everybody, keep those
   aliases global.
 - That rule inverts when a user-scoped alias overrides a **`config.yml`** name.
   The override replaces the configured entry for that user, so the configured
   target is no longer among the names being withheld and it reappears in that
-  user's catalogue. Overriding `myopusmodel` for one user therefore un-hides
+  user's catalog. Overriding `myopusmodel` for one user therefore un-hides
   whatever `myopusmodel` pointed at, for that user only, and still subject to
   their model access. It takes a master key to arrange, so it is not a leak, but
   it is the opposite of what the previous bullet leads you to expect.

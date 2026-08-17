@@ -39,7 +39,7 @@ test.describe("overview", () => {
     // Errors are seeded, so the rate is a real percentage rather than the
     // "unknown" dash a failed summary would leave. Not anchored at the end: a
     // non-neutral rate also carries a status word ("Elevated"), which is there so
-    // the tile never reports its health through colour alone.
+    // the tile never reports its health through color alone.
     await expect(tileValue(page, "Error rate, last 30 days")).toHaveText(/^\d+(\.\d+)?%/);
   });
 

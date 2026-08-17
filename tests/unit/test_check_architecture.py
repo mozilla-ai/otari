@@ -149,5 +149,77 @@ def test_repository_naming_convention(tmp_path: Path) -> None:
     assert violations == ["Repository file gateway/repositories/helpers.py must end with '_repository.py'"]
 
 
+def test_service_importing_the_overlay_is_flagged(tmp_path: Path) -> None:
+    file_path = _write(tmp_path, "gateway/services/thing.py", "from gateway.overlay.billing import charge\n")
+    assert check.check_file(file_path, tmp_path) == [(1, "gateway.overlay.billing", "Forbidden import in OSS base")]
+
+
+def test_adapter_importing_the_overlay_is_flagged(tmp_path: Path) -> None:
+    # The issue's example: an OSS adapter must not reference an enterprise one.
+    file_path = _write(
+        tmp_path, "gateway/adapters/thing_adapter.py", "from gateway.overlay.adapters import Enterprise\n"
+    )
+    assert check.check_file(file_path, tmp_path) == [(1, "gateway.overlay.adapters", "Forbidden import in OSS base")]
+
+
+def test_file_outside_named_layers_importing_the_overlay_is_flagged(tmp_path: Path) -> None:
+    # The boundary covers the whole gateway tree, not only the named layers.
+    file_path = _write(tmp_path, "gateway/main.py", "from gateway.overlay import register\n")
+    assert check.check_file(file_path, tmp_path) == [(1, "gateway.overlay", "Forbidden import in OSS base")]
+
+
+def test_overlay_boundary_via_from_gateway_import_is_flagged(tmp_path: Path) -> None:
+    # `from gateway import overlay` binds the submodule gateway.overlay, which the resolver flags.
+    file_path = _write(tmp_path, "gateway/services/thing.py", "from gateway import overlay\n")
+    assert check.check_file(file_path, tmp_path) == [(1, "gateway.overlay", "Forbidden import in OSS base")]
+
+
+def test_overlay_prefix_requires_a_module_boundary(tmp_path: Path) -> None:
+    # A sibling module whose name merely starts with "overlay" is not the overlay.
+    file_path = _write(tmp_path, "gateway/services/thing.py", "import gateway.overlaything\n")
+    assert check.check_file(file_path, tmp_path) == []
+
+
+def test_service_importing_the_top_level_overlay_is_flagged(tmp_path: Path) -> None:
+    # The overlay is imported as "overlay.*" today; a build that composes it
+    # into the gateway namespace instead would spell it "gateway.overlay.*".
+    # Both spellings are the boundary.
+    file_path = _write(tmp_path, "gateway/services/thing.py", "from overlay.adapters import Enterprise\n")
+    assert check.check_file(file_path, tmp_path) == [(1, "overlay.adapters", "Forbidden import in OSS base")]
+
+
+def test_top_level_overlay_prefix_requires_a_module_boundary(tmp_path: Path) -> None:
+    # An unrelated module whose name merely starts with "overlay" is not the overlay.
+    file_path = _write(tmp_path, "gateway/services/thing.py", "import overlaything\n")
+    assert check.check_file(file_path, tmp_path) == []
+
+
+def test_test_suite_importing_the_overlay_is_flagged(tmp_path: Path) -> None:
+    # The OSS test suite answers to the same boundary as the gateway package.
+    file_path = _write(
+        tmp_path,
+        "tests/unit/services/test_thing.py",
+        "from overlay.adapters.billing_adapter import WalletBillingAdapter\n",
+    )
+    assert check.check_file(file_path, tmp_path) == [
+        (1, "overlay.adapters.billing_adapter", "Forbidden import in OSS test suite")
+    ]
+
+
+def test_main_discovers_tests_root_and_fails_on_overlay_import(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Unlike the check_file() tests above, this exercises main() itself: that
+    # it walks TESTS_ROOT (not just GATEWAY_ROOT) and resolves those paths
+    # against REPO_ROOT, using the gateway-composed overlay spelling.
+    _write(tmp_path, "src/gateway/__init__.py", "")
+    _write(tmp_path, "tests/unit/test_thing.py", "from gateway.overlay.billing import charge\n")
+    monkeypatch.setattr(check, "REPO_ROOT", tmp_path)
+    monkeypatch.setattr(check, "SRC_ROOT", tmp_path / "src")
+    monkeypatch.setattr(check, "GATEWAY_ROOT", tmp_path / "src" / "gateway")
+    monkeypatch.setattr(check, "TESTS_ROOT", tmp_path / "tests")
+    assert check.main() == 1
+
+
 def test_real_gateway_tree_is_clean() -> None:
     assert check.main() == 0

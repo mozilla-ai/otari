@@ -67,7 +67,7 @@ def test_caller_fault_error_still_redacts_credentials(
     api_key_header: dict[str, str],
     test_user: dict[str, Any],
 ) -> None:
-    """Passing the provider's message through is not a licence to pass its
+    """Passing the provider's message through is not a license to pass its
     credentials through: the gateway calls providers with the operator's key."""
     response = _post_chat(
         client,

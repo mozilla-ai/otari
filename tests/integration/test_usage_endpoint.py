@@ -561,26 +561,26 @@ def test_list_usage_labels_rows_from_the_joined_entities(
     on every visit to Usage and Activity just to turn ids into names, which grows
     with the deployment rather than with the page.
     """
-    db_session.add(User(user_id="labelled-user", alias="Ada Lovelace", spend=0.0, blocked=False))
+    db_session.add(User(user_id="labeled-user", alias="Ada Lovelace", spend=0.0, blocked=False))
     db_session.flush()
     key = APIKey(
         id=str(uuid.uuid4()),
         key_hash=f"hash-{uuid.uuid4()}",
         key_prefix="sk-test",
         key_name="CI pipeline",
-        user_id="labelled-user",
+        user_id="labeled-user",
     )
     db_session.add(key)
     db_session.flush()
     _make_log(
         db_session,
-        user_id="labelled-user",
+        user_id="labeled-user",
         timestamp=datetime(2025, 7, 2, 10, 0, tzinfo=UTC),
         api_key_id=key.id,
     )
     db_session.commit()
 
-    response = client.get(USAGE_PATH, headers=master_key_header, params={"user_id": "labelled-user"})
+    response = client.get(USAGE_PATH, headers=master_key_header, params={"user_id": "labeled-user"})
 
     assert response.status_code == 200
     row = response.json()[0]

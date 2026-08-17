@@ -49,6 +49,9 @@ class FakeBackend:
 
     envelope: bool = True
     serve_files: bool = True
+    # A read-only backend: reads and listings served, writes not. Conforming, since
+    # each file operation is independently optional.
+    serve_writes: bool = True
     confine_paths: bool = True
     refuse_unknown_tool: bool = True
     unknown_tool_status: int = 400
@@ -56,7 +59,12 @@ class FakeBackend:
     # Drops the session the moment the file operations are reached, which is the
     # other thing a 404 on a file route can mean.
     lose_session_at_files: bool = False
-    reported_idle_timeout: int = 300
+    # A ceiling of the backend's own, refused rather than clamped, as the contract
+    # allows. `None` accepts any budget.
+    budget_ceiling_seconds: int | None = None
+    # Typed loosely on purpose: JSON has one numeric type, so a conforming backend
+    # may serialize an integer timeout as `99999.0`.
+    reported_idle_timeout: float = 300
     download_body: bytes = _FILE_BODY
     calls: list[tuple[str, str]] = field(default_factory=list)
     _session_lost: bool = False
@@ -90,6 +98,9 @@ class FakeBackend:
 
     def _exec(self, body: dict[str, Any]) -> httpx.Response:
         tool = body["tool"]
+        ceiling = self.budget_ceiling_seconds
+        if ceiling is not None and int(body.get("timeout_seconds") or 0) > ceiling:
+            return httpx.Response(422, json={"detail": f"timeout_seconds exceeds the {ceiling}s ceiling"})
         if tool not in ("code_execution", "bash_code_execution", "text_editor_code_execution"):
             if self.refuse_unknown_tool:
                 return httpx.Response(self.unknown_tool_status, json={"detail": f"unknown tool: {tool}"})
@@ -125,7 +136,7 @@ class FakeBackend:
         if self.lose_session_at_files:
             self._session_lost = True
             return httpx.Response(404, json={"detail": "no such session"})
-        if not self.serve_files:
+        if not self.serve_files or not self.serve_writes:
             return httpx.Response(404, json={"detail": "not implemented"})
         return httpx.Response(201, json={"path": "conformance.txt", "size_bytes": len(_FILE_BODY)})
 
@@ -155,10 +166,10 @@ class FakeBackend:
         return httpx.Response(200, content=self.download_body)
 
 
-def _run(backend: FakeBackend) -> list[Any]:
+def _run(backend: FakeBackend, *, timeout_seconds: int = 5) -> list[Any]:
     spec = conformance.load_spec()
     with httpx.Client(base_url="http://sandbox", transport=httpx.MockTransport(backend.handler)) as client:
-        checks: list[Any] = conformance.run_checks(client, spec, timeout_seconds=5)
+        checks: list[Any] = conformance.run_checks(client, spec, timeout_seconds=timeout_seconds)
     return checks
 
 
@@ -186,11 +197,67 @@ def test_bare_result_block_fails_execute() -> None:
     assert "does not match ExecResponse" in failures["Execute code_execution"]
 
 
+def test_a_read_only_backend_keeps_its_served_operations_checked() -> None:
+    """Each file operation is independently optional, so each is probed on its own.
+
+    Gating all three on the upload skipped a read-only backend's served
+    operations, and took the workspace-confinement check down with them: the one
+    check here that is about safety rather than shape.
+    """
+    checks = _run(FakeBackend(serve_writes=False))
+    statuses = _statuses(checks)
+
+    assert statuses["PutFile"] == conformance.SKIP
+    assert statuses["ListFiles"] == conformance.PASS
+    assert statuses["GetFile"] == conformance.PASS
+    assert statuses["GetFile confines access to the session workspace"] == conformance.PASS
+    assert not _failures(checks)
+
+
+def test_a_404_on_a_traversal_is_a_refusal_not_an_absent_route() -> None:
+    """A backend may reject an escaping path by declaring it not found.
+
+    Reading that as "no read route here" would skip the confinement check on a
+    backend that does serve reads, which is the one place a skip is more
+    dangerous than a failure: it reports nothing wrong about the check that
+    matters most. Reads working on a known file is what settles it.
+    """
+    checks = _run(FakeBackend(escape_status=404))
+    statuses = _statuses(checks)
+
+    assert statuses["GetFile"] == conformance.PASS
+    confinement = "GetFile confines access to the session workspace"
+    assert statuses[confinement] == conformance.PASS
+    assert "refused with 404" in next(check.detail for check in checks if check.name == confinement)
+    assert not _failures(checks)
+
+
+def test_a_backend_serving_no_reads_skips_confinement_rather_than_passing_it() -> None:
+    """Nothing to confine is a skip, never a pass: a pass would claim a check that never ran."""
+    statuses = _statuses(_run(FakeBackend(serve_files=False)))
+    assert statuses["GetFile confines access to the session workspace"] == conformance.SKIP
+
+
 def test_missing_file_operations_are_skipped_not_failed() -> None:
     checks = _run(FakeBackend(serve_files=False))
     statuses = _statuses(checks)
     assert [statuses[name] for name in ("PutFile", "ListFiles", "GetFile")] == [conformance.SKIP] * 3
     assert not _failures(checks)
+
+
+def test_a_backend_that_caps_the_execution_budget_still_conforms() -> None:
+    """Refusing an over-cap budget is contract-permitted, so it cannot be a failure.
+
+    Without the retry, `--timeout-seconds 300` reported the reference backend,
+    which caps at 120 and refuses rather than clamping, as non-conforming to the
+    contract it is the reference for.
+    """
+    checks = _run(FakeBackend(budget_ceiling_seconds=120), timeout_seconds=300)
+
+    assert not _failures(checks)
+    # The refusal is reported rather than hidden: the run says which budget held.
+    executed = [check for check in checks if check.name == "Execute code_execution"]
+    assert "refused a 300s budget" in executed[0].detail
     assert conformance.report(checks) == 0
 
 
@@ -233,7 +300,18 @@ def test_lifetime_hint_reported_above_the_request_fails() -> None:
     the session lives.
     """
     failures = _failures(_run(FakeBackend(reported_idle_timeout=99_999)))
-    assert "CreateSession honours lifetime hints" in failures
+    assert "CreateSession honors lifetime hints" in failures
+
+
+def test_a_float_lifetime_hint_above_the_request_also_fails() -> None:
+    """JSON has one numeric type, so an integer field can arrive as `99999.0`.
+
+    That backend is conforming to the schema (a zero-fraction float is an integer
+    in JSON Schema) and arrives here as a Python float, which an `isinstance(int)`
+    guard skipped, in precisely the case the check exists to catch.
+    """
+    failures = _failures(_run(FakeBackend(reported_idle_timeout=99_999.0)))
+    assert "CreateSession honors lifetime hints" in failures
 
 
 def test_downloaded_bytes_must_match_what_was_written() -> None:

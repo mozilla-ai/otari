@@ -22,7 +22,7 @@ const FIELDS: ToolSettingField[] = [
 const RESPONSE: ToolSettingsResponse = { fields: FIELDS };
 
 // GET /v1/tools drives the "how to call this" card. `accepted_types` is what the
-// deployment currently honours, so it is the interesting axis here.
+// deployment currently honors, so it is the interesting axis here.
 const TOOLS: ToolsResponse = {
   object: "list",
   data: [
@@ -250,8 +250,8 @@ describe("ToolsGuardrailsPage", () => {
     renderWithClient(<ToolsGuardrailsPage />);
     await screen.findByText("Web search");
 
-    const rowOf = (labelledBy: string) =>
-      screen.getByLabelText(labelledBy).closest("div.grid") as HTMLElement | null;
+    const rowOf = (labeledBy: string) =>
+      screen.getByLabelText(labeledBy).closest("div.grid") as HTMLElement | null;
 
     const urlRow = rowOf("web_search_url"); // has Save + Test
     const textRow = rowOf("web_search_engines"); // has Save only

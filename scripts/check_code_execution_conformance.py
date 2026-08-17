@@ -40,6 +40,10 @@ SPEC_PATH = Path(__file__).resolve().parent.parent / "docs" / "public" / "code-e
 # backend answered with a well-shaped envelope.
 _MARKER = "otari-conformance-ok"
 _DEFAULT_TIMEOUT_SECONDS = 30
+# The budget to fall back to when a backend refuses the requested one as over its
+# own cap. Low enough that any backend should accept it, high enough to run the
+# trivial snippets these checks send.
+_MODEST_BUDGET_SECONDS = 10
 # The contract's rule for a client's own budget: allow more wall-clock than the
 # execution budget granted, since transport and the backend's teardown come on
 # top of it. See "Execute" in docs/code-execution-protocol.md.
@@ -163,17 +167,25 @@ def _check_create_session(
     # A backend may accept the hint or clamp it to a ceiling of its own, so the
     # reported value may be lower. Higher would break the client's only guarantee
     # about how long the session lives.
+    #
+    # Compared as a number, not as an `int`: JSON has one numeric type, so a
+    # backend serializing the timeout as `99999.0` is still conforming (JSON
+    # Schema counts a zero-fraction float as an integer) and arrives here as a
+    # Python float. An `isinstance(reported, int)` guard would skip it, and skip
+    # it precisely in the case this check exists to catch. `bool` is excluded
+    # because it is an `int` subclass that no comparison here should reach.
     reported = handle.get("idle_timeout_seconds")
-    if isinstance(reported, int) and reported > idle_hint:
+    reported_a_number = isinstance(reported, int | float) and not isinstance(reported, bool)
+    if reported_a_number and reported > idle_hint:
         checks.append(
             Check(
-                "CreateSession honours lifetime hints",
+                "CreateSession honors lifetime hints",
                 FAIL,
                 f"asked for an idle timeout of {idle_hint}s, handle reports {reported}s",
             )
         )
     else:
-        checks.append(Check("CreateSession honours lifetime hints", PASS))
+        checks.append(Check("CreateSession honors lifetime hints", PASS))
     session_id: str = handle["session_id"]
     return checks, session_id
 
@@ -196,19 +208,31 @@ def _check_exec(
     status are all there is to check.
     """
     payload = _exec_payload(spec, tool, tool_input, timeout_seconds)
-    check, body = _checked(
-        name,
-        client.post(
-            f"/sessions/{session_id}/exec",
-            json=payload,
-            timeout=timeout_seconds + _TIMEOUT_BUFFER_SECONDS,
-        ),
-        expected_status=200,
-        spec=spec,
-        schema_name="ExecResponse",
-    )
+    response = _post_exec(client, session_id, payload, timeout_seconds=timeout_seconds)
+
+    note = ""
+    if response.status_code in (400, 422) and timeout_seconds > _MODEST_BUDGET_SECONDS:
+        # The contract lets a backend cap `timeout_seconds` and refuse a larger
+        # value rather than clamping it, so this refusal is its ceiling talking,
+        # not a broken Execute. Retry inside a budget any backend should accept:
+        # without this, `--timeout-seconds 300` reports the reference backend
+        # (which caps at 120) as non-conforming to the contract it defines.
+        #
+        # The retry is what evidences the diagnosis, which is why it is not keyed
+        # on the error body: the contract says a client MUST NOT depend on that
+        # body, and the two requests differ in nothing but the budget, so a retry
+        # that runs proves the budget is what the backend objected to. A refusal
+        # for any other reason is refused again and still fails the check.
+        note = (
+            f"refused a {timeout_seconds}s budget and accepted {_MODEST_BUDGET_SECONDS}s, "
+            "the same call at a lower budget; the ceiling is the backend's own"
+        )
+        payload = _exec_payload(spec, tool, tool_input, _MODEST_BUDGET_SECONDS)
+        response = _post_exec(client, session_id, payload, timeout_seconds=_MODEST_BUDGET_SECONDS)
+
+    check, body = _checked(name, response, expected_status=200, spec=spec, schema_name="ExecResponse")
     if body is None:
-        return check
+        return check if not note else Check(check.name, check.status, f"{note}; {check.detail}")
 
     if body["tool_use_id"] != payload["tool_use_id"]:
         return Check(name, FAIL, "tool_use_id was not echoed from the request")
@@ -219,7 +243,17 @@ def _check_exec(
         return Check(name, FAIL, f"return_code {return_code}, stderr: {content.get('stderr') or '(empty)'}")
     if expect_marker and _MARKER not in stdout:
         return Check(name, FAIL, f"stdout does not carry the executed marker: {stdout or '(empty)'}")
-    return Check(name, PASS)
+    return Check(name, PASS, note)
+
+
+def _post_exec(
+    client: httpx.Client, session_id: str, payload: dict[str, Any], *, timeout_seconds: int
+) -> httpx.Response:
+    return client.post(
+        f"/sessions/{session_id}/exec",
+        json=payload,
+        timeout=timeout_seconds + _TIMEOUT_BUFFER_SECONDS,
+    )
 
 
 def _check_unknown_tool_refused(client: httpx.Client, session_id: str, *, timeout_seconds: int) -> Check:
@@ -257,7 +291,14 @@ def _session_survives(client: httpx.Client, spec: dict[str, Any], session_id: st
 
 
 def _check_files(client: httpx.Client, spec: dict[str, Any], session_id: str, *, timeout_seconds: int) -> list[Check]:
-    """The optional file operations, skipped as a group when none are served."""
+    """The optional file operations, each probed on its own.
+
+    The three are independently optional, so they are reported independently. A
+    read-only backend that serves `ListFiles` and `GetFile` but not `PutFile` is
+    conforming, and skipping its served operations as a group would take the
+    workspace-confinement check down with them: the one check here that says
+    something about safety rather than shape.
+    """
     body = f"{_MARKER}\n".encode()
     upload = client.post(
         f"/sessions/{session_id}/files",
@@ -265,44 +306,106 @@ def _check_files(client: httpx.Client, spec: dict[str, Any], session_id: str, *,
         data={"path": _UPLOADED_FILE},
     )
     if upload.status_code in _UNSERVED_STATUSES:
-        # A 404 here is ambiguous: no such route, or no such session. Reporting a
-        # reclaimed session as "these operations are optional and absent" would
-        # pass a backend that dropped the session mid-run, so ask the session.
+        # A 404 on a file route is ambiguous: no such route, or no such session.
+        # Reporting a reclaimed session as "these operations are optional and
+        # absent" would pass a backend that dropped the session mid-run, so ask
+        # the session before reading any of these statuses as "not served".
         if not _session_survives(client, spec, session_id, timeout_seconds=timeout_seconds):
             return [Check("File operations", FAIL, "the session was gone before they could be checked")]
-        reason = "backend does not serve the optional file operations"
-        return [Check(name, SKIP, reason) for name in ("PutFile", "ListFiles", "GetFile")]
-
-    put_check, _ = _checked("PutFile", upload, expected_status=201, spec=spec, schema_name="FileUploadResult")
-    checks = [put_check]
-
-    list_check, files = _checked(
-        "ListFiles",
-        client.get(f"/sessions/{session_id}/files/list", params={"path": "."}),
-        expected_status=200,
-        spec=spec,
-        schema_name="FileList",
-    )
-    if files is not None:
-        paths = [entry["path"] for entry in files["files"]]
-        if not any(path.endswith(_UPLOADED_FILE) for path in paths):
-            list_check = Check("ListFiles", FAIL, f"the file just written is absent from the listing: {paths}")
-    checks.append(list_check)
-
-    download = client.get(f"/sessions/{session_id}/files", params={"path": _UPLOADED_FILE})
-    if not download.is_success:
-        checks.append(Check("GetFile", FAIL, f"expected 200, got {download.status_code}"))
-    elif download.content != body:
-        checks.append(Check("GetFile", FAIL, "returned bytes differ from the ones written"))
+        uploaded = False
+        checks = [Check("PutFile", SKIP, "backend does not serve this optional operation")]
     else:
-        checks.append(Check("GetFile", PASS))
+        put_check, _ = _checked("PutFile", upload, expected_status=201, spec=spec, schema_name="FileUploadResult")
+        uploaded = put_check.status == PASS
+        checks = [put_check]
 
-    checks.append(_check_workspace_confinement(client, session_id))
+    writes_served = upload.status_code not in _UNSERVED_STATUSES
+    listing = client.get(f"/sessions/{session_id}/files/list", params={"path": "."})
+    known_file: str | None = _UPLOADED_FILE if uploaded else None
+    if listing.status_code in _UNSERVED_STATUSES:
+        checks.append(Check("ListFiles", SKIP, "backend does not serve this optional operation"))
+    else:
+        list_check, files = _checked("ListFiles", listing, expected_status=200, spec=spec, schema_name="FileList")
+        if files is not None:
+            paths = [entry["path"] for entry in files["files"]]
+            if uploaded and not any(path.endswith(_UPLOADED_FILE) for path in paths):
+                list_check = Check("ListFiles", FAIL, f"the file just written is absent from the listing: {paths}")
+            # Without PutFile there is nothing known to read, so borrow a path
+            # from the listing to give GetFile something to fetch.
+            if known_file is None and paths:
+                known_file = paths[0]
+        checks.append(list_check)
+
+    checks.extend(
+        _check_reads(
+            client,
+            session_id,
+            known_file=known_file,
+            expected=body if uploaded else None,
+            file_routes_served=writes_served or listing.status_code not in _UNSERVED_STATUSES,
+        )
+    )
     return checks
 
 
-def _check_workspace_confinement(client: httpx.Client, session_id: str) -> Check:
+def _check_reads(
+    client: httpx.Client,
+    session_id: str,
+    *,
+    known_file: str | None,
+    expected: bytes | None,
+    file_routes_served: bool,
+) -> list[Check]:
+    """`GetFile`, and the confinement it must enforce.
+
+    Reading a known file comes first, because whether it worked is what tells the
+    confinement probe apart from an absent route. Asking the traversal attempt to
+    answer both questions cannot work: a backend that sanitizes an escaping path
+    and answers `404` is refusing it, and reading that as "no read route here"
+    would skip the confinement check on a backend that does serve reads, which is
+    the one place a skip is more dangerous than a failure.
+    """
+    name = "GetFile"
+    if known_file is None:
+        # Nothing to read. If some other file route answered, the file surface
+        # exists and the probe can interpret its own answer; if none did, there is
+        # no read route to confine and saying so beats a pass for a check that
+        # could not run.
+        return [
+            Check(name, SKIP, "no file available to read: PutFile is not served and the workspace is empty"),
+            _check_workspace_confinement(client, session_id, reads_served=None if file_routes_served else False),
+        ]
+
+    download = client.get(f"/sessions/{session_id}/files", params={"path": known_file})
+    if download.status_code in _UNSERVED_STATUSES:
+        return [
+            Check(name, SKIP, "backend does not serve this optional operation"),
+            _check_workspace_confinement(client, session_id, reads_served=False),
+        ]
+
+    confinement = _check_workspace_confinement(client, session_id, reads_served=True)
+    if not download.is_success:
+        return [Check(name, FAIL, f"expected 200 for {known_file}, got {download.status_code}"), confinement]
+    if expected is not None and download.content != expected:
+        return [Check(name, FAIL, "returned bytes differ from the ones written"), confinement]
+    detail = "" if expected is not None else f"read {known_file} from the listing; contents unknown to this run"
+    return [Check(name, PASS, detail), confinement]
+
+
+def _check_workspace_confinement(client: httpx.Client, session_id: str, *, reads_served: bool | None) -> Check:
+    """Whether an escaping path is refused, given what the read probe already learned.
+
+    `reads_served` is the caller's verdict from reading a known file: `False`
+    skips, because there is no read route to confine, and `True` or `None` means
+    the probe is worth making. A `404` here is then read as a refusal rather than
+    as an absent route: a backend that rejects `../../etc/passwd` by declaring it
+    not found has refused it, and the contract's requirement is that it not be
+    served.
+    """
     name = "GetFile confines access to the session workspace"
+    if reads_served is False:
+        return Check(name, SKIP, "backend does not serve reads, so there is nothing to confine")
+
     escape = client.get(f"/sessions/{session_id}/files", params={"path": "../../etc/passwd"})
     if escape.is_success:
         return Check(name, FAIL, "served a path outside the session workspace")

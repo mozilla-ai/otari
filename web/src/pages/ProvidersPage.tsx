@@ -255,7 +255,7 @@ function ConnectionTest({ getPayload }: { getPayload: () => CreateStoredProvider
             // and a wrong one 404s exactly like an absent listing endpoint.
             <span className="block max-w-md break-words text-xs text-amber-800">
               This provider does not list models, so the key could not be verified here. Save it and use the provider;
-              declare its model ids under <code>models:</code> to have them show up in the catalogue. If you did not
+              declare its model ids under <code>models:</code> to have them show up in the catalog. If you did not
               expect this, check the provider's reply below.
               {test.data.error ? (
                 <span className="mt-0.5 block text-[var(--otari-muted)]">{test.data.error}</span>

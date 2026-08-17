@@ -383,7 +383,7 @@ export function AppShell() {
 
   const width = collapsed ? COLLAPSED_SIDEBAR : sidebarWidth;
   // The collapse rail and resize handle are desktop-only affordances; on mobile
-  // the drawer always shows the full-width, labelled nav.
+  // the drawer always shows the full-width, labeled nav.
   const effectiveCollapsed = isMobile ? false : collapsed;
   // While the mobile drawer is open, make everything behind it (header + page)
   // inert so a modal really is modal: aria-modal alone isn't universally honored,
@@ -556,7 +556,7 @@ export function AppShell() {
               )}
             >
               {/* An open book: the operator guide for this dashboard. Decorative;
-                  the link is labelled by its text (or aria-label when collapsed). */}
+                  the link is labeled by its text (or aria-label when collapsed). */}
               <svg aria-hidden="true" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" className="h-5 w-5 shrink-0">
                 <path d="M12 6.5C10.5 5 8 4.5 4 4.5V18c4 0 6.5.5 8 2 1.5-1.5 4-2 8-2V4.5c-4 0-6.5.5-8 2z" strokeLinejoin="round" />
                 <path d="M12 6.5V20" strokeLinecap="round" />

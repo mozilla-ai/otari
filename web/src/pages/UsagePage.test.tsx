@@ -592,7 +592,7 @@ describe("UsagePage", () => {
     const { container } = renderPage(<UsagePage />);
     await screen.findByText("gpt-5.6");
 
-    // The trend is now a recharts chart (labelled "<metric> per <bucket>"; a
+    // The trend is now a recharts chart (labeled "<metric> per <bucket>"; a
     // group, not an image, since it owns drag selection), and a reusable
     // sparkline rides the KPI tiles off the same bucketed series.
     expect(screen.getByRole("group", { name: "cost per day" })).toBeInTheDocument();

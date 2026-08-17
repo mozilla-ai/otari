@@ -475,7 +475,7 @@ describe("KeysPage", () => {
     await user.keyboard("{Escape}");
     await user.click(screen.getByRole("button", { name: "Advanced" }));
 
-    // The "any" mode is labelled as inheritance, not unrestricted, and the owner's
+    // The "any" mode is labeled as inheritance, not unrestricted, and the owner's
     // access is surfaced for context (a new id starts unrestricted).
     expect(screen.getByRole("button", { name: "Inherit owner access" })).toBeInTheDocument();
     expect(screen.getByText(/starts unrestricted/)).toBeInTheDocument();
