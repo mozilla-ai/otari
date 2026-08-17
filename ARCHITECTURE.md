@@ -177,6 +177,8 @@ entitled("routing") AND flag("smart-model-selection-v2")
 
 A deployment entitled to `routing` still does not get `smart-model-selection-v2` while that flag is off in test. Do not fold one axis into the other: an entitlement is not "a flag that is on for some deployments", a flag is not "a cheap entitlement", and neither is "a deployment that happens to host this". They are different mechanisms with different scopes and different owners.
 
+In the dashboard all three meet on one nav entry, which is where the vocabulary earns its keep: `web/src/app/nav/registry.ts` declares a destination's `surface`, `capability`, and `flag`, and `useNavVisibility` composes them as AND, so any one of them hides the link and the shell answers the route behind it with a panel rather than a page. The entitlement and flag axes resolve through `web/src/shared/hooks/useEntitlements.tsx`, whose default value is the core adapter described above: it grants the base capabilities and reports everything else absent. An overlay replaces `web/src/app/nav/overlaySections.ts` to register its own destinations and renders `EntitlementProvider` to answer the two gates for real, neither of which edits a base source file.
+
 ## Cardinal rules for contributors
 
 These are the rules that keep the boundary from eroding. They apply to anyone adding or moving code across the seam.
@@ -200,7 +202,7 @@ A step-by-step recipe for adding a capability without crossing the boundary. The
 3. **Route callers through the port.** Services depend on the port, resolved from the container; they never name a concrete adapter.
 4. **Ship a working core adapter.** Add a real lightweight implementation, or an honest Null Object, to the core adapters package. Verify the capability behaves correctly with only this adapter present.
 5. **Bind the default in the composition root.** Register `Port -> core factory` in the container built at startup in `create_app`, and resolve it through a dependency in `deps.py`.
-6. **If the capability has API or UI surface, add and gate it.** Add its router to the central additive router list and register its nav item into the nav registry (planned mechanisms), each gated by `EntitlementPort` (and optionally a feature flag). Do not swap anything on this side; add surface and make it conditional.
+6. **If the capability has API or UI surface, add and gate it.** Add its router to the central additive router list (a planned mechanism) and register its nav item into the nav registry (`web/src/app/nav/registry.ts`), each gated by an entitlement and optionally a feature flag. Do not swap anything on this side; add surface and make it conditional.
 7. **Verify Otari still stands alone.** It must boot standalone with only the core adapters bound (no overlay bootstrap configured) and pass its smoke suite, and the boundary check must pass. Both are automated: `uv run --frozen --no-dev python scripts/oss_edition_smoke.py` is the smoke suite (run by `.github/workflows/otari-oss-edition.yml` on any pull request that touches the app, the migrations, or dependency resolution), and `make check-architecture` is the boundary check.
 
 Once the seam exists, an overlay adds its own adapter by registering it through these same extension points, with zero edits to Otari's source. Building the seam is core work; using it is overlay work.

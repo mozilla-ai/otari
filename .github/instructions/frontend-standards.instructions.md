@@ -46,12 +46,16 @@ examples grounded in this dashboard's code, lives in the skill:
    rejects both, so flag placement in review rather than leaving it to the lint to reject
    after the fact. Adding a directory directly under `src/` needs a rule to go with it.
 
-7. **Deployment differences come from the bootstrap.** A surface that only some deployments
-   host gates on `useSurfaces()` / `useDeployment()` (`web/src/shared/hooks/useDeployment.tsx`),
-   which `main.tsx` fills from `GET /v1/bootstrap` before the first render. Flag a page component
-   that reads the gateway's mode itself, or infers it from an endpoint's 404: that is the
-   scattered mode check the bootstrap replaced. Hiding a surface client-side is a convenience,
-   never an authorization; the server still has to enforce it.
+7. **Navigation is data, and its three gates stay three.** A destination is declared in
+   `web/src/app/nav/registry.ts` and nowhere else; flag a nav link hand-written into a
+   component. An entry gates on `surface` (the deployment axis, from `GET /v1/bootstrap`
+   via `useDeployment`), `capability` (the entitlement axis, via `useEntitlements`), and
+   `flag` (the operational axis, valid only alongside a capability), composed as AND by
+   `useNavVisibility`. Do not fold one into another, and do not reach past them: a page
+   component that reads the gateway's mode itself, or infers it from an endpoint's 404, is
+   the scattered mode check this replaced. A new base capability belongs in
+   `BASE_CAPABILITIES`; an overlay's belongs in neither. Hiding a surface client-side is a
+   convenience, never an authorization; the server still has to enforce it.
 
 8. **Tests for changed behavior.** Colocated Vitest tests (`Foo.tsx` → `Foo.test.tsx`) that
    query the way a user would (`getByRole`/`getByLabelText`/`getByText`, not `getByTestId`),

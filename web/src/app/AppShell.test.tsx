@@ -6,6 +6,11 @@ import { AppShell } from "@/app/AppShell"
 import { Provider } from "@/app/provider"
 import type { DeploymentBootstrap } from "@/client"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
+import type { Entitlements } from "@/shared/hooks/useEntitlements"
+import {
+  BASE_CAPABILITIES,
+  EntitlementProvider,
+} from "@/shared/hooks/useEntitlements"
 import { bootstrap } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
 
@@ -44,17 +49,33 @@ function mockMatchMedia(matches: boolean, options: { legacy?: boolean } = {}) {
 // AppShell is the root route's component in the real tree, so it renders its
 // page through an <Outlet>. Here it is the component under test and the pages
 // are the router's children, which is what makes clicking a nav link swap them.
-function renderShell(deployment: DeploymentBootstrap = bootstrap()) {
-  return renderWithRouter(<div>OVERVIEW PAGE</div>, {
-    url: "/",
+function renderShell(
+  deployment: DeploymentBootstrap = bootstrap(),
+  options: { entitlements?: Partial<Entitlements>; url?: string } = {},
+) {
+  const entitlements: Entitlements = {
+    capabilities: BASE_CAPABILITIES,
+    flags: {},
+    isLoading: false,
+    ...options.entitlements,
+  }
+  const url = options.url ?? "/"
+  return renderWithRouter(<div>PAGE CONTENT</div>, {
+    url,
     shell: (
       <Provider>
         <DeploymentProvider value={deployment}>
-          <AppShell />
+          <EntitlementProvider value={entitlements}>
+            <AppShell />
+          </EntitlementProvider>
         </DeploymentProvider>
       </Provider>
     ),
-    routes: [{ path: "/providers", element: <div>PROVIDERS PAGE</div> }],
+    // The harness already mounts the component under test at `url`, so a probe
+    // for that same path would be a duplicate route.
+    routes: [{ path: "/providers", element: <div>PROVIDERS PAGE</div> }].filter(
+      (route) => route.path !== url,
+    ),
   })
 }
 
@@ -245,7 +266,7 @@ describe("AppShell responsive layout", () => {
     const main = container.querySelector("main")!
     expect(main).toHaveFocus()
     // Focus moved without navigating away: the index route is still rendered.
-    expect(screen.getByText("OVERVIEW PAGE")).toBeInTheDocument()
+    expect(screen.getByText("PAGE CONTENT")).toBeInTheDocument()
   })
 
   it("makes the skip link inert while the drawer is open, matching its target", async () => {
@@ -368,5 +389,82 @@ describe("AppShell surface gating", () => {
     // heading over nothing is worse than no heading.
     expect(screen.queryByText("Observability")).toBeNull()
     expect(screen.getByText("Catalog")).toBeInTheDocument()
+  })
+})
+
+describe("AppShell entitlement and flag gating", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+    window.localStorage.clear()
+  })
+
+  it("hides a destination whose capability is not entitled", async () => {
+    mockMatchMedia(false)
+    // The deployment hosts the routing surface, but the edition is not licensed
+    // for the capability. Two independent axes: either one hides the link.
+    await renderShell(bootstrap(), { entitlements: { capabilities: [] } })
+
+    expect(screen.queryByRole("link", { name: "Routing" })).toBeNull()
+    // Its section survives on the entries that are still entitled.
+    expect(screen.getByRole("link", { name: "Models" })).toBeInTheDocument()
+    expect(screen.getByText("Catalog")).toBeInTheDocument()
+  })
+
+  it("hides a destination whose surface is absent even when entitled", async () => {
+    mockMatchMedia(false)
+    // The inverse of the case above: licensed for routing, but this process does
+    // not host the surface, so there is no page to license.
+    await renderShell(bootstrap({ surfaces: ["models"] }), {
+      entitlements: { capabilities: ["routing"] },
+    })
+
+    expect(screen.queryByRole("link", { name: "Routing" })).toBeNull()
+  })
+
+  it("answers a gated-off destination with a panel, not the page", async () => {
+    mockMatchMedia(false)
+    // A bookmark or a shared URL still lands on the route after its link is
+    // gone. Rendering the page anyway would fire requests the server refuses.
+    await renderShell(bootstrap(), {
+      entitlements: { capabilities: [] },
+      url: "/routing",
+    })
+
+    expect(
+      await screen.findByText("Routing is not available here"),
+    ).toBeInTheDocument()
+    expect(screen.queryByText("PAGE CONTENT")).toBeNull()
+  })
+
+  it("answers a destination the deployment does not host the same way", async () => {
+    mockMatchMedia(false)
+    await renderShell(bootstrap({ surfaces: ["models"] }), {
+      url: "/providers",
+    })
+
+    expect(
+      await screen.findByText("Providers is not available here"),
+    ).toBeInTheDocument()
+    expect(screen.queryByText("PAGE CONTENT")).toBeNull()
+  })
+
+  it("still renders a destination that passes every axis", async () => {
+    mockMatchMedia(false)
+    await renderShell(bootstrap(), { url: "/routing" })
+
+    expect(await screen.findByText("PAGE CONTENT")).toBeInTheDocument()
+  })
+
+  it("leaves a path the registry does not declare alone", async () => {
+    mockMatchMedia(false)
+    // The bundled guide is not a registered destination, so the registry has no
+    // opinion on it and must not gate it away with the rest.
+    await renderShell(bootstrap({ surfaces: [] }), {
+      entitlements: { capabilities: [] },
+      url: "/docs",
+    })
+
+    expect(await screen.findByText("PAGE CONTENT")).toBeInTheDocument()
   })
 })

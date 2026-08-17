@@ -1,19 +1,19 @@
 import { Button } from "@heroui/react"
-import type { LinkProps } from "@tanstack/react-router"
-import { Link, Outlet } from "@tanstack/react-router"
+import { Link, Outlet, useLocation } from "@tanstack/react-router"
 import { clsx } from "clsx"
 import type {
   KeyboardEvent as ReactKeyboardEvent,
   MouseEvent as ReactMouseEvent,
-  ReactNode,
   PointerEvent as ReactPointerEvent,
 } from "react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { ConnectionStatus } from "@/app/ConnectionStatus"
+import { NAV_SECTIONS, navItemForPath } from "@/app/nav/registry"
+import { useNavVisibility } from "@/app/nav/useNavVisibility"
 import { UpdatePrompt } from "@/app/UpdatePrompt"
 import { useAuth } from "@/features/auth/AuthContext"
 import { PricingWarning } from "@/features/models/PricingWarning"
-import { useSurfaces } from "@/shared/hooks/useDeployment"
+import { EmptyState } from "@/shared/components/ui"
 
 const MIN_SIDEBAR = 200
 const MAX_SIDEBAR = 480
@@ -73,23 +73,6 @@ function readStoredCollapsed(): boolean {
   }
 }
 
-interface NavItem {
-  to: LinkProps["to"]
-  label: string
-  section: string
-  icon: ReactNode
-  /**
-   * The management surface this destination needs, from the deployment
-   * bootstrap. Not `capability`, which is otari.ai's nav field for the
-   * entitlement axis; this one is the deployment axis, and both will sit on a
-   * nav entry once the registries converge. A missing one is ungated: the
-   * Overview index is the deployment's own front page and reads whatever it is
-   * allowed to. Hiding a link cannot grant access to anything; the server still
-   * authorizes every request the page behind it makes.
-   */
-  surface?: string
-}
-
 // Shared by the nav links and the user-guide link below them, so the two agree
 // on shape and only differ in what marks the current page.
 const navLinkClass = (collapsed: boolean) =>
@@ -101,332 +84,19 @@ const NAV_ACTIVE = "bg-[var(--otari-brand-tint)] text-[var(--otari-brand-dark)]"
 const NAV_INACTIVE =
   "text-[var(--otari-muted)] hover:bg-[var(--otari-bg)] hover:text-[var(--otari-ink)]"
 
-// Sidebar groups, in display order. "Observability" is what the gateway did
-// (the request log today; usage analytics and an overview dashboard later) and
-// leads the sidebar; "Catalog" is what the gateway serves (providers, their
-// models, and aliases over them); "Access" is who may call it (keys, users,
-// budgets); "system" holds standalone config with no header. Grouping keeps the
-// list legible as the dashboard grows.
-const NAV_SECTIONS: { key: string; label?: string }[] = [
-  { key: "home" },
-  { key: "observability", label: "Observability" },
-  { key: "catalog", label: "Catalog" },
-  { key: "access", label: "Access" },
-  { key: "system" },
-]
-
-const NAV: NavItem[] = [
-  {
-    to: "/",
-    section: "home",
-    label: "Overview",
-    // The index/home, so it leads the sidebar above the grouped sections.
-    icon: (
-      // Four panes: an at-a-glance dashboard of the gateway.
-      <svg
-        aria-hidden="true"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        className="h-5 w-5 shrink-0"
-      >
-        <rect
-          x="3.5"
-          y="3.5"
-          width="7"
-          height="7"
-          rx="1.5"
-          strokeLinejoin="round"
-        />
-        <rect
-          x="13.5"
-          y="3.5"
-          width="7"
-          height="7"
-          rx="1.5"
-          strokeLinejoin="round"
-        />
-        <rect
-          x="3.5"
-          y="13.5"
-          width="7"
-          height="7"
-          rx="1.5"
-          strokeLinejoin="round"
-        />
-        <rect
-          x="13.5"
-          y="13.5"
-          width="7"
-          height="7"
-          rx="1.5"
-          strokeLinejoin="round"
-        />
-      </svg>
-    ),
-  },
-  {
-    to: "/activity",
-    surface: "usage",
-    section: "observability",
-    label: "Activity",
-    icon: (
-      // A pulse/activity line: the per-request log of what the gateway served.
-      <svg
-        aria-hidden="true"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        className="h-5 w-5 shrink-0"
-      >
-        <path
-          d="M3 12h4l2.5-6 4 12 2.5-6H21"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    ),
-  },
-  {
-    to: "/usage",
-    surface: "usage",
-    section: "observability",
-    label: "Usage",
-    icon: (
-      // A bar chart: aggregate spend and volume over time, beside the activity log.
-      <svg
-        aria-hidden="true"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        className="h-5 w-5 shrink-0"
-      >
-        <path
-          d="M4 20V10M10 20V4M16 20v-7M22 20H2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    ),
-  },
-  {
-    to: "/providers",
-    surface: "providers",
-    section: "catalog",
-    label: "Providers",
-    icon: (
-      // A server stack: upstream provider services, distinct from the API-keys key.
-      <svg
-        aria-hidden="true"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        className="h-5 w-5 shrink-0"
-      >
-        <rect
-          x="3.5"
-          y="4.5"
-          width="17"
-          height="6"
-          rx="1.5"
-          strokeLinejoin="round"
-        />
-        <rect
-          x="3.5"
-          y="13.5"
-          width="17"
-          height="6"
-          rx="1.5"
-          strokeLinejoin="round"
-        />
-        <path
-          d="M7 7.5h.01M7 16.5h.01"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    ),
-  },
-  {
-    to: "/users",
-    surface: "users",
-    section: "access",
-    label: "Users",
-    icon: (
-      // Two figures: the principals that keys and budgets attach to.
-      <svg
-        aria-hidden="true"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        className="h-5 w-5 shrink-0"
-      >
-        <circle cx="9" cy="8" r="3.2" strokeLinejoin="round" />
-        <path
-          d="M3.5 19a5.5 5.5 0 0 1 11 0"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-        <path
-          d="M16 5.2a3.2 3.2 0 0 1 0 5.6M17.5 19a5.5 5.5 0 0 0-3-4.9"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    ),
-  },
-  {
-    to: "/keys",
-    surface: "keys",
-    section: "access",
-    label: "API keys",
-    icon: (
-      // The key glyph now belongs to API keys (Providers moved to a server stack).
-      <svg
-        aria-hidden="true"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        className="h-5 w-5 shrink-0"
-      >
-        <circle cx="7.5" cy="15.5" r="3.5" />
-        <path
-          d="M10 13l7-7M14 5l3 3M16.5 7.5l2-2"
-          strokeLinecap="round"
-          strokeLinejoin="round"
-        />
-      </svg>
-    ),
-  },
-  {
-    to: "/budgets",
-    surface: "budgets",
-    section: "access",
-    label: "Budgets",
-    icon: (
-      // A wallet: the spending limits callers are held to, alongside the keys.
-      <svg
-        aria-hidden="true"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        className="h-5 w-5 shrink-0"
-      >
-        <path
-          d="M3 7.5A1.5 1.5 0 0 1 4.5 6H18a1.5 1.5 0 0 1 1.5 1.5V9"
-          strokeLinejoin="round"
-        />
-        <rect
-          x="3"
-          y="7.5"
-          width="18"
-          height="12"
-          rx="1.5"
-          strokeLinejoin="round"
-        />
-        <path d="M16 13.5h.01" strokeLinecap="round" strokeLinejoin="round" />
-        <path d="M21 12v3h-3.5a1.5 1.5 0 0 1 0-3H21z" strokeLinejoin="round" />
-      </svg>
-    ),
-  },
-  {
-    to: "/models",
-    surface: "models",
-    section: "catalog",
-    label: "Models",
-    icon: (
-      <svg
-        aria-hidden="true"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        className="h-5 w-5 shrink-0"
-      >
-        <path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z" strokeLinejoin="round" />
-        <path d="M12 12l8-4.5M12 12v9M12 12L4 7.5" strokeLinejoin="round" />
-      </svg>
-    ),
-  },
-  {
-    to: "/routing",
-    surface: "routing",
-    section: "catalog",
-    label: "Routing",
-    icon: (
-      <svg
-        aria-hidden="true"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        className="h-5 w-5 shrink-0"
-      >
-        <path d="M4 5h4l4 7 4-7h4" strokeLinejoin="round" />
-        <path d="M4 19h4l4-7" strokeLinejoin="round" />
-        <circle cx="19" cy="19" r="2" />
-        <circle cx="19" cy="5" r="2" />
-      </svg>
-    ),
-  },
-  {
-    to: "/tools",
-    surface: "tools",
-    section: "system",
-    label: "Tools & Guardrails",
-    icon: (
-      <svg
-        aria-hidden="true"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        className="h-5 w-5 shrink-0"
-      >
-        <path
-          d="M14.7 6.3a4 4 0 0 1 5 5l-8.4 8.4a2 2 0 0 1-2.8 0l-2.2-2.2a2 2 0 0 1 0-2.8z"
-          strokeLinejoin="round"
-        />
-        <path d="M12 9 5 16" strokeLinecap="round" />
-      </svg>
-    ),
-  },
-  {
-    to: "/settings",
-    surface: "settings",
-    section: "system",
-    label: "Settings",
-    icon: (
-      <svg
-        aria-hidden="true"
-        viewBox="0 0 24 24"
-        fill="none"
-        stroke="currentColor"
-        strokeWidth="2"
-        className="h-5 w-5 shrink-0"
-      >
-        <circle cx="12" cy="12" r="3" />
-        <path
-          d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
-          strokeLinejoin="round"
-        />
-      </svg>
-    ),
-  },
-]
-
 export function AppShell() {
   const { logout } = useAuth()
-  // The deployment decides which destinations exist here, so the sidebar reads
-  // it once rather than each page asking what mode it is running in.
-  const hostsSurface = useSurfaces()
+  // Navigation is data: the shell renders whatever the registry declares and
+  // decides visibility from the deployment, the entitlements, and the flags,
+  // rather than each page asking what it is running against.
+  const isVisible = useNavVisibility()
+  const { pathname } = useLocation()
+  // A gated-off destination is still reachable by bookmark or shared URL, so the
+  // shell answers those with a panel instead of a page whose every request the
+  // server would refuse. An unregistered path (the guide, the 404 splat) has no
+  // entry and is never gated.
+  const currentItem = navItemForPath(pathname)
+  const routeIsGatedOff = currentItem !== undefined && !isVisible(currentItem)
 
   const asideRef = useRef<HTMLElement>(null)
   const mainRef = useRef<HTMLElement>(null)
@@ -732,17 +402,13 @@ export function AppShell() {
             )}
           >
             {NAV_SECTIONS.map((section, sectionIndex) => {
-              const items = NAV.filter(
-                (item) =>
-                  item.section === section.key &&
-                  (!item.surface || hostsSurface(item.surface)),
-              )
+              const items = section.items.filter(isVisible)
               if (items.length === 0) {
                 return null
               }
               return (
                 <div
-                  key={section.key}
+                  key={section.id}
                   className={sectionIndex > 0 ? "mt-4" : undefined}
                 >
                   {/* A header labels each group when expanded; a thin divider stands
@@ -882,7 +548,14 @@ export function AppShell() {
           className="flex-1 overflow-y-auto focus:outline-none"
         >
           <div className="mx-auto flex max-w-[1800px] flex-col gap-6 px-4 py-5 md:px-6 md:py-6">
-            <Outlet />
+            {routeIsGatedOff ? (
+              <EmptyState
+                title={`${currentItem.label} is not available here`}
+                description="This deployment does not serve that page. Pick a destination from the sidebar."
+              />
+            ) : (
+              <Outlet />
+            )}
           </div>
         </main>
       </div>

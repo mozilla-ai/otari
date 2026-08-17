@@ -58,6 +58,13 @@ Build and check from the repo root:
   `useSurfaces()` (`web/src/shared/hooks/useDeployment.tsx`). It is the one place that
   knows which deployment served the page, and it is read before the first render. Note the
   word: a *surface* is the deployment axis, a *capability* is the entitlement axis.
+- Declare a new destination in the nav registry (`web/src/app/nav/registry.ts`), never as a
+  hand-written link in a component, and give it whichever of the three gates it needs:
+  `surface`, `capability`, `flag`. `useNavVisibility` composes them as AND for the sidebar;
+  `EntitlementGate` (`web/src/shared/components/EntitlementGate.tsx`) is the component form
+  for wrapping a page. A capability the base build ships goes in `BASE_CAPABILITIES`
+  (`web/src/shared/hooks/useEntitlements.tsx`); an overlay-only one goes in neither, which
+  is what makes a gate on it hide here.
 - Add a Vitest test for any component or helper whose behavior you change (`Foo.tsx` →
   `Foo.test.tsx`, colocated). See [typescript-and-react.md](./typescript-and-react.md#testing).
 
