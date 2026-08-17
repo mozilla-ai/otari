@@ -1,0 +1,23 @@
+# Commits that `git blame` should look through. The point is that a line's history
+# leads to whoever last changed what it says, rather than stopping at a commit that
+# only moved it.
+#
+# Enable locally once:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+# GitHub honors this file automatically, with no setup.
+#
+# What belongs here: a commit that is formatting, or so nearly all formatting that
+# skipping it is right for almost every line in it. A squash merge usually cannot be
+# purely mechanical, since the branch it squashes carries its review fixes along, so
+# name what the exceptions are instead of pretending there are none. A commit whose
+# real changes are a meaningful share of its diff does not belong here at all: blame
+# would then credit the wrong author for work someone actually did.
+
+# style(dashboard): adopt otari-ai/frontend's Biome formatter and rule set (#611)
+#
+# Roughly 19,700 of its ~20,600 changed lines are `biome format` output over web/.
+# The remainder is real: a hoisted pure function in UsagePage, a useCallback in
+# DataTable, a badge role in ActivityPage, four small test fixes, and the rule
+# suppressions. Blame skips those too, which is the price of getting the other
+# 19,700 right; `git log -S` or `git show 97bacad7` finds them when it matters.
+97bacad73f4f348abfee8108c550372dd52143d7
