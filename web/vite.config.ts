@@ -40,7 +40,6 @@ const announceApiTarget = {
   configureServer(server: { httpServer: { once: (e: string, cb: () => void) => void } | null }) {
     server.httpServer?.once("listening", () => {
       const origin = process.env.OTARI_DEV_API ? "OTARI_DEV_API" : "default";
-      // eslint-disable-next-line no-console
       console.log(`\n  ➜  API:     ${apiTarget}  (${origin})\n`);
     });
   },

@@ -108,7 +108,7 @@ function SaveToast({ message }: { message: string | null }) {
         fill="none"
         stroke="currentColor"
         strokeWidth="2"
-        aria-hidden
+        aria-hidden="true"
         className="h-5 w-5"
       >
         <path

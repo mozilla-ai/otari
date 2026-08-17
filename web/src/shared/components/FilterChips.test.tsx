@@ -34,7 +34,7 @@ describe("FilterChips", () => {
     const user = userEvent.setup()
     render(
       <FilterChips chips={[]}>
-        <label>User picker</label>
+        <span>User picker</span>
       </FilterChips>,
     )
     const region = screen.getByText("User picker").closest("div")!
@@ -73,7 +73,7 @@ describe("FilterChips", () => {
     render(
       <FilterChips
         chips={[]}
-        start={<button>30d</button>}
+        start={<button type="button">30d</button>}
         end={<span>Showing window</span>}
       >
         <span>pickers</span>

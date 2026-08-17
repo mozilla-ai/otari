@@ -113,7 +113,7 @@ const NAV: NavItem[] = [
     icon: (
       // Four panes: an at-a-glance dashboard of the gateway.
       <svg
-        aria-hidden
+        aria-hidden="true"
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
@@ -162,7 +162,7 @@ const NAV: NavItem[] = [
     icon: (
       // A pulse/activity line: the per-request log of what the gateway served.
       <svg
-        aria-hidden
+        aria-hidden="true"
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
@@ -184,7 +184,7 @@ const NAV: NavItem[] = [
     icon: (
       // A bar chart: aggregate spend and volume over time, beside the activity log.
       <svg
-        aria-hidden
+        aria-hidden="true"
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
@@ -206,7 +206,7 @@ const NAV: NavItem[] = [
     icon: (
       // A server stack: upstream provider services, distinct from the API-keys key.
       <svg
-        aria-hidden
+        aria-hidden="true"
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
@@ -244,7 +244,7 @@ const NAV: NavItem[] = [
     icon: (
       // Two figures: the principals that keys and budgets attach to.
       <svg
-        aria-hidden
+        aria-hidden="true"
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
@@ -272,7 +272,7 @@ const NAV: NavItem[] = [
     icon: (
       // The key glyph now belongs to API keys (Providers moved to a server stack).
       <svg
-        aria-hidden
+        aria-hidden="true"
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
@@ -295,7 +295,7 @@ const NAV: NavItem[] = [
     icon: (
       // A wallet: the spending limits callers are held to, alongside the keys.
       <svg
-        aria-hidden
+        aria-hidden="true"
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
@@ -325,7 +325,7 @@ const NAV: NavItem[] = [
     label: "Models",
     icon: (
       <svg
-        aria-hidden
+        aria-hidden="true"
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
@@ -343,7 +343,7 @@ const NAV: NavItem[] = [
     label: "Routing",
     icon: (
       <svg
-        aria-hidden
+        aria-hidden="true"
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
@@ -363,7 +363,7 @@ const NAV: NavItem[] = [
     label: "Tools & Guardrails",
     icon: (
       <svg
-        aria-hidden
+        aria-hidden="true"
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
@@ -384,7 +384,7 @@ const NAV: NavItem[] = [
     label: "Settings",
     icon: (
       <svg
-        aria-hidden
+        aria-hidden="true"
         viewBox="0 0 24 24"
         fill="none"
         stroke="currentColor"
@@ -601,7 +601,7 @@ export function AppShell() {
             className="-ml-1 flex h-8 w-8 items-center justify-center rounded-lg text-[var(--otari-muted)] transition-colors hover:bg-[var(--otari-bg)] hover:text-[var(--otari-ink)] md:hidden"
           >
             <svg
-              aria-hidden
+              aria-hidden="true"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -644,6 +644,7 @@ export function AppShell() {
             className="fixed inset-0 z-30 bg-black/40 md:hidden"
           />
         ) : null}
+        {/* biome-ignore lint/a11y/useAriaPropsSupportedByRole: the role is conditional (dialog on mobile), which the rule cannot evaluate */}
         <aside
           ref={asideRef}
           id="app-sidebar"
@@ -683,7 +684,7 @@ export function AppShell() {
             className="absolute -right-3 top-4 z-30 hidden h-6 w-6 items-center justify-center rounded-full border border-[var(--otari-line)] bg-[var(--otari-surface)] text-[var(--otari-muted)] shadow-sm transition-colors hover:border-[var(--otari-brand)] hover:text-[var(--otari-brand-dark)] md:flex"
           >
             <svg
-              aria-hidden
+              aria-hidden="true"
               viewBox="0 0 24 24"
               fill="none"
               stroke="currentColor"
@@ -802,7 +803,7 @@ export function AppShell() {
               )}
             >
               <svg
-                aria-hidden
+                aria-hidden="true"
                 viewBox="0 0 24 24"
                 fill="none"
                 stroke="currentColor"
@@ -822,6 +823,7 @@ export function AppShell() {
             </a>
           </div>
           {collapsed || isMobile ? null : (
+            // biome-ignore lint/a11y/useSemanticElements: <hr> is a thematic break; this is a keyboard-operable resize handle
             <div
               role="separator"
               aria-orientation="vertical"

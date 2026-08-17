@@ -60,11 +60,12 @@ jobs:
     - name: Install dependencies
       run: npm ci
 
-    # Biome, enabled for the layer boundary and nothing else (web/biome.jsonc): a
-    # feature may not import the composition root, shared/ may not import either, and
-    # nothing may import an overlay's tree. Before this step the layout was a
-    # convention a reviewer had to notice; now a violation cannot merge.
-    - name: Lint layer boundaries
+    # Biome (web/biome.jsonc): formatting, the recommended rule set, and the layer
+    # boundary (a feature may not import the composition root; shared/ may not import
+    # either; nothing may import an overlay's tree). `npm run lint` is `biome check`,
+    # which reports rather than rewrites, so a formatting drift fails here instead of
+    # landing as noise in the next person's diff. `npm run lint:fix` is the writing one.
+    - name: Lint and format check
       run: npm run lint
 
     - name: Type-check

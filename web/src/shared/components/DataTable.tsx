@@ -61,7 +61,7 @@ function SelectionBoxVisual({
           fill="none"
           stroke="currentColor"
           strokeWidth={3}
-          aria-hidden
+          aria-hidden="true"
         >
           <line x1="6" x2="18" y1="12" y2="12" strokeLinecap="round" />
         </svg>
@@ -72,7 +72,7 @@ function SelectionBoxVisual({
           fill="none"
           stroke="currentColor"
           strokeWidth={3}
-          aria-hidden
+          aria-hidden="true"
         >
           <polyline
             points="5 12 10 17 19 7"
@@ -240,7 +240,9 @@ export function DataTable<Row extends object>({
     row: HTMLTableRowElement
     cell: HTMLTableCellElement
   } | null>(null)
-  const ensureHost = () => {
+  // Stable identity: it only reads and writes a ref, so the effect below can
+  // list it without re-running on every render.
+  const ensureHost = useCallback(() => {
     if (!hostRef.current) {
       const row = document.createElement("tr")
       row.className = "otari-detail-row"
@@ -253,7 +255,7 @@ export function DataTable<Row extends object>({
       hostRef.current = { row, cell }
     }
     return hostRef.current
-  }
+  }, [])
 
   // Host <tr> management: find the target row by its data-key and position the
   // host right after it. react-aria commits its real rows in a second render
@@ -263,6 +265,7 @@ export function DataTable<Row extends object>({
   // the host) whenever the row set, order, or target changes, and the host is
   // detached as soon as there is no target to sit under, so a vanished target
   // (filtered out, page flipped) leaves nothing behind.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: rows and sortDescriptor are the re-run triggers described above, not values read here
   useLayoutEffect(() => {
     const root = rootRef.current
     if (!root || detailKey == null || !detailRow) {
@@ -301,7 +304,7 @@ export function DataTable<Row extends object>({
       observer.observe(root, { childList: true, subtree: true })
     }
     return () => observer?.disconnect()
-  }, [detailKey, detailRow, columnCount, rows, sortDescriptor])
+  }, [detailKey, detailRow, columnCount, rows, sortDescriptor, ensureHost])
 
   // Detach on unmount. Deliberately not part of the effect above, whose cleanup
   // runs on every dependency change: removing the host there is what made a

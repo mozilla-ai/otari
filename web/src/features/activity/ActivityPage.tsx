@@ -1863,7 +1863,11 @@ export function ActivityPage() {
           return (
             <span className="inline-flex items-center gap-1.5">
               {e.model}
+              {/* A generic span does not reliably expose aria-label, so the
+                  badge takes the img role: the label is the whole meaning, and
+                  the count inside is a summary of it. */}
               <span
+                role="img"
                 className="inline-flex items-center rounded-full border border-[var(--otari-line)] bg-[var(--otari-brand-tint)] px-1.5 py-0.5 text-[11px] font-medium text-[var(--otari-brand-dark)]"
                 title={detail}
                 aria-label={`Gateway tools: ${detail}`}

@@ -142,6 +142,7 @@ describe("CopyableValue", () => {
     const onRowPointerDown = vi.fn()
     const onRowMouseDown = vi.fn()
     render(
+      // biome-ignore lint/a11y/noStaticElementInteractions: a stand-in for the table row whose handlers this test proves are not reached
       <div onPointerDown={onRowPointerDown} onMouseDown={onRowMouseDown}>
         <CopyableValue
           value="anthropic:claude-opus-4-5-20251101"

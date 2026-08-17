@@ -57,7 +57,7 @@ export function ConnectionStatus() {
         fill="none"
         stroke="currentColor"
         strokeWidth="2"
-        aria-hidden
+        aria-hidden="true"
         className="mt-0.5 h-5 w-5 shrink-0"
       >
         <path

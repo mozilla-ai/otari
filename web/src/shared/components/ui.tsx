@@ -312,6 +312,7 @@ export function CopyableValue({
     event.stopPropagation()
   return (
     <span className="inline-flex items-center gap-1">
+      {/* biome-ignore lint/a11y/noStaticElementInteractions: the handlers only stop propagation so a text drag survives; there is no action to expose */}
       <span
         // Focusable, but not tabbable: pressing here focuses the value itself
         // instead of the react-aria table cell, whose focus bookkeeping re-renders

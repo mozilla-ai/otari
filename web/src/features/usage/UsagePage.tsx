@@ -88,6 +88,14 @@ function formatBucketLabel(iso: string, bucket: UsageBucket): string {
 // The time presets and window math live in `@/shared/helpers/timeRange` and are shared
 // with the Activity page. 30d default: a spend investigation is usually monthly.
 
+// Billed tokens for one series point. Pure, so it lives out here: defined inside
+// the component it was a new function every render, which is what made the memo
+// that calls it look like it was missing a dependency.
+const pointBilled = (p: UsageSeriesPoint) =>
+  p.input_tokens !== undefined
+    ? p.input_tokens + (p.output_tokens ?? 0)
+    : p.tokens
+
 const DEFAULT_PRESET = findPreset(
   USAGE_PRESETS,
   USAGE_DEFAULT_KEY,
@@ -739,10 +747,6 @@ export function UsagePage() {
   const prevCacheHitRate =
     prevCache.input > 0 ? prevCache.read / prevCache.input : undefined
 
-  const pointBilled = (p: UsageSeriesPoint) =>
-    p.input_tokens !== undefined
-      ? p.input_tokens + (p.output_tokens ?? 0)
-      : p.tokens
   const hasComposition = series.some((p) => (p.input_tokens ?? 0) > 0)
   const hasErrors = series.some((p) => (p.errors ?? 0) > 0)
 

@@ -1,3 +1,4 @@
+// biome-ignore-all lint/a11y/noLabelWithoutControl: every label here wraps MoneyInput, which renders the input and takes its own ariaLabel. The rule cannot see through a component, and it still works on this file's native inputs.
 import { Button, Card, Chip } from "@heroui/react"
 import {
   type ReactNode,

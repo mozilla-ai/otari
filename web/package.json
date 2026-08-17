@@ -15,7 +15,8 @@
     "e2e:install": "playwright install chromium",
     "client:generate": "openapi-typescript ../docs/public/openapi.json -o src/client/schema.ts",
     "pretest": "npm run client:generate",
-    "lint": "biome lint"
+    "lint": "biome check",
+    "lint:fix": "biome check --write"
   },
   "dependencies": {
     "@heroui/react": "3.2.1",

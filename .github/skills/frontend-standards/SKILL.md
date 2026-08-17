@@ -31,7 +31,7 @@ Build and check from the repo root:
 - `make dashboard` (`npm --prefix web ci && npm --prefix web run build`). Output goes to
   the gitignored `src/gateway/static/dashboard/`; there is nothing to commit. Build only
   when you need to run the dashboard locally; Docker builds it in its own Node stage.
-- `npm --prefix web run lint` (the layer boundaries; see web/AGENTS.md)
+- `npm --prefix web run lint` (Biome: formatting, recommended rules, layer boundaries; `lint:fix` writes)
 - `npm --prefix web run typecheck`
 - `npm --prefix web test`
 

@@ -1,0 +1,13 @@
+# Commits that changed formatting and nothing else. `git blame` skips these, so a
+# line's history points at whoever last changed what it says rather than at the
+# reformat that moved it.
+#
+# Enable locally once:
+#   git config blame.ignoreRevsFile .git-blame-ignore-revs
+# GitHub honors this file automatically.
+#
+# Only add a commit that is provably formatting-only: produced by a formatter with
+# no hand edits, and green on the same tests before and after.
+
+# style(dashboard): adopt otari-ai/frontend's Biome formatter and rule set
+d3d0272a6824b2a4f1ada8187d2d4105e05106a7

@@ -145,7 +145,9 @@ describe("AppShell responsive layout", () => {
 
     // Simulate crossing to a desktop viewport.
     act(() => {
-      listeners.forEach((cb) => cb({ matches: false } as MediaQueryListEvent))
+      listeners.forEach((cb) => {
+        cb({ matches: false } as MediaQueryListEvent)
+      })
     })
 
     expect(
@@ -267,7 +269,9 @@ describe("AppShell responsive layout", () => {
     // aria-hidden to match the rest of the codebase's convention.
     const icons = container.querySelectorAll("svg")
     expect(icons.length).toBeGreaterThan(0)
-    icons.forEach((icon) => expect(icon).toHaveAttribute("aria-hidden"))
+    icons.forEach((icon) => {
+      expect(icon).toHaveAttribute("aria-hidden")
+    })
   })
 
   it("links to the bundled user guide from the sidebar footer", async () => {
@@ -293,7 +297,9 @@ describe("AppShell responsive layout", () => {
     ).toBeInTheDocument()
 
     act(() => {
-      listeners.forEach((cb) => cb({ matches: false } as MediaQueryListEvent))
+      listeners.forEach((cb) => {
+        cb({ matches: false } as MediaQueryListEvent)
+      })
     })
 
     // A desktop-width change still flips the layout off the mobile drawer.

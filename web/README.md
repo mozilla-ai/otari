@@ -14,7 +14,7 @@ storage.
 - HeroUI v3 (`@heroui/react`, `@heroui/styles`) on Tailwind CSS v4
 - TanStack Query for data fetching, TanStack Router (file-based) for routes
 - Vitest + Testing Library for tests
-- Biome for the layer-boundary lint (`npm run lint`), and nothing else
+- Biome for formatting and lint, including the layer boundary (`npm run lint`, `npm run lint:fix`)
 
 ## Layout
 
@@ -44,7 +44,7 @@ which lives in `otari-ai` and is composed onto this base at build time.
 cd web
 npm install
 npm run dev        # Vite dev server on :5173, proxying the API to :8000
-npm run lint       # layer boundaries only; see Layout above
+npm run lint       # format + lint, including the layer boundary
 npm run typecheck
 npm test
 ```

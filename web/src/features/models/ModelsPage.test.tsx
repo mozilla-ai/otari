@@ -533,7 +533,7 @@ describe("ModelsPage", () => {
       models: {
         ...(METADATA.models ?? {}),
         "openai:gpt-4o": {
-          ...(METADATA.models ?? {})["openai:gpt-4o"],
+          ...METADATA.models?.["openai:gpt-4o"],
           input_modalities: undefined,
         },
       },

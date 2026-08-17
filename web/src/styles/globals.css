@@ -116,7 +116,9 @@
    pointer events on data cells where rows have a drill-in action). */
 .otari-table .table__row,
 .otari-table .table__row .table__cell {
+  /* biome-ignore lint/complexity/noImportantStyles: HeroUI sets user-select on the row; this has to win */
   user-select: text !important;
+  /* biome-ignore lint/complexity/noImportantStyles: same, for the WebKit prefix */
   -webkit-user-select: text !important;
 }
 
@@ -297,6 +299,7 @@
   font-size: 0.85rem;
 }
 .otari-markdown th,
+/* biome-ignore lint/style/noDescendingSpecificity: the earlier, more specific td rule is scoped to .otari-table, so these two never apply to the same cell */
 .otari-markdown td {
   border: 1px solid var(--otari-line);
   padding: 0.4rem 0.7rem;

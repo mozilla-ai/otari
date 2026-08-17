@@ -104,8 +104,10 @@ const markdownComponents: Components = {
   // table drops role=table in WebKit), and put the horizontal scroll on a
   // focusable wrapper so keyboard users can reach the clipped columns.
   table: ({ node: _node, ...props }: MdProps<"table">) => (
+    // biome-ignore lint/a11y/useSemanticElements: <section> would not make the overflow keyboard-reachable, which is the point
     <div
       className="otari-markdown-scroll"
+      // biome-ignore lint/a11y/noNoninteractiveTabindex: a scrollable region must be focusable (axe scrollable-region-focusable)
       tabIndex={0}
       role="region"
       aria-label="Table"
@@ -116,6 +118,8 @@ const markdownComponents: Components = {
   // Code blocks scroll horizontally on overflow; make them focusable too so the
   // clipped content is keyboard-reachable (axe scrollable-region-focusable).
   pre: ({ node: _node, ...props }: MdProps<"pre">) => (
+    // biome-ignore lint/a11y/noNoninteractiveTabindex: same as the table above; the block scrolls, so it has to be reachable
+    // biome-ignore lint/a11y/useSemanticElements: the region role is what names the scrollable block for AT
     <pre tabIndex={0} role="region" aria-label="Code" {...props} />
   ),
 }

@@ -70,6 +70,10 @@ function useWindows() {
       window.removeEventListener("focus", check)
     }
   }, [])
+  // dayKey drives the refresh: same day -> same bounds; new day -> re-derive.
+  // Nothing inside reads it, so the rule sees it as surplus; it is the whole
+  // point of the memo.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: dayKey is the cache key, not an input
   return useMemo(() => {
     const now = Date.now()
     const d = new Date(now)
@@ -78,8 +82,6 @@ function useWindows() {
       periodStart: new Date(now - PERIOD_DAYS * DAY_MS).toISOString(),
       prevStart: new Date(now - 2 * PERIOD_DAYS * DAY_MS).toISOString(),
     }
-    // dayKey drives the refresh: same day -> same bounds; new day -> re-derive.
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [dayKey])
 }
 

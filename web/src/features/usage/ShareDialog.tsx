@@ -165,6 +165,11 @@ export function ShareDialog(props: ShareDialogProps) {
 
   // Rasterize the card the user will actually post, debounced so dragging a
   // control or typing a title does not re-encode a 1080px PNG per keystroke.
+  //
+  // hero/secondary/shown/scope are not read here: they are what the card renders,
+  // so the effect depends on them through the DOM it rasterizes. Dropping them
+  // would leave the PNG showing the previous card.
+  // biome-ignore lint/correctness/useExhaustiveDependencies: the dependency is the rendered card, which the rule cannot see
   useEffect(() => {
     let cancelled = false
     let url: string | undefined
@@ -437,7 +442,7 @@ export function ShareDialog(props: ShareDialogProps) {
           display:none subtree (it has no layout), and the preview above must not
           be the scaled node itself or the PNG would inherit the scale. */}
       <div
-        aria-hidden
+        aria-hidden="true"
         className="pointer-events-none fixed -left-[9999px] top-0 opacity-0"
       >
         <div ref={cardRef}>

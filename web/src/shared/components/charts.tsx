@@ -45,7 +45,7 @@ export interface ChartPoint {
 // styles convention.
 function SeriesMarker({ color }: { color: string }) {
   return (
-    <svg aria-hidden viewBox="0 0 8 8" className="h-2 w-2 shrink-0">
+    <svg aria-hidden="true" viewBox="0 0 8 8" className="h-2 w-2 shrink-0">
       <rect width="8" height="8" rx="1.5" fill={color} />
     </svg>
   )
@@ -233,6 +233,7 @@ export function TrendChart({
     // (role="img" would hide the interaction entirely), so it presents as a
     // labeled group instead. Keyboard equivalents live with the callers
     // (presets, zoom buttons, the Activity pan rail).
+    // biome-ignore lint/a11y/useAriaPropsSupportedByRole: both roles this switches between support aria-label; the rule cannot evaluate the condition
     <div
       role={selectable ? "group" : "img"}
       aria-label={ariaLabel}

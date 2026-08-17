@@ -10,7 +10,9 @@
   // ones later, inside the port PRs where a whole-file diff would bury the changes
   // that can actually break something.
   "formatter": { "indentStyle": "space" },
-  "javascript": { "formatter": { "quoteStyle": "double", "semicolons": "asNeeded" } },
+  "javascript": {
+    "formatter": { "quoteStyle": "double", "semicolons": "asNeeded" }
+  },
   "assist": { "actions": { "source": { "organizeImports": "on" } } },
 
   // globals.css is Tailwind v4, whose at-rules (@theme, @custom-variant) Biome
@@ -57,7 +59,12 @@
           "options": {
             "patterns": [
               {
-                "group": ["@/overlay", "@/overlay/**", "**/overlay", "**/overlay/**"],
+                "group": [
+                  "@/overlay",
+                  "@/overlay/**",
+                  "**/overlay",
+                  "**/overlay/**"
+                ],
                 "message": "Nothing in Otari's core may import the overlay tree. An overlay registers itself through the seams the core exposes (the nav registry, the container); the core never reaches the other way."
               }
             ]
@@ -89,7 +96,12 @@
                     "message": "A feature may not import the composition root (src/app). Anything a feature and the shell both need belongs in src/shared; anything the shell needs from a feature, the shell imports."
                   },
                   {
-                    "group": ["@/overlay", "@/overlay/**", "**/overlay", "**/overlay/**"],
+                    "group": [
+                      "@/overlay",
+                      "@/overlay/**",
+                      "**/overlay",
+                      "**/overlay/**"
+                    ],
                     "message": "Nothing in Otari's core may import the overlay tree. An overlay registers itself through the seams the core exposes (the nav registry, the container); the core never reaches the other way."
                   }
                 ]
@@ -137,7 +149,12 @@
                     "message": "src/shared may not import src/app, src/features, or src/routes. Shared code is domain-agnostic by definition; if a helper needs a domain type, it belongs to that feature. A route is a feature page under another name, so importing one is the same crossing."
                   },
                   {
-                    "group": ["@/overlay", "@/overlay/**", "**/overlay", "**/overlay/**"],
+                    "group": [
+                      "@/overlay",
+                      "@/overlay/**",
+                      "**/overlay",
+                      "**/overlay/**"
+                    ],
                     "message": "Nothing in Otari's core may import the overlay tree. An overlay registers itself through the seams the core exposes (the nav registry, the container); the core never reaches the other way."
                   }
                 ]
