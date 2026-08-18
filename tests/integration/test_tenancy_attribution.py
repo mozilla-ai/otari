@@ -169,3 +169,62 @@ def test_re_adding_revives_a_soft_deleted_row_without_clearing_its_spend(
         headers=master_key_header,
     )
     assert keyed.status_code == 200, keyed.text
+
+
+def test_the_membership_context_carries_the_callers_workspaces(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """The shell picks a context and a default workspace from this one call."""
+    context = client.get("/v1/organizations/me", headers=master_key_header).json()
+
+    memberships = context["workspace_memberships"]
+    assert [m["name"] for m in memberships] == ["Default workspace"]
+    assert memberships[0]["role"] == "owner"
+    assert memberships[0]["workspace_id"]
+
+
+def test_a_new_workspace_joins_the_callers_context(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    created = client.post(
+        "/v1/workspaces",
+        json={"name": "Platform team"},
+        headers=master_key_header,
+    )
+    assert created.status_code == 201, created.text
+
+    context = client.get("/v1/organizations/me", headers=master_key_header).json()
+
+    assert sorted(m["name"] for m in context["workspace_memberships"]) == [
+        "Default workspace",
+        "Platform team",
+    ]
+
+
+def test_the_context_lists_only_workspaces_the_caller_joined(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """Not a directory: a workspace the caller is not a member of stays out.
+
+    Listing the organization's workspaces is a separate, authorized read; this
+    field exists to seed a switcher, so it carries only what the caller belongs
+    to.
+    """
+    from gateway.models.tenancy import Workspace
+
+    context = client.get("/v1/organizations/me", headers=master_key_header).json()
+    organization_id = uuid.UUID(context["organization"]["id"])
+
+    session = db_session_factory()
+    try:
+        session.add(Workspace(name="Someone else's", organization_id=organization_id))
+        session.commit()
+    finally:
+        session.close()
+
+    after = client.get("/v1/organizations/me", headers=master_key_header).json()
+    assert [m["name"] for m in after["workspace_memberships"]] == ["Default workspace"]

@@ -326,6 +326,22 @@ class Organization(OrganizationBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtM
     )
 
 
+class CallerWorkspaceMembershipPublic(SQLModel):
+    """One workspace the caller belongs to, and their role in it.
+
+    Carried on the membership context so the shell can populate its workspace
+    switcher and choose a default from the first authenticated call, rather than
+    listing workspaces and then asking for the caller's role in each. Only the
+    caller's own memberships appear, so this is not a directory of the
+    organization's workspaces: an admin sees the ones they joined, and the
+    workspace list endpoint remains the way to see the rest.
+    """
+
+    workspace_id: uuid.UUID
+    name: str
+    role: str
+
+
 class OrganizationMembershipContextPublic(SQLModel):
     """An organization plus the caller's standing in it.
 
@@ -337,6 +353,7 @@ class OrganizationMembershipContextPublic(SQLModel):
     role: str
     status: str
     organization: OrganizationPublic
+    workspace_memberships: list[CallerWorkspaceMembershipPublic] = Field(default_factory=list)
     # Whether the dashboard may offer the BYO provider-keys surface. The
     # platform answers "does this org have a self-hosted gateway attached", which
     # in a standalone deployment is always yes: the deployment reading this *is*

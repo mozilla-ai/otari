@@ -1329,6 +1329,31 @@
         "title": "BudgetResponse",
         "type": "object"
       },
+      "CallerWorkspaceMembershipPublic": {
+        "description": "One workspace the caller belongs to, and their role in it.\n\nCarried on the membership context so the shell can populate its workspace\nswitcher and choose a default from the first authenticated call, rather than\nlisting workspaces and then asking for the caller's role in each. Only the\ncaller's own memberships appear, so this is not a directory of the\norganization's workspaces: an admin sees the ones they joined, and the\nworkspace list endpoint remains the way to see the rest.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace_id",
+          "name",
+          "role"
+        ],
+        "title": "CallerWorkspaceMembershipPublic",
+        "type": "object"
+      },
       "CandidateResponse": {
         "description": "One candidate in a compiled plan.",
         "properties": {
@@ -4677,6 +4702,13 @@
           "status": {
             "title": "Status",
             "type": "string"
+          },
+          "workspace_memberships": {
+            "items": {
+              "$ref": "#/components/schemas/CallerWorkspaceMembershipPublic"
+            },
+            "title": "Workspace Memberships",
+            "type": "array"
           }
         },
         "required": [

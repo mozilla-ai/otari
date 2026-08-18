@@ -34,6 +34,7 @@ from gateway.models.tenancy import (
     ActiveOrganizationMemberPublic,
     ActiveOrganizationMembersPublic,
     ActiveOrganizationMemberUpdateRequest,
+    CallerWorkspaceMembershipPublic,
     Organization,
     OrganizationMember,
     OrganizationMembershipContextPublic,
@@ -99,6 +100,8 @@ class OrganizationService:
         self.organizations = OrganizationRepository(db)
         self.members = OrganizationMemberRepository(db)
         self.users = UserRepository(db)
+        self.workspaces = WorkspaceMemberRepository(db)
+        self.workspace_rows = WorkspaceRepository(db)
 
     # ------------------------------------------------------------------
     # Context resolution and authorization
@@ -147,17 +150,53 @@ class OrganizationService:
         *,
         membership: OrganizationMember,
         organization: Organization,
+        workspace_memberships: list[CallerWorkspaceMembershipPublic],
     ) -> OrganizationMembershipContextPublic:
         return OrganizationMembershipContextPublic(
             organization_member_id=membership.id,
             role=membership.role,
             status=membership.status,
             organization=OrganizationPublic.model_validate(organization),
+            workspace_memberships=workspace_memberships,
             # The platform answers "does this org have a self-hosted gateway
             # attached". A standalone deployment reading this *is* that gateway,
             # so its own provider credentials are always available to it.
             byo_provider_keys_allowed=True,
         )
+
+    async def _caller_workspace_memberships(
+        self,
+        *,
+        user: User,
+        organization: Organization,
+    ) -> list[CallerWorkspaceMembershipPublic]:
+        """The workspaces the caller belongs to, with the name and their role.
+
+        Two queries rather than a join helper, reusing the repository methods the
+        workspace surface already has. Only the caller's own memberships, so a
+        shell can pick a default workspace without being handed a directory of
+        the organization's workspaces: listing those is a separate, authorized
+        read.
+        """
+        memberships, _ = await self.workspaces.get_workspaces_for_user(
+            user_id=user.id,
+            organization_id=organization.id,
+        )
+        if not memberships:
+            return []
+        names = {
+            workspace.id: workspace.name
+            for workspace in await self.workspace_rows.get_by_ids([m.workspace_id for m in memberships])
+        }
+        return [
+            CallerWorkspaceMembershipPublic(
+                workspace_id=membership.workspace_id,
+                name=names[membership.workspace_id],
+                role=membership.role,
+            )
+            for membership in memberships
+            if membership.workspace_id in names
+        ]
 
     async def _resolve_active_organization(self, user: User) -> Organization:
         """Resolve the caller's organization, repairing a stale pointer if it can.
@@ -194,7 +233,11 @@ class OrganizationService:
         """Return the caller's organization and their standing in it."""
         organization = await self._resolve_active_organization(user)
         membership = await self._require_active_membership(user, organization)
-        return self._to_context(membership=membership, organization=organization)
+        return self._to_context(
+            membership=membership,
+            organization=organization,
+            workspace_memberships=await self._caller_workspace_memberships(user=user, organization=organization),
+        )
 
     # ------------------------------------------------------------------
     # The organization itself
@@ -216,7 +259,11 @@ class OrganizationService:
         )
         await self.db.commit()
 
-        return self._to_context(membership=membership, organization=updated)
+        return self._to_context(
+            membership=membership,
+            organization=updated,
+            workspace_memberships=await self._caller_workspace_memberships(user=user, organization=updated),
+        )
 
     # ------------------------------------------------------------------
     # Membership
