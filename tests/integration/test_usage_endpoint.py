@@ -8,6 +8,7 @@ from datetime import UTC, datetime, timedelta
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from conftest import seed_workspace_id
 from gateway.models.entities import APIKey, UsageLog, User
 
 USAGE_PATH = "/v1/usage"
@@ -45,6 +46,7 @@ def _make_log(
     _ensure_user(db, user_id)
     log = UsageLog(
         id=log_id or str(uuid.uuid4()),
+        workspace_id=seed_workspace_id(db),
         user_id=user_id,
         api_key_id=api_key_id,
         timestamp=timestamp,
@@ -564,6 +566,7 @@ def test_list_usage_labels_rows_from_the_joined_entities(
     db_session.add(User(user_id="labeled-user", alias="Ada Lovelace", spend=0.0, blocked=False))
     db_session.flush()
     key = APIKey(
+        workspace_id=seed_workspace_id(db_session),
         id=str(uuid.uuid4()),
         key_hash=f"hash-{uuid.uuid4()}",
         key_prefix="sk-test",
@@ -631,6 +634,7 @@ def test_summary_breakdowns_carry_labels_for_opaque_keys(
     db_session.add(User(user_id="summary-user", alias="Grace Hopper", spend=0.0, blocked=False))
     db_session.flush()
     key = APIKey(
+        workspace_id=seed_workspace_id(db_session),
         id=str(uuid.uuid4()),
         key_hash=f"hash-{uuid.uuid4()}",
         key_prefix="sk-test",

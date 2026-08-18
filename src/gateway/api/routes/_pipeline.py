@@ -154,6 +154,7 @@ from gateway.services.tool_usage import (
 )
 from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 from gateway.services.web_search_backend import WEB_SEARCH_TOOL_NAME, WebSearchNotReachableError
+from gateway.services.workspace_scope import workspace_for_key_id
 from gateway.streaming import (
     StreamFormat,
     StreamingAttemptFailure,
@@ -1836,6 +1837,7 @@ async def log_usage(
     """
     usage_log = UsageLog(
         id=str(uuid.uuid4()),
+        workspace_id=await workspace_for_key_id(db, api_key_id),
         api_key_id=api_key_id,
         user_id=user_id,
         timestamp=datetime.now(UTC),

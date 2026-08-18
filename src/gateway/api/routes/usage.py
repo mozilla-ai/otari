@@ -7,6 +7,7 @@ external systems that need to sync usage data (billing, analytics).
 
 import csv
 import io
+import uuid
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from time import monotonic
@@ -351,6 +352,7 @@ def _usage_filters(
     counts_toward_budget: bool | None = None,
     status_code: int | None = None,
     request_group_id: list[str] | None = None,
+    workspace_id: uuid.UUID | None = None,
 ) -> list[ColumnElement[bool]]:
     """Build the shared WHERE conditions for the list and count endpoints.
 
@@ -363,6 +365,8 @@ def _usage_filters(
     timezone, so the same query would size a different set of rows per deployment.
     """
     conditions: list[ColumnElement[bool]] = []
+    if workspace_id is not None:
+        conditions.append(UsageLog.workspace_id == workspace_id)
     if start_date is not None:
         conditions.append(UsageLog.timestamp >= utc_bound(start_date))
     if end_date is not None:
@@ -434,6 +438,9 @@ async def list_usage(
     request_group_id: Annotated[
         list[str] | None, Query(max_length=_MAX_REQUEST_GROUPS, description=_REQUEST_GROUP_DESC)
     ] = None,
+    workspace_id: Annotated[
+        uuid.UUID | None, Query(description="Only usage recorded in this workspace.")
+    ] = None,
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
 ) -> list[UsageEntry]:
@@ -464,6 +471,7 @@ async def list_usage(
         tool=tool,
         counts_toward_budget=counts_toward_budget,
         request_group_id=request_group_id,
+        workspace_id=workspace_id,
     )
     # Outer-joined rather than looked up per row, and rather than left to the
     # client: naming a page of rows must not cost a round trip each, nor oblige a
@@ -538,6 +546,9 @@ async def count_usage(
     request_group_id: Annotated[
         list[str] | None, Query(max_length=_MAX_REQUEST_GROUPS, description=_REQUEST_GROUP_DESC)
     ] = None,
+    workspace_id: Annotated[
+        uuid.UUID | None, Query(description="Only usage recorded in this workspace.")
+    ] = None,
 ) -> UsageCount:
     """Total number of usage logs matching the given filters.
 
@@ -563,6 +574,7 @@ async def count_usage(
         tool=tool,
         counts_toward_budget=counts_toward_budget,
         request_group_id=request_group_id,
+        workspace_id=workspace_id,
     )
     stmt: Any = select(func.count()).select_from(UsageLog).where(*conditions)
     total = (await db.execute(stmt)).scalar_one()

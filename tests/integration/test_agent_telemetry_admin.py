@@ -7,6 +7,7 @@ from datetime import UTC, datetime
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from conftest import seed_workspace_id
 from gateway.models.entities import AgentTelemetry, APIKey, User
 
 DELETE_PATH = "/v1/agent-telemetry"
@@ -22,7 +23,14 @@ def _ensure_user(db: Session, user_id: str) -> None:
 
 def _ensure_api_key(db: Session, api_key_id: str, user_id: str) -> None:
     if db.query(APIKey).filter(APIKey.id == api_key_id).first() is None:
-        db.add(APIKey(id=api_key_id, key_hash=f"hash-{api_key_id}", user_id=user_id))
+        db.add(
+            APIKey(
+                id=api_key_id,
+                key_hash=f"hash-{api_key_id}",
+                user_id=user_id,
+                workspace_id=seed_workspace_id(db),
+            )
+        )
         db.flush()
 
 

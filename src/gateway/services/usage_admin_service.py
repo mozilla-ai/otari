@@ -18,6 +18,7 @@ rows). Enforced gateway rows and the spend ledger (``users.spend``) are never to
 neither operation can desync a budget, matching the boundary the ingest path establishes.
 """
 
+import uuid
 from datetime import datetime
 from typing import Annotated, Any, cast
 
@@ -87,6 +88,10 @@ class UsageSelection(BaseModel):
     # selection is hard-scoped to imported rows; it is still forwarded so the
     # "every scoping filter must be repeatable" invariant holds without exception.
     tool: str | None = None
+    # Workspace scoping. On this body for the same reason every other scoping
+    # filter is: an operator who filtered the table to one workspace and then
+    # chose "all N matching" must not delete another workspace's rows.
+    workspace_id: uuid.UUID | None = None
 
     @model_validator(mode="after")
     def _require_exactly_one_mode(self) -> "UsageSelection":
@@ -157,6 +162,8 @@ def _selection_conditions(selection: UsageSelection) -> list[ColumnElement[bool]
     if selection.ids:
         conditions.append(UsageLog.id.in_(selection.ids))
         return conditions
+    if selection.workspace_id is not None:
+        conditions.append(UsageLog.workspace_id == selection.workspace_id)
     if selection.source is not None:
         conditions.append(UsageLog.source == selection.source)
     # An empty list is no filter at all, the same reading the count endpoint applies.

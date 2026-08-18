@@ -45,6 +45,22 @@ def _no_background_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
 
 
 @pytest.fixture(autouse=True)
+def _reset_default_workspace() -> None:
+    """Drop the memoized default workspace before each test.
+
+    ``workspace_scope`` memoizes the default workspace id and each key's
+    workspace, because a usage row is written on the hot path and must not pay a
+    lookup for something immutable. Immutable within one database: every test
+    builds a fresh one, so an id cached by the previous test names a workspace
+    that no longer exists and the next insert fails its foreign key. Same reason
+    the alias and provider caches have resets.
+    """
+    from gateway.services.workspace_scope import reset_default_workspace_cache
+
+    reset_default_workspace_cache()
+
+
+@pytest.fixture(autouse=True)
 def _reset_default_pricing() -> Generator[None, None, None]:
     """Restore process-wide pricing state to its default before each test.
 
@@ -66,3 +82,36 @@ def _reset_default_pricing() -> Generator[None, None, None]:
     configure_default_pricing(False)
     configure_provider_types(None)
     reset_price_refresh_state()
+
+
+def seed_workspace_id(db: Any) -> Any:
+    """The workspace a directly-built request-plane row belongs to.
+
+    Fixtures that insert ``UsageLog`` or ``APIKey`` rows through a sync session
+    skip the routes that would resolve a workspace for them, and the column is
+    NOT NULL. The migration seeds a default; this finds it, and creates one on a
+    schema built by ``create_all`` rather than by migrations.
+
+    Imports inside the function: this module puts ``src`` on ``sys.path`` at
+    import time, so a top-level ``gateway`` import here would run before that.
+    """
+    from gateway.models.tenancy import Organization, Workspace
+
+    workspace = (
+        db.query(Workspace)
+        .join(Organization, Organization.id == Workspace.organization_id)
+        .filter(Organization.slug == "default")
+        .first()
+    )
+    if workspace is not None:
+        return workspace.id
+
+    organization = db.query(Organization).filter(Organization.slug == "default").first()
+    if organization is None:
+        organization = Organization(name="Default organization", slug="default")
+        db.add(organization)
+        db.flush()
+    workspace = Workspace(name="Default workspace", organization_id=organization.id)
+    db.add(workspace)
+    db.flush()
+    return workspace.id

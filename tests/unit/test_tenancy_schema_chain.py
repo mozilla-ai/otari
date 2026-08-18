@@ -22,7 +22,7 @@ from pathlib import Path
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import Engine, create_engine, inspect
+from sqlalchemy import Engine, create_engine, inspect, text
 
 _ALEMBIC_DIR = Path(__file__).resolve().parents[2] / "alembic"
 _TENANCY_REVISION = "c4b6d8e0f2a3"
@@ -147,3 +147,65 @@ def test_naming_one_model_module_registers_them_all() -> None:
     )
 
     assert _TENANCY_TABLES <= set(json.loads(result.stdout))
+
+
+def test_workspace_scope_seeds_a_default_and_backfills_existing_rows(tmp_path: Path) -> None:
+    """The workspace column is NOT NULL, so the migration has to supply a value.
+
+    Provisioning is lazy, so a gateway that has only ever served completions has
+    no organization and no workspace to backfill onto. The migration seeds them
+    under the slug and name provisioning looks up, so a later first boot adopts
+    these rather than creating a second default.
+    """
+    url = f"sqlite:///{tmp_path / 'backfill.db'}"
+    config = _alembic_config(url)
+
+    command.upgrade(config, "c4b6d8e0f2a3")
+    engine = create_engine(url)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO users (user_id, spend, reserved, blocked, created_at, updated_at, metadata) "
+                "VALUES ('alice', 0, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}')"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO api_keys (id, key_hash, key_name, user_id, created_at, is_active, "
+                "exclude_from_budget, metadata) "
+                "VALUES ('k1', 'h1', 'ada', 'alice', CURRENT_TIMESTAMP, 1, 0, '{}')"
+            )
+        )
+        assert connection.execute(text("SELECT COUNT(*) FROM workspace")).scalar_one() == 0
+
+    command.upgrade(config, "head")
+
+    with engine.begin() as connection:
+        seeded = connection.execute(
+            text(
+                "SELECT w.id FROM workspace w "
+                "JOIN organization o ON o.id = w.organization_id WHERE o.slug = 'default'"
+            )
+        ).scalar_one()
+        assert connection.execute(text("SELECT workspace_id FROM api_keys")).scalar_one() == seeded
+    engine.dispose()
+
+
+def test_workspace_scope_keeps_the_partial_indexes_it_rebuilds_around(
+    sqlite_at_head: tuple[Config, Engine],
+) -> None:
+    """Adding the column must not cost the alias and policy partial indexes.
+
+    Both tables carry a ``user_id IS NULL`` partial unique index that SQLite's
+    batch mode reflects poorly, which is why the column is added with a default
+    in one statement rather than through a table rebuild.
+    """
+    _, engine = sqlite_at_head
+    with engine.begin() as connection:
+        partial = {
+            name
+            for (name,) in connection.execute(
+                text("SELECT name FROM sqlite_master WHERE type='index' AND sql LIKE '%WHERE%'")
+            )
+        }
+    assert {"uq_model_aliases_global_name", "uq_routing_policies_global_name"} <= partial

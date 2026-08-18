@@ -64,6 +64,7 @@ from gateway.services.pricing_service import (
     pricing_required_but_missing,
 )
 from gateway.services.provider_kwargs import ResolvedProvider, resolve_provider_selector
+from gateway.services.workspace_scope import workspace_for_key_id
 
 ResultT = TypeVar("ResultT")
 
@@ -396,6 +397,10 @@ async def run_passthrough(
             detail=not_allowed_detail,
         )
 
+    # Resolved here rather than in the closure below: the builder is
+    # synchronous, and the workspace is fixed for the whole request anyway.
+    usage_workspace_id = await workspace_for_key_id(db, api_key_id)
+
     def _usage_row(row_status: str, **outcome: Any) -> UsageLog:
         """Build this request's usage row, varying only the outcome columns.
 
@@ -405,6 +410,7 @@ async def run_passthrough(
         """
         return UsageLog(
             id=str(uuid.uuid4()),
+            workspace_id=usage_workspace_id,
             api_key_id=api_key_id,
             user_id=user_id,
             timestamp=datetime.now(UTC),

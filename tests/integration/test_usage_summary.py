@@ -18,6 +18,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from conftest import seed_workspace_id
 from gateway.core.sql import MAX_FILTER_VALUES
 from gateway.models.entities import APIKey, UsageLog, User
 
@@ -34,7 +35,15 @@ def _ensure_user(db: Session, user_id: str) -> None:
 def _ensure_api_key(db: Session, key_id: str, user_id: str | None) -> None:
     # usage_logs.api_key_id is a real FK, so a row attributed to a key needs one.
     if db.query(APIKey).filter(APIKey.id == key_id).first() is None:
-        db.add(APIKey(id=key_id, key_hash=f"hash-{key_id}", key_name=key_id, user_id=user_id))
+        db.add(
+            APIKey(
+                id=key_id,
+                key_hash=f"hash-{key_id}",
+                key_name=key_id,
+                user_id=user_id,
+                workspace_id=seed_workspace_id(db),
+            )
+        )
         db.flush()
 
 
@@ -68,6 +77,7 @@ def _make_log(
     db.add(
         UsageLog(
             id=str(uuid.uuid4()),
+            workspace_id=seed_workspace_id(db),
             user_id=user_id,
             api_key_id=api_key_id,
             timestamp=timestamp,

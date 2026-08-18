@@ -39,6 +39,7 @@ from gateway.services.log_writer import LogWriter
 from gateway.services.model_access import is_model_allowed, model_not_allowed_detail, resolve_request_allowlist
 from gateway.services.pricing_service import find_model_pricing
 from gateway.services.provider_kwargs import get_provider_kwargs, resolve_provider_selector
+from gateway.services.workspace_scope import workspace_for_key_id
 
 router = APIRouter(prefix="/v1/batches", tags=["batches"])
 
@@ -72,6 +73,7 @@ class CreateBatchRequest(BaseModel):
 
 
 async def log_batch_usage(
+    db: AsyncSession,
     log_writer: LogWriter,
     api_key_id: str | None,
     model: str,
@@ -92,6 +94,7 @@ async def log_batch_usage(
     # to record (unlike the chat/passthrough paths).
     usage_log = UsageLog(
         id=str(uuid.uuid4()),
+        workspace_id=await workspace_for_key_id(db, api_key_id),
         api_key_id=api_key_id,
         user_id=user_id,
         timestamp=datetime.now(UTC),
@@ -338,6 +341,7 @@ async def create_batch(
         raise
     except Exception as e:
         await log_batch_usage(
+            db=db,
             log_writer=log_writer,
             api_key_id=api_key_id,
             model=model,
@@ -361,6 +365,7 @@ async def create_batch(
             logger.warning("Failed to remove temp file %s", tmp_path)
 
     await log_batch_usage(
+        db=db,
         log_writer=log_writer,
         api_key_id=api_key_id,
         model=model,
@@ -621,6 +626,7 @@ async def retrieve_batch_results(
 
     if should_account:
         await log_batch_usage(
+            db=db,
             log_writer=log_writer,
             api_key_id=api_key_id,
             model=batch_model,

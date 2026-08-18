@@ -2240,6 +2240,19 @@
             ],
             "description": "Optional user ID to associate with this key",
             "title": "User Id"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Workspace this key belongs to. Omitted means the deployment's default workspace. A key belongs to exactly one workspace: requests on it are scoped and billed there, so the workspace is read off the key rather than off a request header.",
+            "title": "Workspace Id"
           }
         },
         "title": "CreateKeyRequest",
@@ -3660,6 +3673,11 @@
               }
             ],
             "title": "User Id"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
           }
         },
         "required": [
@@ -3675,6 +3693,7 @@
           "exclude_from_budget",
           "reject_user_mismatch",
           "capture_agent_telemetry",
+          "workspace_id",
           "metadata"
         ],
         "title": "KeyInfo",
@@ -7881,6 +7900,18 @@
               }
             ],
             "title": "User Id"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id"
           }
         },
         "title": "UsageDeleteRequest",
@@ -8828,6 +8859,18 @@
               }
             ],
             "title": "User Id"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id"
           }
         },
         "required": [
@@ -10105,6 +10148,27 @@
       "get": {
         "description": "List every alias in force, from config.yml and from storage.\n\nEvery scope at once, global and user-scoped alike: this is the master-key\nmanagement view, not what any one caller resolves.",
         "operationId": "list_aliases_v1_aliases_get",
+        "parameters": [
+          {
+            "description": "Only stored entries in this workspace. Config-file entries are always included.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only stored entries in this workspace. Config-file entries are always included.",
+              "title": "Workspace Id"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -10119,6 +10183,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
@@ -11581,7 +11655,7 @@
     },
     "/v1/keys": {
       "get": {
-        "description": "List all API keys.\n\nRequires master key authentication.",
+        "description": "List all API keys.\n\nRequires master key authentication. An unset ``workspace_id`` lists every key\non the deployment, which keeps the pre-workspace view working unchanged.",
         "operationId": "list_keys_v1_keys_get",
         "parameters": [
           {
@@ -11605,6 +11679,25 @@
               "minimum": 1,
               "title": "Limit",
               "type": "integer"
+            }
+          },
+          {
+            "description": "Only keys in this workspace.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only keys in this workspace.",
+              "title": "Workspace Id"
             }
           }
         ],
@@ -13586,6 +13679,27 @@
       "get": {
         "description": "List every routing policy in force, from config.yml and from storage.\n\nEvery scope at once, global and user-scoped alike: this is the master-key\nmanagement view, not what any one caller resolves.",
         "operationId": "list_policies_v1_routing_policies_get",
+        "parameters": [
+          {
+            "description": "Only stored entries in this workspace. Config-file entries are always included.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only stored entries in this workspace. Config-file entries are always included.",
+              "title": "Workspace Id"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -13600,6 +13714,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
@@ -14889,6 +15013,25 @@
             }
           },
           {
+            "description": "Only usage recorded in this workspace.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only usage recorded in this workspace.",
+              "title": "Workspace Id"
+            }
+          },
+          {
             "in": "query",
             "name": "skip",
             "required": false,
@@ -15248,6 +15391,25 @@
               ],
               "description": "Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call.",
               "title": "Request Group Id"
+            }
+          },
+          {
+            "description": "Only usage recorded in this workspace.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only usage recorded in this workspace.",
+              "title": "Workspace Id"
             }
           }
         ],

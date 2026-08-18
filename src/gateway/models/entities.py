@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, Text, UniqueConstraint, text
+from sqlalchemy import JSON, DateTime, ForeignKey, Index, Text, UniqueConstraint, Uuid, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlmodel import SQLModel
 
@@ -43,6 +43,13 @@ class APIKey(Base):
 
     id: Mapped[str] = mapped_column(primary_key=True)
     key_hash: Mapped[str] = mapped_column(unique=True, index=True)
+    # The workspace this row belongs to. NOT NULL: a workspace is the unit the
+    # dashboard scopes by, so "no workspace" is never a real state, only an
+    # unmigrated one. Existing rows were backfilled onto the deployment's default
+    # workspace, which the same migration seeds when tenancy was never touched.
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
     # Display-only leading characters of the plaintext key, kept so the dashboard can
     # recognize a key after its one-time reveal. Nullable: keys minted before this
     # column existed cannot be back-filled (the plaintext is unrecoverable).
@@ -211,6 +218,12 @@ class ModelAlias(Base):
 
     __tablename__ = "model_aliases"
     __table_args__ = (
+        # Deliberately not workspace-scoped yet. Widening this to
+        # (workspace_id, name, user_id) would let two workspaces each hold a
+        # "fast" entry, but resolution reads a process-wide cache keyed by name
+        # alone, so the second would silently shadow the first at request time.
+        # The constraint widens in the change that makes that cache
+        # workspace-aware, not before.
         UniqueConstraint("name", "user_id", name="uq_model_aliases_name_user"),
         Index(
             "uq_model_aliases_global_name",
@@ -229,6 +242,13 @@ class ModelAlias(Base):
     name: Mapped[str] = mapped_column()
     target: Mapped[str] = mapped_column()
     user_id: Mapped[str | None] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), index=True)
+    # The workspace this row belongs to. NOT NULL: a workspace is the unit the
+    # dashboard scopes by, so "no workspace" is never a real state, only an
+    # unmigrated one. Existing rows were backfilled onto the deployment's default
+    # workspace, which the same migration seeds when tenancy was never touched.
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -267,6 +287,12 @@ class RoutingPolicy(Base):
 
     __tablename__ = "routing_policies"
     __table_args__ = (
+        # Deliberately not workspace-scoped yet. Widening this to
+        # (workspace_id, name, user_id) would let two workspaces each hold a
+        # "fast" entry, but resolution reads a process-wide cache keyed by name
+        # alone, so the second would silently shadow the first at request time.
+        # The constraint widens in the change that makes that cache
+        # workspace-aware, not before.
         UniqueConstraint("name", "user_id", name="uq_routing_policies_name_user"),
         Index(
             "uq_routing_policies_global_name",
@@ -281,6 +307,13 @@ class RoutingPolicy(Base):
     name: Mapped[str] = mapped_column()
     spec: Mapped[dict[str, Any]] = mapped_column(JSON)
     user_id: Mapped[str | None] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), index=True)
+    # The workspace this row belongs to. NOT NULL: a workspace is the unit the
+    # dashboard scopes by, so "no workspace" is never a real state, only an
+    # unmigrated one. Existing rows were backfilled onto the deployment's default
+    # workspace, which the same migration seeds when tenancy was never touched.
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -498,6 +531,13 @@ class UsageLog(Base):
     )
 
     id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
+    # The workspace this row belongs to. NOT NULL: a workspace is the unit the
+    # dashboard scopes by, so "no workspace" is never a real state, only an
+    # unmigrated one. Existing rows were backfilled onto the deployment's default
+    # workspace, which the same migration seeds when tenancy was never touched.
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
     api_key_id: Mapped[str | None] = mapped_column(ForeignKey("api_keys.id", ondelete="SET NULL"), index=True)
     user_id: Mapped[str | None] = mapped_column(ForeignKey("users.user_id", ondelete="SET NULL"), index=True)
     timestamp: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)

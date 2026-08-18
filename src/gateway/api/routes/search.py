@@ -76,6 +76,7 @@ from gateway.services.search_backend import (
     resolve_search_tool,
     run_search,
 )
+from gateway.services.workspace_scope import workspace_for_key_id
 
 router = APIRouter(prefix="/v1", tags=["search"])
 
@@ -319,6 +320,10 @@ async def _dispatch_search(
         counts_toward_budget=not budget_exempt,
     )
 
+    # Resolved here rather than in the closure below: the builder is
+    # synchronous, and the workspace is fixed for the whole request anyway.
+    usage_workspace_id = await workspace_for_key_id(db, api_key_id)
+
     def usage_row(**overrides: Any) -> UsageLog:
         """Build the row for a search that reached the provider.
 
@@ -327,6 +332,7 @@ async def _dispatch_search(
         """
         return UsageLog(
             id=str(uuid.uuid4()),
+            workspace_id=usage_workspace_id,
             api_key_id=api_key_id,
             user_id=user_id,
             timestamp=datetime.now(UTC),

@@ -9,6 +9,7 @@ from gateway.core.config import GatewayConfig
 from gateway.log_config import log_secret
 from gateway.models.entities import APIKey
 from gateway.repositories.users_repository import get_or_create_default_user
+from gateway.services.workspace_scope import default_workspace_id
 
 
 async def bootstrap_first_api_key(config: GatewayConfig, db: AsyncSession) -> None:
@@ -30,6 +31,10 @@ async def bootstrap_first_api_key(config: GatewayConfig, db: AsyncSession) -> No
 
     db_key = APIKey(
         id=key_id,
+        # The deployment's default workspace: the bootstrap key has no owner and
+        # no workspace to be chosen for it, and it is created before anyone could
+        # have picked one.
+        workspace_id=await default_workspace_id(db),
         key_hash=hash_key(api_key),
         key_prefix=key_prefix(api_key),
         key_name="bootstrap",

@@ -15,6 +15,7 @@ a second row. The endpoint accepts only metadata and numeric token counts; promp
 completions, and tool payloads are rejected by the request schema, not stored.
 """
 
+import uuid
 from datetime import datetime
 
 from fastapi import HTTPException, status
@@ -32,6 +33,7 @@ from gateway.services.pricing_service import (
     default_pricing_enabled,
     normalize_effective_at,
 )
+from gateway.services.workspace_scope import resolve_workspace_id
 
 # Bounds. Batch size mirrors the /v1/usage list `limit` cap; the error list is
 # capped so one bad batch can't return an unbounded payload; the IN() list is
@@ -283,6 +285,7 @@ def _build_row(
     event: ExternalUsageEvent,
     pricing: ModelPricing | None,
     api_key_id: str | None,
+    workspace_id: uuid.UUID,
 ) -> UsageLog:
     cost: float | None = None
     meters: dict[str, int] | None = None
@@ -290,6 +293,7 @@ def _build_row(
     if pricing is not None:
         cost, meters, breakdown = calculate_metered_cost(pricing, _build_usage(event))
     return UsageLog(
+        workspace_id=workspace_id,
         api_key_id=api_key_id,
         user_id=user_id,
         timestamp=event.timestamp,
@@ -409,6 +413,10 @@ async def ingest_external_events(
     key_user = str(api_key.user_id) if api_key and api_key.user_id else None
     api_key_id = api_key.id if api_key else None
     seen_in_batch: set[str] = set()
+    # The key names the workspace; an imported batch under the master key is a
+    # deployment-wide write and lands in the default one.
+    usage_workspace_id = await resolve_workspace_id(db, api_key)
+
     rows: list[UsageLog] = []
 
     # Resolve users and pricing in bulk before the row loop, so ingestion issues a
@@ -458,7 +466,7 @@ async def ingest_external_events(
         # there is no budget to protect here. A model with no configured price simply
         # records cost=null (the row still lands); add pricing later to see the cost.
         pricing = _resolve_pricing(pricing_index, event.provider, event.model, event.timestamp)
-        rows.append(_build_row(request.source, target_user, event, pricing, api_key_id))
+        rows.append(_build_row(request.source, target_user, event, pricing, api_key_id, usage_workspace_id))
 
     # Drop events already imported in a prior batch before inserting.
     if rows:

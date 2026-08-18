@@ -11,6 +11,7 @@ is then the only caller that resolves it. See ``services/alias_service`` for the
 precedence between the layers.
 """
 
+import uuid
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -26,6 +27,7 @@ from gateway.models.entities import ModelAlias
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.alias_service import all_alias_names, refresh_alias_cache
 from gateway.services.policy_store import all_policy_names
+from gateway.services.workspace_scope import default_workspace_id
 
 router = APIRouter(prefix="/v1/aliases", tags=["aliases"])
 
@@ -132,13 +134,23 @@ async def _require_user(db: AsyncSession, user_id: str) -> None:
 async def list_aliases(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    workspace_id: Annotated[
+        uuid.UUID | None,
+        Query(description="Only stored entries in this workspace. Config-file entries are always included."),
+    ] = None,
 ) -> list[AliasResponse]:
     """List every alias in force, from config.yml and from storage.
 
     Every scope at once, global and user-scoped alike: this is the master-key
     management view, not what any one caller resolves.
     """
-    rows = (await db.execute(select(ModelAlias).order_by(ModelAlias.name))).scalars().all()
+    statement = select(ModelAlias)
+    if workspace_id is not None:
+        # Stored rows only. A config.yml entry has no workspace: it is
+        # deployment-wide and in force in every one of them, so filtering
+        # it out would misreport what actually resolves.
+        statement = statement.where(ModelAlias.workspace_id == workspace_id)
+    rows = (await db.execute(statement.order_by(ModelAlias.name))).scalars().all()
     # Keyed on (name, scope) rather than name: the same display name can exist
     # globally and per user, and both are real rows to manage.
     merged = {(row.name, row.user_id): AliasResponse.from_model(row) for row in rows}
@@ -175,7 +187,15 @@ async def set_alias(
     if alias:
         alias.target = request.target
     else:
-        alias = ModelAlias(name=request.name, target=request.target, user_id=request.user_id)
+        alias = ModelAlias(
+            name=request.name,
+            target=request.target,
+            user_id=request.user_id,
+            # See the note on RoutingPolicy: alias resolution reads a
+            # process-wide, name-keyed cache, so storing one outside the default
+            # workspace would show it as scoped while it resolved everywhere.
+            workspace_id=await default_workspace_id(db),
+        )
         db.add(alias)
 
     try:

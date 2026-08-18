@@ -80,13 +80,17 @@ async def test_create_returns_generated_values(async_db: AsyncSession) -> None:
 async def test_writes_are_staged_and_not_committed(async_db: AsyncSession) -> None:
     """The contract the whole slice depends on: repositories flush, services commit."""
     repository = OrganizationRepository(async_db)
+    # Every migrated database starts with the seeded default organization, which
+    # the workspace-scope revision creates so the NOT NULL backfill has a target.
+    # Count relative to it rather than from zero.
+    baseline = await repository.count()
 
     await repository.create(OrganizationCreate(name="Acme", slug="acme"))
-    assert await repository.count() == 1
+    assert await repository.count() == baseline + 1
 
     await async_db.rollback()
 
-    assert await repository.count() == 0
+    assert await repository.count() == baseline
 
 
 async def test_update_only_applies_the_fields_the_caller_set(async_db: AsyncSession) -> None:
@@ -102,6 +106,7 @@ async def test_update_only_applies_the_fields_the_caller_set(async_db: AsyncSess
 
 async def test_get_and_delete_round_trip(async_db: AsyncSession) -> None:
     repository = OrganizationRepository(async_db)
+    baseline = await repository.count()
     organization = await repository.create(OrganizationCreate(name="Acme", slug="acme"))
 
     assert await repository.get(organization.id) is not None
@@ -109,16 +114,17 @@ async def test_get_and_delete_round_trip(async_db: AsyncSession) -> None:
     await repository.delete(organization)
 
     assert await repository.get(organization.id) is None
-    assert await repository.count() == 0
+    assert await repository.count() == baseline
 
 
 async def test_get_all_pages(async_db: AsyncSession) -> None:
     repository = OrganizationRepository(async_db)
+    baseline = await repository.count()
     for index in range(3):
         await repository.create(OrganizationCreate(name=f"Org {index}", slug=f"org-{index}"))
 
     assert len(await repository.get_all(limit=2)) == 2
-    assert len(await repository.get_all(skip=2)) == 1
+    assert len(await repository.get_all(skip=2)) == baseline + 1
 
 
 async def test_get_all_pages_in_a_defined_order(async_db: AsyncSession) -> None:

@@ -9,7 +9,7 @@ writer still gets its row.
 """
 
 from typing import Any
-from unittest.mock import MagicMock
+from unittest.mock import AsyncMock, MagicMock
 
 import pytest
 
@@ -45,10 +45,13 @@ class _RecordingWriter:
 
 
 def _kwargs(log_writer: Any) -> dict[str, Any]:
-    # db is only touched when the row carries usage data, which a rejection row
-    # never does, so a bare mock is enough to exercise the real code path.
+    # Touched once even for a rejection: every usage row carries a workspace, and
+    # the key names it. The scalar resolves to None, which is the "key not found"
+    # arm and falls back to the default workspace, so the row is still built.
+    db = MagicMock()
+    db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
     return {
-        "db": MagicMock(),
+        "db": db,
         "log_writer": log_writer,
         "api_key_id": "key-1",
         "user_id": "user-1",

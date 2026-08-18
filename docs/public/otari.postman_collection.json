@@ -283,7 +283,15 @@
                 "v1",
                 "aliases"
               ],
-              "raw": "{{baseUrl}}/v1/aliases"
+              "query": [
+                {
+                  "description": "Only stored entries in this workspace. Config-file entries are always included.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/aliases?workspace_id="
             }
           }
         },
@@ -1150,7 +1158,7 @@
         {
           "name": "List Keys",
           "request": {
-            "description": "List all API keys.\n\nRequires master key authentication.",
+            "description": "List all API keys.\n\nRequires master key authentication. An unset ``workspace_id`` lists every key\non the deployment, which keeps the pre-workspace view working unchanged.",
             "header": [],
             "method": "GET",
             "url": {
@@ -1173,9 +1181,15 @@
                   "disabled": true,
                   "key": "limit",
                   "value": ""
+                },
+                {
+                  "description": "Only keys in this workspace.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/keys?skip=&limit="
+              "raw": "{{baseUrl}}/v1/keys?skip=&limit=&workspace_id="
             }
           }
         },
@@ -1189,7 +1203,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"exclude_from_budget\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"reject_user_mismatch\": false,\n  \"user_id\": \"string\"\n}"
+              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"exclude_from_budget\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"reject_user_mismatch\": false,\n  \"user_id\": \"string\",\n  \"workspace_id\": \"00000000-0000-0000-0000-000000000000\"\n}"
             },
             "description": "Create a new API key.\n\nRequires master key authentication.\n\nIf user_id is provided, the key will be associated with that user (creates user if it doesn't exist).\nIf user_id is not provided, the key is associated with the shared \"default\" user, which is created\non first use. Keys without an explicit owner therefore share one identity, and so share budget,\nusage, and files.",
             "header": [
@@ -2410,7 +2424,15 @@
                 "routing",
                 "policies"
               ],
-              "raw": "{{baseUrl}}/v1/routing/policies"
+              "query": [
+                {
+                  "description": "Only stored entries in this workspace. Config-file entries are always included.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/routing/policies?workspace_id="
             }
           }
         },
@@ -3118,6 +3140,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Only usage recorded in this workspace.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
                   "description": "",
                   "disabled": true,
                   "key": "skip",
@@ -3130,7 +3158,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&request_group_id=&skip=&limit="
+              "raw": "{{baseUrl}}/v1/usage?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&request_group_id=&workspace_id=&skip=&limit="
             }
           }
         },
@@ -3257,9 +3285,15 @@
                   "disabled": true,
                   "key": "request_group_id",
                   "value": ""
+                },
+                {
+                  "description": "Only usage recorded in this workspace.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage/count?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&request_group_id="
+              "raw": "{{baseUrl}}/v1/usage/count?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&request_group_id=&workspace_id="
             }
           }
         },

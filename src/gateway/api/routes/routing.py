@@ -15,6 +15,7 @@ safe as a unit of access: only an operator can decide which models a name reache
 so a caller cannot widen their own access by writing a policy.
 """
 
+import uuid
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -43,6 +44,7 @@ from gateway.services.routing import (
 )
 from gateway.services.routing.decide import explain_router_ordering
 from gateway.services.routing.knn import unpriced_router_candidates
+from gateway.services.workspace_scope import default_workspace_id
 
 router = APIRouter(prefix="/v1/routing/policies", tags=["routing"])
 
@@ -339,13 +341,23 @@ async def _refresh_quietly(db: AsyncSession, name: str) -> None:
 async def list_policies(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    workspace_id: Annotated[
+        uuid.UUID | None,
+        Query(description="Only stored entries in this workspace. Config-file entries are always included."),
+    ] = None,
 ) -> list[PolicyResponse]:
     """List every routing policy in force, from config.yml and from storage.
 
     Every scope at once, global and user-scoped alike: this is the master-key
     management view, not what any one caller resolves.
     """
-    rows = (await db.execute(select(RoutingPolicy).order_by(RoutingPolicy.name))).scalars().all()
+    statement = select(RoutingPolicy)
+    if workspace_id is not None:
+        # Stored rows only. A config.yml entry has no workspace: it is
+        # deployment-wide and in force in every one of them, so filtering
+        # it out would misreport what actually resolves.
+        statement = statement.where(RoutingPolicy.workspace_id == workspace_id)
+    rows = (await db.execute(statement.order_by(RoutingPolicy.name))).scalars().all()
     merged: dict[tuple[str, str | None], PolicyResponse] = {}
     for row in rows:
         try:
@@ -432,7 +444,15 @@ async def set_policy(
     if policy:
         policy.spec = stored_spec
     else:
-        policy = RoutingPolicy(name=request.name, spec=stored_spec, user_id=request.user_id)
+        policy = RoutingPolicy(
+            name=request.name,
+            spec=stored_spec,
+            user_id=request.user_id,
+            # Resolution is still deployment-wide, so everything lands in the
+            # default workspace: a policy stored elsewhere would be listed there
+            # and resolve everywhere, which is worse than not scoping it yet.
+            workspace_id=await default_workspace_id(db),
+        )
         db.add(policy)
 
     try:

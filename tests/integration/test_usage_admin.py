@@ -12,6 +12,7 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from conftest import seed_workspace_id
 from gateway.core.sql import MAX_FILTER_VALUES
 from gateway.models.entities import UsageLog, User
 
@@ -49,6 +50,7 @@ def _make_log(
     _ensure_user(db, user_id)
     log = UsageLog(
         id=log_id,
+        workspace_id=seed_workspace_id(db),
         user_id=user_id,
         timestamp=timestamp,
         model=model,
