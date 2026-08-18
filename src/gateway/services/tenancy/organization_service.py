@@ -49,6 +49,10 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
+from gateway.repositories.users_repository import (
+    get_or_create_attribution_user,
+    live_attribution_user_ids,
+)
 from gateway.services.tenancy.errors import (
     InvalidEmailError,
     MembershipUpdateError,
@@ -229,8 +233,12 @@ class OrganizationService:
         organization = await self.get_active_organization_for_user(user)
 
         rows, count = await self.members.get_by_organization_with_users(organization.id, skip=skip, limit=limit)
+        # One query for the whole page rather than a lookup per row: the roster is
+        # the picker the dashboard builds its key-owner list from, so every row
+        # needs to say whether it can own a key.
+        live = await live_attribution_user_ids(self.db, [str(member_user.id) for _, member_user in rows])
         return ActiveOrganizationMembersPublic(
-            data=[self._to_member_public(membership, member_user) for membership, member_user in rows],
+            data=[self._to_member_public(membership, member_user, live=live) for membership, member_user in rows],
             count=count,
         )
 
@@ -309,6 +317,15 @@ class OrganizationService:
                     {"role": request.role, "status": "active"},
                 )
 
+            # After both branches, not inside either: keyed on the identity's
+            # UUID, so the create path mints and the revive path finds the row it
+            # minted the first time rather than a second one.
+            attribution = await get_or_create_attribution_user(
+                self.db,
+                user_id=str(target.id),
+                alias=email,
+            )
+
             await self._apply_workspace_assignments(user_id=target.id, assignments=assignments)
             await self.db.commit()
         except IntegrityError:
@@ -322,6 +339,7 @@ class OrganizationService:
             status="active",
             organization_member_id=membership.id,
             user_id=target.id,
+            attribution_user_id=attribution.user_id,
             email=email,
             full_name=target.full_name,
             role=membership.role,
@@ -425,7 +443,8 @@ class OrganizationService:
             raise OrganizationMemberNotFoundError(organization_member_id)
         await self.db.commit()
 
-        return self._to_member_public(updated, target_user)
+        live = await live_attribution_user_ids(self.db, [str(target_user.id)])
+        return self._to_member_public(updated, target_user, live=live)
 
     async def remove_active_organization_member_for_user(
         self,
@@ -503,10 +522,17 @@ class OrganizationService:
                 raise MembershipUpdateError("An organization must keep at least one active owner")
 
     @staticmethod
-    def _to_member_public(membership: OrganizationMember, user: User) -> ActiveOrganizationMemberPublic:
+    def _to_member_public(
+        membership: OrganizationMember,
+        user: User,
+        *,
+        live: set[str],
+    ) -> ActiveOrganizationMemberPublic:
+        attribution_user_id = str(user.id)
         return ActiveOrganizationMemberPublic(
             organization_member_id=membership.id,
             user_id=user.id,
+            attribution_user_id=attribution_user_id if attribution_user_id in live else None,
             email=user.email,
             full_name=user.full_name,
             role=membership.role,

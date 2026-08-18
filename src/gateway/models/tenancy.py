@@ -408,10 +408,21 @@ class ActiveOrganizationMemberPublic(SQLModel):
     ``email`` is nullable here (a local operator identity has no sign-in
     address), and ``invitation_id`` is always null until the invitation flow
     rehomes, which is what fills it.
+
+    ``attribution_user_id`` is the addition the platform has no counterpart for.
+    Keys, budgets, and usage attach to the gateway's string-keyed ``users`` row,
+    not to this UUID identity, so this carries the ``user_id`` a caller passes to
+    ``POST /v1/keys`` to give this member a key. It is null when no usable row
+    exists (nobody minted one, or it was soft-deleted through
+    ``DELETE /v1/users``), which is the signal not to offer this member as a key
+    owner: key creation would refuse. The two ids converge when the request plane
+    re-parents onto tenancy (M4), and this field is what lets that happen without
+    the dashboard changing.
     """
 
     organization_member_id: uuid.UUID | None = None
     user_id: uuid.UUID | None = None
+    attribution_user_id: str | None = None
     invitation_id: uuid.UUID | None = None
     email: str | None = None
     full_name: str | None = None
@@ -466,6 +477,7 @@ class ActiveOrganizationMemberCreateResultPublic(SQLModel):
     role: str
     organization_member_id: uuid.UUID | None = None
     user_id: uuid.UUID | None = None
+    attribution_user_id: str | None = None
     invitation_id: uuid.UUID | None = None
     full_name: str | None = None
     expires_at: datetime | None = None

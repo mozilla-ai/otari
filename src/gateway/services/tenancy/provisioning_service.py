@@ -40,6 +40,7 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
+from gateway.repositories.users_repository import get_or_create_attribution_user
 from gateway.services.tenancy.errors import ForeignTenancyError, TenancyError
 
 # Stored in runtime_settings, and deliberately not a SETTABLE_KEY, so
@@ -192,6 +193,10 @@ async def _provision(db: AsyncSession) -> User:
         user_id=operator.id,
         role="owner",
     )
+    # The operator's request-plane owner, so the first-boot identity can hold a
+    # key like any other member. Aliased by name rather than address because this
+    # identity deliberately has none.
+    await get_or_create_attribution_user(db, user_id=str(operator.id), alias=OPERATOR_FULL_NAME)
 
     workspaces = WorkspaceRepository(db)
     workspace = await workspaces.get_by_organization_and_name(organization.id, DEFAULT_WORKSPACE_NAME)
