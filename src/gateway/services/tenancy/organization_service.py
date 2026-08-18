@@ -240,7 +240,10 @@ class OrganizationService:
         parked, since there is no acceptance to park them until.
         """
         organization = await self.get_active_organization_for_user(user)
-        await self.require_active_organization_management_access(user=user, organization=organization)
+        actor_membership = await self.require_active_organization_management_access(
+            user=user,
+            organization=organization,
+        )
 
         email = _validated_email(request.email)
         assignments = request.workspace_assignments or []
@@ -269,6 +272,17 @@ class OrganizationService:
                 # Re-adding someone who was removed: removal suspends the
                 # membership rather than deleting it, so this revives that row
                 # and keeps their history attached to it.
+                #
+                # Through the same guard PATCH and DELETE use, because this
+                # branch also writes a role. Without it, adding an address whose
+                # membership is suspended lets an admin rewrite an owner's role,
+                # which PATCH refuses; the write is the same, so the rule is.
+                await self._validate_membership_update(
+                    actor_membership=actor_membership,
+                    target_membership=membership,
+                    update_data={"role": request.role, "status": "active"},
+                    organization_id=organization.id,
+                )
                 membership = await self.members.update_membership(
                     membership,
                     {"role": request.role, "status": "active"},

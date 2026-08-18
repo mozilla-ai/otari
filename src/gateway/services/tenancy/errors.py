@@ -134,6 +134,17 @@ class WorkspaceNameRequiredError(TenancyValidationError):
         super().__init__("A workspace name is required")
 
 
+class ForeignTenancyError(TenancyError):
+    """The database holds organizations this deployment did not provision.
+
+    A 500 rather than a client error, because nothing the caller sent is wrong:
+    the deployment is pointed at a database it cannot serve, and that is an
+    operator's problem to fix before any request can succeed.
+    """
+
+    status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
+
+
 class LastWorkspaceError(TenancyValidationError):
     """Deleting this workspace would leave the organization without one."""
 

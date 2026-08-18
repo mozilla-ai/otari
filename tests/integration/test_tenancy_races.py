@@ -13,6 +13,7 @@ from collections.abc import Callable
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy.orm import Session
 
 from gateway.models.tenancy import (
     ActiveOrganizationMemberCreateRequest,
@@ -28,9 +29,14 @@ from gateway.repositories.tenancy import (
 )
 from gateway.services.tenancy import OrganizationService, WorkspaceService
 from gateway.services.tenancy.errors import (
+    ForeignTenancyError,
     OrganizationMemberAlreadyExistsError,
     WorkspaceAlreadyExistsError,
     WorkspaceMemberAlreadyExistsError,
+)
+from gateway.services.tenancy.provisioning_service import (
+    BOOTSTRAP_IDENTITY_KEY,
+    ensure_bootstrap_identity,
 )
 
 pytestmark = pytest.mark.asyncio
@@ -162,3 +168,40 @@ async def test_concurrent_workspace_member_adds_conflict(
     conflicts = [outcome for outcome in outcomes if isinstance(outcome, WorkspaceMemberAlreadyExistsError)]
     assert len(joined) == 1
     assert len(conflicts) == _RACERS - 1
+
+
+async def test_provisioning_refuses_to_shadow_an_organization_it_did_not_create(
+    test_db: Session,
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """A restored or imported tenancy must not be silently made unreachable.
+
+    Provisioning adopts an organization slugged ``default``, which is the one it
+    would have made itself. Anything else it would ignore, create its own beside,
+    and point the marker at that; every route is scoped to the marked identity's
+    organization, so the restored rows become invisible with no list, no switch
+    and no by-id route to find them. The platform slugs organizations
+    ``{name}-{prefix}``, so a restored hosted organization always lands here.
+    """
+    async with sessions() as db:
+        await _seed_owner(db)
+
+        with pytest.raises(ForeignTenancyError) as raised:
+            await ensure_bootstrap_identity(db)
+
+        # The message has to name the organization and the way out, because the
+        # marker is not a settable key and nothing else can repoint it.
+        assert "Acme" in str(raised.value)
+        assert BOOTSTRAP_IDENTITY_KEY in str(raised.value)
+
+
+async def test_provisioning_still_runs_on_an_empty_database(
+    test_db: Session,
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """The guard must not break first boot, which is the ordinary path."""
+    async with sessions() as db:
+        operator = await ensure_bootstrap_identity(db)
+
+        assert operator.full_name == "Operator"
+

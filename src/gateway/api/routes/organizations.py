@@ -27,7 +27,7 @@ from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import CurrentIdentity, get_db
+from gateway.api.deps import CurrentIdentity, get_db, verify_master_key
 from gateway.models.tenancy import (
     ActiveOrganizationMemberCreateRequest,
     ActiveOrganizationMemberCreateResultPublic,
@@ -39,7 +39,14 @@ from gateway.models.tenancy import (
 )
 from gateway.services.tenancy import OrganizationService
 
-router = APIRouter(prefix="/v1/organizations", tags=["organizations"])
+# Auth is declared on the router, not left to arrive through `CurrentIdentity`:
+# every handler here happens to take one today, and a future handler that did
+# not would be unauthenticated with nothing to notice.
+router = APIRouter(
+    prefix="/v1/organizations",
+    tags=["organizations"],
+    dependencies=[Depends(verify_master_key)],
+)
 
 
 class Message(BaseModel):

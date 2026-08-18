@@ -25,12 +25,13 @@ and the anchor has to survive all three.
 
 import uuid
 
+from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.log_config import logger
 from gateway.models.entities import RuntimeSetting
-from gateway.models.tenancy import User
+from gateway.models.tenancy import Organization, User
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
     OrganizationRepository,
@@ -38,7 +39,7 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
-from gateway.services.tenancy.errors import TenancyError
+from gateway.services.tenancy.errors import ForeignTenancyError, TenancyError
 
 # Stored in runtime_settings, and deliberately not a SETTABLE_KEY, so
 # runtime_settings_service ignores it exactly as it ignores the master-key hash
@@ -69,6 +70,8 @@ async def ensure_bootstrap_identity(db: AsyncSession) -> User:
     if existing is not None:
         return existing
 
+    await _refuse_to_shadow_existing_tenancy(db)
+
     try:
         return await _provision(db)
     except IntegrityError:
@@ -80,6 +83,35 @@ async def ensure_bootstrap_identity(db: AsyncSession) -> User:
         if resolved is None:
             raise BootstrapIdentityUnavailableError from None
         return resolved
+
+
+async def _refuse_to_shadow_existing_tenancy(db: AsyncSession) -> None:
+    """Refuse to provision beside organizations this deployment did not create.
+
+    Provisioning adopts an organization whose slug is ``default``, which is the
+    one it would have made itself. Anything else it would quietly ignore: it
+    would create its own organization, point the marker at that, and every route
+    is scoped to the marked identity's organization, so the rows already in the
+    database become unreachable through the API. There is no list, no switch and
+    no by-id route to find them again, and the marker is deliberately not a
+    settable key, so the only way back is editing ``runtime_settings`` by hand.
+
+    That is the state a restored or imported tenancy arrives in, because the
+    platform's slugs are ``{name}-{prefix}`` and never the literal ``default``.
+    Failing here turns silent data loss into a startup error naming the fix.
+    """
+    organizations = (await db.execute(select(Organization))).scalars().all()
+    unadoptable = [one for one in organizations if one.slug != DEFAULT_ORGANIZATION_SLUG]
+    if not unadoptable:
+        return
+
+    names = ", ".join(sorted(f"{one.name!r} ({one.slug})" for one in unadoptable))
+    raise ForeignTenancyError(
+        f"This database already holds organizations this gateway did not provision: {names}. "
+        f"Provisioning beside them would make them unreachable, because every route is scoped "
+        f"to the organization the {BOOTSTRAP_IDENTITY_KEY} marker names. Point that marker at an "
+        f"identity in the organization you mean to serve, or start from an empty database."
+    )
 
 
 async def _load_marked_identity(db: AsyncSession) -> User | None:

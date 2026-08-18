@@ -11,7 +11,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, Query, status
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import CurrentIdentity, get_db
+from gateway.api.deps import CurrentIdentity, get_db, verify_master_key
 from gateway.api.routes.organizations import Message
 from gateway.models.tenancy import (
     WorkspaceCreate,
@@ -24,7 +24,14 @@ from gateway.models.tenancy import (
 )
 from gateway.services.tenancy import WorkspaceService
 
-router = APIRouter(prefix="/v1/workspaces", tags=["workspaces"])
+# Auth is declared on the router, not left to arrive through `CurrentIdentity`:
+# every handler here happens to take one today, and a future handler that did
+# not would be unauthenticated with nothing to notice.
+router = APIRouter(
+    prefix="/v1/workspaces",
+    tags=["workspaces"],
+    dependencies=[Depends(verify_master_key)],
+)
 
 WORKSPACE_ROLE_DESCRIPTION = "Role to assign in this workspace."
 
