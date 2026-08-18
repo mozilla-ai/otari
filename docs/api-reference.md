@@ -294,6 +294,7 @@ Tenancy above users and keys; see [Access control](access-control.md#organizatio
 | `GET` | `/v1/organizations/me/memberships` | List the organizations the caller belongs to. | Master key |
 | `POST` | `/v1/organizations/me/switch` | Switch the active organization. | Master key |
 | `GET` | `/v1/organizations/me/members` | List the active organization's members. | Master key |
+| `POST` | `/v1/organizations/me/members` | Add a member by email, optionally into workspaces at the same time. | Master key |
 | `PATCH` | `/v1/organizations/me/members/{organization_member_id}` | Change a member's role or status. | Master key |
 | `DELETE` | `/v1/organizations/me/members/{organization_member_id}` | Remove a member (suspends the membership). | Master key |
 

@@ -1,6 +1,152 @@
 {
   "components": {
     "schemas": {
+      "ActiveOrganizationMemberCreateRequest": {
+        "description": "Add someone to the caller's organization, optionally into workspaces at once.",
+        "properties": {
+          "email": {
+            "maxLength": 255,
+            "title": "Email",
+            "type": "string"
+          },
+          "role": {
+            "default": "member",
+            "maxLength": 32,
+            "title": "Role",
+            "type": "string"
+          },
+          "workspace_assignments": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/WorkspaceAssignmentRequest"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Assignments"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "ActiveOrganizationMemberCreateRequest",
+        "type": "object"
+      },
+      "ActiveOrganizationMemberCreateResultPublic": {
+        "description": "The outcome of adding a member.\n\nThe platform answers ``invited`` on both its branches, because being added\nthere always needs acceptance: a known address gets an ``invited``\nmembership, an unknown one an emailed invitation. This edition has neither\nan invitation to send nor a way to accept one, so it answers on the other\narm of the same union, ``active``, and the invitation fields stay null until\nthat flow rehomes.",
+        "properties": {
+          "created_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Name"
+          },
+          "invitation_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Invitation Id"
+          },
+          "organization_member_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Organization Member Id"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "active",
+              "invited"
+            ],
+            "title": "Status",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "user_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "User Id"
+          }
+        },
+        "required": [
+          "status",
+          "email",
+          "role"
+        ],
+        "title": "ActiveOrganizationMemberCreateResultPublic",
+        "type": "object"
+      },
       "ActiveOrganizationMemberPublic": {
         "description": "A member row joined to the identity behind it, as the roster shows it.\n\nField-for-field the platform's shape, so the ported roster page is not\nrewritten around a new contract, with two consequences of the OSS line:\n``email`` is nullable here (a local operator identity has no sign-in\naddress), and ``invitation_id`` is always null until the invitation flow\nrehomes, which is what fills it.",
         "properties": {
@@ -9069,6 +9215,27 @@
         "title": "ValidationError",
         "type": "object"
       },
+      "WorkspaceAssignmentRequest": {
+        "description": "A workspace and the role to grant in it, applied when a member is added.",
+        "properties": {
+          "role": {
+            "default": "member",
+            "maxLength": 32,
+            "title": "Role",
+            "type": "string"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace_id"
+        ],
+        "title": "WorkspaceAssignmentRequest",
+        "type": "object"
+      },
       "WorkspaceCreate": {
         "properties": {
           "description": {
@@ -12337,6 +12504,54 @@
           }
         ],
         "summary": "List Active Organization Members",
+        "tags": [
+          "organizations"
+        ]
+      },
+      "post": {
+        "description": "Add a member to the caller's active organization, by email address.\n\nOrganization owners and admins only. The member is active immediately and\nthe response says so: this edition has no invitation to send and no way to\naccept one, so it answers on the ``active`` arm of the result rather than\nthe ``invited`` one the platform uses. An address that belongs to no\nidentity yet creates one, which carries the address as the handle a future\nsign-in flow will claim it by, and can do nothing until then.",
+        "operationId": "create_active_organization_member_v1_organizations_me_members_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ActiveOrganizationMemberCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActiveOrganizationMemberCreateResultPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Active Organization Member",
         "tags": [
           "organizations"
         ]

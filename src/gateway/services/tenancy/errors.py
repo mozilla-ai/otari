@@ -104,6 +104,23 @@ class InvalidRoleError(TenancyValidationError):
         super().__init__(f"Invalid role '{role}'; expected one of {', '.join(sorted(allowed))}")
 
 
+class OrganizationMemberAlreadyExistsError(TenancyConflictError):
+    def __init__(self, identifier: object):
+        super().__init__(f"{identifier} is already an active member of this organization")
+
+
+class InvalidEmailError(TenancyValidationError):
+    """An address that could not be a claim handle.
+
+    Deliberately a shape check and nothing more. The address is not delivered to
+    by this edition, and ownership of it is proven by the claim flow that
+    arrives with sign-in, so anything stricter here would be theater.
+    """
+
+    def __init__(self, email: str):
+        super().__init__(f"'{email}' is not a valid email address")
+
+
 class WorkspaceNameRequiredError(TenancyValidationError):
     """A workspace name that is absent, null, or blank once trimmed.
 
@@ -128,11 +145,13 @@ class LastOrganizationError(TenancyValidationError):
 
 
 __all__ = [
+    "InvalidEmailError",
     "InvalidRoleError",
     "LastOrganizationError",
     "MembershipUpdateError",
     "NotAnOrganizationMemberError",
     "NotAuthorizedError",
+    "OrganizationMemberAlreadyExistsError",
     "OrganizationMemberNotFoundError",
     "OrganizationNotFoundError",
     "TenancyConflictError",

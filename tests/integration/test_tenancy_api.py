@@ -342,6 +342,168 @@ def test_the_roster_joins_identities(
     assert rows["Operator"]["email"] is None
 
 
+def test_adding_a_member_creates_a_claimable_identity(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """An address nobody holds yet becomes an identity carrying it.
+
+    The platform would email an invitation here and answer "invited". This
+    edition has neither an invitation to send nor a way to accept one, so it
+    answers on the other arm of the same result union.
+    """
+    added = client.post(
+        "/v1/organizations/me/members",
+        json={"email": "Ada@Example.com", "role": "admin"},
+        headers=master_key_header,
+    )
+
+    assert added.status_code == 201, added.text
+    body = added.json()
+    assert body["status"] == "active"
+    assert body["email"] == "ada@example.com"
+    assert body["role"] == "admin"
+    assert body["invitation_id"] is None
+
+    roster = client.get("/v1/organizations/me/members", headers=master_key_header).json()
+    assert roster["count"] == 2
+    assert {row["email"] for row in roster["data"]} == {None, "ada@example.com"}
+
+
+def test_adding_an_existing_identity_reuses_it(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """An address that already has an identity joins as that identity."""
+    organization_id = uuid.UUID(_context(client, master_key_header)["organization"]["id"])
+    existing = _add_identity(
+        db_session_factory,
+        organization_id=organization_id,
+        full_name="Ada Lovelace",
+        email="ada@example.com",
+    )
+    # Remove them, so the address exists but the membership does not.
+    roster = client.get("/v1/organizations/me/members", headers=master_key_header).json()
+    member_id = next(row["organization_member_id"] for row in roster["data"] if row["full_name"] == "Ada Lovelace")
+    client.delete(f"/v1/organizations/me/members/{member_id}", headers=master_key_header)
+
+    re_added = client.post(
+        "/v1/organizations/me/members",
+        json={"email": "ada@example.com", "role": "viewer"},
+        headers=master_key_header,
+    )
+
+    assert re_added.status_code == 201, re_added.text
+    body = re_added.json()
+    assert body["user_id"] == str(existing)
+    assert body["full_name"] == "Ada Lovelace"
+    assert body["role"] == "viewer"
+    # The suspended membership is revived rather than duplicated, so the history
+    # attached to it survives.
+    assert body["organization_member_id"] == member_id
+
+
+def test_adding_an_active_member_twice_conflicts(client: TestClient, master_key_header: dict[str, str]) -> None:
+    client.post(
+        "/v1/organizations/me/members",
+        json={"email": "ada@example.com"},
+        headers=master_key_header,
+    )
+
+    again = client.post(
+        "/v1/organizations/me/members",
+        json={"email": "ada@example.com"},
+        headers=master_key_header,
+    )
+
+    assert again.status_code == 409
+
+
+def test_workspace_assignments_are_applied_with_the_member(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """No acceptance step exists to park them until, so they are granted now."""
+    workspace = client.post("/v1/workspaces", json={"name": "Research"}, headers=master_key_header).json()
+
+    added = client.post(
+        "/v1/organizations/me/members",
+        json={
+            "email": "ada@example.com",
+            "workspace_assignments": [{"workspace_id": workspace["id"], "role": "admin"}],
+        },
+        headers=master_key_header,
+    )
+
+    assert added.status_code == 201, added.text
+    members = client.get(f"/v1/workspaces/{workspace['id']}/members", headers=master_key_header).json()
+    assigned = next(row for row in members["data"] if row["user_id"] == added.json()["user_id"])
+    assert assigned["role"] == "admin"
+
+
+def test_an_assignment_naming_another_organizations_workspace_adds_nobody(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """The whole add fails, rather than silently dropping one grant."""
+    workspace = client.post("/v1/workspaces", json={"name": "Research"}, headers=master_key_header).json()
+    client.post("/v1/organizations/me", json={"name": "Acme"}, headers=master_key_header)
+
+    added = client.post(
+        "/v1/organizations/me/members",
+        json={
+            "email": "ada@example.com",
+            "workspace_assignments": [{"workspace_id": workspace["id"], "role": "member"}],
+        },
+        headers=master_key_header,
+    )
+
+    assert added.status_code == 404
+    roster = client.get("/v1/organizations/me/members", headers=master_key_header).json()
+    assert roster["count"] == 1
+
+
+@pytest.mark.parametrize("email", ["not-an-address", "ada@example", "ada @example.com", ""])
+def test_an_address_that_could_not_be_a_handle_is_refused(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    email: str,
+) -> None:
+    response = client.post(
+        "/v1/organizations/me/members",
+        json={"email": email},
+        headers=master_key_header,
+    )
+
+    assert response.status_code == 400
+    assert "not a valid email address" in response.json()["detail"]
+
+
+def test_a_member_cannot_be_parked_in_a_status_nothing_can_produce(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """``invited`` is a real stored status with no producer here, so it is not settable.
+
+    Accepting it would let an admin move a member into a state that this edition
+    has no way to leave, since accepting an invitation is what clears it.
+    """
+    added = client.post(
+        "/v1/organizations/me/members",
+        json={"email": "ada@example.com"},
+        headers=master_key_header,
+    ).json()
+
+    response = client.patch(
+        f"/v1/organizations/me/members/{added['organization_member_id']}",
+        json={"status": "invited"},
+        headers=master_key_header,
+    )
+
+    assert response.status_code == 422
+
+
 def test_a_members_role_can_be_changed(
     client: TestClient,
     master_key_header: dict[str, str],

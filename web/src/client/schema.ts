@@ -1050,7 +1050,18 @@ export interface paths {
          */
         get: operations["list_active_organization_members_v1_organizations_me_members_get"];
         put?: never;
-        post?: never;
+        /**
+         * Create Active Organization Member
+         * @description Add a member to the caller's active organization, by email address.
+         *
+         *     Organization owners and admins only. The member is active immediately and
+         *     the response says so: this edition has no invitation to send and no way to
+         *     accept one, so it answers on the ``active`` arm of the result rather than
+         *     the ``invited`` one the platform uses. An address that belongs to no
+         *     identity yet creates one, which carries the address as the handle a future
+         *     sign-in flow will claim it by, and can do nothing until then.
+         */
+        post: operations["create_active_organization_member_v1_organizations_me_members_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -2434,6 +2445,57 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /**
+         * ActiveOrganizationMemberCreateRequest
+         * @description Add someone to the caller's organization, optionally into workspaces at once.
+         */
+        ActiveOrganizationMemberCreateRequest: {
+            /** Email */
+            email: string;
+            /**
+             * Role
+             * @default member
+             */
+            role: string;
+            /** Workspace Assignments */
+            workspace_assignments?: components["schemas"]["WorkspaceAssignmentRequest"][] | null;
+        };
+        /**
+         * ActiveOrganizationMemberCreateResultPublic
+         * @description The outcome of adding a member.
+         *
+         *     The platform answers ``invited`` on both its branches, because being added
+         *     there always needs acceptance: a known address gets an ``invited``
+         *     membership, an unknown one an emailed invitation. This edition has neither
+         *     an invitation to send nor a way to accept one, so it answers on the other
+         *     arm of the same union, ``active``, and the invitation fields stay null until
+         *     that flow rehomes.
+         */
+        ActiveOrganizationMemberCreateResultPublic: {
+            /** Created At */
+            created_at?: string | null;
+            /** Email */
+            email: string;
+            /** Expires At */
+            expires_at?: string | null;
+            /** Full Name */
+            full_name?: string | null;
+            /** Invitation Id */
+            invitation_id?: string | null;
+            /** Organization Member Id */
+            organization_member_id?: string | null;
+            /** Role */
+            role: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "active" | "invited";
+            /** Updated At */
+            updated_at?: string | null;
+            /** User Id */
+            user_id?: string | null;
+        };
         /**
          * ActiveOrganizationMemberPublic
          * @description A member row joined to the identity behind it, as the roster shows it.
@@ -6118,6 +6180,22 @@ export interface components {
             /** Error Type */
             type: string;
         };
+        /**
+         * WorkspaceAssignmentRequest
+         * @description A workspace and the role to grant in it, applied when a member is added.
+         */
+        WorkspaceAssignmentRequest: {
+            /**
+             * Role
+             * @default member
+             */
+            role: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+        };
         /** WorkspaceCreate */
         WorkspaceCreate: {
             /** Description */
@@ -7885,6 +7963,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ActiveOrganizationMembersPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_active_organization_member_v1_organizations_me_members_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ActiveOrganizationMemberCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActiveOrganizationMemberCreateResultPublic"];
                 };
             };
             /** @description Validation Error */

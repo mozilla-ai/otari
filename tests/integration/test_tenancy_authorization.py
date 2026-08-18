@@ -14,6 +14,7 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.models.tenancy import (
+    ActiveOrganizationMemberCreateRequest,
     ActiveOrganizationMemberUpdateRequest,
     Organization,
     OrganizationMember,
@@ -140,6 +141,49 @@ async def test_an_admin_cannot_modify_an_owner(async_db: AsyncSession) -> None:
             organization_member_id=target.id,
             request=ActiveOrganizationMemberUpdateRequest(role="member"),
         )
+
+
+async def test_a_plain_member_cannot_add_members(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db)
+    member = await _member(async_db, organization, role="member", full_name="Member")
+
+    with pytest.raises(NotAuthorizedError):
+        await OrganizationService(async_db).create_active_organization_member_for_user(
+            user=member,
+            request=ActiveOrganizationMemberCreateRequest(email="ada@example.com"),
+        )
+
+
+async def test_an_admin_can_add_members(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db)
+    admin = await _member(async_db, organization, role="admin", full_name="Admin")
+
+    result = await OrganizationService(async_db).create_active_organization_member_for_user(
+        user=admin,
+        request=ActiveOrganizationMemberCreateRequest(email="ada@example.com", role="member"),
+    )
+
+    assert result.status == "active"
+    assert result.user_id is not None
+
+
+async def test_an_added_member_lands_in_the_adding_organization_only(async_db: AsyncSession) -> None:
+    """A new identity's active organization is the one it was added to."""
+    organization = await _organization(async_db, slug="acme")
+    elsewhere = await _organization(async_db, slug="globex")
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = OrganizationService(async_db)
+
+    result = await service.create_active_organization_member_for_user(
+        user=owner,
+        request=ActiveOrganizationMemberCreateRequest(email="ada@example.com"),
+    )
+
+    assert result.user_id is not None
+    added = await UserRepository(async_db).get(result.user_id)
+    assert added is not None
+    assert added.active_organization_id == organization.id
+    assert not await service.user_has_active_membership(organization_id=elsewhere.id, user_id=added.id)
 
 
 async def test_an_owner_can_demote_another_owner(async_db: AsyncSession) -> None:

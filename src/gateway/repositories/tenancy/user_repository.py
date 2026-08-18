@@ -43,15 +43,19 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         *,
         full_name: str | None,
         active_organization_id: uuid.UUID,
+        email: str | None = None,
         is_active: bool = True,
         is_superuser: bool = False,
     ) -> User:
-        """Stage an email-less local identity.
+        """Stage a local identity, claimable later.
 
         A standalone operator (and, after M4's backfill, every re-parented
         gateway user) is an operator-defined label rather than a sign-in
-        address, so the row is stored with no email. The nullable column
-        tolerates that where a create schema requiring an address would not.
+        address, so the row is stored with no email by default; the nullable
+        column tolerates that where a create schema requiring an address would
+        not. An identity an admin adds by address carries it from the start, as
+        the handle the claim flow will match on, but it is unverified and grants
+        nothing until that flow exists.
 
         ``is_active`` is a parameter rather than a constant because the M5
         in-place upgrade needs it: the reconciliation spec maps a soft-deleted
@@ -72,7 +76,7 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         the reconciliation ledger rather than being found during a cutover.
         """
         user = User(
-            email=None,
+            email=email,
             full_name=full_name,
             is_active=is_active,
             is_superuser=is_superuser,

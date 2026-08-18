@@ -5,8 +5,9 @@ Rehomed from the platform's ``OrganizationService`` plus the membership half of
 the membership constraints, and the response shapes are the platform's; what is
 gone is the depth that has no home in the OSS base yet: mixpanel tracking,
 managed provider-key and default-gateway provisioning, email-domain auto-join,
-invitations, teams, and the org's budget and pricing surfaces. Those arrive with
-their own slices (see the PR description) and this service is where they attach.
+emailed invitations, teams, and the org's budget and pricing surfaces. Those
+arrive with their own slices, tracked under mozilla-ai/otari-ai#1452, and this
+service is where they attach.
 
 One rule runs through every method: a caller only ever acts inside the
 organization their identity is currently pointed at. Nothing takes an
@@ -15,12 +16,16 @@ membership before it moves the pointer, so a request cannot name another
 tenant's organization at all.
 """
 
+import re
 import uuid
 
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.models.tenancy import (
     MANAGEMENT_ROLES,
+    ActiveOrganizationMemberCreateRequest,
+    ActiveOrganizationMemberCreateResultPublic,
     ActiveOrganizationMemberPublic,
     ActiveOrganizationMembersPublic,
     ActiveOrganizationMemberUpdateRequest,
@@ -30,6 +35,7 @@ from gateway.models.tenancy import (
     OrganizationMembershipContextsPublic,
     OrganizationPublic,
     User,
+    WorkspaceAssignmentRequest,
 )
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
@@ -39,14 +45,29 @@ from gateway.repositories.tenancy import (
     WorkspaceRepository,
 )
 from gateway.services.tenancy.errors import (
+    InvalidEmailError,
     LastOrganizationError,
     MembershipUpdateError,
     NotAuthorizedError,
+    OrganizationMemberAlreadyExistsError,
     OrganizationMemberNotFoundError,
     OrganizationNotFoundError,
+    WorkspaceNotFoundError,
 )
 from gateway.services.tenancy.provisioning_service import DEFAULT_WORKSPACE_NAME
 from gateway.services.tenancy.slug import slugify
+
+# A shape check, not an authority on deliverability: one @, something either
+# side, a dot in the domain, and no whitespace. See InvalidEmailError.
+_EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _validated_email(email: str) -> str:
+    """Normalize an address to lower case, refusing one that cannot be a handle."""
+    candidate = email.strip().lower()
+    if not _EMAIL_PATTERN.match(candidate):
+        raise InvalidEmailError(email)
+    return candidate
 
 
 class OrganizationService:
@@ -331,6 +352,121 @@ class OrganizationService:
             data=[self._to_member_public(membership, member_user) for membership, member_user in rows],
             count=count,
         )
+
+    async def create_active_organization_member_for_user(
+        self,
+        *,
+        user: User,
+        request: ActiveOrganizationMemberCreateRequest,
+    ) -> ActiveOrganizationMemberCreateResultPublic:
+        """Add someone to the caller's organization, by address.
+
+        The platform's two branches both end at a membership that has to be
+        accepted: a known address gets an ``invited`` membership, an unknown one
+        gets an emailed invitation. Neither half exists here, and a membership
+        nobody can accept is a dead state, so both branches land ``active``
+        instead and an unknown address creates a local identity carrying it (M4's
+        claimable identity). That identity cannot authenticate until the sign-in
+        flow lands; until then it is a roster and attribution entry, which is
+        what the gateway's own ``users`` are today.
+
+        Any workspace assignments are applied in the same transaction rather than
+        parked, since there is no acceptance to park them until.
+        """
+        organization = await self.get_active_organization_for_user(user)
+        await self.require_active_organization_management_access(user=user, organization=organization)
+
+        email = _validated_email(request.email)
+        assignments = request.workspace_assignments or []
+        await self._require_workspaces_in_organization(organization, assignments)
+
+        target = await self.users.get_by_email(email)
+        try:
+            if target is None:
+                target = await self.users.create_local_identity(
+                    full_name=None,
+                    email=email,
+                    active_organization_id=organization.id,
+                )
+
+            membership = await self.members.get_by_organization_and_user(organization.id, target.id)
+            if membership is not None and membership.status == "active":
+                raise OrganizationMemberAlreadyExistsError(email)
+
+            if membership is None:
+                membership = await self.members.create_membership(
+                    organization_id=organization.id,
+                    user_id=target.id,
+                    role=request.role,
+                )
+            else:
+                # Re-adding someone who was removed: removal suspends the
+                # membership rather than deleting it, so this revives that row
+                # and keeps their history attached to it.
+                membership = await self.members.update_membership(
+                    membership,
+                    {"role": request.role, "status": "active"},
+                )
+
+            await self._apply_workspace_assignments(user_id=target.id, assignments=assignments)
+            await self.db.commit()
+        except IntegrityError:
+            # Two admins adding the same address at once: the unique index on
+            # email, or on (organization, user), decides, and the loser reports
+            # the conflict rather than a 500.
+            await self.db.rollback()
+            raise OrganizationMemberAlreadyExistsError(email) from None
+
+        return ActiveOrganizationMemberCreateResultPublic(
+            status="active",
+            organization_member_id=membership.id,
+            user_id=target.id,
+            email=email,
+            full_name=target.full_name,
+            role=membership.role,
+            created_at=membership.created_at,
+            updated_at=membership.updated_at,
+        )
+
+    async def _require_workspaces_in_organization(
+        self,
+        organization: Organization,
+        assignments: list[WorkspaceAssignmentRequest],
+    ) -> None:
+        """Refuse the whole request if an assignment names a workspace elsewhere.
+
+        Checked before anything is written, so a foreign or unknown workspace id
+        fails the add rather than silently dropping that one grant. A workspace
+        in another organization is reported as not found, like everywhere else.
+        """
+        if not assignments:
+            return
+        requested = {assignment.workspace_id for assignment in assignments}
+        found = {
+            workspace.id
+            for workspace in await WorkspaceRepository(self.db).get_by_ids(requested)
+            if workspace.organization_id == organization.id
+        }
+        missing = requested - found
+        if missing:
+            raise WorkspaceNotFoundError(next(iter(sorted(missing, key=str))))
+
+    async def _apply_workspace_assignments(
+        self,
+        *,
+        user_id: uuid.UUID,
+        assignments: list[WorkspaceAssignmentRequest],
+    ) -> None:
+        """Grant each assigned workspace, leaving an existing membership alone."""
+        members = WorkspaceMemberRepository(self.db)
+        for assignment in assignments:
+            if await members.get_by_workspace_and_user(assignment.workspace_id, user_id) is not None:
+                continue
+            await members.create(
+                workspace_id=assignment.workspace_id,
+                user_id=user_id,
+                role=assignment.role,
+            )
 
     async def update_active_organization_member_for_user(
         self,

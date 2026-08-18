@@ -20,6 +20,8 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import CurrentIdentity, get_db
 from gateway.models.tenancy import (
+    ActiveOrganizationMemberCreateRequest,
+    ActiveOrganizationMemberCreateResultPublic,
     ActiveOrganizationMemberPublic,
     ActiveOrganizationMembersPublic,
     ActiveOrganizationMemberUpdateRequest,
@@ -128,6 +130,24 @@ async def list_active_organization_members(
         skip=skip,
         limit=limit,
     )
+
+
+@router.post("/me/members", status_code=status.HTTP_201_CREATED)
+async def create_active_organization_member(
+    service: OrganizationServiceDep,
+    current_identity: CurrentIdentity,
+    body: ActiveOrganizationMemberCreateRequest,
+) -> ActiveOrganizationMemberCreateResultPublic:
+    """Add a member to the caller's active organization, by email address.
+
+    Organization owners and admins only. The member is active immediately and
+    the response says so: this edition has no invitation to send and no way to
+    accept one, so it answers on the ``active`` arm of the result rather than
+    the ``invited`` one the platform uses. An address that belongs to no
+    identity yet creates one, which carries the address as the handle a future
+    sign-in flow will claim it by, and can do nothing until then.
+    """
+    return await service.create_active_organization_member_for_user(user=current_identity, request=body)
 
 
 @router.patch("/me/members/{organization_member_id}")

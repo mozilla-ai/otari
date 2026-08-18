@@ -64,6 +64,13 @@ from sqlmodel import Field, SQLModel
 
 ORGANIZATION_MEMBER_ROLES = {"owner", "admin", "member", "viewer"}
 ORGANIZATION_MEMBER_STATUSES = {"active", "invited", "suspended"}
+# What a member's status may be *set* to over the API. "invited" is a valid
+# stored status (the M4 backfill and the invitation flow both produce it) but
+# nothing in this edition can create or accept an invitation, so offering it on
+# the update request would advertise a state with no producer and no exit.
+# Widening this back when invitations rehome is additive; narrowing later would
+# not be.
+ORGANIZATION_MEMBER_UPDATABLE_STATUSES = {"active", "suspended"}
 WORKSPACE_MEMBER_ROLES = {"owner", "admin", "member", "viewer"}
 WORKSPACE_MEMBER_STATUSES = {"active", "invited", "suspended"}
 
@@ -417,6 +424,57 @@ class ActiveOrganizationMembersPublic(SQLModel):
     count: int
 
 
+class WorkspaceAssignmentRequest(SQLModel):
+    """A workspace and the role to grant in it, applied when a member is added."""
+
+    workspace_id: uuid.UUID
+    role: str = Field(default="member", max_length=32)
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, value: str) -> str:
+        return _validate_membership(value, allowed=WORKSPACE_MEMBER_ROLES, kind="workspace role")
+
+
+class ActiveOrganizationMemberCreateRequest(SQLModel):
+    """Add someone to the caller's organization, optionally into workspaces at once."""
+
+    # Not ``EmailStr``: that would pull in email-validator for one field, and the
+    # address is a claim handle rather than something this edition delivers to.
+    # The format hint still reaches the generated client, so a form validates it.
+    email: str = Field(max_length=255, schema_extra={"format": "email"})
+    role: str = Field(default="member", max_length=32)
+    workspace_assignments: list[WorkspaceAssignmentRequest] | None = None
+
+    @field_validator("role")
+    @classmethod
+    def validate_role(cls, value: str) -> str:
+        return _validate_membership(value, allowed=ORGANIZATION_MEMBER_ROLES, kind="organization role")
+
+
+class ActiveOrganizationMemberCreateResultPublic(SQLModel):
+    """The outcome of adding a member.
+
+    The platform answers ``invited`` on both its branches, because being added
+    there always needs acceptance: a known address gets an ``invited``
+    membership, an unknown one an emailed invitation. This edition has neither
+    an invitation to send nor a way to accept one, so it answers on the other
+    arm of the same union, ``active``, and the invitation fields stay null until
+    that flow rehomes.
+    """
+
+    status: Literal["active", "invited"]
+    email: str
+    role: str
+    organization_member_id: uuid.UUID | None = None
+    user_id: uuid.UUID | None = None
+    invitation_id: uuid.UUID | None = None
+    full_name: str | None = None
+    expires_at: datetime | None = None
+    created_at: datetime | None = None
+    updated_at: datetime | None = None
+
+
 class ActiveOrganizationMemberUpdateRequest(SQLModel):
     role: str | None = Field(default=None, max_length=32)
     status: str | None = Field(default=None, max_length=32)
@@ -433,7 +491,11 @@ class ActiveOrganizationMemberUpdateRequest(SQLModel):
     def validate_status(cls, value: str | None) -> str | None:
         if value is None:
             return None
-        return _validate_membership(value, allowed=ORGANIZATION_MEMBER_STATUSES, kind="organization member status")
+        return _validate_membership(
+            value,
+            allowed=ORGANIZATION_MEMBER_UPDATABLE_STATUSES,
+            kind="organization member status",
+        )
 
 
 class OrganizationMember(OrganizationMemberBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
@@ -564,8 +626,11 @@ __all__ = [
     "MANAGEMENT_ROLES",
     "ORGANIZATION_MEMBER_ROLES",
     "ORGANIZATION_MEMBER_STATUSES",
+    "ORGANIZATION_MEMBER_UPDATABLE_STATUSES",
     "WORKSPACE_MEMBER_ROLES",
     "WORKSPACE_MEMBER_STATUSES",
+    "ActiveOrganizationMemberCreateRequest",
+    "ActiveOrganizationMemberCreateResultPublic",
     "ActiveOrganizationMemberPublic",
     "ActiveOrganizationMemberUpdateRequest",
     "ActiveOrganizationMembersPublic",
@@ -588,6 +653,7 @@ __all__ = [
     "UserCreate",
     "Workspace",
     "WorkspaceActivationClassification",
+    "WorkspaceAssignmentRequest",
     "WorkspaceCreate",
     "WorkspaceMember",
     "WorkspaceMemberCreate",

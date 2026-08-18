@@ -171,6 +171,7 @@ DELETE /v1/organizations/me                                 # dashboard-only
 GET /v1/organizations/me/memberships                        # dashboard-only
 POST /v1/organizations/me/switch                            # dashboard-only
 GET /v1/organizations/me/members                            # dashboard-only
+POST /v1/organizations/me/members                           # dashboard-only
 PATCH /v1/organizations/me/members/{organization_member_id} # dashboard-only
 DELETE /v1/organizations/me/members/{organization_member_id} # dashboard-only
 POST /v1/workspaces                                         # dashboard-only
