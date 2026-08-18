@@ -36,6 +36,7 @@ from gateway.models.tenancy import (
     OrganizationPublic,
     User,
     WorkspaceAssignmentRequest,
+    WorkspaceMemberUpdate,
 )
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
@@ -278,29 +279,40 @@ class OrganizationService:
 
         Members and workspaces ride the database cascade, but ``user`` does not:
         ``active_organization_id`` is NOT NULL with no delete rule, so every
-        identity pointed here is moved to another of its organizations first. An
-        identity with nowhere to go blocks the delete rather than being orphaned;
-        the OSS base has no path that would re-home it (the platform's fallback
-        was to mint a personal organization from the user's email, and a local
-        identity has none).
+        identity pointed at this organization is dealt with first. An identity
+        that belongs to another organization is moved there. One that does not
+        goes with the organization, because in this edition it has nothing left:
+        it cannot sign in, holds no keys, and owns no usage, so leaving it would
+        leave a row nothing can reach or repair. The platform instead mints a
+        personal organization per orphan, which in a self-hosted deployment
+        would answer one delete with a scattering of new organizations.
+
+        The caller is the exception, and still blocks the delete rather than
+        deleting themselves: they are mid-request and have to land somewhere.
         """
         organization = await self.get_active_organization_for_user(current_user)
         membership = await self._require_active_membership(current_user, organization)
         if membership.role != "owner" and not current_user.is_superuser:
             raise NotAuthorizedError("Only an organization owner can delete it")
 
-        for affected in await self.users.get_by_active_organization(organization.id):
+        affected = await self.users.get_by_active_organization(organization.id)
+        elsewhere = await self.members.get_active_by_users([identity.id for identity in affected])
+
+        for identity in affected:
             destination = next(
                 (
                     other.organization_id
-                    for other in await self.members.get_by_user(affected.id, active_only=True)
+                    for other in elsewhere.get(identity.id, [])
                     if other.organization_id != organization.id
                 ),
                 None,
             )
-            if destination is None:
-                raise LastOrganizationError(affected.id)
-            await self.users.set_active_organization(affected, destination)
+            if destination is not None:
+                await self.users.set_active_organization(identity, destination)
+                continue
+            if identity.id == current_user.id:
+                raise LastOrganizationError(identity.id)
+            await self.users.delete(identity)
 
         await self.organizations.delete(organization)
         await self.db.commit()
@@ -457,10 +469,30 @@ class OrganizationService:
         user_id: uuid.UUID,
         assignments: list[WorkspaceAssignmentRequest],
     ) -> None:
-        """Grant each assigned workspace, leaving an existing membership alone."""
+        """Grant each assigned workspace, reviving a suspended membership.
+
+        Deduplicated by workspace first, keeping the first role named for one, so
+        a body that repeats an id costs one round trip rather than one per
+        repetition. `_require_workspaces_in_organization` already resolves the
+        same set rather than the list.
+
+        An existing membership is updated rather than skipped, as the platform's
+        own assignment path does: a suspended row that is left alone would leave
+        the member listed in a workspace they were just granted while still
+        being refused everything in it.
+        """
         members = WorkspaceMemberRepository(self.db)
+        seen: set[uuid.UUID] = set()
         for assignment in assignments:
-            if await members.get_by_workspace_and_user(assignment.workspace_id, user_id) is not None:
+            if assignment.workspace_id in seen:
+                continue
+            seen.add(assignment.workspace_id)
+            existing = await members.get_by_workspace_and_user(assignment.workspace_id, user_id)
+            if existing is not None:
+                await members.update(
+                    existing,
+                    WorkspaceMemberUpdate(role=assignment.role, status="active"),
+                )
                 continue
             await members.create(
                 workspace_id=assignment.workspace_id,

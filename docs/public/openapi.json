@@ -11,7 +11,12 @@
           },
           "role": {
             "default": "member",
-            "maxLength": 32,
+            "enum": [
+              "owner",
+              "admin",
+              "member",
+              "viewer"
+            ],
             "title": "Role",
             "type": "string"
           },
@@ -21,6 +26,7 @@
                 "items": {
                   "$ref": "#/components/schemas/WorkspaceAssignmentRequest"
                 },
+                "maxItems": 50,
                 "type": "array"
               },
               {
@@ -247,7 +253,12 @@
           "role": {
             "anyOf": [
               {
-                "maxLength": 32,
+                "enum": [
+                  "owner",
+                  "admin",
+                  "member",
+                  "viewer"
+                ],
                 "type": "string"
               },
               {
@@ -259,7 +270,10 @@
           "status": {
             "anyOf": [
               {
-                "maxLength": 32,
+                "enum": [
+                  "active",
+                  "suspended"
+                ],
                 "type": "string"
               },
               {
@@ -9220,7 +9234,12 @@
         "properties": {
           "role": {
             "default": "member",
-            "maxLength": 32,
+            "enum": [
+              "owner",
+              "admin",
+              "member",
+              "viewer"
+            ],
             "title": "Role",
             "type": "string"
           },
@@ -17359,12 +17378,18 @@
             }
           },
           {
-            "description": "Role to assign: owner, admin, member, or viewer.",
+            "description": "Role to assign in this workspace.",
             "in": "query",
             "name": "role",
             "required": true,
             "schema": {
-              "description": "Role to assign: owner, admin, member, or viewer.",
+              "description": "Role to assign in this workspace.",
+              "enum": [
+                "owner",
+                "admin",
+                "member",
+                "viewer"
+              ],
               "title": "Role",
               "type": "string"
             }
@@ -17430,13 +17455,19 @@
             }
           },
           {
-            "description": "Role to assign: owner, admin, member, or viewer.",
+            "description": "Role to assign in this workspace.",
             "in": "query",
             "name": "role",
             "required": false,
             "schema": {
               "default": "member",
-              "description": "Role to assign: owner, admin, member, or viewer.",
+              "description": "Role to assign in this workspace.",
+              "enum": [
+                "owner",
+                "admin",
+                "member",
+                "viewer"
+              ],
               "title": "Role",
               "type": "string"
             }

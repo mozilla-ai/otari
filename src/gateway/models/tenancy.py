@@ -64,17 +64,32 @@ from sqlmodel import Field, SQLModel
 
 ORGANIZATION_MEMBER_ROLES = {"owner", "admin", "member", "viewer"}
 ORGANIZATION_MEMBER_STATUSES = {"active", "invited", "suspended"}
-# What a member's status may be *set* to over the API. "invited" is a valid
-# stored status (the M4 backfill and the invitation flow both produce it) but
-# nothing in this edition can create or accept an invitation, so offering it on
-# the update request would advertise a state with no producer and no exit.
-# Widening this back when invitations rehome is additive; narrowing later would
-# not be.
-ORGANIZATION_MEMBER_UPDATABLE_STATUSES = {"active", "suspended"}
 WORKSPACE_MEMBER_ROLES = {"owner", "admin", "member", "viewer"}
 WORKSPACE_MEMBER_STATUSES = {"active", "invited", "suspended"}
 
 WorkspaceActivationClassification = Literal["eligible", "internal", "automated", "migrated", "enterprise_assisted"]
+
+# The request-facing spellings of the vocabularies above. A ``Literal`` is what
+# puts the allowed values in the OpenAPI schema and therefore in the generated
+# dashboard client; a ``field_validator`` on a plain ``str`` enforces the same
+# rule server-side but publishes nothing, so a client cannot tell what it may
+# send until it is refused. Table columns stay ``str``: they must also hold the
+# statuses this edition does not let anyone set.
+OrganizationMemberRole = Literal["owner", "admin", "member", "viewer"]
+WorkspaceMemberRole = Literal["owner", "admin", "member", "viewer"]
+# What a member's status may be *set* to, which is narrower than what one may
+# hold. "invited" stays a valid stored status because the invitation flow
+# produces it and will rehome, but nothing in this edition can create or accept
+# an invitation, so offering it here would advertise a state with no producer
+# and no exit. (The M4 re-parenting backfill does not produce it either: it maps
+# a blocked gateway user to "suspended" and every other one to "active".)
+# Widening this back when invitations rehome is additive; narrowing later would
+# not be.
+OrganizationMemberSettableStatus = Literal["active", "suspended"]
+
+# One request may not carry an unbounded assignment list, matching the ceiling
+# the read endpoints put on repeatable filters (``MAX_FILTER_VALUES``).
+MAX_WORKSPACE_ASSIGNMENTS = 50
 
 # Roles that may manage an organization or a workspace. Fixed roles are the
 # settled OSS line; anything finer-grained is overlay depth.
@@ -428,12 +443,7 @@ class WorkspaceAssignmentRequest(SQLModel):
     """A workspace and the role to grant in it, applied when a member is added."""
 
     workspace_id: uuid.UUID
-    role: str = Field(default="member", max_length=32)
-
-    @field_validator("role")
-    @classmethod
-    def validate_role(cls, value: str) -> str:
-        return _validate_membership(value, allowed=WORKSPACE_MEMBER_ROLES, kind="workspace role")
+    role: WorkspaceMemberRole = "member"
 
 
 class ActiveOrganizationMemberCreateRequest(SQLModel):
@@ -443,13 +453,11 @@ class ActiveOrganizationMemberCreateRequest(SQLModel):
     # address is a claim handle rather than something this edition delivers to.
     # The format hint still reaches the generated client, so a form validates it.
     email: str = Field(max_length=255, schema_extra={"format": "email"})
-    role: str = Field(default="member", max_length=32)
-    workspace_assignments: list[WorkspaceAssignmentRequest] | None = None
-
-    @field_validator("role")
-    @classmethod
-    def validate_role(cls, value: str) -> str:
-        return _validate_membership(value, allowed=ORGANIZATION_MEMBER_ROLES, kind="organization role")
+    role: OrganizationMemberRole = "member"
+    workspace_assignments: list[WorkspaceAssignmentRequest] | None = Field(
+        default=None,
+        max_length=MAX_WORKSPACE_ASSIGNMENTS,
+    )
 
 
 class ActiveOrganizationMemberCreateResultPublic(SQLModel):
@@ -476,26 +484,8 @@ class ActiveOrganizationMemberCreateResultPublic(SQLModel):
 
 
 class ActiveOrganizationMemberUpdateRequest(SQLModel):
-    role: str | None = Field(default=None, max_length=32)
-    status: str | None = Field(default=None, max_length=32)
-
-    @field_validator("role")
-    @classmethod
-    def validate_role(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        return _validate_membership(value, allowed=ORGANIZATION_MEMBER_ROLES, kind="organization role")
-
-    @field_validator("status")
-    @classmethod
-    def validate_status(cls, value: str | None) -> str | None:
-        if value is None:
-            return None
-        return _validate_membership(
-            value,
-            allowed=ORGANIZATION_MEMBER_UPDATABLE_STATUSES,
-            kind="organization member status",
-        )
+    role: OrganizationMemberRole | None = None
+    status: OrganizationMemberSettableStatus | None = None
 
 
 class OrganizationMember(OrganizationMemberBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
@@ -624,9 +614,11 @@ class WorkspaceMember(WorkspaceMemberBase, PrimaryKeyMixin, CreatedAtMixin, Upda
 
 __all__ = [
     "MANAGEMENT_ROLES",
+    "MAX_WORKSPACE_ASSIGNMENTS",
     "ORGANIZATION_MEMBER_ROLES",
     "ORGANIZATION_MEMBER_STATUSES",
-    "ORGANIZATION_MEMBER_UPDATABLE_STATUSES",
+    "OrganizationMemberRole",
+    "OrganizationMemberSettableStatus",
     "WORKSPACE_MEMBER_ROLES",
     "WORKSPACE_MEMBER_STATUSES",
     "ActiveOrganizationMemberCreateRequest",
@@ -659,6 +651,7 @@ __all__ = [
     "WorkspaceMemberCreate",
     "WorkspaceMemberPublic",
     "WorkspaceMemberUpdate",
+    "WorkspaceMemberRole",
     "WorkspaceMembersPublic",
     "WorkspacePublic",
     "WorkspaceUpdate",

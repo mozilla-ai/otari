@@ -34,8 +34,16 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         super().__init__(db, User)
 
     async def get_by_email(self, email: str) -> User | None:
-        """Return the identity with this email address, or None."""
-        result = await self.db.execute(select(User).where(col(User.email) == email))
+        """Return the identity with this email address, or None.
+
+        Matched case-insensitively. The unique index is not, and rows written
+        outside this service (the M4 re-parenting backfill, an operator's own
+        SQL) can carry any casing, so an exact match would answer "no identity
+        holds this address" for one that does and mint a second identity for it.
+        An address is the handle a claim flow matches on, so it has to resolve
+        to one identity however it was typed.
+        """
+        result = await self.db.execute(select(User).where(func.lower(col(User.email)) == email.strip().lower()))
         return result.scalars().first()
 
     async def create_local_identity(

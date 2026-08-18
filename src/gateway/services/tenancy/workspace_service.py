@@ -37,6 +37,7 @@ from gateway.models.tenancy import (
 from gateway.repositories.tenancy import WorkspaceMemberRepository, WorkspaceRepository
 from gateway.services.tenancy.errors import (
     InvalidRoleError,
+    LastWorkspaceError,
     NotAnOrganizationMemberError,
     NotAuthorizedError,
     WorkspaceAlreadyExistsError,
@@ -226,13 +227,22 @@ class WorkspaceService:
         return WorkspacePublic.model_validate(updated)
 
     async def delete_workspace(self, *, user: User, workspace_id: uuid.UUID) -> None:
-        """Delete a workspace. Members ride the database cascade."""
+        """Delete a workspace. Members ride the database cascade.
+
+        The last one cannot go: every creation path provisions a workspace
+        because an organization without one has no usable surface, and nothing
+        would provision a replacement for an organization that already exists.
+        """
         organization = await self._active_organization(user)
         await self.organizations.require_active_organization_management_access(
             user=user,
             organization=organization,
         )
         workspace = await self._workspace_in_active_organization(user=user, workspace_id=workspace_id)
+
+        _, remaining = await self.workspaces.get_by_organization(organization.id, limit=1)
+        if remaining <= 1:
+            raise LastWorkspaceError
 
         await self.workspaces.delete_workspace(workspace)
         await self.db.commit()

@@ -98,12 +98,13 @@ Nothing is required to set it up. The first request to one of those endpoints pr
 
 Adding a member takes an email address (`POST /v1/organizations/me/members`), optionally with the workspaces to grant at the same time. If no identity holds that address yet, one is created carrying it, and the member is active immediately: there is no invitation to accept, because this edition sends no email. Such an identity is a roster and attribution entry today. It cannot sign in until Otari grows a sign-in flow, at which point the address is the handle its owner claims it by.
 
-Two rules exist to stop a tenancy from becoming unmanageable, and both answer `400`:
+Three rules exist to stop a tenancy from becoming unmanageable, and all three answer `400`:
 
 - an organization always keeps at least one active owner, so the last owner cannot be demoted or removed;
-- an identity always belongs to at least one organization, so the last one cannot be deleted.
+- an organization always keeps at least one workspace, so the last one cannot be deleted;
+- you always belong to at least one organization, so your last one cannot be deleted.
 
-Removing a member suspends their membership rather than deleting it, which keeps their past usage attributable.
+Removing a member suspends their membership rather than deleting it, which keeps their past usage attributable. Deleting an organization is the exception: a member who belongs to another organization is moved there, and one who does not is deleted along with it, because an identity with no organization has nothing to sign in to and nothing to attribute.
 
 This layer does not yet gate request-plane spend: keys, budgets, and usage still key on the `user_id` described above. Bringing the two together is the reconciliation tracked in [mozilla-ai/otari-ai#1452](https://github.com/mozilla-ai/otari-ai/issues/1452).
 

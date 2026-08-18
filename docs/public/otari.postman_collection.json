@@ -1794,7 +1794,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"role\": \"string\",\n  \"status\": \"string\"\n}"
+              "raw": "{\n  \"role\": \"owner\",\n  \"status\": \"active\"\n}"
             },
             "description": "Change a member's role or status. Organization owners and admins only.",
             "header": [
@@ -4216,7 +4216,7 @@
               ],
               "query": [
                 {
-                  "description": "Role to assign: owner, admin, member, or viewer.",
+                  "description": "Role to assign in this workspace.",
                   "disabled": true,
                   "key": "role",
                   "value": ""
@@ -4257,7 +4257,7 @@
               ],
               "query": [
                 {
-                  "description": "Role to assign: owner, admin, member, or viewer.",
+                  "description": "Role to assign in this workspace.",
                   "disabled": false,
                   "key": "role",
                   "value": ""

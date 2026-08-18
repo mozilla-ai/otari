@@ -16,6 +16,7 @@ from gateway.api.routes.organizations import Message
 from gateway.models.tenancy import (
     WorkspaceCreate,
     WorkspaceMemberPublic,
+    WorkspaceMemberRole,
     WorkspaceMembersPublic,
     WorkspacePublic,
     WorkspacesPublic,
@@ -25,7 +26,7 @@ from gateway.services.tenancy import WorkspaceService
 
 router = APIRouter(prefix="/v1/workspaces", tags=["workspaces"])
 
-WORKSPACE_ROLE_DESCRIPTION = "Role to assign: owner, admin, member, or viewer."
+WORKSPACE_ROLE_DESCRIPTION = "Role to assign in this workspace."
 
 
 def get_workspace_service(db: Annotated[AsyncSession, Depends(get_db)]) -> WorkspaceService:
@@ -116,7 +117,7 @@ async def add_workspace_member(
     current_identity: CurrentIdentity,
     workspace_id: uuid.UUID,
     user_id: uuid.UUID,
-    role: Annotated[str, Query(description=WORKSPACE_ROLE_DESCRIPTION)] = "member",
+    role: Annotated[WorkspaceMemberRole, Query(description=WORKSPACE_ROLE_DESCRIPTION)] = "member",
 ) -> WorkspaceMemberPublic:
     """Add an existing organization member to a workspace."""
     return await service.add_member(
@@ -133,7 +134,7 @@ async def update_workspace_member_role(
     current_identity: CurrentIdentity,
     workspace_id: uuid.UUID,
     user_id: uuid.UUID,
-    role: Annotated[str, Query(description=WORKSPACE_ROLE_DESCRIPTION)],
+    role: Annotated[WorkspaceMemberRole, Query(description=WORKSPACE_ROLE_DESCRIPTION)],
 ) -> WorkspaceMemberPublic:
     """Change a workspace member's role."""
     return await service.update_member_role(

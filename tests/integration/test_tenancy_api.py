@@ -15,9 +15,16 @@ from typing import Any
 import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
+from sqlmodel import col
 
 from gateway.models.entities import RuntimeSetting
-from gateway.models.tenancy import Organization, OrganizationMember, User
+from gateway.models.tenancy import (
+    MAX_WORKSPACE_ASSIGNMENTS,
+    Organization,
+    OrganizationMember,
+    User,
+    WorkspaceMember,
+)
 from gateway.services.tenancy.provisioning_service import (
     BOOTSTRAP_IDENTITY_KEY,
     DEFAULT_ORGANIZATION_NAME,
@@ -304,6 +311,75 @@ def test_deleting_an_organization_moves_the_caller_to_another(
     assert created["organization"]["id"] != context["organization"]["id"]
 
 
+def test_deleting_an_organization_takes_its_member_only_identities_with_it(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """An identity with no other organization goes with the one being deleted.
+
+    ``active_organization_id`` is NOT NULL, so it has to be repointed or gone.
+    In this edition such an identity cannot sign in, holds no keys and owns no
+    usage, so keeping it would keep a row nothing can reach or repair, and it
+    would make every organization that ever had a member undeletable.
+    """
+    client.post("/v1/organizations/me", json={"name": "Second"}, headers=master_key_header)
+    added = client.post(
+        "/v1/organizations/me/members",
+        json={"email": "ada@example.com"},
+        headers=master_key_header,
+    ).json()
+
+    deleted = client.delete("/v1/organizations/me", headers=master_key_header)
+
+    assert deleted.status_code == 200, deleted.text
+    session = db_session_factory()
+    try:
+        assert session.get(User, uuid.UUID(added["user_id"])) is None
+        # The operator survives: they had somewhere to go.
+        assert session.query(User).count() == 1
+    finally:
+        session.close()
+
+
+def test_an_identity_that_belongs_elsewhere_is_moved_not_deleted(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    first = _context(client, master_key_header)["organization"]["id"]
+    client.post("/v1/organizations/me", json={"name": "Second"}, headers=master_key_header)
+    added = client.post(
+        "/v1/organizations/me/members",
+        json={"email": "ada@example.com"},
+        headers=master_key_header,
+    ).json()
+    # Give them a second home, so the delete has somewhere to move them to.
+    session = db_session_factory()
+    try:
+        session.add(
+            OrganizationMember(
+                organization_id=uuid.UUID(first),
+                user_id=uuid.UUID(added["user_id"]),
+                role="member",
+                status="active",
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    assert client.delete("/v1/organizations/me", headers=master_key_header).status_code == 200
+
+    session = db_session_factory()
+    try:
+        moved = session.get(User, uuid.UUID(added["user_id"]))
+        assert moved is not None
+        assert str(moved.active_organization_id) == first
+    finally:
+        session.close()
+
+
 def test_the_last_organization_cannot_be_deleted(client: TestClient, master_key_header: dict[str, str]) -> None:
     """``user.active_organization_id`` is NOT NULL, so there has to be somewhere to go."""
     _context(client, master_key_header)
@@ -464,6 +540,106 @@ def test_an_assignment_naming_another_organizations_workspace_adds_nobody(
     assert roster["count"] == 1
 
 
+def test_an_address_resolves_to_one_identity_however_it_is_cased(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """The unique index is case-sensitive; a claim handle must not be.
+
+    Rows written outside this service, such as the M4 re-parenting backfill, can
+    carry any casing, and an exact-match lookup would answer "nobody holds this
+    address" for one that is held and mint a second identity for it.
+    """
+    organization_id = uuid.UUID(_context(client, master_key_header)["organization"]["id"])
+    existing = _add_identity(
+        db_session_factory,
+        organization_id=organization_id,
+        full_name="Ada Lovelace",
+        email="Ada@Example.com",
+        status="suspended",
+    )
+
+    added = client.post(
+        "/v1/organizations/me/members",
+        json={"email": "ada@example.com"},
+        headers=master_key_header,
+    )
+
+    assert added.status_code == 201, added.text
+    assert added.json()["user_id"] == str(existing)
+    session = db_session_factory()
+    try:
+        assert session.query(User).filter(col(User.email).ilike("ada@example.com")).count() == 1
+    finally:
+        session.close()
+
+
+def test_a_workspace_assignment_revives_a_suspended_membership(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """Re-adding a removed member with a grant must not leave them listed but refused.
+
+    A suspended workspace membership reads as membership and grants nothing, so
+    skipping the row because it exists would hand back access that is not there.
+    """
+    organization_id = uuid.UUID(_context(client, master_key_header)["organization"]["id"])
+    user_id = _add_identity(
+        db_session_factory,
+        organization_id=organization_id,
+        full_name="Ada Lovelace",
+        email="ada@example.com",
+    )
+    workspace = client.post("/v1/workspaces", json={"name": "Research"}, headers=master_key_header).json()
+    client.post(f"/v1/workspaces/{workspace['id']}/members/{user_id}", headers=master_key_header)
+    session = db_session_factory()
+    try:
+        member = session.query(WorkspaceMember).filter(col(WorkspaceMember.user_id) == user_id).one()
+        member.status = "suspended"
+        session.commit()
+    finally:
+        session.close()
+    roster = client.get("/v1/organizations/me/members", headers=master_key_header).json()
+    member_id = next(row["organization_member_id"] for row in roster["data"] if row["email"] == "ada@example.com")
+    client.delete(f"/v1/organizations/me/members/{member_id}", headers=master_key_header)
+
+    client.post(
+        "/v1/organizations/me/members",
+        json={
+            "email": "ada@example.com",
+            "workspace_assignments": [{"workspace_id": workspace["id"], "role": "admin"}],
+        },
+        headers=master_key_header,
+    )
+
+    session = db_session_factory()
+    try:
+        member = session.query(WorkspaceMember).filter(col(WorkspaceMember.user_id) == user_id).one()
+        assert (member.status, member.role) == ("active", "admin")
+    finally:
+        session.close()
+
+
+def test_an_assignment_list_is_bounded(client: TestClient, master_key_header: dict[str, str]) -> None:
+    """An unbounded list would be an unbounded write inside one transaction."""
+    workspace = client.post("/v1/workspaces", json={"name": "Research"}, headers=master_key_header).json()
+
+    response = client.post(
+        "/v1/organizations/me/members",
+        json={
+            "email": "ada@example.com",
+            "workspace_assignments": [
+                {"workspace_id": workspace["id"], "role": "member"} for _ in range(MAX_WORKSPACE_ASSIGNMENTS + 1)
+            ],
+        },
+        headers=master_key_header,
+    )
+
+    assert response.status_code == 422
+
+
 @pytest.mark.parametrize("email", ["not-an-address", "ada@example", "ada @example.com", ""])
 def test_an_address_that_could_not_be_a_handle_is_refused(
     client: TestClient,
@@ -478,6 +654,19 @@ def test_an_address_that_could_not_be_a_handle_is_refused(
 
     assert response.status_code == 400
     assert "not a valid email address" in response.json()["detail"]
+
+
+def test_the_last_workspace_cannot_be_deleted(client: TestClient, master_key_header: dict[str, str]) -> None:
+    """Every creation path provisions one, and nothing would provision a replacement."""
+    only = client.get("/v1/workspaces", headers=master_key_header).json()["data"][0]
+    second = client.post("/v1/workspaces", json={"name": "Research"}, headers=master_key_header).json()
+
+    assert client.delete(f"/v1/workspaces/{second['id']}", headers=master_key_header).status_code == 200
+    refused = client.delete(f"/v1/workspaces/{only['id']}", headers=master_key_header)
+
+    assert refused.status_code == 400
+    assert "at least one workspace" in refused.json()["detail"]
+    assert client.get("/v1/workspaces", headers=master_key_header).json()["count"] == 1
 
 
 def test_a_member_cannot_be_parked_in_a_status_nothing_can_produce(
@@ -875,7 +1064,13 @@ def test_an_unknown_role_is_refused(
     master_key_header: dict[str, str],
     db_session_factory: Callable[[], Session],
 ) -> None:
-    """Table models skip construction validation, so the service checks the role."""
+    """The allowed roles are published in the schema, so the framework refuses the rest.
+
+    A ``Literal`` rather than a validator on a plain string, so the value set
+    reaches the OpenAPI document and the generated client, instead of being
+    discoverable only by being rejected. The service keeps its own guard for
+    callers that do not arrive over HTTP.
+    """
     organization_id = uuid.UUID(_context(client, master_key_header)["organization"]["id"])
     user_id = _add_identity(
         db_session_factory,
@@ -891,5 +1086,4 @@ def test_an_unknown_role_is_refused(
         headers=master_key_header,
     )
 
-    assert response.status_code == 400
-    assert "Invalid role" in response.json()["detail"]
+    assert response.status_code == 422

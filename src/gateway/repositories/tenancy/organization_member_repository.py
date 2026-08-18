@@ -1,6 +1,7 @@
 """Data access for organization memberships."""
 
 import uuid
+from collections.abc import Collection
 from typing import Any
 
 from sqlalchemy import func, select
@@ -85,6 +86,31 @@ class OrganizationMemberRepository(
             statement = statement.where(col(OrganizationMember.status) == "active")
         result = await self.db.execute(statement.order_by(col(OrganizationMember.created_at)))
         return list(result.scalars().all())
+
+    async def get_active_by_users(
+        self,
+        user_ids: Collection[uuid.UUID],
+    ) -> dict[uuid.UUID, list[OrganizationMember]]:
+        """Return the active memberships of a batch of identities, keyed by identity.
+
+        One query for the whole batch: the organization-delete path has to know
+        where every affected identity can go, and asking per identity is an N+1
+        over a set that grows with the organization.
+        """
+        if not user_ids:
+            return {}
+        result = await self.db.execute(
+            select(OrganizationMember)
+            .where(
+                col(OrganizationMember.user_id).in_(list(user_ids)),
+                col(OrganizationMember.status) == "active",
+            )
+            .order_by(col(OrganizationMember.created_at))
+        )
+        by_user: dict[uuid.UUID, list[OrganizationMember]] = {}
+        for membership in result.scalars().all():
+            by_user.setdefault(membership.user_id, []).append(membership)
+        return by_user
 
     async def get_first_active_for_user(self, user_id: uuid.UUID) -> OrganizationMember | None:
         """Return a user's oldest active membership, or None.

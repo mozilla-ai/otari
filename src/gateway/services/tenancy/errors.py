@@ -134,6 +134,15 @@ class WorkspaceNameRequiredError(TenancyValidationError):
         super().__init__("A workspace name is required")
 
 
+class LastWorkspaceError(TenancyValidationError):
+    """Deleting this workspace would leave the organization without one."""
+
+    def __init__(self) -> None:
+        super().__init__(
+            "An organization keeps at least one workspace; create another before deleting this one"
+        )
+
+
 class LastOrganizationError(TenancyValidationError):
     """Deleting this organization would leave an identity with none at all."""
 
@@ -148,6 +157,7 @@ __all__ = [
     "InvalidEmailError",
     "InvalidRoleError",
     "LastOrganizationError",
+    "LastWorkspaceError",
     "MembershipUpdateError",
     "NotAnOrganizationMemberError",
     "NotAuthorizedError",

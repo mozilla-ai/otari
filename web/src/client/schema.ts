@@ -2455,8 +2455,9 @@ export interface components {
             /**
              * Role
              * @default member
+             * @enum {string}
              */
-            role: string;
+            role: "owner" | "admin" | "member" | "viewer";
             /** Workspace Assignments */
             workspace_assignments?: components["schemas"]["WorkspaceAssignmentRequest"][] | null;
         };
@@ -2532,9 +2533,9 @@ export interface components {
         /** ActiveOrganizationMemberUpdateRequest */
         ActiveOrganizationMemberUpdateRequest: {
             /** Role */
-            role?: string | null;
+            role?: ("owner" | "admin" | "member" | "viewer") | null;
             /** Status */
-            status?: string | null;
+            status?: ("active" | "suspended") | null;
         };
         /** ActiveOrganizationMembersPublic */
         ActiveOrganizationMembersPublic: {
@@ -6188,8 +6189,9 @@ export interface components {
             /**
              * Role
              * @default member
+             * @enum {string}
              */
-            role: string;
+            role: "owner" | "admin" | "member" | "viewer";
             /**
              * Workspace Id
              * Format: uuid
@@ -10147,8 +10149,8 @@ export interface operations {
     add_workspace_member_v1_workspaces__workspace_id__members__user_id__post: {
         parameters: {
             query?: {
-                /** @description Role to assign: owner, admin, member, or viewer. */
-                role?: string;
+                /** @description Role to assign in this workspace. */
+                role?: "owner" | "admin" | "member" | "viewer";
             };
             header?: never;
             path: {
@@ -10214,8 +10216,8 @@ export interface operations {
     update_workspace_member_role_v1_workspaces__workspace_id__members__user_id__patch: {
         parameters: {
             query: {
-                /** @description Role to assign: owner, admin, member, or viewer. */
-                role: string;
+                /** @description Role to assign in this workspace. */
+                role: "owner" | "admin" | "member" | "viewer";
             };
             header?: never;
             path: {
