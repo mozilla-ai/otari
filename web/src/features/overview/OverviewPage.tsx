@@ -132,14 +132,31 @@ export function OverviewPage({
   setupFetching?: boolean
 }) {
   const w = useWindows()
+  const { selected: workspace } = useSelectedWorkspace()
+  // Every window carries the selected workspace, so the tiles, the sparkline and
+  // the recent-requests strip narrow with the keys tile beside them. Scoping one
+  // and not the others would put a workspace's key count next to the whole
+  // deployment's spend on the page an operator opens first.
+  const scope = workspace?.workspace_id
 
-  const todayFilters = useMemo(() => ({ start_date: w.today }), [w])
-  const periodFilters = useMemo(() => ({ start_date: w.periodStart }), [w])
+  const todayFilters = useMemo(
+    () => ({ workspace_id: scope, start_date: w.today }),
+    [scope, w],
+  )
+  const periodFilters = useMemo(
+    () => ({ workspace_id: scope, start_date: w.periodStart }),
+    [scope, w],
+  )
   // Bounded previous window ([-60d, -30d)) so it does not overlap the current one.
   const prevFilters = useMemo(
-    () => ({ start_date: w.prevStart, end_date: w.periodStart }),
-    [w],
+    () => ({
+      workspace_id: scope,
+      start_date: w.prevStart,
+      end_date: w.periodStart,
+    }),
+    [scope, w],
   )
+  const recentFilters = useMemo(() => ({ workspace_id: scope }), [scope])
 
   // Tiles and the sparkline read only `totals` and `series`, so all three windows
   // opt out of every breakdown rather than making the server run a GROUP BY per
@@ -149,12 +166,11 @@ export function OverviewPage({
   const previous = useUsageSummary(prevFilters, "day", NO_BREAKDOWNS)
   const health = useProviderHealth()
   const budgets = useBudgets()
-  const { selected: workspace } = useSelectedWorkspace()
   // Same scope as the API keys page this tile links to, so the count and the
   // table behind it cannot disagree.
-  const keys = useKeys(workspace?.workspace_id)
+  const keys = useKeys(scope)
   const users = useUsers()
-  const recent = useUsageLogs({}, 0, 5)
+  const recent = useUsageLogs(recentFilters, 0, 5)
 
   const todayTotals = today.data?.totals
   const periodTotals = period.data?.totals

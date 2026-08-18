@@ -278,7 +278,7 @@ The `credentials` field points to a Google Cloud service account JSON file.
 `search_tools` declares what [`POST /v1/search`](api-reference.md#search) can
 run against, keyed by the name callers pass as `search_tool_name` (or in the
 `/v1/search/{tool}` path). A tool can also be added at runtime from the
-dashboard's Tools & Guardrails page (or `POST /v1/search-tools`), which needs no
+dashboard's Tools page (or `POST /v1/search-tools`), which needs no
 config file at all; see [Adding a search tool at runtime](#adding-a-search-tool-at-runtime).
 The two sources are merged, and a stored tool wins over a config-file entry of
 the same name.
@@ -352,7 +352,7 @@ same backend.
 ### Adding a search tool at runtime
 
 Everything above is also settable without a config file. The dashboard's
-Tools & Guardrails page has a Search tools card that adds, edits, and removes
+Tools page has a Search tools card that adds, edits, and removes
 tools, backed by `/v1/search-tools` (master-key gated, standalone mode only):
 
 ```bash

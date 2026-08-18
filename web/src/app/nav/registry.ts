@@ -14,7 +14,10 @@ import {
   UsersIcon,
   WorkspacesIcon,
 } from "./icons"
-import { OVERLAY_NAV_SECTIONS } from "./overlaySections"
+import {
+  OVERLAY_NAV_SECTIONS,
+  OVERLAY_ORG_NAV_SECTIONS,
+} from "./overlaySections"
 import type { NavItem, NavSection } from "./types"
 
 /**
@@ -230,8 +233,19 @@ export const NAV_SECTIONS: readonly NavSection[] = composeNavSections(
   OVERLAY_NAV_SECTIONS,
 )
 
-/** The organization context's sidebar. */
-export const ORG_NAV_SECTIONS: readonly NavSection[] = ORGANIZATION_NAV_SECTIONS
+/**
+ * The composed organization sidebar.
+ *
+ * Composed the same way the workspace rail is, and for the same reason: Billing
+ * is the canonical overlay-only capability (ARCHITECTURE.md's capability table)
+ * and it belongs on this rail, so an overlay that could only contribute to the
+ * workspace one would have to edit this file to register it, which is what
+ * cardinal rule 6 rules out. This build appends nothing.
+ */
+export const ORG_NAV_SECTIONS: readonly NavSection[] = composeNavSections(
+  ORGANIZATION_NAV_SECTIONS,
+  OVERLAY_ORG_NAV_SECTIONS,
+)
 
 /**
  * Every registered entry, across both contexts.
@@ -273,16 +287,6 @@ const ORG_PATHS: readonly string[] = ORG_NAV_SECTIONS.flatMap((section) =>
 )
 
 /**
- * Which sidebar a pathname belongs under.
- *
- * Derived from the registry rather than from a path prefix, because the two
- * contexts do not split cleanly by URL: `/workspaces` and `/settings` are
- * organization destinations whose paths look like anything else, and
- * `/members` is a workspace one that sits directly under the root. Anything
- * unregistered (the guide, the 404 splat) belongs to the workspace context,
- * which is the one the shell opens in.
- */
-/**
  * What to call the destination at this pathname, as a breadcrumb would.
  *
  * Distinct from `navItemForPath`, which answers with the entry that *gates* a
@@ -296,6 +300,16 @@ export function navLabelForPath(pathname: string): string | undefined {
   return child?.label ?? navItemForPath(pathname)?.label
 }
 
+/**
+ * Which sidebar a pathname belongs under.
+ *
+ * Derived from the registry rather than from a path prefix, because the two
+ * contexts do not split cleanly by URL: `/workspaces` and `/settings` are
+ * organization destinations whose paths look like anything else, and
+ * `/members` is a workspace one that sits directly under the root. Anything
+ * unregistered (the guide, the 404 splat) belongs to the workspace context,
+ * which is the one the shell opens in.
+ */
 export function navContextForPath(pathname: string): NavContext {
   const item = navItemForPath(pathname)
   if (!item) return "workspace"

@@ -143,22 +143,36 @@ example.
 
 ### 8. (Optional) Set up keys, users, and budgets
 
-For multi-user or multi-app deployments, use the **Access** section of the
-sidebar to hand out scoped API keys, define users, and attach budgets so spend
-is enforced before each call. These are optional: a single-operator setup can
-run on the master key alone.
+For multi-user or multi-app deployments, hand out scoped API keys from
+**Access** on the workspace rail, then define users and attach budgets on the
+organization rail, so spend is enforced before each call. These are optional: a
+single-operator setup can run on the master key alone.
 
 ## Page-by-page reference
 
-The sidebar groups pages by what they do. This section is filled in as pages
-land; the groups below match the current dashboard.
+The dashboard has two sidebars, and only one is on screen at a time.
+
+The **workspace rail** is the default, and the switcher above it chooses which
+workspace you are looking at. That selection scopes members, API keys, usage,
+and the request log; routing and provider credentials are deployment-wide, and
+the switcher's own popover says which is which.
+
+The **organization rail** holds what belongs to the tenant rather than to one
+workspace. It is reached from the **Organization** entry at the foot of the
+workspace rail, and left by the link at its top. Users, budgets, and settings
+live there.
+
+At the very bottom sits the account control: the bundled user guide, the
+light/dark preference, and sign-out.
+
+The groups below match the current dashboard, rail by rail.
 
 ### Overview
 
 The landing page. An at-a-glance view of spend, traffic, and health across the
 gateway.
 
-### Observability
+### Observe
 
 - **Activity**: the per-request log of what the gateway served, with filters.
   Use it to inspect individual requests, their models, and their outcomes.
@@ -285,9 +299,9 @@ reached. If a browser blocks the clipboard outright, the control says so rather
 than reporting a copy that did not happen, and the text is still selectable by
 hand.
 
-### Catalog
+### Gateway
 
-- **Providers**: add, edit, test, and delete provider credentials at runtime
+- **Provider credentials**: add, edit, test, and delete provider credentials at runtime
   (standalone only). Stored keys are encrypted with `OTARI_SECRET_KEY`; config
   providers appear read-only. See the first-run walkthrough above. The add and
   edit forms also take **Client options (JSON)**, the `client_args` passed to the
@@ -355,50 +369,23 @@ hand.
   cannot change, and not at all for a weighted policy, which has nothing to teach. See
   [learned routing](routing.md#let-a-router-choose-learned-routing).
 
-### Organization
-
-The tenant this deployment's workspaces, members, and roles belong to. There is
-exactly one, provisioned on first boot: a self-hosted gateway is one tenant with
-several people in it, not several tenants, so it can be renamed but not created,
-switched between, or deleted.
-
-Standalone Otari has no sign-in of its own yet, so the master key is the
-bootstrap credential: the first authenticated request provisions the
-organization, one default workspace, and one owner identity, and every later
-request resolves that same operator. Members added after that hold a role and
-can be placed in workspaces, but cannot sign in until a per-user sign-in flow
-lands: the address they are added by is the handle it will claim them with.
-
-- **General**: rename the organization and read its slug, which is set when the
-  organization is provisioned and deliberately does not move with a rename.
-  Owners and admins only.
-- **Members**: who belongs to the organization and what each of them may do.
-  Add someone by email address, with a role and optionally the workspaces to
-  place them in at once; nothing is emailed, because a standalone gateway has no
-  invitation to send, so the membership is active straight away. Roles are
-  fixed: owners and admins manage the organization, members use it, viewers only
-  read. Removing a member suspends the membership rather than deleting it, so
-  anything already attributed to them still resolves; the row leaves the roster,
-  and adding the same address again revives that membership rather than starting
-  a second one. Two changes are refused rather than offered: an admin cannot act
-  on an owner, and the last active owner cannot be demoted or removed.
-- **Workspaces**: the scopes inside the organization that work is grouped into.
-  Each organization is created with one. A workspace carries its own members and
-  roles, and its members are always a subset of the organization's, so adding
-  one is a pick from the roster rather than an invitation.
-
 ### Access
 
-- **Users**: the principals that keys and budgets attach to, including the
-  default model access for a user's keys.
 - **API keys**: issue and revoke gateway API keys, optionally restricting the
   models a key may call and setting an expiry (leave blank for a key that never
-  expires).
-- **Budgets**: spending limits callers are held to, with per-period resets.
+  expires). A key belongs to one workspace, the one selected above, and every
+  request on it is billed there.
+- **Provider credentials**: see Gateway above; the same page is reached from
+  either group.
+- **Members**: who is assigned to the selected workspace and their role in it.
+  A workspace's members are always a subset of the organization's, so someone
+  joins the organization first, on the organization rail.
 
-For how users, keys, and budgets fit together and the management endpoints behind these pages, see [Access control](access-control.md).
+Users and budgets moved to the organization rail; see below. For how users,
+keys, and budgets fit together and the management endpoints behind these pages,
+see [Access control](access-control.md).
 
-### System
+### Tools
 
 - **Tools & Guardrails**: configure the backends for built-in tools (for
   example the `otari_web_search` search backend) and request-level guardrails.
@@ -418,6 +405,44 @@ For how users, keys, and budgets fit together and the management endpoints behin
   web-search URL set just above it, so the backend you already run answers the
   direct search endpoint too. Tools declared in a config file are listed here as
   read-only; edit those where the file is defined.
+
+## The organization rail
+
+Reached from the **Organization** entry at the foot of the workspace rail, and
+left by the link at its top.
+
+The tenant this deployment's workspaces, members, and roles belong to. There is
+exactly one, provisioned on first boot: a self-hosted gateway is one tenant with
+several people in it, not several tenants, so it can be renamed but not created,
+switched between, or deleted.
+
+Standalone Otari has no sign-in of its own yet, so the master key is the
+bootstrap credential: the first authenticated request provisions the
+organization, one default workspace, and one owner identity, and every later
+request resolves that same operator. Members added after that hold a role and
+can be placed in workspaces, but cannot sign in until a per-user sign-in flow
+lands: the address they are added by is the handle it will claim them with.
+
+### People & access
+
+- **Members & roles**: who belongs to the organization, their role
+  (owner, admin, member, viewer), and their status. Adding someone takes an
+  email address and optionally the workspaces to put them in straight away.
+- **Workspaces**: create, rename, and delete workspaces, and manage each
+  roster. The last workspace cannot be deleted.
+
+### Money
+
+- **Spend & budgets**: spending limits callers are held to, with per-period
+  resets.
+- **Users**: the principals that keys and budgets attach to, including the
+  default model access for a user's keys. Distinct from members: a member is a
+  person who signs in, a user is what spend is attributed to, and the two merge
+  once the request plane is re-parented onto tenancy.
+
+### General
+
+- **Organization**: rename the organization. There is exactly one.
 - **Settings**: search and toggle runtime settings, review and apply default
   pricing updates, and rotate the generated master key. Rotating the master key
   issues a fresh `otari-mk-…` value and keeps your current session signed in.
