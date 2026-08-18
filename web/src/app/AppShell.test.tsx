@@ -620,4 +620,18 @@ describe("AppShell entitlement and flag gating", () => {
       "Web search",
     )
   })
+
+  it("leads the trail with the organization when a deployment can hold several", async () => {
+    mockMatchMedia(false)
+    // The only way to exercise this: no gateway in this repository reports
+    // `hosted` (bootstrap.py answers standalone or hybrid), and the endpoints
+    // that would mint a second organization are not mounted in standalone. So
+    // the multi-organization trail has no live deployment to be seen on, and
+    // this is what keeps it from rotting until the hosted shell arrives.
+    await renderShell(bootstrap({ deployment_type: "hosted" }))
+
+    const crumb = await screen.findByLabelText("Breadcrumb")
+    expect(crumb).toHaveTextContent("Default Organization")
+    expect(crumb).toHaveTextContent("Overview")
+  })
 })
