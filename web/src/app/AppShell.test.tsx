@@ -312,11 +312,13 @@ describe("AppShell responsive layout", () => {
 
   it("links to the bundled user guide from the sidebar footer", async () => {
     mockMatchMedia(false)
+    const user = userEvent.setup()
     await renderShell()
 
-    // A footer link points operators at the guide bundled with this dashboard,
-    // discoverable without hunting for a separate docs site.
-    const guideLink = screen.getByRole("link", { name: "User guide" })
+    // Still reachable, now from the account menu rather than as its own row:
+    // the footer is one control, and the guide is one of the things it opens.
+    await user.click(screen.getByRole("button", { name: "Account" }))
+    const guideLink = await screen.findByRole("link", { name: "User guide" })
     expect(guideLink).toHaveAttribute("href", "/docs")
   })
 

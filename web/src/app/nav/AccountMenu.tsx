@@ -1,4 +1,5 @@
 import { Button, Popover } from "@heroui/react"
+import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 
 import { useAuth } from "@/features/auth/AuthContext"
@@ -75,6 +76,28 @@ function MenuItem({
 
 const iconClass = "h-4 w-4 shrink-0"
 
+const rowClass =
+  "flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm text-foreground hover:bg-content3"
+
+function MenuLink({
+  to,
+  label,
+  icon,
+  onNavigate,
+}: {
+  to: "/docs"
+  label: string
+  icon: React.ReactNode
+  onNavigate: () => void
+}) {
+  return (
+    <Link to={to} className={rowClass} onClick={onNavigate}>
+      {icon}
+      {label}
+    </Link>
+  )
+}
+
 export function AccountMenu({ collapsed }: { collapsed: boolean }) {
   const { logout } = useAuth()
   const { session_type } = useDeployment()
@@ -116,6 +139,29 @@ export function AccountMenu({ collapsed }: { collapsed: boolean }) {
               >
                 <circle cx="12" cy="8" r="3.5" />
                 <path d="M5 20a7 7 0 0 1 14 0" strokeLinecap="round" />
+              </svg>
+            }
+          />
+          {/* The dashboard's own docs, bundled with the running gateway. In the
+              menu rather than beside it, so the footer is one control. */}
+          <MenuLink
+            to="/docs"
+            label="User guide"
+            onNavigate={() => setOpen(false)}
+            icon={
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                className={iconClass}
+              >
+                <path
+                  d="M12 6.5C10.5 5 8 4.5 4 4.5V18c4 0 6.5.5 8 2 1.5-1.5 4-2 8-2V4.5c-4 0-6.5.5-8 2z"
+                  strokeLinejoin="round"
+                />
+                <path d="M12 6.5V20" strokeLinecap="round" />
               </svg>
             }
           />

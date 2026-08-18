@@ -611,9 +611,6 @@ export function AppShell() {
               )
             })}
           </nav>
-          {/* Footer links, pinned to the bottom of the rail. The user guide is the
-              dashboard's own docs, bundled with the running gateway (see DocsPage);
-              otari.ai is a subtler pointer to the hosted product below it. */}
           {/* The account block, set off by a rule as in the navigation prototype:
               the way onto the organization rail, the bundled guide, and the
               account control whose menu carries appearance and sign-out. */}
@@ -652,73 +649,9 @@ export function AppShell() {
                 {effectiveCollapsed ? null : "Organization"}
               </Link>
             ) : null}
-            <Link
-              to="/docs"
-              activeProps={{ className: NAV_ACTIVE }}
-              inactiveProps={{ className: NAV_INACTIVE }}
-              // Tapping dismisses the mobile drawer, like the primary nav above.
-              onClick={() => setMobileNavOpen(false)}
-              aria-label={effectiveCollapsed ? "User guide" : undefined}
-              title={effectiveCollapsed ? "User guide" : undefined}
-              className={clsx(
-                navLinkClass(effectiveCollapsed),
-                // Indented by a margin rather than the nav's padding: this block
-                // sits outside <nav>, pinned to the bottom of the rail.
-                effectiveCollapsed ? "mx-2" : "mx-3",
-              )}
-            >
-              {/* An open book: the operator guide for this dashboard. Decorative;
-                  the link is labeled by its text (or aria-label when collapsed). */}
-              <svg
-                aria-hidden="true"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                className="h-5 w-5 shrink-0"
-              >
-                <path
-                  d="M12 6.5C10.5 5 8 4.5 4 4.5V18c4 0 6.5.5 8 2 1.5-1.5 4-2 8-2V4.5c-4 0-6.5.5-8 2z"
-                  strokeLinejoin="round"
-                />
-                <path d="M12 6.5V20" strokeLinecap="round" />
-              </svg>
-              {effectiveCollapsed ? null : "User guide"}
-            </Link>
-            <a
-              href="https://otari.ai"
-              target="_blank"
-              rel="noreferrer"
-              title="otari.ai: the hosted Otari gateway"
-              className={clsx(
-                "flex items-center rounded-lg py-2 text-xs font-medium text-muted transition-colors hover:bg-surface-alt hover:text-link",
-                effectiveCollapsed
-                  ? "mx-2 justify-center px-0"
-                  : "mx-3 gap-2 px-3",
-              )}
-            >
-              <svg
-                aria-hidden="true"
-                viewBox="0 0 24 24"
-                fill="none"
-                stroke="currentColor"
-                strokeWidth="2"
-                className="h-4 w-4 shrink-0"
-              >
-                <path
-                  d="M18 10h-1.26A8 8 0 1 0 9 20h9a5 5 0 0 0 0-10z"
-                  strokeLinejoin="round"
-                />
-              </svg>
-              {effectiveCollapsed ? null : (
-                <span className="flex-1">
-                  otari.ai <span aria-hidden>↗</span>
-                </span>
-              )}
-            </a>
-            {/* Last, and the only control here that opens rather than
-                navigates: account settings, appearance, data & privacy, and
-                sign-out, which used to sit in the page header. */}
+            {/* One control, not a stack of links: the guide, appearance, and
+                sign-out all live in its menu, which is how the prototype ends
+                the rail. Sign-out used to sit in the page header. */}
             <AccountMenu collapsed={effectiveCollapsed} />
           </div>
           {collapsed || isMobile ? null : (
