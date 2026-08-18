@@ -395,18 +395,21 @@ export function useModelMetadata() {
   })
 }
 
-export function useAliases() {
+export function useAliases(workspaceId?: string) {
+  const scope = workspaceId ? `?workspace_id=${workspaceId}` : ""
   return useQuery({
-    queryKey: [ALIASES],
-    queryFn: () => apiFetch<AliasResponse[]>("/v1/aliases"),
+    queryKey: [ALIASES, workspaceId ?? null],
+    queryFn: () => apiFetch<AliasResponse[]>(`/v1/aliases${scope}`),
     staleTime: 60_000,
   })
 }
 
-export function useRoutingPolicies() {
+export function useRoutingPolicies(workspaceId?: string) {
+  const scope = workspaceId ? `?workspace_id=${workspaceId}` : ""
   return useQuery({
-    queryKey: [ROUTING_POLICIES],
-    queryFn: () => apiFetch<RoutingPolicyResponse[]>("/v1/routing/policies"),
+    queryKey: [ROUTING_POLICIES, workspaceId ?? null],
+    queryFn: () =>
+      apiFetch<RoutingPolicyResponse[]>(`/v1/routing/policies${scope}`),
     staleTime: 60_000,
   })
 }
@@ -802,11 +805,12 @@ export function useRejectPricingRefresh() {
 const KEYS_PAGE_SIZE = 1000
 const KEYS_MAX_PAGES = 100
 
-async function fetchAllKeys(): Promise<ApiKey[]> {
+async function fetchAllKeys(workspaceId?: string): Promise<ApiKey[]> {
   const all: ApiKey[] = []
+  const scope = workspaceId ? `&workspace_id=${workspaceId}` : ""
   for (let page = 0; page < KEYS_MAX_PAGES; page += 1) {
     const rows = await apiFetch<ApiKey[]>(
-      `/v1/keys?skip=${page * KEYS_PAGE_SIZE}&limit=${KEYS_PAGE_SIZE}`,
+      `/v1/keys?skip=${page * KEYS_PAGE_SIZE}&limit=${KEYS_PAGE_SIZE}${scope}`,
     )
     all.push(...rows)
     if (rows.length < KEYS_PAGE_SIZE) {
@@ -816,10 +820,14 @@ async function fetchAllKeys(): Promise<ApiKey[]> {
   return all
 }
 
-export function useKeys() {
+// The workspace is part of the key, not just the request: switching workspaces
+// has to refetch rather than serve the previous one's keys from cache. Same for
+// the two below. An unset id keeps the deployment-wide view, which is what the
+// organization context and a deployment with no workspace selected still want.
+export function useKeys(workspaceId?: string) {
   return useQuery({
-    queryKey: [KEYS],
-    queryFn: fetchAllKeys,
+    queryKey: [KEYS, workspaceId ?? null],
+    queryFn: () => fetchAllKeys(workspaceId),
     staleTime: 60_000,
   })
 }
@@ -1049,6 +1057,7 @@ function usageParams(filters: UsageFilters): URLSearchParams {
       if (one) params.append(key, one)
     }
   }
+  if (filters.workspace_id) params.set("workspace_id", filters.workspace_id)
   if (filters.start_date) params.set("start_date", filters.start_date)
   if (filters.end_date) params.set("end_date", filters.end_date)
   if (filters.status) params.set("status", filters.status)

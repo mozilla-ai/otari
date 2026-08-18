@@ -36,6 +36,7 @@ import {
   formatRelative,
   formatUsd,
 } from "@/shared/helpers/format"
+import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 const DAY_MS = 86_400_000
 const PERIOD_DAYS = 30
@@ -148,7 +149,10 @@ export function OverviewPage({
   const previous = useUsageSummary(prevFilters, "day", NO_BREAKDOWNS)
   const health = useProviderHealth()
   const budgets = useBudgets()
-  const keys = useKeys()
+  const { selected: workspace } = useSelectedWorkspace()
+  // Same scope as the API keys page this tile links to, so the count and the
+  // table behind it cannot disagree.
+  const keys = useKeys(workspace?.workspace_id)
   const users = useUsers()
   const recent = useUsageLogs({}, 0, 5)
 

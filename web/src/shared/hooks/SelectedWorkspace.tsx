@@ -91,12 +91,18 @@ export function SelectedWorkspaceProvider({
   return <Context.Provider value={value}>{children}</Context.Provider>
 }
 
+// What a caller outside the provider sees. Not an error: "no workspace
+// selected" is a real state inside the shell too (a caller who belongs to none),
+// and every consumer already handles it by falling back to the deployment-wide
+// view. A page rendered on its own therefore behaves like one whose switcher has
+// nothing to offer, rather than crashing.
+const NO_WORKSPACE: SelectedWorkspace = {
+  memberships: [],
+  selected: null,
+  select: () => {},
+  isLoading: false,
+}
+
 export function useSelectedWorkspace(): SelectedWorkspace {
-  const value = useContext(Context)
-  if (!value) {
-    throw new Error(
-      "useSelectedWorkspace must be used within a SelectedWorkspaceProvider",
-    )
-  }
-  return value
+  return useContext(Context) ?? NO_WORKSPACE
 }

@@ -57,6 +57,7 @@ import {
   YEAR_SPAN_S,
 } from "@/shared/helpers/timeRange"
 import { useUrlState } from "@/shared/helpers/urlState"
+import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 // ---------- formatting ----------
 
@@ -1188,8 +1189,12 @@ export function ActivityPage() {
         ? false
         : undefined
 
+  const { selected: workspace } = useSelectedWorkspace()
   const filters: UsageFilters = useMemo(
     () => ({
+      // From the sidebar's switcher, not from a control on this page: it scopes
+      // the whole shell, and the operator's own filters sit below it.
+      workspace_id: workspace?.workspace_id,
       start_date: win.start,
       end_date: win.end,
       status: statusFilter || undefined,
@@ -1204,6 +1209,7 @@ export function ActivityPage() {
       priced,
     }),
     [
+      workspace,
       win,
       toolFilter,
       statusFilter,

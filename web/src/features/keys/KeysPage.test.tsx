@@ -33,9 +33,8 @@ function apiKey(overrides: Partial<ApiKey> = {}): ApiKey {
   return {
     capture_agent_telemetry: null,
     id: "key-1",
-    // Required since keys carry a workspace: a key belongs to one, and requests
-    // on it are scoped and billed there.
-    workspace_id: "11111111-1111-4111-8111-111111111111",
+    // NOT NULL on the server: a key always belongs to exactly one workspace.
+    workspace_id: "11111111-1111-1111-1111-111111111111",
     key_prefix: "gw-AbC3dE",
     key_name: "ci-bot",
     user_id: "alice",

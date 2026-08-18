@@ -42,6 +42,7 @@ import {
   resolveSelectedIds,
   useTableSelection,
 } from "@/shared/helpers/tableSelection"
+import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 // ---------- helpers ----------
 
@@ -456,6 +457,7 @@ function CreateKeyForm({
 }) {
   const create = useCreateKey()
   const users = useUsers()
+  const { selected: workspace } = useSelectedWorkspace()
   const [keyName, setKeyName] = useState("")
   const [expiresAt, setExpiresAt] = useState("")
   const memberLabels = useMemberAttributionLabels()
@@ -479,6 +481,10 @@ function CreateKeyForm({
     if (create.isPending || !scopeValid || ownerMissing) return
     const body: CreateKeyRequest = {
       key_name: keyName.trim() || null,
+      // The workspace the shell is on. A key belongs to exactly one, and it is
+      // what every request on that key is billed to, so it is decided here
+      // rather than left to the server's default.
+      workspace_id: workspace?.workspace_id,
       user_id: userId.trim(),
       expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
       allowed_models: allowedModels,
@@ -722,7 +728,10 @@ function AccessChip({ allowed }: { allowed: string[] | null }) {
 }
 
 export function KeysPage() {
-  const keys = useKeys()
+  // Scoped to the workspace the switcher is on: a key belongs to exactly one,
+  // and this page is in the workspace context.
+  const { selected: workspace } = useSelectedWorkspace()
+  const keys = useKeys(workspace?.workspace_id)
   const updateKey = useUpdateKey()
   const rotateKey = useRotateKey()
   const deleteKey = useDeleteKey()

@@ -8,6 +8,7 @@ import type {
 import { useCallback, useEffect, useRef, useState } from "react"
 import { ConnectionStatus } from "@/app/ConnectionStatus"
 import { AccountMenu } from "@/app/nav/AccountMenu"
+import { Breadcrumbs } from "@/app/nav/Breadcrumbs"
 import {
   NAV_SECTIONS,
   navContextForPath,
@@ -480,6 +481,10 @@ export function AppShell() {
             </div>
           )}
           <nav
+            // Named because the header's breadcrumb is a navigation landmark
+            // too, and two unnamed ones give a screen-reader user no way to tell
+            // the rail from the trail.
+            aria-label="Sidebar"
             className={clsx(
               "flex flex-col py-4",
               effectiveCollapsed ? "px-2" : "px-3",
@@ -672,6 +677,7 @@ export function AppShell() {
                   <path d="M9 4v16" strokeLinecap="round" />
                 </svg>
               </button>
+              <Breadcrumbs pathname={pathname} />
             </div>
           </header>
           <main

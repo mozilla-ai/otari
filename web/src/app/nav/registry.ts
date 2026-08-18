@@ -266,6 +266,20 @@ const ORG_PATHS: readonly string[] = ORG_NAV_SECTIONS.flatMap((section) =>
  * unregistered (the guide, the 404 splat) belongs to the workspace context,
  * which is the one the shell opens in.
  */
+/**
+ * What to call the destination at this pathname, as a breadcrumb would.
+ *
+ * Distinct from `navItemForPath`, which answers with the entry that *gates* a
+ * path: for a nested destination that is the parent, so it would name
+ * `/tools/web-search` "Tools". A breadcrumb wants the leaf.
+ */
+export function navLabelForPath(pathname: string): string | undefined {
+  const child = NAV_ITEMS.flatMap((item) => item.children ?? []).find(
+    (one) => one.to === pathname,
+  )
+  return child?.label ?? navItemForPath(pathname)?.label
+}
+
 export function navContextForPath(pathname: string): NavContext {
   const item = navItemForPath(pathname)
   if (!item) return "workspace"

@@ -31,6 +31,7 @@ import {
   PageHeader,
 } from "@/shared/components/ui"
 import { useUrlValue } from "@/shared/helpers/urlState"
+import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 /** A row on this page: either a routing policy or a stored/config alias.
  *
@@ -1236,8 +1237,9 @@ function PolicyForm({
 // ---------------------------------------------------------------------------
 
 export function RoutingPage() {
-  const policies = useRoutingPolicies()
-  const aliases = useAliases()
+  const { selected: workspace } = useSelectedWorkspace()
+  const policies = useRoutingPolicies(workspace?.workspace_id)
+  const aliases = useAliases(workspace?.workspace_id)
   const deletePolicy = useDeleteRoutingPolicy()
   const deleteAlias = useDeleteAlias()
   // A deep link may pre-fill the add form with ?target=provider:model.

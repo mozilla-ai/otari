@@ -364,7 +364,7 @@ describe("AppShell surface gating", () => {
     // subset check keeps passing while the list quietly stops being every label
     // (which is what happened when the tenancy section landed).
     expect(
-      within(screen.getByRole("navigation"))
+      within(screen.getByRole("navigation", { name: "Sidebar" }))
         .getAllByRole("link")
         .map((link) => link.textContent),
     ).toEqual([
@@ -379,7 +379,7 @@ describe("AppShell surface gating", () => {
     // Routing and Tools nest destinations, so they expand rather than
     // navigate; their children are links once the group is open.
     expect(
-      within(screen.getByRole("navigation"))
+      within(screen.getByRole("navigation", { name: "Sidebar" }))
         .getAllByRole("button")
         .map((button) => button.textContent),
     ).toEqual(["Routing", "Tools"])
@@ -392,7 +392,7 @@ describe("AppShell surface gating", () => {
     await renderShell(bootstrap(), { url: "/organization/members" })
 
     expect(
-      within(screen.getByRole("navigation"))
+      within(screen.getByRole("navigation", { name: "Sidebar" }))
         .getAllByRole("link")
         .map((link) => link.textContent),
     ).toEqual([
@@ -598,5 +598,27 @@ describe("AppShell entitlement and flag gating", () => {
     expect(
       await screen.findByRole("button", { name: "Sign out" }),
     ).toBeInTheDocument()
+  })
+
+  it("names the scope and the page, leaving out an organization there is one of", async () => {
+    mockMatchMedia(false)
+    await renderShell()
+
+    // Standalone has exactly one organization and no way to mint a second, so
+    // naming it on every page is a segment that never disambiguates anything.
+    const crumb = await screen.findByLabelText("Breadcrumb")
+    expect(crumb).toHaveTextContent("Overview")
+    expect(crumb).not.toHaveTextContent(/organization/i)
+  })
+
+  it("names a nested destination after itself, not after its group", async () => {
+    mockMatchMedia(false)
+    // `navItemForPath` answers with the entry that gates a path, which for a
+    // child is its parent; a breadcrumb wants the leaf.
+    await renderShell(bootstrap(), { url: "/tools/web-search" })
+
+    expect(await screen.findByLabelText("Breadcrumb")).toHaveTextContent(
+      "Web search",
+    )
   })
 })

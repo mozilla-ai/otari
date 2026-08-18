@@ -12,7 +12,10 @@ export const MASTER_KEY = "e2e-master-key"
 // page has tile-links whose names substring-collide with sidebar items (e.g.
 // "Providers healthy", "Active users", "No budgets configured"), so an unscoped
 // getByRole("link", { name }) is ambiguous there.
-export const nav = (page: Page): Locator => page.getByRole("navigation")
+// The sidebar specifically: the header's breadcrumb is a navigation landmark
+// too, so an unnamed query now matches both.
+export const nav = (page: Page): Locator =>
+  page.getByRole("navigation", { name: "Sidebar" })
 
 export async function login(page: Page): Promise<void> {
   await page.goto("/")
