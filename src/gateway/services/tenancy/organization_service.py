@@ -372,7 +372,11 @@ class OrganizationService:
         if target is None:
             raise OrganizationMemberNotFoundError(organization_member_id)
 
-        update_data = request.model_dump(exclude_unset=True)
+        # ``exclude_unset`` keeps an explicit ``null`` (the generated client types
+        # both fields as nullable, so a form that clears one sends it), and both
+        # columns are NOT NULL, so passing it through reached the database as an
+        # integrity error rather than as "leave this field alone".
+        update_data = {key: value for key, value in request.model_dump(exclude_unset=True).items() if value is not None}
         await self._validate_membership_update(
             actor_membership=actor_membership,
             target_membership=target,

@@ -520,6 +520,33 @@ def test_a_member_cannot_be_parked_in_a_status_nothing_can_produce(
     assert response.status_code == 422
 
 
+def test_a_null_role_or_status_leaves_the_membership_alone(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """Both columns are NOT NULL, and the generated client types both as nullable.
+
+    ``exclude_unset`` keeps an explicit null, so before it was filtered out a
+    ``{"role": null}`` patch reached the column as an integrity error and
+    answered 500 rather than leaving the field alone.
+    """
+    added = client.post(
+        "/v1/organizations/me/members",
+        json={"email": "ada@example.com", "role": "admin"},
+        headers=master_key_header,
+    ).json()
+
+    response = client.patch(
+        f"/v1/organizations/me/members/{added['organization_member_id']}",
+        json={"role": None, "status": None},
+        headers=master_key_header,
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["role"] == "admin"
+    assert response.json()["status"] == "active"
+
+
 def test_a_members_role_can_be_changed(
     client: TestClient,
     master_key_header: dict[str, str],
