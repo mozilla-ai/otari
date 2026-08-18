@@ -138,6 +138,11 @@ export function organizationMember(
   return {
     organization_member_id: "22222222-2222-2222-2222-222222222222",
     user_id: "33333333-3333-3333-3333-333333333333",
+    // The request-plane owner this member bills through, which the server mints
+    // as the identity's UUID rendered as a string. Set by default because a
+    // member who can hold a key is the ordinary case; a test that is about the
+    // other one passes null.
+    attribution_user_id: "33333333-3333-3333-3333-333333333333",
     invitation_id: null,
     // A standalone operator identity has no sign-in address; a ported platform
     // row does. Both shapes have to render, so the builder ships neither and a

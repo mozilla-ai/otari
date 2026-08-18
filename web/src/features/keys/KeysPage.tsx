@@ -18,6 +18,7 @@ import {
   accessLabel,
   ModelScopeControl,
 } from "@/features/models/ModelScopeControl"
+import { useMemberAttributionLabels } from "@/features/organization/attribution"
 import { UserComboBox } from "@/features/users/UserComboBox"
 import {
   useCreateKey,
@@ -457,6 +458,7 @@ function CreateKeyForm({
   const users = useUsers()
   const [keyName, setKeyName] = useState("")
   const [expiresAt, setExpiresAt] = useState("")
+  const memberLabels = useMemberAttributionLabels()
   const [showAdvanced, setShowAdvanced] = useState(false)
   const [userId, setUserId] = useState("")
   const [allowedModels, setAllowedModels] = useState<string[] | null>(null)
@@ -530,6 +532,7 @@ function CreateKeyForm({
           value={userId}
           onChange={setUserId}
           users={users.data ?? []}
+          memberLabels={memberLabels}
         />
         <button
           type="button"
@@ -723,6 +726,7 @@ export function KeysPage() {
   const updateKey = useUpdateKey()
   const rotateKey = useRotateKey()
   const deleteKey = useDeleteKey()
+  const memberLabels = useMemberAttributionLabels()
 
   const [addOpen, setAddOpen] = useState(false)
   const [editing, setEditing] = useState<string | null>(null)
@@ -829,14 +833,28 @@ export function KeysPage() {
       {
         id: "owner",
         header: "Owner",
-        cell: (k) =>
-          isVirtualUser(k.user_id) ? (
-            <Chip size="sm" color="default">
-              virtual
-            </Chip>
-          ) : (
-            <code className="text-xs text-muted">{k.user_id ?? "—"}</code>
-          ),
+        // A member is named; anything else keeps the raw id, which for a
+        // hand-made owner like `ci-bot` is already the readable form. The id
+        // stays in the title so the value actually sent on a request is still
+        // recoverable from this column.
+        cell: (k) => {
+          if (isVirtualUser(k.user_id)) {
+            return (
+              <Chip size="sm" color="default">
+                virtual
+              </Chip>
+            )
+          }
+          const member = k.user_id ? memberLabels.get(k.user_id) : undefined
+          if (member) {
+            return (
+              <span className="text-sm text-foreground" title={k.user_id ?? ""}>
+                {member}
+              </span>
+            )
+          }
+          return <code className="text-xs text-muted">{k.user_id ?? "—"}</code>
+        },
       },
       {
         id: "key",
@@ -941,6 +959,7 @@ export function KeysPage() {
       deleteKey.mutate,
       setActive,
       regenerate,
+      memberLabels,
     ],
   )
 

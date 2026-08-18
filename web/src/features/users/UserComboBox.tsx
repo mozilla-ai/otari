@@ -14,6 +14,7 @@ import type { User } from "@/client"
 interface Option {
   id: string
   name: string
+  isMember: boolean
 }
 
 // A required "owner" picker for a new API key: choose an existing user or type a
@@ -29,6 +30,7 @@ export function UserComboBox({
   label = "Owner",
   placeholder = "Pick a user, or type a new id…",
   unknownHint,
+  memberLabels,
 }: {
   value: string
   onChange: (userId: string) => void
@@ -36,18 +38,35 @@ export function UserComboBox({
   description?: ReactNode
   label?: ReactNode
   placeholder?: string
+  // Names the organization members among these users, keyed by the owner id
+  // they bill through. Without it a member reads as the bare UUID their
+  // identity was minted under, which nobody can pick from a list.
+  memberLabels?: ReadonlyMap<string, string>
   // What to say when the typed id is not an existing user. Defaults to the
   // keys-page truth (that endpoint creates the user); callers whose endpoint
   // rejects an unknown id must override it rather than promise a creation that
   // will 404.
   unknownHint?: ReactNode
 }) {
+  // A member is named by the roster and sorted to the front: those are the
+  // owners someone means when issuing a key, and their raw id is a UUID that
+  // reads as noise next to a hand-made one like `ci-bot`. The id stays the
+  // value submitted either way; only the label changes.
   const options: Option[] = users
     .filter((u) => !u.user_id.startsWith("apikey-"))
-    .map((u) => ({
-      id: u.user_id,
-      name: u.alias ? `${u.user_id} (${u.alias})` : u.user_id,
-    }))
+    .map((u) => {
+      const member = memberLabels?.get(u.user_id)
+      if (member) return { id: u.user_id, name: member, isMember: true }
+      return {
+        id: u.user_id,
+        name: u.alias ? `${u.user_id} (${u.alias})` : u.user_id,
+        isMember: false,
+      }
+    })
+    .sort((a, b) => {
+      if (a.isMember !== b.isMember) return a.isMember ? -1 : 1
+      return a.name.localeCompare(b.name)
+    })
 
   const [text, setText] = useState(value)
   const query = text.trim().toLowerCase()

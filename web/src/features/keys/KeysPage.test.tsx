@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { ApiKey, User } from "@/client"
 import { KeysPage } from "@/features/keys/KeysPage"
+import { DeploymentProvider } from "@/shared/hooks/useDeployment"
+import { bootstrap, organizationMember } from "@/tests/fixtures"
 
 function user(overrides: Partial<User> = {}): User {
   return {
@@ -60,9 +62,16 @@ const NEW_SECRET = "gw-NEWSECRET0000000000000000000000000000000000000000000000"
 const REGEN_SECRET =
   "gw-REGEN00000000000000000000000000000000000000000000000000"
 
-function mockApi(opts: { keys?: ApiKey[]; users?: User[] } = {}) {
+function mockApi(
+  opts: {
+    keys?: ApiKey[]
+    users?: User[]
+    members?: ReturnType<typeof organizationMember>[]
+  } = {},
+) {
   let list = [...(opts.keys ?? [])]
   const users = opts.users ?? []
+  const members = opts.members ?? []
 
   return vi
     .spyOn(globalThis, "fetch")
@@ -111,6 +120,11 @@ function mockApi(opts: { keys?: ApiKey[]; users?: User[] } = {}) {
         }
         return jsonResponse(list)
       }
+      // Before /v1/users, and paged: the owner picker names members through
+      // this, and `fetchAllPaged` reads `data`/`count` rather than a bare list.
+      if (url.includes("/v1/organizations/me/members")) {
+        return jsonResponse({ data: members, count: members.length })
+      }
       if (url.includes("/v1/users")) {
         return jsonResponse(users)
       }
@@ -140,7 +154,14 @@ function renderPage(ui: ReactElement) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
+  // The page reads the deployment's surfaces to decide whether it may name key
+  // owners from the organization roster, so it needs the context the app shell
+  // provides around it in production.
+  return render(
+    <QueryClientProvider client={client}>
+      <DeploymentProvider value={bootstrap()}>{ui}</DeploymentProvider>
+    </QueryClientProvider>,
+  )
 }
 
 describe("KeysPage", () => {
@@ -785,5 +806,42 @@ describe("KeysPage", () => {
     const row = (await screen.findByText("old")).closest("tr")!
     expect(within(row).getByText("Expired")).toBeInTheDocument()
     expect(within(row).getByText("virtual")).toBeInTheDocument()
+  })
+
+  it("names a key's owner from the roster when that owner is a member", async () => {
+    const uuid = "33333333-3333-3333-3333-333333333333"
+    mockApi({
+      keys: [apiKey({ id: "key-1", key_name: "alice-laptop", user_id: uuid })],
+      users: [user({ user_id: uuid, alias: "alice@example.com" })],
+      members: [
+        organizationMember({
+          attribution_user_id: uuid,
+          full_name: null,
+          email: "alice@example.com",
+        }),
+      ],
+    })
+    renderPage(<KeysPage />)
+
+    const row = (await screen.findByText("alice-laptop")).closest("tr")!
+    // The person, not the UUID their identity was minted under.
+    expect(
+      await within(row).findByText("alice@example.com"),
+    ).toBeInTheDocument()
+    expect(within(row).queryByText(uuid)).not.toBeInTheDocument()
+  })
+
+  it("leaves an owner nobody named as the id it always was", async () => {
+    mockApi({
+      keys: [apiKey({ id: "key-1", key_name: "ci", user_id: "ci-bot" })],
+      users: [user({ user_id: "ci-bot", alias: null })],
+      members: [],
+    })
+    renderPage(<KeysPage />)
+
+    // No roster entry claims `ci-bot`, and a hand-made id is already the
+    // readable form, so the column is unchanged from before members existed.
+    const row = (await screen.findByText("ci")).closest("tr")!
+    expect(within(row).getByText("ci-bot")).toBeInTheDocument()
   })
 })

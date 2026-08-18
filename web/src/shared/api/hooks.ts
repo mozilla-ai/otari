@@ -1390,12 +1390,17 @@ export function useOrganizationContext() {
   })
 }
 
-export function useOrganizationMembers() {
+// `enabled` because the roster is now read from outside the Organization pages
+// too, to name the owner of an API key. A deployment that does not host the
+// `organizations` surface has no such route to call, so the caller gates on it
+// rather than letting the page 404 on a request it only wanted for a label.
+export function useOrganizationMembers(enabled = true) {
   return useQuery({
     queryKey: [ORGANIZATION_MEMBERS],
     queryFn: () =>
       fetchAllPaged<OrganizationMember>("/v1/organizations/me/members"),
     staleTime: 60_000,
+    enabled,
   })
 }
 
