@@ -38,11 +38,12 @@ Otari ignores any it does not recognize. Consumers of this contract MUST do the
 same (ignore unknown fields) so the platform can add fields without breaking
 older gateways.
 
-For example, the otari.ai resolve response also carries `workspace_id`,
-`organization_id`, `provider_key_id`, and `allowed_models`. Otari does not read
-these today, so they are intentionally absent from the shapes documented here.
-`user_id` (below) is the one exception: Otari reads it when present, but a
-peer omitting it is exactly as valid as any other unrecognized field.
+For example, the otari.ai resolve response also carries `provider_key_id` and
+`allowed_models`. Otari does not read these today, so they are intentionally
+absent from the shapes documented here. `user_id`, `workspace_id`, and
+`organization_id` (all below) are the exceptions: Otari reads each when
+present, but a peer omitting any of them is exactly as valid as a peer sending
+an unrecognized field.
 
 When the operator points Otari's web-search backend at the platform
 (`OTARI_WEB_SEARCH_URL` under `base_url`), Otari also sends `X-Gateway-Token`
@@ -74,6 +75,8 @@ Content-Type: application/json
   "request_id": "01HXY...",
   "fallback_enabled": true,
   "user_id": "3fa85f64-5717-4562-b3fc-2c963f66afa6",
+  "workspace_id": "9b1deb4d-3b7d-4bad-9bdd-2b0d7b3dcb6d",
+  "organization_id": "7c9e6679-7425-40de-944b-e07fc1f90ae7",
   "attempts": [
     {
       "attempt_id": "01HX1...",
@@ -172,6 +175,16 @@ omitting any other unrecognized field: nothing that reads this field may
 require it. When present, it is Otari's only way to key its own per-caller
 gateway-side state (aliases, routing memory, files, batches) in hybrid mode.
 
+`workspace_id` and `organization_id` (both optional) identify the tenant that
+owns this resolution: the workspace the presented `X-User-Token` belongs to,
+and the organization above it. Both are stable, opaque strings that Otari never
+parses. They are the only tenant Otari sees, because `X-Gateway-Token`
+authenticates the calling gateway and carries no tenant of its own, so nothing
+downstream can recover them after the fact. Both are optional in the same
+fail-open sense as `user_id`: a peer that omits them costs whatever record
+needed a tenant, never the request. Otari records them and does not route on
+them, so neither value can reach a provider call.
+
 ### Response: single-attempt shape
 
 Otari also accepts a flat payload:
@@ -192,7 +205,9 @@ Otari maps this onto a single-attempt route (`attempts = [{...}]`,
 propagate to the client. New platform implementations should prefer the
 multi-attempt shape. `user_id` has no legacy mirror here, the same treatment
 as `extra_params`: a peer old enough to still emit this shape predates the
-field entirely.
+field entirely. `workspace_id` and `organization_id` are read here too, from
+the same top level, since a peer that still answers flat may nonetheless know
+its own tenant.
 
 ### Failure
 

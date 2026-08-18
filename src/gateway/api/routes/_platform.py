@@ -129,6 +129,17 @@ class ResolvedRoute(BaseModel):
     # has, so it is what gateway-side survivals (aliases, routing memory,
     # files, batches) can key their state on in a later hybrid-mode phase.
     user_id: str | None = None
+    # The tenant that owns this resolution: the workspace the presented
+    # X-User-Token belongs to, and the organization above it. Both opaque
+    # strings, never parsed. The platform has carried them on its resolve
+    # response all along (see docs/hybrid-mode-protocol.md); keeping them here
+    # is the only way anything downstream can attribute a record to a tenant,
+    # because the gateway token that authenticates the call to the platform
+    # carries no tenant of its own. Absent on a peer that does not send them,
+    # in which case a record that needs them is dropped rather than pooled
+    # into some other tenant's.
+    workspace_id: str | None = None
+    organization_id: str | None = None
 
 
 class _AttemptFailure(NamedTuple):
@@ -546,6 +557,22 @@ async def _resolve_platform_credentials(
     return _parse_resolve_payload(payload)
 
 
+def _tenant_ids(payload: dict[str, Any]) -> tuple[str | None, str | None]:
+    """Read the optional ``(workspace_id, organization_id)`` pair off a resolve
+    payload, tolerating absence.
+
+    Shared by both payload shapes, since the fields sit at the top level in
+    each. A peer that omits them yields ``None`` rather than an error, so
+    resolution is never blocked on a field only recording needs.
+    """
+    workspace_id = payload.get("workspace_id")
+    organization_id = payload.get("organization_id")
+    return (
+        str(workspace_id) if workspace_id is not None else None,
+        str(organization_id) if organization_id is not None else None,
+    )
+
+
 def _parse_resolve_payload(payload: dict[str, Any]) -> ResolvedRoute:
     """Build a ResolvedRoute from either the new attempts-list shape or the
     legacy single-attempt shape.
@@ -572,19 +599,27 @@ def _parse_resolve_payload(payload: dict[str, Any]) -> ResolvedRoute:
             for att in attempts_payload
         ]
         raw_user_id = payload.get("user_id")
+        workspace_id, organization_id = _tenant_ids(payload)
         return ResolvedRoute(
             request_id=str(payload["request_id"]),
             fallback_enabled=bool(payload.get("fallback_enabled", False)),
             attempts=attempts,
             user_id=str(raw_user_id) if raw_user_id is not None else None,
+            workspace_id=workspace_id,
+            organization_id=organization_id,
         )
 
     # Legacy single-attempt shape predates user_id entirely, same treatment as
     # extra_params (see the class docstring above): no legacy mirror to read.
+    # The tenant ids are the exception: they sit at the top level in both
+    # shapes, so a flat-answering peer that knows its tenant still gets read.
     correlation_id = str(payload["correlation_id"])
+    workspace_id, organization_id = _tenant_ids(payload)
     return ResolvedRoute(
         request_id=correlation_id,
         fallback_enabled=False,
+        workspace_id=workspace_id,
+        organization_id=organization_id,
         attempts=[
             ResolvedAttempt(
                 attempt_id=correlation_id,
