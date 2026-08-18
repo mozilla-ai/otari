@@ -634,4 +634,31 @@ describe("AppShell entitlement and flag gating", () => {
     expect(crumb).toHaveTextContent("Default Organization")
     expect(crumb).toHaveTextContent("Overview")
   })
+
+  it("drops a nested destination whose own surface the deployment lacks", async () => {
+    mockMatchMedia(false)
+    const user = userEvent.setup()
+    // Guardrails is grouped under Routing but served by the tools surface. The
+    // link used to render anyway and land on the "not available here" panel.
+    await renderShell(bootstrap({ surfaces: ["routing"] }))
+
+    await user.click(screen.getByRole("button", { name: "Routing" }))
+    expect(screen.getByRole("link", { name: "Policies" })).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Guardrails" })).toBeNull()
+  })
+
+  it("marks one link as the current page on a nested route", async () => {
+    mockMatchMedia(false)
+    // TanStack's Link matches a prefix by default, so /organization/members
+    // left `aria-current` on "Organization" too. The className was already
+    // driven from the registry; this is the half a screen reader reads.
+    await renderShell(bootstrap(), { url: "/organization/members" })
+
+    await screen.findByRole("link", { name: "Members & roles" })
+    const current = screen
+      .getAllByRole("link")
+      .filter((link) => link.getAttribute("aria-current") === "page")
+      .map((link) => link.textContent)
+    expect(current).toEqual(["Members & roles"])
+  })
 })

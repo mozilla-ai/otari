@@ -31,7 +31,6 @@ import {
   PageHeader,
 } from "@/shared/components/ui"
 import { useUrlValue } from "@/shared/helpers/urlState"
-import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 /** A row on this page: either a routing policy or a stored/config alias.
  *
@@ -1237,9 +1236,15 @@ function PolicyForm({
 // ---------------------------------------------------------------------------
 
 export function RoutingPage() {
-  const { selected: workspace } = useSelectedWorkspace()
-  const policies = useRoutingPolicies(workspace?.workspace_id)
-  const aliases = useAliases(workspace?.workspace_id)
+  // Deliberately unscoped, unlike keys and usage. The gateway stores every
+  // policy and alias in the default workspace on purpose, because resolution
+  // reads a process-wide name-keyed cache: one stored elsewhere would be listed
+  // as scoped while it resolved for everyone. Filtering this list by the
+  // selected workspace would therefore show an empty page while those policies
+  // were live for that workspace's traffic, and hide a policy the moment it was
+  // created. Scope this when resolution is scoped, not before.
+  const policies = useRoutingPolicies()
+  const aliases = useAliases()
   const deletePolicy = useDeleteRoutingPolicy()
   const deleteAlias = useDeleteAlias()
   // A deep link may pre-fill the add form with ?target=provider:model.

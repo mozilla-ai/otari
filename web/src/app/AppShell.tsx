@@ -111,12 +111,20 @@ function NavGroup({
   item,
   currentPath,
   onNavigate,
+  isVisible,
 }: {
   item: NavItem
   currentPath: string
   onNavigate: () => void
+  isVisible: (item: NavItem) => boolean
 }) {
-  const children = item.children ?? []
+  // A child declaring its own surface is gated on it. Without this the field
+  // was decoration: Guardrails is grouped under Routing but served by the tools
+  // surface, so a deployment without that surface kept the link and landed on
+  // the "not available here" panel.
+  const children = (item.children ?? []).filter((child) =>
+    child.surface ? isVisible({ ...item, surface: child.surface }) : true,
+  )
   const holdsCurrent = children.some((child) => child.to === currentPath)
   const [open, setOpen] = useState(holdsCurrent)
   // Follows the route when navigation lands inside the group from elsewhere
@@ -162,6 +170,7 @@ function NavGroup({
             <Link
               key={child.to}
               to={child.to}
+              activeOptions={{ exact: true }}
               onClick={onNavigate}
               className={clsx(
                 navLinkClass(false),
@@ -518,11 +527,18 @@ export function AppShell() {
                           item={item}
                           currentPath={pathname}
                           onNavigate={() => setMobileNavOpen(false)}
+                          isVisible={isVisible}
                         />
                       ) : (
                         <Link
                           key={item.to}
                           to={item.to}
+                          // Exact, because the default is a prefix match: on
+                          // /organization/members that leaves `aria-current` on
+                          // "Organization" as well as on the child. The class
+                          // below was already driven from the registry; this is
+                          // the half a screen reader reads.
+                          activeOptions={{ exact: true }}
                           // Highlighted from the registry's own answer rather than
                           // from `activeProps`, whose default match is a prefix
                           // one: on `/organization/members` that lights up

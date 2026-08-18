@@ -7,11 +7,15 @@ import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 // that changes the second. Sits above the nav rather than in it because it
 // scopes the destinations below it rather than being one.
 //
-// It drives the Members page today, which is genuinely per-workspace: the
-// workspace member routes take a workspace id. The rest of the workspace
-// context is still deployment-wide, because no request-plane table carries a
-// workspace yet, so a switch does not change what those pages show. The copy
-// below says so rather than implying a scope that is not there.
+// It scopes what the gateway both records and resolves per workspace: members,
+// API keys, and the request log. Three things it does not, and the copy in the
+// popover says so rather than implying a scope that is not there. Routing
+// policies and aliases carry a workspace column but are all stored in the
+// default one on purpose, because resolution reads a process-wide name-keyed
+// cache, so filtering them would hide live policies. Provider credentials are
+// process-wide config rather than a workspace row. And the usage summary
+// endpoints take no workspace filter, so the spend charts do not narrow even
+// though the request log does.
 export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
   const { memberships, selected, select, isLoading } = useSelectedWorkspace()
   const context = useOrganizationContext()
@@ -117,9 +121,8 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
             )}
           </div>
           <p className="mt-2 border-t border-border px-2 pt-2 text-xs text-muted">
-            Selecting a workspace changes the Members page. The other pages are
-            still deployment-wide until the gateway records a workspace on keys
-            and usage.
+            Scopes members, API keys, and the request log. Routing, provider
+            credentials, and the spend charts stay deployment-wide.
           </p>
         </Popover.Dialog>
       </Popover.Content>

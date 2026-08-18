@@ -1443,6 +1443,10 @@ export function useAddOrganizationMember() {
       // A request may place the new member into workspaces in the same
       // transaction, so their rosters move with it.
       void queryClient.invalidateQueries({ queryKey: [WORKSPACES] })
+      // The switcher reads its list from `workspace_memberships` on the
+      // organization context, not from this key, so a workspace created
+      // here would not be offered and a deleted one would stay selected.
+      void queryClient.invalidateQueries({ queryKey: [ORGANIZATIONS] })
     },
   })
 }
@@ -1482,6 +1486,10 @@ export function useRemoveOrganizationMember() {
       // A suspended member keeps their workspace rows, so every roster that
       // resolves a name through the organization list is now stale.
       void queryClient.invalidateQueries({ queryKey: [WORKSPACES] })
+      // The switcher reads its list from `workspace_memberships` on the
+      // organization context, not from this key, so a workspace created
+      // here would not be offered and a deleted one would stay selected.
+      void queryClient.invalidateQueries({ queryKey: [ORGANIZATIONS] })
     },
   })
 }
@@ -1518,6 +1526,10 @@ export function useCreateWorkspace() {
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [WORKSPACES] })
+      // The switcher reads its list from `workspace_memberships` on the
+      // organization context, not from this key, so a workspace created
+      // here would not be offered and a deleted one would stay selected.
+      void queryClient.invalidateQueries({ queryKey: [ORGANIZATIONS] })
     },
   })
 }
@@ -1532,6 +1544,10 @@ export function useUpdateWorkspace() {
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [WORKSPACES] })
+      // The switcher reads its list from `workspace_memberships` on the
+      // organization context, not from this key, so a workspace created
+      // here would not be offered and a deleted one would stay selected.
+      void queryClient.invalidateQueries({ queryKey: [ORGANIZATIONS] })
     },
   })
 }
@@ -1545,6 +1561,10 @@ export function useDeleteWorkspace() {
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [WORKSPACES] })
+      // The switcher reads its list from `workspace_memberships` on the
+      // organization context, not from this key, so a workspace created
+      // here would not be offered and a deleted one would stay selected.
+      void queryClient.invalidateQueries({ queryKey: [ORGANIZATIONS] })
     },
   })
 }
@@ -1569,6 +1589,10 @@ export function useAddWorkspaceMember() {
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [WORKSPACES] })
+      // The switcher reads its list from `workspace_memberships` on the
+      // organization context, not from this key, so a workspace created
+      // here would not be offered and a deleted one would stay selected.
+      void queryClient.invalidateQueries({ queryKey: [ORGANIZATIONS] })
     },
   })
 }
@@ -1591,6 +1615,10 @@ export function useUpdateWorkspaceMemberRole() {
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [WORKSPACES] })
+      // The switcher reads its list from `workspace_memberships` on the
+      // organization context, not from this key, so a workspace created
+      // here would not be offered and a deleted one would stay selected.
+      void queryClient.invalidateQueries({ queryKey: [ORGANIZATIONS] })
     },
   })
 }
@@ -1611,6 +1639,10 @@ export function useRemoveWorkspaceMember() {
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [WORKSPACES] })
+      // The switcher reads its list from `workspace_memberships` on the
+      // organization context, not from this key, so a workspace created
+      // here would not be offered and a deleted one would stay selected.
+      void queryClient.invalidateQueries({ queryKey: [ORGANIZATIONS] })
     },
   })
 }
