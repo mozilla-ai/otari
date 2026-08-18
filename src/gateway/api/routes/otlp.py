@@ -184,6 +184,14 @@ def _int(value: Any) -> int:
         return 0
 
 
+def _first_presence(attrs: dict[str, Any], keys: list[str]) -> Any:
+    for key in keys:
+        val = attrs.get(key)
+        if val is not None:
+            return val
+    return None
+
+
 def _nanos_to_dt(nanos: int) -> datetime | None:
     if not nanos:
         return None
@@ -277,9 +285,10 @@ def _build_event(
         cache_read = _int(attrs.get("cache_read_tokens"))
         cache_write = _int(attrs.get("cache_creation_tokens"))
         reasoning = _int(
-            attrs.get("reasoning_tokens")
-            or attrs.get("thinking_tokens")
-            or attrs.get("reasoning_token_count")
+            _first_presence(
+                attrs,
+                ["reasoning_tokens", "thinking_tokens", "reasoning_token_count"],
+            )
         )
         session = attrs.get("session.id")
         duration = attrs.get("duration_ms", duration_ms)
@@ -298,9 +307,10 @@ def _build_event(
             output_tokens = _int(attrs.get("output_token_count"))
             cache_read = _int(attrs.get("cached_token_count"))
             reasoning = _int(
-                attrs.get("reasoning_token_count")
-                or attrs.get("reasoning_tokens")
-                or attrs.get("thinking_tokens")
+                _first_presence(
+                    attrs,
+                    ["reasoning_token_count", "reasoning_tokens", "thinking_tokens"],
+                )
             )
             event_id = _codex_event_id(attrs, None)
             duration = duration_ms
@@ -309,10 +319,15 @@ def _build_event(
             output_tokens = _int(attrs.get("gen_ai.usage.output_tokens"))
             cache_read = _int(attrs.get("gen_ai.usage.cache_read.input_tokens"))
             reasoning = _int(
-                attrs.get("gen_ai.usage.reasoning_tokens")
-                or attrs.get("gen_ai.usage.reasoning.output_tokens")
-                or attrs.get("reasoning_tokens")
-                or attrs.get("reasoning_token_count")
+                _first_presence(
+                    attrs,
+                    [
+                        "gen_ai.usage.reasoning_tokens",
+                        "gen_ai.usage.reasoning.output_tokens",
+                        "reasoning_tokens",
+                        "reasoning_token_count",
+                    ],
+                )
             )
             event_id = _codex_event_id(attrs, attrs.get("gen_ai.response.id"))
             duration = attrs.get("duration_ms", duration_ms)
@@ -332,10 +347,15 @@ def _build_event(
         )
         cache_write = _int(attrs.get("gen_ai.usage.cache_write_tokens"))
         reasoning = _int(
-            attrs.get("gen_ai.usage.reasoning_tokens")
-            or attrs.get("gen_ai.usage.reasoning.output_tokens")
-            or attrs.get("reasoning_tokens")
-            or attrs.get("reasoning_token_count")
+            _first_presence(
+                attrs,
+                [
+                    "gen_ai.usage.reasoning_tokens",
+                    "gen_ai.usage.reasoning.output_tokens",
+                    "reasoning_tokens",
+                    "reasoning_token_count",
+                ],
+            )
         )
         client = attrs.get("otari.client_name")
         source = _sanitize_source(str(client)) if client else _DEFAULT_SOURCE
