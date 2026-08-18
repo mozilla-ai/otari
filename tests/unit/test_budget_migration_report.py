@@ -160,3 +160,18 @@ def test_render_text_says_so_when_there_is_nothing_to_decide() -> None:
     assert "Every duration maps onto a period exactly." in text
     assert "Every attached budget has exactly one user." in text
     assert "Unattached budgets" not in text
+
+
+def test_render_text_holds_back_the_tail_of_a_very_large_pool() -> None:
+    report = BudgetMigrationReport(
+        budgets=[BudgetPlan("b-big", "Everyone", 5.0, _DAY, [_user(f"u{index}") for index in range(25)])],
+        reset_log_count=0,
+    )
+
+    text = render_text(report)
+
+    assert "u0: spend 0.0" in text
+    assert "u9: spend 0.0" in text
+    assert "u10: spend 0.0" not in text
+    # The count is stated rather than the listing silently ending.
+    assert "... and 15 more, listed in full by --json" in text

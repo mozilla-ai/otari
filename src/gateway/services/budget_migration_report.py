@@ -45,6 +45,12 @@ __all__ = [
 # Seconds the reconciled engine's three periods nominally span. Its windows are
 # calendar aligned, so a real month runs 28 to 31 days; 30 is the nominal length
 # rounding compares against, and the drift it reports is nominal for that reason.
+# Members listed per shared budget before the text report says how many it held
+# back. A pool with thousands of users is exactly the case worth reporting, and
+# exactly the case a full listing makes unreadable; --json always carries all of
+# them.
+_MAX_LISTED_MEMBERS = 10
+
 PERIOD_SECONDS: Final[dict[str, int]] = {
     "daily": 86_400,
     "weekly": 604_800,
@@ -142,6 +148,11 @@ class BudgetMigrationReport:
 
     @property
     def unattached(self) -> list[BudgetPlan]:
+        """Budgets no live user points at, so the migration creates nothing for them.
+
+        This includes a budget whose only users are soft deleted, not just one
+        nothing ever pointed at.
+        """
         return [plan for plan in self.budgets if not plan.live_attached]
 
     @property
@@ -196,10 +207,10 @@ def _plan_json(plan: BudgetPlan) -> dict[str, Any]:
         "name": plan.name,
         "max_budget": plan.max_budget,
         "duration_sec": plan.duration_sec,
-        "period": mapping.period if mapping else None,
-        "is_exact": mapping.is_exact if mapping else None,
-        "drift_sec": mapping.drift_sec if mapping else None,
-        "rate_factor": round(mapping.rate_factor, 4) if mapping else None,
+        "period": mapping.period if mapping is not None else None,
+        "is_exact": mapping.is_exact if mapping is not None else None,
+        "drift_sec": mapping.drift_sec if mapping is not None else None,
+        "rate_factor": round(mapping.rate_factor, 4) if mapping is not None else None,
         "attached_users": [
             {
                 "user_id": user.user_id,
@@ -246,8 +257,8 @@ async def build_migration_report(db: AsyncSession) -> BudgetMigrationReport:
             attached.append(
                 AttachedUser(
                     user_id=user_id,
-                    spend=spend or 0.0,
-                    reserved=reserved or 0.0,
+                    spend=spend,
+                    reserved=reserved,
                     is_deleted=deleted_at is not None,
                 )
             )
@@ -344,8 +355,11 @@ def render_text(report: BudgetMigrationReport) -> str:
         lines.append("  instead would pool the money and tighten the cap, so it is an opt in, not the default.")
         for plan in report.shared_pools:
             lines.append(f"  {_label(plan)}  max_budget {plan.max_budget}, {len(plan.live_attached)} user(s)")
-            for user in plan.live_attached:
+            for user in plan.live_attached[:_MAX_LISTED_MEMBERS]:
                 lines.append(f"      {user.user_id}: spend {user.spend}, reserved {user.reserved}")
+            held_back = len(plan.live_attached) - _MAX_LISTED_MEMBERS
+            if held_back > 0:
+                lines.append(f"      ... and {held_back} more, listed in full by --json")
     lines.append("")
 
     if report.unattached:
