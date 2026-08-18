@@ -10,7 +10,9 @@ Alembic would propose dropping the tables it could not see, and a test's
 ``drop_all`` teardown would leave the rest behind for the next test to collide
 with.
 
-A new model module belongs in the import list below.
+A new model module that declares tables belongs in the import list below; the
+schema-less request/response modules beside them (`guardrails`, `mcp`,
+`routing`) contribute nothing to the metadata and stay out of it.
 """
 
 from gateway.models import entities, tenancy  # noqa: F401

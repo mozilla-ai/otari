@@ -1,5 +1,5 @@
 ---
-applyTo: "src/gateway/api/**/*.py,src/gateway/auth/**/*.py,src/gateway/services/**/*.py,src/gateway/core/config.py,src/gateway/models/entities.py,src/gateway/streaming.py,alembic/versions/**/*.py"
+applyTo: "src/gateway/api/**/*.py,src/gateway/auth/**/*.py,src/gateway/services/**/*.py,src/gateway/core/config.py,src/gateway/models/**/*.py,src/gateway/streaming.py,alembic/versions/**/*.py"
 ---
 
 # Security Review Instructions
@@ -15,7 +15,9 @@ is about those, because that is where this project's real incidents have been.
 - `src/gateway/api/deps.py`, `src/gateway/auth/**` — authentication
 - `src/gateway/services/**` — budget, pricing, metering, log writing, tool/sandbox backends
 - `src/gateway/core/config.py` — configuration and security defaults
-- `src/gateway/models/entities.py`, `alembic/**` — schema and migrations
+- `src/gateway/models/**`, `alembic/**` — schema and migrations (`entities.py` for the gateway's
+  own tables, `tenancy.py` for the reconciled control plane's organizations, workspaces,
+  identities, and memberships, which carry the tenant boundary)
 - `src/gateway/streaming.py` — streaming/SSE billing hooks
 
 When reviewing a PR, read the diff **and** the enclosing functions — a touched billable
@@ -180,7 +182,7 @@ back into model context. All of these are **untrusted**.
 ---
 
 ## Schema & migration safety (Alembic)
-- ✅ **Check**: a model change in `models/entities.py` ships with a matching migration in `alembic/versions/`, chained to the current head.
+- ✅ **Check**: a model change anywhere in `models/` ships with a matching migration in `alembic/versions/`, chained to the current head.
 - ✅ **Check**: new non-nullable columns have a `server_default` (existing rows) — e.g. `users.reserved` defaults to `0`.
 - ✅ **Check**: every FK to `users.user_id` has an explicit `ondelete` policy and account deletion leaves no orphaned billable rows (`tests/integration/test_user_delete_preserve_logs.py` is the template — usage logs are intentionally preserved via `SET NULL`).
 - ✅ **Check**: a reversible `downgrade()`.

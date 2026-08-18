@@ -13,6 +13,9 @@ is the only coverage of that path. Driven against a real file database rather
 than in-memory because batch mode's rebuild is what is under test.
 """
 
+import json
+import subprocess
+import sys
 from collections.abc import Iterator
 from pathlib import Path
 
@@ -119,3 +122,28 @@ def test_upgrade_downgrade_upgrade_round_trips(sqlite_at_head: tuple[Config, Eng
     command.upgrade(config, _TENANCY_REVISION)
 
     assert _TENANCY_TABLES <= set(inspect(engine).get_table_names())
+
+
+def test_naming_one_model_module_registers_them_all() -> None:
+    """``Base.metadata`` is whole however few model modules the caller imported.
+
+    ``alembic/env.py`` names only ``gateway.models.entities`` and relies on the
+    package ``__init__`` to pull in the rest. If that import chain breaks, the
+    metadata silently loses the tenancy tables and autogenerate proposes
+    ``DROP TABLE`` for them, which is data-loss-class and invisible until
+    someone runs it. Asserting it needs a fresh interpreter, because by the time
+    a test runs in this one every model module is already imported.
+    """
+    source = (
+        "from gateway.models.entities import Base;"
+        "import json,sys;"
+        "sys.stdout.write(json.dumps(sorted(Base.metadata.tables)))"
+    )
+    result = subprocess.run(  # noqa: S603
+        [sys.executable, "-c", source],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+
+    assert _TENANCY_TABLES <= set(json.loads(result.stdout))

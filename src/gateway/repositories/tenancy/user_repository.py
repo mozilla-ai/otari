@@ -2,12 +2,12 @@
 
 import uuid
 
-from sqlalchemy import func, select
+from sqlalchemy import func, nulls_last, select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import col
 
-from gateway.models.tenancy import User, UserBase
+from gateway.models.tenancy import User, UserBase, UserCreate
 from gateway.repositories.base_repository import BaseRepository
 
 
@@ -18,11 +18,16 @@ def user_alphabetical_order() -> ColumnElement[str]:
     without one (or with a whitespace-only one), so a member roster reads
     top-to-bottom the way a directory would. A local identity has neither, and
     sorts last.
+
+    ``nulls_last()`` is what makes that last sentence true on both engines:
+    PostgreSQL puts NULLs last in an ascending sort and SQLite puts them first,
+    so an email-less operator would otherwise head the roster on the engine the
+    OSS base ships by default.
     """
-    return func.lower(func.coalesce(func.nullif(func.trim(col(User.full_name)), ""), col(User.email)))
+    return nulls_last(func.lower(func.coalesce(func.nullif(func.trim(col(User.full_name)), ""), col(User.email))))
 
 
-class UserRepository(BaseRepository[User, UserBase, UserBase]):
+class UserRepository(BaseRepository[User, UserCreate, UserBase]):
     """Repository for identity rows."""
 
     def __init__(self, db: AsyncSession):

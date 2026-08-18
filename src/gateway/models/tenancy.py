@@ -30,10 +30,15 @@ Three deliberate departures from the platform's models, applied on arrival:
   operator identity is a label, not a sign-in address (M4: "local identities
   have no email"), and every reader here must already tolerate its absence, so
   the annotation says so rather than being widened at each call site.
-- **Hosted-only columns are not carried**, with one exception:
-  ``workspace.activation_classification`` stays, because the reconciled schema
-  is edition-invariant (the overlay contributes adapters and routers, never
-  tables), so a hosted surface's column has to live here or nowhere.
+- **Hosted-only columns are not carried, with one exception.** The reconciled
+  schema is edition-invariant (the overlay contributes adapters and routers,
+  never tables), so a column the hosted edition needs has to live here or
+  nowhere. ``workspace.activation_classification`` therefore stays. The columns
+  that do *not* come are the ones gated on the still-open identity decision
+  (otari-ai#1716): password hashes, OAuth provider, verification tokens. They
+  arrive with the flow that reads them, rather than being invented ahead of it.
+  Purely hosted CRM and onboarding columns are the third case and are simply
+  not part of the reconciled schema.
 
 No ORM ``relationship()`` is declared on purpose. Lazy loading on an
 ``AsyncSession`` raises ``MissingGreenlet`` at the point of attribute access
@@ -68,7 +73,7 @@ def _validate_membership(value: str, *, allowed: set[str], kind: str) -> str:
     return value
 
 
-def _timestamp_field(*, default_factory: Any = None, column_kwargs: dict[str, Any]) -> Any:
+def _timestamp_field(*, default: Any = None, default_factory: Any = None, column_kwargs: dict[str, Any]) -> Any:
     """Build a timezone-aware timestamp field.
 
     Two things are worked around here, once, instead of at five inheriting
@@ -79,8 +84,14 @@ def _timestamp_field(*, default_factory: Any = None, column_kwargs: dict[str, An
     ``Column`` instance declared on a mixin cannot be attached to more than one
     table; ``sa_type`` plus kwargs lets SQLModel build a fresh column per model.
     """
+    if default_factory is not None:
+        return Field(  # type: ignore[call-overload]
+            default_factory=default_factory,
+            sa_type=DateTime(timezone=True),
+            sa_column_kwargs=column_kwargs,
+        )
     return Field(  # type: ignore[call-overload]
-        default_factory=default_factory,
+        default=default,
         sa_type=DateTime(timezone=True),
         sa_column_kwargs=column_kwargs,
     )
@@ -102,9 +113,15 @@ class CreatedAtMixin:
 
 
 class UpdatedAtMixin:
-    """Last-modification timestamp, stamped by the database on update."""
+    """Last-modification timestamp, stamped by the database on update.
 
-    updated_at: datetime | None = _timestamp_field(column_kwargs={"onupdate": func.now()})
+    ``default=None`` and not merely a nullable annotation: without an explicit
+    default the field is *required* on the pydantic side, which a table class
+    hides (table models skip construction validation) and any schema inheriting
+    this mixin would not.
+    """
+
+    updated_at: datetime | None = _timestamp_field(default=None, column_kwargs={"onupdate": func.now()})
 
 
 # =============================================================================
@@ -119,6 +136,17 @@ class UserBase(SQLModel):
     is_active: bool = True
     is_superuser: bool = False
     full_name: str | None = Field(default=None, max_length=255)
+
+
+class UserCreate(UserBase):
+    """Everything an identity needs to exist: its wire fields plus its scope.
+
+    Separate from ``UserBase`` because ``active_organization_id`` is NOT NULL
+    and has no wire representation, so a create schema without it describes a
+    row the database will refuse.
+    """
+
+    active_organization_id: uuid.UUID
 
 
 class User(UserBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
@@ -183,10 +211,11 @@ class Organization(OrganizationBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtM
     # (``user.active_organization_id`` points back here) and SQLModel's ``Field``
     # cannot name a constraint. The **name** is what matters: SQLAlchemy breaks a
     # cycle by emitting the constraint as a separate ALTER, and it can only do
-    # that for a named constraint, so an anonymous one makes ``drop_all`` raise
-    # ``CircularDependencyError`` on PostgreSQL, which the integration fixtures'
-    # teardown runs. ``use_alter`` states the same intent explicitly and is how
-    # the migration adds the constraint.
+    # that for a named constraint, so an anonymous one fails ``drop_all`` on
+    # PostgreSQL, which the integration fixtures' teardown runs (``CompileError``
+    # with ``use_alter`` set, ``CircularDependencyError`` without it). Both
+    # unnamed combinations fail; both named ones pass. ``use_alter`` states the
+    # same intent explicitly and is how the migration adds the constraint.
     created_by_user_id: uuid.UUID | None = Field(
         default=None,
         sa_column=Column(
@@ -485,6 +514,7 @@ __all__ = [
     "OrganizationUpdate",
     "OrganizationsPublic",
     "User",
+    "UserCreate",
     "Workspace",
     "WorkspaceActivationClassification",
     "WorkspaceCreate",
