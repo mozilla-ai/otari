@@ -413,6 +413,7 @@ def budgets_migration_report(config: str | None, database_url: str | None, as_js
     Read only. Nothing is written and no migration runs, so this is safe to run
     against a production database before an upgrade.
     """
+    from sqlalchemy.engine import make_url
     from sqlalchemy.exc import SQLAlchemyError
 
     from gateway.db import create_session
@@ -436,11 +437,19 @@ def budgets_migration_report(config: str | None, database_url: str | None, as_js
 
     try:
         click.echo(asyncio.run(_build()))
-    except SQLAlchemyError as exc:
+    # A refused connection or an unreachable host surfaces as a bare OSError from
+    # the driver's transport, never reaching SQLAlchemy's exception wrapping, and
+    # pointing this at the wrong host is the likeliest way to get it wrong. Both
+    # arms have to be caught or that case exits on a traceback.
+    except (SQLAlchemyError, OSError) as exc:
+        # Naming the database is what makes the failure actionable, but a
+        # PostgreSQL URL carries a password, and this message reaches terminal
+        # history and CI logs. Render it with the password masked.
+        safe_url = make_url(gateway_config.database_url).render_as_string(hide_password=True)
         raise click.ClickException(
             # The driver's own message ("no such table: budgets") is the useful
             # half; str(exc) appends the whole statement, which buries it.
-            f"Could not read budgets from {gateway_config.database_url}: {getattr(exc, 'orig', exc)}. "
+            f"Could not read budgets from {safe_url}: {getattr(exc, 'orig', exc)}. "
             "If this database predates the budgets table, run `otari migrate` first."
         ) from exc
 

@@ -90,7 +90,7 @@ Assign a budget to a user by setting `budget_id` on the user (at create time or 
 
 ### Preflight before the reconciled budget engine
 
-Otari's budget model is converging onto the one otari.ai runs, whose reset cadence is a fixed period (daily, weekly, or monthly) aligned to the calendar. Two things in your data have no single right answer under that model, so `otari budgets migration-report` lists them before you upgrade:
+Otari's budget model is converging onto the one otari.ai runs, whose reset cadence is a fixed period (daily, weekly, or monthly) aligned to the calendar. Three things in your data have no single right answer under that model, so `otari budgets migration-report` lists them before you upgrade:
 
 ```bash
 otari budgets migration-report --database-url postgresql://... # add --json for a machine readable form
@@ -99,7 +99,9 @@ otari budgets migration-report --database-url postgresql://... # add --json for 
 - **Durations that have to round.** A `budget_duration_sec` with no exact counterpart rounds to the nearest period, which changes how fast a capped user may spend. The report gives each one a rate factor: above `1.00` the cap gets looser, below it the cap gets tighter.
 - **Budgets more than one user shares.** Because `max_budget` is already a per-user ceiling, each attached user becomes their own budget and nothing about enforcement changes. The report lists these so you can instead pool them under one workspace budget, which is a real change in behavior rather than a migration artifact.
 
-Budgets with no `budget_duration_sec` are listed too, since a cap that never resets has to be given a period. The command only reads, so it is safe to run against a live deployment, and it runs no migration itself.
+- **Budgets with no `budget_duration_sec`.** A cap that never resets has to be given a period, since the reconciled model requires one.
+
+The command only reads, so it is safe to run against a live deployment, and it runs no migration itself.
 
 The enforcement strategy is configurable with `OTARI_BUDGET_STRATEGY` (`for_update` row-lock, `cas` compare-and-swap, or `disabled`); see [Configuration](configuration.md).
 

@@ -61,6 +61,17 @@ async def seeded(async_db: AsyncSession) -> AsyncSession:
 
 
 @pytest.fixture
+def released_engine() -> Generator[None]:
+    """Dispose the process-wide engine a CLI command leaves behind.
+
+    ``init_db`` installs a global session factory, which would otherwise point
+    the next test at this test's database.
+    """
+    yield
+    reset_db()
+
+
+@pytest.fixture
 def seeded_url(postgres_url: str) -> Generator[str]:
     """Seed the same rows for the CLI, which drives its own synchronous session.
 
@@ -139,6 +150,20 @@ def test_cli_json_output_is_machine_readable(seeded_url: str) -> None:
     payload = json.loads(result.output)
     assert payload["summary"]["shared_pools"] == 1
     assert payload["summary"]["member_budgets_to_create"] == 3
+
+
+def test_cli_does_not_print_the_database_password(released_engine: None) -> None:
+    # Port 1 refuses immediately, so this fails at connect without a live server.
+    result = CliRunner().invoke(
+        gateway_cli.budgets_migration_report,
+        ["--database-url", "postgresql://otari:hunter2@127.0.0.1:1/otari"],
+    )
+
+    assert result.exit_code != 0
+    assert "hunter2" not in result.output
+    # The host is still named, because a failure that does not say which database
+    # it tried is not actionable.
+    assert "127.0.0.1:1/otari" in result.output
 
 
 def test_cli_reports_a_database_it_cannot_read(tmp_path: object) -> None:

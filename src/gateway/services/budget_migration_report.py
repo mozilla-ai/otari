@@ -301,7 +301,7 @@ def render_text(report: BudgetMigrationReport) -> str:
     lines += [
         f"{len(report.budgets)} budget(s) in this gateway.",
         f"{report.member_budgets_to_create} member budget(s) would be created in the default workspace.",
-        f"{report.reset_log_count} budget_reset_logs row(s) archive with the legacy tables, unmapped.",
+        f"{report.reset_log_count} row(s) in budget_reset_logs are archived with the legacy tables, not mapped.",
     ]
     if report.deleted_attachments:
         lines.append(

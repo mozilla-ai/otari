@@ -148,7 +148,7 @@ def test_render_text_names_every_budget_needing_a_decision() -> None:
     assert "Budgets with no duration (1)" in text
     assert "Shared budgets (1)" in text
     assert "bob: spend 0.0" in text
-    assert "12 budget_reset_logs row(s)" in text
+    assert "12 row(s) in budget_reset_logs are archived" in text
     # Calendar re-anchoring hits every budget, not only the rounded ones, so it is
     # stated even when nothing rounds.
     assert "re-anchored" in text
