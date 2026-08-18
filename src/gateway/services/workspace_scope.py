@@ -38,13 +38,6 @@ _default_workspace_id: uuid.UUID | None = None
 _key_workspace: dict[str, uuid.UUID] = {}
 
 
-class DefaultWorkspaceMissingError(RuntimeError):
-    """The deployment has no default workspace, which a migrated database always has."""
-
-    def __init__(self) -> None:
-        super().__init__("No default workspace; the database is not fully migrated (run `otari migrate`)")
-
-
 def reset_default_workspace_cache() -> None:
     """Drop the cached ids (startup, and between tests that swap databases)."""
     global _default_workspace_id  # noqa: PLW0603
@@ -145,7 +138,6 @@ async def resolve_workspace_id(db: AsyncSession, api_key: APIKey | None) -> uuid
 
 
 __all__ = [
-    "DefaultWorkspaceMissingError",
     "default_workspace_id",
     "reset_default_workspace_cache",
     "resolve_workspace_id",

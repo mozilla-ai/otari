@@ -92,6 +92,12 @@ def _validated_email(email: str) -> str:
     return candidate
 
 
+# The most workspaces a switcher seed carries. Above the repository's paging
+# default so the common deployment is never truncated, and bounded so one
+# unusually large organization cannot make every context read unbounded.
+CALLER_WORKSPACE_LIMIT = 1000
+
+
 class OrganizationService:
     """Business logic for the organization surface."""
 
@@ -178,9 +184,13 @@ class OrganizationService:
         the organization's workspaces: listing those is a separate, authorized
         read.
         """
+        # Explicit limit, because the repository's default is 100 and this is a
+        # switcher seed rather than a page: silently dropping the caller's 101st
+        # workspace would hide it from every context the shell can select.
         memberships, _ = await self.workspaces.get_workspaces_for_user(
             user_id=user.id,
             organization_id=organization.id,
+            limit=CALLER_WORKSPACE_LIMIT,
         )
         if not memberships:
             return []

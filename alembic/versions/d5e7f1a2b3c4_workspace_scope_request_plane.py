@@ -17,10 +17,12 @@ adopts these rows instead of creating a second default. It deliberately creates
 no identity: ``organization.created_by_user_id`` is nullable, and provisioning
 fills it in when it runs.
 
-The column keeps its ``server_default``. Dropping it would need a table rebuild
-on SQLite for all four tables, including two whose partial indexes batch mode
-reflects poorly, and the default is useful on its own: a write path that has not
-yet learned to carry a workspace lands its row in the default one rather than
+The column keeps its ``server_default``, and not for the reason a first draft of
+this docstring gave: the ``batch_alter_table`` below already rebuilds all four
+tables, since SQLite has no ``ALTER TABLE ADD CONSTRAINT``, so a rebuild is
+paid for either way. It stays because the default is useful on its own: a write
+path that has not yet learned to carry a workspace lands its row in the default
+one rather than
 failing in production. Tightening it belongs with the change that finishes
 threading the workspace through every writer.
 
