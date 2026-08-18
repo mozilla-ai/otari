@@ -33,7 +33,9 @@ Three deliberate departures from the platform's models, applied on arrival:
 - **Hosted-only columns are not carried, with one exception.** The reconciled
   schema is edition-invariant (the overlay contributes adapters and routers,
   never tables), so a column the hosted edition needs has to live here or
-  nowhere. ``workspace.activation_classification`` therefore stays. The columns
+  nowhere. ``workspace.activation_classification`` and
+  ``user.default_organization_id`` therefore stay, neither of them read by
+  anything in this edition. The columns
   that do *not* come are the ones gated on the still-open identity decision
   (otari-ai#1716): password hashes, OAuth provider, verification tokens. They
   arrive with the flow that reads them, rather than being invented ahead of it.
@@ -170,6 +172,24 @@ class User(UserBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
     # which is what lets the tenancy routes resolve a scope from the caller
     # alone. Provisioning therefore creates the organization first.
     active_organization_id: uuid.UUID = Field(foreign_key="organization.id", index=True)
+    # The organization provisioned for this identity, which never moves when the
+    # active one does. Nothing in this edition reads it: a standalone deployment
+    # has one organization and no way to switch, so the two always agree here.
+    # It is carried because the schema is edition-invariant, and the hosted
+    # edition anchors recurring offered credits to it precisely so they cannot
+    # be farmed by creating or switching organizations. A column the hosted
+    # edition needs has to live here or nowhere, and the overlay contributes
+    # adapters and routers, never tables.
+    #
+    # ``SET NULL`` rather than cascade, matching the platform: deleting the
+    # organization it points at forfeits that anchor rather than re-homing it to
+    # another one, which would reopen the vector the column exists to close.
+    default_organization_id: uuid.UUID | None = Field(
+        default=None,
+        foreign_key="organization.id",
+        ondelete="SET NULL",
+        index=True,
+    )
 
 
 # =============================================================================

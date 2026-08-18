@@ -98,6 +98,7 @@ def upgrade() -> None:
         sa.Column("is_superuser", sa.Boolean(), nullable=False),
         sa.Column("full_name", sa.String(length=255), nullable=True),
         sa.Column("active_organization_id", sa.Uuid(), nullable=False),
+        sa.Column("default_organization_id", sa.Uuid(), nullable=True),
         sa.Column("created_at", sa.DateTime(timezone=True), server_default=sa.func.now(), nullable=False),
         sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
         # No ondelete: an organization with members must not be deletable out
@@ -107,9 +108,19 @@ def upgrade() -> None:
             ["organization.id"],
             name="fk_user_active_organization_id",
         ),
+        # SET NULL, unlike the pointer above: this one anchors the organization
+        # an identity was provisioned in, and deleting that organization
+        # forfeits the anchor rather than moving it to another one.
+        sa.ForeignKeyConstraint(
+            ["default_organization_id"],
+            ["organization.id"],
+            name="fk_user_default_organization_id",
+            ondelete="SET NULL",
+        ),
         sa.PrimaryKeyConstraint("id"),
     )
     op.create_index(op.f("ix_user_active_organization_id"), "user", ["active_organization_id"], unique=False)
+    op.create_index(op.f("ix_user_default_organization_id"), "user", ["default_organization_id"], unique=False)
     op.create_index(op.f("ix_user_email"), "user", ["email"], unique=True)
 
     with op.batch_alter_table("organization", copy_from=_organization_table(with_user_fk=False)) as batch_op:
@@ -213,6 +224,7 @@ def downgrade() -> None:
         batch_op.drop_constraint(_ORGANIZATION_USER_FK, type_="foreignkey")
 
     op.drop_index(op.f("ix_user_email"), table_name="user")
+    op.drop_index(op.f("ix_user_default_organization_id"), table_name="user")
     op.drop_index(op.f("ix_user_active_organization_id"), table_name="user")
     op.drop_table("user")
 
