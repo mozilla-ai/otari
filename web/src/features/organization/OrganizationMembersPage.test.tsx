@@ -182,7 +182,8 @@ describe("OrganizationMembersPage", () => {
     await user.click(await screen.findByRole("button", { name: "Add member" }))
     await user.type(screen.getByLabelText("Email address"), "ada@example.com")
     await user.selectOptions(screen.getByLabelText("Role"), "admin")
-    await user.click(await screen.findByLabelText("Production"))
+    // Ticked by default, since a member in no workspace can reach nothing.
+    expect(await screen.findByLabelText("Production")).toBeChecked()
     // The header action hides itself while the form is open, so the remaining
     // button of this name is the form's own submit.
     await user.click(screen.getByRole("button", { name: "Add member" }))
@@ -196,7 +197,25 @@ describe("OrganizationMembersPage", () => {
     })
   })
 
-  it("sends no assignment list when no workspace was ticked", async () => {
+  it("leaves the default alone once the operator has cleared it", async () => {
+    mockApi({
+      members: [OWNER],
+      workspaces: [workspace({ id: "ws-1", name: "Production" })],
+    })
+    const user = userEvent.setup()
+    renderPage(<OrganizationMembersPage />)
+
+    await user.click(await screen.findByRole("button", { name: "Add member" }))
+    const production = await screen.findByLabelText("Production")
+    await user.click(production)
+
+    // The seed is a starting point, not a value re-imposed on every render:
+    // typing after clearing it must not tick the box again.
+    await user.type(screen.getByLabelText("Email address"), "ada@example.com")
+    expect(production).not.toBeChecked()
+  })
+
+  it("sends no assignment list, and says so, when every workspace is unticked", async () => {
     const requests = mockApi({
       members: [OWNER],
       workspaces: [workspace({ id: "ws-1", name: "Production" })],
@@ -206,6 +225,10 @@ describe("OrganizationMembersPage", () => {
 
     await user.click(await screen.findByRole("button", { name: "Add member" }))
     await user.type(screen.getByLabelText("Email address"), "ada@example.com")
+    // Deliberate now rather than the default: clearing the seeded workspace is
+    // a choice, and the form says what it costs before the request goes.
+    await user.click(await screen.findByLabelText("Production"))
+    expect(screen.getByText(/no workspace/)).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Add member" }))
 
     const post = requests.find((request) => request.method === "POST")

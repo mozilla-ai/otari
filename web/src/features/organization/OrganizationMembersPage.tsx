@@ -25,6 +25,7 @@ import {
   InfoBanner,
   PageHeader,
 } from "@/shared/components/ui"
+import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 import {
   asMembershipRole,
@@ -79,10 +80,29 @@ function StatusChip({ status }: { status: string }) {
 function AddMemberForm({ onClose }: { onClose: () => void }) {
   const add = useAddOrganizationMember()
   const workspaces = useWorkspaces()
+  const { selected } = useSelectedWorkspace()
   const [email, setEmail] = useState("")
   const [role, setRole] = useState<MembershipRole>("member")
   const [workspaceIds, setWorkspaceIds] = useState<string[]>([])
   const trimmed = email.trim()
+
+  // Seeded once the workspace list answers, and only then: the default is a
+  // starting point the operator can clear, not a value re-imposed on every
+  // render. Nothing was checked before, so an organization member could be
+  // created belonging to no workspace at all, which reads as a working account
+  // and behaves like one with nothing in it.
+  const rows = workspaces.data
+  const [seeded, setSeeded] = useState(false)
+  if (!seeded && rows && rows.length > 0) {
+    setSeeded(true)
+    // The workspace the shell is on, when it is one of this organization's.
+    // Otherwise the first, which is the default workspace on a deployment that
+    // has not made others.
+    const preferred = rows.find(
+      (workspace) => workspace.id === selected?.workspace_id,
+    )
+    setWorkspaceIds([(preferred ?? rows[0]).id])
+  }
 
   const toggleWorkspace = (id: string, checked: boolean) =>
     setWorkspaceIds((current) =>
@@ -142,6 +162,12 @@ function AddMemberForm({ onClose }: { onClose: () => void }) {
               exists without the access they were added for. Workspace roles are
               changed afterwards on the Workspaces page.
             </span>
+            {workspaceIds.length === 0 ? (
+              <span className="text-xs text-warning">
+                With none selected they join the organization but no workspace,
+                and will see nothing until someone assigns them one.
+              </span>
+            ) : null}
             {workspaces.data.map((workspace) => (
               <label
                 key={workspace.id}
