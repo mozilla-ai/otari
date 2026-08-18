@@ -1,3 +1,5 @@
+import asyncio
+import json
 import logging
 import os
 import re
@@ -384,6 +386,63 @@ def routing_explain(
             "/v1/chat/completions, /v1/messages and /v1/responses; on the other model-taking endpoints "
             "(embeddings, images, moderations, rerank, batches) it is not a resolvable model name."
         )
+
+
+@cli.group()
+def budgets() -> None:
+    """Inspect budgets."""
+
+
+@budgets.command(name="migration-report")
+@click.option(
+    "--config",
+    "-c",
+    type=click.Path(exists=True, dir_okay=False),
+    help="Path to config YAML file",
+    default=None,
+)
+@click.option("--database-url", envvar="DATABASE_URL", help="Database connection URL")
+@click.option("--json", "as_json", is_flag=True, help="Emit the report as JSON instead of text")
+def budgets_migration_report(config: str | None, database_url: str | None, as_json: bool) -> None:
+    """Report what the budget migration cannot decide on its own.
+
+    Reads this gateway's budgets and the users attached to them, then lists every
+    duration that has to round onto one of the reconciled engine's periods, every
+    budget with no duration at all, and every budget more than one user shares.
+
+    Read only. Nothing is written and no migration runs, so this is safe to run
+    against a production database before an upgrade.
+    """
+    from sqlalchemy.exc import SQLAlchemyError
+
+    from gateway.db import create_session
+    from gateway.db import init_db as db_init
+    from gateway.services.budget_migration_report import build_migration_report, render_text
+
+    gateway_config = load_config(config)
+
+    if database_url:
+        gateway_config.database_url = database_url
+    # A preflight must not change the database it reports on, so the startup
+    # migration is off here whatever the config says.
+    gateway_config.auto_migrate = False
+
+    db_init(gateway_config)
+
+    async def _build() -> str:
+        async with create_session() as session:
+            report = await build_migration_report(session)
+        return json.dumps(report.to_dict(), indent=2) if as_json else render_text(report)
+
+    try:
+        click.echo(asyncio.run(_build()))
+    except SQLAlchemyError as exc:
+        raise click.ClickException(
+            # The driver's own message ("no such table: budgets") is the useful
+            # half; str(exc) appends the whole statement, which buries it.
+            f"Could not read budgets from {gateway_config.database_url}: {getattr(exc, 'orig', exc)}. "
+            "If this database predates the budgets table, run `otari migrate` first."
+        ) from exc
 
 
 def main() -> None:
