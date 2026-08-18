@@ -8,14 +8,13 @@ import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 // scopes the destinations below it rather than being one.
 //
 // It scopes what the gateway both records and resolves per workspace: members,
-// API keys, and the request log. Three things it does not, and the copy in the
-// popover says so rather than implying a scope that is not there. Routing
-// policies and aliases carry a workspace column but are all stored in the
-// default one on purpose, because resolution reads a process-wide name-keyed
-// cache, so filtering them would hide live policies. Provider credentials are
-// process-wide config rather than a workspace row. And the usage summary
-// endpoints take no workspace filter, so the spend charts do not narrow even
-// though the request log does.
+// API keys, the request log, and the spend and volume charts over it. Two
+// things it does not, and the copy in the popover says so rather than implying
+// a scope that is not there. Routing policies and aliases carry a workspace
+// column but are all stored in the default one on purpose, because resolution
+// reads a process-wide name-keyed cache, so filtering them would hide live
+// policies. Provider credentials are process-wide config rather than a
+// workspace row.
 export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
   const { memberships, selected, select, isLoading } = useSelectedWorkspace()
   const context = useOrganizationContext()
@@ -121,8 +120,8 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
             )}
           </div>
           <p className="mt-2 border-t border-border px-2 pt-2 text-xs text-muted">
-            Scopes members, API keys, and the request log. Routing, provider
-            credentials, and the spend charts stay deployment-wide.
+            Scopes members, API keys, usage, and the request log. Routing and
+            provider credentials stay deployment-wide.
           </p>
         </Popover.Dialog>
       </Popover.Content>

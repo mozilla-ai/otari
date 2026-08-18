@@ -59,6 +59,7 @@ import {
   USAGE_DEFAULT_KEY,
   USAGE_PRESETS,
 } from "@/shared/helpers/timeRange"
+import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 // ---------- formatting ----------
 
@@ -465,15 +466,20 @@ export function UsagePage() {
       : "day"
     : preset.bucket
 
+  const { selected: workspace } = useSelectedWorkspace()
   const filters: UsageFilters = useMemo(
     () => ({
+      // From the sidebar's switcher, like the request log's. `previousFilters`
+      // spreads this, so the period-over-period comparison is scoped to the
+      // same workspace as the window it is compared against.
+      workspace_id: workspace?.workspace_id,
       start_date: winStart,
       end_date: winEnd,
       model: modelFilters.length > 0 ? modelFilters : undefined,
       user_id: userFilters.length > 0 ? userFilters : undefined,
       api_key_id: apiKeyFilters.length > 0 ? apiKeyFilters : undefined,
     }),
-    [winStart, winEnd, modelFilters, userFilters, apiKeyFilters],
+    [workspace, winStart, winEnd, modelFilters, userFilters, apiKeyFilters],
   )
 
   // The immediately-preceding window of equal length, for period-over-period
