@@ -458,7 +458,8 @@ function CreateKeyForm({
 }) {
   const create = useCreateKey()
   const users = useUsers()
-  const { selected: workspace } = useSelectedWorkspace()
+  const { selected: workspace, isLoading: workspaceLoading } =
+    useSelectedWorkspace()
   const [keyName, setKeyName] = useState("")
   const [expiresAt, setExpiresAt] = useState("")
   const memberLabels = useMemberAttributionLabels()
@@ -477,9 +478,17 @@ function CreateKeyForm({
   // API creates as a named user). This is what keeps the dashboard from minting the
   // anonymous virtual users an omitted id would.
   const ownerMissing = userId.trim() === ""
+  // The workspace comes from the organization context, which resolves after the
+  // form paints. Submitting before it does would send no workspace and land the
+  // key in the server's default rather than the one the switcher is showing, so
+  // the button waits for that read. It waits for the read, not for a workspace:
+  // a caller who belongs to none resolves to null and must still be able to
+  // create a key, which the server puts in its default.
+  const workspaceUnresolved = workspaceLoading
 
   const submit = () => {
-    if (create.isPending || !scopeValid || ownerMissing) return
+    if (create.isPending || !scopeValid || ownerMissing || workspaceUnresolved)
+      return
     const body: CreateKeyRequest = {
       key_name: keyName.trim() || null,
       // The workspace the shell is on. A key belongs to exactly one, and it is
@@ -574,7 +583,12 @@ function CreateKeyForm({
         <div className="flex gap-2">
           <Button
             variant="primary"
-            isDisabled={create.isPending || !scopeValid || ownerMissing}
+            isDisabled={
+              create.isPending ||
+              !scopeValid ||
+              ownerMissing ||
+              workspaceUnresolved
+            }
             onPress={submit}
           >
             {create.isPending ? "Creating…" : "Create key"}

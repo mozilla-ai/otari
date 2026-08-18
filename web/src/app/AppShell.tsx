@@ -218,7 +218,12 @@ export function AppShell() {
   // Written anyway because it becomes load-bearing the moment per-user sign-in
   // lands (otari-ai#1716), and because an overlay build can already be reached
   // by someone who is not an admin.
-  const managesOrganization = canManage(organization.data)
+  // Fails open when the context errors rather than resolving false: Users,
+  // budgets and settings are reachable only through this entry, the routes still
+  // work by URL, and the server authorizes every request behind it regardless.
+  // Hiding the way there because one query failed strands three destinations.
+  const managesOrganization =
+    canManage(organization.data) || organization.isError
 
   const asideRef = useRef<HTMLElement>(null)
   const mainRef = useRef<HTMLElement>(null)

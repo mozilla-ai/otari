@@ -395,21 +395,24 @@ export function useModelMetadata() {
   })
 }
 
-export function useAliases(workspaceId?: string) {
-  const scope = workspaceId ? `?workspace_id=${workspaceId}` : ""
+// Deliberately unscoped, and deliberately without the parameter the endpoint
+// would accept: the gateway stores every alias in the default workspace because
+// resolution reads a process-wide name-keyed cache, so a filtered list would
+// hide live aliases. Leaving the argument here would be a loaded gun beside the
+// comment explaining why it must not be fired.
+export function useAliases() {
   return useQuery({
-    queryKey: [ALIASES, workspaceId ?? null],
-    queryFn: () => apiFetch<AliasResponse[]>(`/v1/aliases${scope}`),
+    queryKey: [ALIASES],
+    queryFn: () => apiFetch<AliasResponse[]>("/v1/aliases"),
     staleTime: 60_000,
   })
 }
 
-export function useRoutingPolicies(workspaceId?: string) {
-  const scope = workspaceId ? `?workspace_id=${workspaceId}` : ""
+// Unscoped for the same reason as `useAliases` above.
+export function useRoutingPolicies() {
   return useQuery({
-    queryKey: [ROUTING_POLICIES, workspaceId ?? null],
-    queryFn: () =>
-      apiFetch<RoutingPolicyResponse[]>(`/v1/routing/policies${scope}`),
+    queryKey: [ROUTING_POLICIES],
+    queryFn: () => apiFetch<RoutingPolicyResponse[]>("/v1/routing/policies"),
     staleTime: 60_000,
   })
 }
