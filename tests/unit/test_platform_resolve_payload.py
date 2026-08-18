@@ -12,6 +12,7 @@ from gateway.api.routes._platform import _parse_resolve_payload
 
 
 def test_parse_resolve_payload_reads_user_id_from_attempts_shape() -> None:
+    """The modern attempts-list shape carries user_id at the top level, alongside request_id."""
     payload = {
         "request_id": "req-1",
         "fallback_enabled": False,

@@ -127,7 +127,7 @@ class ResolvedRoute(BaseModel):
     # opaque string, never parsed; absent for peers that predate the field or
     # simply don't send it. This is the only per-caller identity hybrid mode
     # has, so it is what gateway-side survivals (aliases, routing memory,
-    # files, batches) key their own state on there.
+    # files, batches) can key their state on in a later hybrid-mode phase.
     user_id: str | None = None
 
 
