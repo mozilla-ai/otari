@@ -26,6 +26,7 @@ from gateway.api.routes import (
     responses,
     routing,
     routing_memory,
+    scoped_budgets,
     search,
     search_tools,
     settings,
@@ -70,6 +71,7 @@ def register_routers(app: FastAPI, config: GatewayConfig) -> None:
     app.include_router(organizations.router)
     app.include_router(workspaces.router)
     app.include_router(budgets.router)
+    app.include_router(scoped_budgets.router)
     app.include_router(aliases.router)
     app.include_router(routing.router)
     app.include_router(routing_memory.router)

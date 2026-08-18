@@ -18,6 +18,14 @@ from gateway.repositories.users_repository import get_active_user
 from gateway.services.metered_pricing import estimate_metered_cost
 from gateway.services.pricing_service import find_model_pricing
 from gateway.services.provider_kwargs import provider_key
+from gateway.services.scoped_budget_service import (
+    ApplicableBudget,
+    BudgetScopeRequest,
+    applicable_budgets,
+)
+from gateway.services.scoped_budget_service import release as release_scoped
+from gateway.services.scoped_budget_service import reserve as reserve_scoped
+from gateway.services.scoped_budget_service import settle as settle_scoped
 from gateway.types.budget_state import BudgetState
 
 
@@ -166,6 +174,12 @@ class ReservationHandle:
     the ``disabled`` strategy, users without a budget, and free models). The
     handle is passed to :func:`reconcile_reservation` on success or
     :func:`refund_reservation` on failure.
+
+    The scoped-budget fields track the second, independent mechanism (see
+    :mod:`gateway.services.scoped_budget_service`). They are separate from
+    ``estimate`` / ``reserved`` because the two can diverge: a user with no
+    budget row still holds against every scoped ceiling that applies, and a
+    reservation that grows may grow on one mechanism and not the other.
     """
 
     user_id: str
@@ -177,6 +191,17 @@ class ReservationHandle:
     # ``exclude_from_budget`` (and reused for imported usage). Defaults to true so every
     # existing construction site keeps the normal enforced behavior.
     counts_toward_budget: bool = True
+    # The scoped ceilings this reservation is holding against, in the order the
+    # holds were taken, and the amount held on each. Empty for a caller that
+    # passes no scope, which is what keeps every pre-existing construction site
+    # (an empty handle for external spend, the vision side-call) inert here.
+    scoped_budgets: tuple[ApplicableBudget, ...] = ()
+    scoped_estimate: float = 0.0
+
+    @property
+    def scoped_budget_ids(self) -> tuple[str, ...]:
+        """The ids of the scoped ceilings this reservation holds against."""
+        return tuple(applicable.budget_id for applicable in self.scoped_budgets)
 
 
 def estimate_cost(
@@ -222,8 +247,9 @@ async def reserve_budget(
     pricing_provider: str | None = None,
     strategy: str = "for_update",
     counts_toward_budget: bool = True,
+    scope: BudgetScopeRequest | None = None,
 ) -> ReservationHandle:
-    """Atomically pre-debit an estimated cost against the user's budget.
+    """Atomically pre-debit an estimated cost against every budget that applies.
 
     This replaces the old check-then-call pattern (validate, release the lock,
     call the provider, write spend in a *later* transaction) that allowed
@@ -232,6 +258,12 @@ async def reserve_budget(
     conditional UPDATE: if it would push ``spend + reserved`` past ``max_budget``
     the row count is zero and we reject with 403. No row lock is held across the
     provider network call.
+
+    ``scope`` opts the request into the second mechanism, the tenancy-scoped
+    ceilings in ``scoped_budgets``. Those are resolved from the workspace the
+    request bills to and the identity behind the key, and every one of them must
+    also admit the estimate. They are held first, and released again if the
+    per-user gate then refuses, so a rejected request leaves no counter behind.
 
     The returned handle must be passed to :func:`reconcile_reservation` (success)
     or :func:`refund_reservation` (failure) so the reservation does not leak.
@@ -269,25 +301,52 @@ async def reserve_budget(
 
     no_reservation = ReservationHandle(user_id=user_id, estimate=0.0, reserved=False, strategy=normalized)
 
-    if normalized == "disabled" or not user.budget_id:
+    if normalized == "disabled":
         return no_reservation
 
-    budget = await _get_budget(db, user.budget_id)
-    if not budget:
+    budget = await _get_budget(db, user.budget_id) if user.budget_id else None
+
+    if budget is not None:
+        now = datetime.now(UTC)
+        if user.next_budget_reset_at and now >= user.next_budget_reset_at:
+            # Always reset via the atomic CAS path: reserve_budget never holds a
+            # row lock (see for_update=False above), so a non-atomic
+            # read-modify-write reset would let concurrent requests at the reset
+            # boundary double-reset (duplicate reset logs, clobbered spend).
+            user = await _cas_reset_user_budget(db, user, budget, now)
+
+    # Resolved after the per-user lookup so a caller that passes no scope keeps
+    # the original fast path exactly, and skipped entirely when there is nothing
+    # to hold against on either mechanism.
+    scoped = await applicable_budgets(db, user_id=user_id, scope=scope) if scope is not None else ()
+    if budget is None and not scoped:
         return no_reservation
 
-    now = datetime.now(UTC)
-    if user.next_budget_reset_at and now >= user.next_budget_reset_at:
-        # Always reset via the atomic CAS path: reserve_budget never holds a
-        # row lock (see for_update=False above), so a non-atomic
-        # read-modify-write reset would let concurrent requests at the reset
-        # boundary double-reset (duplicate reset logs, clobbered spend).
-        user = await _cas_reset_user_budget(db, user, budget, now)
-
-    # Free models do not consume budget; nothing to reserve. Reconciliation will
-    # add their (zero) cost to spend.
+    # Free models do not consume budget; nothing to reserve on either mechanism.
+    # Reconciliation will add their (zero) cost to spend.
     if model and await _is_model_free(db, model, pricing_provider=pricing_provider):
         return no_reservation
+
+    if scoped:
+        refused = await reserve_scoped(db, scoped, estimate)
+        if refused is not None:
+            record_budget_exceeded()
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"{refused.subject} has exceeded budget limit",
+            )
+
+    if budget is None:
+        # Reachable only with scoped ceilings held (the no-budget, no-scope case
+        # returned above), so the user leg of the handle is deliberately empty.
+        return ReservationHandle(
+            user_id=user_id,
+            estimate=0.0,
+            reserved=False,
+            strategy=normalized,
+            scoped_budgets=scoped,
+            scoped_estimate=estimate,
+        )
 
     if budget.max_budget is None:
         # No cap to enforce, but still reserve so reconciliation math is uniform
@@ -299,7 +358,14 @@ async def reserve_budget(
             .execution_options(synchronize_session=False)
         )
         await db.commit()
-        return ReservationHandle(user_id=user_id, estimate=estimate, reserved=True, strategy=normalized)
+        return ReservationHandle(
+            user_id=user_id,
+            estimate=estimate,
+            reserved=True,
+            strategy=normalized,
+            scoped_budgets=scoped,
+            scoped_estimate=estimate if scoped else 0.0,
+        )
 
     result = await db.execute(
         update(User)
@@ -320,12 +386,23 @@ async def reserve_budget(
 
     if not getattr(result, "rowcount", 0):
         record_budget_exceeded()
+        # The scoped ceilings admitted this request and are already holding the
+        # estimate, so give it back before rejecting. Without this the holds would
+        # leak on every per-user refusal and permanently shrink each ceiling.
+        await release_scoped(db, [item.budget_id for item in scoped], estimate)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"User '{user_id}' has exceeded budget limit",
         )
 
-    return ReservationHandle(user_id=user_id, estimate=estimate, reserved=True, strategy=normalized)
+    return ReservationHandle(
+        user_id=user_id,
+        estimate=estimate,
+        reserved=True,
+        strategy=normalized,
+        scoped_budgets=scoped,
+        scoped_estimate=estimate if scoped else 0.0,
+    )
 
 
 def _release_reserved(estimate: float) -> object:
@@ -365,6 +442,15 @@ async def reconcile_reservation(db: AsyncSession, handle: ReservationHandle, act
         values["spend"] = User.spend + actual_cost
     if handle.reserved:
         values["reserved"] = _release_reserved(handle.estimate)
+    # Every scoped ceiling the reservation held against has to be unwound too, or
+    # the hold outlives the request and permanently shrinks that ceiling.
+    await settle_scoped(
+        db,
+        handle.scoped_budget_ids,
+        actual_cost=actual_cost,
+        held=handle.scoped_estimate,
+        counts_toward_budget=handle.counts_toward_budget,
+    )
     if not values:
         return
     await db.execute(
@@ -385,6 +471,11 @@ async def record_external_spend(db: AsyncSession, user_id: str, cost: float) -> 
     spend has already happened upstream at the provider, so it is recorded, not
     gated. Writing goes through :func:`reconcile_reservation` (with an empty
     handle) so ``users.spend`` still has a single writer.
+
+    Scoped ceilings are deliberately not touched here. The handle that held them
+    was reconciled when the batch was created, and this path has no request scope
+    to resolve a workspace or a provider from, so folding the cost in would have
+    to guess which ceilings it belonged to.
     """
     handle = ReservationHandle(user_id=user_id, estimate=0.0, reserved=False, strategy="disabled")
     await reconcile_reservation(db, handle, cost)
@@ -392,6 +483,7 @@ async def record_external_spend(db: AsyncSession, user_id: str, cost: float) -> 
 
 async def refund_reservation(db: AsyncSession, handle: ReservationHandle) -> None:
     """Release a reservation without recording spend (e.g. provider failure)."""
+    await release_scoped(db, handle.scoped_budget_ids, handle.scoped_estimate)
     if not handle.reserved:
         return
     await db.execute(
@@ -424,6 +516,10 @@ async def increase_reservation(
     clean up the prior hold — the caller owns refunding ``handle`` on failure
     (the request routes wrap the whole post-reservation setup in a
     refund-on-error block). No-op when ``additional_estimate`` is not positive.
+
+    The scoped ceilings are grown on exactly the rows the original reservation
+    took, not re-resolved: the request scope has not changed, and re-resolving
+    would risk holding twice against a ceiling that appeared in between.
     """
     if additional_estimate <= 0:
         return
@@ -432,6 +528,17 @@ async def increase_reservation(
     # enforced flow and reserve against the user's budget.
     if not handle.counts_toward_budget:
         return
+    if handle.scoped_budgets:
+        refused = await reserve_scoped(db, handle.scoped_budgets, additional_estimate)
+        if refused is not None:
+            record_budget_exceeded()
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=f"{refused.subject} has exceeded budget limit",
+            )
+        handle.scoped_estimate += additional_estimate
+    # No scope is passed through: the scoped ceilings were just grown above, and
+    # letting the inner call resolve them again would hold the delta twice.
     delta = await reserve_budget(db, handle.user_id, additional_estimate, model=model, strategy=strategy)
     if delta.reserved:
         handle.estimate += delta.estimate

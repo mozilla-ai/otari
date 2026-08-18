@@ -1651,6 +1651,65 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/scoped-budgets": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Scoped Budgets
+         * @description List scoped budgets, optionally filtered to one scope.
+         */
+        get: operations["list_scoped_budgets_v1_scoped_budgets_get"];
+        put?: never;
+        /**
+         * Create Scoped Budget
+         * @description Create a scoped budget.
+         */
+        post: operations["create_scoped_budget_v1_scoped_budgets_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/scoped-budgets/{budget_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Scoped Budget
+         * @description Get one scoped budget.
+         */
+        get: operations["get_scoped_budget_v1_scoped_budgets__budget_id__get"];
+        put?: never;
+        post?: never;
+        /**
+         * Delete Scoped Budget
+         * @description Delete a scoped budget.
+         *
+         *     A request holding a reservation against it settles into nothing afterwards,
+         *     which is the right outcome: the ceiling no longer exists to be credited.
+         */
+        delete: operations["delete_scoped_budget_v1_scoped_budgets__budget_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Scoped Budget
+         * @description Update a scoped budget's label, limit, or period length.
+         *
+         *     The scope and the provider narrowing are not editable: changing either would
+         *     move the ceiling to a different identity while carrying its spend, which is
+         *     a delete and a create, not an update.
+         */
+        patch: operations["update_scoped_budget_v1_scoped_budgets__budget_id__patch"];
+        trace?: never;
+    };
     "/v1/search": {
         parameters: {
             query?: never;
@@ -3374,6 +3433,43 @@ export interface components {
             user_id: string | null;
         };
         /**
+         * CreateScopedBudgetRequest
+         * @description Request model for creating a scoped budget.
+         */
+        CreateScopedBudgetRequest: {
+            /**
+             * Budget Duration Sec
+             * @description Period length in seconds (e.g. 86400 for daily); null never resets
+             */
+            budget_duration_sec?: number | null;
+            /**
+             * Max Budget
+             * @description Maximum USD spend in the period
+             */
+            max_budget?: number | null;
+            /**
+             * Name
+             * @description Admin-facing label for the budget
+             */
+            name?: string | null;
+            /**
+             * Provider Key Id
+             * @description Narrow the cap to one provider instance; null caps spend across every provider
+             */
+            provider_key_id?: string | null;
+            /**
+             * Scope Id
+             * @description Id of the capped identity: an organization, workspace, membership row, or API key
+             */
+            scope_id: string;
+            /**
+             * Scope Type
+             * @description Which kind of identity this ceiling caps
+             * @enum {string}
+             */
+            scope_type: "organization" | "workspace" | "workspace_member" | "org_member" | "api_token";
+        };
+        /**
          * CreateSearchToolRequest
          * @description Create a stored search tool. ``api_key`` is write-only and requires OTARI_SECRET_KEY.
          * @example {
@@ -5009,6 +5105,42 @@ export interface components {
             user_id: string;
         };
         /**
+         * ScopedBudgetResponse
+         * @description One scoped ceiling and its live counters.
+         *
+         *     Unlike ``/v1/budgets``, the counters are the row's own: a scoped ceiling is
+         *     enforced against ``current_spend + reserved_spend``, so there is no rollup
+         *     over users to compute.
+         */
+        ScopedBudgetResponse: {
+            /** Budget Duration Sec */
+            budget_duration_sec: number | null;
+            /** Created At */
+            created_at: string;
+            /** Current Spend */
+            current_spend: number;
+            /** Id */
+            id: string;
+            /** Max Budget */
+            max_budget: number | null;
+            /** Name */
+            name: string | null;
+            /** Period End */
+            period_end: string | null;
+            /** Period Start */
+            period_start: string | null;
+            /** Provider Key Id */
+            provider_key_id: string | null;
+            /** Reserved Spend */
+            reserved_spend: number;
+            /** Scope Id */
+            scope_id: string;
+            /** Scope Type */
+            scope_type: string;
+            /** Updated At */
+            updated_at: string;
+        };
+        /**
          * ScoredExample
          * @description One prompt and how well each candidate answered it.
          */
@@ -5494,6 +5626,18 @@ export interface components {
             } | null;
             /** Reject User Mismatch */
             reject_user_mismatch?: boolean | null;
+        };
+        /**
+         * UpdateScopedBudgetRequest
+         * @description Request model for updating a scoped budget.
+         */
+        UpdateScopedBudgetRequest: {
+            /** Budget Duration Sec */
+            budget_duration_sec?: number | null;
+            /** Max Budget */
+            max_budget?: number | null;
+            /** Name */
+            name?: string | null;
         };
         /**
          * UpdateSearchToolRequest
@@ -8797,6 +8941,168 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["RouterStatus"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_scoped_budgets_v1_scoped_budgets_get: {
+        parameters: {
+            query?: {
+                scope_type?: ("organization" | "workspace" | "workspace_member" | "org_member" | "api_token") | null;
+                scope_id?: string | null;
+                skip?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScopedBudgetResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_scoped_budget_v1_scoped_budgets_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateScopedBudgetRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScopedBudgetResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_scoped_budget_v1_scoped_budgets__budget_id__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                budget_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScopedBudgetResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_scoped_budget_v1_scoped_budgets__budget_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                budget_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_scoped_budget_v1_scoped_budgets__budget_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                budget_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateScopedBudgetRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ScopedBudgetResponse"];
                 };
             };
             /** @description Validation Error */

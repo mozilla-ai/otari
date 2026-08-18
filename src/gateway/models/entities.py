@@ -889,3 +889,86 @@ class BudgetResetLog(Base):
             "reset_at": self.reset_at.isoformat() if self.reset_at else None,
             "next_reset_at": self.next_reset_at.isoformat() if self.next_reset_at else None,
         }
+
+
+class ScopedBudget(Base):
+    """A USD ceiling on one tenancy scope, optionally narrowed to one provider.
+
+    Two axes. The identity axis is ``(scope_type, scope_id)``: who is capped, an
+    organization, a workspace, a member of either, or a single API key. The
+    resource axis is ``provider_key_id``: NULL caps spend across every provider,
+    a value narrows the cap to one provider instance. A request must pass every
+    row that applies to it, and each row is an independent ceiling with its own
+    counters and its own period window, unlike ``budgets``, where the window and
+    the counters live on the user.
+
+    USD only. There are deliberately no token or request limits in this pass:
+    the gateway prices in dollars everywhere else, and a second enforced
+    dimension is a separate decision from having scopes at all.
+
+    ``scope_type`` is a plain string rather than a database enum so a new scope
+    needs no enum migration, and ``scope_id`` is a string so it holds both this
+    codebase's string ids (an API key's) and the platform's UUIDs. Nothing here
+    is a foreign key for the same reason: the rows a scope names live in four
+    different tables, and a provider instance may be configured in ``config.yml``
+    and have no row at all.
+
+    This table does not replace ``budgets``. That one is many-to-one from
+    ``users`` and is enforced against ``users.spend + users.reserved``, so N
+    users sharing a budget each get the full limit; folding counters onto it
+    would silently turn that into a pooled cap. Both mechanisms are enforced,
+    side by side.
+    """
+
+    __tablename__ = "scoped_budgets"
+    __table_args__ = (
+        # PostgreSQL treats NULLs as distinct in a plain UNIQUE, so one index
+        # over the triple would enforce nothing on the aggregate rows (every one
+        # of them has a NULL key, so no two are ever "equal"). Two partial
+        # indexes instead: the narrowed rows are unique on the triple, and the
+        # aggregate rows are unique on the identity alone, which is what makes
+        # "one aggregate cap per scope" a real constraint.
+        Index(
+            "uq_scoped_budgets_scope_with_key",
+            "scope_type",
+            "scope_id",
+            "provider_key_id",
+            unique=True,
+            postgresql_where=text("provider_key_id IS NOT NULL"),
+            sqlite_where=text("provider_key_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_scoped_budgets_scope_no_key",
+            "scope_type",
+            "scope_id",
+            unique=True,
+            postgresql_where=text("provider_key_id IS NULL"),
+            sqlite_where=text("provider_key_id IS NULL"),
+        ),
+        # The request path resolves rows by identity, so the lookup needs a
+        # non-partial index: neither unique index above covers a scan that spans
+        # narrowed and aggregate rows.
+        Index("ix_scoped_budgets_scope", "scope_type", "scope_id"),
+    )
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
+    scope_type: Mapped[str] = mapped_column()
+    scope_id: Mapped[str] = mapped_column()
+    provider_key_id: Mapped[str | None] = mapped_column(default=None)
+    name: Mapped[str | None] = mapped_column(default=None)
+    max_budget: Mapped[float | None] = mapped_column(default=None)
+    current_spend: Mapped[float] = mapped_column(default=0.0, server_default="0")
+    # In-flight holds from reservations that have passed the gate but whose actual
+    # cost is not known yet. Headroom is ``max_budget - current_spend -
+    # reserved_spend``; a period roll zeroes ``current_spend`` only, so a hold
+    # taken before the roll is still released correctly after it.
+    reserved_spend: Mapped[float] = mapped_column(default=0.0, server_default="0")
+    budget_duration_sec: Mapped[int | None] = mapped_column(default=None)
+    period_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )

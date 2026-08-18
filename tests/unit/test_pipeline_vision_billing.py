@@ -156,11 +156,16 @@ async def test_reservation_uses_the_resolved_provider_for_pricing(monkeypatch: p
 
     await _resolve(_config())
 
-    assert recorder.reserve_calls == [
-        {
-            "model": "gpt-4",
-            "pricing_provider": "openai",
-            "strategy": "for_update",
-            "counts_toward_budget": True,
-        }
-    ]
+    assert len(recorder.reserve_calls) == 1
+    call = recorder.reserve_calls[0]
+    scope = call.pop("scope")
+    assert call == {
+        "model": "gpt-4",
+        "pricing_provider": "openai",
+        "strategy": "for_update",
+        "counts_toward_budget": True,
+    }
+    # The scoped ceilings narrow on the same resolved provider the pricing does,
+    # and bill to the key that authenticated the request.
+    assert scope.provider_instance == "openai"
+    assert scope.api_key is not None and scope.api_key.id == "key-1"

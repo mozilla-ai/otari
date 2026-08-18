@@ -67,6 +67,7 @@ from gateway.services.budget_service import reconcile_reservation, refund_reserv
 from gateway.services.log_writer import LogWriter
 from gateway.services.model_access import is_model_allowed, model_not_allowed_detail, resolve_request_allowlist
 from gateway.services.pricing_service import find_model_pricing, flat_request_cost
+from gateway.services.scoped_budget_service import BudgetScopeRequest
 from gateway.services.search_backend import (
     MAX_RESULTS_CAP,
     SearchHit,
@@ -318,6 +319,9 @@ async def _dispatch_search(
         model=None,
         strategy=config.budget_strategy,
         counts_toward_budget=not budget_exempt,
+        # A search tool is not a model, but it is billed to a workspace like one,
+        # so the scope carries the tool's provider as the narrowing axis.
+        scope=BudgetScopeRequest(api_key=api_key, provider_instance=tool.provider),
     )
 
     # Resolved here rather than in the closure below: the builder is

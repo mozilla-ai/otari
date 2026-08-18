@@ -2605,6 +2605,179 @@
     {
       "item": [
         {
+          "name": "List Scoped Budgets",
+          "request": {
+            "description": "List scoped budgets, optionally filtered to one scope.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "scoped-budgets"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "scope_type",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "scope_id",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/scoped-budgets?scope_type=&scope_id=&skip=&limit="
+            }
+          }
+        },
+        {
+          "name": "Create Scoped Budget",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"scope_type\": \"organization\",\n  \"scope_id\": \"string\"\n}"
+            },
+            "description": "Create a scoped budget.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "scoped-budgets"
+              ],
+              "raw": "{{baseUrl}}/v1/scoped-budgets"
+            }
+          }
+        },
+        {
+          "name": "Get Scoped Budget",
+          "request": {
+            "description": "Get one scoped budget.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "scoped-budgets",
+                ":budget_id"
+              ],
+              "raw": "{{baseUrl}}/v1/scoped-budgets/:budget_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "budget_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Scoped Budget",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\"\n}"
+            },
+            "description": "Update a scoped budget's label, limit, or period length.\n\nThe scope and the provider narrowing are not editable: changing either would\nmove the ceiling to a different identity while carrying its spend, which is\na delete and a create, not an update.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "scoped-budgets",
+                ":budget_id"
+              ],
+              "raw": "{{baseUrl}}/v1/scoped-budgets/:budget_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "budget_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Scoped Budget",
+          "request": {
+            "description": "Delete a scoped budget.\n\nA request holding a reservation against it settles into nothing afterwards,\nwhich is the right outcome: the ceiling no longer exists to be credited.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "scoped-budgets",
+                ":budget_id"
+              ],
+              "raw": "{{baseUrl}}/v1/scoped-budgets/:budget_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "budget_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "scoped-budgets"
+    },
+    {
+      "item": [
+        {
           "name": "Create Search",
           "request": {
             "body": {

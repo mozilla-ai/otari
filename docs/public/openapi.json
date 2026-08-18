@@ -2385,6 +2385,88 @@
         "title": "CreateKeyResponse",
         "type": "object"
       },
+      "CreateScopedBudgetRequest": {
+        "description": "Request model for creating a scoped budget.",
+        "properties": {
+          "budget_duration_sec": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Period length in seconds (e.g. 86400 for daily); null never resets",
+            "title": "Budget Duration Sec"
+          },
+          "max_budget": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Maximum USD spend in the period",
+            "title": "Max Budget"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Admin-facing label for the budget",
+            "title": "Name"
+          },
+          "provider_key_id": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Narrow the cap to one provider instance; null caps spend across every provider",
+            "title": "Provider Key Id"
+          },
+          "scope_id": {
+            "description": "Id of the capped identity: an organization, workspace, membership row, or API key",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Scope Id",
+            "type": "string"
+          },
+          "scope_type": {
+            "description": "Which kind of identity this ceiling caps",
+            "enum": [
+              "organization",
+              "workspace",
+              "workspace_member",
+              "org_member",
+              "api_token"
+            ],
+            "title": "Scope Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "scope_type",
+          "scope_id"
+        ],
+        "title": "CreateScopedBudgetRequest",
+        "type": "object"
+      },
       "CreateSearchToolRequest": {
         "description": "Create a stored search tool. ``api_key`` is write-only and requires OTARI_SECRET_KEY.",
         "example": {
@@ -6124,6 +6206,122 @@
         "title": "RouterStatus",
         "type": "object"
       },
+      "ScopedBudgetResponse": {
+        "description": "One scoped ceiling and its live counters.\n\nUnlike ``/v1/budgets``, the counters are the row's own: a scoped ceiling is\nenforced against ``current_spend + reserved_spend``, so there is no rollup\nover users to compute.",
+        "properties": {
+          "budget_duration_sec": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Duration Sec"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "current_spend": {
+            "title": "Current Spend",
+            "type": "number"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "max_budget": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Budget"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "period_end": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period End"
+          },
+          "period_start": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Period Start"
+          },
+          "provider_key_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Key Id"
+          },
+          "reserved_spend": {
+            "title": "Reserved Spend",
+            "type": "number"
+          },
+          "scope_id": {
+            "title": "Scope Id",
+            "type": "string"
+          },
+          "scope_type": {
+            "title": "Scope Type",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "scope_type",
+          "scope_id",
+          "provider_key_id",
+          "name",
+          "max_budget",
+          "current_spend",
+          "reserved_spend",
+          "budget_duration_sec",
+          "period_start",
+          "period_end",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "ScopedBudgetResponse",
+        "type": "object"
+      },
       "ScoredExample": {
         "description": "One prompt and how well each candidate answered it.",
         "properties": {
@@ -7200,6 +7398,49 @@
           }
         },
         "title": "UpdateKeyRequest",
+        "type": "object"
+      },
+      "UpdateScopedBudgetRequest": {
+        "description": "Request model for updating a scoped budget.",
+        "properties": {
+          "budget_duration_sec": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Duration Sec"
+          },
+          "max_budget": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Budget"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "title": "UpdateScopedBudgetRequest",
         "type": "object"
       },
       "UpdateSearchToolRequest": {
@@ -14000,6 +14241,315 @@
         "summary": "Routing Memory Status",
         "tags": [
           "routing"
+        ]
+      }
+    },
+    "/v1/scoped-budgets": {
+      "get": {
+        "description": "List scoped budgets, optionally filtered to one scope.",
+        "operationId": "list_scoped_budgets_v1_scoped_budgets_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "scope_type",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "enum": [
+                    "organization",
+                    "workspace",
+                    "workspace_member",
+                    "org_member",
+                    "api_token"
+                  ],
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scope Type"
+            }
+          },
+          {
+            "in": "query",
+            "name": "scope_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "maxLength": 255,
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Scope Id"
+            }
+          },
+          {
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/ScopedBudgetResponse"
+                  },
+                  "title": "Response List Scoped Budgets V1 Scoped Budgets Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Scoped Budgets",
+        "tags": [
+          "scoped-budgets"
+        ]
+      },
+      "post": {
+        "description": "Create a scoped budget.",
+        "operationId": "create_scoped_budget_v1_scoped_budgets_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateScopedBudgetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScopedBudgetResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Scoped Budget",
+        "tags": [
+          "scoped-budgets"
+        ]
+      }
+    },
+    "/v1/scoped-budgets/{budget_id}": {
+      "delete": {
+        "description": "Delete a scoped budget.\n\nA request holding a reservation against it settles into nothing afterwards,\nwhich is the right outcome: the ceiling no longer exists to be credited.",
+        "operationId": "delete_scoped_budget_v1_scoped_budgets__budget_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "budget_id",
+            "required": true,
+            "schema": {
+              "title": "Budget Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Scoped Budget",
+        "tags": [
+          "scoped-budgets"
+        ]
+      },
+      "get": {
+        "description": "Get one scoped budget.",
+        "operationId": "get_scoped_budget_v1_scoped_budgets__budget_id__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "budget_id",
+            "required": true,
+            "schema": {
+              "title": "Budget Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScopedBudgetResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Scoped Budget",
+        "tags": [
+          "scoped-budgets"
+        ]
+      },
+      "patch": {
+        "description": "Update a scoped budget's label, limit, or period length.\n\nThe scope and the provider narrowing are not editable: changing either would\nmove the ceiling to a different identity while carrying its spend, which is\na delete and a create, not an update.",
+        "operationId": "update_scoped_budget_v1_scoped_budgets__budget_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "budget_id",
+            "required": true,
+            "schema": {
+              "title": "Budget Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateScopedBudgetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ScopedBudgetResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Scoped Budget",
+        "tags": [
+          "scoped-budgets"
         ]
       }
     },

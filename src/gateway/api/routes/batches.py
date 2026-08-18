@@ -39,6 +39,7 @@ from gateway.services.log_writer import LogWriter
 from gateway.services.model_access import is_model_allowed, model_not_allowed_detail, resolve_request_allowlist
 from gateway.services.pricing_service import find_model_pricing
 from gateway.services.provider_kwargs import get_provider_kwargs, resolve_provider_selector
+from gateway.services.scoped_budget_service import BudgetScopeRequest
 from gateway.services.workspace_scope import workspace_for_key_id
 
 router = APIRouter(prefix="/v1/batches", tags=["batches"])
@@ -309,6 +310,7 @@ async def create_batch(
         model=request.model,
         strategy=config.budget_strategy,
         counts_toward_budget=not budget_exempt,
+        scope=BudgetScopeRequest(api_key=api_key, provider_instance=resolved.instance),
     )
 
     # Stamp the billed user into the provider-side metadata so ownership can be

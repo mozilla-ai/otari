@@ -64,6 +64,7 @@ from gateway.services.pricing_service import (
     pricing_required_but_missing,
 )
 from gateway.services.provider_kwargs import ResolvedProvider, resolve_provider_selector
+from gateway.services.scoped_budget_service import BudgetScopeRequest
 from gateway.services.workspace_scope import workspace_for_key_id
 
 ResultT = TypeVar("ResultT")
@@ -282,6 +283,7 @@ async def run_passthrough(
                 model=model,
                 strategy=config.budget_strategy,
                 counts_toward_budget=not budget_exempt,
+                scope=BudgetScopeRequest(api_key=api_key, provider_instance=row_provider),
             )
         except HTTPException as exc:
             if exc.status_code != status.HTTP_404_NOT_FOUND:
