@@ -1,4 +1,5 @@
 import { Button, Card, Chip } from "@heroui/react"
+import { Link } from "@tanstack/react-router"
 import {
   type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
@@ -1001,6 +1002,28 @@ export function KeysPage() {
           keys.error ?? updateKey.error ?? rotateKey.error ?? deleteKey.error
         }
       />
+
+      {/* A key's owner and its spending limit are both set elsewhere now, on the
+          organization rail. This page is where an operator arrives looking for
+          them, so it says where they went rather than leaving the sidebar to be
+          re-learned. */}
+      <p className="text-sm text-muted">
+        A key spends against its owner's budget. Owners live under{" "}
+        <Link
+          to="/users"
+          className="font-medium text-link hover:text-link-hover"
+        >
+          Organization → Users
+        </Link>
+        , and their limits under{" "}
+        <Link
+          to="/budgets"
+          className="font-medium text-link hover:text-link-hover"
+        >
+          Spend &amp; budgets
+        </Link>
+        .
+      </p>
 
       {showOnboarding ? (
         <EmptyState

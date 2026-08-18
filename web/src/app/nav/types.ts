@@ -68,10 +68,19 @@ export type NavItem = NavItemBase &
     children?: readonly NavChild[]
   }
 
-/** A destination nested under another, gated with its parent. */
+/** A destination nested under another, gated with its parent by default. */
 export interface NavChild {
   to: NavPath
   label: string
+  /**
+   * The surface this destination needs, when it is not the parent's.
+   *
+   * Grouping is an editorial choice and gating is a fact about the deployment,
+   * so the two can disagree: Guardrails is grouped under Routing, where the
+   * navigation prototype puts it, but the page is served by the tools surface.
+   * Omitted, the child inherits the parent's, which is the ordinary case.
+   */
+  surface?: string
 }
 
 /**

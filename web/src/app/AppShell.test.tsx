@@ -572,19 +572,18 @@ describe("AppShell entitlement and flag gating", () => {
     expect(
       screen.getByRole("link", { name: "Code execution" }),
     ).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "Guardrails" })).toBeInTheDocument()
   })
 
   it("opens the group that holds the current route, without a click", async () => {
     mockMatchMedia(false)
     // Arriving by bookmark or shared URL should show where you are rather than
     // a shut group that hides it.
-    await renderShell(bootstrap(), { url: "/tools/guardrails" })
+    await renderShell(bootstrap(), { url: "/tools/web-search" })
 
     expect(
       await screen.findByRole("button", { name: "Tools", expanded: true }),
     ).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "Guardrails" })).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Web search" })).toBeInTheDocument()
   })
 
   it("signs out from the account menu rather than the page header", async () => {

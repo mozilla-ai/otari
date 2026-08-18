@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, within } from "@testing-library/react"
+import { screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -8,6 +8,7 @@ import type { ApiKey, User } from "@/client"
 import { KeysPage } from "@/features/keys/KeysPage"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { bootstrap, organizationMember } from "@/tests/fixtures"
+import { renderWithRouter } from "@/tests/router"
 
 function user(overrides: Partial<User> = {}): User {
   return {
@@ -154,9 +155,9 @@ function renderPage(ui: ReactElement) {
     defaultOptions: { queries: { retry: false } },
   })
   // The page reads the deployment's surfaces to decide whether it may name key
-  // owners from the organization roster, so it needs the context the app shell
-  // provides around it in production.
-  return render(
+  // owners from the organization roster, and links to the pages that own a key's
+  // budget, so it needs both the deployment context and a router around it.
+  return renderWithRouter(
     <QueryClientProvider client={client}>
       <DeploymentProvider value={bootstrap()}>{ui}</DeploymentProvider>
     </QueryClientProvider>,

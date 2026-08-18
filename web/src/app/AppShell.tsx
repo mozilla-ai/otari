@@ -13,6 +13,7 @@ import {
   NAV_SECTIONS,
   navContextForPath,
   navItemForPath,
+  navLabelForPath,
   ORG_NAV_SECTIONS,
   visibleNavSections,
 } from "@/app/nav/registry"
@@ -561,18 +562,28 @@ export function AppShell() {
                 context, since the organization one has its own way back, and
                 only for someone who manages the organization: it is the single
                 destination the prototype hides outright rather than degrading
-                to read-only. */}
+                to read-only.
+
+                Drawn as a bordered row with a trailing chevron rather than as
+                another muted link, because it is the only control here that
+                changes context rather than opening a page, and because Users,
+                Budgets and Settings all moved behind it: an operator upgrading
+                from a sidebar that listed them needs to find this. */}
             {!inOrganization && managesOrganization ? (
               <Link
                 to="/organization/members"
                 onClick={() => setMobileNavOpen(false)}
                 className={clsx(
                   navLinkClass(effectiveCollapsed),
-                  NAV_INACTIVE,
+                  "border border-border bg-surface text-foreground transition-colors hover:border-accent hover:bg-surface-alt",
                   effectiveCollapsed ? "mx-2" : "mx-3",
                 )}
                 aria-label={effectiveCollapsed ? "Organization" : undefined}
-                title={effectiveCollapsed ? "Organization" : undefined}
+                title={
+                  effectiveCollapsed
+                    ? "Organization: members, spend and budgets, users, settings"
+                    : undefined
+                }
               >
                 <svg
                   aria-hidden="true"
@@ -588,7 +599,25 @@ export function AppShell() {
                     strokeLinejoin="round"
                   />
                 </svg>
-                {effectiveCollapsed ? null : "Organization"}
+                {effectiveCollapsed ? null : (
+                  <>
+                    Organization
+                    <svg
+                      aria-hidden="true"
+                      viewBox="0 0 24 24"
+                      fill="none"
+                      stroke="currentColor"
+                      strokeWidth="2"
+                      className="ml-auto h-4 w-4 shrink-0 text-muted"
+                    >
+                      <path
+                        d="M9 6l6 6-6 6"
+                        strokeLinecap="round"
+                        strokeLinejoin="round"
+                      />
+                    </svg>
+                  </>
+                )}
               </Link>
             ) : null}
             {/* One control, not a stack of links: the guide, appearance, and
@@ -692,7 +721,9 @@ export function AppShell() {
             <div className="mx-auto flex max-w-[1800px] flex-col gap-6 px-4 py-5 md:px-6 md:py-6">
               {routeIsGatedOff ? (
                 <EmptyState
-                  title={`${currentItem.label} is not available here`}
+                  // The leaf's name, not the group's: someone who followed a
+                  // link to Guardrails should not be told "Routing" is missing.
+                  title={`${navLabelForPath(pathname) ?? currentItem.label} is not available here`}
                   description="This deployment does not serve that page. Pick a destination from the sidebar."
                 />
               ) : (

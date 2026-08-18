@@ -78,11 +78,18 @@ const BASE_NAV_SECTIONS = [
         label: "Routing",
         surface: "routing",
         icon: RoutingIcon,
-        // Aliases was a route with no way to reach it from the sidebar. It is
-        // the other half of what routing decides (which name resolves to which
-        // target), so the group is what finally puts it on screen.
+        // Policies and Guardrails as the navigation prototype groups them.
+        // Aliases is this dashboard's own addition: it was a route with no way
+        // to reach it from the sidebar at all, and it is the other half of what
+        // routing decides (which name resolves to which target).
         children: [
           { to: "/routing", label: "Policies" },
+          {
+            to: "/tools/guardrails",
+            label: "Guardrails",
+            // Grouped with Routing, served by the tools surface.
+            surface: "tools",
+          },
           { to: "/aliases", label: "Aliases" },
         ],
       },
@@ -91,14 +98,15 @@ const BASE_NAV_SECTIONS = [
         label: "Tools",
         surface: "tools",
         icon: ToolsIcon,
-        // The three services the page already configures, each now reachable on
-        // its own rather than by scrolling one long page. The prototype lists
-        // MCP servers here too; the gateway configures none, so it is left out
-        // rather than linked to nothing.
+        // Two of the three services the page configures; Guardrails is grouped
+        // under Routing, where the prototype puts it. The prototype lists MCP
+        // servers here too, and the gateway has no MCP server registry to
+        // manage (only per-request config a caller passes in, plus two safety
+        // toggles on Settings), so it is left out rather than linked to an
+        // empty page.
         children: [
           { to: "/tools/web-search", label: "Web search" },
           { to: "/tools/code-execution", label: "Code execution" },
-          { to: "/tools/guardrails", label: "Guardrails" },
         ],
       },
     ],
@@ -245,7 +253,15 @@ export const NAV_ITEMS: readonly NavItem[] = [
  */
 const NAV_CHILD_PARENTS: ReadonlyMap<string, NavItem> = new Map(
   NAV_ITEMS.flatMap((item) =>
-    (item.children ?? []).map((child) => [child.to, item] as const),
+    (item.children ?? []).map(
+      (child) =>
+        [
+          child.to,
+          // The parent, so the sidebar still highlights the group this belongs
+          // to, but carrying the child's own surface when it declares one.
+          child.surface ? { ...item, surface: child.surface } : item,
+        ] as const,
+    ),
   ),
 )
 
