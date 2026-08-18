@@ -5,13 +5,14 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import { AppShell } from "@/app/AppShell"
 import { Provider } from "@/app/provider"
 import type { DeploymentBootstrap } from "@/client"
+import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import type { Entitlements } from "@/shared/hooks/useEntitlements"
 import {
   BASE_CAPABILITIES,
   EntitlementProvider,
 } from "@/shared/hooks/useEntitlements"
-import { bootstrap } from "@/tests/fixtures"
+import { bootstrap, organizationContext } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
 
 // jsdom has no layout engine, so `md:hidden` / responsive classes never take
@@ -60,13 +61,23 @@ function renderShell(
     ...options.entitlements,
   }
   const url = options.url ?? "/"
+  // The shell reads the organization context to decide whether to offer the way
+  // into that rail, and the switcher reads it for the names it shows. Stubbed
+  // here so the sidebar behaves as it does in front of a real gateway.
+  vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
+    Response.json(organizationContext()),
+  )
   return renderWithRouter(<div>PAGE CONTENT</div>, {
     url,
     shell: (
       <Provider>
         <DeploymentProvider value={deployment}>
           <EntitlementProvider value={entitlements}>
-            <AppShell />
+            {/* The shell reads the selected workspace for its switcher and its
+                way back out of the organization rail. */}
+            <SelectedWorkspaceProvider>
+              <AppShell />
+            </SelectedWorkspaceProvider>
           </EntitlementProvider>
         </DeploymentProvider>
       </Provider>
@@ -113,7 +124,7 @@ describe("AppShell responsive layout", () => {
     await renderShell()
 
     await user.click(screen.getByRole("button", { name: "Open navigation" }))
-    await user.click(screen.getByRole("link", { name: "Providers" }))
+    await user.click(screen.getByRole("link", { name: "Provider credentials" }))
 
     expect(await screen.findByText("PROVIDERS PAGE")).toBeInTheDocument()
     // Navigating closes the drawer so the page it landed on is not hidden behind it.
@@ -133,17 +144,16 @@ describe("AppShell responsive layout", () => {
     await renderShell()
 
     const overview = screen.getByRole("link", { name: "Overview" })
-    const providers = screen.getByRole("link", { name: "Providers" })
+    const providers = screen.getByRole("link", { name: "Provider credentials" })
     expect(overview).toHaveAttribute("aria-current", "page")
     expect(providers).not.toHaveAttribute("aria-current")
 
     await user.click(providers)
 
     expect(await screen.findByText("PROVIDERS PAGE")).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "Providers" })).toHaveAttribute(
-      "aria-current",
-      "page",
-    )
+    expect(
+      screen.getByRole("link", { name: "Provider credentials" }),
+    ).toHaveAttribute("aria-current", "page")
     expect(screen.getByRole("link", { name: "Overview" })).not.toHaveAttribute(
       "aria-current",
     )
@@ -359,16 +369,31 @@ describe("AppShell surface gating", () => {
       "Overview",
       "Activity",
       "Usage",
-      "Providers",
       "Models",
       "Routing",
-      "General",
-      "Members",
-      "Workspaces",
-      "Users",
-      "API keys",
-      "Budgets",
       "Tools & Guardrails",
+      "API keys",
+      "Provider credentials",
+      "Members",
+    ])
+  })
+
+  it("renders every organization destination on that rail", async () => {
+    mockMatchMedia(false)
+    // Same reasoning as above, for the other context: the organization rail is
+    // its own registry, and nothing else compares it against a full list.
+    await renderShell(bootstrap(), { url: "/organization/members" })
+
+    expect(
+      within(screen.getByRole("navigation"))
+        .getAllByRole("link")
+        .map((link) => link.textContent),
+    ).toEqual([
+      "Members & roles",
+      "Workspaces",
+      "Spend & budgets",
+      "Users",
+      "Organization",
       "Settings",
     ])
   })
@@ -386,17 +411,19 @@ describe("AppShell surface gating", () => {
     expect(screen.queryByRole("link", { name: "API keys" })).toBeNull()
     // Ungated and still present: the index is the deployment's front page.
     expect(screen.getByRole("link", { name: "Overview" })).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "Providers" })).toBeInTheDocument()
+    expect(
+      screen.getByRole("link", { name: "Provider credentials" }),
+    ).toBeInTheDocument()
   })
 
   it("drops a section header once its whole group is gated away", async () => {
     mockMatchMedia(false)
     await renderShell(bootstrap({ surfaces: ["models"] }))
 
-    // "Observability" labels Activity and Usage; with neither served, an empty
+    // "Observe" labels Activity and Usage; with neither served, an empty
     // heading over nothing is worse than no heading.
-    expect(screen.queryByText("Observability")).toBeNull()
-    expect(screen.getByText("Catalog")).toBeInTheDocument()
+    expect(screen.queryByText("Observe")).toBeNull()
+    expect(screen.getByText("Gateway")).toBeInTheDocument()
   })
 })
 
@@ -418,7 +445,7 @@ describe("AppShell entitlement and flag gating", () => {
 
     expect(screen.getByRole("link", { name: "Routing" })).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "Models" })).toBeInTheDocument()
-    expect(screen.getByText("Catalog")).toBeInTheDocument()
+    expect(screen.getByText("Gateway")).toBeInTheDocument()
   })
 
   it("answers a gated-off destination with a panel, not the page", async () => {
@@ -433,37 +460,37 @@ describe("AppShell entitlement and flag gating", () => {
     })
 
     expect(
-      await screen.findByText("Providers is not available here"),
+      await screen.findByText("Provider credentials is not available here"),
     ).toBeInTheDocument()
     expect(screen.queryByText("PAGE CONTENT")).toBeNull()
   })
 
   it("highlights one link on a nested route, and names it correctly", async () => {
     mockMatchMedia(false)
-    // /organization/members is the registry's first child route, and
-    // /organization is its parent route in the generated tree. TanStack's own
+    // /organization/members is a child route of /organization in the generated
+    // tree, and both are entries on the organization rail. TanStack's own
     // `activeProps` matches a parent as active, so the sidebar would light up
-    // both "General" and "Members"; the shell drives the highlight from
-    // navItemForPath instead, which prefers the exact entry.
+    // both; the shell drives the highlight from navItemForPath instead, which
+    // prefers the exact entry.
     await renderShell(bootstrap(), { url: "/organization/members" })
 
-    const members = await screen.findByRole("link", { name: "Members" })
-    const general = screen.getByRole("link", { name: "General" })
+    const members = await screen.findByRole("link", { name: "Members & roles" })
+    const parent = screen.getByRole("link", { name: "Organization" })
     expect(members.className).toContain("bg-primary-subtle")
-    expect(general.className).not.toContain("bg-primary-subtle")
+    expect(parent.className).not.toContain("bg-primary-subtle")
   })
 
   it("names a gated-off child route after the child, not its parent", async () => {
     mockMatchMedia(false)
     // Same prefix collision, seen from the panel: resolving the parent would
-    // tell someone who followed a /organization/members link that "General" is
-    // not available here.
+    // tell someone who followed a /organization/members link that
+    // "Organization" is not available here.
     await renderShell(bootstrap({ surfaces: ["models"] }), {
       url: "/organization/members",
     })
 
     expect(
-      await screen.findByText("Members is not available here"),
+      await screen.findByText("Members & roles is not available here"),
     ).toBeInTheDocument()
   })
 
@@ -484,5 +511,42 @@ describe("AppShell entitlement and flag gating", () => {
     })
 
     expect(await screen.findByText("PAGE CONTENT")).toBeInTheDocument()
+  })
+
+  it("swaps the whole rail when the route is an organization destination", async () => {
+    mockMatchMedia(false)
+    await renderShell(bootstrap(), { url: "/organization/members" })
+
+    // The two rails never render together: entering the organization context
+    // replaces the workspace nav rather than expanding a section inside it.
+    expect(
+      await screen.findByRole("link", { name: "Members & roles" }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "API keys" })).toBeNull()
+    expect(screen.queryByRole("link", { name: "Activity" })).toBeNull()
+  })
+
+  it("offers a way into the organization rail, and a way back out", async () => {
+    mockMatchMedia(false)
+    await renderShell()
+
+    // In: a footer entry, not a nav section.
+    const enter = await screen.findByRole("link", { name: "Organization" })
+    expect(enter).toHaveAttribute("href", "/organization/members")
+    // Out only exists on the other rail.
+    expect(screen.queryByText(/^Back to /)).toBeNull()
+  })
+
+  it("leaves the organization rail by its own way back", async () => {
+    mockMatchMedia(false)
+    await renderShell(bootstrap(), { url: "/organization/members" })
+
+    // The organization rail has no switcher; it has the one link back to where
+    // the shell opened. ("Organization" is a destination *on* this rail, so its
+    // absence is not what distinguishes the two.)
+    expect(await screen.findByText(/^Back to /)).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Switch workspace" }),
+    ).toBeNull()
   })
 })

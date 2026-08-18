@@ -1,6 +1,6 @@
 import { expect, type Locator, type Page, test } from "@playwright/test"
 
-import { login, nav, tableRows } from "./helpers"
+import { login, nav, openOrganization, tableRows } from "./helpers"
 
 // The tenancy pages against a real gateway: the organization a first boot
 // provisions, its roster, and the workspaces under it. Each flow creates what it
@@ -44,7 +44,8 @@ test.describe("standalone tenancy", () => {
     page,
   }) => {
     await login(page)
-    await openPage(page, "General", "Organization")
+    await openOrganization(page)
+    await openPage(page, "Organization", "Organization")
 
     // The master key names no user, so the first authenticated request
     // provisions this: one organization, one owner identity, one workspace.
@@ -65,7 +66,8 @@ test.describe("standalone tenancy", () => {
 
   test("lists the operator as an undemotable owner", async ({ page }) => {
     await login(page)
-    await openPage(page, "Members", "Members")
+    await openOrganization(page)
+    await openPage(page, "Members & roles", "Members")
 
     // Scoped to the operator's own row rather than to a global count: this
     // gateway is shared with the flow below, which adds a member and leaves a
@@ -88,7 +90,8 @@ test.describe("standalone tenancy", () => {
     page,
   }) => {
     await login(page)
-    await openPage(page, "Members", "Members")
+    await openOrganization(page)
+    await openPage(page, "Members & roles", "Members")
 
     await page.getByRole("button", { name: "Add member" }).click()
     await page.getByLabel("Email address").fill(MEMBER_EMAIL)
@@ -138,6 +141,7 @@ test.describe("standalone tenancy", () => {
     page,
   }) => {
     await login(page)
+    await openOrganization(page)
     await openPage(page, "Workspaces", "Workspaces")
 
     await page.getByRole("button", { name: "Create workspace" }).click()
@@ -176,7 +180,8 @@ test.describe("standalone tenancy", () => {
     page,
   }) => {
     await login(page)
-    await openPage(page, "General", "Organization")
+    await openOrganization(page)
+    await openPage(page, "Organization", "Organization")
 
     // A self-hosted gateway is one tenant with several people in it, so the
     // gateway mounts no endpoint to create, switch between, or delete an

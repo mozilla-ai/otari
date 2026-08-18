@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test"
 
-import { login, MASTER_KEY, nav } from "./helpers"
+import { login, MASTER_KEY, nav, openOrganization } from "./helpers"
 
 // One shared gateway + DB, so the flows build on each other and must run in order.
 test.describe.configure({ mode: "serial" })
@@ -34,26 +34,38 @@ test.describe("dashboard core flows", () => {
 
   test("navigate the management pages", async ({ page }) => {
     await login(page)
-    for (const name of [
-      "Models",
-      "Routing",
-      "Users",
-      "Budgets",
-      "Settings",
-      "Providers",
+    // The workspace rail, then the organization one. The sidebar label and the
+    // page heading are no longer always the same word, so both are named.
+    for (const [link, heading] of [
+      ["Models", "Models"],
+      ["Routing", "Routing"],
+      ["Provider credentials", "Providers"],
     ]) {
-      await nav(page).getByRole("link", { name }).click()
+      await nav(page).getByRole("link", { name: link }).click()
       // Exact match: the Budgets onboarding heading ("No budgets yet") would
       // otherwise also substring-match the page title.
       await expect(
-        page.getByRole("heading", { name, exact: true }),
+        page.getByRole("heading", { name: heading, exact: true }),
+      ).toBeVisible()
+    }
+
+    await openOrganization(page)
+    for (const [link, heading] of [
+      ["Users", "Users"],
+      ["Spend & budgets", "Budgets"],
+      ["Settings", "Settings"],
+    ]) {
+      await nav(page).getByRole("link", { name: link }).click()
+      await expect(
+        page.getByRole("heading", { name: heading, exact: true }),
       ).toBeVisible()
     }
   })
 
   test("create a budget", async ({ page }) => {
     await login(page)
-    await nav(page).getByRole("link", { name: "Budgets" }).click()
+    await openOrganization(page)
+    await nav(page).getByRole("link", { name: "Spend & budgets" }).click()
     await page.getByRole("button", { name: "Create your first budget" }).click()
     await page.getByLabel("Name (optional)").fill("e2e-budget")
     await page.getByLabel("Spending limit (USD)").fill("100")
@@ -67,6 +79,7 @@ test.describe("dashboard core flows", () => {
 
   test("create a user and assign the budget", async ({ page }) => {
     await login(page)
+    await openOrganization(page)
     await nav(page).getByRole("link", { name: "Users" }).click()
     // A bootstrap virtual user already exists (from the first-run key), so use the
     // header action, not the empty-state button. It is removed when the form opens,

@@ -16,6 +16,7 @@ import { Route as AliasesRouteImport } from './routes/aliases'
 import { Route as BudgetsRouteImport } from './routes/budgets'
 import { Route as DocsRouteImport } from './routes/docs'
 import { Route as KeysRouteImport } from './routes/keys'
+import { Route as MembersRouteImport } from './routes/members'
 import { Route as ModelsRouteImport } from './routes/models'
 import { Route as OrganizationRouteImport } from './routes/organization'
 import { Route as ProvidersRouteImport } from './routes/providers'
@@ -61,6 +62,11 @@ const DocsRoute = DocsRouteImport.update({
 const KeysRoute = KeysRouteImport.update({
   id: '/keys',
   path: '/keys',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const MembersRoute = MembersRouteImport.update({
+  id: '/members',
+  path: '/members',
   getParentRoute: () => rootRouteImport,
 } as any)
 const ModelsRoute = ModelsRouteImport.update({
@@ -127,6 +133,7 @@ export interface FileRoutesByFullPath {
   '/budgets': typeof BudgetsRoute
   '/docs': typeof DocsRoute
   '/keys': typeof KeysRoute
+  '/members': typeof MembersRoute
   '/models': typeof ModelsRoute
   '/organization': typeof OrganizationRouteWithChildren
   '/providers': typeof ProvidersRoute
@@ -147,6 +154,7 @@ export interface FileRoutesByTo {
   '/budgets': typeof BudgetsRoute
   '/docs': typeof DocsRoute
   '/keys': typeof KeysRoute
+  '/members': typeof MembersRoute
   '/models': typeof ModelsRoute
   '/providers': typeof ProvidersRoute
   '/routing': typeof RoutingRoute
@@ -167,6 +175,7 @@ export interface FileRoutesById {
   '/budgets': typeof BudgetsRoute
   '/docs': typeof DocsRoute
   '/keys': typeof KeysRoute
+  '/members': typeof MembersRoute
   '/models': typeof ModelsRoute
   '/organization': typeof OrganizationRouteWithChildren
   '/providers': typeof ProvidersRoute
@@ -189,6 +198,7 @@ export interface FileRouteTypes {
     | '/budgets'
     | '/docs'
     | '/keys'
+    | '/members'
     | '/models'
     | '/organization'
     | '/providers'
@@ -209,6 +219,7 @@ export interface FileRouteTypes {
     | '/budgets'
     | '/docs'
     | '/keys'
+    | '/members'
     | '/models'
     | '/providers'
     | '/routing'
@@ -228,6 +239,7 @@ export interface FileRouteTypes {
     | '/budgets'
     | '/docs'
     | '/keys'
+    | '/members'
     | '/models'
     | '/organization'
     | '/providers'
@@ -249,6 +261,7 @@ export interface RootRouteChildren {
   BudgetsRoute: typeof BudgetsRoute
   DocsRoute: typeof DocsRoute
   KeysRoute: typeof KeysRoute
+  MembersRoute: typeof MembersRoute
   ModelsRoute: typeof ModelsRoute
   OrganizationRoute: typeof OrganizationRouteWithChildren
   ProvidersRoute: typeof ProvidersRoute
@@ -309,6 +322,13 @@ declare module '@tanstack/react-router' {
       path: '/keys'
       fullPath: '/keys'
       preLoaderRoute: typeof KeysRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/members': {
+      id: '/members'
+      path: '/members'
+      fullPath: '/members'
+      preLoaderRoute: typeof MembersRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/models': {
@@ -413,6 +433,7 @@ const rootRouteChildren: RootRouteChildren = {
   BudgetsRoute: BudgetsRoute,
   DocsRoute: DocsRoute,
   KeysRoute: KeysRoute,
+  MembersRoute: MembersRoute,
   ModelsRoute: ModelsRoute,
   OrganizationRoute: OrganizationRouteWithChildren,
   ProvidersRoute: ProvidersRoute,

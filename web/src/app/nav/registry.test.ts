@@ -6,7 +6,9 @@ import {
   composeNavSections,
   NAV_ITEMS,
   NAV_SECTIONS,
+  navContextForPath,
   navItemForPath,
+  ORG_NAV_SECTIONS,
   visibleNavSections,
 } from "./registry"
 import type { NavItem, NavSection } from "./types"
@@ -15,11 +17,19 @@ describe("nav registry", () => {
   it("exposes the base sections in display order", () => {
     expect(NAV_SECTIONS.map((section) => section.id)).toEqual([
       "home",
-      "observability",
-      "catalog",
-      "organization",
+      "observe",
+      "gateway",
       "access",
-      "system",
+    ])
+  })
+
+  it("exposes the organization sections in display order", () => {
+    // The second rail, reached from the sidebar footer. Its own registry, so
+    // its order is asserted separately from the workspace one's.
+    expect(ORG_NAV_SECTIONS.map((section) => section.id)).toEqual([
+      "org-people",
+      "org-money",
+      "org-general",
     ])
   })
 
@@ -27,34 +37,55 @@ describe("nav registry", () => {
     // The whole list, not a sample: the registry is now the only place a
     // destination exists, so an entry dropped in a refactor is a page that
     // silently stops being reachable.
+    // Both rails, because NAV_ITEMS is what answers "which entry is this
+    // pathname" and a route is gated the same way whichever sidebar links it.
     expect(NAV_ITEMS.map((item) => item.label)).toEqual([
       "Overview",
       "Activity",
       "Usage",
-      "Providers",
       "Models",
       "Routing",
-      "General",
-      "Members",
-      "Workspaces",
-      "Users",
-      "API keys",
-      "Budgets",
       "Tools & Guardrails",
+      "API keys",
+      "Provider credentials",
+      "Members",
+      "Members & roles",
+      "Workspaces",
+      "Spend & budgets",
+      "Users",
+      "Organization",
       "Settings",
     ])
+  })
+
+  it("puts each destination on exactly one rail", () => {
+    // The two registries are concatenated into NAV_ITEMS, so a path declared on
+    // both would resolve to whichever came first and be gated by that one.
+    const paths = NAV_ITEMS.map((item) => item.to)
+    expect(paths).toEqual([...new Set(paths)])
+  })
+
+  it("sorts a pathname onto the rail that declares it", () => {
+    // Not a URL-prefix rule: /workspaces and /settings are organization
+    // destinations whose paths look like anything else, and /members is a
+    // workspace one directly under the root.
+    expect(navContextForPath("/members")).toBe("workspace")
+    expect(navContextForPath("/workspaces")).toBe("organization")
+    expect(navContextForPath("/settings")).toBe("organization")
+    expect(navContextForPath("/organization/members")).toBe("organization")
+    // Unregistered paths open in the context the shell starts in.
+    expect(navContextForPath("/docs")).toBe("workspace")
   })
 
   it("splits the tenancy pages across their two surfaces", () => {
     // The organization pages and the workspace pages are separate management
     // prefixes, so they gate separately: a deployment that served one without
     // the other would otherwise show links it refuses every request behind.
-    const tenancy = NAV_SECTIONS.find(
-      (section) => section.id === "organization",
+    const tenancy = ORG_NAV_SECTIONS.find(
+      (section) => section.id === "org-people",
     )
     expect(tenancy?.items.map((item) => [item.label, item.surface])).toEqual([
-      ["General", "organizations"],
-      ["Members", "organizations"],
+      ["Members & roles", "organizations"],
       ["Workspaces", "workspaces"],
     ])
   })
@@ -65,14 +96,18 @@ describe("nav registry", () => {
     // /organization/members and matches it as a prefix. The shell titles its
     // gated-off panel from whatever comes back, and the sidebar highlights it,
     // so the parent winning here is a page announcing itself as "General".
-    expect(navItemForPath("/organization/members")?.label).toBe("Members")
-    expect(navItemForPath("/organization")?.label).toBe("General")
+    expect(navItemForPath("/organization/members")?.label).toBe(
+      "Members & roles",
+    )
+    expect(navItemForPath("/organization")?.label).toBe("Organization")
   })
 
   it("resolves a deeper path to the deepest entry above it", () => {
     // Both /organization and /organization/members are prefixes of this, and
     // the deeper one is what describes it.
-    expect(navItemForPath("/organization/members/abc")?.label).toBe("Members")
+    expect(navItemForPath("/organization/members/abc")?.label).toBe(
+      "Members & roles",
+    )
   })
 
   it("still resolves an unregistered child route to its parent", () => {
@@ -110,7 +145,7 @@ describe("nav registry", () => {
     // Activity and Usage are two views over /v1/usage, so they gate together on
     // the surface rather than each on a name of its own.
     const observability = NAV_SECTIONS.find(
-      (section) => section.id === "observability",
+      (section) => section.id === "observe",
     )
     expect(observability?.items.map((item) => item.surface)).toEqual([
       "usage",

@@ -1,0 +1,104 @@
+import { Button, Popover } from "@heroui/react"
+import { useState } from "react"
+import { useOrganizationContext } from "@/shared/api/hooks"
+import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
+
+// The organization and the workspace the shell is looking at, and the control
+// that changes the second. Sits above the nav rather than in it because it
+// scopes the destinations below it rather than being one.
+//
+// It drives the Members page today, which is genuinely per-workspace: the
+// workspace member routes take a workspace id. The rest of the workspace
+// context is still deployment-wide, because no request-plane table carries a
+// workspace yet, so a switch does not change what those pages show. The copy
+// below says so rather than implying a scope that is not there.
+export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
+  const { memberships, selected, select, isLoading } = useSelectedWorkspace()
+  const context = useOrganizationContext()
+  const [open, setOpen] = useState(false)
+
+  // Both hops optional: the context can answer without an organization (a
+  // failed read, or a shape a test supplies), and the switcher is chrome that
+  // renders around whatever else is wrong rather than taking the shell down.
+  const organizationName = context.data?.organization?.name ?? "Organization"
+
+  if (collapsed) {
+    // No room for two lines of text; the initial stands in and the full names
+    // are the tooltip, matching how the collapsed nav links behave.
+    return (
+      <div
+        className="mx-2 mb-2 flex h-10 items-center justify-center rounded-lg border border-border bg-surface-alt text-sm font-semibold text-foreground"
+        title={`${selected?.name ?? "No workspace"} · ${organizationName}`}
+      >
+        {(selected?.name ?? organizationName).slice(0, 1).toUpperCase()}
+      </div>
+    )
+  }
+
+  return (
+    <Popover isOpen={open} onOpenChange={setOpen}>
+      <Button
+        variant="ghost"
+        className="mx-3 mb-2 flex h-auto w-auto flex-col items-start gap-0 rounded-lg border border-border bg-surface-alt px-3 py-2 text-left"
+        aria-label="Switch workspace"
+      >
+        <span className="text-sm font-semibold text-foreground">
+          {isLoading ? "Loading…" : (selected?.name ?? "No workspace")}
+        </span>
+        <span className="text-xs text-muted">{organizationName}</span>
+      </Button>
+      <Popover.Content placement="bottom start">
+        <Popover.Dialog className="flex w-64 flex-col">
+          <div className="px-2 pb-1 text-[11px] font-semibold tracking-wider text-muted uppercase">
+            Organization
+          </div>
+          <div className="px-2 pb-2 text-sm text-foreground">
+            {organizationName}
+          </div>
+          <div className="border-t border-border pt-2">
+            <div className="px-2 pb-1 text-[11px] font-semibold tracking-wider text-muted uppercase">
+              Workspaces ({memberships.length})
+            </div>
+            {memberships.length === 0 ? (
+              <p className="px-2 py-1 text-xs text-muted">
+                You do not belong to a workspace yet.
+              </p>
+            ) : (
+              <ul className="flex flex-col">
+                {memberships.map((membership) => (
+                  <li key={membership.workspace_id}>
+                    <button
+                      type="button"
+                      className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm text-foreground hover:bg-content3"
+                      onClick={() => {
+                        select(membership.workspace_id)
+                        setOpen(false)
+                      }}
+                    >
+                      {membership.name}
+                      {membership.workspace_id === selected?.workspace_id ? (
+                        // Text rather than an aria-label on a bare span: the
+                        // check mark is the only thing distinguishing the
+                        // current workspace, so it needs a name that is read
+                        // out rather than an attribute the role does not carry.
+                        <>
+                          <span aria-hidden="true">✓</span>
+                          <span className="sr-only">Selected</span>
+                        </>
+                      ) : null}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </div>
+          <p className="mt-2 border-t border-border px-2 pt-2 text-xs text-muted">
+            Selecting a workspace changes the Members page. The other pages are
+            still deployment-wide until the gateway records a workspace on keys
+            and usage.
+          </p>
+        </Popover.Dialog>
+      </Popover.Content>
+    </Popover>
+  )
+}

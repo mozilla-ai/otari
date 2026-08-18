@@ -20,13 +20,29 @@ export async function login(page: Page): Promise<void> {
   await page.locator('input[type="password"]').press("Enter")
   // The sidebar appears once authenticated, regardless of the index landing
   // page.
-  await expect(nav(page).getByRole("link", { name: "Providers" })).toBeVisible()
+  await expect(
+    nav(page).getByRole("link", { name: "Provider credentials" }),
+  ).toBeVisible()
 }
 
 // The dashboard authenticates with a session cookie, but the seeding and
 // assertion helpers below talk to the management API directly as the master key,
 // which the auth dependencies prefer over the cookie. That keeps them usable
 // before `login` has run.
+/**
+ * Cross from the workspace rail onto the organization one.
+ *
+ * The two sidebars never render together, so a spec about an organization
+ * destination has to enter that context first; the footer entry is the only way
+ * in, matching the navigation prototype.
+ */
+export async function openOrganization(page: Page): Promise<void> {
+  await page.getByRole("link", { name: "Organization", exact: true }).click()
+  await expect(
+    nav(page).getByRole("link", { name: "Members & roles" }),
+  ).toBeVisible()
+}
+
 export const authHeaders = {
   Authorization: `Bearer ${MASTER_KEY}`,
   "Content-Type": "application/json",

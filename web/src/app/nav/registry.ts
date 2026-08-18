@@ -46,8 +46,8 @@ const BASE_NAV_SECTIONS = [
     ],
   },
   {
-    id: "observability",
-    label: "Observability",
+    id: "observe",
+    label: "Observe",
     items: [
       // Both read /v1/usage, which is why they name the surface rather than
       // themselves: a deployment that does not host usage loses both.
@@ -61,15 +61,9 @@ const BASE_NAV_SECTIONS = [
     ],
   },
   {
-    id: "catalog",
-    label: "Catalog",
+    id: "gateway",
+    label: "Gateway",
     items: [
-      {
-        to: "/providers",
-        label: "Providers",
-        surface: "providers",
-        icon: ProvidersIcon,
-      },
       { to: "/models", label: "Models", surface: "models", icon: ModelsIcon },
       // Deliberately not tagged `capability: "routing"`, though otari.ai's
       // registry tags its own Routing item that way. ARCHITECTURE.md's
@@ -85,33 +79,61 @@ const BASE_NAV_SECTIONS = [
         surface: "routing",
         icon: RoutingIcon,
       },
+      {
+        to: "/tools",
+        label: "Tools & Guardrails",
+        surface: "tools",
+        icon: ToolsIcon,
+      },
     ],
   },
   {
-    // The label mozilla-ai/otari-ai#1539 is assigned to change when the
-    // control-plane UI rehomes: "Organization" reads as a multi-tenancy word,
-    // and that issue's plan is for the OSS sidebar to say something
-    // single-tenant while the enterprise overlay overrides it back. Its premise
-    // holds here (one organization per deployment, no way to mint a second),
-    // so this label is on borrowed time; it is left alone because the
-    // substitute that issue suggests, "Settings", already names an item two
-    // sections down, and picking the replacement is that issue's call. The
-    // rename lands there, with the overlay override, not here.
-    id: "organization",
-    label: "Organization",
+    id: "access",
+    label: "Access",
     items: [
-      // Two pages over /v1/organizations, so they name the surface rather than
-      // themselves; the workspace pages are a separate surface because a
-      // deployment could serve one without the other.
+      { to: "/keys", label: "API keys", surface: "keys", icon: KeysIcon },
       {
-        to: "/organization",
-        label: "General",
-        surface: "organizations",
-        icon: OrganizationIcon,
+        to: "/providers",
+        label: "Provider credentials",
+        surface: "providers",
+        icon: ProvidersIcon,
       },
+      // The selected workspace's roster, not the organization's. The
+      // organization roster is "Members & roles" in the other context, and the
+      // two pages cross-link, which is the distinction the prototype draws.
+      {
+        to: "/members",
+        label: "Members",
+        surface: "workspaces",
+        icon: MembersIcon,
+      },
+    ],
+  },
+] as const satisfies readonly NavSection[]
+
+/**
+ * The organization context: what belongs to the tenant rather than to one
+ * workspace inside it.
+ *
+ * Reached from the sidebar footer and left by the "Back to" link at its top,
+ * so the two contexts never render together. Gated on the caller managing the
+ * organization, which in a standalone deployment is always true: there is one
+ * session, the local operator, and it owns the organization the gateway
+ * provisioned for itself. The gate is written anyway because it is the thing
+ * that becomes load-bearing the moment per-user sign-in lands (otari-ai#1716).
+ *
+ * Four entries in the prototype have no page here and are deliberately absent
+ * rather than stubbed: Billing, Gateways, Guardrail ceiling, and a separate
+ * org-scoped provider-credentials view.
+ */
+const ORGANIZATION_NAV_SECTIONS = [
+  {
+    id: "org-people",
+    label: "People & access",
+    items: [
       {
         to: "/organization/members",
-        label: "Members",
+        label: "Members & roles",
         surface: "organizations",
         icon: MembersIcon,
       },
@@ -124,27 +146,32 @@ const BASE_NAV_SECTIONS = [
     ],
   },
   {
-    id: "access",
-    label: "Access",
+    id: "org-money",
+    label: "Money",
     items: [
-      { to: "/users", label: "Users", surface: "users", icon: UsersIcon },
-      { to: "/keys", label: "API keys", surface: "keys", icon: KeysIcon },
       {
         to: "/budgets",
-        label: "Budgets",
+        label: "Spend & budgets",
         surface: "budgets",
         icon: BudgetsIcon,
       },
+      // Absent from the prototype, which folds per-user spend into "Spend &
+      // budgets". Kept because it is still the only place a budget is attached
+      // to anything: a budget names a `users` row, and that table has not merged
+      // into the tenancy identity yet (M4). It moves under Spend & budgets, and
+      // stops being a destination, when it does.
+      { to: "/users", label: "Users", surface: "users", icon: UsersIcon },
     ],
   },
   {
-    id: "system",
+    id: "org-general",
+    label: "General",
     items: [
       {
-        to: "/tools",
-        label: "Tools & Guardrails",
-        surface: "tools",
-        icon: ToolsIcon,
+        to: "/organization",
+        label: "Organization",
+        surface: "organizations",
+        icon: OrganizationIcon,
       },
       {
         to: "/settings",
@@ -170,7 +197,7 @@ export function composeNavSections(
 }
 
 /**
- * The composed sidebar.
+ * The composed workspace sidebar.
  *
  * This build appends nothing, so it is the base sections alone.
  */
@@ -179,10 +206,42 @@ export const NAV_SECTIONS: readonly NavSection[] = composeNavSections(
   OVERLAY_NAV_SECTIONS,
 )
 
-/** Every registered entry, flattened out of its section. */
-export const NAV_ITEMS: readonly NavItem[] = NAV_SECTIONS.flatMap(
-  (section) => section.items,
+/** The organization context's sidebar. */
+export const ORG_NAV_SECTIONS: readonly NavSection[] = ORGANIZATION_NAV_SECTIONS
+
+/**
+ * Every registered entry, across both contexts.
+ *
+ * Flattened over both because this is what answers "which entry is this
+ * pathname", and a route is gated the same way whichever sidebar links to it.
+ */
+export const NAV_ITEMS: readonly NavItem[] = [
+  ...NAV_SECTIONS,
+  ...ORG_NAV_SECTIONS,
+].flatMap((section) => section.items)
+
+/** Where a destination lives: the workspace sidebar, or the organization one. */
+export type NavContext = "workspace" | "organization"
+
+const ORG_PATHS: readonly string[] = ORG_NAV_SECTIONS.flatMap((section) =>
+  section.items.map((item) => item.to),
 )
+
+/**
+ * Which sidebar a pathname belongs under.
+ *
+ * Derived from the registry rather than from a path prefix, because the two
+ * contexts do not split cleanly by URL: `/workspaces` and `/settings` are
+ * organization destinations whose paths look like anything else, and
+ * `/members` is a workspace one that sits directly under the root. Anything
+ * unregistered (the guide, the 404 splat) belongs to the workspace context,
+ * which is the one the shell opens in.
+ */
+export function navContextForPath(pathname: string): NavContext {
+  const item = navItemForPath(pathname)
+  if (!item) return "workspace"
+  return ORG_PATHS.includes(item.to) ? "organization" : "workspace"
+}
 
 /**
  * The registry entry a pathname belongs to, if any.

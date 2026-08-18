@@ -10,14 +10,20 @@ import { useCallback, useEffect, useRef, useState } from "react"
 import { ConnectionStatus } from "@/app/ConnectionStatus"
 import {
   NAV_SECTIONS,
+  navContextForPath,
   navItemForPath,
+  ORG_NAV_SECTIONS,
   visibleNavSections,
 } from "@/app/nav/registry"
 import { useNavVisibility } from "@/app/nav/useNavVisibility"
+import { WorkspaceSwitcher } from "@/app/nav/WorkspaceSwitcher"
 import { UpdatePrompt } from "@/app/UpdatePrompt"
 import { useAuth } from "@/features/auth/AuthContext"
 import { PricingWarning } from "@/features/models/PricingWarning"
+import { canManage } from "@/features/organization/roles"
+import { useOrganizationContext } from "@/shared/api/hooks"
 import { EmptyState } from "@/shared/components/ui"
+import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 const MIN_SIDEBAR = 200
 const MAX_SIDEBAR = 480
@@ -100,9 +106,25 @@ export function AppShell() {
   // entry and is never gated.
   const currentItem = navItemForPath(pathname)
   const routeIsGatedOff = currentItem !== undefined && !isVisible(currentItem)
+  // Which of the two sidebars this path belongs under. The organization context
+  // is a separate rail reached from the footer, not a section inside the
+  // workspace one, so the two never render together.
+  const navContext = navContextForPath(pathname)
+  const inOrganization = navContext === "organization"
   // Filtered before it is indexed, so the divider and top margin below key off
   // the first *rendered* section rather than the first registered one.
-  const visibleSections = visibleNavSections(NAV_SECTIONS, isVisible)
+  const visibleSections = visibleNavSections(
+    inOrganization ? ORG_NAV_SECTIONS : NAV_SECTIONS,
+    isVisible,
+  )
+  const organization = useOrganizationContext()
+  const { selected: selectedWorkspace } = useSelectedWorkspace()
+  // Always true in a standalone deployment, where the one session is the local
+  // operator and it owns the organization the gateway provisioned for itself.
+  // Written anyway because it becomes load-bearing the moment per-user sign-in
+  // lands (otari-ai#1716), and because an overlay build can already be reached
+  // by someone who is not an admin.
+  const managesOrganization = canManage(organization.data)
 
   const asideRef = useRef<HTMLElement>(null)
   const mainRef = useRef<HTMLElement>(null)
@@ -399,6 +421,52 @@ export function AppShell() {
               />
             </svg>
           </button>
+          {/* The scope the rail below belongs to. In the workspace context that
+              is the switcher; in the organization context it is the way back
+              out, which is how the prototype leaves that rail. */}
+          {inOrganization ? (
+            <Link
+              to="/"
+              onClick={() => setMobileNavOpen(false)}
+              className={clsx(
+                navLinkClass(effectiveCollapsed),
+                NAV_INACTIVE,
+                effectiveCollapsed ? "mx-2 mt-3" : "mx-3 mt-3",
+              )}
+              aria-label={
+                effectiveCollapsed
+                  ? `Back to ${selectedWorkspace?.name ?? "workspace"}`
+                  : undefined
+              }
+              title={
+                effectiveCollapsed
+                  ? `Back to ${selectedWorkspace?.name ?? "workspace"}`
+                  : undefined
+              }
+            >
+              <svg
+                aria-hidden="true"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                className="h-5 w-5 shrink-0"
+              >
+                <path
+                  d="M15 6l-6 6 6 6"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                />
+              </svg>
+              {effectiveCollapsed
+                ? null
+                : `Back to ${selectedWorkspace?.name ?? "workspace"}`}
+            </Link>
+          ) : (
+            <div className="pt-3">
+              <WorkspaceSwitcher collapsed={effectiveCollapsed} />
+            </div>
+          )}
           <nav
             className={clsx(
               "flex flex-col py-4",
@@ -461,6 +529,40 @@ export function AppShell() {
               dashboard's own docs, bundled with the running gateway (see DocsPage);
               otari.ai is a subtler pointer to the hosted product below it. */}
           <div className="mt-auto flex flex-col gap-1 pb-3">
+            {/* The way into the organization rail. Only in the workspace
+                context, since the organization one has its own way back, and
+                only for someone who manages the organization: it is the single
+                destination the prototype hides outright rather than degrading
+                to read-only. */}
+            {!inOrganization && managesOrganization ? (
+              <Link
+                to="/organization/members"
+                onClick={() => setMobileNavOpen(false)}
+                className={clsx(
+                  navLinkClass(effectiveCollapsed),
+                  NAV_INACTIVE,
+                  effectiveCollapsed ? "mx-2" : "mx-3",
+                )}
+                aria-label={effectiveCollapsed ? "Organization" : undefined}
+                title={effectiveCollapsed ? "Organization" : undefined}
+              >
+                <svg
+                  aria-hidden="true"
+                  viewBox="0 0 24 24"
+                  fill="none"
+                  stroke="currentColor"
+                  strokeWidth="2"
+                  className="h-5 w-5 shrink-0"
+                >
+                  <path
+                    d="M4 20V7l6-3 6 3v13M4 20h16M10 20v-4h4v4"
+                    strokeLinecap="round"
+                    strokeLinejoin="round"
+                  />
+                </svg>
+                {effectiveCollapsed ? null : "Organization"}
+              </Link>
+            ) : null}
             <Link
               to="/docs"
               activeProps={{ className: NAV_ACTIVE }}

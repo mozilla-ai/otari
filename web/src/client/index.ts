@@ -265,6 +265,11 @@ export type VisionStrategy = NonNullable<
 export type Organization = Schemas["OrganizationPublic"]
 /** An organization plus the caller's standing in it: what every tenancy page reads first. */
 export type OrganizationContext = Schemas["OrganizationMembershipContextPublic"]
+// The caller's own workspace memberships, carried on the context so the shell
+// can seed its switcher from the call it already makes. Not a directory of the
+// organization's workspaces: listing those is a separate authorized read.
+export type CallerWorkspaceMembership =
+  Schemas["CallerWorkspaceMembershipPublic"]
 export type UpdateOrganizationRequest =
   Schemas["ActiveOrganizationUpdateRequest"]
 export type OrganizationMember = Schemas["ActiveOrganizationMemberPublic"]

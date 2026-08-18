@@ -127,6 +127,11 @@ export function organizationContext(
     role: "owner",
     status: "active",
     organization: organization(),
+    // Empty by default: a context is about the organization, and a test that is
+    // about the workspace switcher names the memberships it needs. The server
+    // omits the field entirely for a caller in no workspace, which is why the
+    // shell treats absent and empty the same way.
+    workspace_memberships: [],
     byo_provider_keys_allowed: true,
     ...overrides,
   }

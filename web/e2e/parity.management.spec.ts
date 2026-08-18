@@ -1,6 +1,13 @@
 import { expect, type Locator, type Page, test } from "@playwright/test"
 
-import { dismissComboBox, gotoRoute, login, nav, tableRows } from "./helpers"
+import {
+  dismissComboBox,
+  gotoRoute,
+  login,
+  nav,
+  openOrganization,
+  tableRows,
+} from "./helpers"
 import { PARITY } from "./parity-data"
 
 // Each flow creates the object it acts on and removes it again, so the file can
@@ -54,7 +61,7 @@ test.describe("standalone provider setup", () => {
     page,
   }) => {
     await login(page)
-    await openPage(page, "Providers", "Providers")
+    await openPage(page, "Provider credentials", "Providers")
 
     await page.getByRole("button", { name: "Add provider" }).click()
     await page.getByRole("button", { name: "Custom endpoint" }).click()
@@ -162,7 +169,8 @@ test.describe("budgets", () => {
     page,
   }) => {
     await login(page)
-    await openPage(page, "Budgets", "Budgets")
+    await openOrganization(page)
+    await openPage(page, "Spend & budgets", "Budgets")
 
     await page.getByRole("button", { name: "Create budget" }).click()
     await page.getByLabel("Name (optional)").fill(BUDGET)
