@@ -98,7 +98,19 @@ async def _refuse_to_shadow_existing_tenancy(db: AsyncSession) -> None:
 
     That is the state a restored or imported tenancy arrives in, because the
     platform's slugs are ``{name}-{prefix}`` and never the literal ``default``.
-    Failing here turns silent data loss into a startup error naming the fix.
+    Failing here turns silent data loss into an error naming the fix.
+
+    It catches one of the two orderings. The check runs only while the marker is
+    unresolved, so it covers importing into a database this gateway has never
+    served a tenancy request against. Importing *after* it has provisioned its
+    own tenancy is not caught: the marker already resolves, so this never runs
+    again, and the imported organizations are silently unreachable exactly as
+    described above. Repointing the marker is the fix in both cases; see
+    "Adopting an existing tenancy" in ``docs/access-control.md``.
+
+    Not a startup error either, despite reading like one: the only caller is
+    ``ensure_bootstrap_identity``, which runs from the request dependency, so
+    this surfaces as a failed tenancy request rather than a refusal to boot.
     """
     organizations = (await db.execute(select(Organization))).scalars().all()
     unadoptable = [one for one in organizations if one.slug != DEFAULT_ORGANIZATION_SLUG]

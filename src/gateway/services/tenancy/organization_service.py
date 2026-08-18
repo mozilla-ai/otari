@@ -263,6 +263,12 @@ class OrganizationService:
                 raise OrganizationMemberAlreadyExistsError(email)
 
             if membership is None:
+                # The same rule the revive branch gets from
+                # `_validate_membership_update`: an admin may not mint an owner.
+                # There is no membership to validate against yet, so the one
+                # applicable clause is applied directly.
+                if actor_membership.role != "owner" and request.role == "owner":
+                    raise MembershipUpdateError("Only organization owners can grant the owner role")
                 membership = await self.members.create_membership(
                     organization_id=organization.id,
                     user_id=target.id,
@@ -446,17 +452,29 @@ class OrganizationService:
         update_data: dict[str, str],
         organization_id: uuid.UUID,
     ) -> None:
-        """Refuse the two membership changes that would break the organization.
+        """Refuse the membership changes that would break the organization.
 
-        An admin cannot act on an owner (only an owner outranks an owner), and
-        the last active owner cannot be demoted or deactivated, which would leave
-        the organization with nobody able to manage or delete it.
+        An admin cannot act on an owner (only an owner outranks an owner), an
+        admin cannot *make* an owner either, and the last active owner cannot be
+        demoted or deactivated, which would leave the organization with nobody
+        able to manage or delete it.
         """
         new_role = update_data.get("role", target_membership.role)
         new_status = update_data.get("status", target_membership.status)
 
         if actor_membership.role != "owner" and target_membership.role == "owner":
             raise MembershipUpdateError("Only organization owners can modify owner memberships")
+
+        # Deliberately narrower than the platform, whose guard reads the target's
+        # *current* role alone: there, an admin may promote anyone, themselves
+        # included, to owner, and an owner may not be removed by an admin
+        # afterwards. That is privilege escalation with a lock on the door behind
+        # it. Unreachable while one bootstrap operator is the only identity that
+        # can authenticate, and reachable the day per-identity sign-in lands
+        # (otari-ai#1716), which makes this the cheap moment to close it. The
+        # narrowing is widenable later; the escalation would not be.
+        if actor_membership.role != "owner" and new_role == "owner":
+            raise MembershipUpdateError("Only organization owners can grant the owner role")
 
         target_is_active_owner = target_membership.role == "owner" and target_membership.status == "active"
         if target_is_active_owner and (new_role != "owner" or new_status != "active"):

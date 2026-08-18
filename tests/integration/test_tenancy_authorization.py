@@ -143,6 +143,82 @@ async def test_an_admin_cannot_modify_an_owner(async_db: AsyncSession) -> None:
         )
 
 
+async def test_an_admin_cannot_promote_themselves_to_owner(async_db: AsyncSession) -> None:
+    """The escalation the rank rule reads past.
+
+    "Only an owner outranks an owner" is checked against the target's *current*
+    role, so an admin acting on their own non-owner membership clears it and can
+    write `role="owner"`. That buys them a rank the same rule then protects from
+    every other admin. Deliberately narrower than the platform, which permits it.
+    """
+    organization = await _organization(async_db)
+    await _member(async_db, organization, role="owner", full_name="Owner")
+    admin = await _member(async_db, organization, role="admin", full_name="Admin")
+    service = OrganizationService(async_db)
+    own = await service.members.get_active_by_organization_and_user(organization.id, admin.id)
+    assert own is not None
+
+    with pytest.raises(MembershipUpdateError, match="grant the owner role"):
+        await service.update_active_organization_member_for_user(
+            user=admin,
+            organization_member_id=own.id,
+            request=ActiveOrganizationMemberUpdateRequest(role="owner"),
+        )
+
+
+async def test_an_admin_cannot_promote_another_member_to_owner(async_db: AsyncSession) -> None:
+    """The same rule, reached through someone else's membership rather than their own."""
+    organization = await _organization(async_db)
+    await _member(async_db, organization, role="owner", full_name="Owner")
+    admin = await _member(async_db, organization, role="admin", full_name="Admin")
+    member = await _member(async_db, organization, role="member", full_name="Member")
+    service = OrganizationService(async_db)
+    target = await service.members.get_active_by_organization_and_user(organization.id, member.id)
+    assert target is not None
+
+    with pytest.raises(MembershipUpdateError, match="grant the owner role"):
+        await service.update_active_organization_member_for_user(
+            user=admin,
+            organization_member_id=target.id,
+            request=ActiveOrganizationMemberUpdateRequest(role="owner"),
+        )
+
+
+async def test_an_admin_cannot_add_a_new_owner(async_db: AsyncSession) -> None:
+    """Adding is the third way to write a role, and it takes the same rule.
+
+    Without it the update guard is decorative: an admin who cannot promote
+    anyone can still invite an owner, or their own second address as one.
+    """
+    organization = await _organization(async_db)
+    await _member(async_db, organization, role="owner", full_name="Owner")
+    admin = await _member(async_db, organization, role="admin", full_name="Admin")
+
+    with pytest.raises(MembershipUpdateError, match="grant the owner role"):
+        await OrganizationService(async_db).create_active_organization_member_for_user(
+            user=admin,
+            request=ActiveOrganizationMemberCreateRequest(email="ada@example.com", role="owner"),
+        )
+
+
+async def test_an_owner_can_promote_someone_to_owner(async_db: AsyncSession) -> None:
+    """The narrowing is on the actor's rank, not on the role itself."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    member = await _member(async_db, organization, role="member", full_name="Member")
+    service = OrganizationService(async_db)
+    target = await service.members.get_active_by_organization_and_user(organization.id, member.id)
+    assert target is not None
+
+    updated = await service.update_active_organization_member_for_user(
+        user=owner,
+        organization_member_id=target.id,
+        request=ActiveOrganizationMemberUpdateRequest(role="owner"),
+    )
+
+    assert updated.role == "owner"
+
+
 async def test_a_plain_member_cannot_add_members(async_db: AsyncSession) -> None:
     organization = await _organization(async_db)
     member = await _member(async_db, organization, role="member", full_name="Member")

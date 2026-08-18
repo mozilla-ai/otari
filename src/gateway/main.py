@@ -4,7 +4,7 @@ from contextlib import asynccontextmanager
 from typing import Any, Callable
 from urllib.parse import urlsplit
 
-from fastapi import FastAPI, Request, Response
+from fastapi import FastAPI, Request, Response, status
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -374,9 +374,23 @@ async def _tenancy_error_handler(_: Request, exc: Exception) -> Response:
     errors and no tenancy route needs a try/except (see
     `gateway.services.tenancy.errors`). The body matches FastAPI's own
     ``HTTPException`` shape, so a client cannot tell which layer answered.
+
+    A 4xx message is written for the caller and is rendered as it is. A 5xx one
+    is not: it describes the deployment rather than the request, and
+    ``ForeignTenancyError`` already interpolates organization names and slugs
+    read out of the database. That message goes to the log, where an operator
+    can act on it, and the response carries the generic detail the rest of this
+    app's error boundary uses. The class default is 500, so this also covers a
+    future subclass that forgets to declare a status.
     """
     if not isinstance(exc, TenancyError):  # pragma: no cover - registered for TenancyError only
         raise exc
+    if exc.status_code >= status.HTTP_500_INTERNAL_SERVER_ERROR:
+        logger.error("Tenancy request failed: %s", exc.message)
+        return JSONResponse(
+            status_code=exc.status_code,
+            content={"detail": "Internal server error"},
+        )
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
 
 

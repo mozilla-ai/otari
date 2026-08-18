@@ -155,6 +155,7 @@ class LastWorkspaceError(TenancyValidationError):
 
 
 __all__ = [
+    "ForeignTenancyError",
     "InvalidEmailError",
     "InvalidRoleError",
     "LastWorkspaceError",

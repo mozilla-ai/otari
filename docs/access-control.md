@@ -107,6 +107,34 @@ Two rules exist to stop a tenancy from becoming unmanageable, and both answer `4
 
 Removing a member suspends their membership rather than deleting it, which keeps their past usage attributable.
 
+Granting the `owner` role is an owner's to give. An admin manages members, workspaces and roles, and cannot promote anyone (themselves included) to owner, nor add one.
+
+### Adopting an existing tenancy
+
+Provisioning adopts an organization whose slug is `default`, which is the one it would have created itself. It cannot adopt any other, because every route is scoped to the organization the bootstrap marker names, and there is no route to list, switch, or fetch an organization by id. So an organization this deployment did not provision is unreachable through the API until the marker points at an identity inside it.
+
+That is the state a database restored or imported from elsewhere arrives in: those slugs are `{name}-{suffix}` and never the literal `default`. Otari refuses rather than shadowing it, and the tenancy endpoints answer `500` with `Internal server error` while the specific organizations are named in the gateway's log.
+
+The marker is a `runtime_settings` row keyed `tenancy_bootstrap_user_id`, holding the id of the identity every request resolves to. It is deliberately not settable over the API, since repointing it changes who the operator *is*. Point it at an owner inside the organization you want served:
+
+```sql
+-- The owners of the organization to adopt.
+SELECT u.id, u.email, u.full_name, om.role
+FROM "user" u
+JOIN organization_member om ON om.user_id = u.id
+JOIN organization o ON o.id = om.organization_id
+WHERE o.slug = 'acme-1a2b3c4d' AND om.role = 'owner' AND om.status = 'active';
+
+-- Repoint the marker at one of them.
+UPDATE runtime_settings
+SET value = '<the id from above>'
+WHERE key = 'tenancy_bootstrap_user_id';
+```
+
+Restart the gateway afterwards, and confirm with `GET /v1/organizations/me`.
+
+One ordering is not caught. The refusal only runs while the marker is unresolved, so it covers importing into a deployment that has never served a tenancy request. Import *after* this gateway has provisioned its own default organization and nothing refuses: the marker already resolves, and the imported rows are silently unreachable. Repointing the marker is still the fix, and importing before the first tenancy request is what turns a silent case into a loud one.
+
 This layer does not yet gate request-plane spend: keys, budgets, and usage still key on the `user_id` described above. Bringing the two together is the reconciliation tracked in [mozilla-ai/otari-ai#1452](https://github.com/mozilla-ai/otari-ai/issues/1452).
 
 ## See also
