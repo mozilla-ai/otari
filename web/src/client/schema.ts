@@ -688,7 +688,8 @@ export interface paths {
          * List Keys
          * @description List all API keys.
          *
-         *     Requires master key authentication.
+         *     Requires master key authentication. An unset ``workspace_id`` lists every key
+         *     on the deployment, which keeps the pre-workspace view working unchanged.
          */
         get: operations["list_keys_v1_keys_get"];
         put?: never;
@@ -2428,6 +2429,8 @@ export interface components {
          *     that flow rehomes.
          */
         ActiveOrganizationMemberCreateResultPublic: {
+            /** Attribution User Id */
+            attribution_user_id?: string | null;
             /** Created At */
             created_at?: string | null;
             /** Email */
@@ -2461,8 +2464,20 @@ export interface components {
          *     ``email`` is nullable here (a local operator identity has no sign-in
          *     address), and ``invitation_id`` is always null until the invitation flow
          *     rehomes, which is what fills it.
+         *
+         *     ``attribution_user_id`` is the addition the platform has no counterpart for.
+         *     Keys, budgets, and usage attach to the gateway's string-keyed ``users`` row,
+         *     not to this UUID identity, so this carries the ``user_id`` a caller passes to
+         *     ``POST /v1/keys`` to give this member a key. It is null when no usable row
+         *     exists (nobody minted one, or it was soft-deleted through
+         *     ``DELETE /v1/users``), which is the signal not to offer this member as a key
+         *     owner: key creation would refuse. The two ids converge when the request plane
+         *     re-parents onto tenancy (M4), and this field is what lets that happen without
+         *     the dashboard changing.
          */
         ActiveOrganizationMemberPublic: {
+            /** Attribution User Id */
+            attribution_user_id?: string | null;
             /**
              * Created At
              * Format: date-time
@@ -2990,6 +3005,28 @@ export interface components {
             user_count: number;
         };
         /**
+         * CallerWorkspaceMembershipPublic
+         * @description One workspace the caller belongs to, and their role in it.
+         *
+         *     Carried on the membership context so the shell can populate its workspace
+         *     switcher and choose a default from the first authenticated call, rather than
+         *     listing workspaces and then asking for the caller's role in each. Only the
+         *     caller's own memberships appear, so this is not a directory of the
+         *     organization's workspaces: an admin sees the ones they joined, and the
+         *     workspace list endpoint remains the way to see the rest.
+         */
+        CallerWorkspaceMembershipPublic: {
+            /** Name */
+            name: string;
+            /** Role */
+            role: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+        };
+        /**
          * CandidateResponse
          * @description One candidate in a compiled plan.
          */
@@ -3296,6 +3333,11 @@ export interface components {
              * @description Optional user ID to associate with this key
              */
             user_id?: string | null;
+            /**
+             * Workspace Id
+             * @description Workspace this key belongs to. Omitted means the deployment's default workspace. A key belongs to exactly one workspace: requests on it are scoped and billed there, so the workspace is read off the key rather than off a request header.
+             */
+            workspace_id?: string | null;
         };
         /**
          * CreateKeyResponse
@@ -3931,6 +3973,11 @@ export interface components {
             reject_user_mismatch: boolean | null;
             /** User Id */
             user_id: string | null;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
         };
         /**
          * KnownProviderSchema
@@ -4389,6 +4436,8 @@ export interface components {
             role: string;
             /** Status */
             status: string;
+            /** Workspace Memberships */
+            workspace_memberships?: components["schemas"]["CallerWorkspaceMembershipPublic"][];
         };
         /** OrganizationPublic */
         OrganizationPublic: {
@@ -5626,6 +5675,8 @@ export interface components {
             tool?: string | null;
             /** User Id */
             user_id?: string | string[] | null;
+            /** Workspace Id */
+            workspace_id?: string | null;
         };
         /**
          * UsageDeleteResult
@@ -5940,6 +5991,8 @@ export interface components {
             tool?: string | null;
             /** User Id */
             user_id?: string | string[] | null;
+            /** Workspace Id */
+            workspace_id?: string | null;
         };
         /**
          * UsageSetPriceResult
@@ -6456,7 +6509,10 @@ export interface operations {
     };
     list_aliases_v1_aliases_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Only stored entries in this workspace. Config-file entries are always included. */
+                workspace_id?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -6470,6 +6526,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AliasResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -7331,6 +7396,8 @@ export interface operations {
             query?: {
                 skip?: number;
                 limit?: number;
+                /** @description Only keys in this workspace. */
+                workspace_id?: string | null;
             };
             header?: never;
             path?: never;
@@ -8550,7 +8617,10 @@ export interface operations {
     };
     list_policies_v1_routing_policies_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Only stored entries in this workspace. Config-file entries are always included. */
+                workspace_id?: string | null;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8564,6 +8634,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PolicyResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -9191,6 +9270,8 @@ export interface operations {
                 counts_toward_budget?: boolean | null;
                 /** @description Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call. */
                 request_group_id?: string[] | null;
+                /** @description Only usage recorded in this workspace. */
+                workspace_id?: string | null;
                 skip?: number;
                 limit?: number;
             };
@@ -9286,6 +9367,8 @@ export interface operations {
                 counts_toward_budget?: boolean | null;
                 /** @description Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call. */
                 request_group_id?: string[] | null;
+                /** @description Only usage recorded in this workspace. */
+                workspace_id?: string | null;
             };
             header?: never;
             path?: never;
@@ -9399,6 +9482,8 @@ export interface operations {
                 tool?: ("any" | "web_search" | "code_execution") | null;
                 /** @description Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget */
                 counts_toward_budget?: boolean | null;
+                /** @description Only usage recorded in this workspace. */
+                workspace_id?: string | null;
                 /** @description Time-series granularity: 'hour' or 'day' */
                 bucket?: "hour" | "day";
             };
@@ -9492,6 +9577,8 @@ export interface operations {
                 tool?: ("any" | "web_search" | "code_execution") | null;
                 /** @description Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget */
                 counts_toward_budget?: boolean | null;
+                /** @description Only usage recorded in this workspace. */
+                workspace_id?: string | null;
                 /** @description Time-series granularity: 'hour' or 'day' */
                 bucket?: "hour" | "day";
                 /** @description Which breakdowns to compute; repeatable (dimensions=model&dimensions=user). Each value names the 'by_<value>' response field it fills, except 'status_code', which fills the failure taxonomy in 'errors_by_status_code'. Omit for every breakdown (the default); pass 'none' for a totals-and-series-only response. Each dimension left out skips one GROUP BY scan, so a caller that reads only the tiles or the time series should say so. Fields that were not requested come back empty. */
@@ -9554,6 +9641,8 @@ export interface operations {
                 tool?: ("any" | "web_search" | "code_execution") | null;
                 /** @description Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget */
                 counts_toward_budget?: boolean | null;
+                /** @description Only usage recorded in this workspace. */
+                workspace_id?: string | null;
             };
             header?: never;
             path?: never;
