@@ -79,6 +79,7 @@ class ExternalUsageEvent(BaseModel):
     cache_read_tokens: int = Field(default=0, ge=0, le=_MAX_TOKENS)
     cache_write_tokens: int = Field(default=0, ge=0, le=_MAX_TOKENS)
     cache_write_1h_tokens: int = Field(default=0, ge=0, le=_MAX_TOKENS)
+    reasoning_tokens: int = Field(default=0, ge=0, le=_MAX_TOKENS)
     # Whether ``input_tokens`` already includes the cache counts (OpenAI shape,
     # where ``cached_tokens`` is a subset of ``prompt_tokens``) or excludes them
     # (Anthropic / Claude Code shape, where the cache buckets are additive). The
@@ -274,6 +275,7 @@ def _build_usage(event: ExternalUsageEvent) -> GatewayUsage:
         cache_write_tokens=event.cache_write_tokens,
         cache_write_1h_tokens=event.cache_write_1h_tokens,
         cache_tokens_in_prompt=event.cache_tokens_in_prompt,
+        reasoning_tokens=event.reasoning_tokens,
     )
 
 
@@ -306,6 +308,7 @@ def _build_row(
         cache_read_tokens=event.cache_read_tokens,
         cache_write_tokens=event.cache_write_tokens,
         cache_write_1h_tokens=event.cache_write_1h_tokens,
+        reasoning_tokens=event.reasoning_tokens,
         billing_meters=meters,
         pricing_breakdown=breakdown,
         cost=cost,

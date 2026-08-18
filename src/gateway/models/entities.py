@@ -513,6 +513,7 @@ class UsageLog(Base):
     cache_read_tokens: Mapped[int | None] = mapped_column()
     cache_write_tokens: Mapped[int | None] = mapped_column()
     cache_write_1h_tokens: Mapped[int | None] = mapped_column()
+    reasoning_tokens: Mapped[int | None] = mapped_column()
     billing_meters: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     pricing_breakdown: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
     cost: Mapped[float | None] = mapped_column()
@@ -579,6 +580,7 @@ class UsageLog(Base):
             "cache_read_tokens": self.cache_read_tokens,
             "cache_write_tokens": self.cache_write_tokens,
             "cache_write_1h_tokens": self.cache_write_1h_tokens,
+            "reasoning_tokens": self.reasoning_tokens,
             "billing_meters": self.billing_meters,
             "pricing_breakdown": self.pricing_breakdown,
             "cost": self.cost,

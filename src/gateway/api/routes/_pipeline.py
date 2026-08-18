@@ -94,7 +94,12 @@ from gateway.api.routes._tools import (
 )
 from gateway.core.config import GatewayConfig
 from gateway.core.env import otari_env
-from gateway.core.usage import cache_read_tokens_of, cache_write_1h_tokens_of, cache_write_tokens_of
+from gateway.core.usage import (
+    cache_read_tokens_of,
+    cache_write_1h_tokens_of,
+    cache_write_tokens_of,
+    reasoning_tokens_of,
+)
 from gateway.inflight import track_request
 from gateway.log_config import logger
 from gateway.metrics import record_abandoned_attempt, record_cost, record_tokens
@@ -1865,6 +1870,7 @@ async def log_usage(
         usage_log.cache_read_tokens = cache_read_tokens_of(usage_data)
         usage_log.cache_write_tokens = cache_write_tokens_of(usage_data)
         usage_log.cache_write_1h_tokens = cache_write_1h_tokens_of(usage_data)
+        usage_log.reasoning_tokens = reasoning_tokens_of(usage_data)
 
         record_tokens(
             str(provider or ""),

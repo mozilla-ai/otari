@@ -276,6 +276,11 @@ def _build_event(
         output_tokens = _int(attrs.get("output_tokens"))
         cache_read = _int(attrs.get("cache_read_tokens"))
         cache_write = _int(attrs.get("cache_creation_tokens"))
+        reasoning = _int(
+            attrs.get("reasoning_tokens")
+            or attrs.get("thinking_tokens")
+            or attrs.get("reasoning_token_count")
+        )
         session = attrs.get("session.id")
         duration = attrs.get("duration_ms", duration_ms)
         cache_tokens_in_prompt = False
@@ -292,12 +297,23 @@ def _build_event(
             input_tokens = _int(attrs.get("input_token_count"))
             output_tokens = _int(attrs.get("output_token_count"))
             cache_read = _int(attrs.get("cached_token_count"))
+            reasoning = _int(
+                attrs.get("reasoning_token_count")
+                or attrs.get("reasoning_tokens")
+                or attrs.get("thinking_tokens")
+            )
             event_id = _codex_event_id(attrs, None)
             duration = duration_ms
         else:  # codex.api_request (HTTP /models path)
             input_tokens = _int(attrs.get("gen_ai.usage.input_tokens"))
             output_tokens = _int(attrs.get("gen_ai.usage.output_tokens"))
             cache_read = _int(attrs.get("gen_ai.usage.cache_read.input_tokens"))
+            reasoning = _int(
+                attrs.get("gen_ai.usage.reasoning_tokens")
+                or attrs.get("gen_ai.usage.reasoning.output_tokens")
+                or attrs.get("reasoning_tokens")
+                or attrs.get("reasoning_token_count")
+            )
             event_id = _codex_event_id(attrs, attrs.get("gen_ai.response.id"))
             duration = attrs.get("duration_ms", duration_ms)
         cache_write = 0
@@ -315,6 +331,12 @@ def _build_event(
             or attrs.get("gen_ai.usage.cached_tokens")
         )
         cache_write = _int(attrs.get("gen_ai.usage.cache_write_tokens"))
+        reasoning = _int(
+            attrs.get("gen_ai.usage.reasoning_tokens")
+            or attrs.get("gen_ai.usage.reasoning.output_tokens")
+            or attrs.get("reasoning_tokens")
+            or attrs.get("reasoning_token_count")
+        )
         client = attrs.get("otari.client_name")
         source = _sanitize_source(str(client)) if client else _DEFAULT_SOURCE
         session = attrs.get("otari.user_session_label") or attrs.get("otari.session_label")
@@ -324,7 +346,7 @@ def _build_event(
     timestamp = _resolve_timestamp(attrs, default_timestamp)
     if not (event_id and model and provider and timestamp):
         return None
-    if not (input_tokens or output_tokens or cache_read or cache_write):
+    if not (input_tokens or output_tokens or cache_read or cache_write or reasoning):
         return None  # not an LLM call worth recording
     try:
         event = ExternalUsageEvent(
@@ -338,6 +360,7 @@ def _build_event(
             cache_read_tokens=cache_read,
             cache_write_tokens=cache_write,
             cache_write_1h_tokens=cache_write_1h,
+            reasoning_tokens=reasoning,
             cache_tokens_in_prompt=cache_tokens_in_prompt,
             duration_ms=int(duration) if duration is not None else None,
             session_label=str(session) if session else None,

@@ -26,6 +26,7 @@ class GatewayUsage(CompletionUsage):
     cache_write_tokens: int = 0
     cache_write_1h_tokens: int = 0
     cache_tokens_in_prompt: bool = True
+    reasoning_tokens: int = 0
     """Whether ``cache_read_tokens`` / ``cache_write_tokens`` are already counted
     within ``prompt_tokens``.
 
@@ -47,6 +48,7 @@ class GatewayUsage(CompletionUsage):
         cache_write_tokens: int | None = None,
         cache_write_1h_tokens: int | None = None,
         cache_tokens_in_prompt: bool | None = None,
+        reasoning_tokens: int | None = None,
     ) -> "GatewayUsage":
         """Build a ``GatewayUsage`` from a base ``CompletionUsage`` plus cache counts.
 
@@ -66,6 +68,8 @@ class GatewayUsage(CompletionUsage):
             cache_write_1h_tokens = cache_write_1h_tokens_of(usage)
         if cache_tokens_in_prompt is None:
             cache_tokens_in_prompt = cache_tokens_in_prompt_of(usage)
+        if reasoning_tokens is None:
+            reasoning_tokens = reasoning_tokens_of(usage)
         return cls(
             prompt_tokens=usage.prompt_tokens,
             completion_tokens=usage.completion_tokens,
@@ -76,6 +80,7 @@ class GatewayUsage(CompletionUsage):
             cache_write_tokens=cache_write_tokens,
             cache_write_1h_tokens=cache_write_1h_tokens,
             cache_tokens_in_prompt=cache_tokens_in_prompt,
+            reasoning_tokens=reasoning_tokens,
         )
 
 
@@ -116,3 +121,13 @@ def cache_tokens_in_prompt_of(usage: CompletionUsage) -> bool:
     if isinstance(usage, GatewayUsage):
         return usage.cache_tokens_in_prompt
     return True
+
+
+def reasoning_tokens_of(usage: CompletionUsage) -> int:
+    """Return the reasoning/thinking token count carried by ``usage``."""
+    if isinstance(usage, GatewayUsage):
+        return usage.reasoning_tokens
+    if getattr(usage, "completion_tokens_details", None) is not None:
+        return getattr(usage.completion_tokens_details, "reasoning_tokens", 0) or 0
+    return 0
+
