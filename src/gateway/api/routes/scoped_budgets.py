@@ -7,7 +7,7 @@ here, and everything about how one is enforced lives in
 """
 
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Literal
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
@@ -18,11 +18,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import get_db, verify_master_key
 from gateway.models.entities import ScopedBudget
 
-router = APIRouter(prefix="/v1/scoped-budgets", tags=["scoped-budgets"])
+# ``ScopeType`` comes from the service that resolves a scope, not from a copy
+# here: the ``Literal`` is what puts the allowed values in the OpenAPI schema,
+# and a second roster would eventually let a client create a scope enforcement
+# does not know.
+from gateway.services.scoped_budget_service import ScopeType
 
-# A ``Literal`` rather than a validator on a plain string: it is what puts the
-# allowed values in the OpenAPI schema, so a client can tell what it may send.
-ScopeType = Literal["organization", "workspace", "workspace_member", "org_member", "api_token"]
+router = APIRouter(prefix="/v1/scoped-budgets", tags=["scoped-budgets"])
 
 
 class CreateScopedBudgetRequest(BaseModel):
@@ -185,19 +187,28 @@ async def update_scoped_budget(
     """
     budget = await _get_or_404(db, budget_id)
 
-    # Name is tri-state: omitting it leaves it unchanged, while an explicit null
-    # clears it (unlike the numeric fields, where null is not meaningful).
+    # Every field is tri-state, keyed on ``model_fields_set`` rather than on the
+    # value: omitting one leaves it alone, and an explicit null clears it. Null
+    # is meaningful on all three, because it is a state ``POST`` can create. A
+    # null ``max_budget`` is a ceiling that admits everything and only meters,
+    # and a null ``budget_duration_sec`` is a cap that never resets; testing
+    # ``is not None`` would have made both reachable at creation and permanent
+    # afterwards, so a limit could be tightened but never relaxed.
     if "name" in request.model_fields_set:
         budget.name = request.name
-    if request.max_budget is not None:
+    if "max_budget" in request.model_fields_set:
         budget.max_budget = request.max_budget
-    if request.budget_duration_sec is not None:
+    if "budget_duration_sec" in request.model_fields_set:
         budget.budget_duration_sec = request.budget_duration_sec
         # Retiming restarts the window from now rather than re-deriving an end
-        # from a period_start that belongs to the old cadence.
+        # from a period_start that belongs to the old cadence. Clearing the
+        # cadence drops the window with it, matching what ``POST`` writes for a
+        # budget created without one.
         now = datetime.now(UTC)
-        budget.period_start = now
-        budget.period_end = now + timedelta(seconds=request.budget_duration_sec)
+        budget.period_start = now if request.budget_duration_sec else None
+        budget.period_end = (
+            now + timedelta(seconds=request.budget_duration_sec) if request.budget_duration_sec else None
+        )
 
     try:
         await db.commit()

@@ -22,8 +22,7 @@ this docstring gave: the ``batch_alter_table`` below already rebuilds all four
 tables, since SQLite has no ``ALTER TABLE ADD CONSTRAINT``, so a rebuild is
 paid for either way. It stays because the default is useful on its own: a write
 path that has not yet learned to carry a workspace lands its row in the default
-one rather than
-failing in production. Tightening it belongs with the change that finishes
+one rather than failing in production. Tightening it belongs with the change that finishes
 threading the workspace through every writer.
 
 Revision ID: d5e7f1a2b3c4
@@ -114,10 +113,12 @@ def upgrade() -> None:
     literal = _uuid_literal(bind, default_workspace_id)
 
     for table in SCOPED_TABLES:
-        # Added NOT NULL with the default in one statement: both engines accept
-        # that on a populated table, which is what keeps this off SQLite's
-        # rebuild path and away from the partial indexes on the alias and policy
-        # tables.
+        # Added NOT NULL with the default in one statement, which both engines
+        # accept on a populated table, so there is no add-then-backfill-then-
+        # tighten dance. It does not avoid SQLite's table rebuild, as an earlier
+        # draft of this comment claimed: the foreign key below needs one anyway
+        # (see the docstring). The partial indexes on the alias and policy tables
+        # survive that rebuild, which `test_tenancy_schema_chain` pins.
         op.add_column(
             table,
             sa.Column("workspace_id", sa.Uuid(), nullable=False, server_default=sa.text(f"'{literal}'")),

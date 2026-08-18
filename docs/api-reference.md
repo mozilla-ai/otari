@@ -263,7 +263,7 @@ into something a text-only local model can read.
 
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| `POST` | `/v1/keys` | Create an API key. | Master key |
+| `POST` | `/v1/keys` | Create an API key. Takes an optional `workspace_id`; the deployment default is used when it is omitted, and the key bills its workspace for every request. | Master key |
 | `GET` | `/v1/keys` | List all API keys. | Master key |
 | `GET` | `/v1/keys/{key_id}` | Get a specific key. | Master key |
 | `PATCH` | `/v1/keys/{key_id}` | Update a key (name, active status, expiration, allowed models, `exclude_from_budget`, `reject_user_mismatch`, `capture_agent_telemetry`, metadata). | Master key |
@@ -317,6 +317,18 @@ Tenancy above users and keys; see [Access control](access-control.md#organizatio
 | `GET` | `/v1/budgets/{budget_id}` | Get a specific budget. | Master key |
 | `PATCH` | `/v1/budgets/{budget_id}` | Update a budget. | Master key |
 | `DELETE` | `/v1/budgets/{budget_id}` | Delete a budget. | Master key |
+
+The rows above cap one user. The family below caps a tenancy scope instead, and
+both are enforced: a request must pass every ceiling that applies to it. See
+[Access control](access-control.md#workspace-scoped-spend).
+
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| `POST` | `/v1/scoped-budgets` | Create a ceiling on an organization, workspace, membership, or API key, optionally narrowed to one provider. Refused with 409 if that scope already has one. | Master key |
+| `GET` | `/v1/scoped-budgets` | List scoped budgets, optionally filtered by `scope_type` and `scope_id`. | Master key |
+| `GET` | `/v1/scoped-budgets/{budget_id}` | Get a specific scoped budget. | Master key |
+| `PATCH` | `/v1/scoped-budgets/{budget_id}` | Update a scoped budget's label, limit, or period. The scope and the provider narrowing are fixed. | Master key |
+| `DELETE` | `/v1/scoped-budgets/{budget_id}` | Delete a scoped budget. | Master key |
 
 ### Aliases
 

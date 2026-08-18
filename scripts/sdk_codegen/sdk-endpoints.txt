@@ -160,6 +160,14 @@ DELETE /v1/search-tools/{name}                  # not yet wrapped
 POST /v1/search-tools/reencrypt                 # not yet wrapped
 # Settings
 POST /v1/settings/master-key/rotate             # not yet wrapped
+# Tenancy-scoped budgets: an operator surface with no dashboard page yet either,
+# so it is unwrapped rather than dashboard-only. The per-user /v1/budgets family
+# is [covered]; move these across with it when an SDK grows an admin client.
+GET /v1/scoped-budgets                                      # not yet wrapped
+POST /v1/scoped-budgets                                     # not yet wrapped
+GET /v1/scoped-budgets/{budget_id}                          # not yet wrapped
+PATCH /v1/scoped-budgets/{budget_id}                        # not yet wrapped
+DELETE /v1/scoped-budgets/{budget_id}                       # not yet wrapped
 # Tenancy: organizations, workspaces, and their memberships. The dashboard's
 # tenancy pages are the consumer; an SDK caller acts inside one workspace with a
 # key that already names it, so none of these is an SDK surface yet. Move to

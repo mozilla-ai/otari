@@ -6654,7 +6654,7 @@ export interface operations {
     list_aliases_v1_aliases_get: {
         parameters: {
             query?: {
-                /** @description Only stored entries in this workspace. Config-file entries are always included. */
+                /** @description Only stored entries in this workspace. Config-file entries are always included. Every stored entry is in the deployment's default workspace today, because name uniqueness and the resolution cache are both deployment-wide, so this narrows to one workspace and finds the rest empty until those are scoped (otari-ai#1643). */
                 workspace_id?: string | null;
             };
             header?: never;
@@ -8762,7 +8762,7 @@ export interface operations {
     list_policies_v1_routing_policies_get: {
         parameters: {
             query?: {
-                /** @description Only stored entries in this workspace. Config-file entries are always included. */
+                /** @description Only stored policies in this workspace. Config-file policies are always included. Every stored policy is in the deployment's default workspace today, because name uniqueness and the resolution cache are both deployment-wide, so this narrows to one workspace and finds the rest empty until those are scoped (otari-ai#1643). */
                 workspace_id?: string | null;
             };
             header?: never;

@@ -43,10 +43,14 @@ class APIKey(Base):
 
     id: Mapped[str] = mapped_column(primary_key=True)
     key_hash: Mapped[str] = mapped_column(unique=True, index=True)
-    # The workspace this row belongs to. NOT NULL: a workspace is the unit the
-    # dashboard scopes by, so "no workspace" is never a real state, only an
+    # The workspace this row belongs to, and the canonical note for the three
+    # tables below that carry the same column. NOT NULL: a workspace is the unit
+    # the dashboard scopes by, so "no workspace" is never a real state, only an
     # unmigrated one. Existing rows were backfilled onto the deployment's default
     # workspace, which the same migration seeds when tenancy was never touched.
+    # RESTRICT rather than cascade: deleting a workspace must not silently take
+    # its keys, usage, aliases and policies with it. Which workspace a write
+    # lands in is resolved in `services/workspace_scope.py`.
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("workspace.id", ondelete="RESTRICT"), nullable=False, index=True
     )
@@ -242,10 +246,7 @@ class ModelAlias(Base):
     name: Mapped[str] = mapped_column()
     target: Mapped[str] = mapped_column()
     user_id: Mapped[str | None] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), index=True)
-    # The workspace this row belongs to. NOT NULL: a workspace is the unit the
-    # dashboard scopes by, so "no workspace" is never a real state, only an
-    # unmigrated one. Existing rows were backfilled onto the deployment's default
-    # workspace, which the same migration seeds when tenancy was never touched.
+    # The workspace this row belongs to; see `APIKey.workspace_id` for why.
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("workspace.id", ondelete="RESTRICT"), nullable=False, index=True
     )
@@ -307,10 +308,7 @@ class RoutingPolicy(Base):
     name: Mapped[str] = mapped_column()
     spec: Mapped[dict[str, Any]] = mapped_column(JSON)
     user_id: Mapped[str | None] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), index=True)
-    # The workspace this row belongs to. NOT NULL: a workspace is the unit the
-    # dashboard scopes by, so "no workspace" is never a real state, only an
-    # unmigrated one. Existing rows were backfilled onto the deployment's default
-    # workspace, which the same migration seeds when tenancy was never touched.
+    # The workspace this row belongs to; see `APIKey.workspace_id` for why.
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("workspace.id", ondelete="RESTRICT"), nullable=False, index=True
     )
@@ -531,10 +529,7 @@ class UsageLog(Base):
     )
 
     id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
-    # The workspace this row belongs to. NOT NULL: a workspace is the unit the
-    # dashboard scopes by, so "no workspace" is never a real state, only an
-    # unmigrated one. Existing rows were backfilled onto the deployment's default
-    # workspace, which the same migration seeds when tenancy was never touched.
+    # The workspace this row belongs to; see `APIKey.workspace_id` for why.
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("workspace.id", ondelete="RESTRICT"), nullable=False, index=True
     )

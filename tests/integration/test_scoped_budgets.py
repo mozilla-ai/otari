@@ -450,6 +450,52 @@ def test_management_surface_round_trip(client: Any, master_key_header: dict[str,
     assert client.get(f"/v1/scoped-budgets/{budget_id}", headers=master_key_header).status_code == 404
 
 
+def test_a_ceiling_can_be_relaxed_back_to_the_states_creation_allows(
+    client: Any,
+    master_key_header: dict[str, str],
+) -> None:
+    """Null is a state ``POST`` can write, so ``PATCH`` has to be able to reach it.
+
+    A null ``max_budget`` is a ceiling that meters and admits everything; a null
+    ``budget_duration_sec`` is one that never resets. Both are creatable, so
+    testing the value rather than whether the field was sent made a limit
+    tightenable and never relaxable, and a cadence addable and never removable.
+    """
+    created = client.post(
+        "/v1/scoped-budgets",
+        json={
+            "scope_type": "workspace",
+            "scope_id": "ws-relax",
+            "max_budget": 10.0,
+            "budget_duration_sec": 86400,
+        },
+        headers=master_key_header,
+    ).json()
+
+    cleared = client.patch(
+        f"/v1/scoped-budgets/{created['id']}",
+        json={"max_budget": None, "budget_duration_sec": None},
+        headers=master_key_header,
+    )
+
+    assert cleared.status_code == 200, cleared.text
+    assert cleared.json()["max_budget"] is None
+    # The window goes with the cadence, matching what POST writes for a budget
+    # created without one; a window left behind would name a period nothing rolls.
+    assert cleared.json()["budget_duration_sec"] is None
+    assert cleared.json()["period_end"] is None
+
+    # An omitted field is still "leave it alone", which is the half that already
+    # worked and must keep working.
+    renamed = client.patch(
+        f"/v1/scoped-budgets/{created['id']}",
+        json={"name": "Metering only"},
+        headers=master_key_header,
+    )
+    assert renamed.status_code == 200
+    assert renamed.json()["max_budget"] is None
+
+
 def test_management_surface_requires_the_master_key(client: Any, api_key_header: dict[str, str]) -> None:
     """A plain API key may not read or write the ceilings that bind it."""
     assert client.get("/v1/scoped-budgets", headers=api_key_header).status_code == 401

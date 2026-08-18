@@ -43,6 +43,10 @@ def test_hybrid_mode_disables_local_management_endpoints(monkeypatch: pytest.Mon
         users_response = client.post("/v1/users", json={"user_id": "u1"})
         keys_response = client.get("/v1/keys")
         budgets_response = client.get("/v1/budgets")
+        # The tenancy-scoped ceilings are the second budget surface and are
+        # standalone-only for the same reason as the first: a hybrid gateway
+        # holds no local budget rows, so the router is never registered.
+        scoped_budgets_response = client.get("/v1/scoped-budgets")
         usage_response = client.get("/v1/usage")
 
     expected = {"detail": "This endpoint is not available in hybrid mode. Manage this resource via the platform UI."}
@@ -52,6 +56,7 @@ def test_hybrid_mode_disables_local_management_endpoints(monkeypatch: pytest.Mon
     assert keys_response.json() == expected
     assert budgets_response.status_code == 404
     assert budgets_response.json() == expected
+    assert scoped_budgets_response.status_code == 404
     assert usage_response.status_code == 404
     assert usage_response.json() == expected
 

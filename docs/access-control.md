@@ -100,10 +100,11 @@ Nothing is required to set it up. The first request to one of those endpoints pr
 
 Adding a member takes an email address (`POST /v1/organizations/me/members`), optionally with the workspaces to grant at the same time. If no identity holds that address yet, one is created carrying it, and the member is active immediately: there is no invitation to accept, because this edition sends no email. Such an identity is a roster and attribution entry today. It cannot sign in until Otari grows a sign-in flow, at which point the address is the handle its owner claims it by.
 
-Two rules exist to stop a tenancy from becoming unmanageable, and both answer `400`:
+Three rules exist to stop a tenancy from becoming unmanageable or from losing data:
 
-- an organization always keeps at least one active owner, so the last owner cannot be demoted or removed;
-- an organization always keeps at least one workspace, so the last one cannot be deleted.
+- an organization always keeps at least one active owner, so the last owner cannot be demoted or removed (`400`);
+- an organization always keeps at least one workspace, so the last one cannot be deleted (`400`);
+- a workspace that still holds API keys, usage, aliases, or routing policies cannot be deleted (`409`). Move or delete what it holds first.
 
 Removing a member suspends their membership rather than deleting it, which keeps their past usage attributable.
 
@@ -146,7 +147,20 @@ Confirm with `GET /v1/organizations/me`, which should name the adopted organizat
 
 One ordering is not caught. The refusal only runs while the marker is unresolved, so it covers importing into a deployment that has never served a tenancy request. Import *after* this gateway has provisioned its own default organization and nothing refuses: the marker already resolves, and the imported rows are silently unreachable. Repointing the marker is still the fix, and importing before the first tenancy request is what turns a silent case into a loud one.
 
-This layer does not yet gate request-plane spend: keys, budgets, and usage still key on the `user_id` described above. Bringing the two together is the reconciliation tracked in [mozilla-ai/otari-ai#1452](https://github.com/mozilla-ai/otari-ai/issues/1452).
+### Workspace-scoped spend
+
+API keys, usage rows, model aliases, and routing policies each belong to a workspace. A key's workspace is fixed when it is issued and read off the key on every request, never off a header, so a caller cannot bill another workspace. A master-key request has no key row and lands in the deployment's default workspace.
+
+Budgets come in two kinds, both enforced, and a request has to pass both:
+
+- **Per-user budgets** are the `budgets` table described above, attached with `users.budget_id`, and unchanged. One budget shared by several users is a limit each of them gets in full, not a pot they share.
+- **Scoped budgets** (`/v1/scoped-budgets`) cap a tenancy scope instead: an organization, a workspace, a workspace membership, an organization membership, or a single API key. A ceiling optionally narrows to one provider, so "this workspace may spend $50 a month, of which no more than $10 at Anthropic" is two rows. Every ceiling that applies to a request must admit it; there is deliberately no rule that a workspace's ceilings must sum to less than its organization's, since the organization's already bounds the total.
+
+A key marked `exclude_from_budget`, and `OTARI_BUDGET_STRATEGY=disabled`, bypass both kinds.
+
+Two things scoped ceilings do not yet count, both because there is no request scope to resolve them from: externally recorded spend (`POST /v1/usage/external`) and imported usage. Those still settle against the per-user counters alone, so a workspace's `current_spend` will not match a `SUM(cost)` over its usage rows once imports are in play.
+
+Identities and the request plane are still two tables (`user` for tenancy, `users` for per-request spend), bridged by minting a `users` row named after a member's identity id. Converging them is tracked in [mozilla-ai/otari-ai#1727](https://github.com/mozilla-ai/otari-ai/issues/1727), under the wider reconciliation in [mozilla-ai/otari-ai#1452](https://github.com/mozilla-ai/otari-ai/issues/1452).
 
 ## See also
 

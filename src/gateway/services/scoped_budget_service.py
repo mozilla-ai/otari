@@ -26,7 +26,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
-from typing import TYPE_CHECKING
+from typing import TYPE_CHECKING, Literal, get_args
 
 from sqlalchemy import and_, case, or_, select, update
 from sqlalchemy.sql.elements import ColumnElement
@@ -47,13 +47,14 @@ SCOPE_WORKSPACE_MEMBER = "workspace_member"
 SCOPE_ORG_MEMBER = "org_member"
 SCOPE_API_TOKEN = "api_token"
 
-SCOPE_TYPES: tuple[str, ...] = (
-    SCOPE_ORGANIZATION,
-    SCOPE_WORKSPACE,
-    SCOPE_WORKSPACE_MEMBER,
-    SCOPE_ORG_MEMBER,
-    SCOPE_API_TOKEN,
-)
+# The wire vocabulary, and the one place it is written. The route layer annotates
+# its request and query models with this rather than restating the five strings:
+# a scope the service cannot resolve must not be creatable, and two rosters would
+# eventually disagree about which those are. `Literal` takes no variables, so the
+# constants above and this list are the one unavoidable repetition; `get_args`
+# keeps the tuple form derived rather than typed out a third time.
+ScopeType = Literal["organization", "workspace", "workspace_member", "org_member", "api_token"]
+SCOPE_TYPES: tuple[ScopeType, ...] = get_args(ScopeType)
 
 # Most specific first, so the ceiling closest to the caller is the one that
 # refuses when several are exhausted at once and the reported error is the
@@ -386,6 +387,7 @@ __all__ = [
     "SCOPE_ORGANIZATION",
     "SCOPE_ORG_MEMBER",
     "SCOPE_TYPES",
+    "ScopeType",
     "SCOPE_WORKSPACE",
     "SCOPE_WORKSPACE_MEMBER",
     "ApplicableBudget",

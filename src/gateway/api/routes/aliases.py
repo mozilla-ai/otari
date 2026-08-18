@@ -136,7 +136,12 @@ async def list_aliases(
     config: Annotated[GatewayConfig, Depends(get_config)],
     workspace_id: Annotated[
         uuid.UUID | None,
-        Query(description="Only stored entries in this workspace. Config-file entries are always included."),
+        Query(description=(
+            "Only stored entries in this workspace. Config-file entries are always included. "
+            "Every stored entry is in the deployment's default workspace today, because name "
+            "uniqueness and the resolution cache are both deployment-wide, so this narrows to "
+            "one workspace and finds the rest empty until those are scoped (otari-ai#1643)."
+        )),
     ] = None,
 ) -> list[AliasResponse]:
     """List every alias in force, from config.yml and from storage.

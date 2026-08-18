@@ -48,6 +48,7 @@ from gateway.services.tenancy.errors import (
     WorkspaceNotFoundError,
 )
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.services.workspace_scope import reset_default_workspace_cache
 
 
 class WorkspaceService:
@@ -305,6 +306,16 @@ class WorkspaceService:
             # already knows, so let it answer and translate what it says.
             await self.db.rollback()
             raise WorkspaceInUseError from None
+
+        # `workspace_scope` caches the default workspace's id for the process and
+        # justifies that by RESTRICT: a workspace holding request-plane rows
+        # cannot be deleted, so the cached id cannot point at something gone. The
+        # gap is a default workspace holding *nothing*, which is deletable once a
+        # second one exists, and which RESTRICT therefore does not protect. The
+        # cache would then hand every master-key write a dead id and 500 on the
+        # foreign key until the process restarted. Dropping it here costs one
+        # lookup on the next such write.
+        reset_default_workspace_cache()
 
     # ------------------------------------------------------------------
     # Membership
