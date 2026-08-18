@@ -429,14 +429,24 @@ export function AppShell() {
                       <Link
                         key={item.to}
                         to={item.to}
-                        activeProps={{ className: NAV_ACTIVE }}
-                        inactiveProps={{ className: NAV_INACTIVE }}
+                        // Highlighted from the registry's own answer rather than
+                        // from `activeProps`, whose default match is a prefix
+                        // one: on `/organization/members` that lights up
+                        // "General" as well, since `/organization` is its parent
+                        // route. `navItemForPath` prefers the exact entry, and a
+                        // future child route (`/routing/new`) still resolves to
+                        // its parent, which is the highlight that route wants.
+                        className={clsx(
+                          navLinkClass(effectiveCollapsed),
+                          currentItem?.to === item.to
+                            ? NAV_ACTIVE
+                            : NAV_INACTIVE,
+                        )}
                         // Tapping a destination dismisses the mobile drawer so the
                         // page it navigated to is visible, not hidden behind it.
                         onClick={() => setMobileNavOpen(false)}
                         aria-label={effectiveCollapsed ? item.label : undefined}
                         title={effectiveCollapsed ? item.label : undefined}
-                        className={navLinkClass(effectiveCollapsed)}
                       >
                         {item.icon}
                         {effectiveCollapsed ? null : item.label}

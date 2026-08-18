@@ -59,14 +59,21 @@ describe("nav registry", () => {
     ])
   })
 
-  it("resolves a tenancy child route through its parent entry", () => {
-    // /organization/members is its own destination and its own registry entry,
-    // and the prefix rule finds the parent first. Harmless while both gate on
-    // the same surface, and pinned so a change to either one is a deliberate
-    // one rather than a surprise.
-    expect(navItemForPath("/organization/members")?.surface).toBe(
-      "organizations",
-    )
+  it("resolves a child route to its own entry, not to its parent's", () => {
+    // The first nested pair in the registry, and the reason navItemForPath
+    // makes two passes: /organization is registered ahead of
+    // /organization/members and matches it as a prefix. The shell titles its
+    // gated-off panel from whatever comes back, and the sidebar highlights it,
+    // so the parent winning here is a page announcing itself as "General".
+    expect(navItemForPath("/organization/members")?.label).toBe("Members")
+    expect(navItemForPath("/organization")?.label).toBe("General")
+  })
+
+  it("still resolves an unregistered child route to its parent", () => {
+    // The prefix pass is what a future child route (/routing/new) relies on to
+    // inherit its parent's gating; only an exact match outranks it.
+    expect(navItemForPath("/routing/new")?.label).toBe("Routing")
+    expect(navItemForPath("/docs")).toBeUndefined()
   })
 
   it("points every entry at an absolute path", () => {

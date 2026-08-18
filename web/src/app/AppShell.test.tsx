@@ -430,6 +430,35 @@ describe("AppShell entitlement and flag gating", () => {
     expect(screen.queryByText("PAGE CONTENT")).toBeNull()
   })
 
+  it("highlights one link on a nested route, and names it correctly", async () => {
+    mockMatchMedia(false)
+    // /organization/members is the registry's first child route, and
+    // /organization is its parent route in the generated tree. TanStack's own
+    // `activeProps` matches a parent as active, so the sidebar would light up
+    // both "General" and "Members"; the shell drives the highlight from
+    // navItemForPath instead, which prefers the exact entry.
+    await renderShell(bootstrap(), { url: "/organization/members" })
+
+    const members = await screen.findByRole("link", { name: "Members" })
+    const general = screen.getByRole("link", { name: "General" })
+    expect(members.className).toContain("bg-primary-subtle")
+    expect(general.className).not.toContain("bg-primary-subtle")
+  })
+
+  it("names a gated-off child route after the child, not its parent", async () => {
+    mockMatchMedia(false)
+    // Same prefix collision, seen from the panel: resolving the parent would
+    // tell someone who followed a /organization/members link that "General" is
+    // not available here.
+    await renderShell(bootstrap({ surfaces: ["models"] }), {
+      url: "/organization/members",
+    })
+
+    expect(
+      await screen.findByText("Members is not available here"),
+    ).toBeInTheDocument()
+  })
+
   it("still renders a destination that passes every axis", async () => {
     mockMatchMedia(false)
     await renderShell(bootstrap(), { url: "/providers" })

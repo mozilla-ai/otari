@@ -88,6 +88,14 @@ const BASE_NAV_SECTIONS = [
     ],
   },
   {
+    // The label is the one mozilla-ai/otari-ai#1539 is assigned to change when
+    // the control-plane UI rehomes: "Organization" reads as a multi-tenancy
+    // word, and that issue's plan is for the OSS sidebar to say something
+    // single-tenant while the enterprise overlay overrides it back. Left as is
+    // rather than pre-empted, because the obvious substitute ("Settings")
+    // already names an item two sections down, and because standalone Otari now
+    // does hold more than one organization, which is the premise that issue was
+    // written against. Rename it there, with the override, not here.
     id: "organization",
     label: "Organization",
     items: [
@@ -187,15 +195,23 @@ export const NAV_ITEMS: readonly NavItem[] = NAV_SECTIONS.flatMap(
  * (`/routing/new`) inherits its parent's gating. The index is matched exactly
  * only; as a prefix it would claim every path in the dashboard.
  *
+ * **An exact match wins over a prefix match**, and the two passes are why: with
+ * a single scan, `/organization/members` would resolve to `/organization`,
+ * which is registered ahead of it. The gating would still be right (both name
+ * the same surface), but everything else that asks "which entry is this page"
+ * would be wrong: the shell titles its gated-off panel from the entry it gets
+ * back, and the sidebar highlights it.
+ *
  * An unregistered path (`/docs`, the 404 splat) has no entry and is therefore
  * never gated, which is right: the registry governs the destinations it
  * declares and nothing else.
  */
 export function navItemForPath(pathname: string): NavItem | undefined {
-  return NAV_ITEMS.find(
-    (item) =>
-      pathname === item.to ||
-      (item.to !== "/" && pathname.startsWith(`${item.to}/`)),
+  return (
+    NAV_ITEMS.find((item) => pathname === item.to) ??
+    NAV_ITEMS.find(
+      (item) => item.to !== "/" && pathname.startsWith(`${item.to}/`),
+    )
   )
 }
 

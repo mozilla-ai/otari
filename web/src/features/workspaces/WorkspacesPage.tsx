@@ -151,13 +151,25 @@ function EditWorkspaceForm({
 function AddWorkspaceMember({
   workspaceId,
   candidates,
+  rosterResolved,
 }: {
   workspaceId: string
   candidates: OrganizationMember[]
+  /**
+   * Whether the organization roster actually answered. An empty candidate list
+   * means "everyone is already here" only once it has: while it is loading, or
+   * after it failed, the list is empty for a reason the operator should not be
+   * told is a full workspace.
+   */
+  rosterResolved: boolean
 }) {
   const add = useAddWorkspaceMember()
   const [userId, setUserId] = useState("")
   const [role, setRole] = useState("member")
+
+  if (!rosterResolved) {
+    return null
+  }
 
   if (candidates.length === 0) {
     return (
@@ -210,10 +222,12 @@ function AddWorkspaceMember({
 function WorkspaceMembersPanel({
   workspace,
   orgMembers,
+  rosterResolved,
   canManageWorkspace,
 }: {
   workspace: Workspace
   orgMembers: OrganizationMember[]
+  rosterResolved: boolean
   canManageWorkspace: boolean
 }) {
   const members = useWorkspaceMembers(workspace.id)
@@ -301,6 +315,7 @@ function WorkspaceMembersPanel({
         <AddWorkspaceMember
           workspaceId={workspace.id}
           candidates={candidates}
+          rosterResolved={rosterResolved}
         />
       ) : null}
 
@@ -428,10 +443,11 @@ export function WorkspacesPage() {
       <WorkspaceMembersPanel
         workspace={workspace}
         orgMembers={orgMembers.data ?? []}
+        rosterResolved={orgMembers.isSuccess}
         canManageWorkspace={manages}
       />
     ),
-    [orgMembers.data, manages],
+    [orgMembers.data, orgMembers.isSuccess, manages],
   )
 
   return (
@@ -454,7 +470,11 @@ export function WorkspacesPage() {
         }
       />
 
-      <ErrorBanner error={context.error ?? workspaces.error ?? remove.error} />
+      <ErrorBanner
+        error={
+          context.error ?? workspaces.error ?? orgMembers.error ?? remove.error
+        }
+      />
 
       {manages ? null : (
         <InfoBanner>

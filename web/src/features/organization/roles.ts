@@ -9,6 +9,27 @@
  * The predicates below are the client half of gates the server already enforces.
  * They exist so a control that would always be refused is disabled rather than
  * offered, never to decide who may do what.
+ *
+ * Two of them are deliberately **narrower** than the server, and both narrow in
+ * the safe direction (a control is disabled where the server would have
+ * allowed it, never the reverse). Neither is reachable while a standalone
+ * deployment has one operator identity, who is a superuser and an owner of the
+ * organization and of every workspace in it; both become reachable with the
+ * per-user sign-in of otari-ai#1716, which is when to revisit them.
+ *
+ * - **Workspace-level management is invisible here.** `_require_workspace_
+ *   management_access` also grants a caller whose *workspace* membership is an
+ *   active owner or admin, so an organization member who owns one workspace may
+ *   manage it. Answering that client-side needs the caller's own user id, which
+ *   the membership context does not carry: it names the membership row, not the
+ *   identity behind it. Resolving it through the roster would make every
+ *   workspace control wait on a second query to say what the server will say
+ *   anyway, so `canManage` reads the organization role alone.
+ * - **Superuser is not on the contract.** The server grants organization
+ *   management, and deletion, to `user.is_superuser` whatever their role;
+ *   `OrganizationMembershipContextPublic` carries no such field, so nothing here
+ *   can see it. otari.ai's own `useIsOrgAdmin` does check it, which is the
+ *   divergence to close when the context grows the field.
  */
 
 import type { OrganizationContext, OrganizationMember } from "@/client"

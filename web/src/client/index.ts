@@ -269,14 +269,11 @@ export type UpdateOrganizationRequest =
   Schemas["ActiveOrganizationUpdateRequest"]
 export type SwitchOrganizationRequest = Schemas["OrganizationSwitchRequest"]
 export type OrganizationMember = Schemas["ActiveOrganizationMemberPublic"]
-export type OrganizationMembers = Schemas["ActiveOrganizationMembersPublic"]
 export type UpdateOrganizationMemberRequest =
   Schemas["ActiveOrganizationMemberUpdateRequest"]
 export type Workspace = Schemas["WorkspacePublic"]
-export type Workspaces = Schemas["WorkspacesPublic"]
 export type CreateWorkspaceRequest = Schemas["WorkspaceCreate"]
 export type UpdateWorkspaceRequest = Schemas["WorkspaceUpdate"]
 export type WorkspaceMember = Schemas["WorkspaceMemberPublic"]
-export type WorkspaceMembers = Schemas["WorkspaceMembersPublic"]
 
 export type * from "./local"

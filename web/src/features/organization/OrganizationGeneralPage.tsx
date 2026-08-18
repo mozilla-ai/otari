@@ -18,7 +18,7 @@ import {
   PageLoading,
 } from "@/shared/components/ui"
 
-import { isOwner } from "./roles"
+import { canManage, isOwner } from "./roles"
 
 // The organization the caller is pointed at, and the three things an operator
 // does to it: rename it, move to another one, or retire it. The roster is its
@@ -239,7 +239,7 @@ export function OrganizationGeneralPage() {
   }
 
   const { organization, role } = context.data
-  const canEdit = role === "owner" || role === "admin"
+  const canEdit = canManage(context.data)
   const options = (memberships.data ?? []).map((membership) => ({
     value: membership.organization.id,
     label: membership.organization.name,

@@ -160,6 +160,32 @@ describe("WorkspacesPage", () => {
     expect(screen.queryByLabelText("Organization member")).toBeNull()
   })
 
+  it("reports a roster that failed instead of calling the workspace full", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input)
+      if (url.includes("/v1/organizations/me/members")) {
+        return jsonResponse({ detail: "Roster unavailable" }, 500)
+      }
+      if (url.includes("/members")) {
+        return jsonResponse({ data: [workspaceMember()], count: 1 })
+      }
+      if (url.includes("/v1/workspaces")) {
+        return jsonResponse({ data: [workspace()], count: 1 })
+      }
+      return jsonResponse(organizationContext())
+    })
+    const user = userEvent.setup()
+    renderPage(<WorkspacesPage />)
+
+    await user.click(await screen.findByRole("button", { name: "Members" }))
+    // An empty candidate list is only "everyone is already here" once the
+    // roster has answered; a failed one has to say so instead.
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Roster unavailable",
+    )
+    expect(screen.queryByText(/already in this workspace/)).toBeNull()
+  })
+
   it("adds an organization member to a workspace with a chosen role", async () => {
     const requests = mockApi({
       orgMembers: [

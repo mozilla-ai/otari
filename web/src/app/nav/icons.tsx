@@ -160,7 +160,6 @@ export const RoutingIcon = (
   </svg>
 )
 
-/** Two figures: the principals that keys and budgets attach to. */
 /** A building: the organization every workspace and membership belongs to. */
 export const OrganizationIcon = (
   <svg
@@ -184,7 +183,7 @@ export const OrganizationIcon = (
   </svg>
 )
 
-/** Two figures under one roof: the roster of the organization above. */
+/** A single figure, set apart from the two-figure Users glyph below. */
 export const MembersIcon = (
   <svg
     aria-hidden="true"
@@ -227,6 +226,7 @@ export const WorkspacesIcon = (
   </svg>
 )
 
+/** Two figures: the principals that keys and budgets attach to. */
 export const UsersIcon = (
   <svg
     aria-hidden="true"
