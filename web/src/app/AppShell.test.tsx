@@ -370,12 +370,17 @@ describe("AppShell surface gating", () => {
       "Activity",
       "Usage",
       "Models",
-      "Routing",
-      "Tools & Guardrails",
       "API keys",
       "Provider credentials",
       "Members",
     ])
+    // Routing and Tools nest destinations, so they expand rather than
+    // navigate; their children are links once the group is open.
+    expect(
+      within(screen.getByRole("navigation"))
+        .getAllByRole("button")
+        .map((button) => button.textContent),
+    ).toEqual(["Routing", "Tools"])
   })
 
   it("renders every organization destination on that rail", async () => {
@@ -443,7 +448,8 @@ describe("AppShell entitlement and flag gating", () => {
     // would silently drop a page from the sidebar of every gateway.
     await renderShell(bootstrap(), { entitlements: { capabilities: [] } })
 
-    expect(screen.getByRole("link", { name: "Routing" })).toBeInTheDocument()
+    // Routing nests destinations, so it is the group's expander.
+    expect(screen.getByRole("button", { name: "Routing" })).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "Models" })).toBeInTheDocument()
     expect(screen.getByText("Gateway")).toBeInTheDocument()
   })
@@ -548,5 +554,47 @@ describe("AppShell entitlement and flag gating", () => {
     expect(
       screen.queryByRole("button", { name: "Switch workspace" }),
     ).toBeNull()
+  })
+
+  it("expands a nav group to reveal its nested destinations", async () => {
+    mockMatchMedia(false)
+    const user = userEvent.setup()
+    await renderShell()
+
+    // Collapsed to start: the children are not in the tree at all, so they are
+    // not reachable by tab or by a screen reader while the group is shut.
+    expect(screen.queryByRole("link", { name: "Web search" })).toBeNull()
+
+    await user.click(screen.getByRole("button", { name: "Tools" }))
+    expect(screen.getByRole("link", { name: "Web search" })).toBeInTheDocument()
+    expect(
+      screen.getByRole("link", { name: "Code execution" }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Guardrails" })).toBeInTheDocument()
+  })
+
+  it("opens the group that holds the current route, without a click", async () => {
+    mockMatchMedia(false)
+    // Arriving by bookmark or shared URL should show where you are rather than
+    // a shut group that hides it.
+    await renderShell(bootstrap(), { url: "/tools/guardrails" })
+
+    expect(
+      await screen.findByRole("button", { name: "Tools", expanded: true }),
+    ).toBeInTheDocument()
+    expect(screen.getByRole("link", { name: "Guardrails" })).toBeInTheDocument()
+  })
+
+  it("signs out from the account menu rather than the page header", async () => {
+    mockMatchMedia(false)
+    const user = userEvent.setup()
+    await renderShell()
+
+    // The header carried this until the sidebar grew an account block.
+    expect(screen.queryByRole("button", { name: "Sign out" })).toBeNull()
+    await user.click(screen.getByRole("button", { name: "Account" }))
+    expect(
+      await screen.findByRole("button", { name: "Sign out" }),
+    ).toBeInTheDocument()
   })
 })

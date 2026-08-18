@@ -45,7 +45,7 @@ describe("nav registry", () => {
       "Usage",
       "Models",
       "Routing",
-      "Tools & Guardrails",
+      "Tools",
       "API keys",
       "Provider credentials",
       "Members",

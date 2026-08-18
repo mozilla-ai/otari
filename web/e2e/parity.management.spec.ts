@@ -5,6 +5,7 @@ import {
   gotoRoute,
   login,
   nav,
+  openNested,
   openOrganization,
   tableRows,
 } from "./helpers"
@@ -224,7 +225,10 @@ test.describe("budgets", () => {
 test.describe("fallback routing", () => {
   test("grows and shrinks a policy's failure chain", async ({ page }) => {
     await login(page)
-    await openPage(page, "Routing", "Routing")
+    await openNested(page, "Routing", "Policies")
+    await expect(
+      page.getByRole("heading", { name: "Routing", exact: true }),
+    ).toBeVisible()
 
     await page.getByRole("button", { name: "New policy" }).click()
     await page.getByRole("textbox", { name: /Policy name/ }).fill(POLICY)

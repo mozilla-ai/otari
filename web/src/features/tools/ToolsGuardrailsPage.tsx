@@ -614,7 +614,15 @@ function ServiceRow({
   )
 }
 
-export function ToolsGuardrailsPage() {
+/**
+ * The tool and guardrail service settings, whole or narrowed to one service.
+ *
+ * `only` is what makes the sidebar's Tools group work: each child route renders
+ * this page filtered to its own service rather than scrolling one long page.
+ * Omitted, every service renders, which is the /tools route the group's parent
+ * still points at.
+ */
+export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
   const query = useToolSettings()
   const tools = useTools()
   const pricing = usePricing()
@@ -687,7 +695,12 @@ export function ToolsGuardrailsPage() {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        title="Tools & Guardrails"
+        title={
+          only
+            ? (SERVICES.find((service) => service.key === only)?.label ??
+              "Tools & Guardrails")
+            : "Tools & Guardrails"
+        }
         description="Configure the built-in tool and guardrail service endpoints without a restart. Changes apply immediately and persist. URLs are validated for shape (http/https) and can be tested for reachability before saving; the network-safety gates for these services live on the Settings page."
       />
 
@@ -695,74 +708,85 @@ export function ToolsGuardrailsPage() {
 
       {query.isLoading ? <PageLoading /> : null}
 
-      {SERVICES.map((service) => {
-        const ordered = service.order
-          .map((key) => byKey.get(key))
-          .filter((f): f is ToolSettingField => f !== undefined)
-        // Any field the backend reports for this service that isn't in `order`
-        // (e.g. a newly added key) still renders, after the ordered ones, so a
-        // backend addition is visible without a frontend change.
-        const extra = (data?.fields ?? []).filter(
-          (f) => f.service === service.key && !service.order.includes(f.key),
-        )
-        const fields = [...ordered, ...extra]
-        if (fields.length === 0) return null
-        // Absent while /v1/tools is still loading, or if it failed: the card is
-        // reference material, so its absence must not hide the editable settings.
-        const managed = service.toolId
-          ? (tools.data?.data ?? []).find((tool) => tool.id === service.toolId)
-          : undefined
-        return (
-          <Fragment key={service.key}>
-            <section className="flex flex-col gap-2">
-              <h2 className="text-sm font-semibold text-foreground">
-                {service.label}
-              </h2>
-              <p className="text-sm text-muted">{service.blurb}</p>
-              <Card>
-                <Card.Content className="flex flex-col divide-y divide-border px-5 py-1">
-                  {service.pricingKey ? (
-                    <ToolPriceRow
-                      pricingKey={service.pricingKey}
-                      configured={currentRates.get(service.pricingKey) ?? null}
-                      onSave={(perCall) =>
-                        savePrice(service.pricingKey as string, perCall)
-                      }
-                      saving={pricedTool === service.pricingKey}
-                      saveError={
-                        priceErrors[service.pricingKey] ||
-                        (pricing.error
-                          ? "Could not load the current price. Reload before editing."
-                          : undefined)
-                      }
-                      // Also disabled when the load failed: an errored query leaves
-                      // `configured` null, which renders as "Not priced" and would
-                      // invite an operator to overwrite a rate they cannot see.
-                      disabled={pricing.isLoading || Boolean(pricing.error)}
-                    />
-                  ) : null}
-                  {fields.map((field) => (
-                    <ServiceRow
-                      key={field.key}
-                      field={field}
-                      onSave={(value) => save(field, value)}
-                      saveError={errors[field.key]}
-                      disabled={disabled}
-                    />
-                  ))}
-                  {managed ? <HowToCallCard tool={managed} /> : null}
-                </Card.Content>
-              </Card>
-            </section>
-            {/* Directly below the in-loop web-search settings, because a searxng
+      {SERVICES.filter((service) => !only || service.key === only).map(
+        (service) => {
+          const ordered = service.order
+            .map((key) => byKey.get(key))
+            .filter((f): f is ToolSettingField => f !== undefined)
+          // Any field the backend reports for this service that isn't in `order`
+          // (e.g. a newly added key) still renders, after the ordered ones, so a
+          // backend addition is visible without a frontend change.
+          const extra = (data?.fields ?? []).filter(
+            (f) => f.service === service.key && !service.order.includes(f.key),
+          )
+          const fields = [...ordered, ...extra]
+          if (fields.length === 0) return null
+          // Absent while /v1/tools is still loading, or if it failed: the card is
+          // reference material, so its absence must not hide the editable settings.
+          const managed = service.toolId
+            ? (tools.data?.data ?? []).find(
+                (tool) => tool.id === service.toolId,
+              )
+            : undefined
+          return (
+            <Fragment key={service.key}>
+              <section className="flex flex-col gap-2">
+                {/* Dropped when the page is narrowed to this one service: the
+                    page title already says it, and repeating it reads as two
+                    headings for the same thing. */}
+                {only ? null : (
+                  <h2 className="text-sm font-semibold text-foreground">
+                    {service.label}
+                  </h2>
+                )}
+                <p className="text-sm text-muted">{service.blurb}</p>
+                <Card>
+                  <Card.Content className="flex flex-col divide-y divide-border px-5 py-1">
+                    {service.pricingKey ? (
+                      <ToolPriceRow
+                        pricingKey={service.pricingKey}
+                        configured={
+                          currentRates.get(service.pricingKey) ?? null
+                        }
+                        onSave={(perCall) =>
+                          savePrice(service.pricingKey as string, perCall)
+                        }
+                        saving={pricedTool === service.pricingKey}
+                        saveError={
+                          priceErrors[service.pricingKey] ||
+                          (pricing.error
+                            ? "Could not load the current price. Reload before editing."
+                            : undefined)
+                        }
+                        // Also disabled when the load failed: an errored query leaves
+                        // `configured` null, which renders as "Not priced" and would
+                        // invite an operator to overwrite a rate they cannot see.
+                        disabled={pricing.isLoading || Boolean(pricing.error)}
+                      />
+                    ) : null}
+                    {fields.map((field) => (
+                      <ServiceRow
+                        key={field.key}
+                        field={field}
+                        onSave={(value) => save(field, value)}
+                        saveError={errors[field.key]}
+                        disabled={disabled}
+                      />
+                    ))}
+                    {managed ? <HowToCallCard tool={managed} /> : null}
+                  </Card.Content>
+                </Card>
+              </section>
+              {/* Directly below the in-loop web-search settings, because a searxng
                 search tool that declares no backend URL of its own inherits the
                 one set just above it. */}
-            {service.key === "web_search" ? (
-              <SearchToolsCard onSaved={showToast} />
-            ) : null}
-          </Fragment>
-        )
-      })}
+              {service.key === "web_search" ? (
+                <SearchToolsCard onSaved={showToast} />
+              ) : null}
+            </Fragment>
+          )
+        },
+      )}
 
       <SaveToast message={toast} />
     </div>

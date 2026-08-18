@@ -28,6 +28,10 @@ import { Route as UsersRouteImport } from './routes/users'
 import { Route as WorkspacesRouteImport } from './routes/workspaces'
 import { Route as OrganizationIndexRouteImport } from './routes/organization.index'
 import { Route as OrganizationMembersRouteImport } from './routes/organization.members'
+import { Route as ToolsIndexRouteImport } from './routes/tools.index'
+import { Route as ToolsCodeExecutionRouteImport } from './routes/tools.code-execution'
+import { Route as ToolsGuardrailsRouteImport } from './routes/tools.guardrails'
+import { Route as ToolsWebSearchRouteImport } from './routes/tools.web-search'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -124,6 +128,26 @@ const OrganizationMembersRoute = OrganizationMembersRouteImport.update({
   path: '/members',
   getParentRoute: () => OrganizationRoute,
 } as any)
+const ToolsIndexRoute = ToolsIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => ToolsRoute,
+} as any)
+const ToolsCodeExecutionRoute = ToolsCodeExecutionRouteImport.update({
+  id: '/code-execution',
+  path: '/code-execution',
+  getParentRoute: () => ToolsRoute,
+} as any)
+const ToolsGuardrailsRoute = ToolsGuardrailsRouteImport.update({
+  id: '/guardrails',
+  path: '/guardrails',
+  getParentRoute: () => ToolsRoute,
+} as any)
+const ToolsWebSearchRoute = ToolsWebSearchRouteImport.update({
+  id: '/web-search',
+  path: '/web-search',
+  getParentRoute: () => ToolsRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -139,12 +163,16 @@ export interface FileRoutesByFullPath {
   '/providers': typeof ProvidersRoute
   '/routing': typeof RoutingRoute
   '/settings': typeof SettingsRoute
-  '/tools': typeof ToolsRoute
+  '/tools': typeof ToolsRouteWithChildren
   '/usage': typeof UsageRoute
   '/users': typeof UsersRoute
   '/workspaces': typeof WorkspacesRoute
   '/organization/members': typeof OrganizationMembersRoute
+  '/tools/code-execution': typeof ToolsCodeExecutionRoute
+  '/tools/guardrails': typeof ToolsGuardrailsRoute
+  '/tools/web-search': typeof ToolsWebSearchRoute
   '/organization/': typeof OrganizationIndexRoute
+  '/tools/': typeof ToolsIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -159,12 +187,15 @@ export interface FileRoutesByTo {
   '/providers': typeof ProvidersRoute
   '/routing': typeof RoutingRoute
   '/settings': typeof SettingsRoute
-  '/tools': typeof ToolsRoute
   '/usage': typeof UsageRoute
   '/users': typeof UsersRoute
   '/workspaces': typeof WorkspacesRoute
   '/organization/members': typeof OrganizationMembersRoute
+  '/tools/code-execution': typeof ToolsCodeExecutionRoute
+  '/tools/guardrails': typeof ToolsGuardrailsRoute
+  '/tools/web-search': typeof ToolsWebSearchRoute
   '/organization': typeof OrganizationIndexRoute
+  '/tools': typeof ToolsIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -181,12 +212,16 @@ export interface FileRoutesById {
   '/providers': typeof ProvidersRoute
   '/routing': typeof RoutingRoute
   '/settings': typeof SettingsRoute
-  '/tools': typeof ToolsRoute
+  '/tools': typeof ToolsRouteWithChildren
   '/usage': typeof UsageRoute
   '/users': typeof UsersRoute
   '/workspaces': typeof WorkspacesRoute
   '/organization/members': typeof OrganizationMembersRoute
+  '/tools/code-execution': typeof ToolsCodeExecutionRoute
+  '/tools/guardrails': typeof ToolsGuardrailsRoute
+  '/tools/web-search': typeof ToolsWebSearchRoute
   '/organization/': typeof OrganizationIndexRoute
+  '/tools/': typeof ToolsIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -209,7 +244,11 @@ export interface FileRouteTypes {
     | '/users'
     | '/workspaces'
     | '/organization/members'
+    | '/tools/code-execution'
+    | '/tools/guardrails'
+    | '/tools/web-search'
     | '/organization/'
+    | '/tools/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -224,12 +263,15 @@ export interface FileRouteTypes {
     | '/providers'
     | '/routing'
     | '/settings'
-    | '/tools'
     | '/usage'
     | '/users'
     | '/workspaces'
     | '/organization/members'
+    | '/tools/code-execution'
+    | '/tools/guardrails'
+    | '/tools/web-search'
     | '/organization'
+    | '/tools'
   id:
     | '__root__'
     | '/'
@@ -250,7 +292,11 @@ export interface FileRouteTypes {
     | '/users'
     | '/workspaces'
     | '/organization/members'
+    | '/tools/code-execution'
+    | '/tools/guardrails'
+    | '/tools/web-search'
     | '/organization/'
+    | '/tools/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -267,7 +313,7 @@ export interface RootRouteChildren {
   ProvidersRoute: typeof ProvidersRoute
   RoutingRoute: typeof RoutingRoute
   SettingsRoute: typeof SettingsRoute
-  ToolsRoute: typeof ToolsRoute
+  ToolsRoute: typeof ToolsRouteWithChildren
   UsageRoute: typeof UsageRoute
   UsersRoute: typeof UsersRoute
   WorkspacesRoute: typeof WorkspacesRoute
@@ -408,6 +454,34 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrganizationMembersRouteImport
       parentRoute: typeof OrganizationRoute
     }
+    '/tools/': {
+      id: '/tools/'
+      path: '/'
+      fullPath: '/tools/'
+      preLoaderRoute: typeof ToolsIndexRouteImport
+      parentRoute: typeof ToolsRoute
+    }
+    '/tools/code-execution': {
+      id: '/tools/code-execution'
+      path: '/code-execution'
+      fullPath: '/tools/code-execution'
+      preLoaderRoute: typeof ToolsCodeExecutionRouteImport
+      parentRoute: typeof ToolsRoute
+    }
+    '/tools/guardrails': {
+      id: '/tools/guardrails'
+      path: '/guardrails'
+      fullPath: '/tools/guardrails'
+      preLoaderRoute: typeof ToolsGuardrailsRouteImport
+      parentRoute: typeof ToolsRoute
+    }
+    '/tools/web-search': {
+      id: '/tools/web-search'
+      path: '/web-search'
+      fullPath: '/tools/web-search'
+      preLoaderRoute: typeof ToolsWebSearchRouteImport
+      parentRoute: typeof ToolsRoute
+    }
   }
 }
 
@@ -425,6 +499,22 @@ const OrganizationRouteWithChildren = OrganizationRoute._addFileChildren(
   OrganizationRouteChildren,
 )
 
+interface ToolsRouteChildren {
+  ToolsCodeExecutionRoute: typeof ToolsCodeExecutionRoute
+  ToolsGuardrailsRoute: typeof ToolsGuardrailsRoute
+  ToolsWebSearchRoute: typeof ToolsWebSearchRoute
+  ToolsIndexRoute: typeof ToolsIndexRoute
+}
+
+const ToolsRouteChildren: ToolsRouteChildren = {
+  ToolsCodeExecutionRoute: ToolsCodeExecutionRoute,
+  ToolsGuardrailsRoute: ToolsGuardrailsRoute,
+  ToolsWebSearchRoute: ToolsWebSearchRoute,
+  ToolsIndexRoute: ToolsIndexRoute,
+}
+
+const ToolsRouteWithChildren = ToolsRoute._addFileChildren(ToolsRouteChildren)
+
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
   SplatRoute: SplatRoute,
@@ -439,7 +529,7 @@ const rootRouteChildren: RootRouteChildren = {
   ProvidersRoute: ProvidersRoute,
   RoutingRoute: RoutingRoute,
   SettingsRoute: SettingsRoute,
-  ToolsRoute: ToolsRoute,
+  ToolsRoute: ToolsRouteWithChildren,
   UsageRoute: UsageRoute,
   UsersRoute: UsersRoute,
   WorkspacesRoute: WorkspacesRoute,

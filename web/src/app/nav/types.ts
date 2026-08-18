@@ -55,7 +55,24 @@ type NavItemGating =
   | { capability: string; flag?: string }
 
 /** One sidebar link with its deployment, entitlement, and feature-flag gating. */
-export type NavItem = NavItemBase & NavItemGating
+export type NavItem = NavItemBase &
+  NavItemGating & {
+    /**
+     * Destinations nested under this one, rendered as a collapsible group.
+     *
+     * A child declares no gating of its own and inherits the parent's: the
+     * group exists because the pages belong together, and a deployment that
+     * hosts the surface hosts all of them. Children carry no icon either, since
+     * the prototype indents them under the parent's rather than repeating one.
+     */
+    children?: readonly NavChild[]
+  }
+
+/** A destination nested under another, gated with its parent. */
+export interface NavChild {
+  to: NavPath
+  label: string
+}
 
 /**
  * A group of links under a shared heading.

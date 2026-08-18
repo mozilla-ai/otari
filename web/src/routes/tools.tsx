@@ -1,7 +1,7 @@
-import { createFileRoute } from "@tanstack/react-router"
+import { createFileRoute, Outlet } from "@tanstack/react-router"
 
-import { ToolsGuardrailsPage } from "@/features/tools/ToolsGuardrailsPage"
-
+// A layout, not a page: /tools has child routes now (one per service), so the
+// full page lives in tools.index.tsx and this only nests them.
 export const Route = createFileRoute("/tools")({
-  component: ToolsGuardrailsPage,
+  component: Outlet,
 })

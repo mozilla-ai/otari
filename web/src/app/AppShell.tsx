@@ -1,4 +1,3 @@
-import { Button } from "@heroui/react"
 import { Link, Outlet, useLocation } from "@tanstack/react-router"
 import { clsx } from "clsx"
 import type {
@@ -8,6 +7,7 @@ import type {
 } from "react"
 import { useCallback, useEffect, useRef, useState } from "react"
 import { ConnectionStatus } from "@/app/ConnectionStatus"
+import { AccountMenu } from "@/app/nav/AccountMenu"
 import {
   NAV_SECTIONS,
   navContextForPath,
@@ -15,10 +15,10 @@ import {
   ORG_NAV_SECTIONS,
   visibleNavSections,
 } from "@/app/nav/registry"
+import type { NavItem } from "@/app/nav/types"
 import { useNavVisibility } from "@/app/nav/useNavVisibility"
 import { WorkspaceSwitcher } from "@/app/nav/WorkspaceSwitcher"
 import { UpdatePrompt } from "@/app/UpdatePrompt"
-import { useAuth } from "@/features/auth/AuthContext"
 import { PricingWarning } from "@/features/models/PricingWarning"
 import { canManage } from "@/features/organization/roles"
 import { useOrganizationContext } from "@/shared/api/hooks"
@@ -93,8 +93,91 @@ const navLinkClass = (collapsed: boolean) =>
 const NAV_ACTIVE = "bg-primary-subtle text-primary-subtle-foreground"
 const NAV_INACTIVE = "text-muted hover:bg-surface-alt hover:text-foreground"
 
+/**
+ * A sidebar entry with destinations nested under it, drawn the way the
+ * navigation prototype draws Routing and Tools: a row that expands rather than
+ * navigates, and indented children below it.
+ *
+ * Open when the current route is one of its children, so arriving by URL shows
+ * where you are rather than a collapsed group. Held in state after that, so
+ * closing it stays closed while you read the page it opened.
+ *
+ * Not rendered when the rail is collapsed: there is no width for the labels, and
+ * the parent's icon links straight to its own page instead.
+ */
+function NavGroup({
+  item,
+  currentPath,
+  onNavigate,
+}: {
+  item: NavItem
+  currentPath: string
+  onNavigate: () => void
+}) {
+  const children = item.children ?? []
+  const holdsCurrent = children.some((child) => child.to === currentPath)
+  const [open, setOpen] = useState(holdsCurrent)
+  // Follows the route when navigation lands inside the group from elsewhere
+  // (a link on a page, a bookmark), without fighting a manual close.
+  const [lastHeld, setLastHeld] = useState(holdsCurrent)
+  if (holdsCurrent !== lastHeld) {
+    setLastHeld(holdsCurrent)
+    if (holdsCurrent) setOpen(true)
+  }
+
+  return (
+    <div className="flex flex-col gap-1">
+      <button
+        type="button"
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+        className={clsx(
+          navLinkClass(false),
+          "justify-between",
+          holdsCurrent ? NAV_ACTIVE : NAV_INACTIVE,
+        )}
+      >
+        <span className="flex items-center gap-3">
+          {item.icon}
+          {item.label}
+        </span>
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          className={clsx(
+            "h-4 w-4 shrink-0 transition-transform motion-reduce:transition-none",
+            open && "rotate-90",
+          )}
+        >
+          <path d="M9 6l6 6-6 6" strokeLinecap="round" strokeLinejoin="round" />
+        </svg>
+      </button>
+      {open
+        ? children.map((child) => (
+            <Link
+              key={child.to}
+              to={child.to}
+              onClick={onNavigate}
+              className={clsx(
+                navLinkClass(false),
+                // Indented to the parent's label rather than its icon, which is
+                // what marks it as nested without repeating a glyph.
+                "pl-11",
+                currentPath === child.to ? NAV_ACTIVE : NAV_INACTIVE,
+              )}
+            >
+              {child.label}
+            </Link>
+          ))
+        : null}
+    </div>
+  )
+}
+
 export function AppShell() {
-  const { logout } = useAuth()
   // Navigation is data: the shell renders whatever the registry declares and
   // decides visibility from the deployment, the entitlements, and the flags,
   // rather than each page asking what it is running against.
@@ -340,14 +423,6 @@ export function AppShell() {
           <img src="/favicon.svg" alt="" className="h-7 w-7 shrink-0" />
           <span className="text-base font-semibold text-foreground">Otari</span>
         </div>
-        <Button
-          size="sm"
-          variant="outline"
-          onPress={logout}
-          aria-label="Sign out"
-        >
-          Sign out
-        </Button>
       </header>
       <UpdatePrompt />
       <ConnectionStatus />
@@ -493,33 +568,44 @@ export function AppShell() {
                     <div className="mx-1 mb-2 border-t border-border" />
                   ) : null}
                   <div className="flex flex-col gap-1">
-                    {items.map((item) => (
-                      <Link
-                        key={item.to}
-                        to={item.to}
-                        // Highlighted from the registry's own answer rather than
-                        // from `activeProps`, whose default match is a prefix
-                        // one: on `/organization/members` that lights up
-                        // "General" as well, since `/organization` is its parent
-                        // route. `navItemForPath` prefers the exact entry, and a
-                        // future child route (`/routing/new`) still resolves to
-                        // its parent, which is the highlight that route wants.
-                        className={clsx(
-                          navLinkClass(effectiveCollapsed),
-                          currentItem?.to === item.to
-                            ? NAV_ACTIVE
-                            : NAV_INACTIVE,
-                        )}
-                        // Tapping a destination dismisses the mobile drawer so the
-                        // page it navigated to is visible, not hidden behind it.
-                        onClick={() => setMobileNavOpen(false)}
-                        aria-label={effectiveCollapsed ? item.label : undefined}
-                        title={effectiveCollapsed ? item.label : undefined}
-                      >
-                        {item.icon}
-                        {effectiveCollapsed ? null : item.label}
-                      </Link>
-                    ))}
+                    {items.map((item) =>
+                      item.children && !effectiveCollapsed ? (
+                        <NavGroup
+                          key={item.to}
+                          item={item}
+                          currentPath={pathname}
+                          onNavigate={() => setMobileNavOpen(false)}
+                        />
+                      ) : (
+                        <Link
+                          key={item.to}
+                          to={item.to}
+                          // Highlighted from the registry's own answer rather than
+                          // from `activeProps`, whose default match is a prefix
+                          // one: on `/organization/members` that lights up
+                          // "General" as well, since `/organization` is its parent
+                          // route. `navItemForPath` prefers the exact entry, and a
+                          // future child route (`/routing/new`) still resolves to
+                          // its parent, which is the highlight that route wants.
+                          className={clsx(
+                            navLinkClass(effectiveCollapsed),
+                            currentItem?.to === item.to
+                              ? NAV_ACTIVE
+                              : NAV_INACTIVE,
+                          )}
+                          // Tapping a destination dismisses the mobile drawer so the
+                          // page it navigated to is visible, not hidden behind it.
+                          onClick={() => setMobileNavOpen(false)}
+                          aria-label={
+                            effectiveCollapsed ? item.label : undefined
+                          }
+                          title={effectiveCollapsed ? item.label : undefined}
+                        >
+                          {item.icon}
+                          {effectiveCollapsed ? null : item.label}
+                        </Link>
+                      ),
+                    )}
                   </div>
                 </div>
               )
@@ -528,7 +614,10 @@ export function AppShell() {
           {/* Footer links, pinned to the bottom of the rail. The user guide is the
               dashboard's own docs, bundled with the running gateway (see DocsPage);
               otari.ai is a subtler pointer to the hosted product below it. */}
-          <div className="mt-auto flex flex-col gap-1 pb-3">
+          {/* The account block, set off by a rule as in the navigation prototype:
+              the way onto the organization rail, the bundled guide, and the
+              account control whose menu carries appearance and sign-out. */}
+          <div className="mt-auto flex flex-col gap-1 border-t border-border pt-2 pb-3">
             {/* The way into the organization rail. Only in the workspace
                 context, since the organization one has its own way back, and
                 only for someone who manages the organization: it is the single
@@ -627,6 +716,10 @@ export function AppShell() {
                 </span>
               )}
             </a>
+            {/* Last, and the only control here that opens rather than
+                navigates: account settings, appearance, data & privacy, and
+                sign-out, which used to sit in the page header. */}
+            <AccountMenu collapsed={effectiveCollapsed} />
           </div>
           {collapsed || isMobile ? null : (
             // biome-ignore lint/a11y/useSemanticElements: <hr> is a thematic break; this is a keyboard-operable resize handle

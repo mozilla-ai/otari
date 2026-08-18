@@ -78,12 +78,28 @@ const BASE_NAV_SECTIONS = [
         label: "Routing",
         surface: "routing",
         icon: RoutingIcon,
+        // Aliases was a route with no way to reach it from the sidebar. It is
+        // the other half of what routing decides (which name resolves to which
+        // target), so the group is what finally puts it on screen.
+        children: [
+          { to: "/routing", label: "Policies" },
+          { to: "/aliases", label: "Aliases" },
+        ],
       },
       {
         to: "/tools",
-        label: "Tools & Guardrails",
+        label: "Tools",
         surface: "tools",
         icon: ToolsIcon,
+        // The three services the page already configures, each now reachable on
+        // its own rather than by scrolling one long page. The prototype lists
+        // MCP servers here too; the gateway configures none, so it is left out
+        // rather than linked to nothing.
+        children: [
+          { to: "/tools/web-search", label: "Web search" },
+          { to: "/tools/code-execution", label: "Code execution" },
+          { to: "/tools/guardrails", label: "Guardrails" },
+        ],
       },
     ],
   },
@@ -220,6 +236,19 @@ export const NAV_ITEMS: readonly NavItem[] = [
   ...ORG_NAV_SECTIONS,
 ].flatMap((section) => section.items)
 
+/**
+ * Every nested destination, paired with the entry it is gated by.
+ *
+ * A child has no gating of its own, so `navItemForPath` has to answer with the
+ * parent: that is what the shell reads to decide whether the route is served
+ * and what to call it when it is not.
+ */
+const NAV_CHILD_PARENTS: ReadonlyMap<string, NavItem> = new Map(
+  NAV_ITEMS.flatMap((item) =>
+    (item.children ?? []).map((child) => [child.to, item] as const),
+  ),
+)
+
 /** Where a destination lives: the workspace sidebar, or the organization one. */
 export type NavContext = "workspace" | "organization"
 
@@ -269,6 +298,10 @@ export function navContextForPath(pathname: string): NavContext {
 export function navItemForPath(pathname: string): NavItem | undefined {
   const exact = NAV_ITEMS.find((item) => pathname === item.to)
   if (exact) return exact
+  // A nested destination answers with the entry that gates it, so a child route
+  // is never treated as unregistered (and therefore ungated).
+  const child = NAV_CHILD_PARENTS.get(pathname)
+  if (child) return child
   // Longest prefix, not first: `/organization/members/x` is under both
   // `/organization` and `/organization/members`, and the deeper entry is the
   // one that describes it. Ordering the scan rather than the registry, because

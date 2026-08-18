@@ -1,6 +1,6 @@
 import { expect, test } from "@playwright/test"
 
-import { login, MASTER_KEY, nav, openOrganization } from "./helpers"
+import { login, MASTER_KEY, nav, openNested, openOrganization } from "./helpers"
 
 // One shared gateway + DB, so the flows build on each other and must run in order.
 test.describe.configure({ mode: "serial" })
@@ -38,7 +38,6 @@ test.describe("dashboard core flows", () => {
     // page heading are no longer always the same word, so both are named.
     for (const [link, heading] of [
       ["Models", "Models"],
-      ["Routing", "Routing"],
       ["Provider credentials", "Providers"],
     ]) {
       await nav(page).getByRole("link", { name: link }).click()
@@ -48,6 +47,16 @@ test.describe("dashboard core flows", () => {
         page.getByRole("heading", { name: heading, exact: true }),
       ).toBeVisible()
     }
+
+    // Routing and Tools nest their pages, so each is reached through its group.
+    await openNested(page, "Routing", "Policies")
+    await expect(
+      page.getByRole("heading", { name: "Routing", exact: true }),
+    ).toBeVisible()
+    await openNested(page, "Tools", "Web search")
+    await expect(
+      page.getByRole("heading", { name: "Web search", exact: true }),
+    ).toBeVisible()
 
     await openOrganization(page)
     for (const [link, heading] of [
@@ -125,7 +134,7 @@ test.describe("dashboard core flows", () => {
 
   test("create a routing policy", async ({ page }) => {
     await login(page)
-    await nav(page).getByRole("link", { name: "Routing" }).click()
+    await openNested(page, "Routing", "Policies")
     await page.getByRole("button", { name: "New policy" }).click()
     // Role-scoped for the same reason as the user form: policy rows carry a
     // "Copy policy name" control.
@@ -142,7 +151,7 @@ test.describe("dashboard core flows", () => {
 
   test("grows a policy a fallback chain", async ({ page }) => {
     await login(page)
-    await nav(page).getByRole("link", { name: "Routing" }).click()
+    await openNested(page, "Routing", "Policies")
     await page.getByRole("button", { name: "New policy" }).click()
     await page.getByRole("textbox", { name: /Policy name/ }).fill("chained")
     await page.getByRole("combobox", { name: /Serves/ }).fill("openai:gpt-4o")
@@ -178,7 +187,7 @@ test.describe("dashboard core flows", () => {
     expect([204, 404]).toContain(dropped.status())
 
     await login(page)
-    await nav(page).getByRole("link", { name: "Routing" }).click()
+    await openNested(page, "Routing", "Policies")
 
     const chained = page
       .getByRole("row")

@@ -43,6 +43,25 @@ export async function openOrganization(page: Page): Promise<void> {
   ).toBeVisible()
 }
 
+/**
+ * Expand a sidebar group and open one of the destinations nested under it.
+ *
+ * Routing and Tools nest their pages, so their sidebar row expands rather than
+ * navigating; a spec reaching a child has to open the group first. Idempotent
+ * on an already-open group, which is what arriving from a child route leaves.
+ */
+export async function openNested(
+  page: Page,
+  group: string,
+  child: string,
+): Promise<void> {
+  const toggle = nav(page).getByRole("button", { name: group, exact: true })
+  if ((await toggle.getAttribute("aria-expanded")) !== "true") {
+    await toggle.click()
+  }
+  await nav(page).getByRole("link", { name: child, exact: true }).click()
+}
+
 export const authHeaders = {
   Authorization: `Bearer ${MASTER_KEY}`,
   "Content-Type": "application/json",
