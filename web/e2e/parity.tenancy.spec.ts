@@ -10,6 +10,11 @@ test.describe.configure({ mode: "serial" })
 
 const WORKSPACE = "parity-workspace"
 const RENAMED_WORKSPACE = "parity-workspace-renamed"
+const MEMBER_EMAIL = "parity-member@example.com"
+// What provisioning names the bootstrap identity (OPERATOR_FULL_NAME in
+// provisioning_service.py). It has no email address, which is the point: a
+// standalone operator is a label, not a sign-in.
+const OPERATOR = "Operator"
 
 async function openPage(
   page: Page,
@@ -20,6 +25,12 @@ async function openPage(
   await expect(
     page.getByRole("heading", { name: heading, exact: true }),
   ).toBeVisible()
+}
+
+function memberRow(page: Page, name: string | RegExp): Locator {
+  return tableRows(page, "Organization members").filter({
+    has: page.getByRole("rowheader", { name }),
+  })
 }
 
 function workspaceRow(page: Page, name: string): Locator {
@@ -52,19 +63,75 @@ test.describe("standalone tenancy", () => {
     await expect(name).toHaveValue(original)
   })
 
-  test("lists the operator as the organization's only, undemotable owner", async ({
+  test("lists the operator as an undemotable owner", async ({ page }) => {
+    await login(page)
+    await openPage(page, "Members", "Members")
+
+    // Scoped to the operator's own row rather than to a global count: this
+    // gateway is shared with the flow below, which adds a member and leaves a
+    // suspended one behind on a re-run.
+    const operator = memberRow(page, OPERATOR)
+    await expect(operator.getByLabel(/^Role for /)).toHaveValue("owner")
+    // The last active owner cannot be demoted or removed: doing so would leave
+    // the organization with nobody able to manage or delete it.
+    await expect(operator.getByLabel(/^Role for /)).toBeDisabled()
+    await expect(
+      operator.getByRole("button", { name: "Remove" }),
+    ).toBeDisabled()
+    // Status is shown, not set: suspending is what Remove does, behind a
+    // confirmation, and a suspended membership leaves the roster entirely.
+    await expect(operator.getByLabel(/^Status for /)).toHaveCount(0)
+    await expect(operator.getByText("Active")).toBeVisible()
+  })
+
+  test("adds a member by address, gives them a role, and removes them", async ({
     page,
   }) => {
     await login(page)
     await openPage(page, "Members", "Members")
 
-    const roles = page.getByLabel(/^Role for /)
-    await expect(roles).toHaveCount(1)
-    await expect(roles.first()).toHaveValue("owner")
-    // The last active owner cannot be demoted or removed: doing so would leave
-    // the organization with nobody able to manage or delete it.
-    await expect(roles.first()).toBeDisabled()
-    await expect(page.getByRole("button", { name: "Remove" })).toBeDisabled()
+    await page.getByRole("button", { name: "Add member" }).click()
+    await page.getByLabel("Email address").fill(MEMBER_EMAIL)
+    await page.getByLabel("Role", { exact: true }).selectOption("member")
+    await page.getByRole("button", { name: "Add member" }).click()
+
+    // Nothing is emailed and nothing has to be accepted: this edition answers
+    // on the "active" arm of the platform's result union, so the row is live
+    // immediately. Re-running revives the membership suspended below rather
+    // than inserting beside it, which is what makes this idempotent.
+    const member = memberRow(page, MEMBER_EMAIL)
+    await expect(member).toBeVisible()
+    const role = member.getByLabel(/^Role for /)
+    await expect(role).toHaveValue("member")
+
+    await role.selectOption("admin")
+    await expect(
+      memberRow(page, MEMBER_EMAIL).getByLabel(/^Role for /),
+    ).toHaveValue("admin")
+
+    // Removal suspends rather than deletes, and a suspended membership is not
+    // listable, so the row leaves the roster while the attribution behind it
+    // survives.
+    await memberRow(page, MEMBER_EMAIL)
+      .getByRole("button", { name: "Remove" })
+      .click()
+    await page.getByRole("button", { name: "Remove member" }).click()
+    await expect(memberRow(page, MEMBER_EMAIL)).toHaveCount(0)
+
+    // Re-adding the same address revives that membership rather than starting a
+    // second one, which is also what lets this spec run twice against one
+    // gateway.
+    await page.getByRole("button", { name: "Add member" }).click()
+    await page.getByLabel("Email address").fill(MEMBER_EMAIL)
+    await page.getByRole("button", { name: "Add member" }).click()
+    await expect(memberRow(page, MEMBER_EMAIL)).toHaveCount(1)
+
+    // Leave the roster as this spec found it.
+    await memberRow(page, MEMBER_EMAIL)
+      .getByRole("button", { name: "Remove" })
+      .click()
+    await page.getByRole("button", { name: "Remove member" }).click()
+    await expect(memberRow(page, MEMBER_EMAIL)).toHaveCount(0)
   })
 
   test("creates a workspace, renames it, reads its roster, and removes it", async ({

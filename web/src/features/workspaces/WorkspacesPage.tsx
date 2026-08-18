@@ -1,11 +1,18 @@
 import { Button, Card, Chip } from "@heroui/react"
 import { useCallback, useMemo, useState } from "react"
 
-import type { OrganizationMember, Workspace, WorkspaceMember } from "@/client"
+import type {
+  OrganizationMember,
+  Workspace,
+  WorkspaceMember,
+  WorkspaceMemberRole,
+} from "@/client"
 import {
+  asMembershipRole,
   canManage,
   MEMBERSHIP_ROLES,
   memberLabel,
+  membershipLabel,
 } from "@/features/organization/roles"
 import {
   useAddWorkspaceMember,
@@ -35,9 +42,12 @@ import {
 // a workspace's members are only ever a subset of the organization's, which is
 // why adding one is a picker over the roster rather than an invitation.
 
+// The workspace vocabulary is the organization one: four fixed roles, the same
+// spellings, published on both requests. `asMembershipRole` narrows a picker's
+// string back to it.
 const ROLE_OPTIONS = MEMBERSHIP_ROLES.map((role) => ({
   value: role,
-  label: role,
+  label: membershipLabel(role),
 }))
 
 const getWorkspaceRowKey = (workspace: Workspace): string => workspace.id
@@ -165,7 +175,7 @@ function AddWorkspaceMember({
 }) {
   const add = useAddWorkspaceMember()
   const [userId, setUserId] = useState("")
-  const [role, setRole] = useState("member")
+  const [role, setRole] = useState<WorkspaceMemberRole>("member")
 
   if (!rosterResolved) {
     return null
@@ -174,9 +184,9 @@ function AddWorkspaceMember({
   if (candidates.length === 0) {
     return (
       <InfoBanner>
-        Every active member of this organization is already in this workspace.
-        New people arrive through the organization first, which a standalone
-        gateway does not have a path for yet.
+        Every active member of this organization is already in this workspace. A
+        workspace's members are always a subset of the organization's, so add
+        someone there first, on the Members page.
       </InfoBanner>
     )
   }
@@ -198,7 +208,7 @@ function AddWorkspaceMember({
       <FilterSelect
         label="Role"
         value={role}
-        onChange={setRole}
+        onChange={(value) => setRole(asMembershipRole(value) ?? "member")}
         options={ROLE_OPTIONS}
       />
       <Button
@@ -289,13 +299,16 @@ function WorkspaceMembersPanel({
                   value={member.role}
                   disabled={!canManageWorkspace || updateRole.isPending}
                   options={ROLE_OPTIONS}
-                  onChange={(role) =>
-                    updateRole.mutate({
-                      workspaceId: workspace.id,
-                      userId: member.user_id,
-                      role,
-                    })
-                  }
+                  onChange={(value) => {
+                    const role = asMembershipRole(value)
+                    if (role) {
+                      updateRole.mutate({
+                        workspaceId: workspace.id,
+                        userId: member.user_id,
+                        role,
+                      })
+                    }
+                  }}
                 />
                 <Button
                   size="sm"
@@ -476,7 +489,9 @@ export function WorkspacesPage() {
         }
       />
 
-      {manages ? null : (
+      {/* Withheld until the context answers, so an owner is not told for one
+          paint that they may not manage their own workspaces. */}
+      {context.isLoading || manages ? null : (
         <InfoBanner>
           Only organization owners and admins can create, edit, or delete
           workspaces.

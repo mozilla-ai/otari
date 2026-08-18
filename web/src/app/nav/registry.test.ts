@@ -69,6 +69,12 @@ describe("nav registry", () => {
     expect(navItemForPath("/organization")?.label).toBe("General")
   })
 
+  it("resolves a deeper path to the deepest entry above it", () => {
+    // Both /organization and /organization/members are prefixes of this, and
+    // the deeper one is what describes it.
+    expect(navItemForPath("/organization/members/abc")?.label).toBe("Members")
+  })
+
   it("still resolves an unregistered child route to its parent", () => {
     // The prefix pass is what a future child route (/routing/new) relies on to
     // inherit its parent's gating; only an exact match outranks it.

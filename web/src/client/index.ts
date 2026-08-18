@@ -271,6 +271,32 @@ export type SwitchOrganizationRequest = Schemas["OrganizationSwitchRequest"]
 export type OrganizationMember = Schemas["ActiveOrganizationMemberPublic"]
 export type UpdateOrganizationMemberRequest =
   Schemas["ActiveOrganizationMemberUpdateRequest"]
+export type CreateOrganizationMemberRequest = Defaulted<
+  Schemas["ActiveOrganizationMemberCreateRequest"],
+  "role"
+>
+export type CreateOrganizationMemberResult =
+  Schemas["ActiveOrganizationMemberCreateResultPublic"]
+// Not `Defaulted`: the form states the role it grants rather than leaving it to
+// the server, and `Defaulted` is for the fields the dashboard actually omits.
+export type WorkspaceAssignment = Schemas["WorkspaceAssignmentRequest"]
+
+// The role and status vocabularies, taken from the requests that *set* one
+// rather than restated as literal unions. The gateway publishes them as enums
+// now, so a value this edition refuses cannot reach a picker: the two that
+// matter are that "invited" is a status a membership may hold and not one it may
+// be given, and that a workspace role travels as a query parameter, so its
+// vocabulary is pinned to the operation rather than to a body schema.
+export type MembershipRole =
+  Schemas["ActiveOrganizationMemberCreateRequest"]["role"]
+export type SettableMemberStatus = NonNullable<
+  Schemas["ActiveOrganizationMemberUpdateRequest"]["status"]
+>
+export type WorkspaceMemberRole = NonNullable<
+  NonNullable<
+    operations["add_workspace_member_v1_workspaces__workspace_id__members__user_id__post"]["parameters"]["query"]
+  >["role"]
+>
 export type Workspace = Schemas["WorkspacePublic"]
 export type CreateWorkspaceRequest = Schemas["WorkspaceCreate"]
 export type UpdateWorkspaceRequest = Schemas["WorkspaceUpdate"]

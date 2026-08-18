@@ -13,6 +13,8 @@ import type {
   CreateBudgetRequest,
   CreateKeyRequest,
   CreateKeyResponse,
+  CreateOrganizationMemberRequest,
+  CreateOrganizationMemberResult,
   CreateOrganizationRequest,
   CreateSearchToolRequest,
   CreateStoredProviderRequest,
@@ -78,6 +80,7 @@ import type {
   User,
   Workspace,
   WorkspaceMember,
+  WorkspaceMemberRole,
 } from "@/client"
 import { ApiError, apiFetch, longRequestSignal } from "@/shared/api/client"
 import { isoAgo } from "@/shared/helpers/timeRange"
@@ -1475,6 +1478,27 @@ export function useDeleteOrganization() {
   })
 }
 
+// The one write path that puts a second row on the roster. The response says
+// which arm of the platform's result union it took: this edition always answers
+// "active", because it has no invitation to send and no way to accept one, and
+// the caller is shown that rather than a generic success.
+export function useAddOrganizationMember() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: CreateOrganizationMemberRequest) =>
+      apiFetch<CreateOrganizationMemberResult>("/v1/organizations/me/members", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_MEMBERS] })
+      // A request may place the new member into workspaces in the same
+      // transaction, so their rosters move with it.
+      void queryClient.invalidateQueries({ queryKey: [WORKSPACES] })
+    },
+  })
+}
+
 export function useUpdateOrganizationMember() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -1587,7 +1611,7 @@ export function useAddWorkspaceMember() {
     }: {
       workspaceId: string
       userId: string
-      role: string
+      role: WorkspaceMemberRole
     }) =>
       // The role travels as a query parameter, not a body: that is the wire
       // contract these endpoints were rehomed with.
@@ -1611,7 +1635,7 @@ export function useUpdateWorkspaceMemberRole() {
     }: {
       workspaceId: string
       userId: string
-      role: string
+      role: WorkspaceMemberRole
     }) =>
       apiFetch<WorkspaceMember>(
         `/v1/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(userId)}?role=${encodeURIComponent(role)}`,

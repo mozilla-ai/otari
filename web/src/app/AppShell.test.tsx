@@ -1,4 +1,4 @@
-import { act, screen } from "@testing-library/react"
+import { act, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -347,22 +347,30 @@ describe("AppShell surface gating", () => {
     await renderShell()
 
     // Every label, not a sample: a surface misspelled on a NAV entry hides that
-    // destination in every deployment, and only the full list catches it.
-    for (const label of [
+    // destination in every deployment, and only the full list catches it. Kept
+    // as an exact comparison rather than a loop of presence checks, because a
+    // subset check keeps passing while the list quietly stops being every label
+    // (which is what happened when the tenancy section landed).
+    expect(
+      within(screen.getByRole("navigation"))
+        .getAllByRole("link")
+        .map((link) => link.textContent),
+    ).toEqual([
       "Overview",
       "Activity",
       "Usage",
       "Providers",
+      "Models",
+      "Routing",
+      "General",
+      "Members",
+      "Workspaces",
       "Users",
       "API keys",
       "Budgets",
-      "Models",
-      "Routing",
       "Tools & Guardrails",
       "Settings",
-    ]) {
-      expect(screen.getByRole("link", { name: label })).toBeInTheDocument()
-    }
+    ])
   })
 
   it("hides a destination whose surface the deployment does not host", async () => {

@@ -2,10 +2,14 @@ import { describe, expect, it } from "vitest"
 
 import {
   activeOwnerCount,
+  asMembershipRole,
+  asSettableStatus,
   canManage,
   isOwner,
+  MEMBERSHIP_ROLES,
   memberLabel,
   membershipChangeBlockedReason,
+  SETTABLE_MEMBER_STATUSES,
 } from "@/features/organization/roles"
 import { organizationContext, organizationMember } from "@/tests/fixtures"
 
@@ -33,6 +37,29 @@ describe("tenancy roles", () => {
         organizationMember({ role: "admin", status: "active" }),
       ]),
     ).toBe(1)
+  })
+})
+
+describe("the published vocabularies", () => {
+  it("offers only the statuses a membership may be given", () => {
+    // "invited" is a status a membership may *hold* and not one it may be set
+    // to: nothing in this edition creates or accepts an invitation, and the
+    // gateway's update request refuses it, so a picker offering it would
+    // advertise a dead state and answer 422 when someone picked it.
+    expect(SETTABLE_MEMBER_STATUSES).toEqual(["active", "suspended"])
+    expect(SETTABLE_MEMBER_STATUSES).not.toContain("invited")
+  })
+
+  it("narrows a picker's string back to the vocabulary, or to nothing", () => {
+    expect(asMembershipRole("admin")).toBe("admin")
+    expect(asMembershipRole("superadmin")).toBeUndefined()
+    expect(asSettableStatus("suspended")).toBe("suspended")
+    // Held, not settable: the guard is what keeps it out of a request body.
+    expect(asSettableStatus("invited")).toBeUndefined()
+  })
+
+  it("keeps the four fixed roles, most privileged first", () => {
+    expect(MEMBERSHIP_ROLES).toEqual(["owner", "admin", "member", "viewer"])
   })
 })
 

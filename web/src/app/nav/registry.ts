@@ -207,12 +207,15 @@ export const NAV_ITEMS: readonly NavItem[] = NAV_SECTIONS.flatMap(
  * declares and nothing else.
  */
 export function navItemForPath(pathname: string): NavItem | undefined {
-  return (
-    NAV_ITEMS.find((item) => pathname === item.to) ??
-    NAV_ITEMS.find(
-      (item) => item.to !== "/" && pathname.startsWith(`${item.to}/`),
-    )
-  )
+  const exact = NAV_ITEMS.find((item) => pathname === item.to)
+  if (exact) return exact
+  // Longest prefix, not first: `/organization/members/x` is under both
+  // `/organization` and `/organization/members`, and the deeper entry is the
+  // one that describes it. Ordering the scan rather than the registry, because
+  // the registry's order is the sidebar's.
+  return NAV_ITEMS.filter(
+    (item) => item.to !== "/" && pathname.startsWith(`${item.to}/`),
+  ).sort((a, b) => b.to.length - a.to.length)[0]
 }
 
 /** A section that has at least one visible entry, paired with those entries. */

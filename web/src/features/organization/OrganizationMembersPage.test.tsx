@@ -4,9 +4,17 @@ import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type { OrganizationContext, OrganizationMember } from "@/client"
+import type {
+  OrganizationContext,
+  OrganizationMember,
+  Workspace,
+} from "@/client"
 import { OrganizationMembersPage } from "@/features/organization/OrganizationMembersPage"
-import { organizationContext, organizationMember } from "@/tests/fixtures"
+import {
+  organizationContext,
+  organizationMember,
+  workspace,
+} from "@/tests/fixtures"
 
 interface Request {
   url: string
@@ -24,9 +32,11 @@ function jsonResponse(body: unknown, status = 200): Response {
 function mockApi(opts: {
   context?: OrganizationContext
   members?: OrganizationMember[]
+  workspaces?: Workspace[]
 }) {
   const context = opts.context ?? organizationContext()
   const members = opts.members ?? [organizationMember()]
+  const workspaces = opts.workspaces ?? []
   const requests: Request[] = []
 
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -38,9 +48,18 @@ function mockApi(opts: {
       body: init?.body ? JSON.parse(String(init.body)) : undefined,
     })
 
+    if (url.includes("/v1/workspaces")) {
+      return jsonResponse({ data: workspaces, count: workspaces.length })
+    }
     if (url.includes("/v1/organizations/me/members")) {
       if (method === "GET") {
         return jsonResponse({ data: members, count: members.length })
+      }
+      if (method === "POST") {
+        return jsonResponse(
+          { status: "active", email: "new@example.com", role: "member" },
+          201,
+        )
       }
       return jsonResponse(members[0])
     }
@@ -137,6 +156,65 @@ describe("OrganizationMembersPage", () => {
     expect(remove?.url).toContain(
       "/v1/organizations/me/members/analyst-membership",
     )
+  })
+
+  it("shows a status rather than offering one to set", async () => {
+    mockApi({ members: [OWNER, ANALYST] })
+    renderPage(<OrganizationMembersPage />)
+
+    await screen.findByText("Analyst")
+    // The gateway takes two settable statuses, and suspending is what Remove
+    // already does with a confirmation in front of it, so a dropdown here would
+    // be an unconfirmed removal. The other direction has no subject: a
+    // suspended membership is not listable, so no row exists to reactivate.
+    expect(screen.queryByLabelText("Status for Analyst")).toBeNull()
+    expect(within(rowFor("Analyst")).getByText("Active")).toBeInTheDocument()
+  })
+
+  it("adds a member by address, into the workspaces that were ticked", async () => {
+    const requests = mockApi({
+      members: [OWNER],
+      workspaces: [workspace({ id: "ws-1", name: "Production" })],
+    })
+    const user = userEvent.setup()
+    renderPage(<OrganizationMembersPage />)
+
+    await user.click(await screen.findByRole("button", { name: "Add member" }))
+    await user.type(screen.getByLabelText("Email address"), "ada@example.com")
+    await user.selectOptions(screen.getByLabelText("Role"), "admin")
+    await user.click(await screen.findByLabelText("Production"))
+    // The header action hides itself while the form is open, so the remaining
+    // button of this name is the form's own submit.
+    await user.click(screen.getByRole("button", { name: "Add member" }))
+
+    const post = requests.find((request) => request.method === "POST")
+    expect(post?.url).toContain("/v1/organizations/me/members")
+    expect(post?.body).toEqual({
+      email: "ada@example.com",
+      role: "admin",
+      workspace_assignments: [{ workspace_id: "ws-1", role: "member" }],
+    })
+  })
+
+  it("sends no assignment list when no workspace was ticked", async () => {
+    const requests = mockApi({
+      members: [OWNER],
+      workspaces: [workspace({ id: "ws-1", name: "Production" })],
+    })
+    const user = userEvent.setup()
+    renderPage(<OrganizationMembersPage />)
+
+    await user.click(await screen.findByRole("button", { name: "Add member" }))
+    await user.type(screen.getByLabelText("Email address"), "ada@example.com")
+    await user.click(screen.getByRole("button", { name: "Add member" }))
+
+    const post = requests.find((request) => request.method === "POST")
+    // No assignment is not the same request as an empty list of them.
+    expect(post?.body).toEqual({
+      email: "ada@example.com",
+      role: "member",
+      workspace_assignments: null,
+    })
   })
 
   it("offers no membership control to a caller who cannot manage the organization", async () => {

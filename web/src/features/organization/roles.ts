@@ -32,13 +32,60 @@
  *   divergence to close when the context grows the field.
  */
 
-import type { OrganizationContext, OrganizationMember } from "@/client"
+import type {
+  MembershipRole,
+  OrganizationContext,
+  OrganizationMember,
+  SettableMemberStatus,
+} from "@/client"
 
 /** Every role an organization or workspace membership can carry, most privileged first. */
-export const MEMBERSHIP_ROLES = ["owner", "admin", "member", "viewer"] as const
+export const MEMBERSHIP_ROLES: readonly MembershipRole[] = [
+  "owner",
+  "admin",
+  "member",
+  "viewer",
+]
 
-/** Every status an organization membership can carry. */
-export const MEMBERSHIP_STATUSES = ["active", "invited", "suspended"] as const
+/**
+ * The statuses a membership may be *given*, which is narrower than the set it
+ * may *hold*.
+ *
+ * Not offered as a picker anywhere, and the roster page says why: suspending is
+ * what Remove does, and a suspended membership leaves the roster, so neither
+ * direction has a control. Kept because it is the shape of a rule worth not
+ * rediscovering: "invited" is a stored status the invitation flow produces, the
+ * gateway refuses it on the update request
+ * (`OrganizationMemberSettableStatus`), and whatever control arrives with that
+ * flow has to respect the same line.
+ */
+export const SETTABLE_MEMBER_STATUSES: readonly SettableMemberStatus[] = [
+  "active",
+  "suspended",
+]
+
+/**
+ * Narrow a picker's string back to the vocabulary the gateway publishes.
+ *
+ * A `<select>` hands back a bare string, and the request types are unions now,
+ * so something has to bridge the two. A guard rather than a cast: the options
+ * come from the constants above today, and a value that is not in them is a bug
+ * worth dropping the write for rather than sending and having refused.
+ */
+export function asMembershipRole(value: string): MembershipRole | undefined {
+  return MEMBERSHIP_ROLES.find((role) => role === value)
+}
+
+export function asSettableStatus(
+  value: string,
+): SettableMemberStatus | undefined {
+  return SETTABLE_MEMBER_STATUSES.find((status) => status === value)
+}
+
+/** A vocabulary value as it is shown: "owner" is a wire value, "Owner" is a label. */
+export function membershipLabel(value: string): string {
+  return value.charAt(0).toUpperCase() + value.slice(1)
+}
 
 /** The roles that may manage an organization or a workspace. */
 const MANAGEMENT_ROLES: readonly string[] = ["owner", "admin"]
