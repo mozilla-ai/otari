@@ -3456,13 +3456,19 @@
                   "value": ""
                 },
                 {
+                  "description": "Only usage recorded in this workspace.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
                   "description": "Time-series granularity: 'hour' or 'day'",
                   "disabled": true,
                   "key": "bucket",
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage/series?group_by=&start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&bucket="
+              "raw": "{{baseUrl}}/v1/usage/series?group_by=&start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&workspace_id=&bucket="
             }
           }
         },
@@ -3600,6 +3606,12 @@
                   "value": ""
                 },
                 {
+                  "description": "Only usage recorded in this workspace.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
                   "description": "Time-series granularity: 'hour' or 'day'",
                   "disabled": true,
                   "key": "bucket",
@@ -3612,7 +3624,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage/summary?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&bucket=&dimensions="
+              "raw": "{{baseUrl}}/v1/usage/summary?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&workspace_id=&bucket=&dimensions="
             }
           }
         },
@@ -3715,9 +3727,15 @@
                   "disabled": true,
                   "key": "counts_toward_budget",
                   "value": ""
+                },
+                {
+                  "description": "Only usage recorded in this workspace.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage/summary.csv?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget="
+              "raw": "{{baseUrl}}/v1/usage/summary.csv?start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&workspace_id="
             }
           }
         }

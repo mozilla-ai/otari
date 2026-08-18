@@ -15823,6 +15823,25 @@
             }
           },
           {
+            "description": "Only usage recorded in this workspace.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only usage recorded in this workspace.",
+              "title": "Workspace Id"
+            }
+          },
+          {
             "description": "Time-series granularity: 'hour' or 'day'",
             "in": "query",
             "name": "bucket",
@@ -16202,6 +16221,25 @@
             }
           },
           {
+            "description": "Only usage recorded in this workspace.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only usage recorded in this workspace.",
+              "title": "Workspace Id"
+            }
+          },
+          {
             "description": "Time-series granularity: 'hour' or 'day'",
             "in": "query",
             "name": "bucket",
@@ -16561,6 +16599,25 @@
               ],
               "description": "Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget",
               "title": "Counts Toward Budget"
+            }
+          },
+          {
+            "description": "Only usage recorded in this workspace.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only usage recorded in this workspace.",
+              "title": "Workspace Id"
             }
           }
         ],

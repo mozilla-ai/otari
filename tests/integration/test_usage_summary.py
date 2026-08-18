@@ -69,6 +69,7 @@ def _make_log(
     cost: float | None = 0.01,
     status: str = "success",
     latency_ms: int | None = None,
+    workspace_id: Any = None,
 ) -> None:
     if user_id is not None:
         _ensure_user(db, user_id)
@@ -77,7 +78,7 @@ def _make_log(
     db.add(
         UsageLog(
             id=str(uuid.uuid4()),
-            workspace_id=seed_workspace_id(db),
+            workspace_id=workspace_id if workspace_id is not None else seed_workspace_id(db),
             user_id=user_id,
             api_key_id=api_key_id,
             timestamp=timestamp,
@@ -1221,3 +1222,81 @@ def test_tool_breakdown_is_empty_when_only_absorbed_rows_match(
     )
     assert response.status_code == 200, response.text
     assert response.json()["by_tool"] == []
+
+
+def _make_workspace(client: TestClient, headers: dict[str, str], name: str) -> str:
+    created = client.post("/v1/workspaces", json={"name": name}, headers=headers)
+    assert created.status_code == 201, created.text
+    return str(created.json()["id"])
+
+
+def test_summary_family_filters_by_workspace(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """The whole summary family scopes to a workspace, like the row list already does.
+
+    The dashboard picks a workspace from a switcher and sends it with every request
+    on the page. A summary endpoint that ignored it would leave the spend and volume
+    charts deployment-wide above a table that had narrowed, so one page would report
+    two different answers about the same traffic.
+    """
+    # Captured before the second workspace exists, so it is unambiguously the
+    # default rather than whichever of the two the seed helper happens to find.
+    default = seed_workspace_id(db_session)
+    other = _make_workspace(client, master_key_header, "Platform team")
+
+    ts = datetime(2025, 9, 1, 12, 0, tzinfo=UTC)
+    _make_log(db_session, user_id="ws", timestamp=ts, model="here", cost=0.10, workspace_id=default)
+    _make_log(db_session, user_id="ws", timestamp=ts, model="there", cost=0.20, workspace_id=uuid.UUID(other))
+    db_session.commit()
+
+    window: dict[str, Any] = {
+        "user_id": "ws",
+        "start_date": "2025-09-01T00:00:00Z",
+        "end_date": "2025-09-02T00:00:00Z",
+    }
+    scoped = {**window, "workspace_id": other}
+
+    summary = client.get(SUMMARY_PATH, headers=master_key_header, params=scoped).json()
+    assert summary["totals"]["cost"] == pytest.approx(0.20)
+    assert summary["totals"]["request_count"] == 1
+    assert [row["key"] for row in summary["by_model"]] == ["there"]
+
+    series = client.get(SERIES_PATH, headers=master_key_header, params={**scoped, "group_by": "model"}).json()
+    assert {group["key"] for group in series["groups"]} == {"there"}
+    assert sum(point["cost"] for point in series["points"]) == pytest.approx(0.20)
+
+    export = client.get(CSV_PATH, headers=master_key_header, params=scoped)
+    rows = list(csv.reader(io.StringIO(export.text)))
+    assert [row[1] for row in rows[1:] if row[0] == "model"] == ["there"]
+
+
+def test_summary_family_without_a_workspace_stays_deployment_wide(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """Unset keeps the deployment-wide rollup the organization context wants, which
+    is also what every caller predating the filter sends."""
+    default = seed_workspace_id(db_session)
+    other = _make_workspace(client, master_key_header, "Platform team")
+
+    ts = datetime(2025, 9, 1, 12, 0, tzinfo=UTC)
+    _make_log(db_session, user_id="wsall", timestamp=ts, model="here", cost=0.10, workspace_id=default)
+    _make_log(db_session, user_id="wsall", timestamp=ts, model="there", cost=0.20, workspace_id=uuid.UUID(other))
+    db_session.commit()
+
+    window: dict[str, Any] = {
+        "user_id": "wsall",
+        "start_date": "2025-09-01T00:00:00Z",
+        "end_date": "2025-09-02T00:00:00Z",
+    }
+
+    summary = client.get(SUMMARY_PATH, headers=master_key_header, params=window).json()
+    assert summary["totals"]["cost"] == pytest.approx(0.30)
+    assert sorted(row["key"] for row in summary["by_model"]) == ["here", "there"]
+
+    series = client.get(SERIES_PATH, headers=master_key_header, params={**window, "group_by": "model"}).json()
+    assert {group["key"] for group in series["groups"]} == {"here", "there"}
+
+    export = client.get(CSV_PATH, headers=master_key_header, params=window)
+    rows = list(csv.reader(io.StringIO(export.text)))
+    assert sorted(row[1] for row in rows[1:] if row[0] == "model") == ["here", "there"]

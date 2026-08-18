@@ -308,6 +308,7 @@ _COUNTS_DESC = (
     "Filter by budget participation: true = only enforced gateway rows, "
     "false = only imported rows that never touch a budget"
 )
+_WORKSPACE_DESC = "Only usage recorded in this workspace."
 # The three entity filters are repeatable on every usage endpoint, so a chart or a
 # log view can compare a handful of models / users / keys instead of one at a time.
 # The bulk delete / set-price selection body takes the same form (see
@@ -438,9 +439,7 @@ async def list_usage(
     request_group_id: Annotated[
         list[str] | None, Query(max_length=_MAX_REQUEST_GROUPS, description=_REQUEST_GROUP_DESC)
     ] = None,
-    workspace_id: Annotated[
-        uuid.UUID | None, Query(description="Only usage recorded in this workspace.")
-    ] = None,
+    workspace_id: Annotated[uuid.UUID | None, Query(description=_WORKSPACE_DESC)] = None,
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
 ) -> list[UsageEntry]:
@@ -546,9 +545,7 @@ async def count_usage(
     request_group_id: Annotated[
         list[str] | None, Query(max_length=_MAX_REQUEST_GROUPS, description=_REQUEST_GROUP_DESC)
     ] = None,
-    workspace_id: Annotated[
-        uuid.UUID | None, Query(description="Only usage recorded in this workspace.")
-    ] = None,
+    workspace_id: Annotated[uuid.UUID | None, Query(description=_WORKSPACE_DESC)] = None,
 ) -> UsageCount:
     """Total number of usage logs matching the given filters.
 
@@ -1279,6 +1276,7 @@ async def _summary_context(
     tool: str | None = None,
     counts_toward_budget: bool | None = None,
     status_code: int | None = None,
+    workspace_id: uuid.UUID | None = None,
 ) -> tuple[datetime, datetime, list[ColumnElement[bool]], UsageTotals]:
     """Resolve the bounded window, the shared WHERE conditions, and the grand
     totals: the common preamble both summary endpoints run, kept in one place so a
@@ -1300,6 +1298,7 @@ async def _summary_context(
         priced=priced,
         tool=tool,
         counts_toward_budget=counts_toward_budget,
+        workspace_id=workspace_id,
     )
     totals = await _totals(db, conditions, status)
     return start, end, conditions, totals
@@ -1374,6 +1373,7 @@ async def usage_summary(
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
     tool: ToolFilter | None = Query(default=None, description=_TOOL_DESC),
     counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
+    workspace_id: Annotated[uuid.UUID | None, Query(description=_WORKSPACE_DESC)] = None,
     bucket: Bucket = Query(default="day", description="Time-series granularity: 'hour' or 'day'"),
     dimensions: list[SummaryDimension] | None = Query(default=None, description=_DIMENSIONS_DESC),
 ) -> UsageSummary:
@@ -1412,6 +1412,7 @@ async def usage_summary(
         priced=priced,
         tool=tool,
         counts_toward_budget=counts_toward_budget,
+        workspace_id=workspace_id,
     )
     # ``none`` is dropped rather than rejected: it exists only so a caller can send
     # an empty selection, and it never contributes a dimension of its own.
@@ -1512,6 +1513,7 @@ async def usage_series(
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
     tool: ToolFilter | None = Query(default=None, description=_TOOL_DESC),
     counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
+    workspace_id: Annotated[uuid.UUID | None, Query(description=_WORKSPACE_DESC)] = None,
     bucket: Bucket = Query(default="day", description="Time-series granularity: 'hour' or 'day'"),
 ) -> UsageGroupedSeries:
     """Time series split by one dimension, for the dashboard's stacked charts.
@@ -1542,6 +1544,7 @@ async def usage_series(
         priced=priced,
         tool=tool,
         counts_toward_budget=counts_toward_budget,
+        workspace_id=workspace_id,
     )
     # Finding-5 guard: /summary densifies then caps at _MAX_SERIES_POINTS; this
     # endpoint is sparse, so cap the bucket *grid* instead (hourly over the
@@ -1649,6 +1652,7 @@ async def usage_summary_csv(
     priced: bool | None = Query(default=None, description=_PRICED_DESC),
     tool: ToolFilter | None = Query(default=None, description=_TOOL_DESC),
     counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
+    workspace_id: Annotated[uuid.UUID | None, Query(description=_WORKSPACE_DESC)] = None,
 ) -> Response:
     """Download every breakdown the summary reports, as one CSV.
 
@@ -1676,6 +1680,7 @@ async def usage_summary_csv(
         priced=priced,
         tool=tool,
         counts_toward_budget=counts_toward_budget,
+        workspace_id=workspace_id,
     )
     # Driven off the same dimension table as ``/summary`` so a new breakdown lands
     # in the export without a second edit here.
