@@ -243,9 +243,17 @@ export function OrganizationMembersPage() {
             members: rows,
           })
           return (
+            // `title` reaches a mouse; the reason is folded into the control's
+            // own name so it reaches everyone else too. A disabled control is
+            // not focusable, so an `aria-describedby` on it would never be
+            // announced either.
             <span title={blocked}>
               <FilterSelect
-                ariaLabel={`Role for ${memberLabel(member)}`}
+                ariaLabel={
+                  blocked
+                    ? `Role for ${memberLabel(member)} (${blocked})`
+                    : `Role for ${memberLabel(member)}`
+                }
                 value={member.role}
                 disabled={blocked !== undefined || update.isPending}
                 options={ROLE_OPTIONS}
@@ -291,6 +299,13 @@ export function OrganizationMembersPage() {
               <Button
                 size="sm"
                 variant="danger-soft"
+                // See the Role cell: the reason has to be in the name, not only
+                // in the tooltip, to reach anything but a pointer.
+                aria-label={
+                  blocked
+                    ? `Remove ${memberLabel(member)} (${blocked})`
+                    : undefined
+                }
                 isDisabled={blocked !== undefined}
                 onPress={() => setRemoving(member)}
               >

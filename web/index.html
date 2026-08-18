@@ -22,6 +22,33 @@
          insets to sit out of the way. -->
     <meta name="apple-mobile-web-app-status-bar-style" content="default" />
     <title>Otari Dashboard</title>
+    <!-- Applies the remembered theme before the first paint. `useTheme` sets the
+         same three properties, but it can only do so once React has mounted,
+         which is after the boot screen below has already been painted light: a
+         dark-mode operator saw a white flash on every load. Keep this in sync
+         with the effect in src/shared/hooks/useTheme.tsx; the storage key and
+         the three-state "system" resolution are the same on both sides. -->
+    <script>
+      (function () {
+        try {
+          var stored = window.localStorage.getItem("otari.dashboard.theme")
+          var resolved =
+            stored === "light" || stored === "dark"
+              ? stored
+              : window.matchMedia("(prefers-color-scheme: dark)").matches
+                ? "dark"
+                : "light"
+          var root = document.documentElement
+          root.setAttribute("data-theme", resolved)
+          root.classList.toggle("dark", resolved === "dark")
+          root.style.colorScheme = resolved
+        } catch (error) {
+          // Storage refused, or no matchMedia. The stylesheet's own defaults
+          // apply and the effect corrects it a moment later, which is the
+          // behavior this script exists to improve on, not to replace.
+        }
+      })()
+    </script>
     <!-- Paints the boot state below. A <style> block rather than a Tailwind
          class (which the frontend standards otherwise rule out) because this has
          to render before the bundle's stylesheet is a certainty: it is the thing

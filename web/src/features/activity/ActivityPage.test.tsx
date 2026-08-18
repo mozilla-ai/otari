@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { InFlightRequest, InFlightResponse, UsageEntry } from "@/client"
 import { ActivityPage } from "@/features/activity/ActivityPage"
+import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { withRouter } from "@/tests/router"
 
 function entry(overrides: Partial<UsageEntry> = {}): UsageEntry {
@@ -61,6 +62,8 @@ function mockApi(
     groupRows?: UsageEntry[]
     users?: string[]
     inFlight?: InFlightResponse | (() => InFlightResponse)
+    /** The workspace the switcher is pointed at, if a test needs one. */
+    workspace?: string
   } = {},
 ) {
   const rows = opts.rows ?? []
@@ -163,6 +166,36 @@ function mockApi(
         }
         return jsonResponse(rows)
       }
+      // Seeds the switcher, and only when a test asks for it: the provider reads
+      // `workspace_memberships` off this one response rather than listing
+      // workspaces, so a test that leaves `workspace` unset renders the
+      // deployment-wide view the other cases here assume.
+      if (url.endsWith("/v1/organizations/me")) {
+        return jsonResponse({
+          organization_member_id: "om-1",
+          role: "owner",
+          status: "active",
+          organization: {
+            id: "org-1",
+            name: "Acme",
+            slug: "acme",
+            created_by_user_id: null,
+            created_at: new Date().toISOString(),
+            updated_at: null,
+          },
+          byo_provider_keys_allowed: true,
+          workspace_memberships: opts.workspace
+            ? [
+                {
+                  workspace_id: opts.workspace,
+                  workspace_name: "Production",
+                  role: "owner",
+                  status: "active",
+                },
+              ]
+            : [],
+        })
+      }
       // The page no longer reads /v1/users or /v1/keys; both fall through to the
       // empty default below, and a test asserting that is at the end of this file.
       return jsonResponse([])
@@ -176,7 +209,9 @@ function renderPage(ui: ReactElement, route = "/activity") {
     defaultOptions: { queries: { retry: false } },
   })
   return render(
-    <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
+    <QueryClientProvider client={client}>
+      <SelectedWorkspaceProvider>{ui}</SelectedWorkspaceProvider>
+    </QueryClientProvider>,
     {
       wrapper: withRouter({ url: route }),
     },
@@ -986,6 +1021,55 @@ describe("ActivityPage", () => {
       expect(body.provider).toBe("anthropic")
       expect(body.endpoint).toBe("external")
     })
+  })
+
+  it("carries the selected workspace into an 'all matching' delete", async () => {
+    // The widest scope on the page, and the only one not set by a control on it:
+    // the sidebar's switcher narrows the table, so the count that sizes "select
+    // all N" is taken inside one workspace. A delete body that omits it is
+    // re-derived server-side without the scope and destroys every other
+    // workspace's imported rows from a view the operator had narrowed to one.
+    const user = userEvent.setup()
+    const workspaceId = "11111111-2222-3333-4444-555555555555"
+    const { calls } = mockApi({
+      rows: [
+        entry({
+          id: "imp-1",
+          model: "imported-model",
+          counts_toward_budget: false,
+        }),
+      ],
+      total: 5,
+      workspace: workspaceId,
+    })
+    renderPage(<ActivityPage />)
+
+    const row = (await screen.findByText("imported-model")).closest("tr")!
+    await user.click(within(row).getByRole("checkbox"))
+    await user.click(
+      await screen.findByRole("button", { name: /Select all 5 matching/ }),
+    )
+
+    await user.click(screen.getByRole("button", { name: "Delete" }))
+    const dialog = await screen.findByRole("alertdialog")
+    await user.click(within(dialog).getByRole("button", { name: "Delete" }))
+
+    await waitFor(() => {
+      const del = calls.find(
+        (c) => c.url.endsWith("/v1/usage") && c.method === "DELETE",
+      )
+      expect(del).toBeTruthy()
+      const body = JSON.parse(del!.body ?? "{}")
+      expect(body.by_filter).toBe(true)
+      expect(body.workspace_id).toBe(workspaceId)
+    })
+
+    // The count the operator confirmed was taken under the same scope, which is
+    // what makes "all 5 matching" mean the same set on both sides.
+    const counts = calls.filter((c) => c.url.includes("/v1/usage/count"))
+    expect(
+      counts.some((c) => c.url.includes(`workspace_id=${workspaceId}`)),
+    ).toBe(true)
   })
 
   it("carries a multi-value filter into an 'all matching' delete", async () => {

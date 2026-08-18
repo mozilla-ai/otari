@@ -133,8 +133,19 @@ describe("OrganizationMembersPage", () => {
     const owner = rowFor("Operator")
     // Demoting or removing the last active owner leaves nobody able to manage
     // the organization, so the server refuses it and the page says so up front.
-    expect(within(owner).getByLabelText("Role for Operator")).toBeDisabled()
-    expect(within(owner).getByRole("button", { name: "Remove" })).toBeDisabled()
+    // The reason is in each control's own name, not only in a tooltip: neither
+    // takes focus while disabled, so a pointer is the only thing a `title`
+    // would reach.
+    expect(
+      within(owner).getByLabelText(
+        /Role for Operator \(This is the last active owner/,
+      ),
+    ).toBeDisabled()
+    expect(
+      within(owner).getByRole("button", {
+        name: /Remove Operator \(This is the last active owner/,
+      }),
+    ).toBeDisabled()
     expect(within(owner).getByText("Active")).toBeInTheDocument()
   })
 
@@ -249,9 +260,15 @@ describe("OrganizationMembersPage", () => {
 
     await screen.findByText("Analyst")
     const analyst = rowFor("Analyst")
-    expect(within(analyst).getByLabelText("Role for Analyst")).toBeDisabled()
     expect(
-      within(analyst).getByRole("button", { name: "Remove" }),
+      within(analyst).getByLabelText(
+        /Role for Analyst \(Only organization owners and admins/,
+      ),
+    ).toBeDisabled()
+    expect(
+      within(analyst).getByRole("button", {
+        name: /Remove Analyst \(Only organization owners and admins/,
+      }),
     ).toBeDisabled()
     expect(
       screen.getByText(/Only organization owners and admins/),

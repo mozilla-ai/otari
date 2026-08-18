@@ -59,6 +59,10 @@ function MenuItem({
       type="button"
       disabled={isDisabled}
       title={title}
+      // A disabled button takes no focus, so the tooltip is pointer-only. Fold
+      // the reason into the name instead, which a screen reader still reads
+      // when browsing past the item.
+      aria-label={isDisabled && title ? `${label} (${title})` : undefined}
       onClick={onPress}
       className={`flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm transition-colors ${
         isDisabled

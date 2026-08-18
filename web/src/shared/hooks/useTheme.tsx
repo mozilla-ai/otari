@@ -95,6 +95,15 @@ export function ThemeProvider({ children }: { children: ReactNode }) {
     root.setAttribute("data-theme", resolved)
     // Both spellings, because the `dark:` variant matches either (globals.css).
     root.classList.toggle("dark", resolved === "dark")
+    // The tokens only reach what this stylesheet paints. Scrollbars, native
+    // checkboxes (Members, Users, Keys and Settings all use one) and form
+    // controls are painted by the browser, which follows `color-scheme` alone.
+    // `globals.css` declares `light dark` there, meaning "follow the OS", so
+    // without this an operator on a light OS who picks Dark gets light native
+    // controls on a dark page. Set inline so it wins over that declaration, and
+    // in JS rather than in the stylesheet so the rehomed file stays the file
+    // otari-ai has (see web/AGENTS.md).
+    root.style.colorScheme = resolved
   }, [resolved])
 
   const setPreference = useCallback((next: ThemePreference) => {

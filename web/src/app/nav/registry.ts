@@ -81,10 +81,13 @@ const BASE_NAV_SECTIONS = [
         label: "Routing",
         surface: "routing",
         icon: RoutingIcon,
-        // Policies and Guardrails as the navigation prototype groups them.
-        // Aliases is this dashboard's own addition: it was a route with no way
-        // to reach it from the sidebar at all, and it is the other half of what
-        // routing decides (which name resolves to which target).
+        // Policies and Guardrails as the navigation prototype groups them. The
+        // prototype's third entry, Aliases, is deliberately absent: this
+        // dashboard lists an alias as the one-target policy it is, in the same
+        // table (see `RoutingPage`), so `/aliases` is a compatibility redirect
+        // onto `/routing` rather than a destination. Linking it would give the
+        // group two entries for one page, and the second could never highlight.
+        // It comes back if and when Routing grows a separate alias view.
         children: [
           { to: "/routing", label: "Policies" },
           {
@@ -93,7 +96,6 @@ const BASE_NAV_SECTIONS = [
             // Grouped with Routing, served by the tools surface.
             surface: "tools",
           },
-          { to: "/aliases", label: "Aliases" },
         ],
       },
       {

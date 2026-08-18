@@ -325,7 +325,11 @@ hand.
   cache rates, the 1-hour cache rate, and long-context tiers. The same form
   re-prices a model that is already listed, so a key that already has a price
   replaces it.
-- **Routing**: every named model your callers can send, in one place. A simple
+- **Routing** expands on the sidebar into **Policies** and **Guardrails**.
+  Guardrails is a view of the Tools settings, grouped here because a guardrail
+  decides what a request may do rather than adding a capability to it.
+  Policies is the page described below.
+- **Policies**: every named model your callers can send, in one place. A simple
   one-target name (what used to be called an alias) still works exactly as
   before; a policy adds what to try when the first model fails, a tier-down to a
   cheaper model as a budget fills up, and guardrails a caller cannot skip.
@@ -387,24 +391,37 @@ see [Access control](access-control.md).
 
 ### Tools
 
-- **Tools & Guardrails**: configure the backends for built-in tools (for
-  example the `otari_web_search` search backend) and request-level guardrails.
-  Each tool Otari runs itself also carries a **price per call** here: those calls
-  cost you money at a search provider or a sandbox, so they are billed onto the
-  request that triggered them. An unpriced tool is refused with a 402 while
-  `require_pricing` is on. See [Built-in tools](tools.md#pricing-a-gateway-run-tool).
-  Each gateway-run tool also shows **how to call it**: the `tools[].type` values
-  this deployment accepts and a request you can copy. Turning on
-  `web_search_intercept` adds the provider-named keywords (`web_search`,
-  `web_search_<date>`) to that list, which is what lets a client like Claude Code
-  reach your search backend without knowing Otari's own tool name. See
+One page per service, each a filtered view of the same settings. **Tools** on
+the sidebar expands to:
+
+- **Web search**: the backend behind `otari_web_search`, plus the **Search
+  tools** card that configures what
+  [`POST /v1/search`](api-reference.md#search) can run against. That endpoint no
+  longer needs a config file: add a `searxng` tool with no backend URL and it
+  uses the web-search URL set just above it, so the backend you already run
+  answers the direct search endpoint too. Turning on `web_search_intercept`
+  makes the provider-named keywords (`web_search`, `web_search_<date>`)
+  acceptable too, which is what lets a client like Claude Code reach your search
+  backend without knowing Otari's own tool name. See
   [Web-search interception](tools.md#web-search-interception).
-  The **Search tools** card on the same page configures what
-  [`POST /v1/search`](api-reference.md#search) can run against, which no longer
-  needs a config file: add a `searxng` tool with no backend URL and it uses the
-  web-search URL set just above it, so the backend you already run answers the
-  direct search endpoint too. Tools declared in a config file are listed here as
-  read-only; edit those where the file is defined.
+- **Code execution**: the sandbox backend that runs generated code.
+
+**Guardrails** is the third view, and it sits under Gateway → Routing rather
+than here, because a guardrail decides what a request may do rather than adding
+a capability to it.
+
+Two things are true of every one of these views:
+
+- Each tool Otari runs itself carries a **price per call**. Those calls cost you
+  money at a search provider or a sandbox, so they are billed onto the request
+  that triggered them, and an unpriced tool is refused with a 402 while
+  `require_pricing` is on. See
+  [Built-in tools](tools.md#pricing-a-gateway-run-tool).
+- Each gateway-run tool shows **how to call it**: the `tools[].type` values this
+  deployment accepts, and a request you can copy.
+
+Tools declared in a config file are listed read-only; edit those where the file
+is defined.
 
 ## The organization rail
 
