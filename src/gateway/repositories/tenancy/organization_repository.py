@@ -48,12 +48,5 @@ class OrganizationRepository(BaseRepository[Organization, OrganizationCreate, Or
         await self.db.refresh(organization)
         return organization
 
-    async def get_by_ids(self, organization_ids: list[uuid.UUID]) -> list[Organization]:
-        """Return the organizations named by a batch of ids (order unspecified)."""
-        if not organization_ids:
-            return []
-        result = await self.db.execute(select(Organization).where(col(Organization.id).in_(organization_ids)))
-        return list(result.scalars().all())
-
 
 __all__ = ["OrganizationRepository"]

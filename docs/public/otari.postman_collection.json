@@ -1632,39 +1632,6 @@
           }
         },
         {
-          "name": "Create Organization",
-          "request": {
-            "body": {
-              "mode": "raw",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              },
-              "raw": "{\n  \"name\": \"string\"\n}"
-            },
-            "description": "Create an organization owned by the caller, and switch them into it.",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "method": "POST",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "v1",
-                "organizations",
-                "me"
-              ],
-              "raw": "{{baseUrl}}/v1/organizations/me"
-            }
-          }
-        },
-        {
           "name": "Update Active Organization",
           "request": {
             "body": {
@@ -1684,25 +1651,6 @@
               }
             ],
             "method": "PATCH",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "v1",
-                "organizations",
-                "me"
-              ],
-              "raw": "{{baseUrl}}/v1/organizations/me"
-            }
-          }
-        },
-        {
-          "name": "Delete Active Organization",
-          "request": {
-            "description": "Delete the caller's active organization. Owners only.",
-            "header": [],
-            "method": "DELETE",
             "url": {
               "host": [
                 "{{baseUrl}}"
@@ -1851,60 +1799,6 @@
                   "value": ""
                 }
               ]
-            }
-          }
-        },
-        {
-          "name": "List Organization Memberships",
-          "request": {
-            "description": "List every organization the caller is an active member of.",
-            "header": [],
-            "method": "GET",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "v1",
-                "organizations",
-                "me",
-                "memberships"
-              ],
-              "raw": "{{baseUrl}}/v1/organizations/me/memberships"
-            }
-          }
-        },
-        {
-          "name": "Switch Active Organization",
-          "request": {
-            "body": {
-              "mode": "raw",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              },
-              "raw": "{\n  \"organization_id\": \"00000000-0000-0000-0000-000000000000\"\n}"
-            },
-            "description": "Point the caller at another organization they are a member of.",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "method": "POST",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "v1",
-                "organizations",
-                "me",
-                "switch"
-              ],
-              "raw": "{{baseUrl}}/v1/organizations/me/switch"
             }
           }
         }

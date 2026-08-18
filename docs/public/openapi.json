@@ -4631,21 +4631,6 @@
         "title": "ModerationResult",
         "type": "object"
       },
-      "OrganizationCreateRequest": {
-        "properties": {
-          "name": {
-            "maxLength": 255,
-            "minLength": 1,
-            "title": "Name",
-            "type": "string"
-          }
-        },
-        "required": [
-          "name"
-        ],
-        "title": "OrganizationCreateRequest",
-        "type": "object"
-      },
       "OrganizationMembershipContextPublic": {
         "description": "An organization plus the caller's standing in it.\n\nWhat every tenancy page reads first: which organization it is looking at,\nand what the caller may do there.",
         "properties": {
@@ -4678,27 +4663,6 @@
           "organization"
         ],
         "title": "OrganizationMembershipContextPublic",
-        "type": "object"
-      },
-      "OrganizationMembershipContextsPublic": {
-        "properties": {
-          "count": {
-            "title": "Count",
-            "type": "integer"
-          },
-          "data": {
-            "items": {
-              "$ref": "#/components/schemas/OrganizationMembershipContextPublic"
-            },
-            "title": "Data",
-            "type": "array"
-          }
-        },
-        "required": [
-          "data",
-          "count"
-        ],
-        "title": "OrganizationMembershipContextsPublic",
         "type": "object"
       },
       "OrganizationPublic": {
@@ -4755,20 +4719,6 @@
           "created_at"
         ],
         "title": "OrganizationPublic",
-        "type": "object"
-      },
-      "OrganizationSwitchRequest": {
-        "properties": {
-          "organization_id": {
-            "format": "uuid",
-            "title": "Organization Id",
-            "type": "string"
-          }
-        },
-        "required": [
-          "organization_id"
-        ],
-        "title": "OrganizationSwitchRequest",
         "type": "object"
       },
       "PolicyRequest": {
@@ -12306,34 +12256,6 @@
       }
     },
     "/v1/organizations/me": {
-      "delete": {
-        "description": "Delete the caller's active organization. Owners only.",
-        "operationId": "delete_active_organization_v1_organizations_me_delete",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Message"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Delete Active Organization",
-        "tags": [
-          "organizations"
-        ]
-      },
       "get": {
         "description": "Get the caller's active organization and their standing in it.",
         "operationId": "get_active_organization_context_v1_organizations_me_get",
@@ -12406,54 +12328,6 @@
           }
         ],
         "summary": "Update Active Organization",
-        "tags": [
-          "organizations"
-        ]
-      },
-      "post": {
-        "description": "Create an organization owned by the caller, and switch them into it.",
-        "operationId": "create_organization_v1_organizations_me_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/OrganizationCreateRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "201": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OrganizationMembershipContextPublic"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Create Organization",
         "tags": [
           "organizations"
         ]
@@ -12683,86 +12557,6 @@
           }
         ],
         "summary": "Update Active Organization Member",
-        "tags": [
-          "organizations"
-        ]
-      }
-    },
-    "/v1/organizations/me/memberships": {
-      "get": {
-        "description": "List every organization the caller is an active member of.",
-        "operationId": "list_organization_memberships_v1_organizations_me_memberships_get",
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OrganizationMembershipContextsPublic"
-                }
-              }
-            },
-            "description": "Successful Response"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "List Organization Memberships",
-        "tags": [
-          "organizations"
-        ]
-      }
-    },
-    "/v1/organizations/me/switch": {
-      "post": {
-        "description": "Point the caller at another organization they are a member of.",
-        "operationId": "switch_active_organization_v1_organizations_me_switch_post",
-        "requestBody": {
-          "content": {
-            "application/json": {
-              "schema": {
-                "$ref": "#/components/schemas/OrganizationSwitchRequest"
-              }
-            }
-          },
-          "required": true
-        },
-        "responses": {
-          "200": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/OrganizationMembershipContextPublic"
-                }
-              }
-            },
-            "description": "Successful Response"
-          },
-          "422": {
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/HTTPValidationError"
-                }
-              }
-            },
-            "description": "Validation Error"
-          }
-        },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
-        "summary": "Switch Active Organization",
         "tags": [
           "organizations"
         ]

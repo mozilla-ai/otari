@@ -283,16 +283,12 @@ into something a text-only local model can read.
 
 ### Organizations
 
-Tenancy above users and keys; see [Access control](access-control.md#organizations-and-workspaces). Every path is scoped to the caller's active organization, which the first master-key request provisions.
+Tenancy above users and keys; see [Access control](access-control.md#organizations-and-workspaces). A standalone deployment has one organization, provisioned on the first master-key request, so every path is scoped to it and none names it. Creating, switching between and deleting organizations is what makes a deployment multi-tenant, and belongs to a hosted control plane rather than here.
 
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
 | `GET` | `/v1/organizations/me` | Get the active organization and the caller's role in it. | Master key |
-| `POST` | `/v1/organizations/me` | Create an organization and switch into it. | Master key |
 | `PATCH` | `/v1/organizations/me` | Rename the active organization. | Master key |
-| `DELETE` | `/v1/organizations/me` | Delete the active organization. | Master key |
-| `GET` | `/v1/organizations/me/memberships` | List the organizations the caller belongs to. | Master key |
-| `POST` | `/v1/organizations/me/switch` | Switch the active organization. | Master key |
 | `GET` | `/v1/organizations/me/members` | List the active organization's members. | Master key |
 | `POST` | `/v1/organizations/me/members` | Add a member by email, optionally into workspaces at the same time. | Master key |
 | `PATCH` | `/v1/organizations/me/members/{organization_member_id}` | Change a member's role or status. | Master key |

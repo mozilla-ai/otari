@@ -10,10 +10,15 @@ arrive with their own slices, tracked under mozilla-ai/otari-ai#1452, and this
 service is where they attach.
 
 One rule runs through every method: a caller only ever acts inside the
-organization their identity is currently pointed at. Nothing takes an
-organization id from the request except the switch endpoint, which checks
-membership before it moves the pointer, so a request cannot name another
-tenant's organization at all.
+organization their identity is currently pointed at, and no method takes an
+organization id from the request, so a request cannot name another tenant's
+organization at all.
+
+A standalone deployment has one organization, provisioned at first boot, so
+creating, switching between and deleting them are not part of this surface. They
+are what make a deployment multi-tenant, and a self-hosted gateway is one tenant
+with several people in it. The scoping below is written as if there could be
+many, because the hosted edition has many and the schema is edition-invariant.
 """
 
 import re
@@ -32,7 +37,6 @@ from gateway.models.tenancy import (
     Organization,
     OrganizationMember,
     OrganizationMembershipContextPublic,
-    OrganizationMembershipContextsPublic,
     OrganizationPublic,
     User,
     WorkspaceAssignmentRequest,
@@ -47,7 +51,6 @@ from gateway.repositories.tenancy import (
 )
 from gateway.services.tenancy.errors import (
     InvalidEmailError,
-    LastOrganizationError,
     MembershipUpdateError,
     NotAuthorizedError,
     OrganizationMemberAlreadyExistsError,
@@ -55,8 +58,6 @@ from gateway.services.tenancy.errors import (
     OrganizationNotFoundError,
     WorkspaceNotFoundError,
 )
-from gateway.services.tenancy.provisioning_service import DEFAULT_WORKSPACE_NAME
-from gateway.services.tenancy.slug import slugify
 
 # A shape check, not an authority on deliverability: one @, something either
 # side, a dot in the domain, and no whitespace. See InvalidEmailError.
@@ -145,14 +146,13 @@ class OrganizationService:
         The reachable stale case is a membership that was suspended after the
         pointer was set: falling back to the caller's oldest live membership
         keeps the dashboard usable instead of refusing every page. A pointer at a
-        *deleted* organization is not reachable while foreign keys are enforced,
-        which is why `delete_active_organization` repoints first; the check
-        survives anyway, for a database whose keys are not.
+        *deleted* organization is not reachable at all in this edition, since
+        nothing deletes one and the foreign key would refuse; the check survives
+        for a database that arrived by another route.
 
-        Unlike the platform this never provisions a personal organization as a
-        fallback: in the OSS base first boot owns that (see
-        `provisioning_service`), and every later identity is created inside an
-        organization that already exists.
+        Unlike the platform this never provisions an organization as a fallback:
+        first boot owns that (see `provisioning_service`), and every later
+        identity is created inside the one that already exists.
         """
         organization = await self.organizations.get(user.active_organization_id)
         if organization is not None:
@@ -177,84 +177,9 @@ class OrganizationService:
         membership = await self._require_active_membership(user, organization)
         return self._to_context(membership=membership, organization=organization)
 
-    async def list_membership_contexts_for_user(self, user: User) -> OrganizationMembershipContextsPublic:
-        """List every organization the caller is an active member of, by name."""
-        await self._resolve_active_organization(user)
-
-        memberships = await self.members.get_by_user(user.id, active_only=True)
-        organizations = await self.organizations.get_by_ids([m.organization_id for m in memberships])
-        by_id = {organization.id: organization for organization in organizations}
-
-        contexts = [
-            self._to_context(membership=membership, organization=organization)
-            for membership in memberships
-            if (organization := by_id.get(membership.organization_id)) is not None
-        ]
-        contexts.sort(
-            key=lambda context: (
-                context.organization.name.casefold(),
-                context.organization.name,
-                str(context.organization.id),
-            )
-        )
-        return OrganizationMembershipContextsPublic(data=contexts, count=len(contexts))
-
     # ------------------------------------------------------------------
-    # Organization lifecycle
+    # The organization itself
     # ------------------------------------------------------------------
-
-    async def switch_active_organization_for_user(
-        self,
-        *,
-        user: User,
-        organization_id: uuid.UUID,
-    ) -> OrganizationMembershipContextPublic:
-        """Point the caller at another of their organizations.
-
-        The membership check is the tenant boundary for this endpoint, the only
-        one that accepts an organization id from the request: an id the caller is
-        not an active member of is refused rather than switched to.
-
-        Both refusals answer 404, for the reason `errors.py` gives: an
-        organization the caller is not a member of must not be distinguishable
-        from one that does not exist, or the pair of statuses is an existence
-        oracle over other tenants' organizations.
-        """
-        organization = await self.organizations.get(organization_id)
-        if organization is None:
-            raise OrganizationNotFoundError(organization_id)
-        membership = await self.members.get_active_by_organization_and_user(organization.id, user.id)
-        if membership is None:
-            raise OrganizationNotFoundError(organization_id)
-
-        await self.users.set_active_organization(user, organization.id)
-        await self.db.commit()
-
-        return self._to_context(membership=membership, organization=organization)
-
-    async def create_organization_for_user(
-        self,
-        *,
-        user: User,
-        organization_name: str,
-    ) -> OrganizationMembershipContextPublic:
-        """Create an organization owned by the caller, and switch them into it."""
-        name = organization_name.strip() or "Organization"
-        organization = await self.organizations.create_organization(
-            name=name,
-            slug=await self._unique_slug_for(name),
-            created_by_user_id=user.id,
-        )
-        membership = await self.members.create_membership(
-            organization_id=organization.id,
-            user_id=user.id,
-            role="owner",
-        )
-        await self._provision_default_workspace(organization=organization, user=user)
-        await self.users.set_active_organization(user, organization.id)
-        await self.db.commit()
-
-        return self._to_context(membership=membership, organization=organization)
 
     async def update_active_organization_for_user(
         self,
@@ -273,77 +198,6 @@ class OrganizationService:
         await self.db.commit()
 
         return self._to_context(membership=membership, organization=updated)
-
-    async def delete_active_organization(self, *, current_user: User) -> None:
-        """Delete the caller's organization. Owners only.
-
-        Members and workspaces ride the database cascade, but ``user`` does not:
-        ``active_organization_id`` is NOT NULL with no delete rule, so every
-        identity pointed at this organization is dealt with first. An identity
-        that belongs to another organization is moved there. One that does not
-        goes with the organization, because in this edition it has nothing left:
-        it cannot sign in, holds no keys, and owns no usage, so leaving it would
-        leave a row nothing can reach or repair. The platform instead mints a
-        personal organization per orphan, which in a self-hosted deployment
-        would answer one delete with a scattering of new organizations.
-
-        The caller is the exception, and still blocks the delete rather than
-        deleting themselves: they are mid-request and have to land somewhere.
-        """
-        organization = await self.get_active_organization_for_user(current_user)
-        membership = await self._require_active_membership(current_user, organization)
-        if membership.role != "owner" and not current_user.is_superuser:
-            raise NotAuthorizedError("Only an organization owner can delete it")
-
-        affected = await self.users.get_by_active_organization(organization.id)
-        elsewhere = await self.members.get_active_by_users([identity.id for identity in affected])
-
-        for identity in affected:
-            destination = next(
-                (
-                    other.organization_id
-                    for other in elsewhere.get(identity.id, [])
-                    if other.organization_id != organization.id
-                ),
-                None,
-            )
-            if destination is not None:
-                await self.users.set_active_organization(identity, destination)
-                continue
-            if identity.id == current_user.id:
-                raise LastOrganizationError(identity.id)
-            await self.users.delete(identity)
-
-        await self.organizations.delete(organization)
-        await self.db.commit()
-
-    async def _unique_slug_for(self, name: str) -> str:
-        """Return ``name``'s slug, suffixed until it is free."""
-        base = slugify(name)
-        candidate = base
-        suffix = 2
-        while await self.organizations.get_by_slug(candidate) is not None:
-            candidate = f"{base}-{suffix}"
-            suffix += 1
-        return candidate
-
-    async def _provision_default_workspace(self, *, organization: Organization, user: User) -> None:
-        """Give a new organization one workspace, owned by its creator.
-
-        An organization with no workspace has no usable surface, so every
-        creation path provisions one, exactly as the platform's
-        ``ensure_default_workspace`` does.
-        """
-        workspace = await WorkspaceRepository(self.db).create_workspace(
-            name=DEFAULT_WORKSPACE_NAME,
-            organization_id=organization.id,
-            created_by_user_id=user.id,
-        )
-        await WorkspaceMemberRepository(self.db).create(
-            workspace_id=workspace.id,
-            user_id=user.id,
-            role="owner",
-        )
 
     # ------------------------------------------------------------------
     # Membership

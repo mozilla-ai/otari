@@ -345,19 +345,6 @@ class OrganizationMembershipContextPublic(SQLModel):
     byo_provider_keys_allowed: bool = False
 
 
-class OrganizationMembershipContextsPublic(SQLModel):
-    data: list[OrganizationMembershipContextPublic]
-    count: int
-
-
-class OrganizationSwitchRequest(SQLModel):
-    organization_id: uuid.UUID
-
-
-class OrganizationCreateRequest(SQLModel):
-    name: str = Field(min_length=1, max_length=255)
-
-
 class ActiveOrganizationUpdateRequest(SQLModel):
     name: str = Field(min_length=1, max_length=255)
 
@@ -629,16 +616,13 @@ __all__ = [
     "ActiveOrganizationUpdateRequest",
     "Organization",
     "OrganizationCreate",
-    "OrganizationCreateRequest",
     "OrganizationMember",
     "OrganizationMemberCreate",
     "OrganizationMemberPublic",
     "OrganizationMemberUpdate",
     "OrganizationMembersPublic",
     "OrganizationMembershipContextPublic",
-    "OrganizationMembershipContextsPublic",
     "OrganizationPublic",
-    "OrganizationSwitchRequest",
     "OrganizationUpdate",
     "OrganizationsPublic",
     "User",

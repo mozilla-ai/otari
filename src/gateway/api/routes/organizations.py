@@ -6,9 +6,18 @@ models come from `gateway.models.tenancy` and are the contracts the dashboard's
 generated client is built from, so they keep the platform's shapes.
 
 Every path is scoped to ``/me``, the organization the caller's identity is
-pointed at. That is the tenant boundary: apart from ``/me/switch``, which checks
-membership before it moves the pointer, no request can name an organization at
-all.
+pointed at, and no request can name an organization at all. That is the tenant
+boundary, and in this edition it is also the whole story: a standalone
+deployment has exactly one organization, provisioned at first boot.
+
+**Why there is no create, switch, delete, or membership list here.** Those are
+what make a deployment host more than one tenant, and a self-hosted gateway is
+one tenant with several people in it: many identities, fixed roles, and
+workspaces as the unit teams are isolated by. The model stays tenancy-shaped
+because the hosted edition needs it and the schema is edition-invariant, so
+those surfaces are the overlay's to contribute, gated on an entitlement the way
+`ARCHITECTURE.md` describes for every capability line. Nothing here has to
+change to allow them; they are simply not mounted.
 """
 
 import uuid
@@ -26,10 +35,7 @@ from gateway.models.tenancy import (
     ActiveOrganizationMembersPublic,
     ActiveOrganizationMemberUpdateRequest,
     ActiveOrganizationUpdateRequest,
-    OrganizationCreateRequest,
     OrganizationMembershipContextPublic,
-    OrganizationMembershipContextsPublic,
-    OrganizationSwitchRequest,
 )
 from gateway.services.tenancy import OrganizationService
 
@@ -59,28 +65,6 @@ async def get_active_organization_context(
     return await service.get_active_membership_context_for_user(current_identity)
 
 
-@router.get("/me/memberships")
-async def list_organization_memberships(
-    service: OrganizationServiceDep,
-    current_identity: CurrentIdentity,
-) -> OrganizationMembershipContextsPublic:
-    """List every organization the caller is an active member of."""
-    return await service.list_membership_contexts_for_user(current_identity)
-
-
-@router.post("/me", status_code=status.HTTP_201_CREATED)
-async def create_organization(
-    service: OrganizationServiceDep,
-    current_identity: CurrentIdentity,
-    body: OrganizationCreateRequest,
-) -> OrganizationMembershipContextPublic:
-    """Create an organization owned by the caller, and switch them into it."""
-    return await service.create_organization_for_user(
-        user=current_identity,
-        organization_name=body.name,
-    )
-
-
 @router.patch("/me")
 async def update_active_organization(
     service: OrganizationServiceDep,
@@ -91,29 +75,6 @@ async def update_active_organization(
     return await service.update_active_organization_for_user(
         user=current_identity,
         organization_name=body.name,
-    )
-
-
-@router.delete("/me")
-async def delete_active_organization(
-    service: OrganizationServiceDep,
-    current_identity: CurrentIdentity,
-) -> Message:
-    """Delete the caller's active organization. Owners only."""
-    await service.delete_active_organization(current_user=current_identity)
-    return Message(message="Organization deleted")
-
-
-@router.post("/me/switch")
-async def switch_active_organization(
-    service: OrganizationServiceDep,
-    current_identity: CurrentIdentity,
-    body: OrganizationSwitchRequest,
-) -> OrganizationMembershipContextPublic:
-    """Point the caller at another organization they are a member of."""
-    return await service.switch_active_organization_for_user(
-        user=current_identity,
-        organization_id=body.organization_id,
     )
 
 

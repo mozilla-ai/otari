@@ -94,17 +94,18 @@ The enforcement strategy is configurable with `OTARI_BUDGET_STRATEGY` (`for_upda
 
 Otari is growing a tenancy layer above the users, keys, and budgets described here: an **organization** owns **workspaces**, and identities join both as members with a fixed role (`owner`, `admin`, `member`, or `viewer`). It is available today over the API (`/v1/organizations/*` and `/v1/workspaces/*`, master-key authenticated like the rest of this guide); the dashboard pages for it are still being built.
 
+A self-hosted deployment is **one organization with several people in it**, not several tenants: the organization is provisioned for you and cannot be created, switched or deleted, and workspaces are the unit you separate teams and projects by. Hosting mutually isolated tenants on one deployment is what a hosted control plane is for.
+
 Nothing is required to set it up. The first request to one of those endpoints provisions a default organization, a default workspace, and one owner identity representing the operator, and every later request resolves that same identity. Organization owners and admins can create further workspaces, add members, and manage roles; a workspace's own owners and admins can manage the workspace they belong to.
 
 Adding a member takes an email address (`POST /v1/organizations/me/members`), optionally with the workspaces to grant at the same time. If no identity holds that address yet, one is created carrying it, and the member is active immediately: there is no invitation to accept, because this edition sends no email. Such an identity is a roster and attribution entry today. It cannot sign in until Otari grows a sign-in flow, at which point the address is the handle its owner claims it by.
 
-Three rules exist to stop a tenancy from becoming unmanageable, and all three answer `400`:
+Two rules exist to stop a tenancy from becoming unmanageable, and both answer `400`:
 
 - an organization always keeps at least one active owner, so the last owner cannot be demoted or removed;
-- an organization always keeps at least one workspace, so the last one cannot be deleted;
-- you always belong to at least one organization, so your last one cannot be deleted.
+- an organization always keeps at least one workspace, so the last one cannot be deleted.
 
-Removing a member suspends their membership rather than deleting it, which keeps their past usage attributable. Deleting an organization is the exception: a member who belongs to another organization is moved there, and one who does not is deleted along with it, because an identity with no organization has nothing to sign in to and nothing to attribute.
+Removing a member suspends their membership rather than deleting it, which keeps their past usage attributable.
 
 This layer does not yet gate request-plane spend: keys, budgets, and usage still key on the `user_id` described above. Bringing the two together is the reconciliation tracked in [mozilla-ai/otari-ai#1452](https://github.com/mozilla-ai/otari-ai/issues/1452).
 

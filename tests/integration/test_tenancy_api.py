@@ -23,6 +23,7 @@ from gateway.models.tenancy import (
     Organization,
     OrganizationMember,
     User,
+    Workspace,
     WorkspaceMember,
 )
 from gateway.services.tenancy.provisioning_service import (
@@ -68,6 +69,26 @@ def _add_identity(
         )
         session.commit()
         return user.id
+    finally:
+        session.close()
+
+
+def _other_tenant(session_factory: Callable[[], Session]) -> tuple[uuid.UUID, uuid.UUID]:
+    """Insert a second organization with a workspace, and return both ids.
+
+    Written directly because this edition mounts no endpoint that creates an
+    organization: a standalone deployment has exactly one. The rows still have
+    to exist, because they are what the cross-tenant assertions here point at.
+    """
+    session = session_factory()
+    try:
+        organization = Organization(name="Elsewhere", slug=f"elsewhere-{uuid.uuid4().hex[:8]}")
+        session.add(organization)
+        session.flush()
+        workspace = Workspace(name="Theirs", organization_id=organization.id)
+        session.add(workspace)
+        session.commit()
+        return organization.id, workspace.id
     finally:
         session.close()
 
@@ -193,201 +214,6 @@ def test_rename_the_active_organization(client: TestClient, master_key_header: d
     assert response.status_code == 200, response.text
     assert response.json()["organization"]["name"] == "Acme"
     assert _context(client, master_key_header)["organization"]["name"] == "Acme"
-
-
-def test_creating_an_organization_switches_into_it(client: TestClient, master_key_header: dict[str, str]) -> None:
-    created = client.post("/v1/organizations/me", json={"name": "Acme Labs"}, headers=master_key_header)
-
-    assert created.status_code == 201, created.text
-    body = created.json()
-    assert body["organization"]["name"] == "Acme Labs"
-    assert body["organization"]["slug"] == "acme-labs"
-    assert body["role"] == "owner"
-    assert _context(client, master_key_header)["organization"]["id"] == body["organization"]["id"]
-
-
-def test_a_new_organization_gets_its_own_default_workspace(
-    client: TestClient,
-    master_key_header: dict[str, str],
-) -> None:
-    client.post("/v1/organizations/me", json={"name": "Acme Labs"}, headers=master_key_header)
-
-    workspaces = client.get("/v1/workspaces", headers=master_key_header).json()
-
-    assert [workspace["name"] for workspace in workspaces["data"]] == [DEFAULT_WORKSPACE_NAME]
-
-
-def test_slugs_are_made_unique(client: TestClient, master_key_header: dict[str, str]) -> None:
-    """Two organizations may share a name; their slugs address them, so those differ."""
-    first = client.post("/v1/organizations/me", json={"name": "Acme"}, headers=master_key_header).json()
-    second = client.post("/v1/organizations/me", json={"name": "Acme"}, headers=master_key_header).json()
-
-    assert first["organization"]["slug"] == "acme"
-    assert second["organization"]["slug"] == "acme-2"
-
-
-def test_memberships_list_every_organization_by_name(
-    client: TestClient,
-    master_key_header: dict[str, str],
-) -> None:
-    client.post("/v1/organizations/me", json={"name": "Zebra"}, headers=master_key_header)
-    client.post("/v1/organizations/me", json={"name": "Acme"}, headers=master_key_header)
-
-    body = client.get("/v1/organizations/me/memberships", headers=master_key_header).json()
-
-    assert body["count"] == 3
-    assert [context["organization"]["name"] for context in body["data"]] == ["Acme", DEFAULT_ORGANIZATION_NAME, "Zebra"]
-
-
-def test_switching_organizations(client: TestClient, master_key_header: dict[str, str]) -> None:
-    default_organization_id = _context(client, master_key_header)["organization"]["id"]
-    client.post("/v1/organizations/me", json={"name": "Acme"}, headers=master_key_header)
-
-    switched = client.post(
-        "/v1/organizations/me/switch",
-        json={"organization_id": default_organization_id},
-        headers=master_key_header,
-    )
-
-    assert switched.status_code == 200, switched.text
-    assert switched.json()["organization"]["id"] == default_organization_id
-    assert _context(client, master_key_header)["organization"]["id"] == default_organization_id
-
-
-def test_switching_to_an_unknown_organization_is_not_found(
-    client: TestClient,
-    master_key_header: dict[str, str],
-) -> None:
-    response = client.post(
-        "/v1/organizations/me/switch",
-        json={"organization_id": str(uuid.uuid4())},
-        headers=master_key_header,
-    )
-
-    assert response.status_code == 404
-
-
-def test_an_organization_you_do_not_belong_to_is_indistinguishable_from_a_missing_one(
-    client: TestClient,
-    master_key_header: dict[str, str],
-    db_session_factory: Callable[[], Session],
-) -> None:
-    """Switch is the one endpoint taking a tenant id from the request.
-
-    Answering 403 for "exists but not yours" and 404 for "does not exist" would
-    make the pair an existence oracle over other tenants' organizations.
-    """
-    _context(client, master_key_header)
-    session = db_session_factory()
-    try:
-        stranger = Organization(name="Stranger", slug="stranger")
-        session.add(stranger)
-        session.commit()
-        stranger_id = stranger.id
-    finally:
-        session.close()
-
-    response = client.post(
-        "/v1/organizations/me/switch",
-        json={"organization_id": str(stranger_id)},
-        headers=master_key_header,
-    )
-
-    assert response.status_code == 404
-
-
-def test_deleting_an_organization_moves_the_caller_to_another(
-    client: TestClient,
-    master_key_header: dict[str, str],
-) -> None:
-    default_organization_id = _context(client, master_key_header)["organization"]["id"]
-    created = client.post("/v1/organizations/me", json={"name": "Acme"}, headers=master_key_header).json()
-
-    deleted = client.delete("/v1/organizations/me", headers=master_key_header)
-
-    assert deleted.status_code == 200, deleted.text
-    context = _context(client, master_key_header)
-    assert context["organization"]["id"] == default_organization_id
-    assert created["organization"]["id"] != context["organization"]["id"]
-
-
-def test_deleting_an_organization_takes_its_member_only_identities_with_it(
-    client: TestClient,
-    master_key_header: dict[str, str],
-    db_session_factory: Callable[[], Session],
-) -> None:
-    """An identity with no other organization goes with the one being deleted.
-
-    ``active_organization_id`` is NOT NULL, so it has to be repointed or gone.
-    In this edition such an identity cannot sign in, holds no keys and owns no
-    usage, so keeping it would keep a row nothing can reach or repair, and it
-    would make every organization that ever had a member undeletable.
-    """
-    client.post("/v1/organizations/me", json={"name": "Second"}, headers=master_key_header)
-    added = client.post(
-        "/v1/organizations/me/members",
-        json={"email": "ada@example.com"},
-        headers=master_key_header,
-    ).json()
-
-    deleted = client.delete("/v1/organizations/me", headers=master_key_header)
-
-    assert deleted.status_code == 200, deleted.text
-    session = db_session_factory()
-    try:
-        assert session.get(User, uuid.UUID(added["user_id"])) is None
-        # The operator survives: they had somewhere to go.
-        assert session.query(User).count() == 1
-    finally:
-        session.close()
-
-
-def test_an_identity_that_belongs_elsewhere_is_moved_not_deleted(
-    client: TestClient,
-    master_key_header: dict[str, str],
-    db_session_factory: Callable[[], Session],
-) -> None:
-    first = _context(client, master_key_header)["organization"]["id"]
-    client.post("/v1/organizations/me", json={"name": "Second"}, headers=master_key_header)
-    added = client.post(
-        "/v1/organizations/me/members",
-        json={"email": "ada@example.com"},
-        headers=master_key_header,
-    ).json()
-    # Give them a second home, so the delete has somewhere to move them to.
-    session = db_session_factory()
-    try:
-        session.add(
-            OrganizationMember(
-                organization_id=uuid.UUID(first),
-                user_id=uuid.UUID(added["user_id"]),
-                role="member",
-                status="active",
-            )
-        )
-        session.commit()
-    finally:
-        session.close()
-
-    assert client.delete("/v1/organizations/me", headers=master_key_header).status_code == 200
-
-    session = db_session_factory()
-    try:
-        moved = session.get(User, uuid.UUID(added["user_id"]))
-        assert moved is not None
-        assert str(moved.active_organization_id) == first
-    finally:
-        session.close()
-
-
-def test_the_last_organization_cannot_be_deleted(client: TestClient, master_key_header: dict[str, str]) -> None:
-    """``user.active_organization_id`` is NOT NULL, so there has to be somewhere to go."""
-    _context(client, master_key_header)
-
-    response = client.delete("/v1/organizations/me", headers=master_key_header)
-
-    assert response.status_code == 400
-    assert "no other organization" in response.json()["detail"]
 
 
 # =============================================================================
@@ -521,16 +347,17 @@ def test_workspace_assignments_are_applied_with_the_member(
 def test_an_assignment_naming_another_organizations_workspace_adds_nobody(
     client: TestClient,
     master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
 ) -> None:
     """The whole add fails, rather than silently dropping one grant."""
-    workspace = client.post("/v1/workspaces", json={"name": "Research"}, headers=master_key_header).json()
-    client.post("/v1/organizations/me", json={"name": "Acme"}, headers=master_key_header)
+    _context(client, master_key_header)
+    _, elsewhere = _other_tenant(db_session_factory)
 
     added = client.post(
         "/v1/organizations/me/members",
         json={
             "email": "ada@example.com",
-            "workspace_assignments": [{"workspace_id": workspace["id"], "role": "member"}],
+            "workspace_assignments": [{"workspace_id": str(elsewhere), "role": "member"}],
         },
         headers=master_key_header,
     )
@@ -771,19 +598,24 @@ def test_another_organizations_member_is_not_found(
     db_session_factory: Callable[[], Session],
 ) -> None:
     """The cross-tenant boundary on the member routes."""
-    default_organization_id = uuid.UUID(_context(client, master_key_header)["organization"]["id"])
-    _add_identity(
+    _context(client, master_key_header)
+    other_organization, _ = _other_tenant(db_session_factory)
+    stranger = _add_identity(
         db_session_factory,
-        organization_id=default_organization_id,
-        full_name="Ada Lovelace",
-        email="ada@example.com",
+        organization_id=other_organization,
+        full_name="Stranger",
+        email="stranger@example.com",
     )
-    roster = client.get("/v1/organizations/me/members", headers=master_key_header).json()
-    member_id = next(row["organization_member_id"] for row in roster["data"] if row["full_name"] == "Ada Lovelace")
-    client.post("/v1/organizations/me", json={"name": "Acme"}, headers=master_key_header)
+    session = db_session_factory()
+    try:
+        their_membership = (
+            session.query(OrganizationMember).filter(col(OrganizationMember.user_id) == stranger).one().id
+        )
+    finally:
+        session.close()
 
     response = client.patch(
-        f"/v1/organizations/me/members/{member_id}",
+        f"/v1/organizations/me/members/{their_membership}",
         json={"role": "admin"},
         headers=master_key_header,
     )
@@ -895,19 +727,24 @@ def test_an_unknown_workspace_is_not_found(client: TestClient, master_key_header
 def test_a_workspace_in_another_organization_is_not_found(
     client: TestClient,
     master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
 ) -> None:
     """Cross-tenant reads answer 404, not 403: existence itself is scoped."""
-    workspace = client.post("/v1/workspaces", json={"name": "Research"}, headers=master_key_header).json()
-    client.post("/v1/organizations/me", json={"name": "Acme"}, headers=master_key_header)
+    _context(client, master_key_header)
+    _, elsewhere = _other_tenant(db_session_factory)
 
-    response = client.get(f"/v1/workspaces/{workspace['id']}", headers=master_key_header)
+    response = client.get(f"/v1/workspaces/{elsewhere}", headers=master_key_header)
 
     assert response.status_code == 404
 
 
-def test_workspaces_are_listed_per_organization(client: TestClient, master_key_header: dict[str, str]) -> None:
-    client.post("/v1/workspaces", json={"name": "Research"}, headers=master_key_header)
-    client.post("/v1/organizations/me", json={"name": "Acme"}, headers=master_key_header)
+def test_workspaces_are_listed_per_organization(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    _context(client, master_key_header)
+    _other_tenant(db_session_factory)
 
     body = client.get("/v1/workspaces", headers=master_key_header).json()
 

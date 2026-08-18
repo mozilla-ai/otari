@@ -1018,16 +1018,8 @@ export interface paths {
          */
         get: operations["get_active_organization_context_v1_organizations_me_get"];
         put?: never;
-        /**
-         * Create Organization
-         * @description Create an organization owned by the caller, and switch them into it.
-         */
-        post: operations["create_organization_v1_organizations_me_post"];
-        /**
-         * Delete Active Organization
-         * @description Delete the caller's active organization. Owners only.
-         */
-        delete: operations["delete_active_organization_v1_organizations_me_delete"];
+        post?: never;
+        delete?: never;
         options?: never;
         head?: never;
         /**
@@ -1090,46 +1082,6 @@ export interface paths {
          * @description Change a member's role or status. Organization owners and admins only.
          */
         patch: operations["update_active_organization_member_v1_organizations_me_members__organization_member_id__patch"];
-        trace?: never;
-    };
-    "/v1/organizations/me/memberships": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * List Organization Memberships
-         * @description List every organization the caller is an active member of.
-         */
-        get: operations["list_organization_memberships_v1_organizations_me_memberships_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
-    "/v1/organizations/me/switch": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        get?: never;
-        put?: never;
-        /**
-         * Switch Active Organization
-         * @description Point the caller at another organization they are a member of.
-         */
-        post: operations["switch_active_organization_v1_organizations_me_switch_post"];
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
         trace?: never;
     };
     "/v1/pricing": {
@@ -4411,11 +4363,6 @@ export interface components {
                 [key: string]: unknown;
             } | null;
         };
-        /** OrganizationCreateRequest */
-        OrganizationCreateRequest: {
-            /** Name */
-            name: string;
-        };
         /**
          * OrganizationMembershipContextPublic
          * @description An organization plus the caller's standing in it.
@@ -4440,13 +4387,6 @@ export interface components {
             /** Status */
             status: string;
         };
-        /** OrganizationMembershipContextsPublic */
-        OrganizationMembershipContextsPublic: {
-            /** Count */
-            count: number;
-            /** Data */
-            data: components["schemas"]["OrganizationMembershipContextPublic"][];
-        };
         /** OrganizationPublic */
         OrganizationPublic: {
             /**
@@ -4467,14 +4407,6 @@ export interface components {
             slug: string;
             /** Updated At */
             updated_at?: string | null;
-        };
-        /** OrganizationSwitchRequest */
-        OrganizationSwitchRequest: {
-            /**
-             * Organization Id
-             * Format: uuid
-             */
-            organization_id: string;
         };
         /**
          * PolicyRequest
@@ -7858,59 +7790,6 @@ export interface operations {
             };
         };
     };
-    create_organization_v1_organizations_me_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["OrganizationCreateRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            201: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OrganizationMembershipContextPublic"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    delete_active_organization_v1_organizations_me_delete: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["Message"];
-                };
-            };
-        };
-    };
     update_active_organization_v1_organizations_me_patch: {
         parameters: {
             query?: never;
@@ -8064,59 +7943,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ActiveOrganizationMemberPublic"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    list_organization_memberships_v1_organizations_me_memberships_get: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OrganizationMembershipContextsPublic"];
-                };
-            };
-        };
-    };
-    switch_active_organization_v1_organizations_me_switch_post: {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody: {
-            content: {
-                "application/json": components["schemas"]["OrganizationSwitchRequest"];
-            };
-        };
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["OrganizationMembershipContextPublic"];
                 };
             };
             /** @description Validation Error */

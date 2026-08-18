@@ -143,20 +143,9 @@ class LastWorkspaceError(TenancyValidationError):
         )
 
 
-class LastOrganizationError(TenancyValidationError):
-    """Deleting this organization would leave an identity with none at all."""
-
-    def __init__(self, user_id: object):
-        super().__init__(
-            f"Identity {user_id} belongs to no other organization, so this one cannot be deleted; "
-            "move them to another organization first"
-        )
-
-
 __all__ = [
     "InvalidEmailError",
     "InvalidRoleError",
-    "LastOrganizationError",
     "LastWorkspaceError",
     "MembershipUpdateError",
     "NotAnOrganizationMemberError",
