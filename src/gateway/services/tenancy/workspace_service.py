@@ -191,7 +191,13 @@ class WorkspaceService:
                 skip=skip,
                 limit=limit,
             )
-            workspaces = await self.workspaces.get_by_ids([row.workspace_id for row in member_rows])
+            # Re-ordered to the page's own order: the membership rows are paged
+            # by created_at, but `get_by_ids` resolves them with no ORDER BY, so
+            # the page held the right workspaces in an arbitrary sequence and a
+            # caller reading two pages could not tell where one ended.
+            resolved = await self.workspaces.get_by_ids([row.workspace_id for row in member_rows])
+            by_id = {workspace.id: workspace for workspace in resolved}
+            workspaces = [by_id[row.workspace_id] for row in member_rows if row.workspace_id in by_id]
 
         return WorkspacesPublic(
             data=[WorkspacePublic.model_validate(workspace) for workspace in workspaces],
