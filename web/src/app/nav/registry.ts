@@ -88,14 +88,15 @@ const BASE_NAV_SECTIONS = [
     ],
   },
   {
-    // The label is the one mozilla-ai/otari-ai#1539 is assigned to change when
-    // the control-plane UI rehomes: "Organization" reads as a multi-tenancy
-    // word, and that issue's plan is for the OSS sidebar to say something
-    // single-tenant while the enterprise overlay overrides it back. Left as is
-    // rather than pre-empted, because the obvious substitute ("Settings")
-    // already names an item two sections down, and because standalone Otari now
-    // does hold more than one organization, which is the premise that issue was
-    // written against. Rename it there, with the override, not here.
+    // The label mozilla-ai/otari-ai#1539 is assigned to change when the
+    // control-plane UI rehomes: "Organization" reads as a multi-tenancy word,
+    // and that issue's plan is for the OSS sidebar to say something
+    // single-tenant while the enterprise overlay overrides it back. Its premise
+    // holds here (one organization per deployment, no way to mint a second),
+    // so this label is on borrowed time; it is left alone because the
+    // substitute that issue suggests, "Settings", already names an item two
+    // sections down, and picking the replacement is that issue's call. The
+    // rename lands there, with the overlay override, not here.
     id: "organization",
     label: "Organization",
     items: [

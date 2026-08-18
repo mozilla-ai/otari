@@ -259,15 +259,14 @@ export type VisionStrategy = NonNullable<
 // pages built on them here are the ones otari.ai's control plane brings across
 // at M5, so a renamed field would have to be reconciled twice.
 // ---------------------------------------------------------------------------
+// A standalone gateway hosts exactly one organization, provisioned at first
+// boot and fixed: the create, switch and delete endpoints are not mounted here,
+// so there is no request shape for any of them to alias.
 export type Organization = Schemas["OrganizationPublic"]
 /** An organization plus the caller's standing in it: what every tenancy page reads first. */
 export type OrganizationContext = Schemas["OrganizationMembershipContextPublic"]
-export type OrganizationContexts =
-  Schemas["OrganizationMembershipContextsPublic"]
-export type CreateOrganizationRequest = Schemas["OrganizationCreateRequest"]
 export type UpdateOrganizationRequest =
   Schemas["ActiveOrganizationUpdateRequest"]
-export type SwitchOrganizationRequest = Schemas["OrganizationSwitchRequest"]
 export type OrganizationMember = Schemas["ActiveOrganizationMemberPublic"]
 export type UpdateOrganizationMemberRequest =
   Schemas["ActiveOrganizationMemberUpdateRequest"]

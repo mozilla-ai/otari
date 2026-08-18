@@ -6,7 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { OrganizationContext } from "@/client"
 import { OrganizationGeneralPage } from "@/features/organization/OrganizationGeneralPage"
-import { organization, organizationContext } from "@/tests/fixtures"
+import { organizationContext } from "@/tests/fixtures"
 
 interface Request {
   url: string
@@ -21,35 +21,16 @@ function jsonResponse(body: unknown, status = 200): Response {
   })
 }
 
-function mockApi(opts: {
-  context?: OrganizationContext
-  memberships?: OrganizationContext[]
-}) {
-  const context = opts.context ?? organizationContext()
-  const memberships = opts.memberships ?? [context]
+function mockApi(context: OrganizationContext = organizationContext()) {
   const requests: Request[] = []
-
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
-    const url = String(input)
-    const method = (init?.method ?? "GET").toUpperCase()
     requests.push({
-      url,
-      method,
+      url: String(input),
+      method: (init?.method ?? "GET").toUpperCase(),
       body: init?.body ? JSON.parse(String(init.body)) : undefined,
     })
-
-    if (url.includes("/v1/organizations/me/memberships")) {
-      return jsonResponse({ data: memberships, count: memberships.length })
-    }
-    if (url.includes("/v1/organizations/me/switch")) {
-      return jsonResponse(context)
-    }
-    if (url.includes("/v1/organizations/me")) {
-      return jsonResponse(context)
-    }
-    return jsonResponse({})
+    return jsonResponse(context)
   })
-
   return requests
 }
 
@@ -66,7 +47,7 @@ afterEach(() => {
 
 describe("OrganizationGeneralPage", () => {
   it("names the organization the caller is pointed at and their role in it", async () => {
-    mockApi({})
+    mockApi()
     renderPage(<OrganizationGeneralPage />)
 
     expect(
@@ -77,7 +58,7 @@ describe("OrganizationGeneralPage", () => {
   })
 
   it("renames the organization through the active-organization endpoint", async () => {
-    const requests = mockApi({})
+    const requests = mockApi()
     const user = userEvent.setup()
     renderPage(<OrganizationGeneralPage />)
 
@@ -92,69 +73,43 @@ describe("OrganizationGeneralPage", () => {
   })
 
   it("will not save a name that has not changed", async () => {
-    mockApi({})
+    mockApi()
     renderPage(<OrganizationGeneralPage />)
 
     await screen.findByDisplayValue("Default Organization")
     expect(screen.getByRole("button", { name: "Save name" })).toBeDisabled()
   })
 
-  it("offers no switcher and refuses deletion while there is one organization", async () => {
-    mockApi({})
+  it("offers nothing that would make the deployment multi-tenant", async () => {
+    mockApi()
     renderPage(<OrganizationGeneralPage />)
 
     await screen.findByDisplayValue("Default Organization")
-    expect(screen.queryByRole("button", { name: "Switch" })).toBeNull()
-    // Every identity has to be pointed at an organization, so the server
-    // refuses this; saying why beats reporting a 400 after the click.
+    // A self-hosted gateway is one tenant with several people in it. The
+    // gateway mounts no create, switch, or delete endpoint, so a control for
+    // any of them here would be a 404 waiting to happen.
     expect(
-      screen.getByRole("button", { name: "Delete organization" }),
-    ).toBeDisabled()
-    expect(screen.getByText(/only organization/)).toBeInTheDocument()
+      screen.queryByRole("button", { name: /Create organization/ }),
+    ).toBeNull()
+    expect(screen.queryByRole("button", { name: "Switch" })).toBeNull()
+    expect(
+      screen.queryByRole("button", { name: /Delete organization/ }),
+    ).toBeNull()
+    expect(screen.queryByText("Danger zone")).toBeNull()
   })
 
-  it("switches into another organization the caller belongs to", async () => {
-    const other = organizationContext({
-      organization_member_id: "other-membership",
-      organization: organization({
-        id: "99999999-9999-9999-9999-999999999999",
-        name: "Research",
-        slug: "research",
-      }),
-    })
-    const requests = mockApi({
-      memberships: [organizationContext(), other],
-    })
-    const user = userEvent.setup()
-    renderPage(<OrganizationGeneralPage />)
-
-    const picker = await screen.findByLabelText("Organization")
-    await user.selectOptions(picker, "99999999-9999-9999-9999-999999999999")
-    await user.click(screen.getByRole("button", { name: "Switch" }))
-
-    const post = requests.find((request) =>
-      request.url.includes("/v1/organizations/me/switch"),
-    )
-    expect(post?.body).toEqual({
-      organization_id: "99999999-9999-9999-9999-999999999999",
-    })
-  })
-
-  it("hides the destructive and editing controls from a non-manager", async () => {
-    mockApi({ context: organizationContext({ role: "member" }) })
+  it("leaves the name read-only for a caller who cannot manage the organization", async () => {
+    mockApi(organizationContext({ role: "member" }))
     renderPage(<OrganizationGeneralPage />)
 
     await screen.findByDisplayValue("Default Organization")
     expect(screen.getByRole("button", { name: "Save name" })).toBeDisabled()
-    // Deletion is an owner's alone, so the whole danger zone is absent rather
-    // than present and refused.
-    expect(screen.queryByText("Danger zone")).toBeNull()
     expect(
       screen.getByText(/Only owners and admins can change it/),
     ).toBeInTheDocument()
   })
 
-  it("reports a bootstrap that could not be read instead of an empty page", async () => {
+  it("reports a context that could not be read instead of an empty page", async () => {
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       jsonResponse({ detail: "Tenancy is unavailable" }, 500),
     )

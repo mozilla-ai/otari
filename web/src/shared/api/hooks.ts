@@ -15,7 +15,6 @@ import type {
   CreateKeyResponse,
   CreateOrganizationMemberRequest,
   CreateOrganizationMemberResult,
-  CreateOrganizationRequest,
   CreateSearchToolRequest,
   CreateStoredProviderRequest,
   CreateUserRequest,
@@ -32,7 +31,6 @@ import type {
   ModelListResponse,
   ModelMetadataResponse,
   OrganizationContext,
-  OrganizationContexts,
   OrganizationMember,
   PricingRefreshPreview,
   PricingResponse,
@@ -51,7 +49,6 @@ import type {
   StoredProvider,
   StoredSearchTool,
   SummaryDimension,
-  SwitchOrganizationRequest,
   TestProviderResult,
   TestServiceResponse,
   ToolSettingsResponse,
@@ -1393,51 +1390,12 @@ export function useOrganizationContext() {
   })
 }
 
-// Every organization the caller may switch into. Separate from the context key
-// because switching rewrites the context while leaving this list as it was.
-export function useOrganizationMemberships() {
-  return useQuery({
-    queryKey: [ORGANIZATIONS, "memberships"],
-    queryFn: () =>
-      apiFetch<OrganizationContexts>("/v1/organizations/me/memberships").then(
-        (body) => body.data,
-      ),
-    staleTime: 60_000,
-  })
-}
-
 export function useOrganizationMembers() {
   return useQuery({
     queryKey: [ORGANIZATION_MEMBERS],
     queryFn: () =>
       fetchAllPaged<OrganizationMember>("/v1/organizations/me/members"),
     staleTime: 60_000,
-  })
-}
-
-// Which organization the caller is in decides what every other tenancy query
-// answers, so a write that can move or rename it clears the whole tenancy tree
-// rather than one key. Cheap (three small lists) and the alternative is a page
-// showing the previous tenant's workspaces.
-function invalidateTenancy(
-  queryClient: ReturnType<typeof useQueryClient>,
-): void {
-  void queryClient.invalidateQueries({ queryKey: [ORGANIZATIONS] })
-  void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_MEMBERS] })
-  void queryClient.invalidateQueries({ queryKey: [WORKSPACES] })
-}
-
-export function useCreateOrganization() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (body: CreateOrganizationRequest) =>
-      apiFetch<OrganizationContext>("/v1/organizations/me", {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
-    // Creating an organization also switches the caller into it, so this moves
-    // the tenant as much as a switch does.
-    onSuccess: () => invalidateTenancy(queryClient),
   })
 }
 
@@ -1454,30 +1412,6 @@ export function useUpdateOrganization() {
     },
   })
 }
-
-export function useSwitchOrganization() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: (body: SwitchOrganizationRequest) =>
-      apiFetch<OrganizationContext>("/v1/organizations/me/switch", {
-        method: "POST",
-        body: JSON.stringify(body),
-      }),
-    onSuccess: () => invalidateTenancy(queryClient),
-  })
-}
-
-export function useDeleteOrganization() {
-  const queryClient = useQueryClient()
-  return useMutation({
-    mutationFn: () =>
-      apiFetch<void>("/v1/organizations/me", { method: "DELETE" }),
-    // The caller lands in another of their organizations, which the server
-    // picked, so everything scoped to a tenant has to be re-read.
-    onSuccess: () => invalidateTenancy(queryClient),
-  })
-}
-
 // The one write path that puts a second row on the roster. The response says
 // which arm of the platform's result union it took: this edition always answers
 // "active", because it has no invitation to send and no way to accept one, and

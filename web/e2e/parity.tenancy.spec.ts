@@ -172,20 +172,21 @@ test.describe("standalone tenancy", () => {
     await expect(workspaceRow(page, RENAMED_WORKSPACE)).toHaveCount(0)
   })
 
-  test("refuses to delete the only organization the operator belongs to", async ({
+  test("offers nothing that would make the deployment multi-tenant", async ({
     page,
   }) => {
     await login(page)
     await openPage(page, "General", "Organization")
 
-    // Every identity is pointed at exactly one organization, so deleting the
-    // only one it belongs to would orphan it. The server refuses; the page says
-    // so before the click rather than after it.
+    // A self-hosted gateway is one tenant with several people in it, so the
+    // gateway mounts no endpoint to create, switch between, or delete an
+    // organization, and the page offers no control for one.
     await expect(
-      page.getByRole("button", { name: "Delete organization" }),
-    ).toBeDisabled()
-    await expect(page.getByText(/only organization/)).toBeVisible()
-    // With one organization there is nothing to switch between either.
+      page.getByRole("button", { name: /Create organization/ }),
+    ).toHaveCount(0)
     await expect(page.getByRole("button", { name: "Switch" })).toHaveCount(0)
+    await expect(
+      page.getByRole("button", { name: /Delete organization/ }),
+    ).toHaveCount(0)
   })
 })

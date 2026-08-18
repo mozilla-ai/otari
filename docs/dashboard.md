@@ -357,20 +357,21 @@ hand.
 
 ### Organization
 
-The tenant this deployment's workspaces, members, and roles belong to.
+The tenant this deployment's workspaces, members, and roles belong to. There is
+exactly one, provisioned on first boot: a self-hosted gateway is one tenant with
+several people in it, not several tenants, so it can be renamed but not created,
+switched between, or deleted.
+
 Standalone Otari has no sign-in of its own yet, so the master key is the
-bootstrap credential: the first authenticated request provisions one
+bootstrap credential: the first authenticated request provisions the
 organization, one default workspace, and one owner identity, and every later
 request resolves that same operator. Members added after that hold a role and
 can be placed in workspaces, but cannot sign in until a per-user sign-in flow
 lands: the address they are added by is the handle it will claim them with.
 
-- **General**: rename the active organization, read its slug (set at creation,
-  and deliberately not moved by a rename), switch between the organizations
-  your identity belongs to, create another one, or delete the active one.
-  Deleting is an owner's alone, and is refused while it is the only
-  organization your identity belongs to: every identity has to be pointed at
-  one.
+- **General**: rename the organization and read its slug, which is set when the
+  organization is provisioned and deliberately does not move with a rename.
+  Owners and admins only.
 - **Members**: who belongs to the organization and what each of them may do.
   Add someone by email address, with a role and optionally the workspaces to
   place them in at once; nothing is emailed, because a standalone gateway has no
