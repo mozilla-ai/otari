@@ -27,25 +27,49 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
     // are the tooltip, matching how the collapsed nav links behave.
     return (
       <div
-        className="mx-2 mb-2 flex h-10 items-center justify-center rounded-lg border border-border bg-surface-alt text-sm font-semibold text-foreground"
+        className="mx-2 mb-2 flex h-10 items-center justify-center rounded-lg border border-border bg-surface"
         title={`${selected?.name ?? "No workspace"} · ${organizationName}`}
       >
-        {(selected?.name ?? organizationName).slice(0, 1).toUpperCase()}
+        <img src="/favicon.svg" alt="" className="h-6 w-6 shrink-0" />
       </div>
     )
   }
 
   return (
     <Popover isOpen={open} onOpenChange={setOpen}>
+      {/* HeroUI's Button, not a plain one: the popover wires its trigger through
+          react-aria. `w-auto!` overrides the width the variant sets, which
+          otherwise stops this short of the rail rather than spanning it. */}
       <Button
         variant="ghost"
-        className="mx-3 mb-2 flex h-auto w-auto flex-col items-start gap-0 rounded-lg border border-border bg-surface-alt px-3 py-2 text-left"
         aria-label="Switch workspace"
+        className="mx-3 mb-2 h-auto w-[calc(100%-1.5rem)]! items-center justify-start gap-2.5 rounded-lg border border-border bg-surface px-2.5 py-2 text-left transition-colors hover:border-accent"
       >
-        <span className="text-sm font-semibold text-foreground">
-          {isLoading ? "Loading…" : (selected?.name ?? "No workspace")}
+        {/* The mark is the switcher's hero, as in the prototype: the product
+            name is not repeated in the header, so this is where it lives. */}
+        <img src="/favicon.svg" alt="" className="h-7 w-7 shrink-0" />
+        <span className="flex min-w-0 flex-col">
+          <span className="truncate text-sm font-semibold text-foreground">
+            {isLoading ? "Loading…" : (selected?.name ?? "No workspace")}
+          </span>
+          <span className="truncate text-xs text-muted">
+            {organizationName}
+          </span>
         </span>
-        <span className="text-xs text-muted">{organizationName}</span>
+        <svg
+          aria-hidden="true"
+          viewBox="0 0 24 24"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth="2"
+          className="ml-auto h-4 w-4 shrink-0 text-muted"
+        >
+          <path
+            d="M8 10l4 4 4-4"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
       </Button>
       <Popover.Content placement="bottom start">
         <Popover.Dialog className="flex w-64 flex-col">
@@ -69,7 +93,7 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
                   <li key={membership.workspace_id}>
                     <button
                       type="button"
-                      className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm text-foreground hover:bg-content3"
+                      className="flex w-full items-center justify-between rounded-md px-2 py-1.5 text-left text-sm text-foreground hover:bg-surface-alt hover:text-foreground"
                       onClick={() => {
                         select(membership.workspace_id)
                         setOpen(false)

@@ -60,12 +60,14 @@ function MenuItem({
       disabled={isDisabled}
       title={title}
       onClick={onPress}
-      className={`flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm ${
+      className={`flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm transition-colors ${
         isDisabled
           ? "cursor-not-allowed text-muted opacity-60"
           : danger
-            ? "text-danger hover:bg-content3"
-            : "text-foreground hover:bg-content3"
+            ? // Stays red on hover: the color is what marks this as the
+              // destructive row, so the hover must not wash it out.
+              "text-danger hover:bg-surface-alt"
+            : "text-foreground hover:bg-surface-alt"
       }`}
     >
       {icon}
@@ -77,7 +79,7 @@ function MenuItem({
 const iconClass = "h-4 w-4 shrink-0"
 
 const rowClass =
-  "flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm text-foreground hover:bg-content3"
+  "flex w-full items-center gap-2.5 rounded-md px-2 py-1.5 text-left text-sm text-foreground transition-colors hover:bg-surface-alt"
 
 function MenuLink({
   to,
@@ -107,14 +109,18 @@ export function AccountMenu({ collapsed }: { collapsed: boolean }) {
 
   return (
     <Popover isOpen={open} onOpenChange={setOpen}>
+      {/* HeroUI's Button, not a plain one: the popover wires its trigger through
+          react-aria, and a bare <button> leaves it unopenable. `w-auto!` is what
+          makes it span the rail, overriding the width the variant sets, which
+          otherwise leaves this a pill in the corner. */}
       <Button
         variant="ghost"
         aria-label="Account"
-        className={`flex h-auto items-center gap-2.5 rounded-lg px-2 py-2 text-left ${
+        className={`h-auto w-auto! justify-start gap-2.5 rounded-lg px-2 py-2 text-left ${
           collapsed ? "mx-2 justify-center" : "mx-3"
         }`}
       >
-        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-content3 text-[10px] font-semibold text-foreground">
+        <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-surface-alt text-[10px] font-semibold text-foreground">
           {identity.initials}
         </span>
         {collapsed ? null : (
@@ -190,7 +196,7 @@ export function AccountMenu({ collapsed }: { collapsed: boolean }) {
                   className={`flex-1 cursor-pointer rounded-md border px-2 py-1 text-center text-xs ${
                     preference === option
                       ? "border-accent bg-primary-subtle text-foreground"
-                      : "border-border text-muted hover:bg-content3"
+                      : "border-border text-muted transition-colors hover:bg-surface-alt hover:text-foreground"
                   }`}
                 >
                   {/* A real radio, visually replaced by the label around it, so

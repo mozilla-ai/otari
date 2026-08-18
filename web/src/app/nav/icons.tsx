@@ -13,7 +13,8 @@
  * asserts across the whole shell.
  */
 
-/** Four panes: an at-a-glance dashboard of the gateway. */
+// A house: the deployment's front page, and what the navigation prototype
+// uses for Overview.
 export const OverviewIcon = (
   <svg
     aria-hidden="true"
@@ -23,38 +24,13 @@ export const OverviewIcon = (
     strokeWidth="2"
     className="h-5 w-5 shrink-0"
   >
-    <rect
-      x="3.5"
-      y="3.5"
-      width="7"
-      height="7"
-      rx="1.5"
+    <path
+      d="M3.5 10.5 12 3.5l8.5 7"
+      strokeLinecap="round"
       strokeLinejoin="round"
     />
-    <rect
-      x="13.5"
-      y="3.5"
-      width="7"
-      height="7"
-      rx="1.5"
-      strokeLinejoin="round"
-    />
-    <rect
-      x="3.5"
-      y="13.5"
-      width="7"
-      height="7"
-      rx="1.5"
-      strokeLinejoin="round"
-    />
-    <rect
-      x="13.5"
-      y="13.5"
-      width="7"
-      height="7"
-      rx="1.5"
-      strokeLinejoin="round"
-    />
+    <path d="M5.5 9v10.5h13V9" strokeLinecap="round" strokeLinejoin="round" />
+    <path d="M9.75 19.5v-5h4.5v5" strokeLinejoin="round" />
   </svg>
 )
 
@@ -94,7 +70,8 @@ export const UsageIcon = (
   </svg>
 )
 
-/** A server stack: upstream provider services, distinct from the API-keys key. */
+// A shield: these are stored credentials, which is what the prototype's
+// Provider credentials entry draws, rather than the hardware serving them.
 export const ProvidersIcon = (
   <svg
     aria-hidden="true"
@@ -104,31 +81,14 @@ export const ProvidersIcon = (
     strokeWidth="2"
     className="h-5 w-5 shrink-0"
   >
-    <rect
-      x="3.5"
-      y="4.5"
-      width="17"
-      height="6"
-      rx="1.5"
-      strokeLinejoin="round"
-    />
-    <rect
-      x="3.5"
-      y="13.5"
-      width="17"
-      height="6"
-      rx="1.5"
-      strokeLinejoin="round"
-    />
     <path
-      d="M7 7.5h.01M7 16.5h.01"
-      strokeLinecap="round"
+      d="M12 3.5 19 6v6c0 4-2.9 6.9-7 8.5-4.1-1.6-7-4.5-7-8.5V6z"
       strokeLinejoin="round"
     />
   </svg>
 )
 
-/** A cube net: the model catalog the gateway serves. */
+// Stacked layers: a catalog of models, as the prototype draws it.
 export const ModelsIcon = (
   <svg
     aria-hidden="true"
@@ -138,8 +98,9 @@ export const ModelsIcon = (
     strokeWidth="2"
     className="h-5 w-5 shrink-0"
   >
-    <path d="M12 3l8 4.5v9L12 21l-8-4.5v-9L12 3z" strokeLinejoin="round" />
-    <path d="M12 12l8-4.5M12 12v9M12 12L4 7.5" strokeLinejoin="round" />
+    <path d="M12 3.5 20 8l-8 4.5L4 8z" strokeLinejoin="round" />
+    <path d="m4 12 8 4.5L20 12" strokeLinejoin="round" strokeLinecap="round" />
+    <path d="m4 16 8 4.5L20 16" strokeLinejoin="round" strokeLinecap="round" />
   </svg>
 )
 
@@ -160,7 +121,8 @@ export const RoutingIcon = (
   </svg>
 )
 
-/** A building: the organization every workspace and membership belongs to. */
+// A gear: the organization rail is where a deployment is configured, so it
+// reads as settings rather than as a building.
 export const OrganizationIcon = (
   <svg
     aria-hidden="true"
@@ -170,20 +132,15 @@ export const OrganizationIcon = (
     strokeWidth="2"
     className="h-5 w-5 shrink-0"
   >
+    <circle cx="12" cy="12" r="3" />
     <path
-      d="M4 20V5.5A1.5 1.5 0 0 1 5.5 4h7A1.5 1.5 0 0 1 14 5.5V20"
+      d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
       strokeLinejoin="round"
-    />
-    <path d="M14 10h4.5A1.5 1.5 0 0 1 20 11.5V20" strokeLinejoin="round" />
-    <path d="M2.5 20h19" strokeLinecap="round" />
-    <path
-      d="M7 8h1M10.5 8h1M7 12h1M10.5 12h1M7 16h1M10.5 16h1M17 14h1"
-      strokeLinecap="round"
     />
   </svg>
 )
 
-/** A single figure, set apart from the two-figure Users glyph below. */
+// Two people: a roster, as the prototype draws Members.
 export const MembersIcon = (
   <svg
     aria-hidden="true"
@@ -193,12 +150,10 @@ export const MembersIcon = (
     strokeWidth="2"
     className="h-5 w-5 shrink-0"
   >
-    <circle cx="12" cy="7.5" r="3" strokeLinejoin="round" />
-    <path
-      d="M5.5 19a6.5 6.5 0 0 1 13 0"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
+    <circle cx="9.5" cy="8.5" r="3" />
+    <path d="M3.5 19.5a6 6 0 0 1 12 0" strokeLinecap="round" />
+    <path d="M16 6.2a3 3 0 0 1 0 5.6" strokeLinecap="round" />
+    <path d="M17.5 14.5a5 5 0 0 1 3 4.6" strokeLinecap="round" />
   </svg>
 )
 
@@ -250,7 +205,7 @@ export const UsersIcon = (
   </svg>
 )
 
-/** The key glyph belongs to API keys (Providers uses the server stack above). */
+/** The key glyph belongs to API keys (Provider credentials uses the shield). */
 export const KeysIcon = (
   <svg
     aria-hidden="true"
@@ -260,12 +215,12 @@ export const KeysIcon = (
     strokeWidth="2"
     className="h-5 w-5 shrink-0"
   >
-    <circle cx="7.5" cy="15.5" r="3.5" />
-    <path
-      d="M10 13l7-7M14 5l3 3M16.5 7.5l2-2"
-      strokeLinecap="round"
-      strokeLinejoin="round"
-    />
+    <g transform="translate(12 12) scale(0.86) translate(-12 -12)">
+      <circle cx="7.5" cy="15.5" r="4.5" />
+      <path d="M10.7 12.3 19 4" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="m15 8 3 3" strokeLinecap="round" strokeLinejoin="round" />
+      <path d="m17.5 5.5 3 3" strokeLinecap="round" strokeLinejoin="round" />
+    </g>
   </svg>
 )
 
@@ -296,7 +251,7 @@ export const BudgetsIcon = (
   </svg>
 )
 
-/** A wrench: the runtime tools and guardrails the gateway can call. */
+// A wrench, as the prototype draws Tools.
 export const ToolsIcon = (
   <svg
     aria-hidden="true"
@@ -306,15 +261,18 @@ export const ToolsIcon = (
     strokeWidth="2"
     className="h-5 w-5 shrink-0"
   >
-    <path
-      d="M14.7 6.3a4 4 0 0 1 5 5l-8.4 8.4a2 2 0 0 1-2.8 0l-2.2-2.2a2 2 0 0 1 0-2.8z"
-      strokeLinejoin="round"
-    />
-    <path d="M12 9 5 16" strokeLinecap="round" />
+    <g transform="translate(12 12) scale(0.86) translate(-12 -12)">
+      <path
+        d="M14.7 6.3a1 1 0 0 0 0 1.4l1.6 1.6a1 1 0 0 0 1.4 0l3.77-3.77a6 6 0 0 1-7.94 7.94l-6.91 6.91a2.12 2.12 0 0 1-3-3l6.91-6.91a6 6 0 0 1 7.94-7.94l-3.76 3.76z"
+        strokeLinecap="round"
+        strokeLinejoin="round"
+      />
+    </g>
   </svg>
 )
 
-/** A cog: the deployment's own runtime configuration. */
+// Sliders, not a gear: Organization is the gear now, and two identical glyphs
+// two rows apart on the same rail is worse than either choice alone.
 export const SettingsIcon = (
   <svg
     aria-hidden="true"
@@ -324,10 +282,8 @@ export const SettingsIcon = (
     strokeWidth="2"
     className="h-5 w-5 shrink-0"
   >
-    <circle cx="12" cy="12" r="3" />
-    <path
-      d="M19.4 15a1.65 1.65 0 0 0 .33 1.82l.06.06a2 2 0 1 1-2.83 2.83l-.06-.06a1.65 1.65 0 0 0-1.82-.33 1.65 1.65 0 0 0-1 1.51V21a2 2 0 0 1-4 0v-.09A1.65 1.65 0 0 0 9 19.4a1.65 1.65 0 0 0-1.82.33l-.06.06a2 2 0 1 1-2.83-2.83l.06-.06a1.65 1.65 0 0 0 .33-1.82 1.65 1.65 0 0 0-1.51-1H3a2 2 0 0 1 0-4h.09A1.65 1.65 0 0 0 4.6 9a1.65 1.65 0 0 0-.33-1.82l-.06-.06a2 2 0 1 1 2.83-2.83l.06.06a1.65 1.65 0 0 0 1.82.33H9a1.65 1.65 0 0 0 1-1.51V3a2 2 0 0 1 4 0v.09a1.65 1.65 0 0 0 1 1.51 1.65 1.65 0 0 0 1.82-.33l.06-.06a2 2 0 1 1 2.83 2.83l-.06.06a1.65 1.65 0 0 0-.33 1.82V9a1.65 1.65 0 0 0 1.51 1H21a2 2 0 0 1 0 4h-.09a1.65 1.65 0 0 0-1.51 1z"
-      strokeLinejoin="round"
-    />
+    <path d="M4 7h9M17 7h3M4 17h3M11 17h9" strokeLinecap="round" />
+    <circle cx="15" cy="7" r="2" />
+    <circle cx="9" cy="17" r="2" />
   </svg>
 )
