@@ -355,6 +355,33 @@ hand.
   cannot change, and not at all for a weighted policy, which has nothing to teach. See
   [learned routing](routing.md#let-a-router-choose-learned-routing).
 
+### Organization
+
+The tenant this deployment's workspaces, members, and roles belong to.
+Standalone Otari has no sign-in of its own yet, so the master key is the
+bootstrap credential: the first authenticated request provisions one
+organization, one default workspace, and one owner identity, and every later
+request resolves that same operator. Until per-user sign-in and invitations
+land, the roster stays at one row, and these pages are where the shape it will
+grow into is already enforced.
+
+- **General**: rename the active organization, read its slug (set at creation,
+  and deliberately not moved by a rename), switch between the organizations
+  your identity belongs to, create another one, or delete the active one.
+  Deleting is an owner's alone, and is refused while it is the only
+  organization your identity belongs to: every identity has to be pointed at
+  one.
+- **Members**: who belongs to the organization and what each of them may do.
+  Roles are fixed: owners and admins manage the organization, members use it,
+  viewers only read. Removing a member suspends the membership rather than
+  deleting it, so past usage stays attributable and they can be reactivated
+  here. Two changes are refused rather than offered: an admin cannot act on an
+  owner, and the last active owner cannot be demoted or suspended.
+- **Workspaces**: the scopes inside the organization that work is grouped into.
+  Each organization is created with one. A workspace carries its own members and
+  roles, and its members are always a subset of the organization's, so adding
+  one is a pick from the roster rather than an invitation.
+
 ### Access
 
 - **Users**: the principals that keys and budgets attach to, including the

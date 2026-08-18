@@ -252,4 +252,31 @@ export type VisionStrategy = NonNullable<
   UpdateSettingsRequest["vision_strategy"]
 >
 
+// ---------------------------------------------------------------------------
+// Tenancy: organizations, workspaces, and the memberships joining them
+//
+// Rehomed from the platform with their shapes intact, which is the point: the
+// pages built on them here are the ones otari.ai's control plane brings across
+// at M5, so a renamed field would have to be reconciled twice.
+// ---------------------------------------------------------------------------
+export type Organization = Schemas["OrganizationPublic"]
+/** An organization plus the caller's standing in it: what every tenancy page reads first. */
+export type OrganizationContext = Schemas["OrganizationMembershipContextPublic"]
+export type OrganizationContexts =
+  Schemas["OrganizationMembershipContextsPublic"]
+export type CreateOrganizationRequest = Schemas["OrganizationCreateRequest"]
+export type UpdateOrganizationRequest =
+  Schemas["ActiveOrganizationUpdateRequest"]
+export type SwitchOrganizationRequest = Schemas["OrganizationSwitchRequest"]
+export type OrganizationMember = Schemas["ActiveOrganizationMemberPublic"]
+export type OrganizationMembers = Schemas["ActiveOrganizationMembersPublic"]
+export type UpdateOrganizationMemberRequest =
+  Schemas["ActiveOrganizationMemberUpdateRequest"]
+export type Workspace = Schemas["WorkspacePublic"]
+export type Workspaces = Schemas["WorkspacesPublic"]
+export type CreateWorkspaceRequest = Schemas["WorkspaceCreate"]
+export type UpdateWorkspaceRequest = Schemas["WorkspaceUpdate"]
+export type WorkspaceMember = Schemas["WorkspaceMemberPublic"]
+export type WorkspaceMembers = Schemas["WorkspaceMembersPublic"]
+
 export type * from "./local"

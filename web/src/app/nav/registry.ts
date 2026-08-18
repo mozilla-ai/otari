@@ -2,7 +2,9 @@ import {
   ActivityIcon,
   BudgetsIcon,
   KeysIcon,
+  MembersIcon,
   ModelsIcon,
+  OrganizationIcon,
   OverviewIcon,
   ProvidersIcon,
   RoutingIcon,
@@ -10,6 +12,7 @@ import {
   ToolsIcon,
   UsageIcon,
   UsersIcon,
+  WorkspacesIcon,
 } from "./icons"
 import { OVERLAY_NAV_SECTIONS } from "./overlaySections"
 import type { NavItem, NavSection } from "./types"
@@ -21,10 +24,11 @@ import type { NavItem, NavSection } from "./types"
  * Sections render in this order. "Observability" is what the gateway did (the
  * request log and the usage rollups over it); "Catalog" is what the gateway
  * serves (providers, their models, and the policies that route over them);
- * "Access" is who may call it (users, keys, budgets); the unlabeled first and
- * last groups hold the index and the standalone config, set off by a divider
- * rather than a heading. Grouping keeps the list legible as the dashboard
- * grows.
+ * "Organization" is the tenant the deployment belongs to (itself, its roster,
+ * and the workspaces it is divided into); "Access" is who may call it (users,
+ * keys, budgets); the unlabeled first and last groups hold the index and the
+ * standalone config, set off by a divider rather than a heading. Grouping keeps
+ * the list legible as the dashboard grows.
  *
  * Each entry declares its own gating, and the three axes are independent:
  * `surface` (does this deployment host it), `capability` (is it entitled), and
@@ -80,6 +84,33 @@ const BASE_NAV_SECTIONS = [
         label: "Routing",
         surface: "routing",
         icon: RoutingIcon,
+      },
+    ],
+  },
+  {
+    id: "organization",
+    label: "Organization",
+    items: [
+      // Two pages over /v1/organizations, so they name the surface rather than
+      // themselves; the workspace pages are a separate surface because a
+      // deployment could serve one without the other.
+      {
+        to: "/organization",
+        label: "General",
+        surface: "organizations",
+        icon: OrganizationIcon,
+      },
+      {
+        to: "/organization/members",
+        label: "Members",
+        surface: "organizations",
+        icon: MembersIcon,
+      },
+      {
+        to: "/workspaces",
+        label: "Workspaces",
+        surface: "workspaces",
+        icon: WorkspacesIcon,
       },
     ],
   },

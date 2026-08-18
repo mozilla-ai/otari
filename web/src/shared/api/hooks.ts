@@ -13,9 +13,11 @@ import type {
   CreateBudgetRequest,
   CreateKeyRequest,
   CreateKeyResponse,
+  CreateOrganizationRequest,
   CreateSearchToolRequest,
   CreateStoredProviderRequest,
   CreateUserRequest,
+  CreateWorkspaceRequest,
   DashboardBuild,
   DiscoverableModelsResponse,
   ExplainPolicyRequest,
@@ -27,6 +29,9 @@ import type {
   KnownProviderSummary,
   ModelListResponse,
   ModelMetadataResponse,
+  OrganizationContext,
+  OrganizationContexts,
+  OrganizationMember,
   PricingRefreshPreview,
   PricingResponse,
   ProviderHealthResponse,
@@ -44,17 +49,21 @@ import type {
   StoredProvider,
   StoredSearchTool,
   SummaryDimension,
+  SwitchOrganizationRequest,
   TestProviderResult,
   TestServiceResponse,
   ToolSettingsResponse,
   ToolsResponse,
   UpdateBudgetRequest,
   UpdateKeyRequest,
+  UpdateOrganizationMemberRequest,
+  UpdateOrganizationRequest,
   UpdateSearchToolRequest,
   UpdateSettingsRequest,
   UpdateStoredProviderRequest,
   UpdateToolSettingsRequest,
   UpdateUserRequest,
+  UpdateWorkspaceRequest,
   UsageBucket,
   UsageCount,
   UsageDeleteResult,
@@ -67,6 +76,8 @@ import type {
   UsageSetPriceResult,
   UsageSummary,
   User,
+  Workspace,
+  WorkspaceMember,
 } from "@/client"
 import { ApiError, apiFetch, longRequestSignal } from "@/shared/api/client"
 import { isoAgo } from "@/shared/helpers/timeRange"
@@ -95,6 +106,12 @@ const KEYS = "keys"
 const BUDGETS = "budgets"
 const USERS = "users"
 const USAGE = "usage"
+const ORGANIZATIONS = "organizations"
+// Deliberately its own key rather than a child of ORGANIZATIONS: switching
+// organizations invalidates both, but a role change invalidates only the roster,
+// and nesting would re-read the context (and every page gated on it) as well.
+const ORGANIZATION_MEMBERS = "organization-members"
+const WORKSPACES = "workspaces"
 
 // How often an open tab asks whether the app it is running is still the one the
 // gateway serves. Cheap (a hash of one small file) and only while the tab is
@@ -1332,5 +1349,296 @@ export function useUsageGroupedSeries(
     // the page falls back to the ungrouped view with a notice instead.
     retry: (failureCount, error) =>
       !(error instanceof ApiError && error.status === 404) && failureCount < 3,
+  })
+}
+
+// ---------- tenancy: organizations, workspaces, memberships ----------
+
+// The tenancy endpoints answer `{ data, count }` and page with skip/limit, all
+// capped at 1000 server-side. The pages want one list, so the walk is bounded
+// the same way fetchAllPricing is: a backend or proxy that ignores `skip` must
+// not turn "fetch everything" into an unbounded loop.
+const TENANCY_PAGE_SIZE = 1000
+const TENANCY_MAX_PAGES = 100
+
+interface Paged<T> {
+  data: T[]
+  count: number
+}
+
+async function fetchAllPaged<T>(path: string): Promise<T[]> {
+  const all: T[] = []
+  for (let page = 0; page < TENANCY_MAX_PAGES; page += 1) {
+    const body = await apiFetch<Paged<T>>(
+      `${path}?skip=${page * TENANCY_PAGE_SIZE}&limit=${TENANCY_PAGE_SIZE}`,
+    )
+    all.push(...body.data)
+    if (body.data.length < TENANCY_PAGE_SIZE) break
+  }
+  return all
+}
+
+// The organization the caller's identity is pointed at, and their standing in
+// it. Every tenancy page reads it first: it names the tenant on screen and
+// decides whether the management controls are offered at all. Read often and
+// changed rarely, so it is cached for a minute like the other management lists.
+export function useOrganizationContext() {
+  return useQuery({
+    queryKey: [ORGANIZATIONS, "context"],
+    queryFn: () => apiFetch<OrganizationContext>("/v1/organizations/me"),
+    staleTime: 60_000,
+  })
+}
+
+// Every organization the caller may switch into. Separate from the context key
+// because switching rewrites the context while leaving this list as it was.
+export function useOrganizationMemberships() {
+  return useQuery({
+    queryKey: [ORGANIZATIONS, "memberships"],
+    queryFn: () =>
+      apiFetch<OrganizationContexts>("/v1/organizations/me/memberships").then(
+        (body) => body.data,
+      ),
+    staleTime: 60_000,
+  })
+}
+
+export function useOrganizationMembers() {
+  return useQuery({
+    queryKey: [ORGANIZATION_MEMBERS],
+    queryFn: () =>
+      fetchAllPaged<OrganizationMember>("/v1/organizations/me/members"),
+    staleTime: 60_000,
+  })
+}
+
+// Which organization the caller is in decides what every other tenancy query
+// answers, so a write that can move or rename it clears the whole tenancy tree
+// rather than one key. Cheap (three small lists) and the alternative is a page
+// showing the previous tenant's workspaces.
+function invalidateTenancy(
+  queryClient: ReturnType<typeof useQueryClient>,
+): void {
+  void queryClient.invalidateQueries({ queryKey: [ORGANIZATIONS] })
+  void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_MEMBERS] })
+  void queryClient.invalidateQueries({ queryKey: [WORKSPACES] })
+}
+
+export function useCreateOrganization() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: CreateOrganizationRequest) =>
+      apiFetch<OrganizationContext>("/v1/organizations/me", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    // Creating an organization also switches the caller into it, so this moves
+    // the tenant as much as a switch does.
+    onSuccess: () => invalidateTenancy(queryClient),
+  })
+}
+
+export function useUpdateOrganization() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: UpdateOrganizationRequest) =>
+      apiFetch<OrganizationContext>("/v1/organizations/me", {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [ORGANIZATIONS] })
+    },
+  })
+}
+
+export function useSwitchOrganization() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: SwitchOrganizationRequest) =>
+      apiFetch<OrganizationContext>("/v1/organizations/me/switch", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => invalidateTenancy(queryClient),
+  })
+}
+
+export function useDeleteOrganization() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: () =>
+      apiFetch<void>("/v1/organizations/me", { method: "DELETE" }),
+    // The caller lands in another of their organizations, which the server
+    // picked, so everything scoped to a tenant has to be re-read.
+    onSuccess: () => invalidateTenancy(queryClient),
+  })
+}
+
+export function useUpdateOrganizationMember() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      id,
+      body,
+    }: {
+      id: string
+      body: UpdateOrganizationMemberRequest
+    }) =>
+      apiFetch<OrganizationMember>(
+        `/v1/organizations/me/members/${encodeURIComponent(id)}`,
+        { method: "PATCH", body: JSON.stringify(body) },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_MEMBERS] })
+      // The caller may have changed their own role, which is what the page
+      // gates its controls on.
+      void queryClient.invalidateQueries({ queryKey: [ORGANIZATIONS] })
+    },
+  })
+}
+
+export function useRemoveOrganizationMember() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<void>(`/v1/organizations/me/members/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_MEMBERS] })
+      // A suspended member keeps their workspace rows, so every roster that
+      // resolves a name through the organization list is now stale.
+      void queryClient.invalidateQueries({ queryKey: [WORKSPACES] })
+    },
+  })
+}
+
+export function useWorkspaces() {
+  return useQuery({
+    queryKey: [WORKSPACES],
+    queryFn: () => fetchAllPaged<Workspace>("/v1/workspaces"),
+    staleTime: 60_000,
+  })
+}
+
+// One workspace's roster. Nested under the workspaces key so deleting a
+// workspace drops its roster with it.
+export function useWorkspaceMembers(workspaceId: string | null) {
+  return useQuery({
+    queryKey: [WORKSPACES, workspaceId, "members"],
+    queryFn: () =>
+      fetchAllPaged<WorkspaceMember>(
+        `/v1/workspaces/${encodeURIComponent(workspaceId as string)}/members`,
+      ),
+    enabled: workspaceId !== null,
+    staleTime: 60_000,
+  })
+}
+
+export function useCreateWorkspace() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: CreateWorkspaceRequest) =>
+      apiFetch<Workspace>("/v1/workspaces", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [WORKSPACES] })
+    },
+  })
+}
+
+export function useUpdateWorkspace() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, body }: { id: string; body: UpdateWorkspaceRequest }) =>
+      apiFetch<Workspace>(`/v1/workspaces/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [WORKSPACES] })
+    },
+  })
+}
+
+export function useDeleteWorkspace() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<void>(`/v1/workspaces/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [WORKSPACES] })
+    },
+  })
+}
+
+export function useAddWorkspaceMember() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      userId,
+      role,
+    }: {
+      workspaceId: string
+      userId: string
+      role: string
+    }) =>
+      // The role travels as a query parameter, not a body: that is the wire
+      // contract these endpoints were rehomed with.
+      apiFetch<WorkspaceMember>(
+        `/v1/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(userId)}?role=${encodeURIComponent(role)}`,
+        { method: "POST" },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [WORKSPACES] })
+    },
+  })
+}
+
+export function useUpdateWorkspaceMemberRole() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      userId,
+      role,
+    }: {
+      workspaceId: string
+      userId: string
+      role: string
+    }) =>
+      apiFetch<WorkspaceMember>(
+        `/v1/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(userId)}?role=${encodeURIComponent(role)}`,
+        { method: "PATCH" },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [WORKSPACES] })
+    },
+  })
+}
+
+export function useRemoveWorkspaceMember() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      userId,
+    }: {
+      workspaceId: string
+      userId: string
+    }) =>
+      apiFetch<void>(
+        `/v1/workspaces/${encodeURIComponent(workspaceId)}/members/${encodeURIComponent(userId)}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [WORKSPACES] })
+    },
   })
 }

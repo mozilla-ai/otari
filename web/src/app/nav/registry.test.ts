@@ -17,6 +17,7 @@ describe("nav registry", () => {
       "home",
       "observability",
       "catalog",
+      "organization",
       "access",
       "system",
     ])
@@ -33,12 +34,39 @@ describe("nav registry", () => {
       "Providers",
       "Models",
       "Routing",
+      "General",
+      "Members",
+      "Workspaces",
       "Users",
       "API keys",
       "Budgets",
       "Tools & Guardrails",
       "Settings",
     ])
+  })
+
+  it("splits the tenancy pages across their two surfaces", () => {
+    // The organization pages and the workspace pages are separate management
+    // prefixes, so they gate separately: a deployment that served one without
+    // the other would otherwise show links it refuses every request behind.
+    const tenancy = NAV_SECTIONS.find(
+      (section) => section.id === "organization",
+    )
+    expect(tenancy?.items.map((item) => [item.label, item.surface])).toEqual([
+      ["General", "organizations"],
+      ["Members", "organizations"],
+      ["Workspaces", "workspaces"],
+    ])
+  })
+
+  it("resolves a tenancy child route through its parent entry", () => {
+    // /organization/members is its own destination and its own registry entry,
+    // and the prefix rule finds the parent first. Harmless while both gate on
+    // the same surface, and pinned so a change to either one is a deliberate
+    // one rather than a surprise.
+    expect(navItemForPath("/organization/members")?.surface).toBe(
+      "organizations",
+    )
   })
 
   it("points every entry at an absolute path", () => {

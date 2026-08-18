@@ -8,9 +8,14 @@
 
 import type {
   DeploymentBootstrap,
+  Organization,
+  OrganizationContext,
+  OrganizationMember,
   PricingResponse,
   UsageSeriesPoint,
   UsageTotals,
+  Workspace,
+  WorkspaceMember,
 } from "@/client"
 
 export function usageTotals(overrides: Partial<UsageTotals> = {}): UsageTotals {
@@ -91,6 +96,86 @@ export function bootstrap(
     session_type: "local_operator",
     surfaces: [...STANDALONE_SURFACES],
     management_url: null,
+    ...overrides,
+  }
+}
+
+// ---------- tenancy ----------
+
+const ORGANIZATION_ID = "11111111-1111-1111-1111-111111111111"
+
+export function organization(
+  overrides: Partial<Organization> = {},
+): Organization {
+  return {
+    id: ORGANIZATION_ID,
+    name: "Default Organization",
+    slug: "default-organization",
+    created_by_user_id: null,
+    created_at: "2026-01-01T00:00:00+00:00",
+    updated_at: null,
+    ...overrides,
+  }
+}
+
+/** The caller's organization plus their standing in it, as an owner by default. */
+export function organizationContext(
+  overrides: Partial<OrganizationContext> = {},
+): OrganizationContext {
+  return {
+    organization_member_id: "22222222-2222-2222-2222-222222222222",
+    role: "owner",
+    status: "active",
+    organization: organization(),
+    byo_provider_keys_allowed: true,
+    ...overrides,
+  }
+}
+
+export function organizationMember(
+  overrides: Partial<OrganizationMember> = {},
+): OrganizationMember {
+  return {
+    organization_member_id: "22222222-2222-2222-2222-222222222222",
+    user_id: "33333333-3333-3333-3333-333333333333",
+    invitation_id: null,
+    // A standalone operator identity has no sign-in address; a ported platform
+    // row does. Both shapes have to render, so the builder ships neither and a
+    // test names the one it is about.
+    email: null,
+    full_name: "Operator",
+    role: "owner",
+    status: "active",
+    created_at: "2026-01-01T00:00:00+00:00",
+    updated_at: null,
+    ...overrides,
+  }
+}
+
+export function workspace(overrides: Partial<Workspace> = {}): Workspace {
+  return {
+    id: "44444444-4444-4444-4444-444444444444",
+    name: "Default Workspace",
+    description: null,
+    organization_id: ORGANIZATION_ID,
+    created_by_user_id: null,
+    created_at: "2026-01-01T00:00:00+00:00",
+    updated_at: null,
+    ...overrides,
+  }
+}
+
+export function workspaceMember(
+  overrides: Partial<WorkspaceMember> = {},
+): WorkspaceMember {
+  return {
+    id: "55555555-5555-5555-5555-555555555555",
+    workspace_id: "44444444-4444-4444-4444-444444444444",
+    user_id: "33333333-3333-3333-3333-333333333333",
+    role: "owner",
+    status: "active",
+    created_at: "2026-01-01T00:00:00+00:00",
+    updated_at: null,
     ...overrides,
   }
 }

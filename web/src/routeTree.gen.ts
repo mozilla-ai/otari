@@ -17,12 +17,16 @@ import { Route as BudgetsRouteImport } from './routes/budgets'
 import { Route as DocsRouteImport } from './routes/docs'
 import { Route as KeysRouteImport } from './routes/keys'
 import { Route as ModelsRouteImport } from './routes/models'
+import { Route as OrganizationRouteImport } from './routes/organization'
 import { Route as ProvidersRouteImport } from './routes/providers'
 import { Route as RoutingRouteImport } from './routes/routing'
 import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ToolsRouteImport } from './routes/tools'
 import { Route as UsageRouteImport } from './routes/usage'
 import { Route as UsersRouteImport } from './routes/users'
+import { Route as WorkspacesRouteImport } from './routes/workspaces'
+import { Route as OrganizationIndexRouteImport } from './routes/organization.index'
+import { Route as OrganizationMembersRouteImport } from './routes/organization.members'
 
 const IndexRoute = IndexRouteImport.update({
   id: '/',
@@ -64,6 +68,11 @@ const ModelsRoute = ModelsRouteImport.update({
   path: '/models',
   getParentRoute: () => rootRouteImport,
 } as any)
+const OrganizationRoute = OrganizationRouteImport.update({
+  id: '/organization',
+  path: '/organization',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const ProvidersRoute = ProvidersRouteImport.update({
   id: '/providers',
   path: '/providers',
@@ -94,6 +103,21 @@ const UsersRoute = UsersRouteImport.update({
   path: '/users',
   getParentRoute: () => rootRouteImport,
 } as any)
+const WorkspacesRoute = WorkspacesRouteImport.update({
+  id: '/workspaces',
+  path: '/workspaces',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const OrganizationIndexRoute = OrganizationIndexRouteImport.update({
+  id: '/',
+  path: '/',
+  getParentRoute: () => OrganizationRoute,
+} as any)
+const OrganizationMembersRoute = OrganizationMembersRouteImport.update({
+  id: '/members',
+  path: '/members',
+  getParentRoute: () => OrganizationRoute,
+} as any)
 
 export interface FileRoutesByFullPath {
   '/': typeof IndexRoute
@@ -104,12 +128,16 @@ export interface FileRoutesByFullPath {
   '/docs': typeof DocsRoute
   '/keys': typeof KeysRoute
   '/models': typeof ModelsRoute
+  '/organization': typeof OrganizationRouteWithChildren
   '/providers': typeof ProvidersRoute
   '/routing': typeof RoutingRoute
   '/settings': typeof SettingsRoute
   '/tools': typeof ToolsRoute
   '/usage': typeof UsageRoute
   '/users': typeof UsersRoute
+  '/workspaces': typeof WorkspacesRoute
+  '/organization/members': typeof OrganizationMembersRoute
+  '/organization/': typeof OrganizationIndexRoute
 }
 export interface FileRoutesByTo {
   '/': typeof IndexRoute
@@ -126,6 +154,9 @@ export interface FileRoutesByTo {
   '/tools': typeof ToolsRoute
   '/usage': typeof UsageRoute
   '/users': typeof UsersRoute
+  '/workspaces': typeof WorkspacesRoute
+  '/organization/members': typeof OrganizationMembersRoute
+  '/organization': typeof OrganizationIndexRoute
 }
 export interface FileRoutesById {
   __root__: typeof rootRouteImport
@@ -137,12 +168,16 @@ export interface FileRoutesById {
   '/docs': typeof DocsRoute
   '/keys': typeof KeysRoute
   '/models': typeof ModelsRoute
+  '/organization': typeof OrganizationRouteWithChildren
   '/providers': typeof ProvidersRoute
   '/routing': typeof RoutingRoute
   '/settings': typeof SettingsRoute
   '/tools': typeof ToolsRoute
   '/usage': typeof UsageRoute
   '/users': typeof UsersRoute
+  '/workspaces': typeof WorkspacesRoute
+  '/organization/members': typeof OrganizationMembersRoute
+  '/organization/': typeof OrganizationIndexRoute
 }
 export interface FileRouteTypes {
   fileRoutesByFullPath: FileRoutesByFullPath
@@ -155,12 +190,16 @@ export interface FileRouteTypes {
     | '/docs'
     | '/keys'
     | '/models'
+    | '/organization'
     | '/providers'
     | '/routing'
     | '/settings'
     | '/tools'
     | '/usage'
     | '/users'
+    | '/workspaces'
+    | '/organization/members'
+    | '/organization/'
   fileRoutesByTo: FileRoutesByTo
   to:
     | '/'
@@ -177,6 +216,9 @@ export interface FileRouteTypes {
     | '/tools'
     | '/usage'
     | '/users'
+    | '/workspaces'
+    | '/organization/members'
+    | '/organization'
   id:
     | '__root__'
     | '/'
@@ -187,12 +229,16 @@ export interface FileRouteTypes {
     | '/docs'
     | '/keys'
     | '/models'
+    | '/organization'
     | '/providers'
     | '/routing'
     | '/settings'
     | '/tools'
     | '/usage'
     | '/users'
+    | '/workspaces'
+    | '/organization/members'
+    | '/organization/'
   fileRoutesById: FileRoutesById
 }
 export interface RootRouteChildren {
@@ -204,12 +250,14 @@ export interface RootRouteChildren {
   DocsRoute: typeof DocsRoute
   KeysRoute: typeof KeysRoute
   ModelsRoute: typeof ModelsRoute
+  OrganizationRoute: typeof OrganizationRouteWithChildren
   ProvidersRoute: typeof ProvidersRoute
   RoutingRoute: typeof RoutingRoute
   SettingsRoute: typeof SettingsRoute
   ToolsRoute: typeof ToolsRoute
   UsageRoute: typeof UsageRoute
   UsersRoute: typeof UsersRoute
+  WorkspacesRoute: typeof WorkspacesRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -270,6 +318,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ModelsRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/organization': {
+      id: '/organization'
+      path: '/organization'
+      fullPath: '/organization'
+      preLoaderRoute: typeof OrganizationRouteImport
+      parentRoute: typeof rootRouteImport
+    }
     '/providers': {
       id: '/providers'
       path: '/providers'
@@ -312,8 +367,43 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof UsersRouteImport
       parentRoute: typeof rootRouteImport
     }
+    '/workspaces': {
+      id: '/workspaces'
+      path: '/workspaces'
+      fullPath: '/workspaces'
+      preLoaderRoute: typeof WorkspacesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/organization/': {
+      id: '/organization/'
+      path: '/'
+      fullPath: '/organization/'
+      preLoaderRoute: typeof OrganizationIndexRouteImport
+      parentRoute: typeof OrganizationRoute
+    }
+    '/organization/members': {
+      id: '/organization/members'
+      path: '/members'
+      fullPath: '/organization/members'
+      preLoaderRoute: typeof OrganizationMembersRouteImport
+      parentRoute: typeof OrganizationRoute
+    }
   }
 }
+
+interface OrganizationRouteChildren {
+  OrganizationMembersRoute: typeof OrganizationMembersRoute
+  OrganizationIndexRoute: typeof OrganizationIndexRoute
+}
+
+const OrganizationRouteChildren: OrganizationRouteChildren = {
+  OrganizationMembersRoute: OrganizationMembersRoute,
+  OrganizationIndexRoute: OrganizationIndexRoute,
+}
+
+const OrganizationRouteWithChildren = OrganizationRoute._addFileChildren(
+  OrganizationRouteChildren,
+)
 
 const rootRouteChildren: RootRouteChildren = {
   IndexRoute: IndexRoute,
@@ -324,12 +414,14 @@ const rootRouteChildren: RootRouteChildren = {
   DocsRoute: DocsRoute,
   KeysRoute: KeysRoute,
   ModelsRoute: ModelsRoute,
+  OrganizationRoute: OrganizationRouteWithChildren,
   ProvidersRoute: ProvidersRoute,
   RoutingRoute: RoutingRoute,
   SettingsRoute: SettingsRoute,
   ToolsRoute: ToolsRoute,
   UsageRoute: UsageRoute,
   UsersRoute: UsersRoute,
+  WorkspacesRoute: WorkspacesRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

@@ -161,6 +161,72 @@ export const RoutingIcon = (
 )
 
 /** Two figures: the principals that keys and budgets attach to. */
+/** A building: the organization every workspace and membership belongs to. */
+export const OrganizationIcon = (
+  <svg
+    aria-hidden="true"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    className="h-5 w-5 shrink-0"
+  >
+    <path
+      d="M4 20V5.5A1.5 1.5 0 0 1 5.5 4h7A1.5 1.5 0 0 1 14 5.5V20"
+      strokeLinejoin="round"
+    />
+    <path d="M14 10h4.5A1.5 1.5 0 0 1 20 11.5V20" strokeLinejoin="round" />
+    <path d="M2.5 20h19" strokeLinecap="round" />
+    <path
+      d="M7 8h1M10.5 8h1M7 12h1M10.5 12h1M7 16h1M10.5 16h1M17 14h1"
+      strokeLinecap="round"
+    />
+  </svg>
+)
+
+/** Two figures under one roof: the roster of the organization above. */
+export const MembersIcon = (
+  <svg
+    aria-hidden="true"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    className="h-5 w-5 shrink-0"
+  >
+    <circle cx="12" cy="7.5" r="3" strokeLinejoin="round" />
+    <path
+      d="M5.5 19a6.5 6.5 0 0 1 13 0"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+)
+
+/** Stacked frames: the workspaces an organization is divided into. */
+export const WorkspacesIcon = (
+  <svg
+    aria-hidden="true"
+    viewBox="0 0 24 24"
+    fill="none"
+    stroke="currentColor"
+    strokeWidth="2"
+    className="h-5 w-5 shrink-0"
+  >
+    <rect x="3" y="4" width="12" height="9" rx="1.5" strokeLinejoin="round" />
+    <path
+      d="M8 17.5h11a1.5 1.5 0 0 0 1.5-1.5V8"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+    <path
+      d="M11 21h8a3 3 0 0 0 3-3"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    />
+  </svg>
+)
+
 export const UsersIcon = (
   <svg
     aria-hidden="true"
