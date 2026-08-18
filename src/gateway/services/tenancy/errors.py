@@ -157,6 +157,25 @@ class OrganizationNameRequiredError(TenancyValidationError):
         super().__init__("An organization name is required")
 
 
+class WorkspaceInUseError(TenancyConflictError):
+    """A workspace still holds request-plane rows, which are ON DELETE RESTRICT.
+
+    Keys, usage, aliases and policies are restricted rather than cascaded on
+    purpose: a workspace is a billing scope, and deleting one should not take
+    the record of what was spent in it with it. So this is a real refusal with a
+    real reason, not the integrity error escaping as a 500.
+    """
+
+    status_code = status.HTTP_409_CONFLICT
+
+    def __init__(self) -> None:
+        super().__init__(
+            "This workspace still holds API keys, usage, aliases or routing policies. "
+            "Move or delete those first; they are kept rather than cascaded so a "
+            "workspace's spend history survives it."
+        )
+
+
 class LastWorkspaceError(TenancyValidationError):
     """Deleting this workspace would leave the organization without one."""
 
@@ -184,6 +203,7 @@ __all__ = [
     "TenancyNotFoundError",
     "TenancyValidationError",
     "WorkspaceAlreadyExistsError",
+    "WorkspaceInUseError",
     "WorkspaceMemberAlreadyExistsError",
     "WorkspaceMemberNotFoundError",
     "WorkspaceNameRequiredError",

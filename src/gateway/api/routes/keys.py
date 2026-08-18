@@ -7,11 +7,13 @@ from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from gateway.api.deps import get_config, get_db, verify_master_key
 from gateway.auth.models import generate_api_key, hash_key, key_prefix
 from gateway.core.config import GatewayConfig
 from gateway.models.entities import APIKey, User
+from gateway.models.tenancy import Workspace
 from gateway.repositories.users_repository import get_or_create_default_user
 from gateway.services.model_access import is_allowlist_subset, validate_allowed_models
 from gateway.services.workspace_scope import default_workspace_id
@@ -201,6 +203,18 @@ async def create_key(
     if not is_allowlist_subset(allowed_models, user.allowed_models):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_KEY_EXCEEDS_USER_DETAIL)
 
+    # Checked rather than left to the foreign key: an id naming no workspace is
+    # a bad request, and letting it reach the constraint answered 500 "Database
+    # error" for a value the caller supplied and can fix.
+    if request.workspace_id is not None:
+        named = await db.execute(
+            select(col(Workspace.id)).where(col(Workspace.id) == request.workspace_id)
+        )
+        if named.scalar_one_or_none() is None:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"Workspace '{request.workspace_id}' not found",
+            )
     workspace_id = request.workspace_id or await default_workspace_id(db)
 
     db_key = APIKey(

@@ -302,7 +302,7 @@ Tenancy above users and keys; see [Access control](access-control.md#organizatio
 | `GET` | `/v1/workspaces` | List the workspaces the caller can see. | Master key |
 | `GET` | `/v1/workspaces/{workspace_id}` | Get a specific workspace. | Master key |
 | `PATCH` | `/v1/workspaces/{workspace_id}` | Rename a workspace or change its description. | Master key |
-| `DELETE` | `/v1/workspaces/{workspace_id}` | Delete a workspace and its memberships. | Master key |
+| `DELETE` | `/v1/workspaces/{workspace_id}` | Delete a workspace and its memberships. Refused with 409 while it holds API keys, usage, aliases or routing policies, and refused for the last workspace. | Master key |
 | `GET` | `/v1/workspaces/{workspace_id}/members` | List a workspace's members. | Master key |
 | `POST` | `/v1/workspaces/{workspace_id}/members/{user_id}` | Add an organization member to a workspace. | Master key |
 | `PATCH` | `/v1/workspaces/{workspace_id}/members/{user_id}` | Change a workspace member's role. | Master key |

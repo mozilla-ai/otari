@@ -41,6 +41,7 @@ from gateway.services.tenancy.errors import (
     NotAnOrganizationMemberError,
     NotAuthorizedError,
     WorkspaceAlreadyExistsError,
+    WorkspaceInUseError,
     WorkspaceMemberAlreadyExistsError,
     WorkspaceMemberNotFoundError,
     WorkspaceNameRequiredError,
@@ -271,6 +272,10 @@ class WorkspaceService:
         The last one cannot go: every creation path provisions a workspace
         because an organization without one has no usable surface, and nothing
         would provision a replacement for an organization that already exists.
+
+        Nor can one that still holds request-plane rows. Those foreign keys are
+        ON DELETE RESTRICT, so the database refuses; without the guard below the
+        refusal reached the client as a 500 rather than as the conflict it is.
         """
         organization = await self._active_organization(user)
         await self.organizations.require_active_organization_management_access(
@@ -292,8 +297,14 @@ class WorkspaceService:
         if remaining <= 1:
             raise LastWorkspaceError
 
-        await self.workspaces.delete_workspace(workspace)
-        await self.db.commit()
+        try:
+            await self.workspaces.delete_workspace(workspace)
+            await self.db.commit()
+        except IntegrityError:
+            # Checking first would be a race and four more queries; the database
+            # already knows, so let it answer and translate what it says.
+            await self.db.rollback()
+            raise WorkspaceInUseError from None
 
     # ------------------------------------------------------------------
     # Membership

@@ -153,3 +153,52 @@ def test_the_usage_list_filters_by_workspace(
 
     everything = client.get("/v1/usage", headers=master_key_header).json()
     assert sorted(row["model"] for row in everything) == ["here", "there"]
+
+
+def test_a_workspace_holding_request_plane_rows_cannot_be_deleted(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """The four foreign keys are ON DELETE RESTRICT, so the database refuses.
+
+    Without a guard that refusal escaped as a 500: a workspace is a billing
+    scope, and deleting one must not take the record of what was spent in it,
+    so this is a real conflict with a real reason rather than a server error.
+    """
+    workspace = client.post(
+        "/v1/workspaces",
+        json={"name": "Holds a key"},
+        headers=master_key_header,
+    ).json()
+    client.post(
+        "/v1/keys",
+        json={"user_id": "scoped-owner", "workspace_id": workspace["id"]},
+        headers=master_key_header,
+    )
+
+    response = client.delete(f"/v1/workspaces/{workspace['id']}", headers=master_key_header)
+
+    assert response.status_code == 409, response.text
+    assert "API keys" in response.json()["detail"]
+
+
+def test_a_key_cannot_be_created_in_a_workspace_that_does_not_exist(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """The id comes from the caller, so an unknown one is a bad request.
+
+    Left to the foreign key it answered 500 "Database error" for a value the
+    caller supplied and could fix.
+    """
+    response = client.post(
+        "/v1/keys",
+        json={
+            "user_id": "no-such-workspace",
+            "workspace_id": "00000000-0000-0000-0000-000000000000",
+        },
+        headers=master_key_header,
+    )
+
+    assert response.status_code == 404, response.text
+
