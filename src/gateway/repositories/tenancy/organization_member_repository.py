@@ -193,7 +193,7 @@ class OrganizationMemberRepository(
                 col(OrganizationMember.organization_id) == organization_id,
                 col(OrganizationMember.status).in_(LISTABLE_STATUSES),
             )
-            .order_by(user_alphabetical_order())
+            .order_by(user_alphabetical_order(), col(OrganizationMember.id))
             .offset(skip)
             .limit(limit)
         )

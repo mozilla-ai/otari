@@ -223,10 +223,12 @@ async def test_roster_joins_identities_and_hides_suspended_members(async_db: Asy
     organization = await _organization(async_db)
     named = await _identity(async_db, organization, full_name="Zoe Zhang", email="zoe@example.com")
     unnamed = await _identity(async_db, organization, email="adam@example.com")
+    local = await _identity(async_db, organization)
     removed = await _identity(async_db, organization, full_name="Removed", email="removed@example.com")
     repository = OrganizationMemberRepository(async_db)
     await repository.create_membership(organization_id=organization.id, user_id=named.id, role="owner")
     await repository.create_membership(organization_id=organization.id, user_id=unnamed.id, role="member")
+    await repository.create_membership(organization_id=organization.id, user_id=local.id, role="member")
     await repository.create_membership(
         organization_id=organization.id,
         user_id=removed.id,
@@ -236,10 +238,12 @@ async def test_roster_joins_identities_and_hides_suspended_members(async_db: Asy
 
     rows, count = await repository.get_by_organization_with_users(organization.id)
 
-    assert count == 2
+    assert count == 3
     # Ordered by display name, which falls back to the email address when an
     # identity has no full name: "adam@example.com" sorts before "Zoe Zhang".
-    assert [user.id for _, user in rows] == [unnamed.id, named.id]
+    # A local identity has neither, so ``nulls_last`` puts it at the end on
+    # both engines rather than at the head on SQLite.
+    assert [user.id for _, user in rows] == [unnamed.id, named.id, local.id]
 
 
 async def test_memberships_join_their_organizations(async_db: AsyncSession) -> None:

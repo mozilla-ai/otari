@@ -6,8 +6,9 @@ description: Backend conventions for the otari gateway (`src/gateway/`), async S
 # Backend Standards: otari gateway (`src/gateway/`)
 
 The gateway is an async FastAPI service: request handlers in `api/routes/`, business logic in
-`services/`, ORM in `models/entities.py`, migrations in `alembic/versions/`. This guide is the
-backend counterpart to the frontend skill and to the path-scoped review instructions in
+`services/`, ORM in `models/` (`entities.py` plus `tenancy.py`), migrations in
+`alembic/versions/`. This guide is the backend counterpart to the frontend skill and to the
+path-scoped review instructions in
 `.github/instructions/` (performance and security). `AGENTS.md` is the source of truth for
 build/test/lint commands and the two-mode architecture; read it first. This file captures the
 conventions that keep new backend code correct and consistent.
@@ -89,7 +90,7 @@ A reservation that never settles leaks and permanently shrinks the user's budget
 
 ## Migrations (Alembic)
 
-- A change to `models/entities.py` ships with a matching migration in `alembic/versions/`,
+- A change to anything under `models/` ships with a matching migration in `alembic/versions/`,
   chained to the current head, in the same PR.
 - New non-nullable columns need a `server_default` for existing rows (e.g. `users.reserved`
   defaults to `"0"`).

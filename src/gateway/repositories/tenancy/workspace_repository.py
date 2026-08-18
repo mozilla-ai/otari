@@ -53,7 +53,7 @@ class WorkspaceRepository(BaseRepository[Workspace, WorkspaceCreate, WorkspaceUp
         result = await self.db.execute(
             select(Workspace)
             .where(col(Workspace.organization_id) == organization_id)
-            .order_by(col(Workspace.created_at).desc())
+            .order_by(col(Workspace.created_at).desc(), col(Workspace.id))
             .offset(skip)
             .limit(limit)
         )
@@ -130,7 +130,7 @@ class WorkspaceMemberRepository:
             select(WorkspaceMember)
             .join(User, col(WorkspaceMember.user_id) == col(User.id))
             .where(col(WorkspaceMember.workspace_id) == workspace_id)
-            .order_by(user_alphabetical_order())
+            .order_by(user_alphabetical_order(), col(WorkspaceMember.id))
             .offset(skip)
             .limit(limit)
         )
@@ -177,7 +177,7 @@ class WorkspaceMemberRepository:
                 col(WorkspaceMember.user_id) == user_id,
                 col(Workspace.organization_id) == organization_id,
             )
-            .order_by(col(WorkspaceMember.created_at))
+            .order_by(col(WorkspaceMember.created_at), col(WorkspaceMember.id))
             .offset(skip)
             .limit(limit)
         )
