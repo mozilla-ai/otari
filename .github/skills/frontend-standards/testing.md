@@ -89,37 +89,69 @@ anything outside it. `playwright.config.ts` carries the rest.
 
 `e2e/screenshots/` is the visual-regression suite. Each spec is captured by six projects,
 three viewports (1920×1080, 1280×800, 390×844) times both themes, so one entry covers a page
-at every size and in both palettes. The theme is seeded into localStorage before the first
-navigation (`e2e/screenshots/fixtures.ts`) so the pre-paint script in `index.html` applies it
-on the first frame, and `colorScheme` is set to match underneath it.
+at every size and in both palettes. **The configuration is otari-ai/frontend's**, ported
+rather than reinvented, because the two suites fail for the same reasons and only one of them
+should have to learn each one. Keep them recognizably the same file.
 
 **Adding a page means adding an entry**, in the registry that matches how it is reached: a
 route in `WORKSPACE_ROUTES` in `authenticated.spec.ts` for anything behind a session, or a
 test in `public.spec.ts` for anything in front of one. Either is one line and buys six
 captures. A page with no entry is a page whose mobile and dark rendering nobody checks.
 
-What the harness already handles, so you do not work around it: `fullPage` captures,
-`animations: "disabled"`, the caret hidden, fonts awaited, and masks over the two things that
-are not reproducible (recharts, which animates on mount with no way to disable it from a test,
-and any relative timestamp). If you find a third source of noise, mask it in `fixtures.ts`
-with a comment, rather than loosening the pixel threshold for everything.
+What the harness already handles, so you do not work around it:
+
+- **The mobile project is a phone**, not a narrow desktop: `isMobile`, `hasTouch`, a
+  `deviceScaleFactor` and an iPhone user agent, so touch guards, viewport meta and `:hover`
+  rules behave as they would on a device. Playwright captures at CSS scale, so the PNG is
+  390 wide whatever the scale factor.
+- **A frozen clock** (`page.clock.setFixedTime`), so anything derived from the current time
+  renders identically every run. Deliberately not `clock.install`, which also fakes timers and
+  deadlocks TanStack Query's refetching and React's scheduler.
+- **Animations and transitions frozen** by injected CSS, the scrollbar hidden (its width
+  differs between a laptop and the CI container, and it runs the height of a full-page shot),
+  SVG timelines paused at t=0, fonts awaited, scroll position reset, and a few frames allowed
+  to land before the shutter. That is `waitForStable` in `fixtures.ts`.
+- **Pinned `locale`, `timezoneId` and `reducedMotion`** on the screenshot projects only, so
+  date and number formatting cannot vary while the behavioral suite keeps its own behavior.
+- **Two comparison budgets, not one.** `maxDiffPixels: 2000` alongside
+  `maxDiffPixelRatio: 0.002`, because Playwright takes the smaller of the two and a ratio
+  alone scales with page height: a tall full-page capture would earn an allowance big enough
+  to absorb a whole changed paragraph. `threshold: 0.12` is the per-pixel distance that counts
+  as a difference, set so antialiasing does not.
+- **Masks** over the two things still not reproducible here: recharts, which animates through
+  JavaScript that neither the CSS freeze nor `animations: "disabled"` reaches, and relative
+  timestamps, which move with the gap between the frozen clock and rows the seed created at
+  run time. otari-ai needs neither, because its captures run against static mocked responses;
+  ours will not either once they do.
+
+If you find a third source of noise, mask it in `fixtures.ts` with a comment rather than
+loosening the budgets for everything.
+
+The suite depends on the `seed` project and deliberately not on `parity`. Some database state
+is needed, but each parity flow removes what it creates, so the seed is the fixture; depending
+on the flows as well only means one flaky behavioral test takes all 108 captures with it,
+which is exactly what it did before this was narrowed.
 
 **No baselines are committed yet, and the suite is not a gate.** The dashboard is
 mid-migration onto the rehomed design foundation, so pages still move for good reasons: a
 committed set would fail most PRs and churn in every diff. So the `screenshots` job runs only
-on `workflow_dispatch`, `e2e/screenshots/__snapshots__/` is gitignored, and a PR that changes
+on `workflow_dispatch`, `e2e/screenshots/*-snapshots/` is gitignored, and a PR that changes
 how a page looks owes no PNGs.
 
 What a PR does owe is the entry above, because that is what makes the page covered the day
 this becomes a gate rather than the day someone remembers it.
 
 Running it is still worth doing when you have changed a layout: `pnpm --dir web run
-e2e:screenshots` captures every page at every size locally and leaves the PNGs where you can
-look at them. Treat them as a rendering check, not a diff: a macOS capture renders fonts
+e2e:screenshots` captures every page at every size locally and leaves the PNGs beside the spec
+that took them. Treat them as a rendering check, not a diff: a macOS capture renders fonts
 differently from CI's Linux, so the two sets are not comparable. To get a Linux set (which is
 also what a future baseline commit needs), run the workflow from the Actions tab or with
 `gh workflow run otari-dashboard.yml --ref <branch>` and download the `screenshot-baselines`
 artifact.
+
+`pnpm --dir web run e2e:screenshots:update` is the deliberate-update form, and note the
+missing `--`: pnpm forwards the separator and Playwright's CLI discards everything after it,
+so `-- --update-snapshots` is a flag that silently never arrives.
 
 Turning it into a gate later is three edits: add `pull_request` back to the job's condition,
 drop the `.gitignore` entry, and commit the Linux set that run captures.
