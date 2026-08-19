@@ -114,7 +114,12 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(
             ["default_organization_id"],
             ["organization.id"],
-            name="fk_user_default_organization_id",
+            # The platform's own name for this constraint (`c2d3e4f5a6b7` over
+            # there), suffix and all, which the other two here already match.
+            # The reconciled schema is meant to be name-identical to production,
+            # so a migration comparing the two does not report a difference that
+            # is only a difference in spelling.
+            name="fk_user_default_organization_id_organization",
             ondelete="SET NULL",
         ),
         sa.PrimaryKeyConstraint("id"),

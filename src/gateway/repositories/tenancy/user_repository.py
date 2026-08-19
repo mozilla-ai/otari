@@ -51,6 +51,15 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         gateway user) is an operator-defined label rather than a sign-in
         address, so the row is stored with no email. The nullable column
         tolerates that where a create schema requiring an address would not.
+
+        ``default_organization_id`` is stamped with the same organization, which
+        is what the platform does at every creation site. Leaving it NULL is not
+        the same as leaving it equal: the hosted edition resolves an identity's
+        offered-credit owner *through* that column, and a NULL one resolves to
+        nobody, so an identity created here would silently forfeit the anchor
+        the column exists to hold. This edition never reads it, and a column
+        only ever written by the other edition is a column that goes wrong
+        without anything failing.
         """
         user = User(
             email=None,
@@ -58,6 +67,7 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
             is_active=True,
             is_superuser=is_superuser,
             active_organization_id=active_organization_id,
+            default_organization_id=active_organization_id,
         )
         self.db.add(user)
         await self.db.flush()

@@ -87,14 +87,20 @@ class OrganizationMemberRepository(
         return list(result.scalars().all())
 
     async def get_first_active_for_user(self, user_id: uuid.UUID) -> OrganizationMember | None:
-        """Return a user's oldest active membership, or None."""
+        """Return a user's oldest active membership, or None.
+
+        The id breaks a tie, for the same reason ``get_active_owner`` does it:
+        two memberships written in one transaction share a ``created_at``, and
+        this decides which organization a stale pointer is repaired onto, so it
+        must not be able to answer differently on two reads.
+        """
         result = await self.db.execute(
             select(OrganizationMember)
             .where(
                 col(OrganizationMember.user_id) == user_id,
                 col(OrganizationMember.status) == "active",
             )
-            .order_by(col(OrganizationMember.created_at))
+            .order_by(col(OrganizationMember.created_at), col(OrganizationMember.id))
         )
         return result.scalars().first()
 

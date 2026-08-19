@@ -19,13 +19,17 @@ styles coexist deliberately, and new *gateway* tables still belong there.
 
 Three deliberate departures from the platform's models, applied on arrival:
 
-- **Timestamps are timezone-aware.** The platform's mixins annotate
-  ``created_at``/``updated_at`` as a bare ``datetime`` (so SQLAlchemy renders a
-  naive column) while their ``default_factory`` writes an aware
+- **Timestamps are timezone-aware, on every engine.** The platform's mixins
+  annotate ``created_at``/``updated_at`` as a bare ``datetime`` (so SQLAlchemy
+  renders a naive column) while their ``default_factory`` writes an aware
   ``datetime.now(UTC)`` into it: the offset is silently dropped on the way in,
   and the value reads back as local-looking UTC. That is a latent bug, not a
-  style difference, so it is fixed here rather than carried, matching the
-  gateway's ``DateTime(timezone=True)`` house style.
+  style difference, so it is fixed here rather than carried. ``timezone=True``
+  alone does not fix it, which is why ``UtcDateTime`` below exists: PostgreSQL
+  honors the flag and SQLite ignores it, and SQLite is what the OSS edition
+  ships by default, so on that engine the departure would have been a comment
+  rather than a behavior. ``tests/unit/test_tenancy_timestamps.py`` is what
+  keeps it one.
 - **``email`` is a plain nullable string, not ``EmailStr``.** A standalone
   operator identity is a label, not a sign-in address (M4: "local identities
   have no email"), and every reader here must already tolerate its absence, so
@@ -54,6 +58,8 @@ from typing import Any, Literal
 
 from pydantic import field_validator
 from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, UniqueConstraint, Uuid, func
+from sqlalchemy.engine.interfaces import Dialect
+from sqlalchemy.types import TypeDecorator
 from sqlmodel import Field, SQLModel
 
 ORGANIZATION_MEMBER_ROLES = {"owner", "admin", "member", "viewer"}
@@ -75,26 +81,61 @@ def _validate_membership(value: str, *, allowed: set[str], kind: str) -> str:
     return value
 
 
+class UtcDateTime(TypeDecorator[datetime]):
+    """A timestamp that reads back UTC-aware on every engine.
+
+    ``DateTime(timezone=True)`` alone is not enough, and the gap is the whole
+    reason this exists. PostgreSQL honors it and hands back an aware value;
+    SQLite has no timestamp type at all, so SQLAlchemy stores an ISO string and
+    the flag is a no-op, and a value written as ``datetime.now(UTC)`` reads back
+    with ``tzinfo=None``. A naive datetime then serializes with no offset, and a
+    browser parses an offset-less timestamp as **local** time, so every tenancy
+    timestamp in the dashboard would be wrong by the deployment's UTC offset on
+    the engine the OSS edition ships by default.
+
+    Both directions are handled: an aware value is normalized to UTC before it
+    is stored, so a caller in another zone cannot write a wall-clock time that
+    means something else, and a naive value read back is stamped UTC, because
+    UTC is what everything here writes.
+
+    The rendered DDL is exactly ``impl``'s, so this changes no migration and
+    ``compare_metadata`` stays clean.
+    """
+
+    impl = DateTime(timezone=True)
+    cache_ok = True
+
+    def process_bind_param(self, value: datetime | None, dialect: Dialect) -> datetime | None:
+        if value is not None and value.tzinfo is not None:
+            return value.astimezone(UTC)
+        return value
+
+    def process_result_value(self, value: datetime | None, dialect: Dialect) -> datetime | None:
+        if value is not None and value.tzinfo is None:
+            return value.replace(tzinfo=UTC)
+        return value
+
+
 def _timestamp_field(*, default: Any = None, default_factory: Any = None, column_kwargs: dict[str, Any]) -> Any:
     """Build a timezone-aware timestamp field.
 
     Two things are worked around here, once, instead of at five inheriting
     tables. SQLModel's ``Field`` overloads type ``sa_type`` as a *class*, while
-    ``timezone=True`` only exists on an *instance* of ``DateTime`` (the runtime
-    accepts either and hands it straight to ``Column``). And the type has to
-    arrive as ``sa_type`` rather than a ready-made ``sa_column``, because a
-    ``Column`` instance declared on a mixin cannot be attached to more than one
-    table; ``sa_type`` plus kwargs lets SQLModel build a fresh column per model.
+    the type we want is an *instance* (the runtime accepts either and hands it
+    straight to ``Column``). And the type has to arrive as ``sa_type`` rather
+    than a ready-made ``sa_column``, because a ``Column`` instance declared on a
+    mixin cannot be attached to more than one table; ``sa_type`` plus kwargs
+    lets SQLModel build a fresh column per model.
     """
     if default_factory is not None:
         return Field(  # type: ignore[call-overload]
             default_factory=default_factory,
-            sa_type=DateTime(timezone=True),
+            sa_type=UtcDateTime(),
             sa_column_kwargs=column_kwargs,
         )
     return Field(  # type: ignore[call-overload]
         default=default,
-        sa_type=DateTime(timezone=True),
+        sa_type=UtcDateTime(),
         sa_column_kwargs=column_kwargs,
     )
 

@@ -121,6 +121,33 @@ async def test_get_all_pages(async_db: AsyncSession) -> None:
     assert len(await repository.get_all(skip=2)) == 1
 
 
+async def test_get_all_pages_in_a_defined_order(async_db: AsyncSession) -> None:
+    """Paging needs an ORDER BY, and every tenancy repository inherits this one.
+
+    ``OFFSET``/``LIMIT`` over an unordered query is undefined: two pages of an
+    unchanged table may repeat a row and skip another, and the counts stay right
+    either way. Asserting the partition alone would not catch a missing
+    ``ORDER BY``, because undefined is not the same as wrong and a freshly
+    filled table usually reads back in insertion order regardless. So the order
+    itself is what is asserted. Primary keys here are ``uuid4``, which sorts
+    nothing like insertion order, so this is red the moment the clause goes.
+    """
+    repository = OrganizationRepository(async_db)
+    for index in range(7):
+        await repository.create(OrganizationCreate(name=f"Org {index}", slug=f"org-{index}"))
+
+    listed = await repository.get_all(limit=1000)
+
+    assert [org.id for org in listed] == sorted(org.id for org in listed)
+
+    # And the partition that ordering buys: paged in twos, every row once.
+    paged = [
+        org.slug for offset in range(0, len(listed), 2) for org in await repository.get_all(skip=offset, limit=2)
+    ]
+    assert len(paged) == len(listed)
+    assert len(set(paged)) == len(listed), "a page repeated a row, so another was skipped"
+
+
 # =============================================================================
 # Organizations
 # =============================================================================
@@ -132,6 +159,23 @@ async def test_slug_is_unique(async_db: AsyncSession) -> None:
 
     with pytest.raises(IntegrityError):
         await _organization(async_db, slug="acme")
+
+
+async def test_a_local_identity_anchors_its_default_organization(async_db: AsyncSession) -> None:
+    """The column is written by this edition and read by the other one.
+
+    Nothing here reads ``default_organization_id``, so a NULL would look
+    harmless: the hosted edition resolves an identity's offered-credit owner
+    through it and treats "no anchor" as "nobody", which is a silent forfeit
+    rather than an error. It is stamped with the active organization, matching
+    what the platform writes at every creation site.
+    """
+    organization = await _organization(async_db)
+
+    identity = await _identity(async_db, organization)
+
+    assert identity.default_organization_id == organization.id
+    assert identity.active_organization_id == organization.id
 
 
 async def test_get_by_slug(async_db: AsyncSession) -> None:

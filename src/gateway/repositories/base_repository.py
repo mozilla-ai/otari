@@ -18,6 +18,7 @@ from typing import Any, Generic, TypeVar
 
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlalchemy.orm import class_mapper
 from sqlmodel import SQLModel
 
 ModelType = TypeVar("ModelType", bound=SQLModel)
@@ -52,8 +53,16 @@ class BaseRepository(Generic[ModelType, CreateSchemaType, UpdateSchemaType]):
         return await self.db.get(self.model_class, entity_id)
 
     async def get_all(self, *, skip: int = 0, limit: int = 100) -> list[ModelType]:
-        """Return a page of entities."""
-        result = await self.db.execute(select(self.model_class).offset(skip).limit(limit))
+        """Return a page of entities, ordered by primary key.
+
+        The order is not cosmetic. ``OFFSET``/``LIMIT`` over an unordered query
+        is undefined, so two pages of the same unchanged table may repeat a row
+        and omit another, and every repository inheriting this pages that way.
+        The primary key is the one column every model here has and the one that
+        never ties.
+        """
+        primary_key = class_mapper(self.model_class).primary_key
+        result = await self.db.execute(select(self.model_class).order_by(*primary_key).offset(skip).limit(limit))
         return list(result.scalars().all())
 
     async def create(self, obj_in: CreateSchemaType) -> ModelType:
