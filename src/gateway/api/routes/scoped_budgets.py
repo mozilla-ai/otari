@@ -1,6 +1,6 @@
 """Manage the tenancy-scoped USD ceilings in ``scoped_budgets``.
 
-Standalone-mode only and master-key authed, following ``routes/budgets.py``.
+Standalone-mode only, and master-key authed on the router itself.
 Deliberately minimal: a scope's ceiling is created, listed, retimed and removed
 here, and everything about how one is enforced lives in
 ``services/scoped_budget_service.py``.
@@ -26,7 +26,15 @@ from gateway.models.tenancy import Organization, OrganizationMember, Workspace, 
 # does not know.
 from gateway.services.scoped_budget_service import ScopeType
 
-router = APIRouter(prefix="/v1/scoped-budgets", tags=["scoped-budgets"])
+# Auth is declared on the router, not repeated on each handler, following
+# `routes/organizations.py`: every handler here needs the master key, and a
+# future one that forgot the decorator would be unauthenticated with nothing
+# to notice.
+router = APIRouter(
+    prefix="/v1/scoped-budgets",
+    tags=["scoped-budgets"],
+    dependencies=[Depends(verify_master_key)],
+)
 
 
 class CreateScopedBudgetRequest(BaseModel):
@@ -151,7 +159,7 @@ async def _require_scope_exists(db: AsyncSession, scope_type: str, scope_id: str
         )
 
 
-@router.post("", dependencies=[Depends(verify_master_key)])
+@router.post("")
 async def create_scoped_budget(
     request: CreateScopedBudgetRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -194,7 +202,7 @@ async def create_scoped_budget(
     return ScopedBudgetResponse.from_model(budget)
 
 
-@router.get("", dependencies=[Depends(verify_master_key)])
+@router.get("")
 async def list_scoped_budgets(
     db: Annotated[AsyncSession, Depends(get_db)],
     scope_type: Annotated[ScopeType | None, Query()] = None,
@@ -212,7 +220,7 @@ async def list_scoped_budgets(
     return [ScopedBudgetResponse.from_model(budget) for budget in result.scalars().all()]
 
 
-@router.get("/{budget_id}", dependencies=[Depends(verify_master_key)])
+@router.get("/{budget_id}")
 async def get_scoped_budget(
     budget_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -221,7 +229,7 @@ async def get_scoped_budget(
     return ScopedBudgetResponse.from_model(await _get_or_404(db, budget_id))
 
 
-@router.patch("/{budget_id}", dependencies=[Depends(verify_master_key)])
+@router.patch("/{budget_id}")
 async def update_scoped_budget(
     budget_id: str,
     request: UpdateScopedBudgetRequest,
@@ -270,7 +278,7 @@ async def update_scoped_budget(
     return ScopedBudgetResponse.from_model(budget)
 
 
-@router.delete("/{budget_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(verify_master_key)])
+@router.delete("/{budget_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_scoped_budget(
     budget_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
