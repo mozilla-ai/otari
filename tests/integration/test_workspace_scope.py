@@ -202,3 +202,55 @@ def test_a_key_cannot_be_created_in_a_workspace_that_does_not_exist(
 
     assert response.status_code == 404, response.text
 
+
+
+def test_deleting_a_workspace_takes_its_ceilings_with_it(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """``scoped_budgets.scope_id`` is not a foreign key, so nothing cascades it.
+
+    A ceiling left behind is the state ``_require_scope_exists`` refuses to
+    create, just reached from the other end: it lists, it never binds, and
+    nothing surfaces that it stopped mattering.
+    """
+    workspace = _make_workspace(client, master_key_header, "Departing")
+    created = client.post(
+        "/v1/scoped-budgets",
+        json={"scope_type": "workspace", "scope_id": workspace, "max_budget": 5.0},
+        headers=master_key_header,
+    )
+    assert created.status_code == status.HTTP_200_OK, created.text
+    budget_id = created.json()["id"]
+
+    deleted = client.delete(f"/v1/workspaces/{workspace}", headers=master_key_header)
+    assert deleted.status_code == status.HTTP_200_OK, deleted.text
+
+    orphan = client.get(f"/v1/scoped-budgets/{budget_id}", headers=master_key_header)
+    assert orphan.status_code == status.HTTP_404_NOT_FOUND, orphan.text
+
+
+def test_a_members_workspace_ceiling_goes_with_the_workspace(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """The membership rows ride the database cascade, so their ceilings must too."""
+    workspace = _make_workspace(client, master_key_header, "Departing with members")
+    # Creating a workspace joins its creator to it, so the roster already has the
+    # membership row this ceiling is hung on.
+    members = client.get(f"/v1/workspaces/{workspace}/members", headers=master_key_header)
+    assert members.status_code == status.HTTP_200_OK, members.text
+    membership_id = members.json()["data"][0]["id"]
+    created = client.post(
+        "/v1/scoped-budgets",
+        json={"scope_type": "workspace_member", "scope_id": membership_id, "max_budget": 5.0},
+        headers=master_key_header,
+    )
+    assert created.status_code == status.HTTP_200_OK, created.text
+    budget_id = created.json()["id"]
+
+    deleted = client.delete(f"/v1/workspaces/{workspace}", headers=master_key_header)
+    assert deleted.status_code == status.HTTP_200_OK, deleted.text
+
+    orphan = client.get(f"/v1/scoped-budgets/{budget_id}", headers=master_key_header)
+    assert orphan.status_code == status.HTTP_404_NOT_FOUND, orphan.text

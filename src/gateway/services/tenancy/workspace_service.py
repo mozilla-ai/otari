@@ -17,9 +17,12 @@ two-row insert here.
 
 import uuid
 
+from sqlalchemy import and_, delete, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
+from gateway.models.entities import ScopedBudget
 from gateway.models.tenancy import (
     MANAGEMENT_ROLES,
     WORKSPACE_MEMBER_ROLES,
@@ -27,6 +30,7 @@ from gateway.models.tenancy import (
     User,
     Workspace,
     WorkspaceCreate,
+    WorkspaceMember,
     WorkspaceMemberPublic,
     WorkspaceMembersPublic,
     WorkspaceMemberUpdate,
@@ -276,6 +280,13 @@ class WorkspaceService:
         Nor can one that still holds request-plane rows. Those foreign keys are
         ON DELETE RESTRICT, so the database refuses; without the guard below the
         refusal reached the client as a 500 rather than as the conflict it is.
+
+        The scoped budgets naming this workspace and its memberships go with it,
+        in the same transaction. ``scoped_budgets.scope_id`` is deliberately not
+        a foreign key (a scope names a row in one of four tables), so nothing in
+        the database removes them, and a ceiling left behind is the exact state
+        ``routes/scoped_budgets._require_scope_exists`` refuses to create: it
+        lists, it never binds, and nothing surfaces that it stopped mattering.
         """
         organization = await self._active_organization(user)
         await self.organizations.require_active_organization_management_access(
@@ -298,31 +309,51 @@ class WorkspaceService:
             raise LastWorkspaceError
 
         try:
+            await self._delete_scoped_budgets_for(workspace_id)
             await self.workspaces.delete_workspace(workspace)
             await self.db.commit()
         except IntegrityError:
             # Checking first would be a race and four more queries; the database
-            # already knows, so let it answer and translate what it says.
+            # already knows, so let it answer and translate what it says. The
+            # rollback takes the ceiling deletes back with it, so a refused
+            # delete leaves the workspace exactly as it was.
             await self.db.rollback()
             raise WorkspaceInUseError from None
 
-        # Imported here rather than at module scope, because `workspace_scope`
-        # imports `tenancy.provisioning_service`, which runs `tenancy/__init__`,
-        # which imports this module: at module scope the cycle makes
-        # `import gateway.services.workspace_scope` fail outright unless
-        # something imported `tenancy` first. The app happens to, and a new
-        # script or test reaching either module first would not.
-        from gateway.services.workspace_scope import reset_default_workspace_cache
+    async def _delete_scoped_budgets_for(self, workspace_id: uuid.UUID) -> None:
+        """Remove the ceilings that would outlive this workspace.
 
-        # `workspace_scope` caches the default workspace's id for the process and
-        # justifies that by RESTRICT: a workspace holding request-plane rows
-        # cannot be deleted, so the cached id cannot point at something gone. The
-        # gap is a default workspace holding *nothing*, which is deletable once a
-        # second one exists, and which RESTRICT therefore does not protect. The
-        # cache would then hand every master-key write a dead id and 500 on the
-        # foreign key until the process restarted. Dropping it here costs one
-        # lookup on the next such write.
-        reset_default_workspace_cache()
+        Its own, and its memberships', read before the cascade takes those rows
+        away. Not committed here: the caller owns the transaction, so a refused
+        workspace delete takes these back with it.
+        """
+        member_ids = (
+            (
+                await self.db.execute(
+                    select(col(WorkspaceMember.id)).where(col(WorkspaceMember.workspace_id) == workspace_id)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        # The scope names are spelled out rather than imported from
+        # `scoped_budget_service`: that module imports `workspace_scope`, which
+        # imports `tenancy.provisioning_service`, which runs `tenancy/__init__`,
+        # which imports this one. `tests/unit/test_service_module_imports.py`
+        # pins that cycle staying closed.
+        await self.db.execute(
+            delete(ScopedBudget)
+            .where(
+                or_(
+                    and_(ScopedBudget.scope_type == "workspace", ScopedBudget.scope_id == str(workspace_id)),
+                    and_(
+                        ScopedBudget.scope_type == "workspace_member",
+                        ScopedBudget.scope_id.in_([str(member_id) for member_id in member_ids]),
+                    ),
+                )
+            )
+            .execution_options(synchronize_session=False)
+        )
 
     # ------------------------------------------------------------------
     # Membership
