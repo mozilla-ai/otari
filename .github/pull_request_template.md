@@ -22,7 +22,7 @@
 - [ ] I ran the Definition of Done checks locally (`make lint`, `make typecheck`, `make test`).
 - [ ] Documentation was updated where necessary.
 - [ ] If the API contract changed, I regenerated the OpenAPI spec (`uv run python scripts/generate_openapi.py`).
-- [ ] If this PR adds or changes a persistent table, a control-plane contract the otari.ai platform consumes or serves, a capability the platform also has, or a mode-specific surface, I appended an entry to the M4 reconciliation ledger ([otari-ai#1587](https://github.com/mozilla-ai/otari-ai/issues/1587)). See [.github/instructions/reconciliation-ledger.instructions.md](instructions/reconciliation-ledger.instructions.md).
+- [ ] **M4 ledger:** this PR either needs no entry (an existing row already covers it and its target is unchanged), or the entry is appended to [otari-ai#1587](https://github.com/mozilla-ai/otari-ai/issues/1587). One entry per *change*, not per PR: a stack delivering one surface change gets one. See [.github/instructions/reconciliation-ledger.instructions.md](instructions/reconciliation-ledger.instructions.md).
 
 ## AI Usage
 <!-- Check one -->
