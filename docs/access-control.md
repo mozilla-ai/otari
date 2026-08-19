@@ -132,10 +132,12 @@ UPDATE "user"
 SET active_organization_id = (SELECT id FROM organization WHERE slug = 'acme-1a2b3c4d')
 WHERE id = '<the id from step 1>';
 
--- 3. Repoint the marker at that identity.
-UPDATE runtime_settings
-SET value = '<the id from step 1>'
-WHERE key = 'tenancy_bootstrap_user_id';
+-- 3. Point the marker at that identity. An upsert, not an UPDATE: a gateway
+--    that refused rather than provisioning never wrote the marker row, so an
+--    UPDATE would match nothing and the refusal would repeat unchanged.
+INSERT INTO runtime_settings (key, value)
+VALUES ('tenancy_bootstrap_user_id', '<the id from step 1>')
+ON CONFLICT (key) DO UPDATE SET value = excluded.value;
 ```
 
 Confirm with `GET /v1/organizations/me`, which should name the adopted organization and report the role `owner`. No restart is needed: both rows are read from the database on each request.

@@ -71,6 +71,12 @@ cannot attach to more than one table, so a shared mixin passes `sa_type` plus
 - Service-specific exceptions live beside their service (e.g. `UnsafeURLError`,
   `GuardrailsNotReachableError`). Raise `HTTPException` with a clear `detail` in the API layer;
   prefer specific exceptions (`ValueError`, `SQLAlchemyError`) over broad `except Exception`.
+- **The tenancy slice is the one exception, deliberately.** `services/tenancy/errors.py`
+  declares a `TenancyError` family that each carry their own `status_code`, and one handler
+  registered in `gateway.main` renders them as FastAPI's `{"detail": ...}` shape. A tenancy
+  route therefore raises nothing and needs no `try`/`except`; a 5xx member has its message
+  logged and a generic detail returned. Follow that convention inside `services/tenancy/` and
+  `api/routes/organizations.py` / `workspaces.py`, and the rule above everywhere else.
 
 ## The budget / reservation lifecycle is load-bearing
 
