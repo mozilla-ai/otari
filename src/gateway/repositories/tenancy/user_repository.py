@@ -43,6 +43,7 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         *,
         full_name: str | None,
         active_organization_id: uuid.UUID,
+        is_active: bool = True,
         is_superuser: bool = False,
     ) -> User:
         """Stage an email-less local identity.
@@ -52,19 +53,28 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         address, so the row is stored with no email. The nullable column
         tolerates that where a create schema requiring an address would not.
 
-        ``default_organization_id`` is stamped with the same organization, which
-        is what the platform does at every creation site. Leaving it NULL is not
-        the same as leaving it equal: the hosted edition resolves an identity's
-        offered-credit owner *through* that column, and a NULL one resolves to
-        nobody, so an identity created here would silently forfeit the anchor
-        the column exists to hold. This edition never reads it, and a column
-        only ever written by the other edition is a column that goes wrong
-        without anything failing.
+        ``is_active`` is a parameter rather than a constant because the M5
+        in-place upgrade needs it: the reconciliation spec maps a soft-deleted
+        gateway user onto a deactivated identity so its history stays
+        resolvable, and the platform's own backfill passes
+        ``is_active=row.deleted_at is None`` for exactly that. A helper that can
+        only produce active rows cannot carry out that migration.
+
+        ``default_organization_id`` is stamped with the same organization, and
+        that is a **deliberate divergence**, not parity. The platform stamps it
+        on its signup paths but not in its own ``create_local_identity``, so its
+        re-parenting backfill leaves it NULL. Stamping is the safer default
+        here: the hosted edition resolves an identity's offered-credit owner
+        through that column and reads NULL as nobody, so an unstamped identity
+        silently forfeits the anchor the column exists to hold, and nothing in
+        this edition reads it to notice. The cost is that the two editions
+        disagree on this column for identically-shaped rows, which belongs in
+        the reconciliation ledger rather than being found during a cutover.
         """
         user = User(
             email=None,
             full_name=full_name,
-            is_active=True,
+            is_active=is_active,
             is_superuser=is_superuser,
             active_organization_id=active_organization_id,
             default_organization_id=active_organization_id,

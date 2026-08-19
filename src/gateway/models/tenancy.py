@@ -106,9 +106,19 @@ class UtcDateTime(TypeDecorator[datetime]):
     cache_ok = True
 
     def process_bind_param(self, value: datetime | None, dialect: Dialect) -> datetime | None:
-        if value is not None and value.tzinfo is not None:
-            return value.astimezone(UTC)
-        return value
+        if value is None:
+            return None
+        if value.utcoffset() is None:
+            # Refused rather than assumed. Reading a naive value back as UTC is
+            # safe, because UTC is what everything here writes; writing one is
+            # not, because the engines disagree about what it means. PostgreSQL
+            # interprets it in the *session* time zone, so the same value lands
+            # as a different instant depending on who connected, while SQLite
+            # stores the wall clock as written. Silently picking one is how a
+            # timestamp ends up hours off with nothing to show for it.
+            msg = "A tenancy timestamp must be timezone-aware; got a naive datetime"
+            raise ValueError(msg)
+        return value.astimezone(UTC)
 
     def process_result_value(self, value: datetime | None, dialect: Dialect) -> datetime | None:
         if value is not None and value.tzinfo is None:

@@ -22,7 +22,9 @@ from collections.abc import Awaitable, Callable
 from datetime import datetime, timedelta, timezone
 from typing import TypeVar
 
+import pytest
 from sqlalchemy import select
+from sqlalchemy.exc import StatementError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlmodel import SQLModel
 
@@ -41,11 +43,16 @@ def _run(scenario: Callable[[AsyncSession], Awaitable[T]]) -> T:
 
     async def main() -> T:
         engine = create_async_engine("sqlite+aiosqlite:///:memory:")
-        async with engine.begin() as conn:
-            await conn.run_sync(SQLModel.metadata.create_all)
-        session_factory = async_sessionmaker(engine, expire_on_commit=False)
-        async with session_factory() as session:
-            return await scenario(session)
+        try:
+            async with engine.begin() as conn:
+                await conn.run_sync(SQLModel.metadata.create_all)
+            session_factory = async_sessionmaker(engine, expire_on_commit=False)
+            async with session_factory() as session:
+                return await scenario(session)
+        finally:
+            # aiosqlite runs each connection on its own thread, so an undisposed
+            # engine leaks one per call. Four tests is harmless; the habit is not.
+            await engine.dispose()
 
     return asyncio.run(main())
 
@@ -72,6 +79,22 @@ def test_the_wire_form_carries_an_offset() -> None:
     created = json.loads(OrganizationPublic.model_validate(stored).model_dump_json())["created_at"]
 
     assert created.endswith("Z") or created.endswith("+00:00"), created
+
+
+def test_a_naive_timestamp_is_refused_rather_than_guessed() -> None:
+    """The one direction that cannot be recovered from, so it is not attempted.
+
+    Reading a naive value back as UTC is safe, since UTC is what everything here
+    writes. Writing one is not: PostgreSQL reads it in the session time zone, so
+    the stored instant depends on who connected, while SQLite keeps the wall
+    clock. Both are silent, and the value is hours wrong with nothing to show.
+    """
+    naive = datetime(2026, 8, 18, 12, 0)
+
+    # SQLAlchemy wraps a bind-processor failure in StatementError, so the
+    # refusal is asserted on the message it carries rather than on the type.
+    with pytest.raises(StatementError, match="timezone-aware"):
+        _run(lambda session: _round_trip(session, created_at=naive))
 
 
 def test_a_value_written_in_another_zone_is_normalized_to_utc() -> None:

@@ -167,8 +167,12 @@ async def test_a_local_identity_anchors_its_default_organization(async_db: Async
     Nothing here reads ``default_organization_id``, so a NULL would look
     harmless: the hosted edition resolves an identity's offered-credit owner
     through it and treats "no anchor" as "nobody", which is a silent forfeit
-    rather than an error. It is stamped with the active organization, matching
-    what the platform writes at every creation site.
+    rather than an error.
+
+    Deliberately *not* what the platform's own ``create_local_identity`` does,
+    which leaves it NULL; only its signup paths stamp it. Pinned here because it
+    is a divergence chosen on purpose, so changing it should mean changing this
+    test rather than happening quietly.
     """
     organization = await _organization(async_db)
 
@@ -176,6 +180,28 @@ async def test_a_local_identity_anchors_its_default_organization(async_db: Async
 
     assert identity.default_organization_id == organization.id
     assert identity.active_organization_id == organization.id
+
+
+async def test_a_local_identity_can_be_created_deactivated(async_db: AsyncSession) -> None:
+    """A soft-deleted gateway user migrates as a deactivated identity.
+
+    That mapping is what keeps its usage history resolvable after the M5
+    upgrade, and this helper is what the upgrade calls, so it has to be able to
+    express it. The platform's backfill passes ``is_active=row.deleted_at is
+    None`` for the same reason.
+    """
+    organization = await _organization(async_db)
+
+    identity = await UserRepository(async_db).create_local_identity(
+        full_name="Retired bot",
+        active_organization_id=organization.id,
+        is_active=False,
+    )
+
+    assert identity.is_active is False
+    # Still a full member of the graph, which is the point of deactivating
+    # rather than deleting.
+    assert identity.default_organization_id == organization.id
 
 
 async def test_get_by_slug(async_db: AsyncSession) -> None:
