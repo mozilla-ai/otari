@@ -321,8 +321,8 @@ describe("applyNavLabelOverrides", () => {
     applyNavLabelOverrides(base, overrides)[0]
 
   it("is a no-op with no overrides", () => {
-    // Identity, not a copy: the base sections are what every derived table in
-    // the registry is built from, so the empty seam has to leave them alone.
+    // Identity, not a copy: pins the short-circuit, so the seam this build
+    // ships costs the base sections nothing at all.
     expect(applyNavLabelOverrides(base, [])).toBe(base)
   })
 

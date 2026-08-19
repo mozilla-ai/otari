@@ -220,7 +220,8 @@ const ORGANIZATION_NAV_SECTIONS = [
  * icons and gating passes through untouched, and a section no override targets
  * is returned as it was. An override naming a section, or a path inside one,
  * that the registry does not declare is a no-op rather than a throw, so a stale
- * override in an overlay costs a rename and not the sidebar.
+ * override in an overlay costs a rename and not the sidebar. Two overrides
+ * naming one section is the overlay's own bug, and the last of them wins.
  *
  * Applied to the base sections before `composeNavSections` appends an overlay's
  * own, which declare their labels directly and have nothing to rename.
@@ -243,8 +244,13 @@ export function applyNavLabelOverrides(
       ...(disclosureLabels && {
         items: section.items.map((item) => {
           const label = disclosureLabels[item.to]
-          // Groups only. A plain link's label names the destination itself, and
-          // renaming that is renaming the page, not relabeling the sidebar.
+          // Groups only, which is what the platform's single `NavDisclosure`
+          // label maps to. A group is a destination here as well as a heading,
+          // so renaming one also renames what the breadcrumbs and the shell's
+          // gated-off panel call that page (`/tools`); the group and the page
+          // sharing a name is why that reads correctly rather than as a bug.
+          // A plain link's label and a `NavChild`'s are outside the seam, as
+          // they are over there; widen it when a contribution needs one.
           return label !== undefined && item.children
             ? { ...item, label }
             : item
