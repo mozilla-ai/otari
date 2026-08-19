@@ -158,7 +158,9 @@ Budgets come in two kinds, both enforced, and a request has to pass both:
 
 A key marked `exclude_from_budget`, and `OTARI_BUDGET_STRATEGY=disabled`, bypass both kinds.
 
-Two things scoped ceilings do not yet count, both because there is no request scope to resolve them from: externally recorded spend (`POST /v1/usage/external`) and imported usage. Those still settle against the per-user counters alone, so a workspace's `current_spend` will not match a `SUM(cost)` over its usage rows once imports are in play.
+Three things scoped ceilings do not yet count. Externally recorded spend (`POST /v1/usage/external`) and imported usage have no request scope to resolve a workspace or provider from, so they settle against the per-user counters alone. A batch is the third: it is gated when it is created, but its real cost arrives later through the same external path, so it never reaches a ceiling either. A workspace's `current_spend` therefore will not match a `SUM(cost)` over its usage rows once imports or batches are in play.
+
+One more limit is worth knowing before you narrow a ceiling to a provider. A request is admitted against the ceilings for the provider its routing policy names *first*. If that attempt fails and the policy falls over to another provider, the second provider's narrowed ceiling is neither checked nor charged, so a narrowed cap is only reliable on a provider that is the head of every policy that can reach it. Aggregate ceilings, the ones with no provider, are unaffected: they apply whichever provider serves.
 
 Identities and the request plane are still two tables (`user` for tenancy, `users` for per-request spend), bridged by minting a `users` row named after a member's identity id. Converging them is tracked in [mozilla-ai/otari-ai#1727](https://github.com/mozilla-ai/otari-ai/issues/1727), under the wider reconciliation in [mozilla-ai/otari-ai#1452](https://github.com/mozilla-ai/otari-ai/issues/1452).
 
