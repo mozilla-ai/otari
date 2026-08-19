@@ -241,8 +241,9 @@ def _insert_identity(connection: Connection, *, email: str | None = None, token:
 
     Raw SQL rather than the models, because what is under test is the migrated
     table: going through SQLModel would assert against the metadata that
-    produced the revision instead of against what the revision built. UUIDs are
-    CHAR(32) hex on SQLite, so the literals are written that way.
+    produced the revision instead of against what the revision built. The
+    literals are shaped for SQLite, which is the engine every test here drives:
+    a UUID is CHAR(32) hex and a boolean is 1 or 0.
     """
     organization_id = uuid.uuid4().hex
     user_id = uuid.uuid4().hex
@@ -308,17 +309,22 @@ def test_two_identities_cannot_share_a_verification_token(sqlite_at_head: tuple[
 
 
 def test_identities_without_a_token_coexist_under_that_index(sqlite_at_head: tuple[Config, Engine]) -> None:
-    """Which is every existing row: both engines allow repeated NULLs in a unique index."""
+    """Which is every existing row: both engines allow repeated NULLs in a unique index.
+
+    Counted as a delta rather than as a total, so the assertion still describes
+    the two rows it inserted if a later revision ever seeds an identity of its
+    own (the workspace-scope revision deliberately seeds none today).
+    """
     _, engine = sqlite_at_head
+    without_a_token = text('SELECT COUNT(*) FROM "user" WHERE email_verification_token IS NULL')
 
     with engine.begin() as connection:
+        before = connection.execute(without_a_token).scalar_one()
         _insert_identity(connection)
         _insert_identity(connection)
-        stored = connection.execute(
-            text('SELECT COUNT(*) FROM "user" WHERE email_verification_token IS NULL')
-        ).scalar_one()
+        after = connection.execute(without_a_token).scalar_one()
 
-    assert stored == 2
+    assert after - before == 2
 
 
 def test_an_existing_database_upgrades_with_its_rows_untouched(tmp_path: Path) -> None:
