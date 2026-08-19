@@ -39,10 +39,13 @@ Three deliberate departures from the platform's models, applied on arrival:
   never tables), so a column the hosted edition needs has to live here or
   nowhere. ``workspace.activation_classification`` and
   ``user.default_organization_id`` therefore stay, neither of them read by
-  anything in this edition. The columns
-  that do *not* come are the ones gated on the still-open identity decision
-  (otari-ai#1716): password hashes, OAuth provider, verification tokens. They
-  arrive with the flow that reads them, rather than being invented ahead of it.
+  anything in this edition. The identity columns
+  (``hashed_password``, ``oauth_provider``, ``email_verification_token``,
+  ``email_verified_at``, ``terms_accepted_at``) were held back while
+  otari-ai#1716 was open and now join them: that issue settled that the master
+  key stays the API credential while sessions become the dashboard login, so the
+  columns land here ahead of the flow that reads them, which gives otari-ai#1644
+  one target schema instead of two. Nothing in this edition reads them yet.
   Purely hosted CRM and onboarding columns are the third case and are simply
   not part of the reconciled schema.
 
@@ -241,6 +244,29 @@ class User(UserBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
     __tablename__ = "user"
 
     email: str | None = Field(default=None, unique=True, index=True, max_length=255)
+    # The credential columns, in the platform's own order. All nullable, none
+    # read anywhere in this tree: they land ahead of the session flow
+    # (otari-ai#1716) so the re-parenting migration (otari-ai#1644) has one
+    # target schema rather than one per edition. A row with every one of them
+    # null is the normal standalone state, not an unmigrated one, because the
+    # master key remains the API credential.
+    #
+    # Unbounded, matching the platform's ``AutoString()``: a hash carries its own
+    # algorithm and cost parameters, so a length ceiling here would be a bet on
+    # which hash the session flow picks.
+    hashed_password: str | None = Field(default=None)
+    terms_accepted_at: datetime | None = _timestamp_field(default=None, column_kwargs={})
+    # ``str`` rather than the platform's native ``oauthprovider`` enum. The
+    # vocabulary belongs to the OAuth flow that has not rehomed yet, and a
+    # PostgreSQL enum would have to be created and dropped by hand around
+    # ``add_column`` while rendering as VARCHAR plus a CHECK on SQLite, which the
+    # OSS edition ships by default. This matches how the tenancy tables already
+    # store their own vocabularies (``role``, ``status``).
+    oauth_provider: str | None = Field(default=None, max_length=50)
+    # Unique, like the platform's: two identities holding one verification token
+    # would let either confirm the other's address.
+    email_verification_token: str | None = Field(default=None, unique=True, index=True)
+    email_verified_at: datetime | None = _timestamp_field(default=None, column_kwargs={})
     # NOT NULL: every identity is always looking at exactly one organization,
     # which is what lets the tenancy routes resolve a scope from the caller
     # alone. Provisioning therefore creates the organization first.

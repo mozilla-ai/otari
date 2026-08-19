@@ -11,23 +11,46 @@ rebuilds the table, which is the step that can silently lose a constraint.
 Every integration run migrates PostgreSQL and nothing migrates SQLite, so this
 is the only coverage of that path. Driven against a real file database rather
 than in-memory because batch mode's rebuild is what is under test.
+
+The later revisions that reshape the same tables are exercised here too, for the
+same reason: the workspace scoping that rebuilds four request-plane tables, and
+the credential columns added to ``user``, whose downgrade depends on SQLite's
+refusal to drop an indexed column.
 """
 
 import json
 import subprocess
 import sys
+import uuid
 from collections.abc import Iterator
 from pathlib import Path
 
 import pytest
 from alembic import command
 from alembic.config import Config
-from sqlalchemy import Engine, create_engine, inspect, text
+from alembic.script import ScriptDirectory
+from sqlalchemy import Connection, Engine, create_engine, inspect, text
+from sqlalchemy.exc import IntegrityError
+from sqlmodel import SQLModel
+
+import gateway.models  # noqa: F401  (registers every table on the shared metadata)
+from gateway.models.tenancy import UtcDateTime
 
 _ALEMBIC_DIR = Path(__file__).resolve().parents[2] / "alembic"
 _TENANCY_REVISION = "c4b6d8e0f2a3"
 _PREVIOUS_REVISION = "b2d4f6a8c0e1"
 _TENANCY_TABLES = {"user", "organization", "organization_member", "workspace", "workspace_member"}
+
+_CREDENTIAL_REVISION = "f2a4c6d8b0e3"
+_BEFORE_CREDENTIALS = "a3c7e1b9d5f2"
+_CREDENTIAL_COLUMNS = {
+    "hashed_password",
+    "terms_accepted_at",
+    "oauth_provider",
+    "email_verification_token",
+    "email_verified_at",
+}
+_TOKEN_INDEX = "ix_user_email_verification_token"
 
 
 def _alembic_config(database_url: str) -> Config:
@@ -211,3 +234,163 @@ def test_workspace_scope_keeps_the_partial_indexes_it_rebuilds_around(
             )
         }
     assert {"uq_model_aliases_global_name", "uq_routing_policies_global_name"} <= partial
+
+
+def _insert_identity(connection: Connection, *, email: str | None = None, token: str | None = None) -> str:
+    """Store one organization-scoped identity, returning its id.
+
+    Raw SQL rather than the models, because what is under test is the migrated
+    table: going through SQLModel would assert against the metadata that
+    produced the revision instead of against what the revision built. UUIDs are
+    CHAR(32) hex on SQLite, so the literals are written that way.
+    """
+    organization_id = uuid.uuid4().hex
+    user_id = uuid.uuid4().hex
+    connection.execute(
+        text(
+            "INSERT INTO organization (id, name, slug, created_at) "
+            "VALUES (:id, :name, :slug, CURRENT_TIMESTAMP)"
+        ),
+        {"id": organization_id, "name": f"Org {organization_id[:6]}", "slug": organization_id[:6]},
+    )
+    connection.execute(
+        text(
+            'INSERT INTO "user" '
+            "(id, email, is_active, is_superuser, full_name, active_organization_id, created_at) "
+            "VALUES (:id, :email, 1, 0, 'Ada', :org, CURRENT_TIMESTAMP)"
+        ),
+        {"id": user_id, "email": email, "org": organization_id},
+    )
+    if token is not None:
+        connection.execute(
+            text('UPDATE "user" SET email_verification_token = :token WHERE id = :id'),
+            {"token": token, "id": user_id},
+        )
+    return user_id
+
+
+def test_the_credential_columns_arrive_nullable(sqlite_at_head: tuple[Config, Engine]) -> None:
+    """All five, and every one of them optional.
+
+    Nothing reads them yet, and the master key remains the API credential, so a
+    standalone row with all five null is the normal state. A NOT NULL here would
+    make the session flow's arrival a data migration rather than a code change.
+    """
+    _, engine = sqlite_at_head
+    columns = {column["name"]: column for column in inspect(engine).get_columns("user")}
+
+    assert _CREDENTIAL_COLUMNS <= set(columns)
+    assert [columns[name]["nullable"] for name in sorted(_CREDENTIAL_COLUMNS)] == [True] * 5
+
+
+def test_the_verification_token_is_uniquely_indexed(sqlite_at_head: tuple[Config, Engine]) -> None:
+    """Unique like the platform's, because a shared token confirms the wrong address."""
+    _, engine = sqlite_at_head
+    indexes = [
+        index
+        for index in inspect(engine).get_indexes("user")
+        if index["column_names"] == ["email_verification_token"]
+    ]
+
+    assert [index["name"] for index in indexes] == [_TOKEN_INDEX]
+    assert [index["unique"] for index in indexes] == [True]
+
+
+def test_two_identities_cannot_share_a_verification_token(sqlite_at_head: tuple[Config, Engine]) -> None:
+    """The error path the unique index exists for."""
+    _, engine = sqlite_at_head
+
+    with engine.begin() as connection:
+        _insert_identity(connection, email="ada@example.com", token="tok-1")
+
+    with pytest.raises(IntegrityError), engine.begin() as connection:
+        _insert_identity(connection, email="grace@example.com", token="tok-1")
+
+
+def test_identities_without_a_token_coexist_under_that_index(sqlite_at_head: tuple[Config, Engine]) -> None:
+    """Which is every existing row: both engines allow repeated NULLs in a unique index."""
+    _, engine = sqlite_at_head
+
+    with engine.begin() as connection:
+        _insert_identity(connection)
+        _insert_identity(connection)
+        stored = connection.execute(
+            text('SELECT COUNT(*) FROM "user" WHERE email_verification_token IS NULL')
+        ).scalar_one()
+
+    assert stored == 2
+
+
+def test_an_existing_database_upgrades_with_its_rows_untouched(tmp_path: Path) -> None:
+    """The upgrade an operator on v0.x runs: additive, and null everywhere it lands."""
+    url = f"sqlite:///{tmp_path / 'credentials.db'}"
+    config = _alembic_config(url)
+    command.upgrade(config, _BEFORE_CREDENTIALS)
+    engine = create_engine(url)
+
+    with engine.begin() as connection:
+        user_id = _insert_identity(connection, email="ada@example.com")
+
+    command.upgrade(config, _CREDENTIAL_REVISION)
+
+    with engine.begin() as connection:
+        row = connection.execute(
+            text(
+                "SELECT email, full_name, is_active, hashed_password, terms_accepted_at, oauth_provider, "
+                'email_verification_token, email_verified_at FROM "user" WHERE id = :id'
+            ),
+            {"id": user_id},
+        ).mappings().one()
+
+    assert (row["email"], row["full_name"], row["is_active"]) == ("ada@example.com", "Ada", 1)
+    assert all(row[column] is None for column in _CREDENTIAL_COLUMNS)
+    engine.dispose()
+
+
+def test_the_credential_revision_round_trips(sqlite_at_head: tuple[Config, Engine]) -> None:
+    """Down drops the five columns and the index; up puts them back.
+
+    The downgrade drops the index first on purpose: SQLite refuses
+    ``DROP COLUMN`` while an index covers the column, and this is the only
+    coverage of that ordering, since nothing else migrates SQLite.
+    """
+    config, engine = sqlite_at_head
+
+    command.downgrade(config, _BEFORE_CREDENTIALS)
+
+    inspector = inspect(engine)
+    assert not (_CREDENTIAL_COLUMNS & {column["name"] for column in inspector.get_columns("user")})
+    assert _TOKEN_INDEX not in {index["name"] for index in inspector.get_indexes("user")}
+
+    command.upgrade(config, _CREDENTIAL_REVISION)
+
+    assert _CREDENTIAL_COLUMNS <= {column["name"] for column in inspect(engine).get_columns("user")}
+
+
+def test_the_migrated_columns_match_the_model(sqlite_at_head: tuple[Config, Engine]) -> None:
+    """Hand-written revision, so nothing else would notice the two drifting apart.
+
+    The timestamps are the half worth pinning: the platform stores them naive,
+    and this schema's departure is that every tenancy timestamp reads back
+    UTC-aware on both engines, which ``UtcDateTime`` is what delivers.
+    """
+    _, engine = sqlite_at_head
+
+    declared = SQLModel.metadata.tables["user"]
+    migrated = {column["name"] for column in inspect(engine).get_columns("user")}
+
+    assert migrated == set(declared.columns.keys())
+    for name in ("terms_accepted_at", "email_verified_at"):
+        assert isinstance(declared.columns[name].type, UtcDateTime)
+
+
+def test_the_revision_chain_has_one_head() -> None:
+    """A second head is not a merge conflict, so nothing else fails when one appears.
+
+    Several migrations land in parallel during the M5 rehome, and Alembic accepts
+    two revisions naming the same ``down_revision`` without complaint until
+    ``upgrade head`` refuses to choose between them.
+    """
+    heads = ScriptDirectory.from_config(_alembic_config("sqlite://")).get_heads()
+
+    assert len(heads) == 1, heads
