@@ -11,8 +11,13 @@ import {
 export const THEME_PREFERENCES = ["system", "light", "dark"] as const
 export type ThemePreference = (typeof THEME_PREFERENCES)[number]
 
-const STORAGE_KEY = "otari.dashboard.theme"
-const DARK_QUERY = "(prefers-color-scheme: dark)"
+// Exported so `useTheme.test.tsx` can pin it against the pre-paint script in
+// `index.html`, which hand-duplicates this key and cannot import it. Renaming it
+// here alone would leave that script reading a dead key, and the only symptom
+// would be the light flash it exists to prevent, on a dark-mode load.
+export const STORAGE_KEY = "otari.dashboard.theme"
+// Exported for the same reason as STORAGE_KEY above.
+export const DARK_QUERY = "(prefers-color-scheme: dark)"
 
 interface Theme {
   /** What the operator chose, which may be "system". */
