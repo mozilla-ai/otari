@@ -5,6 +5,7 @@
         "description": "Add someone to the caller's organization, optionally into workspaces at once.",
         "properties": {
           "email": {
+            "format": "email",
             "maxLength": 255,
             "title": "Email",
             "type": "string"

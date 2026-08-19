@@ -2402,7 +2402,10 @@ export interface components {
          * @description Add someone to the caller's organization, optionally into workspaces at once.
          */
         ActiveOrganizationMemberCreateRequest: {
-            /** Email */
+            /**
+             * Email
+             * Format: email
+             */
             email: string;
             /**
              * Role

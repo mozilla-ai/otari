@@ -439,7 +439,10 @@ class ActiveOrganizationMemberCreateRequest(SQLModel):
     # Not ``EmailStr``: that would pull in email-validator for one field, and the
     # address is a claim handle rather than something this edition delivers to.
     # The format hint still reaches the generated client, so a form validates it.
-    email: str = Field(max_length=255, schema_extra={"format": "email"})
+    # SQLModel splats ``schema_extra`` into pydantic's ``FieldInfo``, which drops
+    # a key it does not recognize, so the hint has to arrive under
+    # ``json_schema_extra`` to reach the schema.
+    email: str = Field(max_length=255, schema_extra={"json_schema_extra": {"format": "email"}})
     role: OrganizationMemberRole = "member"
     workspace_assignments: list[WorkspaceAssignmentRequest] | None = Field(
         default=None,

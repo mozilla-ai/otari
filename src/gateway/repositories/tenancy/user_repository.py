@@ -42,8 +42,16 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         holds this address" for one that does and mint a second identity for it.
         An address is the handle a claim flow matches on, so it has to resolve
         to one identity however it was typed.
+
+        Ordered for the same reason ``get_active_owner`` is: the unique index is
+        case-sensitive, so two rows differing only in case can both exist, and an
+        unordered ``first()`` could answer with a different one on two reads.
         """
-        result = await self.db.execute(select(User).where(func.lower(col(User.email)) == email.strip().lower()))
+        result = await self.db.execute(
+            select(User)
+            .where(func.lower(col(User.email)) == email.strip().lower())
+            .order_by(col(User.created_at), col(User.id))
+        )
         return result.scalars().first()
 
     async def create_local_identity(
