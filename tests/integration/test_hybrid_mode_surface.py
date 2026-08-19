@@ -48,6 +48,10 @@ def test_hybrid_mode_disables_local_management_endpoints(monkeypatch: pytest.Mon
         # holds no local budget rows, so the router is never registered.
         scoped_budgets_response = client.get("/v1/scoped-budgets")
         usage_response = client.get("/v1/usage")
+        # Invitations are tenancy too: a hybrid gateway holds no membership
+        # state to accept one into, and the router is never registered.
+        validate_response = client.get("/v1/invitations/validate/some-token")
+        accept_response = client.post("/v1/invitations/accept", json={"token": "some-token"})
 
     expected = {"detail": "This endpoint is not available in hybrid mode. Manage this resource via the platform UI."}
     assert users_response.status_code == 404
@@ -57,6 +61,10 @@ def test_hybrid_mode_disables_local_management_endpoints(monkeypatch: pytest.Mon
     assert budgets_response.status_code == 404
     assert budgets_response.json() == expected
     assert scoped_budgets_response.status_code == 404
+    assert validate_response.status_code == 404
+    assert validate_response.json() == expected
+    assert accept_response.status_code == 404
+    assert accept_response.json() == expected
     assert usage_response.status_code == 404
     assert usage_response.json() == expected
 

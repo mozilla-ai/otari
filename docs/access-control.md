@@ -98,7 +98,15 @@ A self-hosted deployment is **one organization with several people in it**, not 
 
 Nothing is required to set it up. The first request to one of those endpoints provisions a default organization, a default workspace, and one owner identity representing the operator, and every later request resolves that same identity. Organization owners and admins can create further workspaces, add members, and manage roles; a workspace's own owners and admins can manage the workspace they belong to.
 
-Adding a member takes an email address (`POST /v1/organizations/me/members`), optionally with the workspaces to grant at the same time. If no identity holds that address yet, one is created carrying it, and the member is active immediately: there is no invitation to accept, because this edition sends no email. Such an identity is a roster and attribution entry today. It cannot sign in until Otari grows a sign-in flow, at which point the address is the handle its owner claims it by.
+Adding a member takes an email address (`POST /v1/organizations/me/members`), optionally with the workspaces to grant at the same time. If no identity holds that address yet, one is created carrying it, and the member is active immediately with nothing emailed. Such an identity is a roster and attribution entry today. It cannot sign in until Otari grows a sign-in flow, at which point the address is the handle its owner claims it by.
+
+### Invitations
+
+`POST /v1/organizations/me/member-invitations` is the other way to add someone: the membership lands `invited` rather than `active`, and an email with an accept link goes out if mail is configured (see [Configuration](configuration.md)). If it isn't, the response still carries the link (`accept_link`) so the operator can share it another way; `mail_sent` says whether it was actually emailed.
+
+The recipient follows the link to a public accept page (`GET /v1/invitations/validate/{token}` to preview it, `POST /v1/invitations/accept` to commit), which resolves the membership to `active` and grants any workspaces parked on the invitation. No session is minted: Otari has no per-user sign-in yet, so accepting only clears the way to use the sign-in flow once it exists, the same as an address added directly.
+
+An invitation expires after `invitation_expiry_hours` (default 7 days) and can be revoked before it is accepted (`DELETE /v1/organizations/me/member-invitations/{invitation_id}`), which cancels it and suspends the membership, the same as removing a member. Re-inviting the same address revives it.
 
 Three rules exist to stop a tenancy from becoming unmanageable or from losing data:
 

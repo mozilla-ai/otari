@@ -60,7 +60,7 @@ from datetime import UTC, datetime
 from typing import Any, Literal
 
 from pydantic import field_validator
-from sqlalchemy import CheckConstraint, Column, DateTime, ForeignKey, UniqueConstraint, Uuid, func
+from sqlalchemy import JSON, CheckConstraint, Column, DateTime, ForeignKey, UniqueConstraint, Uuid, func
 from sqlalchemy.engine.interfaces import Dialect
 from sqlalchemy.types import TypeDecorator
 from sqlmodel import Field, SQLModel
@@ -657,26 +657,189 @@ class WorkspaceMember(WorkspaceMemberBase, PrimaryKeyMixin, CreatedAtMixin, Upda
     __table_args__ = (UniqueConstraint("workspace_id", "user_id", name="uq_workspace_member_workspace_user"),)
 
 
+# =============================================================================
+# Invitations
+# =============================================================================
+
+INVITATION_STATUSES = {"pending", "accepted", "cancelled", "expired"}
+InvitationStatus = Literal["pending", "accepted", "cancelled", "expired"]
+
+
+class InvitationBase(SQLModel):
+    email: str = Field(max_length=255)
+    status: str = Field(default="pending", max_length=32)
+
+    @field_validator("status")
+    @classmethod
+    def validate_status(cls, value: str) -> str:
+        return _validate_membership(value, allowed=INVITATION_STATUSES, kind="invitation status")
+
+
+class InvitationCreate(InvitationBase):
+    pass
+
+
+class InvitationUpdate(SQLModel):
+    status: str | None = Field(default=None, max_length=32)
+
+
+class InvitationPreviewPublic(SQLModel):
+    """What an unauthenticated visitor sees before committing to accept.
+
+    Deliberately narrow: the address it was sent to, the organization's name,
+    and the role on offer. The token is the caller's only credential here, not
+    a session, so this carries nothing that identifies who sent it or any
+    other member.
+    """
+
+    email: str
+    organization_name: str
+    role: str
+    expires_at: datetime
+
+
+class InviteOrganizationMemberRequest(SQLModel):
+    """Invite an address to the caller's organization, optionally into workspaces at once.
+
+    Field-for-field ``ActiveOrganizationMemberCreateRequest``'s twin: the two
+    requests ask for the same thing and differ only in what creating one
+    produces (this lands ``invited`` and emails a link; that lands ``active``
+    immediately).
+    """
+
+    email: str = Field(max_length=255, schema_extra={"json_schema_extra": {"format": "email"}})
+    role: OrganizationMemberRole = "member"
+    workspace_assignments: list[WorkspaceAssignmentRequest] | None = Field(
+        default=None,
+        max_length=MAX_WORKSPACE_ASSIGNMENTS,
+    )
+
+
+class InviteOrganizationMemberResultPublic(SQLModel):
+    """What issuing an invitation produces, and whether the email actually went out."""
+
+    invitation_id: uuid.UUID
+    organization_member_id: uuid.UUID
+    email: str
+    role: str
+    status: Literal["invited"] = "invited"
+    mail_sent: bool = Field(
+        description=(
+            "Whether the invitation email was actually dispatched. False when mail is not "
+            "configured, or the send itself failed; accept_link is set either way, so the "
+            "operator can share it themselves rather than the invitation being a dead end."
+        )
+    )
+    accept_link: str
+    expires_at: datetime
+    created_at: datetime
+
+
+class AcceptInvitationRequest(SQLModel):
+    token: str
+
+
+class AcceptInvitationResultPublic(SQLModel):
+    """What accepting produces: enough for the accept page to say where the visitor landed.
+
+    No session and no token: accepting resolves the membership to ``active``
+    and stops there. Otari has no per-user sign-in yet, so there is nothing to
+    sign this visitor into; they see the sign-in screen next, the same as
+    anyone else added to an organization before that flow exists.
+    """
+
+    organization_name: str
+    role: str
+
+
+class Invitation(InvitationBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True):
+    """One organization-member invitation: an emailed accept link.
+
+    Points at the ``OrganizationMember`` row created at invite time
+    (``status="invited"``), rather than the membership being created on
+    acceptance: the roster already lists an ``invited`` row for free
+    (``LISTABLE_STATUSES``), and accepting flips that same row to ``active``
+    rather than creating a fresh one. ``role`` lives on that row, not
+    duplicated here.
+
+    A membership can be invited, revoked (which cancels this row and suspends
+    the membership, not delete either), and re-invited, and each round mints a
+    fresh ``Invitation`` row against the same membership id rather than
+    reusing or deleting the cancelled one, so its history stays queryable.
+    At most one row is ``pending`` for a given membership at a time; that is a
+    service-layer invariant (a membership already ``invited`` refuses a second
+    invite), not a database constraint, the same way an organization's
+    active-vs-suspended membership history has none either.
+
+    ``workspace_assignments`` are parked here rather than applied immediately,
+    since there is no active membership yet to grant them to;
+    ``accept_invitation`` (``organization_service.py``) applies them once the
+    member is active, the same way immediate assignments are applied on
+    ``POST /me/members``.
+
+    The token itself is never stored, only its hash (``token_hash``), matching
+    ``dashboard_session_service``'s reasoning: a bearer-style secret sitting in
+    a queryable column is the same risk class as a password, so it is hashed at
+    rest the same way and compared by hash, never by value.
+    """
+
+    __tablename__ = "invitation"
+
+    organization_id: uuid.UUID = Field(foreign_key="organization.id", ondelete="CASCADE", index=True)
+    # Not unique: a membership can be invited, revoked (which suspends it, not
+    # deletes it, and cancels this row), and re-invited, and each round mints a
+    # fresh row against the same membership rather than reusing or deleting the
+    # cancelled one, so its history stays queryable. At most one row is
+    # ``pending`` for a given membership at a time, which is what the service
+    # layer enforces (a membership already ``invited`` refuses a second invite)
+    # rather than a constraint here, the same way OrganizationMember's own
+    # active-vs-suspended history has no DB-level exclusivity either.
+    organization_member_id: uuid.UUID = Field(
+        foreign_key="organization_member.id",
+        ondelete="CASCADE",
+        index=True,
+    )
+    invited_by_user_id: uuid.UUID | None = Field(
+        default=None,
+        foreign_key="user.id",
+        ondelete="SET NULL",
+        index=True,
+    )
+    token_hash: str = Field(unique=True, index=True, max_length=64)
+    workspace_assignments: list[dict[str, str]] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    expires_at: datetime = Field(sa_type=UtcDateTime())  # type: ignore[call-overload]
+
+
 __all__ = [
+    "INVITATION_STATUSES",
     "MANAGEMENT_ROLES",
     "MAX_WORKSPACE_ASSIGNMENTS",
     "ORGANIZATION_MEMBER_ROLES",
     "ORGANIZATION_MEMBER_STATUSES",
-    "OrganizationMemberRole",
-    "OrganizationMemberSettableStatus",
     "WORKSPACE_MEMBER_ROLES",
     "WORKSPACE_MEMBER_STATUSES",
+    "AcceptInvitationRequest",
+    "AcceptInvitationResultPublic",
     "ActiveOrganizationMemberCreateRequest",
     "ActiveOrganizationMemberCreateResultPublic",
     "ActiveOrganizationMemberPublic",
     "ActiveOrganizationMemberUpdateRequest",
     "ActiveOrganizationMembersPublic",
     "ActiveOrganizationUpdateRequest",
+    "Invitation",
+    "InvitationCreate",
+    "InvitationPreviewPublic",
+    "InvitationStatus",
+    "InvitationUpdate",
+    "InviteOrganizationMemberRequest",
+    "InviteOrganizationMemberResultPublic",
     "Organization",
     "OrganizationCreate",
     "OrganizationMember",
     "OrganizationMemberCreate",
     "OrganizationMemberPublic",
+    "OrganizationMemberRole",
+    "OrganizationMemberSettableStatus",
     "OrganizationMemberUpdate",
     "OrganizationMembersPublic",
     "OrganizationMembershipContextPublic",

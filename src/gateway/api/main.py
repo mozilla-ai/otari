@@ -14,6 +14,7 @@ from gateway.api.routes import (
     health,
     hybrid_mode,
     images,
+    invitations,
     keys,
     messages,
     models,
@@ -72,6 +73,7 @@ def register_routers(app: FastAPI, config: GatewayConfig) -> None:
     app.include_router(organizations.router)
     app.include_router(organization_pricing.router)
     app.include_router(workspaces.router)
+    app.include_router(invitations.router)
     app.include_router(budgets.router)
     app.include_router(scoped_budgets.router)
     app.include_router(aliases.router)

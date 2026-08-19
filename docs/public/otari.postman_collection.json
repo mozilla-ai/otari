@@ -1156,6 +1156,71 @@
     {
       "item": [
         {
+          "name": "Accept Invitation",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"token\": \"string\"\n}"
+            },
+            "description": "Accept a pending invitation, resolving it to an active membership.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "invitations",
+                "accept"
+              ],
+              "raw": "{{baseUrl}}/v1/invitations/accept"
+            }
+          }
+        },
+        {
+          "name": "Validate Invitation",
+          "request": {
+            "description": "Look up a pending invitation by its token, for the accept page to render before committing.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "invitations",
+                "validate",
+                ":token"
+              ],
+              "raw": "{{baseUrl}}/v1/invitations/validate/:token",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "token",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "invitations"
+    },
+    {
+      "item": [
+        {
           "name": "List Keys",
           "request": {
             "description": "List all API keys.\n\nRequires master key authentication. An unset ``workspace_id`` lists every key\non the deployment, which keeps the pre-workspace view working unchanged.",
@@ -1675,6 +1740,68 @@
                 "me"
               ],
               "raw": "{{baseUrl}}/v1/organizations/me"
+            }
+          }
+        },
+        {
+          "name": "Invite Active Organization Member",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"email\": \"string\"\n}"
+            },
+            "description": "Invite an address to the caller's active organization by email.\n\nOrganization owners and admins only. Unlike ``POST /me/members``, the\nmembership lands ``invited`` rather than ``active``: it becomes active\nonce the recipient accepts (``POST /v1/invitations/accept``). The response\nalways carries the accept link, whether or not it was actually emailed\n(``mail_sent``), so an operator can share it themselves when mail is not\nconfigured or the send fails.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "member-invitations"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/member-invitations"
+            }
+          }
+        },
+        {
+          "name": "Revoke Active Organization Member Invitation",
+          "request": {
+            "description": "Revoke an unaccepted invitation. Organization owners and admins only.\n\nSuspends the paired membership rather than deleting it, the same as\nremoving an active member: re-inviting the same address later revives it.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "member-invitations",
+                ":invitation_id"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/member-invitations/:invitation_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "invitation_id",
+                  "value": ""
+                }
+              ]
             }
           }
         },

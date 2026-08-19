@@ -1,6 +1,38 @@
 {
   "components": {
     "schemas": {
+      "AcceptInvitationRequest": {
+        "properties": {
+          "token": {
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "AcceptInvitationRequest",
+        "type": "object"
+      },
+      "AcceptInvitationResultPublic": {
+        "description": "What accepting produces: enough for the accept page to say where the visitor landed.\n\nNo session and no token: accepting resolves the membership to ``active``\nand stops there. Otari has no per-user sign-in yet, so there is nothing to\nsign this visitor into; they see the sign-in screen next, the same as\nanyone else added to an organization before that flow exists.",
+        "properties": {
+          "organization_name": {
+            "title": "Organization Name",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "organization_name",
+          "role"
+        ],
+        "title": "AcceptInvitationResultPublic",
+        "type": "object"
+      },
       "ActiveOrganizationMemberCreateRequest": {
         "description": "Add someone to the caller's organization, optionally into workspaces at once.",
         "properties": {
@@ -2718,6 +2750,11 @@
             "title": "Deployment Type",
             "type": "string"
           },
+          "mail_enabled": {
+            "description": "Whether this deployment can actually deliver mail (an invitation's accept link), not merely whether an SMTP host is set: it also needs to know its own public URL to put in one. Lets the dashboard hide or disable a mail-dependent affordance instead of offering one that would fail at send time. False for a hybrid gateway, which holds no tenancy state to invite anyone into.",
+            "title": "Mail Enabled",
+            "type": "boolean"
+          },
           "management_url": {
             "anyOf": [
               {
@@ -2753,7 +2790,8 @@
           "deployment_type",
           "session_type",
           "surfaces",
-          "management_url"
+          "management_url",
+          "mail_enabled"
         ],
         "title": "DeploymentBootstrap",
         "type": "object"
@@ -3656,6 +3694,138 @@
           "total"
         ],
         "title": "InFlightResponse",
+        "type": "object"
+      },
+      "InvitationPreviewPublic": {
+        "description": "What an unauthenticated visitor sees before committing to accept.\n\nDeliberately narrow: the address it was sent to, the organization's name,\nand the role on offer. The token is the caller's only credential here, not\na session, so this carries nothing that identifies who sent it or any\nother member.",
+        "properties": {
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "organization_name": {
+            "title": "Organization Name",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email",
+          "organization_name",
+          "role",
+          "expires_at"
+        ],
+        "title": "InvitationPreviewPublic",
+        "type": "object"
+      },
+      "InviteOrganizationMemberRequest": {
+        "description": "Invite an address to the caller's organization, optionally into workspaces at once.\n\nField-for-field ``ActiveOrganizationMemberCreateRequest``'s twin: the two\nrequests ask for the same thing and differ only in what creating one\nproduces (this lands ``invited`` and emails a link; that lands ``active``\nimmediately).",
+        "properties": {
+          "email": {
+            "format": "email",
+            "maxLength": 255,
+            "title": "Email",
+            "type": "string"
+          },
+          "role": {
+            "default": "member",
+            "enum": [
+              "owner",
+              "admin",
+              "member",
+              "viewer"
+            ],
+            "title": "Role",
+            "type": "string"
+          },
+          "workspace_assignments": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/WorkspaceAssignmentRequest"
+                },
+                "maxItems": 50,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Assignments"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "InviteOrganizationMemberRequest",
+        "type": "object"
+      },
+      "InviteOrganizationMemberResultPublic": {
+        "description": "What issuing an invitation produces, and whether the email actually went out.",
+        "properties": {
+          "accept_link": {
+            "title": "Accept Link",
+            "type": "string"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "email": {
+            "title": "Email",
+            "type": "string"
+          },
+          "expires_at": {
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "invitation_id": {
+            "format": "uuid",
+            "title": "Invitation Id",
+            "type": "string"
+          },
+          "mail_sent": {
+            "description": "Whether the invitation email was actually dispatched. False when mail is not configured, or the send itself failed; accept_link is set either way, so the operator can share it themselves rather than the invitation being a dead end.",
+            "title": "Mail Sent",
+            "type": "boolean"
+          },
+          "organization_member_id": {
+            "format": "uuid",
+            "title": "Organization Member Id",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "status": {
+            "const": "invited",
+            "default": "invited",
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "invitation_id",
+          "organization_member_id",
+          "email",
+          "role",
+          "mail_sent",
+          "accept_link",
+          "expires_at",
+          "created_at"
+        ],
+        "title": "InviteOrganizationMemberResultPublic",
         "type": "object"
       },
       "KeyInfo": {
@@ -12281,6 +12451,107 @@
         ]
       }
     },
+    "/v1/invitations/accept": {
+      "post": {
+        "description": "Accept a pending invitation, resolving it to an active membership.",
+        "operationId": "accept_invitation_v1_invitations_accept_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AcceptInvitationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AcceptInvitationResultPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Accept Invitation",
+        "tags": [
+          "invitations"
+        ]
+      }
+    },
+    "/v1/invitations/validate/{token}": {
+      "get": {
+        "description": "Look up a pending invitation by its token, for the accept page to render before committing.",
+        "operationId": "validate_invitation_v1_invitations_validate__token__get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "token",
+            "required": true,
+            "schema": {
+              "title": "Token",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InvitationPreviewPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Validate Invitation",
+        "tags": [
+          "invitations"
+        ]
+      }
+    },
     "/v1/keys": {
       "get": {
         "description": "List all API keys.\n\nRequires master key authentication. An unset ``workspace_id`` lists every key\non the deployment, which keeps the pre-workspace view working unchanged.",
@@ -13104,6 +13375,108 @@
           }
         ],
         "summary": "Update Active Organization",
+        "tags": [
+          "organizations"
+        ]
+      }
+    },
+    "/v1/organizations/me/member-invitations": {
+      "post": {
+        "description": "Invite an address to the caller's active organization by email.\n\nOrganization owners and admins only. Unlike ``POST /me/members``, the\nmembership lands ``invited`` rather than ``active``: it becomes active\nonce the recipient accepts (``POST /v1/invitations/accept``). The response\nalways carries the accept link, whether or not it was actually emailed\n(``mail_sent``), so an operator can share it themselves when mail is not\nconfigured or the send fails.",
+        "operationId": "invite_active_organization_member_v1_organizations_me_member_invitations_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/InviteOrganizationMemberRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/InviteOrganizationMemberResultPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Invite Active Organization Member",
+        "tags": [
+          "organizations"
+        ]
+      }
+    },
+    "/v1/organizations/me/member-invitations/{invitation_id}": {
+      "delete": {
+        "description": "Revoke an unaccepted invitation. Organization owners and admins only.\n\nSuspends the paired membership rather than deleting it, the same as\nremoving an active member: re-inviting the same address later revives it.",
+        "operationId": "revoke_active_organization_member_invitation_v1_organizations_me_member_invitations__invitation_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "invitation_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Invitation Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Revoke Active Organization Member Invitation",
         "tags": [
           "organizations"
         ]

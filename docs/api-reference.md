@@ -297,6 +297,10 @@ Tenancy above users and keys; see [Access control](access-control.md#organizatio
 | `POST` | `/v1/organizations/me/pricing` | Set the organization's rate for a model over a period. | Master key |
 | `PUT` | `/v1/organizations/me/pricing/{pricing_id}` | Replace an override's rates and period. | Master key |
 | `DELETE` | `/v1/organizations/me/pricing/{pricing_id}` | Remove an override, returning the model to the deployment price list. | Master key |
+| `POST` | `/v1/organizations/me/member-invitations` | Invite a member by email; emails an accept link if mail is configured. | Master key |
+| `DELETE` | `/v1/organizations/me/member-invitations/{invitation_id}` | Revoke an unaccepted invitation (cancels it, suspends the membership). | Master key |
+
+Accepting an invitation is a separate, unauthenticated pair the recipient's browser calls from the link: `GET /v1/invitations/validate/{token}` to preview it and `POST /v1/invitations/accept` to commit. See [Access control](access-control.md#invitations).
 
 ### Workspaces
 

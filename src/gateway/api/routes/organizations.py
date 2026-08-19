@@ -27,7 +27,8 @@ from fastapi import APIRouter, Depends, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import CurrentIdentity, get_db, verify_master_key
+from gateway.api.deps import CurrentIdentity, get_config, get_db, verify_master_key
+from gateway.core.config import GatewayConfig
 from gateway.models.tenancy import (
     ActiveOrganizationMemberCreateRequest,
     ActiveOrganizationMemberCreateResultPublic,
@@ -35,6 +36,8 @@ from gateway.models.tenancy import (
     ActiveOrganizationMembersPublic,
     ActiveOrganizationMemberUpdateRequest,
     ActiveOrganizationUpdateRequest,
+    InviteOrganizationMemberRequest,
+    InviteOrganizationMemberResultPublic,
     OrganizationMembershipContextPublic,
 )
 from gateway.services.tenancy import OrganizationService
@@ -145,3 +148,44 @@ async def remove_active_organization_member(
         organization_member_id=organization_member_id,
     )
     return Message(message="Organization member removed")
+
+
+@router.post("/me/member-invitations", status_code=status.HTTP_201_CREATED)
+async def invite_active_organization_member(
+    service: OrganizationServiceDep,
+    current_identity: CurrentIdentity,
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    body: InviteOrganizationMemberRequest,
+) -> InviteOrganizationMemberResultPublic:
+    """Invite an address to the caller's active organization by email.
+
+    Organization owners and admins only. Unlike ``POST /me/members``, the
+    membership lands ``invited`` rather than ``active``: it becomes active
+    once the recipient accepts (``POST /v1/invitations/accept``). The response
+    always carries the accept link, whether or not it was actually emailed
+    (``mail_sent``), so an operator can share it themselves when mail is not
+    configured or the send fails.
+    """
+    return await service.invite_active_organization_member_for_user(
+        user=current_identity,
+        request=body,
+        config=config,
+    )
+
+
+@router.delete("/me/member-invitations/{invitation_id}")
+async def revoke_active_organization_member_invitation(
+    service: OrganizationServiceDep,
+    current_identity: CurrentIdentity,
+    invitation_id: uuid.UUID,
+) -> Message:
+    """Revoke an unaccepted invitation. Organization owners and admins only.
+
+    Suspends the paired membership rather than deleting it, the same as
+    removing an active member: re-inviting the same address later revives it.
+    """
+    await service.revoke_organization_member_invitation_for_user(
+        user=current_identity,
+        invitation_id=invitation_id,
+    )
+    return Message(message="Invitation revoked")

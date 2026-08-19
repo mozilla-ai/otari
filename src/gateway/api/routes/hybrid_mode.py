@@ -74,3 +74,12 @@ async def organizations_disabled() -> None:
 @router.api_route("/v1/workspaces", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
 async def workspaces_disabled() -> None:
     _raise_disabled()
+
+
+# Invitations are tenancy, same reasoning as organizations/workspaces above: a
+# hybrid gateway holds no membership state to accept an invitation into, so
+# there is nothing this stub could hand off to even if it tried.
+@router.api_route("/v1/invitations/{path:path}", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+@router.api_route("/v1/invitations", methods=["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"])
+async def invitations_disabled() -> None:
+    _raise_disabled()

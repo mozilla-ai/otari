@@ -14,12 +14,14 @@ keeps the slice free of the blanket ``attr-defined``/``arg-type`` exemptions the
 platform's own mypy config needs.
 """
 
+from gateway.repositories.tenancy.invitation_repository import InvitationRepository
 from gateway.repositories.tenancy.organization_member_repository import OrganizationMemberRepository
 from gateway.repositories.tenancy.organization_repository import OrganizationRepository
 from gateway.repositories.tenancy.user_repository import UserRepository, user_alphabetical_order
 from gateway.repositories.tenancy.workspace_repository import WorkspaceMemberRepository, WorkspaceRepository
 
 __all__ = [
+    "InvitationRepository",
     "OrganizationMemberRepository",
     "OrganizationRepository",
     "UserRepository",

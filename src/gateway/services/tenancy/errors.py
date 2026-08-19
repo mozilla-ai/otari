@@ -216,12 +216,40 @@ class OrganizationPricingOverlapError(TenancyConflictError):
             f"An override for '{model_key}' already covers part of that period ({existing_period}). "
             "Change this period, or edit the existing override instead."
         )
+class InvitationNotFoundError(TenancyNotFoundError):
+    """No invitation matches the token or id given.
+
+    One status for "wrong token", "unknown id", and "someone else's
+    invitation", for the same reason ``TenancyNotFoundError`` gives every
+    cross-tenant lookup one status: distinguishing them would let a caller
+    probe for which is true.
+    """
+
+    def __init__(self, identifier: object = "invitation") -> None:
+        super().__init__(f"{identifier} not found or already used")
+
+
+class InvitationExpiredError(TenancyValidationError):
+    """The invitation's ``expires_at`` has passed."""
+
+    def __init__(self) -> None:
+        super().__init__("This invitation has expired")
+
+
+class InvitationAlreadyUsedError(TenancyValidationError):
+    """The invitation is not ``pending`` (already accepted, cancelled, or expired)."""
+
+    def __init__(self) -> None:
+        super().__init__("This invitation has already been used or is no longer valid")
 
 
 __all__ = [
     "ForeignTenancyError",
     "InvalidEmailError",
     "InvalidRoleError",
+    "InvitationAlreadyUsedError",
+    "InvitationExpiredError",
+    "InvitationNotFoundError",
     "LastWorkspaceError",
     "MembershipUpdateError",
     "NotAnOrganizationMemberError",

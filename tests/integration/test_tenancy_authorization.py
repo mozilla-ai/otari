@@ -13,9 +13,11 @@ import uuid
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.core.config import GatewayConfig
 from gateway.models.tenancy import (
     ActiveOrganizationMemberCreateRequest,
     ActiveOrganizationMemberUpdateRequest,
+    InviteOrganizationMemberRequest,
     Organization,
     OrganizationMember,
     User,
@@ -35,10 +37,13 @@ from gateway.services.tenancy import OrganizationService, WorkspaceService
 from gateway.services.tenancy.errors import (
     MembershipUpdateError,
     NotAuthorizedError,
+    OrganizationMemberAlreadyExistsError,
     OrganizationNameRequiredError,
     OrganizationNotFoundError,
     WorkspaceNotFoundError,
 )
+
+_TEST_CONFIG = GatewayConfig()
 
 pytestmark = pytest.mark.asyncio
 
@@ -603,3 +608,84 @@ async def test_a_superuser_manages_a_workspace_they_are_not_a_member_of(async_db
         workspace_update=WorkspaceUpdate(name="Renamed"),
     )
     assert renamed.name == "Renamed"
+
+
+# =============================================================================
+# Invitations
+# =============================================================================
+
+
+async def test_a_plain_member_cannot_invite(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db)
+    member = await _member(async_db, organization, role="member", full_name="Member")
+
+    with pytest.raises(NotAuthorizedError):
+        await OrganizationService(async_db).invite_active_organization_member_for_user(
+            user=member,
+            request=InviteOrganizationMemberRequest(email="ada@example.com"),
+            config=_TEST_CONFIG,
+        )
+
+
+async def test_an_admin_can_invite(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db)
+    admin = await _member(async_db, organization, role="admin", full_name="Admin")
+
+    result = await OrganizationService(async_db).invite_active_organization_member_for_user(
+        user=admin,
+        request=InviteOrganizationMemberRequest(email="ada@example.com", role="member"),
+        config=_TEST_CONFIG,
+    )
+
+    assert result.status == "invited"
+    assert result.mail_sent is False  # _TEST_CONFIG has no SMTP configured
+
+
+async def test_an_admin_cannot_invite_an_owner(async_db: AsyncSession) -> None:
+    """The same rule ``create_active_organization_member_for_user`` enforces, on its twin."""
+    organization = await _organization(async_db)
+    await _member(async_db, organization, role="owner", full_name="Owner")
+    admin = await _member(async_db, organization, role="admin", full_name="Admin")
+
+    with pytest.raises(MembershipUpdateError, match="grant the owner role"):
+        await OrganizationService(async_db).invite_active_organization_member_for_user(
+            user=admin,
+            request=InviteOrganizationMemberRequest(email="ada@example.com", role="owner"),
+            config=_TEST_CONFIG,
+        )
+
+
+async def test_a_viewer_cannot_revoke_an_invitation(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db)
+    admin = await _member(async_db, organization, role="admin", full_name="Admin")
+    viewer = await _member(async_db, organization, role="viewer", full_name="Viewer")
+    service = OrganizationService(async_db)
+    invitation = await service.invite_active_organization_member_for_user(
+        user=admin,
+        request=InviteOrganizationMemberRequest(email="ada@example.com"),
+        config=_TEST_CONFIG,
+    )
+
+    with pytest.raises(NotAuthorizedError):
+        await service.revoke_organization_member_invitation_for_user(
+            user=viewer,
+            invitation_id=invitation.invitation_id,
+        )
+
+
+async def test_inviting_an_address_with_a_pending_invitation_conflicts(async_db: AsyncSession) -> None:
+    organization = await _organization(async_db)
+    admin = await _member(async_db, organization, role="admin", full_name="Admin")
+    service = OrganizationService(async_db)
+    await service.invite_active_organization_member_for_user(
+        user=admin,
+        request=InviteOrganizationMemberRequest(email="ada@example.com"),
+        config=_TEST_CONFIG,
+    )
+
+    with pytest.raises(OrganizationMemberAlreadyExistsError):
+        await service.invite_active_organization_member_for_user(
+            user=admin,
+            request=InviteOrganizationMemberRequest(email="ada@example.com"),
+            config=_TEST_CONFIG,
+        )

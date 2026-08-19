@@ -513,14 +513,16 @@ def test_the_last_workspace_cannot_be_deleted(client: TestClient, master_key_hea
     assert client.get("/v1/workspaces", headers=master_key_header).json()["count"] == 1
 
 
-def test_a_member_cannot_be_parked_in_a_status_nothing_can_produce(
+def test_a_member_cannot_be_parked_in_a_status_by_patch(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
-    """``invited`` is a real stored status with no producer here, so it is not settable.
+    """``invited`` is a real stored status, but ``PATCH`` is not how it is produced.
 
-    Accepting it would let an admin move a member into a state that this edition
-    has no way to leave, since accepting an invitation is what clears it.
+    The invitation flow (``POST /me/member-invitations``) is the one producer,
+    and accepting is the one exit; a ``PATCH`` that could set it directly would
+    let an admin park a member in that state with no invitation behind it to
+    accept, which is a state with no way to leave.
     """
     added = client.post(
         "/v1/organizations/me/members",

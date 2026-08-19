@@ -447,8 +447,14 @@ lands: the address they are added by is the handle it will claim them with.
 - **Workspaces**: create, rename, and delete workspaces, and manage each
   roster. The last workspace cannot be deleted.
 - **Members & roles**: who belongs to the organization, their role
-  (owner, admin, member, viewer), and their status. Adding someone takes an
-  email address and optionally the workspaces to put them in straight away.
+  (owner, admin, member, viewer), and their status. Adding someone directly
+  takes an email address and optionally the workspaces to put them in straight
+  away, with the membership active immediately. Inviting instead leaves the
+  membership `invited` until they follow an emailed accept link (see
+  [Configuration](configuration.md#mail) for what mail needs to actually
+  send); with none configured, the invite is still created and the dashboard
+  hands you the link to share yourself. A pending invitation can be revoked
+  before it is accepted.
 - **Users**: the principals that keys and budgets attach to, including the
   default model access for a user's keys. Distinct from members: a member is a
   person who signs in, a user is what spend is attributed to, and the two merge
