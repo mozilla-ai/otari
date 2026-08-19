@@ -1,0 +1,8 @@
+You're invited to join ORGANIZATION_NAME on Otari
+
+INVITER_NAME has invited you to join ORGANIZATION_NAME on Otari as a ROLE.
+
+Accept the invitation (valid for VALID_DAYS days) by opening this link:
+ACCEPT_LINK
+
+If you weren't expecting this invitation, you can ignore this email.

@@ -62,6 +62,15 @@ pricing:
 | `host` | string | `0.0.0.0` | Server bind host |
 | `port` | int | `8000` | Server bind port |
 | `master_key` | string | none | Master key for management endpoints |
+| `public_base_url` | string | none | This deployment's own externally-reachable URL, no trailing slash. Needed to put an absolute link in an invitation email; see [Mail](#mail). |
+| `smtp_host` | string | none | SMTP server host for outgoing mail. Unset disables mail entirely. |
+| `smtp_port` | int | `587` | SMTP server port |
+| `smtp_user` | string | none | SMTP username, if the server requires auth |
+| `smtp_password` | string | none | SMTP password, if the server requires auth |
+| `smtp_tls` | bool | `true` | Use STARTTLS when connecting to the SMTP server |
+| `mail_from_email` | string | none | The `From` address on outgoing mail. Required, alongside `smtp_host`, for mail to actually send. |
+| `mail_from_name` | string | `Otari` | The `From` display name on outgoing mail |
+| `invitation_expiry_hours` | int | `168` | How long an organization invitation stays acceptable (default 7 days) |
 | `rate_limit_rpm` | int | none | Max requests per minute per user (none = disabled) |
 | `cors_allow_origins` | list | `[]` | Allowed CORS origins (empty = disabled) |
 | `providers` | dict | `{}` | Provider credentials (see below) |
@@ -171,6 +180,22 @@ Note the `require_pricing` interaction: it defaults to `true` (fail-closed), so 
 | `OTARI_PORT` | Server bind port |
 | `OTARI_AUTO_MIGRATE` | Auto-run migrations on startup |
 | `OTARI_BOOTSTRAP_API_KEY` | Create first-use API key |
+
+### Mail
+
+Outgoing mail is what delivers an organization invitation's accept link (see [Access control](access-control.md#invitations)). It is optional: with none of this configured, invitations still work, just without an email sent, so an operator shares the accept link another way.
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `OTARI_PUBLIC_BASE_URL` | none | This deployment's own externally-reachable URL, no trailing slash (e.g. `https://otari.example.com`). Needed to put an absolute link in an email; without it, an invitation is still created but not emailed even if SMTP is configured below. |
+| `OTARI_SMTP_HOST` | none | SMTP server host. Unset disables mail entirely. |
+| `OTARI_SMTP_PORT` | `587` | SMTP server port. |
+| `OTARI_SMTP_USER` | none | SMTP username, if the server requires auth. |
+| `OTARI_SMTP_PASSWORD` | none | SMTP password, if the server requires auth. |
+| `OTARI_SMTP_TLS` | `true` | Use STARTTLS when connecting. |
+| `OTARI_MAIL_FROM_EMAIL` | none | The `From` address on outgoing mail. Required, alongside `OTARI_SMTP_HOST`, for mail to actually send. |
+| `OTARI_MAIL_FROM_NAME` | `Otari` | The `From` display name on outgoing mail. |
+| `OTARI_INVITATION_EXPIRY_HOURS` | `168` | How long an invitation stays acceptable (default 7 days). |
 
 ### Built-in tools and guardrails variables
 

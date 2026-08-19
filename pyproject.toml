@@ -109,6 +109,8 @@ include = ["gateway*"]
 gateway = [
     "templates/*.html",
     "templates/*.svg",
+    "templates/email/*.html",
+    "templates/email/*.txt",
     "static/dashboard/*",
     "static/dashboard/assets/*",
     "static/dashboard/pwa/*",

@@ -348,6 +348,33 @@ class GatewayConfig(BaseSettings):
     cors_allow_origins: list[str] = Field(
         default_factory=list, description="Allowed CORS origins (empty list disables CORS)"
     )
+    public_base_url: str | None = Field(
+        default=None,
+        description=(
+            "This deployment's own externally-reachable URL, with no trailing slash "
+            "(e.g. 'https://otari.example.com'). Used to build absolute links in outgoing "
+            "email (an invitation's accept link); nothing else here needs to describe "
+            "its own address, since every other reference is relative to the request."
+        ),
+    )
+    smtp_host: str | None = Field(
+        default=None,
+        description="SMTP server host for outgoing mail. Unset disables mail entirely.",
+    )
+    smtp_port: int = Field(default=587, ge=1, le=65535, description="SMTP server port.")
+    smtp_user: str | None = Field(default=None, description="SMTP username, if the server requires auth.")
+    smtp_password: str | None = Field(default=None, description="SMTP password, if the server requires auth.")
+    smtp_tls: bool = Field(default=True, description="Use STARTTLS when connecting to the SMTP server.")
+    mail_from_email: str | None = Field(
+        default=None,
+        description="The 'From' address on outgoing mail. Required, alongside smtp_host, for mail_enabled.",
+    )
+    mail_from_name: str = Field(default="Otari", description="The 'From' display name on outgoing mail.")
+    invitation_expiry_hours: int = Field(
+        default=168,
+        ge=1,
+        description="How long an organization invitation stays acceptable, in hours (default 7 days).",
+    )
     providers: dict[str, dict[str, Any]] = Field(
         default_factory=dict,
         description=(
@@ -873,6 +900,30 @@ class GatewayConfig(BaseSettings):
     @property
     def is_hybrid_mode(self) -> bool:
         return self.effective_mode == "hybrid"
+
+    @property
+    def mail_enabled(self) -> bool:
+        """Whether outgoing mail is configured well enough to attempt a send.
+
+        Both a host and a from-address are required: a host with no from-address
+        would send mail no recipient could reasonably trust, and a from-address
+        with no host has nothing to send through. Mail-dependent surfaces (an
+        invitation's accept link) read this to report themselves unavailable
+        rather than failing at send time, per the no-mail-configured requirement.
+        """
+        return bool(self.smtp_host and self.mail_from_email)
+
+    @property
+    def invitation_mail_ready(self) -> bool:
+        """Whether an invitation email can actually be sent and land somewhere useful.
+
+        ``mail_enabled`` alone is not enough: the email needs an absolute link
+        to put in it, and a deployment is the only one that knows its own
+        address, so ``public_base_url`` has to be set too. Otherwise an
+        invitation is still created (the accept link is still valid, just
+        relative), it is just not emailed.
+        """
+        return self.mail_enabled and bool(self.public_base_url)
 
     def provider_instance_type(self, instance: str) -> str:
         """Return the any-llm implementation backing a provider instance.
