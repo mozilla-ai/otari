@@ -94,6 +94,20 @@ def _ensure_default_workspace(bind: sa.engine.Connection) -> uuid.UUID:
     if workspace_id is not None:
         return uuid.UUID(str(workspace_id))
 
+    # Adopt the organization's oldest workspace before minting one, matching the
+    # fallback in `services/workspace_scope.default_workspace_id`. An operator who
+    # renamed the default would otherwise get a second workspace here, every
+    # existing key and usage row backfilled into it, and no member on it, since
+    # provisioning's marker already resolves and it will not revisit the
+    # organization. The id breaks a `created_at` tie so the migration and the
+    # runtime resolve the same row.
+    workspace_id = bind.execute(
+        sa.text("SELECT id FROM workspace WHERE organization_id = :org ORDER BY created_at, id LIMIT 1"),
+        {"org": _uuid_literal(bind, organization_id)},
+    ).scalar()
+    if workspace_id is not None:
+        return uuid.UUID(str(workspace_id))
+
     workspace_id = uuid.uuid4()
     bind.execute(
         sa.text(
