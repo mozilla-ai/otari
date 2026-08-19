@@ -8,6 +8,7 @@ same unsalted SHA-256 digest. Verification now hashes whatever was presented and
 decides on the row lookup alone; format stays a mint-time concern.
 """
 
+import hashlib
 from datetime import UTC, datetime
 from types import SimpleNamespace
 from typing import Any
@@ -17,12 +18,22 @@ import pytest
 from fastapi import HTTPException, status
 
 from gateway.api.deps import _verify_and_update_api_key
-from gateway.auth.models import hash_key
 from gateway.metrics import REGISTRY
 
 # A key with the shape otari-ai mints: neither the ``gw-``/``gw_`` prefix nor the
 # ``gw[-_][A-Za-z0-9_-]+`` charset the old check enforced.
 MIGRATED_KEY = "tk_live.migrated-platform-key-0123456789abcdefghij"
+
+
+def _platform_digest(api_key: str) -> str:
+    """The digest otari-ai stored for ``api_key``, computed without ``hash_key``.
+
+    Standing in for the other product's hasher keeps the row independent of the
+    function under test: pre-fix, ``hash_key`` raised on this key, so a fixture
+    built through it would fail during setup instead of on the auth behavior the
+    test is about.
+    """
+    return hashlib.sha256(api_key.encode()).hexdigest()
 
 
 def _sample(labels: dict[str, str]) -> float:
@@ -41,7 +52,7 @@ def _db_returning(api_key: Any) -> Any:
 async def test_migrated_key_authenticates_when_its_hash_is_on_a_row() -> None:
     api_key: Any = SimpleNamespace(
         id="key-migrated",
-        key_hash=hash_key(MIGRATED_KEY),
+        key_hash=_platform_digest(MIGRATED_KEY),
         is_active=True,
         expires_at=None,
         # Recent enough that the throttled ``last_used_at`` bump is skipped, so

@@ -7,19 +7,29 @@ key with a 401 before the lookup ever happened; auth now depends on the row
 alone, which is what makes a cutover re-issue unnecessary.
 """
 
+import hashlib
 from typing import Any
 
 from fastapi.testclient import TestClient
 from sqlalchemy import update
 from sqlalchemy.orm import Session
 
-from gateway.auth.models import hash_key
 from gateway.core.config import API_KEY_HEADER
 from gateway.models.entities import APIKey
 
 # The shape otari-ai mints: it fails both the ``gw-``/``gw_`` prefix check and the
 # ``gw[-_][A-Za-z0-9_-]+`` charset check the old validator applied.
 MIGRATED_KEY = "tk_live.migrated-platform-key-0123456789abcdefghij"
+
+
+def _platform_digest(api_key: str) -> str:
+    """The digest otari-ai stored for ``api_key``, computed without ``hash_key``.
+
+    Standing in for the other product's hasher is what makes this a migration
+    test rather than a round-trip through our own helper, and it keeps the row
+    buildable on a tree where ``hash_key`` still rejects the key.
+    """
+    return hashlib.sha256(api_key.encode()).hexdigest()
 
 
 def test_migrated_key_authenticates_when_its_hash_is_on_a_row(
@@ -29,7 +39,7 @@ def test_migrated_key_authenticates_when_its_hash_is_on_a_row(
 ) -> None:
     """Re-point an existing key row at a migrated key's hash, as the migration would."""
     db_session.execute(
-        update(APIKey).where(APIKey.id == api_key_obj["id"]).values(key_hash=hash_key(MIGRATED_KEY)),
+        update(APIKey).where(APIKey.id == api_key_obj["id"]).values(key_hash=_platform_digest(MIGRATED_KEY)),
     )
     db_session.commit()
 
