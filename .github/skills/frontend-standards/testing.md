@@ -104,9 +104,11 @@ What the harness already handles, so you do not work around it:
   `deviceScaleFactor` and an iPhone user agent, so touch guards, viewport meta and `:hover`
   rules behave as they would on a device. Playwright captures at CSS scale, so the PNG is
   390 wide whatever the scale factor.
-- **A frozen clock** (`page.clock.setFixedTime`), so anything derived from the current time
-  renders identically every run. Deliberately not `clock.install`, which also fakes timers and
-  deadlocks TanStack Query's refetching and React's scheduler.
+- **A frozen clock** (`page.clock.setFixedTime`), so anything the page reads off the browser
+  clock renders identically every run. What a fixed clock cannot fix is a timestamp relative to
+  a row the seed created at run time, which is why those are masked below. Deliberately not
+  `clock.install`, which also fakes timers and deadlocks TanStack Query's refetching and
+  React's scheduler.
 - **Animations and transitions frozen** by injected CSS, the scrollbar hidden (its width
   differs between a laptop and the CI container, and it runs the height of a full-page shot),
   SVG timelines paused at t=0, fonts awaited, scroll position reset, and a few frames allowed
@@ -116,8 +118,8 @@ What the harness already handles, so you do not work around it:
 - **Two comparison budgets, not one.** `maxDiffPixels: 2000` alongside
   `maxDiffPixelRatio: 0.002`, because Playwright takes the smaller of the two and a ratio
   alone scales with page height: a tall full-page capture would earn an allowance big enough
-  to absorb a whole changed paragraph. `threshold: 0.12` is the per-pixel distance that counts
-  as a difference, set so antialiasing does not.
+  to absorb a whole changed paragraph. `threshold: 0.12` is the per-pixel color distance that
+  counts as a difference at all, set high enough that antialiasing does not register as one.
 - **Masks** over the two things still not reproducible here: recharts, which animates through
   JavaScript that neither the CSS freeze nor `animations: "disabled"` reaches, and relative
   timestamps, which move with the gap between the frozen clock and rows the seed created at
