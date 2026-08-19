@@ -197,7 +197,11 @@ export function AccountMenu({ collapsed }: { collapsed: boolean }) {
               {THEME_PREFERENCES.map((option) => (
                 <label
                   key={option}
-                  className={`flex-1 cursor-pointer rounded-md border px-2 py-1 text-center text-xs ${
+                  // The radio is `sr-only`, so the browser draws its focus ring
+                  // on a clipped one-pixel box nobody can see. The label is the
+                  // visible control, so it is what has to take the ring when the
+                  // input inside it is focused from the keyboard.
+                  className={`flex-1 cursor-pointer rounded-md border px-2 py-1 text-center text-xs has-[:focus-visible]:outline-2 has-[:focus-visible]:outline-offset-2 has-[:focus-visible]:outline-[var(--color-focus)] ${
                     preference === option
                       ? "border-accent bg-primary-subtle text-foreground"
                       : "border-border text-muted transition-colors hover:bg-surface-alt hover:text-foreground"

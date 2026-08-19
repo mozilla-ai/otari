@@ -1740,11 +1740,6 @@ export function ActivityPage() {
           // workspace's imported rows from a view the operator had narrowed to
           // one. `UsageSelection.workspace_id` exists on the server for exactly
           // this case.
-          // First, because it is the widest of them: the switcher scopes the
-          // whole shell, so leaving it out would delete or reprice every other
-          // workspace's imported rows from a view the operator had narrowed to
-          // one. `UsageSelection.workspace_id` exists on the server for exactly
-          // this case.
           workspace_id: filters.workspace_id,
           model: filters.model,
           user_id: filters.user_id,
