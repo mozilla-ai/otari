@@ -8,6 +8,7 @@ write is best-effort in both directions: a failure is swallowed, and a healthy
 writer still gets its row.
 """
 
+import uuid
 from typing import Any
 from unittest.mock import AsyncMock, MagicMock
 
@@ -44,12 +45,17 @@ class _RecordingWriter:
         pass
 
 
+def _result(value: Any) -> MagicMock:
+    return MagicMock(scalar_one_or_none=MagicMock(return_value=value))
+
+
 def _kwargs(log_writer: Any) -> dict[str, Any]:
-    # Touched once even for a rejection: every usage row carries a workspace, and
-    # the key names it. The scalar resolves to None, which is the "key not found"
-    # arm and falls back to the default workspace, so the row is still built.
+    # Touched even for a rejection: every usage row carries a workspace. Two
+    # reads, stubbed in the order `workspace_for_key_id` issues them: the key
+    # resolves to nothing (the "deleted mid-flight" arm), so it falls back to the
+    # deployment's default workspace, which is found. The row is still built.
     db = MagicMock()
-    db.execute = AsyncMock(return_value=MagicMock(scalar_one_or_none=MagicMock(return_value=None)))
+    db.execute = AsyncMock(side_effect=[_result(None), _result(uuid.uuid4())])
     return {
         "db": db,
         "log_writer": log_writer,

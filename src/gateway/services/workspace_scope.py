@@ -11,10 +11,14 @@ only two sources:
   default workspace: the operator acting deployment-wide, which is what the
   master key means.
 
-The default is resolved once per process and cached. That is safe rather than
-merely convenient: the foreign keys are ``ON DELETE RESTRICT``, so a workspace
-holding request-plane rows cannot be deleted, and a cached id cannot go stale by
-pointing at something that is gone.
+The default is resolved per call and deliberately not memoized. ``RESTRICT``
+looks like it makes a cached id safe, since a workspace holding request-plane
+rows cannot be deleted, but it does not cover a default holding *nothing*, which
+is deletable as soon as a second workspace exists. A process cache would then
+hand every deployment-wide write an id naming no row, and one process clearing
+its own cache does nothing for the other workers and replicas that also hold it.
+The lookup it saves is two indexed reads on the master-key path, which is
+operator traffic; keyed requests read the workspace straight off the key.
 """
 
 import uuid
@@ -31,18 +35,15 @@ from gateway.services.tenancy.provisioning_service import (
     DEFAULT_WORKSPACE_NAME,
 )
 
-_default_workspace_id: uuid.UUID | None = None
 # api_key id -> its workspace. A key belongs to exactly one workspace and never
 # moves, so this cannot go stale; it exists because a usage row is written on the
-# hot path and must not pay a lookup for something immutable.
+# hot path and must not pay a lookup for something immutable. A deleted key
+# leaves its entry behind, which is inert: nothing can authenticate on it again.
 _key_workspace: dict[str, uuid.UUID] = {}
 
 
-def reset_default_workspace_cache() -> None:
-    """Drop the cached ids (startup, and between tests that swap databases)."""
-    global _default_workspace_id  # noqa: PLW0603
-
-    _default_workspace_id = None
+def reset_key_workspace_cache() -> None:
+    """Drop the cached key workspaces (between tests that swap databases)."""
     _key_workspace.clear()
 
 
@@ -52,11 +53,6 @@ async def default_workspace_id(db: AsyncSession) -> uuid.UUID:
     Seeded by the migration that added the columns, and adopted by first-boot
     provisioning rather than duplicated, so it exists on every migrated database.
     """
-    global _default_workspace_id  # noqa: PLW0603
-
-    if _default_workspace_id is not None:
-        return _default_workspace_id
-
     resolved = (
         await db.execute(
             select(col(Workspace.id))
@@ -76,14 +72,8 @@ async def default_workspace_id(db: AsyncSession) -> uuid.UUID:
             )
         ).scalar_one_or_none()
     if resolved is None:
-        # Deliberately not memoized. The row is only flushed here, and this
-        # session's caller owns the commit, so caching an id the caller may yet
-        # roll back would hand every later write a foreign key that names
-        # nothing, for the life of the process. One extra lookup until something
-        # commits is the cheaper failure.
         return await _create_default_workspace(db)
 
-    _default_workspace_id = resolved
     return resolved
 
 
@@ -150,7 +140,7 @@ async def resolve_workspace_id(db: AsyncSession, api_key: APIKey | None) -> uuid
 
 __all__ = [
     "default_workspace_id",
-    "reset_default_workspace_cache",
+    "reset_key_workspace_cache",
     "resolve_workspace_id",
     "workspace_for_key_id",
 ]

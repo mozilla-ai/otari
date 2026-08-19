@@ -46,18 +46,18 @@ def _no_background_refresh(monkeypatch: pytest.MonkeyPatch) -> None:
 
 @pytest.fixture(autouse=True)
 def _reset_default_workspace() -> None:
-    """Drop the memoized default workspace before each test.
+    """Drop the memoized key workspaces before each test.
 
-    ``workspace_scope`` memoizes the default workspace id and each key's
-    workspace, because a usage row is written on the hot path and must not pay a
-    lookup for something immutable. Immutable within one database: every test
-    builds a fresh one, so an id cached by the previous test names a workspace
-    that no longer exists and the next insert fails its foreign key. Same reason
-    the alias and provider caches have resets.
+    ``workspace_scope`` memoizes each key's workspace, because a usage row is
+    written on the hot path and must not pay a lookup for something immutable.
+    Immutable within one database: every test builds a fresh one, so an id cached
+    by the previous test names a workspace that no longer exists and the next
+    insert fails its foreign key. Same reason the alias and provider caches have
+    resets.
     """
-    from gateway.services.workspace_scope import reset_default_workspace_cache
+    from gateway.services.workspace_scope import reset_key_workspace_cache
 
-    reset_default_workspace_cache()
+    reset_key_workspace_cache()
 
 
 @pytest.fixture(autouse=True)
