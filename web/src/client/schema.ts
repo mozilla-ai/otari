@@ -1704,7 +1704,7 @@ export interface paths {
         head?: never;
         /**
          * Update Scoped Budget
-         * @description Update a scoped budget's label, limit, or period length.
+         * @description Update a scoped budget's label, limit, or period.
          *
          *     The scope and the provider narrowing are not editable: changing either would
          *     move the ceiling to a different identity while carrying its spend, which is
@@ -3461,6 +3461,11 @@ export interface components {
              */
             provider_key_id?: string | null;
             /**
+             * Reset Alignment
+             * @description Reset on a UTC calendar boundary instead of a fixed number of seconds, which is the only way to express a calendar month. Mutually exclusive with budget_duration_sec
+             */
+            reset_alignment?: ("calendar_day" | "calendar_week" | "calendar_month") | null;
+            /**
              * Scope Id
              * @description Id of the capped identity: an organization, workspace, membership row, or API key
              */
@@ -5136,6 +5141,8 @@ export interface components {
             provider_key_id: string | null;
             /** Reserved Spend */
             reserved_spend: number;
+            /** Reset Alignment */
+            reset_alignment: string | null;
             /** Scope Id */
             scope_id: string;
             /** Scope Type */
@@ -5641,6 +5648,8 @@ export interface components {
             max_budget?: number | null;
             /** Name */
             name?: string | null;
+            /** Reset Alignment */
+            reset_alignment?: ("calendar_day" | "calendar_week" | "calendar_month") | null;
         };
         /**
          * UpdateSearchToolRequest

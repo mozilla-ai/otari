@@ -2440,6 +2440,23 @@
             "description": "Narrow the cap to one provider instance; null caps spend across every provider",
             "title": "Provider Key Id"
           },
+          "reset_alignment": {
+            "anyOf": [
+              {
+                "enum": [
+                  "calendar_day",
+                  "calendar_week",
+                  "calendar_month"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Reset on a UTC calendar boundary instead of a fixed number of seconds, which is the only way to express a calendar month. Mutually exclusive with budget_duration_sec",
+            "title": "Reset Alignment"
+          },
           "scope_id": {
             "description": "Id of the capped identity: an organization, workspace, membership row, or API key",
             "maxLength": 255,
@@ -6291,6 +6308,17 @@
             "title": "Reserved Spend",
             "type": "number"
           },
+          "reset_alignment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Alignment"
+          },
           "scope_id": {
             "title": "Scope Id",
             "type": "string"
@@ -6314,6 +6342,7 @@
           "current_spend",
           "reserved_spend",
           "budget_duration_sec",
+          "reset_alignment",
           "period_start",
           "period_end",
           "created_at",
@@ -7438,6 +7467,22 @@
               }
             ],
             "title": "Name"
+          },
+          "reset_alignment": {
+            "anyOf": [
+              {
+                "enum": [
+                  "calendar_day",
+                  "calendar_week",
+                  "calendar_month"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Alignment"
           }
         },
         "title": "UpdateScopedBudgetRequest",
@@ -14494,7 +14539,7 @@
         ]
       },
       "patch": {
-        "description": "Update a scoped budget's label, limit, or period length.\n\nThe scope and the provider narrowing are not editable: changing either would\nmove the ceiling to a different identity while carrying its spend, which is\na delete and a create, not an update.",
+        "description": "Update a scoped budget's label, limit, or period.\n\nThe scope and the provider narrowing are not editable: changing either would\nmove the ceiling to a different identity while carrying its spend, which is\na delete and a create, not an update.",
         "operationId": "update_scoped_budget_v1_scoped_budgets__budget_id__patch",
         "parameters": [
           {

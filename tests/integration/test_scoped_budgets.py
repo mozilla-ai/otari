@@ -14,6 +14,7 @@ import pytest
 import pytest_asyncio
 from fastapi import HTTPException
 from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from gateway.models.entities import APIKey, Budget, ScopedBudget, User
@@ -269,6 +270,127 @@ async def test_expired_period_rolls_before_the_gate(async_db: AsyncSession, tena
     assert refreshed.period_end > now
 
 
+def _midnight(moment: datetime) -> datetime:
+    return moment.replace(hour=0, minute=0, second=0, microsecond=0)
+
+
+def _first_of_next_month(moment: datetime) -> datetime:
+    first = _midnight(moment).replace(day=1)
+    return first.replace(year=first.year + 1, month=1) if first.month == 12 else first.replace(month=first.month + 1)
+
+
+@pytest.mark.asyncio
+async def test_an_aligned_period_rolls_onto_the_boundary_not_onto_the_request(
+    async_db: AsyncSession, tenancy: Fixture
+) -> None:
+    """A daily ceiling rolled three days late still lands on today's window.
+
+    This is the difference the column buys. A rolling window is measured from the
+    first request after expiry, so on a quiet deployment the reset time walks
+    forward and each delay is permanent; an aligned one is derived from the
+    boundary, so when the roll happened does not leak into the data.
+    """
+    now = datetime.now(UTC)
+    midnight = _midnight(now)
+    cap = ScopedBudget(
+        scope_type="workspace",
+        scope_id=str(tenancy.workspace_id),
+        max_budget=10.0,
+        current_spend=9.5,
+        reset_alignment="calendar_day",
+        period_start=midnight - timedelta(days=4),
+        period_end=midnight - timedelta(days=3),
+    )
+    async_db.add(cap)
+    await async_db.commit()
+
+    handle = await reserve_budget(async_db, tenancy.user_id, 5.0, scope=tenancy.scope())
+    assert handle.scoped_budget_ids == (cap.id,)
+    assert await _counters(async_db, cap.id) == (0.0, 5.0)
+
+    refreshed = (await async_db.execute(select(ScopedBudget).where(ScopedBudget.id == cap.id))).scalar_one()
+    await async_db.refresh(refreshed)
+    assert refreshed.period_start == midnight
+    assert refreshed.period_end == midnight + timedelta(days=1)
+
+
+@pytest.mark.asyncio
+async def test_a_monthly_ceiling_asleep_for_two_months_lands_in_the_current_one(
+    async_db: AsyncSession, tenancy: Fixture
+) -> None:
+    """No backfill: the window containing ``now``, with fresh counters, not one
+    window per month it slept through."""
+    now = datetime.now(UTC)
+    first_of_month = _midnight(now).replace(day=1)
+    cap = ScopedBudget(
+        scope_type="workspace",
+        scope_id=str(tenancy.workspace_id),
+        max_budget=10.0,
+        current_spend=10.0,
+        reset_alignment="calendar_month",
+        period_start=first_of_month - timedelta(days=90),
+        period_end=first_of_month - timedelta(days=60),
+    )
+    async_db.add(cap)
+    await async_db.commit()
+
+    await reserve_budget(async_db, tenancy.user_id, 1.0, scope=tenancy.scope())
+
+    refreshed = (await async_db.execute(select(ScopedBudget).where(ScopedBudget.id == cap.id))).scalar_one()
+    await async_db.refresh(refreshed)
+    assert refreshed.period_start == first_of_month
+    assert refreshed.period_end == _first_of_next_month(now)
+    assert refreshed.current_spend == 0.0
+
+
+@pytest.mark.asyncio
+async def test_an_unrecognized_alignment_leaves_the_exhausted_window_in_place(
+    async_db: AsyncSession, tenancy: Fixture
+) -> None:
+    """A value the API cannot create, so only a write that went around it. The
+    safe direction is refusing requests, not guessing a cadence and admitting
+    them, so the window stays where it is and the cap stays exhausted."""
+    now = datetime.now(UTC)
+    cap = ScopedBudget(
+        scope_type="workspace",
+        scope_id=str(tenancy.workspace_id),
+        max_budget=10.0,
+        current_spend=10.0,
+        reset_alignment="calendar_quarter",
+        period_start=now - timedelta(days=2),
+        period_end=now - timedelta(days=1),
+    )
+    async_db.add(cap)
+    await async_db.commit()
+
+    with pytest.raises(HTTPException) as exc_info:
+        await reserve_budget(async_db, tenancy.user_id, 1.0, scope=tenancy.scope())
+    assert exc_info.value.status_code == 403
+
+    refreshed = (await async_db.execute(select(ScopedBudget).where(ScopedBudget.id == cap.id))).scalar_one()
+    await async_db.refresh(refreshed)
+    assert refreshed.period_end == now - timedelta(days=1)
+    assert refreshed.current_spend == 10.0
+
+
+@pytest.mark.asyncio
+async def test_a_ceiling_cannot_carry_both_kinds_of_period(async_db: AsyncSession, tenancy: Fixture) -> None:
+    """The fourth state is not storable, so the pair never needs an "ignored
+    when" rule to be read."""
+    async_db.add(
+        ScopedBudget(
+            scope_type="workspace",
+            scope_id=str(tenancy.workspace_id),
+            max_budget=10.0,
+            budget_duration_sec=86400,
+            reset_alignment="calendar_month",
+        )
+    )
+    with pytest.raises(IntegrityError):
+        await async_db.commit()
+    await async_db.rollback()
+
+
 @pytest.mark.asyncio
 async def test_concurrent_reservers_cannot_overspend_a_shared_ceiling(
     async_db: AsyncSession, postgres_url: str, tenancy: Fixture
@@ -387,8 +509,6 @@ async def test_aggregate_uniqueness_survives_postgres_null_semantics(async_db: A
     both in on PostgreSQL, where NULLs never compare equal. The partial index
     over the identity alone is what makes this fail.
     """
-    from sqlalchemy.exc import IntegrityError
-
     scope_id = str(uuid.uuid4())
     async_db.add(_scoped(scope_type="workspace", scope_id=scope_id, max_budget=1.0))
     await async_db.commit()
@@ -540,6 +660,108 @@ def test_a_ceiling_on_a_scope_that_does_not_exist_is_refused(
 
     assert malformed.status_code == 404, malformed.text
     assert client.get("/v1/scoped-budgets", headers=master_key_header).json() == []
+
+
+def test_a_calendar_aligned_ceiling_opens_on_its_boundary(
+    client: Any,
+    master_key_header: dict[str, str],
+) -> None:
+    """Create writes the window rather than waiting for first spend, and for an
+    aligned ceiling that window is the calendar one it was created in."""
+    workspace_id = _a_workspace_id(client, master_key_header)
+    created = client.post(
+        "/v1/scoped-budgets",
+        json={
+            "scope_type": "workspace",
+            "scope_id": workspace_id,
+            "max_budget": 500.0,
+            "reset_alignment": "calendar_month",
+        },
+        headers=master_key_header,
+    )
+
+    assert created.status_code == 200, created.text
+    body = created.json()
+    assert body["reset_alignment"] == "calendar_month"
+    assert body["budget_duration_sec"] is None
+    now = datetime.now(UTC)
+    assert datetime.fromisoformat(body["period_start"]) == _midnight(now).replace(day=1)
+    assert datetime.fromisoformat(body["period_end"]) == _first_of_next_month(now)
+
+
+def test_a_ceiling_can_be_switched_between_the_two_kinds_of_period(
+    client: Any,
+    master_key_header: dict[str, str],
+) -> None:
+    """One request nulls the duration and names the alignment. Naming only the
+    alignment is refused rather than silently dropping the duration."""
+    workspace_id = _a_workspace_id(client, master_key_header)
+    created = client.post(
+        "/v1/scoped-budgets",
+        json={"scope_type": "workspace", "scope_id": workspace_id, "budget_duration_sec": 86400},
+        headers=master_key_header,
+    ).json()
+
+    half_switched = client.patch(
+        f"/v1/scoped-budgets/{created['id']}",
+        json={"reset_alignment": "calendar_day"},
+        headers=master_key_header,
+    )
+    assert half_switched.status_code == 400, half_switched.text
+
+    switched = client.patch(
+        f"/v1/scoped-budgets/{created['id']}",
+        json={"budget_duration_sec": None, "reset_alignment": "calendar_day"},
+        headers=master_key_header,
+    )
+    assert switched.status_code == 200, switched.text
+    assert switched.json()["budget_duration_sec"] is None
+    assert switched.json()["reset_alignment"] == "calendar_day"
+    assert datetime.fromisoformat(switched.json()["period_start"]) == _midnight(datetime.now(UTC))
+
+    # And back, which is the same rule read the other way round.
+    reverted = client.patch(
+        f"/v1/scoped-budgets/{created['id']}",
+        json={"budget_duration_sec": 3600, "reset_alignment": None},
+        headers=master_key_header,
+    )
+    assert reverted.status_code == 200, reverted.text
+    assert reverted.json()["reset_alignment"] is None
+    assert reverted.json()["budget_duration_sec"] == 3600
+
+
+def test_a_ceiling_cannot_be_created_with_both_kinds_of_period(
+    client: Any,
+    master_key_header: dict[str, str],
+) -> None:
+    """The state the table's CHECK refuses is answered as a request error, not a
+    database error."""
+    workspace_id = _a_workspace_id(client, master_key_header)
+    response = client.post(
+        "/v1/scoped-budgets",
+        json={
+            "scope_type": "workspace",
+            "scope_id": workspace_id,
+            "budget_duration_sec": 86400,
+            "reset_alignment": "calendar_month",
+        },
+        headers=master_key_header,
+    )
+
+    assert response.status_code == 400, response.text
+    assert "not both" in response.json()["detail"]
+
+
+def test_an_unknown_reset_alignment_is_refused(client: Any, master_key_header: dict[str, str]) -> None:
+    """The alignment vocabulary is published in the schema, so an unknown one is
+    a 422 and never reaches a row nothing can roll."""
+    workspace_id = _a_workspace_id(client, master_key_header)
+    response = client.post(
+        "/v1/scoped-budgets",
+        json={"scope_type": "workspace", "scope_id": workspace_id, "reset_alignment": "calendar_quarter"},
+        headers=master_key_header,
+    )
+    assert response.status_code == 422
 
 
 def test_management_surface_requires_the_master_key(client: Any, api_key_header: dict[str, str]) -> None:

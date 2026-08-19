@@ -39,3 +39,9 @@ node_modules/
 # by construction. The Docker image builds it in a Node stage instead; a source
 # checkout that has not built it degrades to the tutorial page.
 /src/gateway/static/dashboard/
+# pnpm's content-addressable store. pnpm falls back to a repo-relative
+# .pnpm-store when it cannot use a store on the same filesystem as the install
+# target, which is what happens in a container, so an install at the repo root
+# leaves tens of thousands of files here. web/node_modules hard-links into it,
+# so it stays on disk and is only untracked.
+.pnpm-store/

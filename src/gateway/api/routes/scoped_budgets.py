@@ -7,7 +7,7 @@ here, and everything about how one is enforced lives in
 """
 
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -24,7 +24,7 @@ from gateway.models.tenancy import Organization, OrganizationMember, Workspace, 
 # here: the ``Literal`` is what puts the allowed values in the OpenAPI schema,
 # and a second roster would eventually let a client create a scope enforcement
 # does not know.
-from gateway.services.scoped_budget_service import ScopeType
+from gateway.services.scoped_budget_service import ResetAlignment, ScopeType, period_window
 
 # Auth is declared on the router, not repeated on each handler, following
 # `routes/organizations.py`: every handler here needs the master key, and a
@@ -56,6 +56,13 @@ class CreateScopedBudgetRequest(BaseModel):
     budget_duration_sec: int | None = Field(
         default=None, gt=0, description="Period length in seconds (e.g. 86400 for daily); null never resets"
     )
+    reset_alignment: ResetAlignment | None = Field(
+        default=None,
+        description=(
+            "Reset on a UTC calendar boundary instead of a fixed number of seconds, "
+            "which is the only way to express a calendar month. Mutually exclusive with budget_duration_sec"
+        ),
+    )
 
 
 class UpdateScopedBudgetRequest(BaseModel):
@@ -64,6 +71,7 @@ class UpdateScopedBudgetRequest(BaseModel):
     name: str | None = Field(default=None, max_length=200)
     max_budget: float | None = Field(default=None, ge=0)
     budget_duration_sec: int | None = Field(default=None, gt=0)
+    reset_alignment: ResetAlignment | None = Field(default=None)
 
 
 class ScopedBudgetResponse(BaseModel):
@@ -83,6 +91,7 @@ class ScopedBudgetResponse(BaseModel):
     current_spend: float
     reserved_spend: float
     budget_duration_sec: int | None
+    reset_alignment: str | None
     period_start: str | None
     period_end: str | None
     created_at: str
@@ -101,6 +110,7 @@ class ScopedBudgetResponse(BaseModel):
             current_spend=budget.current_spend,
             reserved_spend=budget.reserved_spend,
             budget_duration_sec=budget.budget_duration_sec,
+            reset_alignment=budget.reset_alignment,
             period_start=budget.period_start.isoformat() if budget.period_start else None,
             period_end=budget.period_end.isoformat() if budget.period_end else None,
             created_at=budget.created_at.isoformat(),
@@ -159,6 +169,20 @@ async def _require_scope_exists(db: AsyncSession, scope_type: str, scope_id: str
         )
 
 
+def _require_single_period_source(duration: int | None, alignment: str | None) -> None:
+    """Refuse the state the table's CHECK refuses, with a message instead of a 500.
+
+    A period comes from a duration or from a calendar boundary. Both set is one
+    concept encoded twice, so the pair would need an "ignored when" rule to mean
+    anything.
+    """
+    if duration is not None and alignment is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A budget resets on budget_duration_sec or on reset_alignment, not both",
+        )
+
+
 @router.post("")
 async def create_scoped_budget(
     request: CreateScopedBudgetRequest,
@@ -169,8 +193,18 @@ async def create_scoped_budget(
     Answers 404 when the scope names nothing, rather than creating a ceiling
     that can never bind.
     """
+    _require_single_period_source(request.budget_duration_sec, request.reset_alignment)
     await _require_scope_exists(db, request.scope_type, request.scope_id)
-    now = datetime.now(UTC)
+    # The window opens now rather than on first spend, so a period-limited ceiling
+    # has a defined end before any request has arrived. An aligned one opens on the
+    # boundary it is already past, so its first period is the remainder of the
+    # calendar period it was created in rather than a full one starting now.
+    window = period_window(
+        datetime.now(UTC),
+        duration=request.budget_duration_sec,
+        alignment=request.reset_alignment,
+    )
+    period_start, period_end = window if window is not None else (None, None)
     budget = ScopedBudget(
         scope_type=request.scope_type,
         scope_id=request.scope_id,
@@ -178,10 +212,9 @@ async def create_scoped_budget(
         name=request.name,
         max_budget=request.max_budget,
         budget_duration_sec=request.budget_duration_sec,
-        # The window opens now rather than on first spend, so a period-limited
-        # ceiling has a defined end before any request has arrived.
-        period_start=now if request.budget_duration_sec else None,
-        period_end=now + timedelta(seconds=request.budget_duration_sec) if request.budget_duration_sec else None,
+        reset_alignment=request.reset_alignment,
+        period_start=period_start,
+        period_end=period_end,
     )
     db.add(budget)
     try:
@@ -235,7 +268,7 @@ async def update_scoped_budget(
     request: UpdateScopedBudgetRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ScopedBudgetResponse:
-    """Update a scoped budget's label, limit, or period length.
+    """Update a scoped budget's label, limit, or period.
 
     The scope and the provider narrowing are not editable: changing either would
     move the ceiling to a different identity while carrying its spend, which is
@@ -245,26 +278,41 @@ async def update_scoped_budget(
 
     # Every field is tri-state, keyed on ``model_fields_set`` rather than on the
     # value: omitting one leaves it alone, and an explicit null clears it. Null
-    # is meaningful on all three, because it is a state ``POST`` can create. A
-    # null ``max_budget`` is a ceiling that admits everything and only meters,
-    # and a null ``budget_duration_sec`` is a cap that never resets; testing
-    # ``is not None`` would have made both reachable at creation and permanent
-    # afterwards, so a limit could be tightened but never relaxed.
+    # is meaningful on every one of them, because it is a state ``POST`` can
+    # create. A null ``max_budget`` is a ceiling that admits everything and only
+    # meters, and a cap with neither ``budget_duration_sec`` nor
+    # ``reset_alignment`` never resets; testing ``is not None`` would have made
+    # both reachable at creation and permanent afterwards, so a limit could be
+    # tightened but never relaxed.
     if "name" in request.model_fields_set:
         budget.name = request.name
     if "max_budget" in request.model_fields_set:
         budget.max_budget = request.max_budget
-    if "budget_duration_sec" in request.model_fields_set:
-        budget.budget_duration_sec = request.budget_duration_sec
+    # The two cadence fields are settled together, because each is only legal in
+    # terms of the other: the pair that has to hold is the one the row ends up
+    # with, so an omitted field contributes what is stored. Switching a rolling
+    # ceiling to a calendar one is therefore one request that nulls the duration
+    # and names the alignment, and naming only the alignment is refused rather
+    # than silently clearing a duration the caller did not mention.
+    if {"budget_duration_sec", "reset_alignment"} & request.model_fields_set:
+        duration = (
+            request.budget_duration_sec
+            if "budget_duration_sec" in request.model_fields_set
+            else budget.budget_duration_sec
+        )
+        alignment = (
+            request.reset_alignment if "reset_alignment" in request.model_fields_set else budget.reset_alignment
+        )
+        _require_single_period_source(duration, alignment)
+        budget.budget_duration_sec = duration
+        budget.reset_alignment = alignment
         # Retiming restarts the window from now rather than re-deriving an end
         # from a period_start that belongs to the old cadence. Clearing the
         # cadence drops the window with it, matching what ``POST`` writes for a
-        # budget created without one.
-        now = datetime.now(UTC)
-        budget.period_start = now if request.budget_duration_sec else None
-        budget.period_end = (
-            now + timedelta(seconds=request.budget_duration_sec) if request.budget_duration_sec else None
-        )
+        # budget created without one. An alignment lands on its boundary, so
+        # retiming to one is not a way to shift where the boundary falls.
+        window = period_window(datetime.now(UTC), duration=duration, alignment=alignment)
+        budget.period_start, budget.period_end = window if window is not None else (None, None)
 
     try:
         await db.commit()

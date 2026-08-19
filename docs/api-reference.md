@@ -324,7 +324,7 @@ both are enforced: a request must pass every ceiling that applies to it. See
 
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| `POST` | `/v1/scoped-budgets` | Create a ceiling on an organization, workspace, membership, or API key, optionally narrowed to one provider. Refused with 409 if that scope already has one. | Master key |
+| `POST` | `/v1/scoped-budgets` | Create a ceiling on an organization, workspace, membership, or API key, optionally narrowed to one provider. Its period is a rolling `budget_duration_sec` or a UTC-aligned `reset_alignment`, never both. Refused with 409 if that scope already has one. | Master key |
 | `GET` | `/v1/scoped-budgets` | List scoped budgets, optionally filtered by `scope_type` and `scope_id`. | Master key |
 | `GET` | `/v1/scoped-budgets/{budget_id}` | Get a specific scoped budget. | Master key |
 | `PATCH` | `/v1/scoped-budgets/{budget_id}` | Update a scoped budget's label, limit, or period. The scope and the provider narrowing are fixed. | Master key |

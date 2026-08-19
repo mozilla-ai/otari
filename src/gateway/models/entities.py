@@ -2,7 +2,7 @@ import uuid
 from datetime import UTC, datetime
 from typing import Any
 
-from sqlalchemy import JSON, DateTime, ForeignKey, Index, Text, UniqueConstraint, Uuid, text
+from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Index, Text, UniqueConstraint, Uuid, text
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlmodel import SQLModel
 
@@ -944,6 +944,13 @@ class ScopedBudget(Base):
         # non-partial index: neither unique index above covers a scan that spans
         # narrowed and aggregate rows.
         Index("ix_scoped_budgets_scope", "scope_type", "scope_id"),
+        # A period comes from one place or the other, never both. Without this the
+        # two columns would encode one concept with an implicit "ignored when"
+        # rule, and ``(86400, calendar_month)`` would be storable and meaningless.
+        CheckConstraint(
+            "NOT (budget_duration_sec IS NOT NULL AND reset_alignment IS NOT NULL)",
+            name="ck_scoped_budgets_single_period_source",
+        ),
     )
 
     id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -959,6 +966,15 @@ class ScopedBudget(Base):
     # taken before the roll is still released correctly after it.
     reserved_spend: Mapped[float] = mapped_column(default=0.0, server_default="0")
     budget_duration_sec: Mapped[int | None] = mapped_column(default=None)
+    # Either this or ``budget_duration_sec``, and the CHECK above enforces that.
+    # A duration is a rolling window measured from the last reset; an alignment
+    # snaps the window to a UTC calendar boundary instead, which is the only way
+    # to express a calendar month (2592000 seconds is a different, 1.5 percent
+    # more generous, product). A plain string rather than a database enum, for the
+    # same reason ``scope_type`` is one. Boundaries are UTC only: a local calendar
+    # day is 23 or 25 hours across a DST transition, and a ``reset_timezone``
+    # column stays additive if that is ever wanted.
+    reset_alignment: Mapped[str | None] = mapped_column(default=None)
     period_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
