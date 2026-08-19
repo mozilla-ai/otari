@@ -13,26 +13,21 @@ authentication behavior changes here.
 ``email`` is deliberately untouched: it stays nullable and uniquely indexed,
 because a standalone operator identity is a label rather than a sign-in address.
 
-Three things this revision settles, all of them stated in ``models/tenancy.py``
-next to the columns:
+**No table rebuild**, which is the one thing here that belongs to the revision
+rather than to the columns. Five ``ADD COLUMN`` statements and one
+``CREATE UNIQUE INDEX``, which both engines take as plain DDL;
+``batch_alter_table`` is what a constraint would have cost, and rebuilding
+``user`` on SQLite would mean recreating the table four other tables hold
+foreign keys into, plus the half of the ``organization`` cycle that points at it.
+``email_verification_token`` is therefore unique through an index rather than a
+constraint, as it is on the platform, and ``downgrade`` drops that index before
+the column because SQLite refuses ``DROP COLUMN`` while one covers it.
 
-- **No table rebuild.** Five ``ADD COLUMN`` statements and one
-  ``CREATE UNIQUE INDEX``, which both engines take as plain DDL.
-  ``batch_alter_table`` is what a constraint would have cost, and rebuilding
-  ``user`` on SQLite would mean recreating the table four other tables hold
-  foreign keys into, plus the half of the ``organization`` cycle that points at
-  it. ``email_verification_token`` is therefore unique through an index rather
-  than a constraint, which is what the platform does too, and the index is
-  dropped before the column in ``downgrade`` because SQLite refuses
-  ``DROP COLUMN`` on an indexed column.
-- **``oauth_provider`` is a VARCHAR, not the platform's native ``oauthprovider``
-  enum.** ``op.add_column`` does not create a PostgreSQL enum type for you, and
-  the same type renders as VARCHAR plus a CHECK on SQLite, which the OSS edition
-  ships by default. The vocabulary belongs to the OAuth flow that has not
-  rehomed; the tenancy tables already store their own vocabularies as strings.
-- **The two timestamps are timezone-aware**, unlike the platform's naive
-  ``DateTime``, matching the departure the tenancy revision already applied to
-  every ``created_at`` and ``updated_at`` in this schema.
+Two departures from the platform's production DDL travel with the columns, so
+their reasoning lives beside them in ``models/tenancy.py`` and is not repeated
+here: ``oauth_provider`` is a VARCHAR rather than a native ``oauthprovider``
+enum, and the two timestamps are timezone-aware rather than naive. Everything
+else is DDL-identical to the platform's ``3c08d06718ce``.
 
 Revision ID: f2a4c6d8b0e3
 Revises: a3c7e1b9d5f2
