@@ -17,8 +17,10 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlmodel import col
 
 from gateway.models.entities import APIKey, ModelPricing, UsageLog, User
+from gateway.models.tenancy import Organization, Workspace
 from gateway.services.pricing_service import gateway_tool_pricing_key
 from gateway.services.tool_usage import TOOL_METER_NAMESPACE
 
@@ -43,13 +45,54 @@ engine = create_engine(URL)
 Session = sessionmaker(bind=engine)
 db = Session()
 
+
+def default_workspace_id() -> uuid.UUID:
+    """The workspace a directly-built request-plane row belongs to.
+
+    ``api_keys`` and ``usage_logs`` carry a NOT NULL ``workspace_id``, and the
+    ORM sends an explicit NULL for a column it was given no value for, so the
+    migration's ``server_default`` does not cover a writer like this one. The
+    migration seeds this row; the fallback covers a database built some other
+    way.
+    """
+    workspace = (
+        db.query(Workspace)
+        .join(Organization, col(Organization.id) == col(Workspace.organization_id))
+        .filter(col(Organization.slug) == "default")
+        .first()
+    )
+    if workspace is not None:
+        return workspace.id
+
+    organization = db.query(Organization).filter(col(Organization.slug) == "default").first()
+    if organization is None:
+        organization = Organization(name="Default organization", slug="default")
+        db.add(organization)
+        db.flush()
+    workspace = Workspace(name="Default workspace", organization_id=organization.id)
+    db.add(workspace)
+    db.flush()
+    return workspace.id
+
+
+WORKSPACE_ID = default_workspace_id()
+
 # Users + keys the logs reference (FKs are ON DELETE SET NULL, but present here).
 for uid in USERS:
     if db.query(User).filter(User.user_id == uid).first() is None:
         db.add(User(user_id=uid, alias=uid.capitalize(), spend=0.0, blocked=False))
 for kid, owner in KEYS:
     if db.query(APIKey).filter(APIKey.id == kid).first() is None:
-        db.add(APIKey(id=kid, key_hash=f"hash-{kid}", key_name=kid, user_id=owner, is_active=True))
+        db.add(
+            APIKey(
+                id=kid,
+                key_hash=f"hash-{kid}",
+                key_name=kid,
+                user_id=owner,
+                is_active=True,
+                workspace_id=WORKSPACE_ID,
+            )
+        )
 db.flush()
 
 # Price web search so its calls carry a cost (the stored convention is USD per
@@ -135,6 +178,7 @@ for _ in range(1500):
     db.add(
         UsageLog(
             id=str(uuid.uuid4()),
+            workspace_id=WORKSPACE_ID,
             user_id=owner,
             api_key_id=kid,
             timestamp=ts,

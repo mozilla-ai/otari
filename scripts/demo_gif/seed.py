@@ -25,6 +25,7 @@ from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import create_engine
 from sqlalchemy.orm import sessionmaker
+from sqlmodel import col
 
 from gateway.models.entities import (
     APIKey,
@@ -34,6 +35,7 @@ from gateway.models.entities import (
     UsageLog,
     User,
 )
+from gateway.models.tenancy import Organization, Workspace
 
 URL = sys.argv[1] if len(sys.argv) > 1 else "sqlite:///./scripts/demo_gif/demo.db"
 rng = random.Random(4242)  # deterministic values across runs
@@ -102,6 +104,38 @@ engine = create_engine(URL)
 Session = sessionmaker(bind=engine)
 db = Session()
 
+
+def default_workspace_id() -> uuid.UUID:
+    """The workspace a directly-built request-plane row belongs to.
+
+    ``api_keys``, ``usage_logs`` and ``model_aliases`` carry a NOT NULL
+    ``workspace_id``, and the ORM sends an explicit NULL for a column it was
+    given no value for, so the migration's ``server_default`` does not cover a
+    writer like this one. The migration seeds this row; the fallback covers a
+    database built some other way.
+    """
+    workspace = (
+        db.query(Workspace)
+        .join(Organization, col(Organization.id) == col(Workspace.organization_id))
+        .filter(col(Organization.slug) == "default")
+        .first()
+    )
+    if workspace is not None:
+        return workspace.id
+
+    organization = db.query(Organization).filter(col(Organization.slug) == "default").first()
+    if organization is None:
+        organization = Organization(name="Default organization", slug="default")
+        db.add(organization)
+        db.flush()
+    workspace = Workspace(name="Default workspace", organization_id=organization.id)
+    db.add(workspace)
+    db.flush()
+    return workspace.id
+
+
+WORKSPACE_ID = default_workspace_id()
+
 # --- Budgets -----------------------------------------------------------------
 # Created with a placeholder limit; the real max_budget is derived from seeded
 # spend after the usage rows exist (see "Derive budget limits" below).
@@ -140,6 +174,7 @@ for kname, owner in KEYS.items():
     db.add(
         APIKey(
             id=kid,
+            workspace_id=WORKSPACE_ID,
             key_hash=f"demo-hash-{kname}",
             key_prefix="otari-",
             key_name=kname,
@@ -166,7 +201,7 @@ for model_key, (_provider, in_price, out_price, _lat) in MODELS.items():
 for name, target in ALIASES.items():
     if db.get(ModelAlias, name) is not None:
         continue
-    db.add(ModelAlias(name=name, target=target))
+    db.add(ModelAlias(name=name, target=target, workspace_id=WORKSPACE_ID))
 
 db.flush()
 
@@ -204,6 +239,7 @@ for _ in range(4000):
     db.add(
         UsageLog(
             id=str(uuid.uuid4()),
+            workspace_id=WORKSPACE_ID,
             user_id=owner,
             api_key_id=f"key-{kname}",
             timestamp=ts,

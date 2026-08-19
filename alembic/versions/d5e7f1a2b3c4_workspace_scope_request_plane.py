@@ -20,10 +20,14 @@ fills it in when it runs.
 The column keeps its ``server_default``, and not for the reason a first draft of
 this docstring gave: the ``batch_alter_table`` below already rebuilds all four
 tables, since SQLite has no ``ALTER TABLE ADD CONSTRAINT``, so a rebuild is
-paid for either way. It stays because the default is useful on its own: a write
-path that has not yet learned to carry a workspace lands its row in the default
-one rather than failing in production. Tightening it belongs with the change that finishes
-threading the workspace through every writer.
+paid for either way. It stays because the backfill needs it, and for nothing
+after that. It protects no writer: it covers only an INSERT that omits the
+column, and the ORM never does, since SQLAlchemy sends an explicit NULL for a
+mapped column it was given no value for. A write path that has not learned to
+carry a workspace therefore still fails its NOT NULL, on a migrated database as
+much as on any other, which is the loud failure rather than a row quietly filed
+under the wrong workspace. Dropping the default belongs with the change that
+finishes threading the workspace through every writer.
 
 Revision ID: d5e7f1a2b3c4
 Revises: c4b6d8e0f2a3
