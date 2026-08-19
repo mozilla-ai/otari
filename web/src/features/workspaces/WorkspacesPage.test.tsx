@@ -87,6 +87,8 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
+const SECOND = "66666666-6666-6666-6666-666666666666"
+
 describe("WorkspacesPage", () => {
   it("lists the organization's workspaces", async () => {
     mockApi({
@@ -223,11 +225,15 @@ describe("WorkspacesPage", () => {
   })
 
   it("confirms before deleting a workspace", async () => {
-    const requests = mockApi({})
+    // Two, because the last workspace cannot be deleted and its button says so.
+    const requests = mockApi({
+      workspaces: [workspace(), workspace({ id: SECOND, name: "Bravo" })],
+    })
     const user = userEvent.setup()
     renderPage(<WorkspacesPage />)
 
-    await user.click(await screen.findByRole("button", { name: "Delete" }))
+    const deletes = await screen.findAllByRole("button", { name: "Delete" })
+    await user.click(deletes[0])
     await user.click(screen.getByRole("button", { name: "Delete workspace" }))
 
     const remove = requests.find((request) => request.method === "DELETE")
@@ -236,8 +242,26 @@ describe("WorkspacesPage", () => {
     )
   })
 
+  it("refuses to offer the last workspace's deletion, and says why", async () => {
+    // The server keeps every organization on at least one workspace, and first
+    // boot is that state, so an enabled button here is one that always 400s.
+    mockApi({})
+    renderPage(<WorkspacesPage />)
+
+    const remove = await screen.findByRole("button", {
+      name: /^Delete Default Workspace \(/,
+    })
+    expect(remove).toBeDisabled()
+    expect(remove).toHaveAccessibleName(/keeps at least one workspace/)
+  })
+
   it("offers a non-manager the roster but none of the write controls", async () => {
-    mockApi({ context: organizationContext({ role: "viewer" }) })
+    // Two workspaces, so the Delete button is about the caller's role rather
+    // than about the last-workspace rule.
+    mockApi({
+      context: organizationContext({ role: "viewer" }),
+      workspaces: [workspace(), workspace({ id: SECOND, name: "Bravo" })],
+    })
     const user = userEvent.setup()
     renderPage(<WorkspacesPage />)
 
@@ -245,10 +269,10 @@ describe("WorkspacesPage", () => {
     expect(
       screen.queryByRole("button", { name: "Create workspace" }),
     ).toBeNull()
-    expect(screen.getByRole("button", { name: "Edit" })).toBeDisabled()
-    expect(screen.getByRole("button", { name: "Delete" })).toBeDisabled()
+    expect(screen.getAllByRole("button", { name: "Edit" })[0]).toBeDisabled()
+    expect(screen.getAllByRole("button", { name: "Delete" })[0]).toBeDisabled()
 
-    await user.click(screen.getByRole("button", { name: "Members" }))
+    await user.click(screen.getAllByRole("button", { name: "Members" })[0])
     const roster = await screen.findByText("Members of Default Workspace")
     expect(roster).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Remove" })).toBeDisabled()

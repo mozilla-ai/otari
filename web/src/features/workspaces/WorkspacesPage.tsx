@@ -21,6 +21,7 @@ import {
   InfoBanner,
   PageHeader,
 } from "@/shared/components/ui"
+import { formatDate } from "@/shared/helpers/format"
 
 // Workspaces are the unit inside an organization that work is scoped to. This
 // page lists the ones the caller can see, and opening a row reveals its roster:
@@ -32,9 +33,8 @@ import {
 // string back to it.
 const getWorkspaceRowKey = (workspace: Workspace): string => workspace.id
 
-function formatDate(value: string): string {
-  return new Date(value).toLocaleDateString()
-}
+const LAST_WORKSPACE_REASON =
+  "An organization keeps at least one workspace; create another first"
 
 function CreateWorkspaceForm({ onClose }: { onClose: () => void }) {
   const create = useCreateWorkspace()
@@ -150,6 +150,9 @@ export function WorkspacesPage() {
   const [deleting, setDeleting] = useState<Workspace | null>(null)
 
   const rows = workspaces.data ?? []
+  // Only once the list has actually answered: an empty list while loading is
+  // not one workspace, and disabling on it would flicker.
+  const isOnlyWorkspace = workspaces.isSuccess && rows.length === 1
   const manages = canManage(context.data)
   const editingWorkspace = rows.find((row) => row.id === editing) ?? null
   const showOnboarding = !workspaces.isLoading && rows.length === 0 && !creating
@@ -208,19 +211,33 @@ export function WorkspacesPage() {
             >
               Edit
             </Button>
-            <Button
-              size="sm"
-              variant="danger-soft"
-              isDisabled={!manages}
-              onPress={() => setDeleting(workspace)}
-            >
-              Delete
-            </Button>
+            {/* The server keeps every organization on at least one workspace
+                (`LastWorkspaceError`), and first boot is the one-workspace
+                state, so the ordinary case would be a button that always
+                refuses. Say why instead of offering the refusal. The reason
+                goes in the name, following the membership controls: a disabled
+                control takes no focus, so a tooltip would reach a pointer and
+                nothing else. */}
+            <span title={isOnlyWorkspace ? LAST_WORKSPACE_REASON : undefined}>
+              <Button
+                size="sm"
+                variant="danger-soft"
+                aria-label={
+                  isOnlyWorkspace
+                    ? `Delete ${workspace.name} (${LAST_WORKSPACE_REASON})`
+                    : undefined
+                }
+                isDisabled={!manages || isOnlyWorkspace}
+                onPress={() => setDeleting(workspace)}
+              >
+                Delete
+              </Button>
+            </span>
           </div>
         ),
       },
     ],
-    [expanded, manages],
+    [expanded, manages, isOnlyWorkspace],
   )
 
   const renderDetail = useCallback(
@@ -256,10 +273,11 @@ export function WorkspacesPage() {
         }
       />
 
+      {/* `remove.error` is deliberately absent: the confirm dialog renders that
+          mutation's error itself, and listing it here too paints the same
+          message twice, once behind the open dialog. */}
       <ErrorBanner
-        error={
-          context.error ?? workspaces.error ?? orgMembers.error ?? remove.error
-        }
+        error={context.error ?? workspaces.error ?? orgMembers.error}
       />
 
       {/* Withheld until the context answers, so an owner is not told for one
