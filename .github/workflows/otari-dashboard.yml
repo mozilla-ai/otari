@@ -259,7 +259,7 @@ jobs:
       with:
         name: screenshot-baselines
         path: |
-          web/e2e/screenshots/__snapshots__/
+          web/e2e/screenshots/*-snapshots/
           web/test-results/
         retention-days: 7
         if-no-files-found: ignore
