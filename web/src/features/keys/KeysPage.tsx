@@ -39,6 +39,7 @@ import {
   InfoBanner,
   PageHeader,
 } from "@/shared/components/ui"
+import { formatDate } from "@/shared/helpers/format"
 import {
   resolveSelectedIds,
   useTableSelection,
@@ -46,12 +47,6 @@ import {
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 // ---------- helpers ----------
-
-function absolute(iso: string | null): string {
-  if (!iso) return "—"
-  const d = new Date(iso)
-  return Number.isNaN(d.getTime()) ? "—" : d.toLocaleDateString()
-}
 
 function relative(iso: string | null): string | null {
   if (!iso) return null
@@ -893,7 +888,7 @@ export function KeysPage() {
         id: "created",
         header: "Created",
         cell: (k) => (
-          <span className="text-muted">{absolute(k.created_at)}</span>
+          <span className="text-muted">{formatDate(k.created_at)}</span>
         ),
       },
       {
@@ -915,7 +910,7 @@ export function KeysPage() {
               k.expires_at ? new Date(k.expires_at).toLocaleString() : undefined
             }
           >
-            {k.expires_at ? absolute(k.expires_at) : "never"}
+            {k.expires_at ? formatDate(k.expires_at) : "never"}
           </span>
         ),
       },

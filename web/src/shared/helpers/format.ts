@@ -71,6 +71,19 @@ export function formatReleaseDate(value: string | null | undefined): string {
   return `${MONTH_ABBREVIATIONS[monthIndex]} ${match[1]}`
 }
 
+// Date only, for table cells where the time of day carries nothing. Falls back
+// to the raw string rather than rendering "Invalid Date", matching formatDateTime.
+export function formatDate(iso: string | null | undefined): string {
+  if (!iso) {
+    return "—"
+  }
+  const date = new Date(iso)
+  if (Number.isNaN(date.getTime())) {
+    return iso
+  }
+  return date.toLocaleDateString()
+}
+
 export function formatDateTime(iso: string | null | undefined): string {
   if (!iso) {
     return "—"
