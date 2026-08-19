@@ -55,6 +55,7 @@ from gateway.services.tenancy.errors import (
     NotAuthorizedError,
     OrganizationMemberAlreadyExistsError,
     OrganizationMemberNotFoundError,
+    OrganizationNameRequiredError,
     OrganizationNotFoundError,
     WorkspaceNotFoundError,
 )
@@ -62,6 +63,20 @@ from gateway.services.tenancy.errors import (
 # A shape check, not an authority on deliverability: one @, something either
 # side, a dot in the domain, and no whitespace. See InvalidEmailError.
 _EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+
+
+def _validated_organization_name(name: str | None) -> str:
+    """Reject a name that is blank once trimmed, rather than substituting one.
+
+    ``min_length=1`` on the request admits a single space, and the fallback this
+    replaced then stored the literal "Organization", renaming the organization to
+    something the caller never asked for. ``workspace_service`` already refuses
+    the same input, so the two agree now.
+    """
+    trimmed = (name or "").strip()
+    if not trimmed:
+        raise OrganizationNameRequiredError
+    return trimmed
 
 
 def _validated_email(email: str) -> str:
@@ -193,7 +208,7 @@ class OrganizationService:
 
         updated = await self.organizations.update_organization(
             organization,
-            {"name": organization_name.strip() or "Organization"},
+            {"name": _validated_organization_name(organization_name)},
         )
         await self.db.commit()
 
@@ -345,10 +360,11 @@ class OrganizationService:
     ) -> None:
         """Grant each assigned workspace, reviving a suspended membership.
 
-        Deduplicated by workspace first, keeping the first role named for one, so
-        a body that repeats an id costs one round trip rather than one per
-        repetition. `_require_workspaces_in_organization` already resolves the
-        same set rather than the list.
+        Deduplicated by workspace first, keeping the first role named for one, and
+        every existing membership is resolved in one query before the loop, so a
+        body naming N workspaces costs one lookup rather than N.
+        `_require_workspaces_in_organization` already resolves the same set
+        rather than the list.
 
         An existing membership is updated rather than skipped, as the platform's
         own assignment path does: a suspended row that is left alone would leave
@@ -356,23 +372,22 @@ class OrganizationService:
         being refused everything in it.
         """
         members = WorkspaceMemberRepository(self.db)
-        seen: set[uuid.UUID] = set()
+        wanted: dict[uuid.UUID, str] = {}
         for assignment in assignments:
-            if assignment.workspace_id in seen:
-                continue
-            seen.add(assignment.workspace_id)
-            existing = await members.get_by_workspace_and_user(assignment.workspace_id, user_id)
+            wanted.setdefault(assignment.workspace_id, assignment.role)
+
+        # One IN query rather than one lookup per assignment: with the ceiling at
+        # MAX_WORKSPACE_ASSIGNMENTS that is the difference between one round trip
+        # and fifty inside a single request.
+        existing_by_workspace = {
+            member.workspace_id: member for member in await members.get_by_workspaces_and_user(wanted, user_id)
+        }
+        for workspace_id, role in wanted.items():
+            existing = existing_by_workspace.get(workspace_id)
             if existing is not None:
-                await members.update(
-                    existing,
-                    WorkspaceMemberUpdate(role=assignment.role, status="active"),
-                )
+                await members.update(existing, WorkspaceMemberUpdate(role=role, status="active"))
                 continue
-            await members.create(
-                workspace_id=assignment.workspace_id,
-                user_id=user_id,
-                role=assignment.role,
-            )
+            await members.create(workspace_id=workspace_id, user_id=user_id, role=role)
 
     async def update_active_organization_member_for_user(
         self,
@@ -459,6 +474,12 @@ class OrganizationService:
         demoted or deactivated, which would leave the organization with nobody
         able to manage or delete it.
         """
+        # Serialized on the parent row before anything is read: the last-owner
+        # rule below is read-then-write with no unique index behind it, so
+        # without this two concurrent demotions of two different owners both
+        # count two and both commit. See ``OrganizationRepository.lock``.
+        await self.organizations.lock(organization_id)
+
         new_role = update_data.get("role", target_membership.role)
         new_status = update_data.get("status", target_membership.status)
 

@@ -21,6 +21,7 @@ from gateway.models.tenancy import (
     User,
     Workspace,
     WorkspaceCreate,
+    WorkspaceMemberUpdate,
     WorkspaceUpdate,
 )
 from gateway.repositories.tenancy import (
@@ -34,6 +35,7 @@ from gateway.services.tenancy import OrganizationService, WorkspaceService
 from gateway.services.tenancy.errors import (
     MembershipUpdateError,
     NotAuthorizedError,
+    OrganizationNameRequiredError,
     OrganizationNotFoundError,
     WorkspaceNotFoundError,
 )
@@ -535,3 +537,69 @@ async def test_the_operator_identity_and_organization_member_rows_are_distinct_c
     assert [row.role for row in organization_rows] == ["member"]
     assert [row.role for row in workspace_rows[0]] == ["owner"]
     assert isinstance(organization_rows[0], OrganizationMember)
+
+
+async def test_a_suspended_workspace_membership_grants_no_visibility(async_db: AsyncSession) -> None:
+    """Suspended is not a quieter kind of member: it grants nothing.
+
+    The management check has always read the status; the two visibility paths did
+    not, so a member removed from a workspace kept reading it and its roster
+    while being refused every action in it.
+    """
+    organization = await _organization(async_db, slug="acme")
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    plain = await _member(async_db, organization, role="member", full_name="Plain")
+    workspace = await _workspace(async_db, organization, name="Research", owner=owner)
+
+    members = WorkspaceMemberRepository(async_db)
+    membership = await members.create(workspace_id=workspace.id, user_id=plain.id, role="member")
+    await members.update(membership, WorkspaceMemberUpdate(status="suspended"))
+    await async_db.commit()
+
+    service = WorkspaceService(async_db)
+    with pytest.raises(WorkspaceNotFoundError):
+        await service.get_workspace(user=plain, workspace_id=workspace.id)
+    with pytest.raises(WorkspaceNotFoundError):
+        await service.list_members(user=plain, workspace_id=workspace.id)
+
+    listed = await service.list_workspaces(user=plain)
+    assert listed.count == 0
+    assert listed.data == []
+
+
+async def test_a_blank_organization_name_is_refused_rather_than_substituted(async_db: AsyncSession) -> None:
+    """``min_length=1`` admits a single space, which must not rename the organization.
+
+    The fallback this replaced stored the literal "Organization", so a caller who
+    submitted whitespace got a rename they never asked for.
+    """
+    organization = await _organization(async_db, slug="acme")
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    await async_db.commit()
+
+    service = OrganizationService(async_db)
+    with pytest.raises(OrganizationNameRequiredError):
+        await service.update_active_organization_for_user(user=owner, organization_name="   ")
+
+    refreshed = await OrganizationRepository(async_db).get(organization.id)
+    assert refreshed is not None
+    assert refreshed.name == "Acme"
+
+
+async def test_a_superuser_manages_a_workspace_they_are_not_a_member_of(async_db: AsyncSession) -> None:
+    """The superuser arm of workspace management, matching the read and org-level checks.
+
+    A superuser already saw every workspace and could delete one through the
+    organization-level guard, so refusing them a rename was the odd one out.
+    """
+    organization = await _organization(async_db, slug="acme")
+    outsider = await _member(async_db, organization, role="member", full_name="Root", is_superuser=True)
+    workspace = await _workspace(async_db, organization, name="Research")
+    await async_db.commit()
+
+    renamed = await WorkspaceService(async_db).update_workspace(
+        user=outsider,
+        workspace_id=workspace.id,
+        workspace_update=WorkspaceUpdate(name="Renamed"),
+    )
+    assert renamed.name == "Renamed"

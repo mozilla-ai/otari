@@ -221,6 +221,23 @@ def test_rename_the_active_organization(client: TestClient, master_key_header: d
 # =============================================================================
 
 
+def test_a_whitespace_only_organization_name_is_refused(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """``min_length=1`` lets " " through validation, so the service has to refuse it.
+
+    It previously stored the literal "Organization" instead, renaming the
+    organization to something the caller never sent.
+    """
+    before = _context(client, master_key_header)["organization"]["name"]
+
+    response = client.patch("/v1/organizations/me", json={"name": "   "}, headers=master_key_header)
+
+    assert response.status_code == 400
+    assert _context(client, master_key_header)["organization"]["name"] == before
+
+
 def test_the_roster_joins_identities(
     client: TestClient,
     master_key_header: dict[str, str],

@@ -145,6 +145,18 @@ class ForeignTenancyError(TenancyError):
     status_code = status.HTTP_500_INTERNAL_SERVER_ERROR
 
 
+class OrganizationNameRequiredError(TenancyValidationError):
+    """An organization name that is absent, null, or blank once trimmed.
+
+    The request's ``min_length=1`` admits a single space, so this is what stops a
+    whitespace-only rename from reaching the column, in the same way
+    ``WorkspaceNameRequiredError`` does for a workspace.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("An organization name is required")
+
+
 class LastWorkspaceError(TenancyValidationError):
     """Deleting this workspace would leave the organization without one."""
 
@@ -164,6 +176,7 @@ __all__ = [
     "NotAuthorizedError",
     "OrganizationMemberAlreadyExistsError",
     "OrganizationMemberNotFoundError",
+    "OrganizationNameRequiredError",
     "OrganizationNotFoundError",
     "TenancyConflictError",
     "TenancyError",

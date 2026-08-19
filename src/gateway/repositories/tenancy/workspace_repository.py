@@ -150,6 +150,49 @@ class WorkspaceMemberRepository:
         )
         return result.scalars().first()
 
+    async def get_active_by_workspace_and_user(
+        self,
+        workspace_id: uuid.UUID,
+        user_id: uuid.UUID,
+    ) -> WorkspaceMember | None:
+        """Return the *active* membership joining a user to a workspace, or None.
+
+        The any-status variant above is what the mutation paths want: adding
+        someone whose membership is suspended has to see that row in order to
+        revive it rather than insert beside it. Every path that asks "may this
+        caller see this workspace" wants this one instead, because a suspended
+        membership grants nothing.
+        """
+        result = await self.db.execute(
+            select(WorkspaceMember).where(
+                col(WorkspaceMember.workspace_id) == workspace_id,
+                col(WorkspaceMember.user_id) == user_id,
+                col(WorkspaceMember.status) == "active",
+            )
+        )
+        return result.scalars().first()
+
+    async def get_by_workspaces_and_user(
+        self,
+        workspace_ids: Collection[uuid.UUID],
+        user_id: uuid.UUID,
+    ) -> list[WorkspaceMember]:
+        """Return a user's memberships across a batch of workspaces, whatever their status.
+
+        One ``IN`` query so applying N workspace assignments costs one lookup
+        rather than N. Any status, for the same reason
+        ``get_by_workspace_and_user`` is: the caller revives a suspended row.
+        """
+        if not workspace_ids:
+            return []
+        result = await self.db.execute(
+            select(WorkspaceMember).where(
+                col(WorkspaceMember.workspace_id).in_(workspace_ids),
+                col(WorkspaceMember.user_id) == user_id,
+            )
+        )
+        return list(result.scalars().all())
+
     async def get_workspaces_for_user(
         self,
         *,
@@ -158,7 +201,11 @@ class WorkspaceMemberRepository:
         skip: int = 0,
         limit: int = 100,
     ) -> tuple[Sequence[WorkspaceMember], int]:
-        """Return a user's memberships within one organization's workspaces, plus the total."""
+        """Return a user's *active* memberships in one organization's workspaces, plus the total.
+
+        Suspended memberships are excluded from both the page and the count,
+        so a member who was removed from a workspace stops seeing it listed.
+        """
         count_result = await self.db.execute(
             select(func.count())
             .select_from(WorkspaceMember)
@@ -166,6 +213,7 @@ class WorkspaceMemberRepository:
             .where(
                 col(WorkspaceMember.user_id) == user_id,
                 col(Workspace.organization_id) == organization_id,
+                col(WorkspaceMember.status) == "active",
             )
         )
         count = count_result.scalar_one()
@@ -176,6 +224,7 @@ class WorkspaceMemberRepository:
             .where(
                 col(WorkspaceMember.user_id) == user_id,
                 col(Workspace.organization_id) == organization_id,
+                col(WorkspaceMember.status) == "active",
             )
             .order_by(col(WorkspaceMember.created_at), col(WorkspaceMember.id))
             .offset(skip)

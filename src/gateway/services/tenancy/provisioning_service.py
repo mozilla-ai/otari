@@ -28,6 +28,7 @@ import uuid
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from gateway.log_config import logger
 from gateway.models.entities import RuntimeSetting
@@ -50,6 +51,10 @@ DEFAULT_ORGANIZATION_NAME = "Default organization"
 DEFAULT_ORGANIZATION_SLUG = "default"
 DEFAULT_WORKSPACE_NAME = "Default workspace"
 OPERATOR_FULL_NAME = "Operator"
+
+# How many foreign organizations the refusal names. Enough to recognize the
+# database, without reading an unbounded table into a log line.
+_FOREIGN_ORGANIZATIONS_NAMED = 5
 
 
 class BootstrapIdentityUnavailableError(TenancyError):
@@ -116,12 +121,28 @@ async def _refuse_to_shadow_existing_tenancy(db: AsyncSession) -> None:
     ``ensure_bootstrap_identity``, which runs from the request dependency, so
     this surfaces as a failed tenancy request rather than a refusal to boot.
     """
-    organizations = (await db.execute(select(Organization))).scalars().all()
-    unadoptable = [one for one in organizations if one.slug != DEFAULT_ORGANIZATION_SLUG]
+    # Filtered and bounded in the query rather than in Python: this runs on every
+    # request until the marker resolves, only the non-default slugs decide the
+    # answer, and the message needs a handful of them rather than all of them.
+    unadoptable = list(
+        (
+            await db.execute(
+                select(Organization)
+                .where(col(Organization.slug) != DEFAULT_ORGANIZATION_SLUG)
+                .order_by(col(Organization.created_at), col(Organization.id))
+                .limit(_FOREIGN_ORGANIZATIONS_NAMED + 1)
+            )
+        )
+        .scalars()
+        .all()
+    )
     if not unadoptable:
         return
 
-    names = ", ".join(sorted(f"{one.name!r} ({one.slug})" for one in unadoptable))
+    named = sorted(f"{one.name!r} ({one.slug})" for one in unadoptable[:_FOREIGN_ORGANIZATIONS_NAMED])
+    if len(unadoptable) > _FOREIGN_ORGANIZATIONS_NAMED:
+        named.append("and others")
+    names = ", ".join(named)
     raise ForeignTenancyError(
         f"This database already holds organizations this gateway did not provision: {names}. "
         f"Provisioning beside them would make them unreachable, because every route is scoped to "

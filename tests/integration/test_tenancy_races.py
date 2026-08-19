@@ -17,6 +17,7 @@ from sqlalchemy.orm import Session
 
 from gateway.models.tenancy import (
     ActiveOrganizationMemberCreateRequest,
+    ActiveOrganizationMemberUpdateRequest,  # noqa: E402
     Organization,
     User,
     WorkspaceCreate,
@@ -30,6 +31,8 @@ from gateway.repositories.tenancy import (
 from gateway.services.tenancy import OrganizationService, WorkspaceService
 from gateway.services.tenancy.errors import (
     ForeignTenancyError,
+    LastWorkspaceError,
+    MembershipUpdateError,
     OrganizationMemberAlreadyExistsError,
     WorkspaceAlreadyExistsError,
     WorkspaceMemberAlreadyExistsError,
@@ -205,3 +208,96 @@ async def test_provisioning_still_runs_on_an_empty_database(
 
         assert operator.full_name == "Operator"
 
+
+async def test_concurrent_demotions_cannot_strip_the_last_owner(
+    async_db: AsyncSession,
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """Two owners, each demoted by a different concurrent request.
+
+    Unlike the three races above there is no unique index to lose to, so the
+    ``IntegrityError`` guards never fire and only the row lock in
+    ``OrganizationRepository.lock`` keeps the count the guard read still true when
+    it writes. Without it both requests count two owners and both commit.
+    """
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Acme",
+        slug=f"acme-{uuid.uuid4().hex[:8]}",
+        created_by_user_id=None,
+    )
+    members = OrganizationMemberRepository(async_db)
+    users = UserRepository(async_db)
+    owners = []
+    for index in range(2):
+        owner = await users.create_local_identity(
+            full_name=f"Owner {index}",
+            active_organization_id=organization.id,
+            email=f"owner{index}@example.com",
+        )
+        membership = await members.create_membership(
+            organization_id=organization.id,
+            user_id=owner.id,
+            role="owner",
+        )
+        owners.append((owner.id, membership.id))
+    await async_db.commit()
+
+    def demote(actor_id: uuid.UUID, target_membership_id: uuid.UUID) -> Callable[[AsyncSession], object]:
+        async def attempt(session: AsyncSession) -> object:
+            actor = await UserRepository(session).get(actor_id)
+            assert actor is not None
+            return await OrganizationService(session).update_active_organization_member_for_user(
+                user=actor,
+                organization_member_id=target_membership_id,
+                request=ActiveOrganizationMemberUpdateRequest(role="member"),
+            )
+
+        return attempt
+
+    attempts = [
+        demote(owners[0][0], owners[1][1]),
+        demote(owners[1][0], owners[0][1]),
+    ]
+
+    async def run_one(attempt: Callable[[AsyncSession], object]) -> object:
+        async with sessions() as session:
+            try:
+                return await attempt(session)  # type: ignore[misc]
+            except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
+                return exc
+
+    outcomes = list(await asyncio.gather(*(run_one(attempt) for attempt in attempts)))
+
+    refused = [outcome for outcome in outcomes if isinstance(outcome, MembershipUpdateError)]
+    assert len(refused) == 1
+    assert await OrganizationMemberRepository(async_db).count_active_owners(organization.id) == 1
+
+
+async def test_concurrent_deletes_cannot_remove_the_last_workspace(
+    async_db: AsyncSession,
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """Two workspaces, deleted concurrently. One has to survive."""
+    organization, owner = await _seed_owner(async_db)
+    service = WorkspaceService(async_db)
+    workspace_ids = [
+        (await service.create_workspace(user=owner, workspace_create=WorkspaceCreate(name=name))).id
+        for name in ("One", "Two")
+    ]
+
+    async def run_one(workspace_id: uuid.UUID) -> object:
+        async with sessions() as session:
+            user = await UserRepository(session).get(owner.id)
+            assert user is not None
+            try:
+                await WorkspaceService(session).delete_workspace(user=user, workspace_id=workspace_id)
+            except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
+                return exc
+            return None
+
+    outcomes = list(await asyncio.gather(*(run_one(workspace_id) for workspace_id in workspace_ids)))
+
+    refused = [outcome for outcome in outcomes if isinstance(outcome, LastWorkspaceError)]
+    assert len(refused) == 1
+    _, remaining = await WorkspaceRepository(async_db).get_by_organization(organization.id, limit=1)
+    assert remaining == 1

@@ -74,6 +74,25 @@ class WorkspaceService:
         not exist.
         """
         organization = await self._active_organization(user)
+        return await self._workspace_in_organization(
+            user=user,
+            workspace_id=workspace_id,
+            organization=organization,
+        )
+
+    async def _workspace_in_organization(
+        self,
+        *,
+        user: User,
+        workspace_id: uuid.UUID,
+        organization: Organization,
+    ) -> Workspace:
+        """The body of the above, for a caller that already resolved the organization.
+
+        ``delete_workspace`` needs the organization for its own checks, and
+        resolving it twice cost an extra round trip plus a second membership read
+        on a path that already does several.
+        """
         workspace = await self.workspaces.get(workspace_id)
         if workspace is None or workspace.organization_id != organization.id:
             raise WorkspaceNotFoundError(workspace_id)
@@ -88,7 +107,11 @@ class WorkspaceService:
         if organization_membership is not None and organization_membership.role in MANAGEMENT_ROLES:
             return workspace
 
-        if await self.members.get_by_workspace_and_user(workspace.id, user.id) is None:
+        # Active-only: a suspended membership grants nothing, and the management
+        # check below already reads it that way, so a suspended member could
+        # otherwise read a workspace and its roster while being refused every
+        # action in it.
+        if await self.members.get_active_by_workspace_and_user(workspace.id, user.id) is None:
             raise WorkspaceNotFoundError(workspace_id)
         return workspace
 
@@ -118,7 +141,17 @@ class WorkspaceService:
         return trimmed
 
     async def _require_workspace_management_access(self, *, user: User, workspace: Workspace) -> None:
-        """Allow an organization owner/admin, or an owner/admin of this workspace."""
+        """Allow a superuser, an organization owner/admin, or an owner/admin of this workspace.
+
+        The superuser arm is what makes this agree with the two checks either
+        side of it: ``_workspace_in_active_organization`` grants a superuser read
+        on every workspace and ``_enforce_management_role`` grants them
+        organization management, so without it a superuser could delete a
+        workspace but not rename it.
+        """
+        if user.is_superuser:
+            return
+
         organization_membership = await self.organizations.members.get_active_by_organization_and_user(
             workspace.organization_id,
             user.id,
@@ -244,8 +277,17 @@ class WorkspaceService:
             user=user,
             organization=organization,
         )
-        workspace = await self._workspace_in_active_organization(user=user, workspace_id=workspace_id)
+        workspace = await self._workspace_in_organization(
+            user=user,
+            workspace_id=workspace_id,
+            organization=organization,
+        )
 
+        # Serialized on the parent row before the count, because the count and
+        # the delete are otherwise read-then-write with no unique index behind
+        # them: two concurrent deletes both read two remaining and both commit,
+        # leaving the organization with none. See ``OrganizationRepository.lock``.
+        await self.organizations.organizations.lock(organization.id)
         _, remaining = await self.workspaces.get_by_organization(organization.id, limit=1)
         if remaining <= 1:
             raise LastWorkspaceError
