@@ -117,15 +117,13 @@ def _extract_bearer_token(request: Request, config: GatewayConfig) -> str:
 
 
 async def _verify_and_update_api_key(db: AsyncSession, token: str) -> APIKey:
-    """Verify API key token and update last_used_at."""
-    try:
-        key_hash = hash_key(token)
-    except ValueError as e:
-        record_auth_failure("invalid_format")
-        raise HTTPException(
-            status_code=status.HTTP_401_UNAUTHORIZED,
-            detail=f"Invalid API key format: {e}",
-        ) from e
+    """Verify API key token and update last_used_at.
+
+    The token's shape is not checked: any presented token is hashed and looked
+    up, so a key minted elsewhere (a migrated platform key) authenticates on its
+    hash and an unrecognized one gets the ordinary "Invalid API key" 401.
+    """
+    key_hash = hash_key(token)
 
     try:
         result = await db.execute(select(APIKey).where(APIKey.key_hash == key_hash))

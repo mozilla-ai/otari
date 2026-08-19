@@ -22,9 +22,9 @@ from fastapi.testclient import TestClient
 
 from gateway.core.config import API_KEY_HEADER
 
-# A well-formed but unknown key: it passes ``validate_api_key_format`` so it
-# reaches the hash lookup and misses, the closest inference-path analog to an
-# invalid master key (both are recognized-shape-but-wrong credentials).
+# A well-formed but unknown key: its hash reaches the lookup and misses, the
+# closest inference-path analog to an invalid master key (both are
+# recognized-shape-but-wrong credentials).
 INVALID_API_KEY = "gw-" + "a" * 60
 
 # The inference path guards on ``verify_api_key``; an unknown key yields 401.

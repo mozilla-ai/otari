@@ -48,8 +48,8 @@ def is_generated_master_key(token: str) -> bool:
 def hash_master_key(token: str) -> str:
     """SHA-256 hex of a master key.
 
-    Deliberately not ``auth.hash_key``, which validates the ``gw-`` API-key
-    format; a master key has its own shape.
+    Deliberately not ``auth.hash_key``: a master key is a different credential
+    with its own shape and its own storage, so the two hashes stay independent.
     """
     return hashlib.sha256(token.encode()).hexdigest()
 

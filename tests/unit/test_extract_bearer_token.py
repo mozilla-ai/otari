@@ -11,6 +11,7 @@ from starlette.requests import Request
 
 from gateway.api.deps import _extract_bearer_token
 from gateway.core.config import API_KEY_HEADER, X_API_KEY_HEADER, GatewayConfig
+from gateway.metrics import REGISTRY
 
 
 def _make_request(headers: dict[str, str]) -> Request:
@@ -77,12 +78,20 @@ def test_canonical_header_accepts_raw_token(config: GatewayConfig) -> None:
 
 
 def test_malformed_authorization_header_raises_401(config: GatewayConfig) -> None:
+    """A non-Bearer Authorization scheme is the ``invalid_format`` auth-failure trigger.
+
+    It is the only one since the ``gw-`` shape check came off the key-verify path
+    (issue #646), so the metric label is pinned here rather than left to lapse.
+    """
     request = _make_request({"Authorization": "Basic abc123"})
+    before = REGISTRY.get_sample_value("gateway_auth_failures_total", {"reason": "invalid_format"}) or 0.0
 
     with pytest.raises(HTTPException) as exc_info:
         _extract_bearer_token(request, config)
 
     assert exc_info.value.status_code == 401
+    after = REGISTRY.get_sample_value("gateway_auth_failures_total", {"reason": "invalid_format"}) or 0.0
+    assert after - before == 1.0
 
 
 def test_missing_credentials_raises_401(config: GatewayConfig) -> None:

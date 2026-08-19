@@ -70,15 +70,16 @@ def validate_api_key_format(api_key: str) -> None:
 def hash_key(api_key: str) -> str:
     """Hash an API key using SHA-256.
 
+    Deliberately does not validate the key's format. Format is a mint-time
+    concern (``generate_api_key`` validates what it generates); on the verify
+    path a shape check only decides which error a wrong key gets, and it would
+    reject a key minted elsewhere whose hash is legitimately on a row.
+
     Args:
         api_key: The API key to hash
 
     Returns:
         Hexadecimal string of the SHA-256 hash
 
-    Raises:
-        ValueError: If the API key format is invalid
-
     """
-    validate_api_key_format(api_key)
     return hashlib.sha256(api_key.encode()).hexdigest()
