@@ -111,27 +111,34 @@ Granting the `owner` role is an owner's to give. An admin manages members, works
 
 ### Adopting an existing tenancy
 
-Provisioning adopts an organization whose slug is `default`, which is the one it would have created itself. It cannot adopt any other, because every route is scoped to the organization the bootstrap marker names, and there is no route to list, switch, or fetch an organization by id. So an organization this deployment did not provision is unreachable through the API until the marker points at an identity inside it.
+Provisioning adopts an organization whose slug is `default`, which is the one it would have created itself. It cannot adopt any other, because every route is scoped to the organization the operator identity is currently pointed at, and there is no route to list, switch, or fetch an organization by id. So an organization this deployment did not provision is unreachable through the API until the operator identity points at it.
 
 That is the state a database restored or imported from elsewhere arrives in: those slugs are `{name}-{suffix}` and never the literal `default`. Otari refuses rather than shadowing it, and the tenancy endpoints answer `500` with `Internal server error` while the specific organizations are named in the gateway's log.
 
-The marker is a `runtime_settings` row keyed `tenancy_bootstrap_user_id`, holding the id of the identity every request resolves to. It is deliberately not settable over the API, since repointing it changes who the operator *is*. Point it at an owner inside the organization you want served:
+Two rows decide this, and both have to move. The marker is a `runtime_settings` row keyed `tenancy_bootstrap_user_id`, holding the id of the identity every request resolves to; it is deliberately not settable over the API, since repointing it changes who the operator *is*. The organization served is then that identity's own `active_organization_id`, **not** anything the marker says. An imported identity usually belongs to several organizations, and that pointer holds whichever one they last switched to on the platform, so setting the marker alone adopts whatever organization that happens to be:
 
 ```sql
--- The owners of the organization to adopt.
-SELECT u.id, u.email, u.full_name, om.role
+-- 1. Find an active owner of the organization to adopt.
+SELECT u.id, u.email, u.full_name, u.active_organization_id
 FROM "user" u
 JOIN organization_member om ON om.user_id = u.id
 JOIN organization o ON o.id = om.organization_id
 WHERE o.slug = 'acme-1a2b3c4d' AND om.role = 'owner' AND om.status = 'active';
 
--- Repoint the marker at one of them.
+-- 2. Point that identity at the organization to adopt. Without this the
+--    gateway serves whichever organization the identity was last active in,
+--    and reports the operator's role there rather than their ownership here.
+UPDATE "user"
+SET active_organization_id = (SELECT id FROM organization WHERE slug = 'acme-1a2b3c4d')
+WHERE id = '<the id from step 1>';
+
+-- 3. Repoint the marker at that identity.
 UPDATE runtime_settings
-SET value = '<the id from above>'
+SET value = '<the id from step 1>'
 WHERE key = 'tenancy_bootstrap_user_id';
 ```
 
-Restart the gateway afterwards, and confirm with `GET /v1/organizations/me`.
+Confirm with `GET /v1/organizations/me`, which should name the adopted organization and report the role `owner`. No restart is needed: both rows are read from the database on each request.
 
 One ordering is not caught. The refusal only runs while the marker is unresolved, so it covers importing into a deployment that has never served a tenancy request. Import *after* this gateway has provisioned its own default organization and nothing refuses: the marker already resolves, and the imported rows are silently unreachable. Repointing the marker is still the fix, and importing before the first tenancy request is what turns a silent case into a loud one.
 

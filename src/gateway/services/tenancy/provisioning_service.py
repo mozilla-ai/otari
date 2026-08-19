@@ -105,8 +105,12 @@ async def _refuse_to_shadow_existing_tenancy(db: AsyncSession) -> None:
     served a tenancy request against. Importing *after* it has provisioned its
     own tenancy is not caught: the marker already resolves, so this never runs
     again, and the imported organizations are silently unreachable exactly as
-    described above. Repointing the marker is the fix in both cases; see
-    "Adopting an existing tenancy" in ``docs/access-control.md``.
+    described above. The fix in both cases is two rows, not one: the marker names
+    the identity, and that identity's ``active_organization_id`` names the
+    organization served. An imported identity belongs to several organizations
+    and its pointer holds whichever it was last active in, so moving the marker
+    alone adopts whatever that happens to be. See "Adopting an existing tenancy"
+    in ``docs/access-control.md``.
 
     Not a startup error either, despite reading like one: the only caller is
     ``ensure_bootstrap_identity``, which runs from the request dependency, so
@@ -120,9 +124,11 @@ async def _refuse_to_shadow_existing_tenancy(db: AsyncSession) -> None:
     names = ", ".join(sorted(f"{one.name!r} ({one.slug})" for one in unadoptable))
     raise ForeignTenancyError(
         f"This database already holds organizations this gateway did not provision: {names}. "
-        f"Provisioning beside them would make them unreachable, because every route is scoped "
-        f"to the organization the {BOOTSTRAP_IDENTITY_KEY} marker names. Point that marker at an "
-        f"identity in the organization you mean to serve, or start from an empty database."
+        f"Provisioning beside them would make them unreachable, because every route is scoped to "
+        f"the organization the operator identity is pointed at. Point the {BOOTSTRAP_IDENTITY_KEY} "
+        f"marker at an identity in the organization you mean to serve, and point that identity's "
+        f"active_organization_id at it (both are needed; see docs/access-control.md), or start "
+        f"from an empty database."
     )
 
 

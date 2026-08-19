@@ -92,6 +92,54 @@ async def _workspace(
 
 
 # =============================================================================
+# Which organization a caller is served
+# =============================================================================
+
+
+async def test_the_served_organization_follows_the_identity_not_its_memberships(
+    async_db: AsyncSession,
+) -> None:
+    """Two rows decide the adopted tenant, and the docs have to say both.
+
+    `docs/access-control.md` tells an operator to adopt an imported tenancy by
+    pointing the bootstrap marker at an owner of the organization they want. The
+    marker only names the *identity*; the organization served is that identity's
+    ``active_organization_id``. An imported platform identity belongs to several
+    organizations and that pointer holds whichever it was last active in, so a
+    recipe that moved the marker alone adopted the wrong tenant and reported the
+    operator's role there rather than their ownership in the one they meant.
+    """
+    adopted = await _organization(async_db, slug="acme-1a2b3c4d")
+    elsewhere = await _organization(async_db, slug="other-9z8y7x6w")
+
+    # Owner of the one to adopt, but currently pointed at the other, which is the
+    # shape an import produces.
+    operator = await UserRepository(async_db).create_local_identity(
+        full_name="Ada",
+        active_organization_id=elsewhere.id,
+    )
+    await OrganizationMemberRepository(async_db).create_membership(
+        organization_id=adopted.id, user_id=operator.id, role="owner"
+    )
+    await OrganizationMemberRepository(async_db).create_membership(
+        organization_id=elsewhere.id, user_id=operator.id, role="member"
+    )
+    service = OrganizationService(async_db)
+
+    served = await service.get_active_organization_for_user(operator)
+    assert served.slug == elsewhere.slug, "ownership elsewhere does not move the pointer"
+
+    # Step 2 of the documented recipe, and the one that was missing.
+    await UserRepository(async_db).set_active_organization(operator, adopted.id)
+
+    served = await service.get_active_organization_for_user(operator)
+    assert served.slug == adopted.slug
+    membership = await service.members.get_active_by_organization_and_user(adopted.id, operator.id)
+    assert membership is not None
+    assert membership.role == "owner", "and the operator manages it, rather than only reading it"
+
+
+# =============================================================================
 # Organization-level rules
 # =============================================================================
 
