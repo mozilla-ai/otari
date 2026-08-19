@@ -2,7 +2,9 @@ import { describe, expect, it } from "vitest"
 
 import { BASE_CAPABILITIES } from "@/shared/hooks/useEntitlements"
 
+import { OVERLAY_NAV_LABEL_OVERRIDES } from "./overlayLabelOverrides"
 import {
+  applyNavLabelOverrides,
   composeNavSections,
   NAV_ITEMS,
   NAV_SECTIONS,
@@ -11,7 +13,7 @@ import {
   ORG_NAV_SECTIONS,
   visibleNavSections,
 } from "./registry"
-import type { NavItem, NavSection } from "./types"
+import type { NavItem, NavLabelOverride, NavSection } from "./types"
 
 describe("nav registry", () => {
   it("exposes the base sections in display order", () => {
@@ -195,6 +197,30 @@ describe("nav registry", () => {
     ).toEqual(["base", "overlay-billing"])
   })
 
+  it("renames nothing in this build", () => {
+    // The label seam's twin of the assertion below: the overlay tree lives in
+    // another repo, so every base heading and disclosure label renders as
+    // declared.
+    expect(OVERLAY_NAV_LABEL_OVERRIDES).toEqual([])
+    const gateway = NAV_SECTIONS.find((section) => section.id === "gateway")
+    expect(gateway?.label).toBe("Gateway")
+    expect(gateway?.items.map((item) => item.label)).toContain("Routing")
+    const general = ORG_NAV_SECTIONS.find(
+      (section) => section.id === "org-general",
+    )
+    expect(general?.label).toBe("General")
+    expect(general?.items.map((item) => item.label)).toContain("Organization")
+  })
+
+  it("keeps section ids unique across the two rails", () => {
+    // What lets one override list address both rails: an id that appeared on
+    // each would rename two sections from one entry.
+    const ids = [...NAV_SECTIONS, ...ORG_NAV_SECTIONS].map(
+      (section) => section.id,
+    )
+    expect(ids).toEqual([...new Set(ids)])
+  })
+
   it("appends nothing in this build", () => {
     // The overlay tree lives in another repo; the seam here stays empty.
     expect(composeNavSections(NAV_SECTIONS, [])).toEqual(NAV_SECTIONS)
@@ -270,5 +296,99 @@ describe("navItemForPath", () => {
     // never gated.
     expect(navItemForPath("/docs")).toBeUndefined()
     expect(navItemForPath("/nope")).toBeUndefined()
+  })
+})
+
+describe("applyNavLabelOverrides", () => {
+  const base: NavSection[] = [
+    {
+      id: "gateway",
+      label: "Gateway",
+      items: [
+        { to: "/models", label: "Models", surface: "models", icon: null },
+        {
+          to: "/routing",
+          label: "Routing",
+          surface: "routing",
+          icon: null,
+          children: [{ to: "/routing", label: "Policies" }],
+        },
+      ],
+    },
+  ]
+
+  const only = (overrides: readonly NavLabelOverride[]) =>
+    applyNavLabelOverrides(base, overrides)[0]
+
+  it("is a no-op with no overrides", () => {
+    // Identity, not a copy: the base sections are what every derived table in
+    // the registry is built from, so the empty seam has to leave them alone.
+    expect(applyNavLabelOverrides(base, [])).toBe(base)
+  })
+
+  it("renames a section heading and a disclosure label together", () => {
+    const section = only([
+      {
+        sectionId: "gateway",
+        label: "Inference",
+        disclosureLabels: { "/routing": "Policies & guardrails" },
+      },
+    ])
+    expect(section.label).toBe("Inference")
+    expect(section.items.map((item) => item.label)).toEqual([
+      "Models",
+      "Policies & guardrails",
+    ])
+  })
+
+  it("applies only the field that is set", () => {
+    expect(only([{ sectionId: "gateway", label: "Inference" }]).label).toBe(
+      "Inference",
+    )
+    const disclosureOnly = only([
+      { sectionId: "gateway", disclosureLabels: { "/routing": "Policies" } },
+    ])
+    expect(disclosureOnly.label).toBe("Gateway")
+    expect(disclosureOnly.items[1].label).toBe("Policies")
+  })
+
+  it("leaves ids, icons, gating, and nested destinations untouched", () => {
+    const section = only([
+      {
+        sectionId: "gateway",
+        label: "Inference",
+        disclosureLabels: { "/routing": "Policies" },
+      },
+    ])
+    expect(section.id).toBe("gateway")
+    const routing = section.items[1]
+    expect(routing.to).toBe("/routing")
+    expect(routing.surface).toBe("routing")
+    expect(routing.children).toBe(base[0].items[1].children)
+    // An untargeted item is the same object, not a rebuilt one.
+    expect(section.items[0]).toBe(base[0].items[0])
+  })
+
+  it("ignores an override whose sectionId matches no section", () => {
+    expect(
+      applyNavLabelOverrides(base, [
+        { sectionId: "nope", label: "X", disclosureLabels: { "/": "Y" } },
+      ]),
+    ).toEqual(base)
+  })
+
+  it("ignores a path that is not a disclosure in this section", () => {
+    // /models is a plain link and /keys belongs to another section: relabeling
+    // either would be renaming a destination rather than a group.
+    const section = only([
+      {
+        sectionId: "gateway",
+        disclosureLabels: { "/models": "Catalog", "/keys": "Credentials" },
+      },
+    ])
+    expect(section.items.map((item) => item.label)).toEqual([
+      "Models",
+      "Routing",
+    ])
   })
 })

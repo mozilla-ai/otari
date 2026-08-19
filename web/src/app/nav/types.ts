@@ -95,3 +95,33 @@ export interface NavSection {
   label?: string
   items: readonly NavItem[]
 }
+
+/**
+ * A rename of one base section's labels: its heading, and the labels of the
+ * disclosures inside it.
+ *
+ * How an overlay relabels an entry the base declares, rather than contributing
+ * one of its own. Labels only: a different destination, icon, or gate is a
+ * section of the overlay's own through `overlaySections.ts`.
+ *
+ * Same name as `otari-ai/frontend/src/app/nav/types.ts`'s `NavLabelOverride`,
+ * with its two fields pointing at this registry's label sites. Both differ in
+ * name for the reason the shapes differ: a section's heading is `label` here and
+ * `header` there, and nesting is `children` here where there it is a single
+ * `NavDisclosure`, so a section here can hold several disclosures (Gateway holds
+ * Routing and Tools) and a rename has to say which.
+ */
+export interface NavLabelOverride {
+  /** Id of the base `NavSection` this override targets. */
+  sectionId: string
+  /** Replaces the section's heading when set. */
+  label?: string
+  /**
+   * Replaces the label of the nested group at this path, when set.
+   *
+   * Keyed by the group's own `to`, the same field the registry declares it
+   * under, so an override that names a path no longer nested under this section
+   * is dropped rather than applied to the wrong row.
+   */
+  disclosureLabels?: Readonly<Partial<Record<NavPath, string>>>
+}
