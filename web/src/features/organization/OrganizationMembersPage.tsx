@@ -20,6 +20,7 @@ import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import { Field } from "@/shared/components/Field"
 import {
+  Checkbox,
   ErrorBanner,
   FilterSelect,
   InfoBanner,
@@ -169,19 +170,15 @@ function AddMemberForm({ onClose }: { onClose: () => void }) {
               </span>
             ) : null}
             {workspaces.data.map((workspace) => (
-              <label
+              <Checkbox
                 key={workspace.id}
-                className="flex w-fit items-center gap-2 text-sm text-foreground"
+                isSelected={workspaceIds.includes(workspace.id)}
+                onChange={(isSelected) =>
+                  toggleWorkspace(workspace.id, isSelected)
+                }
               >
-                <input
-                  type="checkbox"
-                  checked={workspaceIds.includes(workspace.id)}
-                  onChange={(event) =>
-                    toggleWorkspace(workspace.id, event.target.checked)
-                  }
-                />
                 {workspace.name}
-              </label>
+              </Checkbox>
             ))}
           </fieldset>
         ) : null}
@@ -333,9 +330,10 @@ export function OrganizationMembersPage() {
         }
       />
 
-      <ErrorBanner
-        error={context.error ?? members.error ?? update.error ?? remove.error}
-      />
+      {/* `remove.error` is deliberately absent: the confirm dialog renders that
+          mutation's error itself, and listing it here too paints the same
+          message twice, once behind the open dialog. */}
+      <ErrorBanner error={context.error ?? members.error ?? update.error} />
 
       {/* Withheld until the context answers. Rendering the refusal first shows
           an owner "you cannot change memberships" for one paint and then takes

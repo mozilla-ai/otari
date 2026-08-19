@@ -13,10 +13,120 @@ import type { LinkProps } from "@tanstack/react-router"
 import { Link } from "@tanstack/react-router"
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react"
 import { useEffect, useId, useRef, useState } from "react"
+import { Checkbox as AriaCheckbox } from "react-aria-components"
 
 import { ApiError } from "@/shared/api/client"
 import { copyToClipboard } from "@/shared/helpers/clipboard"
 import { formatPct, formatRelative } from "@/shared/helpers/format"
+
+// The box visual, split out so it can hold optimistic state: react-aria only
+// reports the new `isSelected` after the whole collection re-renders (O(rows)
+// per click, tens to hundreds of ms on big pages or slow machines), which made
+// the checkmark feel laggy. On pointerdown the visual flips immediately; the
+// authoritative state catches up and clears the override, and a timeout clears
+// it as a backstop if the press never lands (e.g. drag-away).
+export function CheckboxVisual({
+  isSelected,
+  isIndeterminate,
+  isDisabled,
+}: {
+  isSelected: boolean
+  isIndeterminate: boolean
+  isDisabled: boolean
+}) {
+  const [flash, setFlash] = useState<boolean | null>(null)
+
+  useEffect(() => {
+    if (flash !== null && isSelected === flash) setFlash(null)
+  }, [isSelected, flash])
+  useEffect(() => {
+    if (flash === null) return
+    const timer = setTimeout(() => setFlash(null), 600)
+    return () => clearTimeout(timer)
+  }, [flash])
+
+  const showChecked = flash ?? (isSelected || isIndeterminate)
+  return (
+    <span
+      onPointerDown={() => {
+        if (!isDisabled) setFlash(!isSelected)
+      }}
+      className={`flex h-4 w-4 items-center justify-center rounded border transition-colors ${
+        showChecked
+          ? "border-accent bg-accent text-accent-foreground"
+          : "border-border bg-surface"
+      } group-data-[focus-visible]:outline-2 group-data-[focus-visible]:outline-accent`}
+    >
+      {isIndeterminate && flash === null ? (
+        <svg
+          viewBox="0 0 24 24"
+          className="h-3 w-3"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={3}
+          aria-hidden="true"
+        >
+          <line x1="6" x2="18" y1="12" y2="12" strokeLinecap="round" />
+        </svg>
+      ) : showChecked ? (
+        <svg
+          viewBox="0 0 24 24"
+          className="h-3 w-3"
+          fill="none"
+          stroke="currentColor"
+          strokeWidth={3}
+          aria-hidden="true"
+        >
+          <polyline
+            points="5 12 10 17 19 7"
+            strokeLinecap="round"
+            strokeLinejoin="round"
+          />
+        </svg>
+      ) : null}
+    </span>
+  )
+}
+
+/**
+ * A checkbox on the design tokens.
+ *
+ * react-aria rather than HeroUI's own `Checkbox`, for the reason
+ * `DataTable`'s selection box gives: HeroUI splits the control across
+ * subcomponents and the two would not look alike. One visual serves both, so a
+ * standalone checkbox and a table's selection box cannot drift apart.
+ */
+export function Checkbox({
+  isSelected,
+  onChange,
+  isDisabled = false,
+  children,
+}: {
+  isSelected: boolean
+  onChange: (isSelected: boolean) => void
+  isDisabled?: boolean
+  children: ReactNode
+}) {
+  return (
+    <AriaCheckbox
+      isSelected={isSelected}
+      onChange={onChange}
+      isDisabled={isDisabled}
+      className="group flex w-fit items-center gap-2 text-sm text-foreground"
+    >
+      {({ isSelected: selected, isDisabled: disabled }) => (
+        <>
+          <CheckboxVisual
+            isSelected={selected}
+            isIndeterminate={false}
+            isDisabled={disabled}
+          />
+          {children}
+        </>
+      )}
+    </AriaCheckbox>
+  )
+}
 
 // A tile's attention status, on the foundation's three status roles. Color is
 // never the only signal: a status tile also carries a word/icon via `statusLabel`.

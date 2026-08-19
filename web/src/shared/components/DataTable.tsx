@@ -16,74 +16,7 @@ import type { Key, Selection, SortDescriptor } from "react-aria-components"
 import { Checkbox as AriaCheckbox } from "react-aria-components"
 import { createPortal } from "react-dom"
 
-// The box visual, split out so it can hold optimistic state: react-aria only
-// reports the new `isSelected` after the whole collection re-renders (O(rows)
-// per click, tens to hundreds of ms on big pages or slow machines), which made
-// the checkmark feel laggy. On pointerdown the visual flips immediately; the
-// authoritative state catches up and clears the override, and a timeout clears
-// it as a backstop if the press never lands (e.g. drag-away).
-function SelectionBoxVisual({
-  isSelected,
-  isIndeterminate,
-  isDisabled,
-}: {
-  isSelected: boolean
-  isIndeterminate: boolean
-  isDisabled: boolean
-}) {
-  const [flash, setFlash] = useState<boolean | null>(null)
-
-  useEffect(() => {
-    if (flash !== null && isSelected === flash) setFlash(null)
-  }, [isSelected, flash])
-  useEffect(() => {
-    if (flash === null) return
-    const timer = setTimeout(() => setFlash(null), 600)
-    return () => clearTimeout(timer)
-  }, [flash])
-
-  const showChecked = flash ?? (isSelected || isIndeterminate)
-  return (
-    <span
-      onPointerDown={() => {
-        if (!isDisabled) setFlash(!isSelected)
-      }}
-      className={`flex h-4 w-4 items-center justify-center rounded border transition-colors ${
-        showChecked
-          ? "border-accent bg-accent text-accent-foreground"
-          : "border-border bg-surface"
-      } group-data-[focus-visible]:outline-2 group-data-[focus-visible]:outline-accent`}
-    >
-      {isIndeterminate && flash === null ? (
-        <svg
-          viewBox="0 0 24 24"
-          className="h-3 w-3"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={3}
-          aria-hidden="true"
-        >
-          <line x1="6" x2="18" y1="12" y2="12" strokeLinecap="round" />
-        </svg>
-      ) : showChecked ? (
-        <svg
-          viewBox="0 0 24 24"
-          className="h-3 w-3"
-          fill="none"
-          stroke="currentColor"
-          strokeWidth={3}
-          aria-hidden="true"
-        >
-          <polyline
-            points="5 12 10 17 19 7"
-            strokeLinecap="round"
-            strokeLinejoin="round"
-          />
-        </svg>
-      ) : null}
-    </span>
-  )
-}
+import { CheckboxVisual } from "@/shared/components/ui"
 
 // react-aria's own Checkbox drives table row/all selection through
 // `slot="selection"`. HeroUI's Checkbox splits the control across subcomponents
@@ -97,7 +30,7 @@ function SelectionCheckbox({ ariaLabel }: { ariaLabel: string }) {
       className="group inline-flex items-center"
     >
       {({ isSelected, isIndeterminate, isDisabled }) => (
-        <SelectionBoxVisual
+        <CheckboxVisual
           isSelected={isSelected}
           isIndeterminate={isIndeterminate}
           isDisabled={isDisabled}
