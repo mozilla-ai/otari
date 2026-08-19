@@ -65,12 +65,23 @@ async def default_workspace_id(db: AsyncSession) -> uuid.UUID:
         )
     ).scalar_one_or_none()
     if resolved is None:
-        # Fall back to any workspace before creating one: an operator may have
-        # renamed the default, and minting a second beside it would be worse than
-        # billing to the one that exists.
-        resolved = (await db.execute(select(col(Workspace.id)).order_by(col(Workspace.created_at)))).scalars().first()
+        # Fall back to the oldest workspace before creating one: an operator may
+        # have renamed the default, and minting a second beside it would be worse
+        # than billing to the one that exists. The id breaks a ``created_at``
+        # tie, which one transaction creating two workspaces produces, so every
+        # process picks the same one rather than each picking its own.
+        resolved = (
+            await db.execute(
+                select(col(Workspace.id)).order_by(col(Workspace.created_at), col(Workspace.id)).limit(1)
+            )
+        ).scalar_one_or_none()
     if resolved is None:
-        resolved = await _create_default_workspace(db)
+        # Deliberately not memoized. The row is only flushed here, and this
+        # session's caller owns the commit, so caching an id the caller may yet
+        # roll back would hand every later write a foreign key that names
+        # nothing, for the life of the process. One extra lookup until something
+        # commits is the cheaper failure.
+        return await _create_default_workspace(db)
 
     _default_workspace_id = resolved
     return resolved
