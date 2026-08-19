@@ -5,12 +5,15 @@ import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type {
+  DeploymentBootstrap,
   OrganizationContext,
   OrganizationMember,
   Workspace,
 } from "@/client"
 import { OrganizationMembersPage } from "@/features/organization/OrganizationMembersPage"
+import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
+  bootstrap,
   organizationContext,
   organizationMember,
   workspace,
@@ -33,6 +36,7 @@ function mockApi(opts: {
   context?: OrganizationContext
   members?: OrganizationMember[]
   workspaces?: Workspace[]
+  inviteResult?: unknown
 }) {
   const context = opts.context ?? organizationContext()
   const members = opts.members ?? [organizationMember()]
@@ -50,6 +54,25 @@ function mockApi(opts: {
 
     if (url.includes("/v1/workspaces")) {
       return jsonResponse({ data: workspaces, count: workspaces.length })
+    }
+    if (url.includes("/v1/organizations/me/member-invitations")) {
+      if (method === "POST") {
+        return jsonResponse(
+          opts.inviteResult ?? {
+            invitation_id: "invitation-1",
+            organization_member_id: "invited-membership",
+            email: "new@example.com",
+            role: "member",
+            status: "invited",
+            mail_sent: false,
+            accept_link: "/#/accept-invitation?token=abc123",
+            expires_at: "2026-01-08T00:00:00+00:00",
+            created_at: "2026-01-01T00:00:00+00:00",
+          },
+          201,
+        )
+      }
+      return jsonResponse({ message: "Invitation revoked" })
     }
     if (url.includes("/v1/organizations/me/members")) {
       if (method === "GET") {
@@ -69,11 +92,18 @@ function mockApi(opts: {
   return requests
 }
 
-function renderPage(ui: ReactElement) {
+function renderPage(
+  ui: ReactElement,
+  bootstrapOverrides: Partial<DeploymentBootstrap> = {},
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
+  return render(
+    <DeploymentProvider value={bootstrap(bootstrapOverrides)}>
+      <QueryClientProvider client={client}>{ui}</QueryClientProvider>
+    </DeploymentProvider>,
+  )
 }
 
 const OWNER = organizationMember({
@@ -273,5 +303,73 @@ describe("OrganizationMembersPage", () => {
     expect(
       screen.getByText(/Only organization owners and admins/),
     ).toBeInTheDocument()
+  })
+
+  it("invites a member by email and shows the accept link when mail is not configured", async () => {
+    const requests = mockApi({ members: [OWNER] })
+    const user = userEvent.setup()
+    renderPage(<OrganizationMembersPage />, { mail_enabled: false })
+
+    await user.click(
+      await screen.findByRole("button", { name: "Invite member" }),
+    )
+    expect(screen.getByText(/No mail is configured/)).toBeInTheDocument()
+    await user.type(screen.getByLabelText("Email address"), "ada@example.com")
+    await user.click(screen.getByRole("button", { name: "Send invitation" }))
+
+    const post = requests.find(
+      (request) =>
+        request.method === "POST" && request.url.includes("member-invitations"),
+    )
+    expect(post?.body).toMatchObject({
+      email: "ada@example.com",
+      role: "member",
+    })
+
+    // mail_sent is false in the mocked response, so the link is offered to
+    // share by hand rather than the form just closing.
+    expect(await screen.findByText("Invitation sent")).toBeInTheDocument()
+    expect(
+      screen.getByText("/#/accept-invitation?token=abc123"),
+    ).toBeInTheDocument()
+  })
+
+  it("says the email will be sent when mail is configured", async () => {
+    mockApi({ members: [OWNER] })
+    const user = userEvent.setup()
+    renderPage(<OrganizationMembersPage />, { mail_enabled: true })
+
+    await user.click(
+      await screen.findByRole("button", { name: "Invite member" }),
+    )
+    expect(
+      screen.getByText(/An email with an accept link is sent here/),
+    ).toBeInTheDocument()
+  })
+
+  it("offers Revoke instead of Remove for an invited row, and revokes through the invitation endpoint", async () => {
+    const invited = organizationMember({
+      organization_member_id: "invited-membership",
+      user_id: "cccccccc-0000-0000-0000-000000000000",
+      email: "pending@example.com",
+      full_name: null,
+      role: "member",
+      status: "invited",
+      invitation_id: "invitation-1",
+    })
+    const requests = mockApi({ members: [OWNER, invited] })
+    const user = userEvent.setup()
+    renderPage(<OrganizationMembersPage />)
+
+    await screen.findByText("pending@example.com")
+    const row = rowFor("pending@example.com")
+    expect(within(row).queryByRole("button", { name: "Remove" })).toBeNull()
+    await user.click(within(row).getByRole("button", { name: "Revoke" }))
+    await user.click(screen.getByRole("button", { name: "Revoke invitation" }))
+
+    const revoke = requests.find((request) => request.method === "DELETE")
+    expect(revoke?.url).toContain(
+      "/v1/organizations/me/member-invitations/invitation-1",
+    )
   })
 })

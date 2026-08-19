@@ -333,4 +333,17 @@ export type CreateWorkspaceRequest = Schemas["WorkspaceCreate"]
 export type UpdateWorkspaceRequest = Schemas["WorkspaceUpdate"]
 export type WorkspaceMember = Schemas["WorkspaceMemberPublic"]
 
+// Invitations: the emailed half of adding a member. `InviteOrganizationMemberRequest`
+// is `CreateOrganizationMemberRequest`'s twin (same fields, different result:
+// `invited` and an accept link rather than `active` immediately), so it is
+// `Defaulted` on the same field for the same reason.
+export type InviteOrganizationMemberRequest = Defaulted<
+  Schemas["InviteOrganizationMemberRequest"],
+  "role"
+>
+export type InviteOrganizationMemberResult =
+  Schemas["InviteOrganizationMemberResultPublic"]
+export type InvitationPreview = Schemas["InvitationPreviewPublic"]
+export type AcceptInvitationResult = Schemas["AcceptInvitationResultPublic"]
+
 export type * from "./local"

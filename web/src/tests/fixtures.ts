@@ -97,6 +97,7 @@ export function bootstrap(
     session_type: "local_operator",
     surfaces: [...STANDALONE_SURFACES],
     management_url: null,
+    mail_enabled: false,
     ...overrides,
   }
 }

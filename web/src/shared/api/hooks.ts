@@ -5,6 +5,7 @@ import {
   useQueryClient,
 } from "@tanstack/react-query"
 import type {
+  AcceptInvitationResult,
   AliasResponse,
   ApiKey,
   Budget,
@@ -27,6 +28,9 @@ import type {
   GatewayHealth,
   GatewaySettings,
   InFlightResponse,
+  InvitationPreview,
+  InviteOrganizationMemberRequest,
+  InviteOrganizationMemberResult,
   KnownProvider,
   KnownProviderSummary,
   ModelListResponse,
@@ -1436,10 +1440,10 @@ export function useUpdateOrganization() {
     },
   })
 }
-// The one write path that puts a second row on the roster. The response says
-// which arm of the platform's result union it took: this edition always answers
-// "active", because it has no invitation to send and no way to accept one, and
-// the caller is shown that rather than a generic success.
+// One of two write paths that put a second row on the roster: this one lands
+// the membership `active` immediately, with nothing emailed.
+// `useInviteOrganizationMember` below is the other, which lands `invited` and
+// emails an accept link.
 export function useAddOrganizationMember() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -1501,6 +1505,68 @@ export function useRemoveOrganizationMember() {
       // the caller in or out of a workspace has to refresh it too.
       void queryClient.invalidateQueries({ queryKey: [ORGANIZATIONS] })
     },
+  })
+}
+
+// The other write path onto the roster: lands `invited` rather than `active`,
+// and the response always carries `accept_link` (whether or not `mail_sent`
+// is true), so the caller can offer "share this link yourself" when it isn't.
+export function useInviteOrganizationMember() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: InviteOrganizationMemberRequest) =>
+      apiFetch<InviteOrganizationMemberResult>(
+        "/v1/organizations/me/member-invitations",
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_MEMBERS] })
+      void queryClient.invalidateQueries({ queryKey: [ORGANIZATIONS] })
+    },
+  })
+}
+
+export function useRevokeOrganizationMemberInvitation() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (invitationId: string) =>
+      apiFetch<void>(
+        `/v1/organizations/me/member-invitations/${encodeURIComponent(invitationId)}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_MEMBERS] })
+      void queryClient.invalidateQueries({ queryKey: [ORGANIZATIONS] })
+    },
+  })
+}
+
+// The accept-invitation page's two calls. Both hit routes the server never
+// gates on a session or the master key: the token in the emailed link is the
+// caller's whole credential, and the gateway answers 404/400 for a bad one,
+// never 401, so apiFetch's session-bounce on 401/403 never triggers here.
+export function useValidateInvitation(token: string) {
+  return useQuery({
+    queryKey: ["invitation-preview", token],
+    queryFn: () =>
+      apiFetch<InvitationPreview>(
+        `/v1/invitations/validate/${encodeURIComponent(token)}`,
+      ),
+    // An empty token (a malformed link) is never worth a round trip: the
+    // server would only answer "not found" for what the client can already
+    // see is missing.
+    enabled: token.length > 0,
+    retry: false,
+  })
+}
+
+export function useAcceptInvitation() {
+  return useMutation({
+    mutationFn: (token: string) =>
+      apiFetch<AcceptInvitationResult>("/v1/invitations/accept", {
+        method: "POST",
+        body: JSON.stringify({ token }),
+      }),
   })
 }
 

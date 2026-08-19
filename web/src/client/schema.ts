@@ -677,6 +677,46 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/invitations/accept": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Accept Invitation
+         * @description Accept a pending invitation, resolving it to an active membership.
+         */
+        post: operations["accept_invitation_v1_invitations_accept_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/invitations/validate/{token}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Validate Invitation
+         * @description Look up a pending invitation by its token, for the accept page to render before committing.
+         */
+        get: operations["validate_invitation_v1_invitations_validate__token__get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/keys": {
         parameters: {
             query?: never;
@@ -1028,6 +1068,56 @@ export interface paths {
          * @description Rename the caller's active organization.
          */
         patch: operations["update_active_organization_v1_organizations_me_patch"];
+        trace?: never;
+    };
+    "/v1/organizations/me/member-invitations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Invite Active Organization Member
+         * @description Invite an address to the caller's active organization by email.
+         *
+         *     Organization owners and admins only. Unlike ``POST /me/members``, the
+         *     membership lands ``invited`` rather than ``active``: it becomes active
+         *     once the recipient accepts (``POST /v1/invitations/accept``). The response
+         *     always carries the accept link, whether or not it was actually emailed
+         *     (``mail_sent``), so an operator can share it themselves when mail is not
+         *     configured or the send fails.
+         */
+        post: operations["invite_active_organization_member_v1_organizations_me_member_invitations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/organizations/me/member-invitations/{invitation_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Revoke Active Organization Member Invitation
+         * @description Revoke an unaccepted invitation. Organization owners and admins only.
+         *
+         *     Suspends the paired membership rather than deleting it, the same as
+         *     removing an active member: re-inviting the same address later revives it.
+         */
+        delete: operations["revoke_active_organization_member_invitation_v1_organizations_me_member_invitations__invitation_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
     "/v1/organizations/me/members": {
@@ -2532,6 +2622,26 @@ export interface paths {
 export type webhooks = Record<string, never>;
 export interface components {
     schemas: {
+        /** AcceptInvitationRequest */
+        AcceptInvitationRequest: {
+            /** Token */
+            token: string;
+        };
+        /**
+         * AcceptInvitationResultPublic
+         * @description What accepting produces: enough for the accept page to say where the visitor landed.
+         *
+         *     No session and no token: accepting resolves the membership to ``active``
+         *     and stops there. Otari has no per-user sign-in yet, so there is nothing to
+         *     sign this visitor into; they see the sign-in screen next, the same as
+         *     anyone else added to an organization before that flow exists.
+         */
+        AcceptInvitationResultPublic: {
+            /** Organization Name */
+            organization_name: string;
+            /** Role */
+            role: string;
+        };
         /**
          * ActiveOrganizationMemberCreateRequest
          * @description Add someone to the caller's organization, optionally into workspaces at once.
@@ -3681,6 +3791,11 @@ export interface components {
              */
             deployment_type: "standalone" | "hosted" | "hybrid";
             /**
+             * Mail Enabled
+             * @description Whether this deployment can actually deliver mail (an invitation's accept link), not merely whether an SMTP host is set: it also needs to know its own public URL to put in one. Lets the dashboard hide or disable a mail-dependent affordance instead of offering one that would fail at send time. False for a hybrid gateway, which holds no tenancy state to invite anyone into.
+             */
+            mail_enabled: boolean;
+            /**
              * Management Url
              * @description Where the authoritative control plane lives when it is not this deployment. Set for a hybrid gateway so its landing page can link to otari.ai; null otherwise.
              */
@@ -4115,6 +4230,95 @@ export interface components {
             requests: components["schemas"]["InFlightEntry"][];
             /** Total */
             total: number;
+        };
+        /**
+         * InvitationPreviewPublic
+         * @description What an unauthenticated visitor sees before committing to accept.
+         *
+         *     Deliberately narrow: the address it was sent to, the organization's name,
+         *     and the role on offer. The token is the caller's only credential here, not
+         *     a session, so this carries nothing that identifies who sent it or any
+         *     other member.
+         */
+        InvitationPreviewPublic: {
+            /** Email */
+            email: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /** Organization Name */
+            organization_name: string;
+            /** Role */
+            role: string;
+        };
+        /**
+         * InviteOrganizationMemberRequest
+         * @description Invite an address to the caller's organization, optionally into workspaces at once.
+         *
+         *     Field-for-field ``ActiveOrganizationMemberCreateRequest``'s twin: the two
+         *     requests ask for the same thing and differ only in what creating one
+         *     produces (this lands ``invited`` and emails a link; that lands ``active``
+         *     immediately).
+         */
+        InviteOrganizationMemberRequest: {
+            /**
+             * Email
+             * Format: email
+             */
+            email: string;
+            /**
+             * Role
+             * @default member
+             * @enum {string}
+             */
+            role: "owner" | "admin" | "member" | "viewer";
+            /** Workspace Assignments */
+            workspace_assignments?: components["schemas"]["WorkspaceAssignmentRequest"][] | null;
+        };
+        /**
+         * InviteOrganizationMemberResultPublic
+         * @description What issuing an invitation produces, and whether the email actually went out.
+         */
+        InviteOrganizationMemberResultPublic: {
+            /** Accept Link */
+            accept_link: string;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Email */
+            email: string;
+            /**
+             * Expires At
+             * Format: date-time
+             */
+            expires_at: string;
+            /**
+             * Invitation Id
+             * Format: uuid
+             */
+            invitation_id: string;
+            /**
+             * Mail Sent
+             * @description Whether the invitation email was actually dispatched. False when mail is not configured, or the send itself failed; accept_link is set either way, so the operator can share it themselves rather than the invitation being a dead end.
+             */
+            mail_sent: boolean;
+            /**
+             * Organization Member Id
+             * Format: uuid
+             */
+            organization_member_id: string;
+            /** Role */
+            role: string;
+            /**
+             * Status
+             * @default invited
+             * @constant
+             */
+            status: "invited";
         };
         /**
          * KeyInfo
@@ -7797,6 +8001,70 @@ export interface operations {
             };
         };
     };
+    accept_invitation_v1_invitations_accept_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AcceptInvitationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AcceptInvitationResultPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    validate_invitation_v1_invitations_validate__token__get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                token: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InvitationPreviewPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_keys_v1_keys_get: {
         parameters: {
             query?: {
@@ -8286,6 +8554,70 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OrganizationMembershipContextPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    invite_active_organization_member_v1_organizations_me_member_invitations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["InviteOrganizationMemberRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["InviteOrganizationMemberResultPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    revoke_active_organization_member_invitation_v1_organizations_me_member_invitations__invitation_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                invitation_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Message"];
                 };
             };
             /** @description Validation Error */

@@ -3,6 +3,8 @@ import { useMemo, useState } from "react"
 
 import type {
   CreateOrganizationMemberRequest,
+  InviteOrganizationMemberRequest,
+  InviteOrganizationMemberResult,
   MembershipRole,
   OrganizationContext,
   OrganizationMember,
@@ -10,9 +12,11 @@ import type {
 } from "@/client"
 import {
   useAddOrganizationMember,
+  useInviteOrganizationMember,
   useOrganizationContext,
   useOrganizationMembers,
   useRemoveOrganizationMember,
+  useRevokeOrganizationMemberInvitation,
   useUpdateOrganizationMember,
   useWorkspaces,
 } from "@/shared/api/hooks"
@@ -21,12 +25,14 @@ import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import { Field } from "@/shared/components/Field"
 import {
   Checkbox,
+  CopyableValue,
   ErrorBanner,
   FilterSelect,
   InfoBanner,
   PageHeader,
 } from "@/shared/components/ui"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
+import { useDeployment } from "@/shared/hooks/useDeployment"
 
 import {
   asMembershipRole,
@@ -69,7 +75,7 @@ function StatusChip({ status }: { status: string }) {
   }
   return (
     <Chip size="sm" color={status === "suspended" ? "warning" : "default"}>
-      {status}
+      {membershipLabel(status)}
     </Chip>
   )
 }
@@ -144,7 +150,7 @@ function AddMemberForm({ onClose }: { onClose: () => void }) {
             placeholder="alice@example.com"
             isRequired
             autoFocus
-            description="The handle this identity is claimed by. Nothing is emailed: a standalone gateway has no invitation to send, so the membership is active straight away."
+            description="The handle this identity is claimed by. Nothing is emailed here; the membership is active straight away. Use Invite member instead to email an accept link."
           />
           <FilterSelect
             label="Role"
@@ -200,14 +206,172 @@ function AddMemberForm({ onClose }: { onClose: () => void }) {
   )
 }
 
+// Invites rather than adds: the membership lands `invited`, not `active`, and
+// an email with an accept link goes out if mail is configured. Kept separate
+// from AddMemberForm rather than a toggle on it: the two produce different
+// results (`mail_sent`, `accept_link`) and this one has something to show
+// after it succeeds, which AddMemberForm's immediate close does not.
+function InviteMemberForm({ onClose }: { onClose: () => void }) {
+  const invite = useInviteOrganizationMember()
+  const workspaces = useWorkspaces()
+  const { mail_enabled } = useDeployment()
+  const { selected } = useSelectedWorkspace()
+  const [email, setEmail] = useState("")
+  const [role, setRole] = useState<MembershipRole>("member")
+  const [workspaceIds, setWorkspaceIds] = useState<string[]>([])
+  const [result, setResult] = useState<InviteOrganizationMemberResult | null>(
+    null,
+  )
+  const trimmed = email.trim()
+
+  const rows = workspaces.data
+  const [seeded, setSeeded] = useState(false)
+  if (!seeded && rows && rows.length > 0) {
+    setSeeded(true)
+    const preferred = rows.find(
+      (workspace) => workspace.id === selected?.workspace_id,
+    )
+    setWorkspaceIds([(preferred ?? rows[0]).id])
+  }
+
+  const toggleWorkspace = (id: string, checked: boolean) =>
+    setWorkspaceIds((current) =>
+      checked ? [...current, id] : current.filter((one) => one !== id),
+    )
+
+  const submit = () => {
+    const body: InviteOrganizationMemberRequest = {
+      email: trimmed,
+      role,
+      workspace_assignments:
+        workspaceIds.length > 0
+          ? workspaceIds.map(
+              (workspace_id): WorkspaceAssignment => ({
+                workspace_id,
+                role: "member",
+              }),
+            )
+          : null,
+    }
+    invite.mutate(body, { onSuccess: setResult })
+  }
+
+  // After a successful invite: whether it was actually emailed, and the link
+  // to share by hand when it was not (or when mail is unconfigured entirely).
+  if (result) {
+    return (
+      <Card>
+        <Card.Content className="flex flex-col gap-4 p-5">
+          <div className="text-sm font-semibold text-foreground">
+            Invitation sent
+          </div>
+          {result.mail_sent ? (
+            <InfoBanner>
+              An email with an accept link was sent to{" "}
+              <strong>{result.email}</strong>.
+            </InfoBanner>
+          ) : (
+            <InfoBanner>
+              No mail transport is configured, so nothing was emailed. Share
+              this link with <strong>{result.email}</strong> yourself; it works
+              the same either way.
+              <div className="mt-2">
+                <CopyableValue value={result.accept_link} label="Accept link">
+                  <span className="break-all text-xs">
+                    {result.accept_link}
+                  </span>
+                </CopyableValue>
+              </div>
+            </InfoBanner>
+          )}
+          <div className="flex gap-2">
+            <Button variant="primary" onPress={onClose}>
+              Done
+            </Button>
+          </div>
+        </Card.Content>
+      </Card>
+    )
+  }
+
+  return (
+    <Card>
+      <Card.Content className="flex flex-col gap-4 p-5">
+        <div className="text-sm font-semibold text-foreground">
+          Invite member
+        </div>
+        <ErrorBanner error={invite.error} />
+        <div className="grid gap-4 sm:grid-cols-2">
+          <Field
+            label="Email address"
+            value={email}
+            onChange={setEmail}
+            placeholder="alice@example.com"
+            isRequired
+            autoFocus
+            description={
+              mail_enabled
+                ? "An email with an accept link is sent here; the membership becomes active once they follow it."
+                : "No mail is configured, so nothing is emailed: you'll get a link to share with them yourself."
+            }
+          />
+          <FilterSelect
+            label="Role"
+            value={role}
+            onChange={(value) => setRole(asMembershipRole(value) ?? "member")}
+            options={ROLE_OPTIONS}
+          />
+        </div>
+        {workspaces.data && workspaces.data.length > 0 ? (
+          <fieldset className="flex flex-col gap-2">
+            <legend className="text-sm font-medium text-foreground">
+              Workspaces (optional)
+            </legend>
+            <span className="text-xs text-muted">
+              Granted once the invitation is accepted, not before.
+            </span>
+            {workspaces.data.map((workspace) => (
+              <Checkbox
+                key={workspace.id}
+                isSelected={workspaceIds.includes(workspace.id)}
+                onChange={(isSelected) =>
+                  toggleWorkspace(workspace.id, isSelected)
+                }
+              >
+                {workspace.name}
+              </Checkbox>
+            ))}
+          </fieldset>
+        ) : null}
+        <div className="flex gap-2">
+          <Button
+            variant="primary"
+            isDisabled={trimmed === ""}
+            isPending={invite.isPending}
+            onPress={submit}
+          >
+            Send invitation
+          </Button>
+          <Button variant="ghost" onPress={onClose}>
+            Cancel
+          </Button>
+        </div>
+      </Card.Content>
+    </Card>
+  )
+}
+
 export function OrganizationMembersPage() {
   const context = useOrganizationContext()
   const members = useOrganizationMembers()
   const update = useUpdateOrganizationMember()
   const remove = useRemoveOrganizationMember()
+  const revoke = useRevokeOrganizationMemberInvitation()
 
   const [removing, setRemoving] = useState<OrganizationMember | null>(null)
+  const [revoking, setRevoking] = useState<OrganizationMember | null>(null)
   const [adding, setAdding] = useState(false)
+  const [inviting, setInviting] = useState(false)
 
   const rows = useMemo(() => members.data ?? [], [members.data])
   const activeContext: OrganizationContext | undefined = context.data
@@ -277,8 +441,9 @@ export function OrganizationMembersPage() {
         // same thing would be an unconfirmed removal. The other direction has
         // no subject either: a suspended membership leaves the roster
         // (LISTABLE_STATUSES), so there is no row here to reactivate, and
-        // re-adding the address revives the membership instead. "invited"
-        // arrives with the invitation flow and gets its own control then.
+        // re-adding the address revives the membership instead. "invited" has
+        // its own control in the Actions column (Revoke) rather than a status
+        // a picker could set, for the same reason.
         cell: (member) => <StatusChip status={member.status} />,
       },
       {
@@ -291,6 +456,23 @@ export function OrganizationMembersPage() {
             context: activeContext,
             members: rows,
           })
+          // An invited row's only action is Revoke: it has nothing to demote
+          // or reassign yet, and Remove's own guard (membershipChangeBlockedReason)
+          // already refuses a row with no organization_member_id, which every
+          // invited row here has, so Remove would otherwise render enabled and
+          // do the wrong thing on a pending invitation.
+          if (member.status === "invited" && member.invitation_id) {
+            return (
+              <Button
+                size="sm"
+                variant="danger-soft"
+                isDisabled={!manages}
+                onPress={() => setRevoking(member)}
+              >
+                Revoke
+              </Button>
+            )
+          }
           return (
             <span title={blocked}>
               <Button
@@ -313,7 +495,7 @@ export function OrganizationMembersPage() {
         },
       },
     ],
-    [activeContext, rows, update.isPending, update.mutate],
+    [activeContext, rows, update.isPending, update.mutate, manages],
   )
 
   return (
@@ -322,17 +504,22 @@ export function OrganizationMembersPage() {
         title="Members"
         description="Who belongs to this organization and what each of them may do. Roles are fixed: owners and admins manage the organization, members use it, viewers only read."
         action={
-          manages && !adding ? (
-            <Button variant="primary" onPress={() => setAdding(true)}>
-              Add member
-            </Button>
+          manages && !adding && !inviting ? (
+            <div className="flex gap-2">
+              <Button variant="ghost" onPress={() => setAdding(true)}>
+                Add member
+              </Button>
+              <Button variant="primary" onPress={() => setInviting(true)}>
+                Invite member
+              </Button>
+            </div>
           ) : null
         }
       />
 
-      {/* `remove.error` is deliberately absent: the confirm dialog renders that
-          mutation's error itself, and listing it here too paints the same
-          message twice, once behind the open dialog. */}
+      {/* `remove.error`/`revoke.error` are deliberately absent: their confirm
+          dialogs render each mutation's error themselves, and listing it here
+          too paints the same message twice, once behind the open dialog. */}
       <ErrorBanner error={context.error ?? members.error ?? update.error} />
 
       {/* Withheld until the context answers. Rendering the refusal first shows
@@ -345,6 +532,9 @@ export function OrganizationMembersPage() {
       )}
 
       {adding ? <AddMemberForm onClose={() => setAdding(false)} /> : null}
+      {inviting ? (
+        <InviteMemberForm onClose={() => setInviting(false)} />
+      ) : null}
 
       <DataTable
         ariaLabel="Organization members"
@@ -377,6 +567,32 @@ export function OrganizationMembersPage() {
           if (removing?.organization_member_id) {
             remove.mutate(removing.organization_member_id, {
               onSuccess: () => setRemoving(null),
+            })
+          }
+        }}
+      />
+
+      <ConfirmDialog
+        isOpen={revoking !== null}
+        onOpenChange={(open) => {
+          if (!open) setRevoking(null)
+        }}
+        heading="Revoke invitation"
+        body={
+          <>
+            Revoke the invitation to{" "}
+            <strong>{revoking ? memberLabel(revoking) : ""}</strong>? Their
+            accept link stops working, and the membership is suspended rather
+            than deleted. Inviting the same address again revives it.
+          </>
+        }
+        confirmLabel="Revoke invitation"
+        isPending={revoke.isPending}
+        error={revoke.error}
+        onConfirm={() => {
+          if (revoking?.invitation_id) {
+            revoke.mutate(revoking.invitation_id, {
+              onSuccess: () => setRevoking(null),
             })
           }
         }}
