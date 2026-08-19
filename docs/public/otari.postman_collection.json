@@ -2660,7 +2660,7 @@
               },
               "raw": "{\n  \"scope_type\": \"organization\",\n  \"scope_id\": \"string\"\n}"
             },
-            "description": "Create a scoped budget.",
+            "description": "Create a scoped budget.\n\nAnswers 404 when the scope names nothing, rather than creating a ceiling\nthat can never bind.",
             "header": [
               {
                 "key": "Content-Type",

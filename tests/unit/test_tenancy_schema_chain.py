@@ -196,9 +196,11 @@ def test_workspace_scope_keeps_the_partial_indexes_it_rebuilds_around(
 ) -> None:
     """Adding the column must not cost the alias and policy partial indexes.
 
-    Both tables carry a ``user_id IS NULL`` partial unique index that SQLite's
-    batch mode reflects poorly, which is why the column is added with a default
-    in one statement rather than through a table rebuild.
+    Both tables carry a ``user_id IS NULL`` partial unique index, and SQLite's
+    batch mode reflects one poorly. The rebuild happens regardless, because the
+    foreign key needs it, so this is what proves the indexes survive it rather
+    than what proves it was avoided (the migration's own docstring retracts that
+    earlier rationale).
     """
     _, engine = sqlite_at_head
     with engine.begin() as connection:

@@ -399,13 +399,26 @@ async def test_aggregate_uniqueness_survives_postgres_null_semantics(async_db: A
     await async_db.rollback()
 
 
+def _a_workspace_id(client: Any, headers: dict[str, str]) -> str:
+    """A real workspace to hang a ceiling on.
+
+    The scope ids in these API tests have to name rows that exist, because
+    create refuses one that does not. The deployment provisions a default
+    workspace on the first tenancy request, which is what this reads.
+    """
+    listed = client.get("/v1/workspaces", headers=headers)
+    assert listed.status_code == 200, listed.text
+    return str(listed.json()["data"][0]["id"])
+
+
 def test_management_surface_round_trip(client: Any, master_key_header: dict[str, str]) -> None:
     """Create, read, list, update and delete one scoped budget over the API."""
+    workspace_id = _a_workspace_id(client, master_key_header)
     created = client.post(
         "/v1/scoped-budgets",
         json={
             "scope_type": "workspace",
-            "scope_id": "ws-1",
+            "scope_id": workspace_id,
             "name": "Workspace cap",
             "max_budget": 25.0,
             "budget_duration_sec": 86400,
@@ -421,19 +434,19 @@ def test_management_surface_round_trip(client: Any, master_key_header: dict[str,
 
     duplicate = client.post(
         "/v1/scoped-budgets",
-        json={"scope_type": "workspace", "scope_id": "ws-1", "max_budget": 5.0},
+        json={"scope_type": "workspace", "scope_id": workspace_id, "max_budget": 5.0},
         headers=master_key_header,
     )
     assert duplicate.status_code == 409
 
     narrowed = client.post(
         "/v1/scoped-budgets",
-        json={"scope_type": "workspace", "scope_id": "ws-1", "provider_key_id": "openai", "max_budget": 5.0},
+        json={"scope_type": "workspace", "scope_id": workspace_id, "provider_key_id": "openai", "max_budget": 5.0},
         headers=master_key_header,
     )
     assert narrowed.status_code == 200
 
-    listed = client.get("/v1/scoped-budgets?scope_type=workspace&scope_id=ws-1", headers=master_key_header)
+    listed = client.get(f"/v1/scoped-budgets?scope_type=workspace&scope_id={workspace_id}", headers=master_key_header)
     assert listed.status_code == 200
     assert len(listed.json()) == 2
 
@@ -461,11 +474,12 @@ def test_a_ceiling_can_be_relaxed_back_to_the_states_creation_allows(
     testing the value rather than whether the field was sent made a limit
     tightenable and never relaxable, and a cadence addable and never removable.
     """
+    workspace_id = _a_workspace_id(client, master_key_header)
     created = client.post(
         "/v1/scoped-budgets",
         json={
             "scope_type": "workspace",
-            "scope_id": "ws-relax",
+            "scope_id": workspace_id,
             "max_budget": 10.0,
             "budget_duration_sec": 86400,
         },
@@ -494,6 +508,38 @@ def test_a_ceiling_can_be_relaxed_back_to_the_states_creation_allows(
     )
     assert renamed.status_code == 200
     assert renamed.json()["max_budget"] is None
+
+
+def test_a_ceiling_on_a_scope_that_does_not_exist_is_refused(
+    client: Any,
+    master_key_header: dict[str, str],
+) -> None:
+    """A typo must not answer 200 and then quietly enforce nothing.
+
+    Resolution matches a ceiling by id, so one naming a workspace that does not
+    exist is created, listed, and never applied, with nothing anywhere to say
+    so. That is what a mis-mapped id in a bulk import produces, and it fails in
+    the permissive direction. ``POST /v1/keys`` already refuses an unknown
+    workspace; this matches it.
+    """
+    missing = client.post(
+        "/v1/scoped-budgets",
+        json={"scope_type": "workspace", "scope_id": str(uuid.uuid4()), "max_budget": 5.0},
+        headers=master_key_header,
+    )
+
+    assert missing.status_code == 404, missing.text
+    assert "not found" in missing.json()["detail"]
+
+    # Not a UUID at all is the same answer, not a 500 and not a stored row.
+    malformed = client.post(
+        "/v1/scoped-budgets",
+        json={"scope_type": "organization", "scope_id": "not-a-uuid-at-all", "max_budget": 5.0},
+        headers=master_key_header,
+    )
+
+    assert malformed.status_code == 404, malformed.text
+    assert client.get("/v1/scoped-budgets", headers=master_key_header).json() == []
 
 
 def test_management_surface_requires_the_master_key(client: Any, api_key_header: dict[str, str]) -> None:

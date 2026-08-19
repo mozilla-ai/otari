@@ -14353,7 +14353,7 @@
         ]
       },
       "post": {
-        "description": "Create a scoped budget.",
+        "description": "Create a scoped budget.\n\nAnswers 404 when the scope names nothing, rather than creating a ceiling\nthat can never bind.",
         "operationId": "create_scoped_budget_v1_scoped_budgets_post",
         "requestBody": {
           "content": {

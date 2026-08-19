@@ -6,6 +6,7 @@ here, and everything about how one is enforced lives in
 ``services/scoped_budget_service.py``.
 """
 
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Annotated
 
@@ -16,7 +17,8 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_db, verify_master_key
-from gateway.models.entities import ScopedBudget
+from gateway.models.entities import APIKey, ScopedBudget
+from gateway.models.tenancy import Organization, OrganizationMember, Workspace, WorkspaceMember
 
 # ``ScopeType`` comes from the service that resolves a scope, not from a copy
 # here: the ``Literal`` is what puts the allowed values in the OpenAPI schema,
@@ -108,12 +110,58 @@ async def _get_or_404(db: AsyncSession, budget_id: str) -> ScopedBudget:
     return budget
 
 
+# What a scope's id has to name for the ceiling to ever bind, by scope type.
+# `api_token` keys on a string id, the rest on UUIDs.
+_ScopeSubject = type[Organization | Workspace | OrganizationMember | WorkspaceMember | APIKey]
+_SCOPE_SUBJECTS: dict[str, tuple[_ScopeSubject, str]] = {
+    "organization": (Organization, "Organization"),
+    "workspace": (Workspace, "Workspace"),
+    "workspace_member": (WorkspaceMember, "Workspace membership"),
+    "org_member": (OrganizationMember, "Organization membership"),
+    "api_token": (APIKey, "API key"),
+}
+
+
+async def _require_scope_exists(db: AsyncSession, scope_type: str, scope_id: str) -> None:
+    """Refuse a ceiling on a scope that does not exist.
+
+    Without this a typo answers 200 and then never binds: resolution matches on
+    the id, so a ceiling naming nothing is created, listed, and silently
+    unenforced, with nothing anywhere to surface it. That is the shape a bulk
+    import produces from a mis-mapped id, and it fails in the permissive
+    direction. `POST /v1/keys` already refuses an unknown workspace for the same
+    reason; this matches it.
+    """
+    model, subject = _SCOPE_SUBJECTS[scope_type]
+    identifier: object = scope_id
+    if model is not APIKey:
+        try:
+            identifier = uuid.UUID(scope_id)
+        except ValueError:
+            raise HTTPException(
+                status_code=status.HTTP_404_NOT_FOUND,
+                detail=f"{subject} '{scope_id}' not found",
+            ) from None
+
+    found = await db.get(model, identifier)
+    if found is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"{subject} '{scope_id}' not found",
+        )
+
+
 @router.post("", dependencies=[Depends(verify_master_key)])
 async def create_scoped_budget(
     request: CreateScopedBudgetRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> ScopedBudgetResponse:
-    """Create a scoped budget."""
+    """Create a scoped budget.
+
+    Answers 404 when the scope names nothing, rather than creating a ceiling
+    that can never bind.
+    """
+    await _require_scope_exists(db, request.scope_type, request.scope_id)
     now = datetime.now(UTC)
     budget = ScopedBudget(
         scope_type=request.scope_type,

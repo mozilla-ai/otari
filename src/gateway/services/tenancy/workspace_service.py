@@ -48,7 +48,6 @@ from gateway.services.tenancy.errors import (
     WorkspaceNotFoundError,
 )
 from gateway.services.tenancy.organization_service import OrganizationService
-from gateway.services.workspace_scope import reset_default_workspace_cache
 
 
 class WorkspaceService:
@@ -306,6 +305,14 @@ class WorkspaceService:
             # already knows, so let it answer and translate what it says.
             await self.db.rollback()
             raise WorkspaceInUseError from None
+
+        # Imported here rather than at module scope, because `workspace_scope`
+        # imports `tenancy.provisioning_service`, which runs `tenancy/__init__`,
+        # which imports this module: at module scope the cycle makes
+        # `import gateway.services.workspace_scope` fail outright unless
+        # something imported `tenancy` first. The app happens to, and a new
+        # script or test reaching either module first would not.
+        from gateway.services.workspace_scope import reset_default_workspace_cache
 
         # `workspace_scope` caches the default workspace's id for the process and
         # justifies that by RESTRICT: a workspace holding request-plane rows

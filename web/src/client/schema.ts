@@ -1667,6 +1667,9 @@ export interface paths {
         /**
          * Create Scoped Budget
          * @description Create a scoped budget.
+         *
+         *     Answers 404 when the scope names nothing, rather than creating a ceiling
+         *     that can never bind.
          */
         post: operations["create_scoped_budget_v1_scoped_budgets_post"];
         delete?: never;
