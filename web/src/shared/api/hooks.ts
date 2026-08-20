@@ -34,7 +34,6 @@ import type {
   OrganizationContext,
   OrganizationMember,
   OrganizationPricingOverride,
-  OrganizationPricingOverrides,
   PricingRefreshPreview,
   PricingResponse,
   ProviderHealthResponse,
@@ -1674,12 +1673,15 @@ export function useRemoveWorkspaceMember() {
 export function useOrganizationPricing(enabled = true) {
   return useQuery({
     queryKey: [ORGANIZATION_PRICING],
-    queryFn: async () => {
-      const response = await apiFetch<OrganizationPricingOverrides>(
+    // Paged through rather than read in one shot: the endpoint caps `limit`
+    // server-side and the table grows a row per model per period, so a long-lived
+    // organization would otherwise have its oldest overrides silently truncated.
+    // `fetchAllPaged` carries the same hard page cap the rest of the tenancy
+    // surface uses, so a backend that ignored `skip` cannot spin this.
+    queryFn: () =>
+      fetchAllPaged<OrganizationPricingOverride>(
         "/v1/organizations/me/pricing",
-      )
-      return response.data
-    },
+      ),
     staleTime: 60_000,
     enabled,
   })

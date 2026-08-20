@@ -21,9 +21,9 @@ import uuid
 from datetime import UTC, datetime
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import CurrentIdentity, get_db, verify_master_key
@@ -143,10 +143,12 @@ class OrganizationModelPricingPublic(BaseModel):
 
 
 class OrganizationModelPricingsPublic(BaseModel):
-    """Every override in the organization, with a count.
+    """One page of the organization's overrides, and how many there are in total.
 
     The envelope shape the platform's equivalent endpoint returns, kept so the
-    generated dashboard client stays recognizable across both trees.
+    generated dashboard client stays recognizable across both trees. ``count`` is
+    the total rather than the length of ``data``, which is what lets a client tell
+    whether another page is owed.
     """
 
     data: list[OrganizationModelPricingPublic]
@@ -183,13 +185,31 @@ def _to_input(body: OrganizationModelPricingRates) -> PricingOverrideInput:
 
 
 async def _commit(db: AsyncSession) -> None:
-    """Commit the request's work, mapping a database failure to a 500.
+    """Commit the request's work, mapping a database failure to a status.
 
     The services flush rather than commit (the house contract), so the route owns
     the transaction boundary.
+
+    An ``IntegrityError`` here is not an internal fault, and this is the one place
+    that can tell. The service checks the overlap rule before writing, but two
+    writers racing on the same period both pass that check and the unique index on
+    ``(organization_id, model_key, effective_from)`` refuses the second (see
+    `models.entities.OrganizationModelPricing`, which explains why the rest of the
+    rule cannot be a constraint). That is the same conflict the service reports as
+    a 409, so it is reported as one here rather than as a 500 the caller would
+    read as "retry, this is our fault".
     """
     try:
         await db.commit()
+    except IntegrityError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "Another override for this model and period was stored while this request was in flight. "
+                "Re-read the overrides and try again."
+            ),
+        ) from None
     except SQLAlchemyError:
         await db.rollback()
         raise HTTPException(
@@ -202,17 +222,23 @@ async def _commit(db: AsyncSession) -> None:
 async def list_organization_pricing(
     identity: CurrentIdentity,
     service: ServiceDep,
+    skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of records to return")] = 100,
 ) -> OrganizationModelPricingsPublic:
     """List the organization's rate overrides.
 
     Readable by any member: these rates decide what the caller's own requests
     cost, so they are not withheld from the people billed at them. Writing needs
     an owner or admin.
+
+    Paged on the same bounds the rest of the tenancy surface uses, because the
+    table grows a row per model per period. ``count`` is the total, so a client
+    knows whether another page is owed.
     """
-    overrides = await service.list_for_caller(identity)
+    overrides, total = await service.list_for_caller(identity, skip=skip, limit=limit)
     return OrganizationModelPricingsPublic(
         data=[OrganizationModelPricingPublic.from_model(override) for override in overrides],
-        count=len(overrides),
+        count=total,
     )
 
 

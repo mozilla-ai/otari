@@ -158,7 +158,11 @@ async def test_is_model_free_uses_the_resolved_provider_instance(async_db: Async
         result = await _is_model_free(async_db, "Kimi-K3", pricing_provider="otari.ai")
 
     assert result is True
-    lookup.assert_awaited_once_with(async_db, "otari.ai", "Kimi-K3")
+    # ``organization_id`` is passed through so "free" means free at the caller's
+    # organization's rate: a model the deployment prices at zero is not free to an
+    # organization that overrode it. None is the deployment-wide answer, which is
+    # what a caller that resolves no organization gets.
+    lookup.assert_awaited_once_with(async_db, "otari.ai", "Kimi-K3", organization_id=None)
 
 
 @pytest.mark.asyncio

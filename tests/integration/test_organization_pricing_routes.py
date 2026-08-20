@@ -204,6 +204,47 @@ def test_the_endpoints_require_the_master_key(client: TestClient) -> None:
     }
 
 
+def test_the_list_is_paged_and_counts_the_whole_set(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """A growing table is read a page at a time, and the count is the total."""
+    start = datetime.now(UTC) - timedelta(days=30)
+    for index in range(3):
+        created = client.post(
+            _ENDPOINT,
+            json=_body(
+                model_key=f"openai:model-{index}",
+                effective_from=(start + timedelta(days=index)).isoformat(),
+            ),
+            headers=master_key_header,
+        )
+        assert created.status_code == status.HTTP_201_CREATED, created.text
+
+    first_page = client.get(f"{_ENDPOINT}?skip=0&limit=2", headers=master_key_header)
+    second_page = client.get(f"{_ENDPOINT}?skip=2&limit=2", headers=master_key_header)
+
+    assert len(first_page.json()["data"]) == 2
+    assert len(second_page.json()["data"]) == 1
+    # The total, not the page length, on both pages.
+    assert first_page.json()["count"] == 3
+    assert second_page.json()["count"] == 3
+    # And no row is served twice or skipped.
+    ids = [row["id"] for row in first_page.json()["data"] + second_page.json()["data"]]
+    assert len(set(ids)) == 3
+
+
+def test_the_list_refuses_a_limit_past_the_ceiling(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    over = client.get(f"{_ENDPOINT}?limit=1001", headers=master_key_header)
+    under = client.get(f"{_ENDPOINT}?limit=0", headers=master_key_header)
+
+    assert over.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT, over.text
+    assert under.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT, under.text
+
+
 def test_the_deployment_price_list_is_untouched_by_an_override(
     client: TestClient,
     master_key_header: dict[str, str],
@@ -305,9 +346,10 @@ async def test_any_member_may_read_the_overrides(async_db: AsyncSession, role: s
     service = OrganizationPricingService(async_db)
     await service.create_for_caller(owner, _MODEL_KEY, _rates())
 
-    visible = await service.list_for_caller(reader)
+    visible, total = await service.list_for_caller(reader)
 
     assert [row.model_key for row in visible] == [_MODEL_KEY]
+    assert total == 1
 
 
 @pytest.mark.asyncio

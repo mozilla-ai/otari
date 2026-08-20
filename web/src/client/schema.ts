@@ -1099,6 +1099,10 @@ export interface paths {
          *     Readable by any member: these rates decide what the caller's own requests
          *     cost, so they are not withheld from the people billed at them. Writing needs
          *     an owner or admin.
+         *
+         *     Paged on the same bounds the rest of the tenancy surface uses, because the
+         *     table grows a row per model per period. ``count`` is the total, so a client
+         *     knows whether another page is owed.
          */
         get: operations["list_organization_pricing_v1_organizations_me_pricing_get"];
         put?: never;
@@ -4759,10 +4763,12 @@ export interface components {
         };
         /**
          * OrganizationModelPricingsPublic
-         * @description Every override in the organization, with a count.
+         * @description One page of the organization's overrides, and how many there are in total.
          *
          *     The envelope shape the platform's equivalent endpoint returns, kept so the
-         *     generated dashboard client stays recognizable across both trees.
+         *     generated dashboard client stays recognizable across both trees. ``count`` is
+         *     the total rather than the length of ``data``, which is what lets a client tell
+         *     whether another page is owed.
          */
         OrganizationModelPricingsPublic: {
             /** Count */
@@ -8411,7 +8417,12 @@ export interface operations {
     };
     list_organization_pricing_v1_organizations_me_pricing_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -8425,6 +8436,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OrganizationModelPricingsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

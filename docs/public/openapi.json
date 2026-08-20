@@ -5164,7 +5164,7 @@
         "type": "object"
       },
       "OrganizationModelPricingsPublic": {
-        "description": "Every override in the organization, with a count.\n\nThe envelope shape the platform's equivalent endpoint returns, kept so the\ngenerated dashboard client stays recognizable across both trees.",
+        "description": "One page of the organization's overrides, and how many there are in total.\n\nThe envelope shape the platform's equivalent endpoint returns, kept so the\ngenerated dashboard client stays recognizable across both trees. ``count`` is\nthe total rather than the length of ``data``, which is what lets a client tell\nwhether another page is owed.",
         "properties": {
           "count": {
             "title": "Count",
@@ -13345,8 +13345,37 @@
     },
     "/v1/organizations/me/pricing": {
       "get": {
-        "description": "List the organization's rate overrides.\n\nReadable by any member: these rates decide what the caller's own requests\ncost, so they are not withheld from the people billed at them. Writing needs\nan owner or admin.",
+        "description": "List the organization's rate overrides.\n\nReadable by any member: these rates decide what the caller's own requests\ncost, so they are not withheld from the people billed at them. Writing needs\nan owner or admin.\n\nPaged on the same bounds the rest of the tenancy surface uses, because the\ntable grows a row per model per period. ``count`` is the total, so a client\nknows whether another page is owed.",
         "operationId": "list_organization_pricing_v1_organizations_me_pricing_get",
+        "parameters": [
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of records to return",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -13357,6 +13386,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [

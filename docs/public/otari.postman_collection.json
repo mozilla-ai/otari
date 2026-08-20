@@ -1824,7 +1824,7 @@
         {
           "name": "List Organization Pricing",
           "request": {
-            "description": "List the organization's rate overrides.\n\nReadable by any member: these rates decide what the caller's own requests\ncost, so they are not withheld from the people billed at them. Writing needs\nan owner or admin.",
+            "description": "List the organization's rate overrides.\n\nReadable by any member: these rates decide what the caller's own requests\ncost, so they are not withheld from the people billed at them. Writing needs\nan owner or admin.\n\nPaged on the same bounds the rest of the tenancy surface uses, because the\ntable grows a row per model per period. ``count`` is the total, so a client\nknows whether another page is owed.",
             "header": [],
             "method": "GET",
             "url": {
@@ -1837,7 +1837,21 @@
                 "me",
                 "pricing"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/pricing"
+              "query": [
+                {
+                  "description": "Number of records to skip",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "Maximum number of records to return",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/pricing?skip=&limit="
             }
           }
         },

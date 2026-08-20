@@ -82,6 +82,26 @@ describe("periodBlockedReason", () => {
     ).toBeUndefined()
   })
 
+  // Copilot caught this on #674: a present-but-unparseable value used to fall
+  // through the blank check, which let Save enable, sent `null` to the server
+  // (read as "starts now" / "no end"), and skipped the overlap check on the way,
+  // because every comparison against NaN is false.
+  it("refuses a start that is present but not a date", () => {
+    expect(periodBlockedReason("not-a-date", "")).toMatch(
+      /start is not a date/i,
+    )
+  })
+
+  it("refuses an end that is present but not a date", () => {
+    expect(periodBlockedReason("2026-08-20T12:00", "not-a-date")).toMatch(
+      /end is not a date/i,
+    )
+  })
+
+  it("still accepts both blank, which is the common case", () => {
+    expect(periodBlockedReason("", "")).toBeUndefined()
+  })
+
   it("refuses an inverted period", () => {
     expect(periodBlockedReason("2026-08-21T12:00", "2026-08-20T12:00")).toMatch(
       /must be after/i,

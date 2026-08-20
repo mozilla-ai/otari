@@ -55,19 +55,30 @@ export function isValidModelKey(value: string): boolean {
  * The period is half-open, `[from, to)`, so an end equal to the start covers no
  * instant at all and is refused along with an inverted one. That is the server's
  * rule (`validate_period`), stated here as a sentence.
+ *
+ * Each field is judged on its own, and that matters more than it looks. Blank is
+ * legitimate on both sides (a start defaults to now, an absent end is open
+ * ended), but a value that is present and *unparseable* is not the same thing:
+ * `fromLocalInput` turns it into `null`, which the server reads as "starts now"
+ * or "no end". So an early return that only looked at blankness would let a
+ * half-typed date enable Save, store a period the operator did not ask for, and
+ * skip the overlap check on the way (`Date.parse` yields `NaN`, and every
+ * comparison against `NaN` is false, so nothing looks like it overlaps).
  */
 export function periodBlockedReason(
   effectiveFrom: string,
   effectiveTo: string,
 ): string | undefined {
-  if (effectiveTo.trim() === "") return undefined
-  if (effectiveFrom.trim() === "") return undefined
-  const from = Date.parse(effectiveFrom)
-  const to = Date.parse(effectiveTo)
-  if (Number.isNaN(from) || Number.isNaN(to)) {
-    return "Enter both dates in a format your browser recognizes."
+  const from = effectiveFrom.trim()
+  const to = effectiveTo.trim()
+  if (from !== "" && Number.isNaN(Date.parse(from))) {
+    return "The start is not a date this browser recognizes."
   }
-  if (to <= from) {
+  if (to !== "" && Number.isNaN(Date.parse(to))) {
+    return "The end is not a date this browser recognizes."
+  }
+  if (from === "" || to === "") return undefined
+  if (Date.parse(to) <= Date.parse(from)) {
     return "The end must be after the start. An end equal to the start covers no time at all."
   }
   return undefined

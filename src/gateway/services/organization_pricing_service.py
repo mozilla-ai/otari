@@ -32,7 +32,7 @@ import uuid
 from dataclasses import dataclass
 from datetime import datetime
 
-from sqlalchemy import or_, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.models.entities import OrganizationModelPricing
@@ -152,9 +152,30 @@ class OrganizationPricingService:
                 _describe_period(clash.effective_from, clash.effective_to),
             )
 
-    async def list_for_caller(self, user: TenancyUser) -> list[OrganizationModelPricing]:
-        """Every override in the caller's organization, newest period first."""
+    async def list_for_caller(
+        self,
+        user: TenancyUser,
+        *,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> tuple[list[OrganizationModelPricing], int]:
+        """One page of the caller's organization's overrides, and the total.
+
+        Paged rather than whole: the table grows a row per model per period, so a
+        long-lived organization accumulates them and an unbounded read would get
+        slower forever. Ordered by key then newest period, so paging is stable.
+
+        The count is the total matching rows, not the length of the page, because
+        that is what tells a client whether to ask for another one.
+        """
         organization_id = await self._readable_organization_id(user)
+        total = (
+            await self.db.execute(
+                select(func.count())
+                .select_from(OrganizationModelPricing)
+                .where(OrganizationModelPricing.organization_id == organization_id)
+            )
+        ).scalar_one()
         stmt = (
             select(OrganizationModelPricing)
             .where(OrganizationModelPricing.organization_id == organization_id)
@@ -162,8 +183,10 @@ class OrganizationPricingService:
                 OrganizationModelPricing.model_key,
                 OrganizationModelPricing.effective_from.desc(),
             )
+            .offset(skip)
+            .limit(limit)
         )
-        return list((await self.db.execute(stmt)).scalars().all())
+        return list((await self.db.execute(stmt)).scalars().all()), total
 
     async def create_for_caller(
         self,
