@@ -38,6 +38,24 @@ def test_render_invitation_email_fills_every_placeholder() -> None:
     assert "{{ACCEPT_LINK}}" not in html
 
 
+def test_render_invitation_email_uses_the_right_article_for_every_role() -> None:
+    """Half the roles start with a vowel, so a hard-coded "a" was wrong half the time.
+
+    Caught by reading a message a real SMTP server delivered, not by a test:
+    every owner and admin invitation said "as a admin".
+    """
+    for role, expected in (
+        ("owner", "as an owner"),
+        ("admin", "as an admin"),
+        ("member", "as a member"),
+        ("viewer", "as a viewer"),
+    ):
+        _, html, text = _render(role=role)
+        assert expected in text, role
+        # The HTML wraps the role in <strong>, so the article sits outside it.
+        assert f"{expected.split()[1]} <strong>{role}</strong>" in html, role
+
+
 def test_render_invitation_email_escapes_operator_set_strings_in_html_only() -> None:
     _, html, text = _render(organization_name="<script>alert(1)</script>", inviter_name="Robert</b>")
 

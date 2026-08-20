@@ -1,6 +1,6 @@
 You're invited to join {{ORGANIZATION_NAME}} on Otari
 
-{{INVITER_NAME}} has invited you to join {{ORGANIZATION_NAME}} on Otari as a {{ROLE}}.
+{{INVITER_NAME}} has invited you to join {{ORGANIZATION_NAME}} on Otari as {{ROLE_ARTICLE}} {{ROLE}}.
 
 Accept the invitation (expires in {{VALID_DAYS}}) by opening this link:
 {{ACCEPT_LINK}}
