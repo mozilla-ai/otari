@@ -9,8 +9,10 @@ services with identities built at whatever role a case needs.
 
 import asyncio
 import uuid
+from collections.abc import AsyncIterator
 
 import pytest
+import pytest_asyncio
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
@@ -474,12 +476,23 @@ async def test_materialize_batch_recovers_from_a_missed_collision(async_db: Asyn
 # =============================================================================
 
 
-@pytest.fixture
-def sessions(postgres_url: str) -> async_sessionmaker[AsyncSession]:
+@pytest_asyncio.fixture
+async def sessions(postgres_url: str) -> AsyncIterator[async_sessionmaker[AsyncSession]]:
+    """A session factory on its own engine, disposed after the test.
+
+    Undisposed, each test using this leaves an asyncpg connection pool alive
+    until garbage collection, which tends to surface later as a
+    connection-limit failure or "event loop is closed" noise in an unrelated
+    test rather than as a failure here.
+    """
     url = postgres_url.replace("postgresql+psycopg2://", "postgresql+asyncpg://").replace(
         "postgresql://", "postgresql+asyncpg://"
     )
-    return async_sessionmaker(create_async_engine(url), expire_on_commit=False)
+    engine = create_async_engine(url)
+    try:
+        yield async_sessionmaker(engine, expire_on_commit=False)
+    finally:
+        await engine.dispose()
 
 
 async def test_concurrent_default_create_and_member_add_both_land(
