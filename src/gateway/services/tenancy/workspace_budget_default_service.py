@@ -75,7 +75,7 @@ def _period_window(budget_duration_sec: int | None) -> tuple[datetime | None, da
     of two; worth reconciling further, into one definition shared with
     ``scoped_budgets.py`` itself, wherever that shared home ends up landing.
     """
-    if not budget_duration_sec:
+    if budget_duration_sec is None:
         return None, None
     now = datetime.now(UTC)
     return now, now + timedelta(seconds=budget_duration_sec)
@@ -161,7 +161,14 @@ class WorkspaceBudgetDefaultService:
         """Create a per-member ``ScopedBudget`` for every default on the member's workspace.
 
         Skips any ``provider_key_id`` the member already has a ceiling for; a
-        member-specific override always wins over the template.
+        member-specific override always wins over the template. Never raises
+        ``IntegrityError``: a collision on one default (see
+        :meth:`_insert_member_budgets`) is swallowed there, precisely so this
+        method's callers (``WorkspaceService.add_member``,
+        ``OrganizationService._apply_workspace_assignments``) can keep their
+        own ``except IntegrityError`` narrow to the membership row they
+        actually insert, without a materialization-time collision escaping
+        and being misreported as a duplicate membership.
         """
         defaults = (
             (
@@ -178,7 +185,7 @@ class WorkspaceBudgetDefaultService:
         for default in defaults:
             if await self._existing_member_budget(member.id, default.provider_key_id) is not None:
                 continue
-            created.append(await self._create_member_budget(member.id, default))
+            created.extend(await self._insert_member_budgets([member.id], default))
         return created
 
     async def materialize_for_default(self, default: WorkspaceBudgetDefault) -> list[ScopedBudget]:
@@ -204,28 +211,20 @@ class WorkspaceBudgetDefaultService:
                 break
             active_ids = [member.id for member in members if member.status == "active"]
             if active_ids:
-                created.extend(await self._create_member_budgets(active_ids, default))
+                created.extend(await self._materialize_batch(active_ids, default))
             skip += len(members)
             if skip >= total:
                 break
         return created
 
-    async def _create_member_budgets(
+    async def _materialize_batch(
         self, member_ids: list[uuid.UUID], default: WorkspaceBudgetDefault
     ) -> list[ScopedBudget]:
         """Materialize ``default`` onto every id in ``member_ids`` that does not already have one.
 
-        One query for the whole batch's existing rows, one flush for the whole
-        batch's new ones, in the common case. The existence check and the
-        insert are still two round trips with nothing locking the gap between
-        them, and the one surface that can land in it (a direct
-        ``POST /v1/scoped-budgets`` for one of these members, racing this
-        fan-out) takes no lock on this workspace: `routes/scoped_budgets.py`
-        is a master-key admin surface with no notion of one. A batch that
-        collides falls back to inserting one row at a time, each in its own
-        savepoint, so a single colliding member costs one skipped row rather
-        than failing the whole page, and, one level up, the default's own
-        creation with it (see :meth:`create_default`).
+        One query for the whole batch's existing rows: the insert itself is
+        :meth:`_insert_member_budgets`, which is what actually tolerates a
+        collision on any one id.
         """
         existing_stmt = select(ScopedBudget.scope_id).where(
             ScopedBudget.scope_type == _SCOPE_WORKSPACE_MEMBER,
@@ -240,39 +239,67 @@ class WorkspaceBudgetDefaultService:
         candidates = [member_id for member_id in member_ids if str(member_id) not in already_covered]
         if not candidates:
             return []
+        return await self._insert_member_budgets(candidates, default)
 
-        def build(member_id: uuid.UUID) -> ScopedBudget:
-            period_start, period_end = _period_window(default.budget_duration_sec)
-            return ScopedBudget(
-                scope_type=_SCOPE_WORKSPACE_MEMBER,
-                scope_id=str(member_id),
-                provider_key_id=default.provider_key_id,
-                max_budget=default.max_budget,
-                budget_duration_sec=default.budget_duration_sec,
-                period_start=period_start,
-                period_end=period_end,
-            )
+    async def _insert_member_budgets(
+        self, member_ids: list[uuid.UUID], default: WorkspaceBudgetDefault
+    ) -> list[ScopedBudget]:
+        """Insert a ``ScopedBudget`` for each id in ``member_ids``, tolerating a uniqueness collision on any one.
 
-        budgets = [build(member_id) for member_id in candidates]
-        self.db.add_all(budgets)
+        The existence check the two callers run first is a separate round
+        trip with nothing locking the gap after it, and the one surface that
+        can land there (a direct ``POST /v1/scoped-budgets`` for one of these
+        members, racing this insert) takes no lock on the workspace:
+        `routes/scoped_budgets.py` is a master-key admin surface with no
+        notion of one. One flush for the whole batch in the common case;
+        falls back to one row at a time, each in its own savepoint, on
+        conflict, so a single colliding id costs one skipped row rather than
+        the whole batch.
+
+        Each attempt's ``add()`` happens *inside* its ``begin_nested()``
+        block, not before it: ``AsyncSession.begin_nested()`` unconditionally
+        flushes whatever is already pending before it opens the ``SAVEPOINT``,
+        so an add staged beforehand is flushed *outside* any savepoint, and a
+        conflict there fails the outer transaction rather than just rolling
+        back to the point the savepoint was meant to protect. The same reason
+        rules out an explicit ``expunge`` in the ``except`` branch: a
+        savepoint rollback already expunges the row it was protecting, so a
+        second, manual expunge finds nothing there and raises
+        ``InvalidRequestError`` instead.
+        """
         try:
             async with self.db.begin_nested():
+                budgets = [self._build_member_budget(member_id, default) for member_id in member_ids]
+                self.db.add_all(budgets)
                 await self.db.flush()
             return budgets
         except IntegrityError:
             pass  # fall back below; the savepoint already rolled the batch back
 
         created: list[ScopedBudget] = []
-        for member_id in candidates:
-            budget = build(member_id)
-            self.db.add(budget)
+        for member_id in member_ids:
             try:
                 async with self.db.begin_nested():
+                    budget = self._build_member_budget(member_id, default)
+                    self.db.add(budget)
                     await self.db.flush()
                 created.append(budget)
             except IntegrityError:
-                self.db.expunge(budget)
+                pass  # this id's savepoint rolled back and expunged it; move on
         return created
+
+    @staticmethod
+    def _build_member_budget(member_id: uuid.UUID, default: WorkspaceBudgetDefault) -> ScopedBudget:
+        period_start, period_end = _period_window(default.budget_duration_sec)
+        return ScopedBudget(
+            scope_type=_SCOPE_WORKSPACE_MEMBER,
+            scope_id=str(member_id),
+            provider_key_id=default.provider_key_id,
+            max_budget=default.max_budget,
+            budget_duration_sec=default.budget_duration_sec,
+            period_start=period_start,
+            period_end=period_end,
+        )
 
     async def _existing_member_budget(self, member_id: uuid.UUID, provider_key_id: str | None) -> ScopedBudget | None:
         stmt = select(ScopedBudget).where(
@@ -285,21 +312,6 @@ class WorkspaceBudgetDefaultService:
             else ScopedBudget.provider_key_id.is_(None)
         )
         return (await self.db.execute(stmt)).scalars().first()
-
-    async def _create_member_budget(self, member_id: uuid.UUID, default: WorkspaceBudgetDefault) -> ScopedBudget:
-        period_start, period_end = _period_window(default.budget_duration_sec)
-        budget = ScopedBudget(
-            scope_type=_SCOPE_WORKSPACE_MEMBER,
-            scope_id=str(member_id),
-            provider_key_id=default.provider_key_id,
-            max_budget=default.max_budget,
-            budget_duration_sec=default.budget_duration_sec,
-            period_start=period_start,
-            period_end=period_end,
-        )
-        self.db.add(budget)
-        await self.db.flush()
-        return budget
 
     # ------------------------------------------------------------------
     # CRUD (commit on success)
@@ -385,7 +397,7 @@ class WorkspaceBudgetDefaultService:
         # write `WorkspaceBudgetDefaultAlreadyExistsError`'s message describes
         # (the template's own unique index). `materialize_for_default` handles
         # its own, unrelated `IntegrityError`s internally (see
-        # `_create_member_budgets`) precisely so one never reaches here and
+        # `_insert_member_budgets`) precisely so one never reaches here and
         # gets misreported as "this default already exists", rolling back a
         # template that in fact does not conflict with anything.
         try:

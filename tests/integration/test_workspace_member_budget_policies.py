@@ -14,7 +14,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
-from gateway.models.entities import ScopedBudget
+from gateway.models.entities import ScopedBudget, WorkspaceBudgetDefault
 from gateway.models.tenancy import (
     ActiveOrganizationMemberCreateRequest,
     Organization,
@@ -233,6 +233,53 @@ async def test_reviving_a_suspended_workspace_membership_is_materialized(async_d
     assert budget.max_budget == 35.0
 
 
+async def test_reapplying_an_active_assignment_does_not_rematerialize_a_deleted_override(
+    async_db: AsyncSession,
+) -> None:
+    """Re-applying an assignment to an already-active member is not a join.
+
+    `_apply_workspace_assignments`'s revive branch also runs for a membership
+    that was already active (an idempotent re-post, or a second invitation
+    naming the same workspace); only a row that was actually inactive is a
+    real join. Without the status gate, re-applying the assignment would
+    resurrect a per-member ceiling an admin deliberately deleted through
+    `/v1/scoped-budgets`.
+    """
+    org = await _organization(async_db, slug="acme-reapply")
+    owner = await _member(async_db, org, role="owner", full_name="Owner")
+    member_user = await _member(async_db, org, role="member", full_name="Member")
+    workspace = await _workspace(async_db, org, name="Engineering", owner=owner)
+    workspace_member = await WorkspaceMemberRepository(async_db).create(
+        workspace_id=workspace.id, user_id=member_user.id, role="member"
+    )
+    await async_db.commit()
+
+    service = WorkspaceBudgetDefaultService(async_db)
+    await service.create_default(
+        user=owner,
+        workspace_id=workspace.id,
+        request=WorkspaceMemberBudgetPolicyCreate(max_budget=50.0),
+    )
+    budget = await _member_budget(async_db, workspace_member.id)
+    assert budget is not None
+
+    # An admin deletes the member's own ceiling directly.
+    await async_db.delete(budget)
+    await async_db.commit()
+    assert await _member_budget(async_db, workspace_member.id) is None
+
+    organization_service = OrganizationService(async_db)
+    await organization_service._apply_workspace_assignments(  # noqa: SLF001 - exercising the internal gate directly
+        user_id=member_user.id,
+        assignments=[WorkspaceAssignmentRequest(workspace_id=workspace.id, role="member")],
+    )
+    await async_db.commit()
+
+    assert await _member_budget(async_db, workspace_member.id) is None, (
+        "re-applying an already-active assignment must not re-materialize a deleted override"
+    )
+
+
 async def test_update_is_not_retroactive(async_db: AsyncSession) -> None:
     org = await _organization(async_db, slug="acme-update")
     owner = await _member(async_db, org, role="owner", full_name="Owner")
@@ -363,6 +410,63 @@ async def test_foreign_workspace_is_not_found(async_db: AsyncSession) -> None:
     service = WorkspaceBudgetDefaultService(async_db)
     with pytest.raises(WorkspaceNotFoundError):
         await service.list_defaults(user=owner_a, workspace_id=workspace_b.id)
+
+
+# =============================================================================
+# _insert_member_budgets' savepoint fallback, exercised directly: a batch
+# collision must fall back to a per-row retry rather than 500ing the request
+# or leaving the session unusable.
+# =============================================================================
+
+
+async def test_materialize_batch_recovers_from_a_missed_collision(async_db: AsyncSession) -> None:
+    """A batch collision falls back to a per-row retry instead of failing outright.
+
+    Reproduces the shape of the race `_insert_member_budgets` exists to
+    survive: by the time the insert runs, a ceiling already exists for one of
+    the ids in the batch (standing in for a concurrent direct
+    ``POST /v1/scoped-budgets`` for that member, which the batch's own
+    existence check, run a moment earlier, would not yet have seen).
+    Called directly rather than through `materialize_for_default`, which
+    otherwise wraps the same existence check around every id and would just
+    filter the colliding one out before ever attempting to insert it.
+    """
+    org = await _organization(async_db, slug="acme-collision")
+    owner = await _member(async_db, org, role="owner", full_name="Owner")
+    other = await _member(async_db, org, role="member", full_name="Other")
+    workspace = await _workspace(async_db, org, name="Engineering", owner=owner)
+    workspace_members = WorkspaceMemberRepository(async_db)
+    other_member = await workspace_members.create(workspace_id=workspace.id, user_id=other.id, role="member")
+    owner_member = await workspace_members.get_by_workspace_and_user(workspace.id, owner.id)
+    assert owner_member is not None
+
+    default = WorkspaceBudgetDefault(workspace_id=workspace.id, max_budget=40.0)
+    async_db.add(default)
+    await async_db.flush()
+
+    # The row `_insert_member_budgets` will collide with, inserted directly
+    # (not through the check-then-insert path this test bypasses).
+    collision = ScopedBudget(scope_type="workspace_member", scope_id=str(other_member.id), max_budget=999.0)
+    async_db.add(collision)
+    await async_db.flush()
+
+    service = WorkspaceBudgetDefaultService(async_db)
+    created = await service._insert_member_budgets(  # noqa: SLF001 - exercising the fallback directly
+        [owner_member.id, other_member.id], default
+    )
+
+    assert {budget.scope_id for budget in created} == {str(owner_member.id)}
+    owner_budget = await _member_budget(async_db, owner_member.id)
+    assert owner_budget is not None
+    assert owner_budget.max_budget == 40.0
+    other_budget = await _member_budget(async_db, other_member.id)
+    assert other_budget is not None
+    assert other_budget.max_budget == 999.0, "the pre-existing row must survive the collision untouched"
+
+    # The broken version failed exactly here: PendingRollbackError on the next
+    # statement, because the failed batch flush had already dirtied the outer
+    # transaction rather than just the savepoint.
+    await async_db.commit()
 
 
 # =============================================================================

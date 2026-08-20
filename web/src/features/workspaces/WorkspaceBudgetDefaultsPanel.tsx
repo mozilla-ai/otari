@@ -62,8 +62,14 @@ function providerLabel(providerKeyId: string | null): string {
 // `daysTouched` below); dividing by `DAY` unconditionally here would print a
 // fraction for one, e.g. "/ 0.041666666666666664 days" for 3,600.
 function formatDuration(seconds: number): string {
-  if (seconds % DAY === 0) return `${seconds / DAY} days`
-  if (seconds % HOUR === 0) return `${seconds / HOUR} hours`
+  if (seconds % DAY === 0) {
+    const days = seconds / DAY
+    return `${days} ${days === 1 ? "day" : "days"}`
+  }
+  if (seconds % HOUR === 0) {
+    const hours = seconds / HOUR
+    return `${hours} ${hours === 1 ? "hour" : "hours"}`
+  }
   return `${seconds}s`
 }
 

@@ -170,7 +170,7 @@ const BASE_NAV_SECTIONS = [
         to: "/budget-defaults",
         label: "Budget defaults",
         surface: "workspaces",
-        icon: BudgetsIcon,
+        icon: FiDollarSign,
       },
     ],
   },

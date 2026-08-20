@@ -539,6 +539,11 @@ class OrganizationService:
         as creating one is: a suspended member could have missed a default
         created while they were out, and the revive is the only signal that
         they are back to being covered by the workspace's defaults again.
+        Gated on the row actually having been inactive: re-applying the same
+        assignment to an already-active membership (a repeat invitation
+        accept, say) is not a join, and materializing it would resurrect a
+        per-member ceiling an admin deliberately deleted through
+        `/v1/scoped-budgets`.
 
         Each target workspace is locked (`WorkspaceRepository.lock`) before
         its create-or-revive-and-materialize step, same as
@@ -574,8 +579,10 @@ class OrganizationService:
             await workspaces.lock(workspace_id)
             existing = existing_by_workspace.get(workspace_id)
             if existing is not None:
+                was_inactive = existing.status != "active"
                 revived = await members.update(existing, WorkspaceMemberUpdate(role=role, status="active"))
-                await budget_defaults.materialize_for_member(revived)
+                if was_inactive:
+                    await budget_defaults.materialize_for_member(revived)
                 continue
             member = await members.create(workspace_id=workspace_id, user_id=user_id, role=role)
             await budget_defaults.materialize_for_member(member)
