@@ -6,26 +6,41 @@ its SHA-256 hash stored in the ``dashboard_sessions`` table. This lets a
 sign-in survive tab closes and browser restarts without ever persisting the
 master key (or any JS-readable credential) in the browser.
 
+Every session names the identity it was minted for, so it resolves a caller and
+that caller's active organization rather than only proving the master key was
+presented once. Master-key sign-in binds the session to the deployment's
+bootstrap operator (`services.tenancy.provisioning_service`); a per-user sign-in
+flow binds it to whoever authenticated.
+
+An opaque token, deliberately, rather than the platform's JWT ``Token``: this
+session is revocable server-side, which a bearer JWT is not, and the cookie,
+HTTPS and rate-limit machinery around it already works. otari-ai#1716 settled
+that sessions are the steady-state dashboard login, so the platform's JWT does
+not survive the rehome (see ``docs/access-control.md``).
+
 Sessions live in the database, not process memory, so every worker and replica
 accepts them and a revocation is seen everywhere. They expire on a TTL
-(``dashboard_session_ttl_hours``) and are revoked on sign-out and on master-key
-rotation.
+(``dashboard_session_ttl_hours``) and are revoked on sign-out, on master-key
+rotation, and (through the foreign key) when their identity is deleted.
 """
 
 import hashlib
 import secrets
+import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 from fastapi import Request, Response
-from sqlalchemy import delete, update
+from sqlalchemy import delete, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import DashboardSession, RuntimeSetting
+from gateway.models.tenancy import User
 from gateway.services.master_key_service import hash_master_key
 
 SESSION_COOKIE_NAME = "otari_dashboard_session"
@@ -47,8 +62,14 @@ def _as_utc(value: datetime) -> datetime:
     return value if value.tzinfo is not None else value.replace(tzinfo=UTC)
 
 
-async def create_dashboard_session(db: AsyncSession, ttl_hours: int) -> tuple[str, datetime]:
-    """Stage a new session row and return ``(token, expires_at)``.
+async def create_dashboard_session(
+    db: AsyncSession, ttl_hours: int, *, user_id: uuid.UUID
+) -> tuple[str, datetime]:
+    """Stage a new session row for ``user_id`` and return ``(token, expires_at)``.
+
+    ``user_id`` names the tenancy identity the session speaks for, and is
+    required rather than defaulted: a session that names nobody cannot resolve a
+    caller, which is the reason the column exists.
 
     Expired rows are pruned opportunistically here, so the table stays small
     without a background task. The caller owns the transaction and must commit
@@ -58,16 +79,51 @@ async def create_dashboard_session(db: AsyncSession, ttl_hours: int) -> tuple[st
     await db.execute(delete(DashboardSession).where(DashboardSession.expires_at < now))
     token = f"{_SESSION_TOKEN_PREFIX}{secrets.token_urlsafe(32)}"
     expires_at = now + timedelta(hours=ttl_hours)
-    db.add(DashboardSession(token_hash=hash_session_token(token), created_at=now, expires_at=expires_at))
+    db.add(
+        DashboardSession(
+            token_hash=hash_session_token(token),
+            user_id=user_id,
+            created_at=now,
+            expires_at=expires_at,
+        )
+    )
     return token, expires_at
 
 
-async def is_valid_dashboard_session(db: AsyncSession, token: str) -> bool:
-    """Whether a session token matches a stored, unexpired session."""
-    row = await db.get(DashboardSession, hash_session_token(token))
+async def resolve_dashboard_session(db: AsyncSession, token: str) -> User | None:
+    """Return the identity a stored, unexpired session token speaks for.
+
+    One query joining the session to its identity, rather than two lookups or a
+    lazy ``relationship()`` (which raises ``MissingGreenlet`` on an
+    ``AsyncSession``), because this runs on every cookie-authenticated request.
+
+    Three things make a token resolve to nothing, and all three mean "not
+    authenticated": no such session, an expired one, and one whose identity has
+    been deactivated. That last is why the identity is loaded here rather than
+    trusted from the session row: deactivating an operator has to end their
+    dashboard access, not wait out the TTL.
+
+    Expiry is compared in Python, as the rest of this module does: SQLite hands
+    the stored timestamp back naive, so the check goes through ``_as_utc``.
+    """
+    row = (
+        await db.execute(
+            select(DashboardSession, User)
+            .join(User, col(User.id) == DashboardSession.user_id)
+            .where(DashboardSession.token_hash == hash_session_token(token))
+        )
+    ).first()
     if row is None:
-        return False
-    return _as_utc(row.expires_at) >= datetime.now(UTC)
+        return None
+    # Annotated rather than tuple-unpacked: a two-entity ``Row`` types as ``Any``
+    # under mypy strict, and the return type is what callers rely on.
+    session: DashboardSession = row[0]
+    identity: User = row[1]
+    if _as_utc(session.expires_at) < datetime.now(UTC):
+        return None
+    if not identity.is_active:
+        return None
+    return identity
 
 
 async def revoke_dashboard_session(db: AsyncSession, token: str) -> None:

@@ -528,6 +528,11 @@ put it behind HTTPS, as the security notes below describe.
   server, expires the cookie, and clears any cached admin data. Rotating the
   master key revokes every session and re-mints the one you are using, so other
   signed-in browsers are logged out.
+- **A session is signed in as someone.** It names the operator identity it was
+  minted for, which is what the Organization pages scope themselves to; see
+  [Access control](access-control.md#dashboard-sessions-and-identity). Deleting
+  or deactivating that identity signs its browsers out immediately rather than
+  when the cookie expires.
 - **Log out on a machine you share.** A session runs for its full
   `dashboard_session_ttl_hours` with no idle timeout, so an unattended browser
   stays signed in until the cookie expires. Use **Log out** when you are done on

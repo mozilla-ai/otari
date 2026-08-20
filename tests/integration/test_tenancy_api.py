@@ -174,13 +174,21 @@ def test_the_dashboard_session_cookie_also_authenticates(
     test_config: Any,
     master_key_header: dict[str, str],
 ) -> None:
-    """The tenancy routes accept what the rest of the management API accepts."""
+    """The tenancy routes accept what the rest of the management API accepts.
+
+    And resolve the same identity from it: a session names the operator it was
+    minted for (#647), so the cookie answers for the organization the master key
+    answers for rather than for whatever provisioning happens to run next.
+    """
     signed_in = client.post("/v1/auth/session", json={"master_key": test_config.master_key})
     assert signed_in.status_code == 200, signed_in.text
 
     response = client.get("/v1/organizations/me")
 
     assert response.status_code == 200, response.text
+    by_key = client.get("/v1/organizations/me", headers=master_key_header)
+    assert signed_in.json()["active_organization_id"] == by_key.json()["organization"]["id"]
+    assert response.json()["organization"]["id"] == by_key.json()["organization"]["id"]
 
 
 @pytest.mark.parametrize(

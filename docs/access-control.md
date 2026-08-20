@@ -118,6 +118,14 @@ Removing a member suspends their membership rather than deleting it, which keeps
 
 Granting the `owner` role is an owner's to give. An admin manages members, workspaces and roles, and cannot promote anyone (themselves included) to owner, nor add one.
 
+### Dashboard sessions and identity
+
+Signing in to the dashboard exchanges the master key for a session: an opaque token in an HttpOnly cookie, stored only as a SHA-256 hash, revocable server-side, expiring on `dashboard_session_ttl_hours`. Each session names the identity it was minted for, so a cookie-authenticated request resolves a user and, through that user's `active_organization_id`, the organization it is acting in. `POST /v1/auth/session` returns both ids alongside the expiry.
+
+Master-key sign-in binds the session to the operator identity described above, which is the same identity a request carrying the master key in a header resolves to, so the two credentials answer for the same organization. A session is revoked on sign-out, on master-key rotation (every session, with the rotating tab's own re-minted for the same identity), when the master key changes across a restart, and when the identity it names is deleted or deactivated. Sign-in flows that authenticate a person rather than the deployment are a separate track; they mint the same kind of session, bound to whoever signed in.
+
+An opaque session token is the settled shape here, not a stopgap: it is revocable, which a bearer JWT is not, and [mozilla-ai/otari-ai#1716](https://github.com/mozilla-ai/otari-ai/issues/1716) settled that sessions are the steady-state dashboard login. **The platform's JWT `Token` therefore does not survive the rehome.** Anything on the platform frontend that reads or stores a bearer token changes when its pages arrive: the credential is an HttpOnly cookie the page's own script cannot read, sent automatically and same-origin only, so there is no token to attach to a header and no expiry to decode out of a payload. Sign-in state comes from the session endpoint's response and from a 401 bounce, not from inspecting a token.
+
 ### Adopting an existing tenancy
 
 Provisioning adopts an organization whose slug is `default`, which is the one it would have created itself. It cannot adopt any other, because every route is scoped to the organization the operator identity is currently pointed at, and there is no route to list, switch, or fetch an organization by id. So an organization this deployment did not provision is unreachable through the API until the operator identity points at it.

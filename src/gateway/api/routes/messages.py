@@ -17,7 +17,13 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db_if_needed, get_log_writer, verify_api_key_or_master_key
+from gateway.api.deps import (
+    get_config,
+    get_db_if_needed,
+    get_log_writer,
+    get_session_identity,
+    verify_api_key_or_master_key,
+)
 from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages
 from gateway.api.routes._normalize import normalize_request_messages
 from gateway.api.routes._pipeline import (
@@ -716,7 +722,9 @@ async def count_message_tokens(
         else:
             if db is None:
                 raise _anthropic_error(_ERR_API, DB_UNAVAILABLE_DETAIL, status.HTTP_500_INTERNAL_SERVER_ERROR)
-            await verify_api_key_or_master_key(raw_request, db, config)
+            # Resolved explicitly: a direct call gets no dependency injection.
+            session_identity = await get_session_identity(raw_request, db, config)
+            await verify_api_key_or_master_key(raw_request, db, config, session_identity)
     except HTTPException as exc:
         # Keep /v1/messages/count_tokens auth errors in the Anthropic envelope too.
         raise _ensure_anthropic_error(exc) from exc

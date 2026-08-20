@@ -435,7 +435,7 @@
               },
               "raw": "{\n  \"master_key\": \"string\"\n}"
             },
-            "description": "Verify the master key and set the HttpOnly session cookie.\n\nThe rate-limit check deliberately runs only after a failed verification,\nnot before it: a pre-verification gate can't know whether *this* attempt\nwould have succeeded, so once an IP has used up its failure quota it\nwould end up blocking that IP's legitimate owner too, not just further\nattackers. The issue this implements explicitly rules that out. The\nDB/hash lookup this exposes to repeated attempts only runs when no fixed\nmaster_key is configured (the auto-generated bootstrap-key path); with a\nconfigured master_key, verification is a constant-time string compare,\nnot a DB round trip.",
+            "description": "Verify the master key and set the HttpOnly session cookie.\n\nThe session is bound to the bootstrap operator identity, so every request it\nlater authenticates resolves a user and that user's active organization\nrather than only \"the master key was presented once\". The response names\nboth, so a client knows who it is signed in as without a second call.\n\nThe rate-limit check deliberately runs only after a failed verification,\nnot before it: a pre-verification gate can't know whether *this* attempt\nwould have succeeded, so once an IP has used up its failure quota it\nwould end up blocking that IP's legitimate owner too, not just further\nattackers. The issue this implements explicitly rules that out. The\nDB/hash lookup this exposes to repeated attempts only runs when no fixed\nmaster_key is configured (the auto-generated bootstrap-key path); with a\nconfigured master_key, verification is a constant-time string compare,\nnot a DB round trip.",
             "header": [
               {
                 "key": "Content-Type",
@@ -3342,7 +3342,7 @@
         {
           "name": "Rotate Master Key",
           "request": {
-            "description": "Regenerate the database-backed master key and invalidate the old one.\n\nOnly the first-run generated master key can be rotated here. When a master\nkey is supplied through config or ``OTARI_MASTER_KEY``, the dashboard cannot\ninvalidate it; the operator must change that value and restart instead.\n\nEvery dashboard session is revoked with the rotation (a session only proves\npossession of the now-dead key); the caller's own session is re-minted under\nthe new key so the tab that performed the rotation stays signed in.",
+            "description": "Regenerate the database-backed master key and invalidate the old one.\n\nOnly the first-run generated master key can be rotated here. When a master\nkey is supplied through config or ``OTARI_MASTER_KEY``, the dashboard cannot\ninvalidate it; the operator must change that value and restart instead.\n\nEvery dashboard session is revoked with the rotation (a session only proves\npossession of the now-dead key); the caller's own session is re-minted under\nthe new key, for the same identity it named, so the tab that performed the\nrotation stays signed in as who it was. A caller that authenticated with a\nheader key has no session identity to re-mint for, so it is not handed one:\nit was not signed in to the dashboard to begin with.",
             "header": [],
             "method": "POST",
             "url": {

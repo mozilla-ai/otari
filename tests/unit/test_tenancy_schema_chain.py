@@ -13,9 +13,11 @@ is the only coverage of that path. Driven against a real file database rather
 than in-memory because batch mode's rebuild is what is under test.
 
 The later revisions that reshape the same tables are exercised here too, for the
-same reason: the workspace scoping that rebuilds four request-plane tables, and
-the credential columns added to ``user``, whose downgrade depends on SQLite's
-refusal to drop an indexed column.
+same reason: the workspace scoping that rebuilds four request-plane tables, the
+credential columns added to ``user``, whose downgrade depends on SQLite's refusal
+to drop an indexed column, and the identity column added to
+``dashboard_sessions``, which rebuilds that table to tighten a column to NOT NULL
+and point it at ``user``.
 """
 
 import json
@@ -40,6 +42,12 @@ _ALEMBIC_DIR = Path(__file__).resolve().parents[2] / "alembic"
 _TENANCY_REVISION = "c4b6d8e0f2a3"
 _PREVIOUS_REVISION = "b2d4f6a8c0e1"
 _TENANCY_TABLES = {"user", "organization", "organization_member", "workspace", "workspace_member"}
+
+_SESSION_IDENTITY_REVISION = "b6d8f0a2c4e7"
+_BEFORE_SESSION_IDENTITY = "7ff4e082eb0c"
+_SESSION_USER_INDEX = "ix_dashboard_sessions_user_id"
+_SESSION_EXPIRY_INDEX = "ix_dashboard_sessions_expires_at"
+BOOTSTRAP_IDENTITY_KEY = "tenancy_bootstrap_user_id"
 
 _CREDENTIAL_REVISION = "f2a4c6d8b0e3"
 _BEFORE_CREDENTIALS = "a3c7e1b9d5f2"
@@ -400,3 +408,136 @@ def test_the_revision_chain_has_one_head() -> None:
     heads = ScriptDirectory.from_config(_alembic_config("sqlite://")).get_heads()
 
     assert len(heads) == 1, heads
+
+
+def _insert_session(connection: Connection, token_hash: str) -> None:
+    """Store one pre-#647 dashboard session: a token hash and its two timestamps."""
+    connection.execute(
+        text(
+            "INSERT INTO dashboard_sessions (token_hash, created_at, expires_at) "
+            "VALUES (:hash, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+        ),
+        {"hash": token_hash},
+    )
+
+
+def _mark_bootstrap_identity(connection: Connection, value: str) -> None:
+    """Point the provisioning marker at ``value``, in the dashed form it holds."""
+    connection.execute(
+        text("INSERT INTO runtime_settings (key, value, updated_at) VALUES (:key, :value, CURRENT_TIMESTAMP)"),
+        {"key": BOOTSTRAP_IDENTITY_KEY, "value": value},
+    )
+
+
+def _at_revision(tmp_path: Path, name: str, revision: str) -> tuple[Config, Engine]:
+    """A SQLite database migrated to one revision, for a step-by-step upgrade."""
+    url = f"sqlite:///{tmp_path / name}"
+    config = _alembic_config(url)
+    command.upgrade(config, revision)
+    return config, create_engine(url)
+
+
+def test_a_live_session_is_bound_to_the_bootstrap_operator(tmp_path: Path) -> None:
+    """The signed-in operator stays signed in across the upgrade.
+
+    ``user_id`` is NOT NULL, so an existing session has to be attributed to
+    someone, and the only right answer is the identity master-key auth already
+    resolves to: the one the provisioning marker names.
+    """
+    config, engine = _at_revision(tmp_path, "session-backfill.db", _BEFORE_SESSION_IDENTITY)
+    with engine.begin() as connection:
+        identity = _insert_identity(connection)
+        _mark_bootstrap_identity(connection, str(uuid.UUID(identity)))
+        _insert_session(connection, "hash-of-a-live-session")
+
+    command.upgrade(config, _SESSION_IDENTITY_REVISION)
+
+    with engine.begin() as connection:
+        bound = connection.execute(text("SELECT token_hash, user_id FROM dashboard_sessions")).one()
+    assert bound == ("hash-of-a-live-session", identity)
+    engine.dispose()
+
+
+def test_a_session_with_nobody_to_name_is_revoked(tmp_path: Path) -> None:
+    """A deployment that never served a tenancy request has no identity to bind to.
+
+    Provisioning is lazy, so there is nothing to attribute the row to and the
+    column cannot be null: the session is revoked and the operator signs in once
+    more, which is what a master-key rotation already does to them.
+    """
+    config, engine = _at_revision(tmp_path, "session-unattributed.db", _BEFORE_SESSION_IDENTITY)
+    with engine.begin() as connection:
+        _insert_session(connection, "hash-of-an-unattributed-session")
+
+    command.upgrade(config, _SESSION_IDENTITY_REVISION)
+
+    with engine.begin() as connection:
+        assert connection.execute(text("SELECT COUNT(*) FROM dashboard_sessions")).scalar_one() == 0
+    engine.dispose()
+
+
+def test_a_marker_naming_a_missing_identity_revokes_rather_than_failing(tmp_path: Path) -> None:
+    """The marker can outlive the row it names, and the runtime tolerates that.
+
+    Binding a session to it would fail the foreign key mid-upgrade, so the
+    revision checks that the identity exists rather than trusting the marker.
+    """
+    config, engine = _at_revision(tmp_path, "session-stale-marker.db", _BEFORE_SESSION_IDENTITY)
+    with engine.begin() as connection:
+        _mark_bootstrap_identity(connection, str(uuid.uuid4()))
+        _insert_session(connection, "hash-of-a-session-whose-operator-is-gone")
+
+    command.upgrade(config, _SESSION_IDENTITY_REVISION)
+
+    with engine.begin() as connection:
+        assert connection.execute(text("SELECT COUNT(*) FROM dashboard_sessions")).scalar_one() == 0
+    engine.dispose()
+
+
+def test_the_session_identity_column_cascades_from_its_identity(sqlite_at_head: tuple[Config, Engine]) -> None:
+    """Deleting an identity revokes its sessions instead of orphaning them."""
+    _, engine = sqlite_at_head
+    foreign_keys = [
+        fk for fk in inspect(engine).get_foreign_keys("dashboard_sessions") if fk["referred_table"] == "user"
+    ]
+
+    assert [tuple(fk["constrained_columns"]) for fk in foreign_keys] == [("user_id",)]
+    assert foreign_keys[0]["options"].get("ondelete") == "CASCADE"
+
+
+def test_the_session_identity_revision_round_trips(sqlite_at_head: tuple[Config, Engine]) -> None:
+    """Down drops the column and its index; up puts them back.
+
+    The expiry index is the one that has to survive both directions: the table is
+    rebuilt in each, and a rebuild driven by reflection alone is what loses it
+    (hence ``copy_from`` in the revision).
+    """
+    config, engine = sqlite_at_head
+
+    command.downgrade(config, _BEFORE_SESSION_IDENTITY)
+
+    inspector = inspect(engine)
+    columns = {column["name"] for column in inspector.get_columns("dashboard_sessions")}
+    indexes = {index["name"] for index in inspector.get_indexes("dashboard_sessions")}
+    assert "user_id" not in columns
+    assert _SESSION_USER_INDEX not in indexes
+    assert _SESSION_EXPIRY_INDEX in indexes
+
+    command.upgrade(config, _SESSION_IDENTITY_REVISION)
+
+    inspector = inspect(engine)
+    assert "user_id" in {column["name"] for column in inspector.get_columns("dashboard_sessions")}
+    assert {_SESSION_USER_INDEX, _SESSION_EXPIRY_INDEX} <= {
+        index["name"] for index in inspector.get_indexes("dashboard_sessions")
+    }
+
+
+def test_the_migrated_session_table_matches_the_model(sqlite_at_head: tuple[Config, Engine]) -> None:
+    """Hand-written revision, so nothing else would notice the two drifting apart."""
+    _, engine = sqlite_at_head
+
+    declared = SQLModel.metadata.tables["dashboard_sessions"]
+    migrated = {column["name"]: column for column in inspect(engine).get_columns("dashboard_sessions")}
+
+    assert set(migrated) == set(declared.columns.keys())
+    assert migrated["user_id"]["nullable"] is False

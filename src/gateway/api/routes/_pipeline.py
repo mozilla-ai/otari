@@ -55,7 +55,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import verify_api_key_or_master_key
+from gateway.api.deps import get_session_identity, verify_api_key_or_master_key
 from gateway.api.routes._attempts import walk_attempts
 from gateway.api.routes._helpers import apply_input_guardrails, resolve_user_id
 from gateway.api.routes._platform import (
@@ -1083,7 +1083,10 @@ async def resolve_request_context(
     else:
         if db is None:
             raise adapter.error(500, DB_UNAVAILABLE_DETAIL, ErrorKind.API)
-        api_key, is_master_key = await verify_api_key_or_master_key(raw_request, db, config)
+        # The dashboard session cookie is resolved explicitly here: this is a
+        # direct call rather than a route dependency, so FastAPI cannot inject it.
+        session_identity = await get_session_identity(raw_request, db, config)
+        api_key, is_master_key = await verify_api_key_or_master_key(raw_request, db, config, session_identity)
         api_key_id = api_key.id if api_key else None
         try:
             user_id = resolve_user_id(

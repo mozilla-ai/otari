@@ -356,18 +356,35 @@ class RuntimeSetting(Base):
 
 
 class DashboardSession(Base):
-    """A server-side admin-dashboard sign-in session.
+    """A server-side admin-dashboard sign-in session, held by one identity.
 
     Minted when an operator signs in to the dashboard with the master key: the
     browser holds only an opaque token in an HttpOnly cookie and this table
     stores the token's SHA-256 hash, so neither the master key nor a usable
     session credential is ever persisted in JS-readable storage. Sessions
     expire on a TTL and are revoked on sign-out and on master-key rotation.
+
+    ``user_id`` is what lets a session resolve a caller rather than only prove
+    that the master key was presented once. It names a tenancy identity
+    (`models.tenancy.User`), whose ``active_organization_id`` is the
+    organization the session acts in, so a tenancy surface reads its scope off
+    the session. Master-key sign-in binds the session to the deployment's
+    bootstrap operator; a per-user sign-in flow binds it to whoever
+    authenticated.
+
+    NOT NULL on purpose: a session that names nobody cannot answer "who is
+    calling", which is the whole point of the column, and the migration that
+    added it bound existing sessions to that same bootstrap operator. CASCADE
+    on the foreign key, so deleting an identity revokes its sessions rather
+    than leaving a live cookie pointing at a row that is gone.
     """
 
     __tablename__ = "dashboard_sessions"
 
     token_hash: Mapped[str] = mapped_column(primary_key=True)
+    user_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True
+    )
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), index=True)
 

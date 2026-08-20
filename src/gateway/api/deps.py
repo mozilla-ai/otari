@@ -15,7 +15,7 @@ from gateway.log_config import logger
 from gateway.metrics import record_auth_failure
 from gateway.models.entities import APIKey
 from gateway.models.tenancy import User as TenancyUser
-from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, is_valid_dashboard_session
+from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
 from gateway.services.file_store import FileStore
 from gateway.services.log_writer import LogWriter
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
@@ -191,7 +191,9 @@ def _header_credentials_present(request: Request) -> bool:
     Header credentials always win over the dashboard session cookie: an API
     client that sends a key gets exactly today's behavior (including failures),
     and the cookie is only consulted for requests that present nothing else,
-    i.e. the browser-driven dashboard.
+    i.e. the browser-driven dashboard. ``get_session_identity`` applies that
+    rule, so a cookie is never resolved for a request that carries a header
+    credential.
     """
     return bool(
         request.headers.get(API_KEY_HEADER)
@@ -207,24 +209,35 @@ def _header_credentials_present(request: Request) -> bool:
 _COOKIE_SAFE_FETCH_SITES = ("same-origin", "none")
 
 
-async def _session_cookie_authenticates(request: Request, config: GatewayConfig, db: AsyncSession) -> bool:
-    """Whether a valid dashboard session cookie grants master-key authority.
+async def get_session_identity(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+) -> TenancyUser | None:
+    """The identity a valid dashboard session cookie authenticates, or None.
+
+    A session cookie grants master-key authority *and* names who is using it, so
+    this is both the credential check and the identity resolution: the callers
+    below treat a non-None result as authenticated, and ``get_current_identity``
+    reuses the same resolved identity. Declared as a dependency rather than
+    called directly so FastAPI's per-request cache means one lookup however many
+    of them a route pulls in.
 
     ``SameSite=Strict`` on the cookie is the primary CSRF control; the
     Sec-Fetch-Site check is belt-and-braces for clients that send the header.
     Standalone-only: hybrid mode has no dashboard or management API.
     """
-    if config.is_hybrid_mode:
-        return False
+    if config.is_hybrid_mode or _header_credentials_present(request):
+        return None
     token = request.cookies.get(SESSION_COOKIE_NAME)
     if not token:
-        return False
+        return None
     fetch_site = request.headers.get("Sec-Fetch-Site")
     if fetch_site is not None and fetch_site not in _COOKIE_SAFE_FETCH_SITES:
         record_auth_failure("cross_site_cookie")
-        return False
+        return None
     try:
-        return await is_valid_dashboard_session(db, token)
+        return await resolve_dashboard_session(db, token)
     except SQLAlchemyError as exc:
         record_auth_failure("db_error")
         raise HTTPException(
@@ -286,22 +299,27 @@ async def verify_master_key(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
 ) -> str | None:
     """Verify master key from Otari-Key header or the dashboard session cookie.
 
     Args:
         request: FastAPI request object
+        db: Database session
         config: Gateway configuration
+        session_identity: The identity behind a dashboard session cookie, if any
 
     Returns:
         The raw master key when header-authenticated, or None when a dashboard
         session cookie authenticated the request (the raw key is not available).
+        Which identity that session speaks for is read with
+        ``get_current_identity``, not from this return value.
 
     Raises:
         HTTPException: If master key is not configured or invalid
 
     """
-    if not _header_credentials_present(request) and await _session_cookie_authenticates(request, config, db):
+    if session_identity is not None:
         return None
     token = _extract_bearer_token(request, config)
 
@@ -327,6 +345,7 @@ async def verify_api_key_or_master_key(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
 ) -> tuple[APIKey | None, bool]:
     """Verify either API key or master key from Otari-Key header.
 
@@ -337,6 +356,7 @@ async def verify_api_key_or_master_key(
         request: FastAPI request object
         db: Database session
         config: Gateway configuration
+        session_identity: The identity behind a dashboard session cookie, if any
 
     Returns:
         Tuple of (APIKey object or None, is_master_key boolean)
@@ -345,7 +365,7 @@ async def verify_api_key_or_master_key(
         HTTPException: If key is invalid, inactive, or expired
 
     """
-    if not _header_credentials_present(request) and await _session_cookie_authenticates(request, config, db):
+    if session_identity is not None:
         return None, True
 
     token = _extract_bearer_token(request, config)
@@ -371,22 +391,30 @@ async def get_db_if_needed(
 
 async def get_current_identity(
     db: Annotated[AsyncSession, Depends(get_db)],
+    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
     _master_key: Annotated[str | None, Depends(verify_master_key)],
 ) -> TenancyUser:
     """Resolve the tenancy identity acting on this request.
 
-    Standalone Otari authenticates an operator with the master key (or the
-    dashboard session cookie minted from it), which names no user, while every
-    tenancy surface needs an identity with an active organization and a role.
-    Depending on ``verify_master_key`` first keeps the credential check exactly
-    where the rest of the management API has it; the identity behind that
-    credential is the deployment's bootstrap operator, provisioned on first use
-    (otari-ai#1716 option A, see `gateway.services.tenancy.provisioning_service`).
+    A dashboard session names the identity it was minted for, so a
+    cookie-authenticated request resolves that identity and, through its
+    ``active_organization_id``, the organization it is acting in. No second
+    lookup: ``verify_master_key`` already resolved it through the same cached
+    dependency to decide the cookie authenticates at all.
 
-    Per-session identities land with the sign-in flow that retires the master key
-    as a login. Until then every authenticated caller is the one operator, which
-    is what a single-tenant standalone deployment already means.
+    A header master key names nobody, so it falls back to the deployment's
+    bootstrap operator, provisioned on first use (otari-ai#1716 option A, see
+    `gateway.services.tenancy.provisioning_service`). That is also the identity
+    master-key sign-in binds a session to, so both credentials resolve to the
+    same operator on a standalone deployment; the difference matters once the
+    per-user sign-in flows mint sessions for other identities.
+
+    Depending on ``verify_master_key`` keeps the credential check exactly where
+    the rest of the management API has it, and keeps a request with no credential
+    at all from provisioning anything.
     """
+    if session_identity is not None:
+        return session_identity
     return await ensure_bootstrap_identity(db)
 
 
@@ -409,6 +437,7 @@ __all__ = [
     "get_config",
     "get_current_identity",
     "get_db",
+    "get_session_identity",
     "reset_config",
     "set_config",
     "get_db_if_needed",

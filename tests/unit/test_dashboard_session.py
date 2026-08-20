@@ -1,9 +1,15 @@
-"""Dashboard sign-in sessions: mint, cookie auth, revocation, and rotation.
+"""Dashboard sign-in sessions: mint, identity, cookie auth, revocation, rotation.
 
 Covers the fix for the dashboard losing its sign-in on every tab close or
 browser restart (issue #338): the master key is exchanged once for an HttpOnly
 session cookie that the master-key auth dependencies accept when a request
 carries no header credentials.
+
+It also covers what issue #647 added on top: a session names the identity it was
+minted for, so a cookie-authenticated request resolves a user and that user's
+active organization rather than only proving the master key was presented once.
+The revocation paths are re-asserted here rather than trusted, since binding an
+identity to a session is the change most likely to break them silently.
 """
 
 from datetime import UTC, datetime, timedelta
@@ -11,7 +17,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, update
+from sqlalchemy import create_engine, text, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker
 
@@ -21,6 +27,7 @@ from gateway.main import create_app
 from gateway.models.entities import DashboardSession
 from gateway.services import master_key_service
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
+from gateway.services.tenancy.provisioning_service import BOOTSTRAP_IDENTITY_KEY
 
 MASTER_KEY = "sk-test-master"
 
@@ -233,6 +240,141 @@ def test_rotation_revokes_other_sessions_and_reminting_keeps_the_caller_signed_i
         for stale in (other_tab_session, rotating_session):
             client.cookies.set(SESSION_COOKIE_NAME, stale)
             assert client.get("/v1/settings").status_code == 401
+
+
+def _sessions(config: GatewayConfig) -> list[tuple[str, str]]:
+    """Every stored session as ``(token_hash, user_id)``, read outside the app.
+
+    A sync engine of its own, like the expiry test above: what is under test is
+    the row the request handler committed, not the ORM state of a live session.
+    """
+    engine = create_engine(config.database_url)
+    try:
+        with engine.connect() as connection:
+            return [
+                (str(row[0]), str(row[1]))
+                for row in connection.execute(text("SELECT token_hash, user_id FROM dashboard_sessions"))
+            ]
+    finally:
+        engine.dispose()
+
+
+def test_a_session_names_the_operator_identity(tmp_path: Path) -> None:
+    """The point of #647: the minted row resolves a user, and the response says who.
+
+    The identity is the deployment's bootstrap operator, the same one a header
+    master key resolves to, so both credentials answer for the same organization.
+    """
+    config = _config(tmp_path)
+    with TestClient(create_app(config)) as client:
+        signed_in = client.post("/v1/auth/session", json={"master_key": MASTER_KEY})
+        assert signed_in.status_code == 200, signed_in.text
+        body = signed_in.json()
+
+        operator = client.get("/v1/organizations/me", headers={"Otari-Key": MASTER_KEY})
+        assert operator.status_code == 200, operator.text
+        assert body["active_organization_id"] == operator.json()["organization"]["id"]
+
+        stored = _sessions(config)
+        assert [user_id for _, user_id in stored] == [body["user_id"].replace("-", "")]
+
+
+def test_the_cookie_resolves_that_identity_on_every_later_request(tmp_path: Path) -> None:
+    """A tenancy surface reads its scope off the session, with no key in sight."""
+    with TestClient(create_app(_config(tmp_path))) as client:
+        _sign_in(client)
+
+        by_cookie = client.get("/v1/organizations/me")
+        by_key = client.get("/v1/organizations/me", headers={"Otari-Key": MASTER_KEY})
+
+        assert by_cookie.status_code == 200, by_cookie.text
+        assert by_cookie.json()["organization"]["id"] == by_key.json()["organization"]["id"]
+        assert by_cookie.json()["role"] == "owner"
+
+
+def test_deactivating_the_identity_ends_its_sessions(tmp_path: Path) -> None:
+    """Deactivation has to end dashboard access now, not when the TTL runs out.
+
+    Which is why the identity is loaded on every cookie-authenticated request
+    rather than trusted from the session row.
+    """
+    config = _config(tmp_path)
+    with TestClient(create_app(config)) as client:
+        _sign_in(client)
+        assert client.get("/v1/settings").status_code == 200
+
+        engine = create_engine(config.database_url)
+        with engine.begin() as connection:
+            connection.execute(text('UPDATE "user" SET is_active = 0'))
+        engine.dispose()
+
+        assert client.get("/v1/settings").status_code == 401
+
+
+def test_deleting_the_identity_revokes_its_sessions(tmp_path: Path) -> None:
+    """The foreign key is CASCADE, so no cookie outlives the identity it names.
+
+    ``PRAGMA foreign_keys`` is enabled on this connection by hand: the gateway's
+    own engine sets it (``core.database``), and a plain ``create_engine`` here
+    would otherwise leave the session row behind with SQLite's default off.
+    """
+    config = _config(tmp_path)
+    with TestClient(create_app(config)) as client:
+        _sign_in(client)
+
+        engine = create_engine(config.database_url)
+        with engine.begin() as connection:
+            connection.execute(text("PRAGMA foreign_keys=ON"))
+            connection.execute(text('DELETE FROM "user"'))
+        engine.dispose()
+
+        assert _sessions(config) == []
+        assert client.get("/v1/settings").status_code == 401
+
+
+def test_a_first_sign_in_provisions_the_identity_it_binds_to(tmp_path: Path) -> None:
+    """Sign-in is the first tenancy-touching request on a fresh deployment.
+
+    Provisioning is lazy, so the session cannot be bound to an identity that
+    exists yet; it has to run before the row is staged. Without that the sign-in
+    would fail its foreign key on every fresh install.
+    """
+    config = _config(tmp_path)
+    with TestClient(create_app(config)) as client:
+        engine = create_engine(config.database_url)
+        with engine.connect() as connection:
+            assert connection.execute(text('SELECT COUNT(*) FROM "user"')).scalar_one() == 0
+
+        signed_in = client.post("/v1/auth/session", json={"master_key": MASTER_KEY})
+        assert signed_in.status_code == 200, signed_in.text
+
+        with engine.connect() as connection:
+            marker = connection.execute(
+                text("SELECT value FROM runtime_settings WHERE key = :key"),
+                {"key": BOOTSTRAP_IDENTITY_KEY},
+            ).scalar_one()
+        engine.dispose()
+
+        assert marker.replace("-", "") == signed_in.json()["user_id"].replace("-", "")
+
+
+def test_rotation_re_mints_the_session_for_the_same_identity(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """Revoke-then-re-mint must not lose track of who the tab was signed in as."""
+    monkeypatch.setattr(master_key_service, "generate_master_key", lambda: "otari-mk-first")
+    config = GatewayConfig(
+        database_url=f"sqlite:///{tmp_path / 'rotation-identity.db'}",
+        require_pricing=False,
+    )
+    with TestClient(create_app(config)) as client:
+        signed_in = client.post("/v1/auth/session", json={"master_key": "otari-mk-first"})
+        assert signed_in.status_code == 200, signed_in.text
+        identity = signed_in.json()["user_id"].replace("-", "")
+
+        monkeypatch.setattr(master_key_service, "generate_master_key", lambda: "otari-mk-second")
+        assert client.post("/v1/settings/master-key/rotate").status_code == 200
+
+        assert [user_id for _, user_id in _sessions(config)] == [identity]
+        assert client.get("/v1/organizations/me").status_code == 200
 
 
 def _rate_limited_config(tmp_path: Path, *, limit: int | None) -> GatewayConfig:

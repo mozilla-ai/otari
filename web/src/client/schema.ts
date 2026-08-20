@@ -316,6 +316,11 @@ export interface paths {
          * Create Session
          * @description Verify the master key and set the HttpOnly session cookie.
          *
+         *     The session is bound to the bootstrap operator identity, so every request it
+         *     later authenticates resolves a user and that user's active organization
+         *     rather than only "the master key was presented once". The response names
+         *     both, so a client knows who it is signed in as without a second call.
+         *
          *     The rate-limit check deliberately runs only after a failed verification,
          *     not before it: a pre-verification gate can't know whether *this* attempt
          *     would have succeeded, so once an IP has used up its failure quota it
@@ -2097,7 +2102,10 @@ export interface paths {
          *
          *     Every dashboard session is revoked with the rotation (a session only proves
          *     possession of the now-dead key); the caller's own session is re-minted under
-         *     the new key so the tab that performed the rotation stays signed in.
+         *     the new key, for the same identity it named, so the tab that performed the
+         *     rotation stays signed in as who it was. A caller that authenticated with a
+         *     header key has no session identity to re-mint for, so it is not handed one:
+         *     it was not signed in to the dashboard to begin with.
          */
         post: operations["rotate_master_key_v1_settings_master_key_rotate_post"];
         delete?: never;
@@ -5757,11 +5765,23 @@ export interface components {
          */
         SessionResponse: {
             /**
+             * Active Organization Id
+             * Format: uuid
+             * @description The organization that identity is acting in, which scopes every tenancy surface.
+             */
+            active_organization_id: string;
+            /**
              * Expires At
              * Format: date-time
              * @description When the session cookie stops being accepted.
              */
             expires_at: string;
+            /**
+             * User Id
+             * Format: uuid
+             * @description The identity this session speaks for.
+             */
+            user_id: string;
         };
         /**
          * SetPricingRequest

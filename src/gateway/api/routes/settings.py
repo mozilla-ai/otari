@@ -22,10 +22,10 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, verify_master_key
+from gateway.api.deps import get_config, get_db, get_session_identity, verify_master_key
 from gateway.core.config import GatewayConfig
+from gateway.models.tenancy import User as TenancyUser
 from gateway.services.dashboard_session_service import (
-    SESSION_COOKIE_NAME,
     apply_session_cookie,
     create_dashboard_session,
     record_session_key_marker,
@@ -380,6 +380,7 @@ async def rotate_master_key(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     authenticated_key: Annotated[str | None, Depends(verify_master_key)],
+    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
 ) -> RotateMasterKeyResponse:
     """Regenerate the database-backed master key and invalidate the old one.
 
@@ -389,7 +390,10 @@ async def rotate_master_key(
 
     Every dashboard session is revoked with the rotation (a session only proves
     possession of the now-dead key); the caller's own session is re-minted under
-    the new key so the tab that performed the rotation stays signed in.
+    the new key, for the same identity it named, so the tab that performed the
+    rotation stays signed in as who it was. A caller that authenticated with a
+    header key has no session identity to re-mint for, so it is not handed one:
+    it was not signed in to the dashboard to begin with.
     """
     if config.master_key is not None:
         raise HTTPException(
@@ -416,9 +420,9 @@ async def rotate_master_key(
         # Keep the startup key-change check in step, so a restart after this
         # rotation does not revoke the session re-minted below.
         await record_session_key_marker(db, hashed)
-        if SESSION_COOKIE_NAME in request.cookies:
+        if session_identity is not None:
             session_token, session_expires_at = await create_dashboard_session(
-                db, config.dashboard_session_ttl_hours
+                db, config.dashboard_session_ttl_hours, user_id=session_identity.id
             )
         await db.commit()
     except MasterKeyRotationConflictError as exc:

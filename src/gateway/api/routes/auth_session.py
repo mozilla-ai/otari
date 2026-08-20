@@ -4,9 +4,17 @@
 held in an HttpOnly cookie, so the dashboard never persists the raw key in the
 browser and a sign-in survives tab closes and restarts. ``DELETE`` is sign-out.
 The cookie is honored by the master-key auth dependencies in
-``gateway.api.deps`` when a request carries no header credentials.
+``gateway.api.deps`` when a request carries no header credentials, and it names
+the identity it was minted for, so those dependencies resolve a caller from it.
+
+The master key names nobody, so a session minted here speaks for the
+deployment's bootstrap operator, which is the same identity a header master key
+resolves to (`gateway.services.tenancy.provisioning_service`). A session bound
+to some other identity is what the per-user sign-in flows add; nothing about the
+cookie or this contract changes when they do.
 """
 
+import uuid
 from datetime import datetime
 from typing import Annotated
 
@@ -28,6 +36,7 @@ from gateway.services.dashboard_session_service import (
     request_is_https,
     revoke_dashboard_session,
 )
+from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 
 router = APIRouter(prefix="/v1/auth/session", tags=["auth"])
 
@@ -42,6 +51,10 @@ class SessionResponse(BaseModel):
     """A freshly minted dashboard session (the token travels only in the cookie)."""
 
     expires_at: datetime = Field(description="When the session cookie stops being accepted.")
+    user_id: uuid.UUID = Field(description="The identity this session speaks for.")
+    active_organization_id: uuid.UUID = Field(
+        description="The organization that identity is acting in, which scopes every tenancy surface."
+    )
 
 
 def _check_login_rate_limit(request: Request) -> None:
@@ -88,6 +101,11 @@ async def create_session(
 ) -> SessionResponse:
     """Verify the master key and set the HttpOnly session cookie.
 
+    The session is bound to the bootstrap operator identity, so every request it
+    later authenticates resolves a user and that user's active organization
+    rather than only "the master key was presented once". The response names
+    both, so a client knows who it is signed in as without a second call.
+
     The rate-limit check deliberately runs only after a failed verification,
     not before it: a pre-verification gate can't know whether *this* attempt
     would have succeeded, so once an IP has used up its failure quota it
@@ -103,7 +121,13 @@ async def create_session(
         _check_login_rate_limit(request)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid master key")
     try:
-        token, expires_at = await create_dashboard_session(db, config.dashboard_session_ttl_hours)
+        # Provisions the tenancy root on a first-ever sign-in, and resolves the
+        # same operator every time after that. It commits its own work, which is
+        # why it runs before the session row is staged rather than beside it.
+        identity = await ensure_bootstrap_identity(db)
+        token, expires_at = await create_dashboard_session(
+            db, config.dashboard_session_ttl_hours, user_id=identity.id
+        )
         await db.commit()
     except SQLAlchemyError:
         await db.rollback()
@@ -114,7 +138,11 @@ async def create_session(
             detail="Database error",
         ) from None
     apply_session_cookie(response, token, expires_at, secure=request_is_https(request))
-    return SessionResponse(expires_at=expires_at)
+    return SessionResponse(
+        expires_at=expires_at,
+        user_id=identity.id,
+        active_organization_id=identity.active_organization_id,
+    )
 
 
 @router.delete("", status_code=status.HTTP_204_NO_CONTENT)
