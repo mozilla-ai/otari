@@ -315,7 +315,7 @@ function InviteMemberForm({ onClose }: { onClose: () => void }) {
             description={
               invitation_mail_ready
                 ? "An email with an accept link is sent here; the membership becomes active once they follow it."
-                : "No mail is configured, so nothing is emailed: you'll get a link to share with them yourself."
+                : "Invitation email is unavailable, so you will get a link to share with them yourself."
             }
           />
           <FilterSelect

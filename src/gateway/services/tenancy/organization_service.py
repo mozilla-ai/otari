@@ -5,9 +5,12 @@ Rehomed from the platform's ``OrganizationService`` plus the membership half of
 the membership constraints, and the response shapes are the platform's; what is
 gone is the depth that has no home in the OSS base yet: mixpanel tracking,
 managed provider-key and default-gateway provisioning, email-domain auto-join,
-emailed invitations, teams, and the org's budget and pricing surfaces. Those
-arrive with their own slices, tracked under mozilla-ai/otari-ai#1452, and this
-service is where they attach.
+teams, and the org's budget and pricing surfaces. Those arrive with their own
+slices, tracked under mozilla-ai/otari-ai#1452, and this service is where they
+attach. Emailed invitations shipped here in mozilla-ai/otari#641 (see
+``invite_active_organization_member_for_user``/``accept_invitation`` below);
+``create_active_organization_member_for_user`` is the older, still-supported
+immediate path this replaced no part of.
 
 One rule runs through every method: a caller only ever acts inside the
 organization their identity is currently pointed at, and no method takes an

@@ -404,6 +404,11 @@ async def test_concurrent_accepts_of_one_invitation_produce_one_active_membershi
     assert len(accepted) == 1
     assert len(already_used) == _RACERS - 1
 
+    # async_db's own invite call above left the membership row resident in this
+    # session's identity map with status "invited"; with expire_on_commit=False,
+    # a plain get() would return that unexpired cached instance rather than
+    # querying the row the race committed through separate sessions.
+    async_db.expire_all()
     membership = await OrganizationMemberRepository(async_db).get(invited.organization_member_id)
     assert membership is not None
     assert membership.status == "active"

@@ -313,7 +313,9 @@ describe("OrganizationMembersPage", () => {
     await user.click(
       await screen.findByRole("button", { name: "Invite member" }),
     )
-    expect(screen.getByText(/No mail is configured/)).toBeInTheDocument()
+    expect(
+      screen.getByText(/Invitation email is unavailable/),
+    ).toBeInTheDocument()
     await user.type(screen.getByLabelText("Email address"), "ada@example.com")
     await user.click(screen.getByRole("button", { name: "Send invitation" }))
 
