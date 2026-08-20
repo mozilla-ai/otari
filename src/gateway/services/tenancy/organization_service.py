@@ -535,9 +535,28 @@ class OrganizationService:
         An existing membership is updated rather than skipped, as the platform's
         own assignment path does: a suspended row that is left alone would leave
         the member listed in a workspace they were just granted while still
-        being refused everything in it.
+        being refused everything in it. Reviving one is materialized exactly
+        as creating one is: a suspended member could have missed a default
+        created while they were out, and the revive is the only signal that
+        they are back to being covered by the workspace's defaults again.
+
+        Each target workspace is locked (`WorkspaceRepository.lock`) before
+        its create-or-revive-and-materialize step, same as
+        `WorkspaceService.add_member`, and in a stable order (`wanted` is
+        walked sorted by id, not in insertion order) so two requests naming
+        the same workspaces in different orders cannot deadlock each other.
+        Imported locally, not at module top: `WorkspaceBudgetDefaultService`
+        reaches back to `OrganizationService` (for its own authorization
+        checks), and importing it at the top of this module would close that
+        into a real cycle. See `tests/unit/test_service_module_imports.py`.
         """
+        from gateway.services.tenancy.workspace_budget_default_service import (
+            WorkspaceBudgetDefaultService,
+        )
+
         members = WorkspaceMemberRepository(self.db)
+        workspaces = WorkspaceRepository(self.db)
+        budget_defaults = WorkspaceBudgetDefaultService(self.db)
         wanted: dict[uuid.UUID, str] = {}
         for assignment in assignments:
             wanted.setdefault(assignment.workspace_id, assignment.role)
@@ -548,12 +567,18 @@ class OrganizationService:
         existing_by_workspace = {
             member.workspace_id: member for member in await members.get_by_workspaces_and_user(wanted, user_id)
         }
-        for workspace_id, role in wanted.items():
+        for workspace_id, role in sorted(wanted.items(), key=lambda item: str(item[0])):
+            # Serialized against a concurrent `WorkspaceBudgetDefaultService.create_default`
+            # on this workspace; see `WorkspaceService.add_member`'s identical lock
+            # for why.
+            await workspaces.lock(workspace_id)
             existing = existing_by_workspace.get(workspace_id)
             if existing is not None:
-                await members.update(existing, WorkspaceMemberUpdate(role=role, status="active"))
+                revived = await members.update(existing, WorkspaceMemberUpdate(role=role, status="active"))
+                await budget_defaults.materialize_for_member(revived)
                 continue
-            await members.create(workspace_id=workspace_id, user_id=user_id, role=role)
+            member = await members.create(workspace_id=workspace_id, user_id=user_id, role=role)
+            await budget_defaults.materialize_for_member(member)
 
     async def invite_active_organization_member_for_user(
         self,

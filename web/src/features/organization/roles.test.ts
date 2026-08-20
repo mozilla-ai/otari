@@ -5,6 +5,7 @@ import {
   asMembershipRole,
   asSettableStatus,
   canManage,
+  canManageWorkspace,
   isOwner,
   MEMBERSHIP_ROLES,
   memberLabel,
@@ -22,6 +23,18 @@ describe("tenancy roles", () => {
     // A context that has not loaded is not a manager: the controls stay off
     // until the server has said what the caller is.
     expect(canManage(undefined)).toBe(false)
+  })
+
+  it("also lets a workspace's own owner or admin manage it, without an organization role", () => {
+    const memberContext = organizationContext({ role: "member" })
+    expect(canManageWorkspace(memberContext, "owner")).toBe(true)
+    expect(canManageWorkspace(memberContext, "admin")).toBe(true)
+    expect(canManageWorkspace(memberContext, "member")).toBe(false)
+    expect(canManageWorkspace(memberContext, undefined)).toBe(false)
+    // The organization arm still applies with no workspace role at all.
+    expect(
+      canManageWorkspace(organizationContext({ role: "owner" }), undefined),
+    ).toBe(true)
   })
 
   it("reserves ownership for the owner role", () => {

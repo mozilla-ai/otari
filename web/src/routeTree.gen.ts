@@ -13,6 +13,7 @@ import { Route as IndexRouteImport } from './routes/index'
 import { Route as SplatRouteImport } from './routes/$'
 import { Route as ActivityRouteImport } from './routes/activity'
 import { Route as AliasesRouteImport } from './routes/aliases'
+import { Route as BudgetDefaultsRouteImport } from './routes/budget-defaults'
 import { Route as BudgetsRouteImport } from './routes/budgets'
 import { Route as DocsRouteImport } from './routes/docs'
 import { Route as KeysRouteImport } from './routes/keys'
@@ -56,6 +57,11 @@ const ActivityRoute = ActivityRouteImport.update({
 const AliasesRoute = AliasesRouteImport.update({
   id: '/aliases',
   path: '/aliases',
+  getParentRoute: () => rootRouteImport,
+} as any)
+const BudgetDefaultsRoute = BudgetDefaultsRouteImport.update({
+  id: '/budget-defaults',
+  path: '/budget-defaults',
   getParentRoute: () => rootRouteImport,
 } as any)
 const BudgetsRoute = BudgetsRouteImport.update({
@@ -185,6 +191,7 @@ export interface FileRoutesByFullPath {
   '/$': typeof SplatRoute
   '/activity': typeof ActivityRoute
   '/aliases': typeof AliasesRoute
+  '/budget-defaults': typeof BudgetDefaultsRoute
   '/budgets': typeof BudgetsRoute
   '/docs': typeof DocsRoute
   '/keys': typeof KeysRoute
@@ -215,6 +222,7 @@ export interface FileRoutesByTo {
   '/$': typeof SplatRoute
   '/activity': typeof ActivityRoute
   '/aliases': typeof AliasesRoute
+  '/budget-defaults': typeof BudgetDefaultsRoute
   '/budgets': typeof BudgetsRoute
   '/docs': typeof DocsRoute
   '/keys': typeof KeysRoute
@@ -244,6 +252,7 @@ export interface FileRoutesById {
   '/$': typeof SplatRoute
   '/activity': typeof ActivityRoute
   '/aliases': typeof AliasesRoute
+  '/budget-defaults': typeof BudgetDefaultsRoute
   '/budgets': typeof BudgetsRoute
   '/docs': typeof DocsRoute
   '/keys': typeof KeysRoute
@@ -276,6 +285,7 @@ export interface FileRouteTypes {
     | '/$'
     | '/activity'
     | '/aliases'
+    | '/budget-defaults'
     | '/budgets'
     | '/docs'
     | '/keys'
@@ -306,6 +316,7 @@ export interface FileRouteTypes {
     | '/$'
     | '/activity'
     | '/aliases'
+    | '/budget-defaults'
     | '/budgets'
     | '/docs'
     | '/keys'
@@ -334,6 +345,7 @@ export interface FileRouteTypes {
     | '/$'
     | '/activity'
     | '/aliases'
+    | '/budget-defaults'
     | '/budgets'
     | '/docs'
     | '/keys'
@@ -365,6 +377,7 @@ export interface RootRouteChildren {
   SplatRoute: typeof SplatRoute
   ActivityRoute: typeof ActivityRoute
   AliasesRoute: typeof AliasesRoute
+  BudgetDefaultsRoute: typeof BudgetDefaultsRoute
   BudgetsRoute: typeof BudgetsRoute
   DocsRoute: typeof DocsRoute
   KeysRoute: typeof KeysRoute
@@ -408,6 +421,13 @@ declare module '@tanstack/react-router' {
       path: '/aliases'
       fullPath: '/aliases'
       preLoaderRoute: typeof AliasesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/budget-defaults': {
+      id: '/budget-defaults'
+      path: '/budget-defaults'
+      fullPath: '/budget-defaults'
+      preLoaderRoute: typeof BudgetDefaultsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/budgets': {
@@ -626,6 +646,7 @@ const rootRouteChildren: RootRouteChildren = {
   SplatRoute: SplatRoute,
   ActivityRoute: ActivityRoute,
   AliasesRoute: AliasesRoute,
+  BudgetDefaultsRoute: BudgetDefaultsRoute,
   BudgetsRoute: BudgetsRoute,
   DocsRoute: DocsRoute,
   KeysRoute: KeysRoute,

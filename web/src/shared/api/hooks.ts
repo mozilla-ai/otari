@@ -20,6 +20,7 @@ import type {
   CreateSearchToolRequest,
   CreateStoredProviderRequest,
   CreateUserRequest,
+  CreateWorkspaceBudgetDefaultRequest,
   CreateWorkspaceRequest,
   DashboardBuild,
   DiscoverableModelsResponse,
@@ -69,6 +70,7 @@ import type {
   UpdateStoredProviderRequest,
   UpdateToolSettingsRequest,
   UpdateUserRequest,
+  UpdateWorkspaceBudgetDefaultRequest,
   UpdateWorkspaceRequest,
   UsageBucket,
   UsageCount,
@@ -83,6 +85,7 @@ import type {
   UsageSummary,
   User,
   Workspace,
+  WorkspaceBudgetDefault,
   WorkspaceMember,
   WorkspaceMemberRole,
 } from "@/client"
@@ -1699,6 +1702,88 @@ export function useUpdateWorkspaceMemberRole() {
       // organization context, not from this key, so a roster change that moves
       // the caller in or out of a workspace has to refresh it too.
       void queryClient.invalidateQueries({ queryKey: [ORGANIZATIONS] })
+    },
+  })
+}
+
+// A workspace's budget-default templates. Nested under the workspaces key so
+// deleting a workspace drops them with it, same as `useWorkspaceMembers`.
+export function useWorkspaceBudgetDefaults(workspaceId: string | null) {
+  return useQuery({
+    queryKey: [WORKSPACES, workspaceId, "budget-defaults"],
+    queryFn: () =>
+      fetchAllPaged<WorkspaceBudgetDefault>(
+        `/v1/workspaces/${encodeURIComponent(workspaceId as string)}/member-budget-policies`,
+      ),
+    enabled: workspaceId !== null,
+    staleTime: 60_000,
+  })
+}
+
+export function useCreateWorkspaceBudgetDefault() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      body,
+    }: {
+      workspaceId: string
+      body: CreateWorkspaceBudgetDefaultRequest
+    }) =>
+      apiFetch<WorkspaceBudgetDefault>(
+        `/v1/workspaces/${encodeURIComponent(workspaceId)}/member-budget-policies`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+    onSuccess: (_data, { workspaceId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: [WORKSPACES, workspaceId, "budget-defaults"],
+      })
+    },
+  })
+}
+
+export function useUpdateWorkspaceBudgetDefault() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      defaultId,
+      body,
+    }: {
+      workspaceId: string
+      defaultId: string
+      body: UpdateWorkspaceBudgetDefaultRequest
+    }) =>
+      apiFetch<WorkspaceBudgetDefault>(
+        `/v1/workspaces/${encodeURIComponent(workspaceId)}/member-budget-policies/${encodeURIComponent(defaultId)}`,
+        { method: "PATCH", body: JSON.stringify(body) },
+      ),
+    onSuccess: (_data, { workspaceId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: [WORKSPACES, workspaceId, "budget-defaults"],
+      })
+    },
+  })
+}
+
+export function useDeleteWorkspaceBudgetDefault() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      defaultId,
+    }: {
+      workspaceId: string
+      defaultId: string
+    }) =>
+      apiFetch<void>(
+        `/v1/workspaces/${encodeURIComponent(workspaceId)}/member-budget-policies/${encodeURIComponent(defaultId)}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: (_data, { workspaceId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: [WORKSPACES, workspaceId, "budget-defaults"],
+      })
     },
   })
 }

@@ -1156,3 +1156,63 @@ class OrganizationModelPricing(Base):
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
+
+
+class WorkspaceBudgetDefault(Base):
+    """A workspace-level template for a per-member ``ScopedBudget``.
+
+    ``scoped_budgets`` holds concrete ceilings; this table has no counters of
+    its own and enforces nothing directly. It is **materialized**: creating one
+    on a workspace that already has members, or a member joining a workspace
+    that already has one, stages a ``ScopedBudget(scope_type="workspace_member",
+    scope_id=<member id>)`` row for each (see
+    ``services/tenancy/workspace_budget_default_service.py``). A member with an
+    existing ceiling for the same ``provider_key_id`` is left alone; a
+    member-specific override always wins over the template.
+
+    Same two-axis shape as ``ScopedBudget``: ``workspace_id`` is who the
+    template belongs to, ``provider_key_id`` optionally narrows it to one
+    provider instance (NULL applies to all of them). Unlike ``ScopedBudget``,
+    ``workspace_id`` is a real foreign key: a template has exactly one owner
+    and nothing else names it, so it is deleted with the workspace rather than
+    requiring the same explicit cleanup ``ScopedBudget`` needs (see
+    ``WorkspaceService._delete_scoped_budgets_for``).
+    """
+
+    __tablename__ = "workspace_budget_defaults"
+    __table_args__ = (
+        # Same reasoning as ScopedBudget's two partial indexes: PostgreSQL and
+        # SQLite both treat NULLs as distinct in a plain UNIQUE, so a single
+        # index over the pair would enforce nothing on the aggregate (NULL-key)
+        # rows.
+        Index(
+            "uq_workspace_budget_defaults_with_key",
+            "workspace_id",
+            "provider_key_id",
+            unique=True,
+            postgresql_where=text("provider_key_id IS NOT NULL"),
+            sqlite_where=text("provider_key_id IS NOT NULL"),
+        ),
+        Index(
+            "uq_workspace_budget_defaults_no_key",
+            "workspace_id",
+            unique=True,
+            postgresql_where=text("provider_key_id IS NULL"),
+            sqlite_where=text("provider_key_id IS NULL"),
+        ),
+    )
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    provider_key_id: Mapped[str | None] = mapped_column(default=None)
+    name: Mapped[str | None] = mapped_column(default=None)
+    max_budget: Mapped[float | None] = mapped_column(default=None)
+    budget_duration_sec: Mapped[int | None] = mapped_column(default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )

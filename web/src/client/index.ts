@@ -346,4 +346,16 @@ export type InviteOrganizationMemberResult =
 export type InvitationPreview = Schemas["InvitationPreviewPublic"]
 export type AcceptInvitationResult = Schemas["AcceptInvitationResultPublic"]
 
+// A workspace-level template for a per-member `scoped_budgets` ceiling; see
+// `src/gateway/services/tenancy/workspace_budget_default_service.py`. The DTO
+// name is `WorkspaceMemberBudgetPolicy*` on the wire (kept recognizable
+// against otari-ai's own hosted equivalent); the dashboard's own name for the
+// concept is "budget default".
+export type WorkspaceBudgetDefault =
+  Schemas["WorkspaceMemberBudgetPolicyPublic"]
+export type CreateWorkspaceBudgetDefaultRequest =
+  Schemas["WorkspaceMemberBudgetPolicyCreate"]
+export type UpdateWorkspaceBudgetDefaultRequest =
+  Schemas["WorkspaceMemberBudgetPolicyUpdate"]
+
 export type * from "./local"

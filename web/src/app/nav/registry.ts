@@ -163,6 +163,15 @@ const BASE_NAV_SECTIONS = [
         surface: "workspaces",
         icon: FiUsers,
       },
+      // Per-member spend templates for the selected workspace. Gated on the
+      // same surface as Members: a default names members of this workspace and
+      // materializes onto the same `workspace_member` rows the roster reads.
+      {
+        to: "/budget-defaults",
+        label: "Budget defaults",
+        surface: "workspaces",
+        icon: BudgetsIcon,
+      },
     ],
   },
 ] as const satisfies readonly NavSection[]

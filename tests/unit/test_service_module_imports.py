@@ -31,6 +31,13 @@ _MODULES = [
     "gateway.services.tenancy.workspace_service",
     "gateway.services.tenancy.organization_service",
     "gateway.services.tenancy.provisioning_service",
+    # workspace_budget_default_service sits between workspace_service and
+    # organization_service (both reach it, it reaches organization_service and
+    # authorization but never workspace_service), and authorization sits
+    # between workspace_service and organization_service the same way. Pinned
+    # here for the same reason as the two above them.
+    "gateway.services.tenancy.workspace_budget_default_service",
+    "gateway.services.tenancy.authorization",
 ]
 
 

@@ -17,14 +17,16 @@
  * organization and of every workspace in it; both become reachable with the
  * per-user sign-in of otari-ai#1716, which is when to revisit them.
  *
- * - **Workspace-level management is invisible here.** `_require_workspace_
+ * - **`canManage` alone is organization-role-only.** `_require_workspace_
  *   management_access` also grants a caller whose *workspace* membership is an
  *   active owner or admin, so an organization member who owns one workspace may
- *   manage it. Answering that client-side needs the caller's own user id, which
- *   the membership context does not carry: it names the membership row, not the
- *   identity behind it. Resolving it through the roster would make every
- *   workspace control wait on a second query to say what the server will say
- *   anyway, so `canManage` reads the organization role alone.
+ *   manage it. `canManage` itself stays narrower on the organization pages,
+ *   which have no selected workspace to ask about: answering there would need
+ *   the caller's own user id resolved through the roster, which is a second
+ *   query to say what the server will say anyway. `canManageWorkspace` below is
+ *   for the workspace-scoped pages, where `CallerWorkspaceMembershipPublic.role`
+ *   (the switcher's own data, already fetched) already names the caller's
+ *   standing in *that* workspace, with nothing more to resolve.
  * - **Superuser is not on the contract.** The server grants organization
  *   management, and deletion, to `user.is_superuser` whatever their role;
  *   `OrganizationMembershipContextPublic` carries no such field, so nothing here
@@ -93,6 +95,24 @@ const MANAGEMENT_ROLES: readonly string[] = ["owner", "admin"]
 /** Whether the caller's standing in their organization lets them manage it. */
 export function canManage(context: OrganizationContext | undefined): boolean {
   return context !== undefined && MANAGEMENT_ROLES.includes(context.role)
+}
+
+/**
+ * Whether the caller may manage a specific workspace: `canManage`'s
+ * organization arm, or an active owner/admin of that workspace itself.
+ *
+ * `workspaceRole` is the caller's own role in the selected workspace (e.g.
+ * `useSelectedWorkspace().selected?.role`), not a roster entry. See the
+ * module docstring for why that is enough on its own, with no extra request.
+ */
+export function canManageWorkspace(
+  context: OrganizationContext | undefined,
+  workspaceRole: string | undefined,
+): boolean {
+  return (
+    canManage(context) ||
+    (workspaceRole !== undefined && MANAGEMENT_ROLES.includes(workspaceRole))
+  )
 }
 
 /** Whether the caller owns their organization, which is what deleting it takes. */

@@ -10155,6 +10155,209 @@
         "title": "WorkspaceCreate",
         "type": "object"
       },
+      "WorkspaceMemberBudgetPoliciesPublic": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceMemberBudgetPolicyPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "WorkspaceMemberBudgetPoliciesPublic",
+        "type": "object"
+      },
+      "WorkspaceMemberBudgetPolicyCreate": {
+        "description": "Request body for creating a default.",
+        "properties": {
+          "budget_duration_sec": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 315360000.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Period length in seconds; null never resets",
+            "title": "Budget Duration Sec"
+          },
+          "max_budget": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Maximum USD spend per member in the period",
+            "title": "Max Budget"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Admin-facing label",
+            "title": "Name"
+          },
+          "provider_key_id": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Narrow the default to one provider instance; null applies to every provider",
+            "title": "Provider Key Id"
+          }
+        },
+        "title": "WorkspaceMemberBudgetPolicyCreate",
+        "type": "object"
+      },
+      "WorkspaceMemberBudgetPolicyPublic": {
+        "description": "One default and its template values.",
+        "properties": {
+          "budget_duration_sec": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Duration Sec"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "title": "Id",
+            "type": "string"
+          },
+          "max_budget": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Budget"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          },
+          "provider_key_id": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Key Id"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "workspace_id",
+          "provider_key_id",
+          "name",
+          "max_budget",
+          "budget_duration_sec",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "WorkspaceMemberBudgetPolicyPublic",
+        "type": "object"
+      },
+      "WorkspaceMemberBudgetPolicyUpdate": {
+        "description": "Request body for updating a default.\n\nNot retroactive: a member already materialized from this default keeps\nthe value that was in effect when they were materialized. Only a member\nmaterialized after this update sees the new one.",
+        "properties": {
+          "budget_duration_sec": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 315360000.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Budget Duration Sec"
+          },
+          "max_budget": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Budget"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 200,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "title": "WorkspaceMemberBudgetPolicyUpdate",
+        "type": "object"
+      },
       "WorkspaceMemberPublic": {
         "properties": {
           "created_at": {
@@ -18821,6 +19024,275 @@
         "summary": "Update Workspace",
         "tags": [
           "workspaces"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/member-budget-policies": {
+      "get": {
+        "description": "List the budget defaults attached to a workspace. Any member may read it.",
+        "operationId": "list_workspace_budget_defaults_v1_workspaces__workspace_id__member_budget_policies_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of records to return",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMemberBudgetPoliciesPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Workspace Budget Defaults",
+        "tags": [
+          "workspace-member-budget-policies"
+        ]
+      },
+      "post": {
+        "description": "Create a budget default.\n\nMaterializes it into a per-member ``scoped_budgets`` row for every\nexisting active member of the workspace; a member who joins afterwards is\nmaterialized when they join.",
+        "operationId": "create_workspace_budget_default_v1_workspaces__workspace_id__member_budget_policies_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceMemberBudgetPolicyCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMemberBudgetPolicyPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Workspace Budget Default",
+        "tags": [
+          "workspace-member-budget-policies"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/member-budget-policies/{default_id}": {
+      "delete": {
+        "description": "Delete a budget default.\n\nThe per-member ``scoped_budgets`` rows it already materialized are kept;\na member joining afterwards no longer gets one from it.",
+        "operationId": "delete_workspace_budget_default_v1_workspaces__workspace_id__member_budget_policies__default_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "default_id",
+            "required": true,
+            "schema": {
+              "title": "Default Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Workspace Budget Default",
+        "tags": [
+          "workspace-member-budget-policies"
+        ]
+      },
+      "patch": {
+        "description": "Update a budget default's label or limit.\n\nNot retroactive: members already materialized from this default keep\ntheir existing ceiling; only a member materialized afterwards sees the\nnew one.",
+        "operationId": "update_workspace_budget_default_v1_workspaces__workspace_id__member_budget_policies__default_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "default_id",
+            "required": true,
+            "schema": {
+              "title": "Default Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceMemberBudgetPolicyUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceMemberBudgetPolicyPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Workspace Budget Default",
+        "tags": [
+          "workspace-member-budget-policies"
         ]
       }
     },

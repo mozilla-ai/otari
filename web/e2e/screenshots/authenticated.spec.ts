@@ -21,6 +21,11 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
   { route: "/providers", name: "providers", heading: /provider/i },
   { route: "/keys", name: "keys", heading: /keys/i },
   { route: "/budgets", name: "budgets", heading: /budgets/i },
+  {
+    route: "/budget-defaults",
+    name: "budget-defaults",
+    heading: /budget defaults/i,
+  },
   { route: "/users", name: "users", heading: /users/i },
   { route: "/usage", name: "usage", heading: /usage/i },
   { route: "/activity", name: "activity", heading: /activity/i },

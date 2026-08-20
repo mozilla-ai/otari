@@ -258,6 +258,17 @@ class InvitationAlreadyUsedError(TenancyValidationError):
         super().__init__("This invitation has already been used or is no longer valid")
 
 
+class WorkspaceBudgetDefaultNotFoundError(TenancyNotFoundError):
+    def __init__(self, default_id: object):
+        super().__init__(f"Workspace budget default {default_id} not found")
+
+
+class WorkspaceBudgetDefaultAlreadyExistsError(TenancyConflictError):
+    def __init__(self, workspace_id: object, provider_key_id: object):
+        scope = "every provider" if provider_key_id is None else f"provider '{provider_key_id}'"
+        super().__init__(f"Workspace {workspace_id} already has a budget default for {scope}")
+
+
 __all__ = [
     "ForeignTenancyError",
     "InvalidEmailError",
@@ -282,6 +293,8 @@ __all__ = [
     "TenancyNotFoundError",
     "TenancyValidationError",
     "WorkspaceAlreadyExistsError",
+    "WorkspaceBudgetDefaultAlreadyExistsError",
+    "WorkspaceBudgetDefaultNotFoundError",
     "WorkspaceInUseError",
     "WorkspaceMemberAlreadyExistsError",
     "WorkspaceMemberNotFoundError",

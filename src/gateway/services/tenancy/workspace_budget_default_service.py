@@ -1,0 +1,465 @@
+"""Workspace-level templates for per-member ``scoped_budgets`` ceilings.
+
+A default (``WorkspaceBudgetDefault``) is a workspace-level template for a
+per-member spend limit. When a member joins the workspace (or when a default
+is created on a workspace that already has members) it is **eagerly
+materialized** into a per-member :class:`ScopedBudget` row, so the ceiling is
+visible immediately rather than on first spend.
+
+The wire DTOs keep the ``WorkspaceMemberBudgetPolicy*`` names from
+``otari-ai``'s ``budget_policy_service`` (the hosted equivalent this is ported
+from), so the generated client stays recognizable across both trees; the
+stored fields follow this repo's own ``ScopedBudget`` vocabulary
+(``max_budget``, ``budget_duration_sec``) rather than otari-ai's
+(``budget_limit``, ``spend_period``), since OSS budgets are USD/seconds-only
+with no token or request dimension.
+
+Materialization methods (``materialize_for_member``, ``materialize_for_default``)
+are flush-only: they do not commit, so they fold into the enclosing
+transaction at each call site (workspace creation, adding a member,
+organization-member creation with workspace assignments). CRUD methods commit
+on success.
+"""
+
+from __future__ import annotations
+
+import uuid
+from datetime import UTC, datetime, timedelta
+
+from pydantic import BaseModel, Field
+from sqlalchemy import func, select
+from sqlalchemy.exc import IntegrityError
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
+
+from gateway.models.entities import ScopedBudget, WorkspaceBudgetDefault
+from gateway.models.tenancy import User, Workspace, WorkspaceMember
+from gateway.repositories.tenancy import WorkspaceMemberRepository, WorkspaceRepository
+from gateway.services.tenancy import authorization
+from gateway.services.tenancy.errors import (
+    WorkspaceBudgetDefaultAlreadyExistsError,
+    WorkspaceBudgetDefaultNotFoundError,
+)
+from gateway.services.tenancy.organization_service import OrganizationService
+
+# The scope name is spelled out rather than imported from
+# `scoped_budget_service`: that module imports `workspace_scope`, which imports
+# `tenancy.provisioning_service`, which imports `tenancy/__init__`, which
+# imports `workspace_service`, which imports this module. See
+# `WorkspaceService`'s own docstring on `_delete_scoped_budgets_for` for the
+# same avoidance. `tests/unit/test_service_module_imports.py` pins the graph
+# staying acyclic.
+_SCOPE_WORKSPACE_MEMBER = "workspace_member"
+
+# Page size for fanning a new default out across a workspace's active members,
+# and the ceiling a list read pages at.
+_MATERIALIZE_PAGE_SIZE = 500
+_MAX_LIST_LIMIT = 1000
+
+# An upper bound on a period length, in seconds (roughly ten years). Without
+# one, `_period_window`'s `datetime + timedelta(seconds=...)` overflows on an
+# arbitrarily large value: `timedelta` itself refuses more than
+# `timedelta.max`, so a request near that raises `OverflowError` (a 500)
+# instead of the 422 an out-of-range period should be.
+_MAX_BUDGET_DURATION_SEC = 10 * 365 * 24 * 3600
+
+
+def _period_window(budget_duration_sec: int | None) -> tuple[datetime | None, datetime | None]:
+    """The ``(period_start, period_end)`` a freshly materialized ``ScopedBudget`` opens with.
+
+    A private, local duplicate of the same arithmetic
+    ``routes/scoped_budgets.create_scoped_budget`` does, for the same reason
+    ``_SCOPE_WORKSPACE_MEMBER`` above is a literal rather than an import
+    (importing ``scoped_budget_service`` closes a cycle). Centralized to one
+    definition *here* at least, so the module carries one derivation instead
+    of two; worth reconciling further, into one definition shared with
+    ``scoped_budgets.py`` itself, wherever that shared home ends up landing.
+    """
+    if not budget_duration_sec:
+        return None, None
+    now = datetime.now(UTC)
+    return now, now + timedelta(seconds=budget_duration_sec)
+
+
+class WorkspaceMemberBudgetPolicyCreate(BaseModel):
+    """Request body for creating a default."""
+
+    provider_key_id: str | None = Field(
+        default=None,
+        max_length=255,
+        description="Narrow the default to one provider instance; null applies to every provider",
+    )
+    name: str | None = Field(default=None, max_length=200, description="Admin-facing label")
+    max_budget: float | None = Field(default=None, ge=0, description="Maximum USD spend per member in the period")
+    budget_duration_sec: int | None = Field(
+        default=None,
+        gt=0,
+        le=_MAX_BUDGET_DURATION_SEC,
+        description="Period length in seconds; null never resets",
+    )
+
+
+class WorkspaceMemberBudgetPolicyUpdate(BaseModel):
+    """Request body for updating a default.
+
+    Not retroactive: a member already materialized from this default keeps
+    the value that was in effect when they were materialized. Only a member
+    materialized after this update sees the new one.
+    """
+
+    name: str | None = Field(default=None, max_length=200)
+    max_budget: float | None = Field(default=None, ge=0)
+    budget_duration_sec: int | None = Field(default=None, gt=0, le=_MAX_BUDGET_DURATION_SEC)
+
+
+class WorkspaceMemberBudgetPolicyPublic(BaseModel):
+    """One default and its template values."""
+
+    id: str
+    workspace_id: uuid.UUID
+    provider_key_id: str | None
+    name: str | None
+    max_budget: float | None
+    budget_duration_sec: int | None
+    created_at: str
+    updated_at: str
+
+    @classmethod
+    def from_model(cls, default: WorkspaceBudgetDefault) -> WorkspaceMemberBudgetPolicyPublic:
+        return cls(
+            id=default.id,
+            workspace_id=default.workspace_id,
+            provider_key_id=default.provider_key_id,
+            name=default.name,
+            max_budget=default.max_budget,
+            budget_duration_sec=default.budget_duration_sec,
+            created_at=default.created_at.isoformat(),
+            updated_at=default.updated_at.isoformat(),
+        )
+
+
+class WorkspaceMemberBudgetPoliciesPublic(BaseModel):
+    data: list[WorkspaceMemberBudgetPolicyPublic]
+    count: int
+
+
+class WorkspaceBudgetDefaultService:
+    """Materializer + CRUD for workspace per-member budget defaults."""
+
+    def __init__(self, db: AsyncSession):
+        self.db = db
+        self.organizations = OrganizationService(db)
+        self.workspaces = WorkspaceRepository(db)
+        self.workspace_members = WorkspaceMemberRepository(db)
+
+    # ------------------------------------------------------------------
+    # Materialization (flush-only, no auth: called from within an
+    # already-authorized membership-creation transaction)
+    # ------------------------------------------------------------------
+
+    async def materialize_for_member(self, member: WorkspaceMember) -> list[ScopedBudget]:
+        """Create a per-member ``ScopedBudget`` for every default on the member's workspace.
+
+        Skips any ``provider_key_id`` the member already has a ceiling for; a
+        member-specific override always wins over the template.
+        """
+        defaults = (
+            (
+                await self.db.execute(
+                    select(WorkspaceBudgetDefault).where(
+                        col(WorkspaceBudgetDefault.workspace_id) == member.workspace_id
+                    )
+                )
+            )
+            .scalars()
+            .all()
+        )
+        created: list[ScopedBudget] = []
+        for default in defaults:
+            if await self._existing_member_budget(member.id, default.provider_key_id) is not None:
+                continue
+            created.append(await self._create_member_budget(member.id, default))
+        return created
+
+    async def materialize_for_default(self, default: WorkspaceBudgetDefault) -> list[ScopedBudget]:
+        """Create a per-member ``ScopedBudget`` for every active member of the default's workspace.
+
+        Members who already have a ceiling for this ``provider_key_id`` are
+        left untouched, same precedence rule as :meth:`materialize_for_member`.
+        Pages through members so a large workspace is fully materialized.
+
+        One existence query and one flush per page, not per member: for a
+        page of up to ``_MATERIALIZE_PAGE_SIZE`` members that would otherwise
+        be two round trips each (an existence check, then an insert), which on
+        a workspace with hundreds of members is the difference between one
+        query pair and hundreds of them.
+        """
+        created: list[ScopedBudget] = []
+        skip = 0
+        while True:
+            members, total = await self.workspace_members.get_by_workspace(
+                default.workspace_id, skip=skip, limit=_MATERIALIZE_PAGE_SIZE
+            )
+            if not members:
+                break
+            active_ids = [member.id for member in members if member.status == "active"]
+            if active_ids:
+                created.extend(await self._create_member_budgets(active_ids, default))
+            skip += len(members)
+            if skip >= total:
+                break
+        return created
+
+    async def _create_member_budgets(
+        self, member_ids: list[uuid.UUID], default: WorkspaceBudgetDefault
+    ) -> list[ScopedBudget]:
+        """Materialize ``default`` onto every id in ``member_ids`` that does not already have one.
+
+        One query for the whole batch's existing rows, one flush for the whole
+        batch's new ones, in the common case. The existence check and the
+        insert are still two round trips with nothing locking the gap between
+        them, and the one surface that can land in it (a direct
+        ``POST /v1/scoped-budgets`` for one of these members, racing this
+        fan-out) takes no lock on this workspace: `routes/scoped_budgets.py`
+        is a master-key admin surface with no notion of one. A batch that
+        collides falls back to inserting one row at a time, each in its own
+        savepoint, so a single colliding member costs one skipped row rather
+        than failing the whole page, and, one level up, the default's own
+        creation with it (see :meth:`create_default`).
+        """
+        existing_stmt = select(ScopedBudget.scope_id).where(
+            ScopedBudget.scope_type == _SCOPE_WORKSPACE_MEMBER,
+            col(ScopedBudget.scope_id).in_([str(member_id) for member_id in member_ids]),
+        )
+        existing_stmt = existing_stmt.where(
+            ScopedBudget.provider_key_id == default.provider_key_id
+            if default.provider_key_id is not None
+            else ScopedBudget.provider_key_id.is_(None)
+        )
+        already_covered = {row for row in (await self.db.execute(existing_stmt)).scalars().all()}
+        candidates = [member_id for member_id in member_ids if str(member_id) not in already_covered]
+        if not candidates:
+            return []
+
+        def build(member_id: uuid.UUID) -> ScopedBudget:
+            period_start, period_end = _period_window(default.budget_duration_sec)
+            return ScopedBudget(
+                scope_type=_SCOPE_WORKSPACE_MEMBER,
+                scope_id=str(member_id),
+                provider_key_id=default.provider_key_id,
+                max_budget=default.max_budget,
+                budget_duration_sec=default.budget_duration_sec,
+                period_start=period_start,
+                period_end=period_end,
+            )
+
+        budgets = [build(member_id) for member_id in candidates]
+        self.db.add_all(budgets)
+        try:
+            async with self.db.begin_nested():
+                await self.db.flush()
+            return budgets
+        except IntegrityError:
+            pass  # fall back below; the savepoint already rolled the batch back
+
+        created: list[ScopedBudget] = []
+        for member_id in candidates:
+            budget = build(member_id)
+            self.db.add(budget)
+            try:
+                async with self.db.begin_nested():
+                    await self.db.flush()
+                created.append(budget)
+            except IntegrityError:
+                self.db.expunge(budget)
+        return created
+
+    async def _existing_member_budget(self, member_id: uuid.UUID, provider_key_id: str | None) -> ScopedBudget | None:
+        stmt = select(ScopedBudget).where(
+            ScopedBudget.scope_type == _SCOPE_WORKSPACE_MEMBER,
+            ScopedBudget.scope_id == str(member_id),
+        )
+        stmt = stmt.where(
+            ScopedBudget.provider_key_id == provider_key_id
+            if provider_key_id is not None
+            else ScopedBudget.provider_key_id.is_(None)
+        )
+        return (await self.db.execute(stmt)).scalars().first()
+
+    async def _create_member_budget(self, member_id: uuid.UUID, default: WorkspaceBudgetDefault) -> ScopedBudget:
+        period_start, period_end = _period_window(default.budget_duration_sec)
+        budget = ScopedBudget(
+            scope_type=_SCOPE_WORKSPACE_MEMBER,
+            scope_id=str(member_id),
+            provider_key_id=default.provider_key_id,
+            max_budget=default.max_budget,
+            budget_duration_sec=default.budget_duration_sec,
+            period_start=period_start,
+            period_end=period_end,
+        )
+        self.db.add(budget)
+        await self.db.flush()
+        return budget
+
+    # ------------------------------------------------------------------
+    # CRUD (commit on success)
+    # ------------------------------------------------------------------
+
+    async def _get_or_404(self, workspace: Workspace, default_id: str) -> WorkspaceBudgetDefault:
+        default = await self.db.get(WorkspaceBudgetDefault, default_id)
+        if default is None or default.workspace_id != workspace.id:
+            raise WorkspaceBudgetDefaultNotFoundError(default_id)
+        return default
+
+    async def list_defaults(
+        self,
+        *,
+        user: User,
+        workspace_id: uuid.UUID,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> WorkspaceMemberBudgetPoliciesPublic:
+        """List a page of a workspace's defaults, plus the total. Any member of the workspace may read it."""
+        await authorization.resolve_visible_workspace(
+            self.db, user=user, workspace_id=workspace_id, organizations=self.organizations
+        )
+        limit = min(limit, _MAX_LIST_LIMIT)
+
+        count = (
+            await self.db.execute(
+                select(func.count())
+                .select_from(WorkspaceBudgetDefault)
+                .where(col(WorkspaceBudgetDefault.workspace_id) == workspace_id)
+            )
+        ).scalar_one()
+
+        defaults = (
+            (
+                await self.db.execute(
+                    select(WorkspaceBudgetDefault)
+                    .where(col(WorkspaceBudgetDefault.workspace_id) == workspace_id)
+                    .order_by(col(WorkspaceBudgetDefault.created_at), col(WorkspaceBudgetDefault.id))
+                    .offset(skip)
+                    .limit(limit)
+                )
+            )
+            .scalars()
+            .all()
+        )
+        return WorkspaceMemberBudgetPoliciesPublic(
+            data=[WorkspaceMemberBudgetPolicyPublic.from_model(default) for default in defaults],
+            count=count,
+        )
+
+    async def create_default(
+        self,
+        *,
+        user: User,
+        workspace_id: uuid.UUID,
+        request: WorkspaceMemberBudgetPolicyCreate,
+    ) -> WorkspaceMemberBudgetPolicyPublic:
+        """Create a default, materializing it onto every existing active member."""
+        workspace = await authorization.resolve_visible_workspace(
+            self.db, user=user, workspace_id=workspace_id, organizations=self.organizations
+        )
+        await authorization.require_workspace_management_access(
+            self.db, user=user, workspace=workspace, organizations=self.organizations
+        )
+
+        # Serialized against every membership-creation path's own lock on this
+        # row (see `WorkspaceRepository.lock`): without it, a concurrent
+        # `add_member` can read the pre-creation set of defaults, and this call
+        # can read the pre-join set of members, and the new member gets neither
+        # ceiling even though both transactions commit successfully.
+        await self.workspaces.lock(workspace.id)
+
+        default = WorkspaceBudgetDefault(
+            workspace_id=workspace.id,
+            provider_key_id=request.provider_key_id,
+            name=request.name,
+            max_budget=request.max_budget,
+            budget_duration_sec=request.budget_duration_sec,
+        )
+        self.db.add(default)
+        # Narrowed to the default row's own flush on purpose: this is the only
+        # write `WorkspaceBudgetDefaultAlreadyExistsError`'s message describes
+        # (the template's own unique index). `materialize_for_default` handles
+        # its own, unrelated `IntegrityError`s internally (see
+        # `_create_member_budgets`) precisely so one never reaches here and
+        # gets misreported as "this default already exists", rolling back a
+        # template that in fact does not conflict with anything.
+        try:
+            await self.db.flush()
+        except IntegrityError:
+            await self.db.rollback()
+            raise WorkspaceBudgetDefaultAlreadyExistsError(workspace_id, request.provider_key_id) from None
+
+        await self.materialize_for_default(default)
+        await self.db.commit()
+        await self.db.refresh(default)
+        return WorkspaceMemberBudgetPolicyPublic.from_model(default)
+
+    async def update_default(
+        self,
+        *,
+        user: User,
+        workspace_id: uuid.UUID,
+        default_id: str,
+        request: WorkspaceMemberBudgetPolicyUpdate,
+    ) -> WorkspaceMemberBudgetPolicyPublic:
+        """Update a default's label or limit.
+
+        Not retroactive (see :class:`WorkspaceMemberBudgetPolicyUpdate`):
+        members already materialized from this default keep their existing
+        ``ScopedBudget`` row untouched. The scope (``provider_key_id``) is not
+        editable, matching ``routes/scoped_budgets.py``'s own rule for the
+        concrete ceilings this produces: changing it would move the template
+        to a different identity, which is a delete and a create, not an
+        update.
+        """
+        workspace = await authorization.resolve_visible_workspace(
+            self.db, user=user, workspace_id=workspace_id, organizations=self.organizations
+        )
+        await authorization.require_workspace_management_access(
+            self.db, user=user, workspace=workspace, organizations=self.organizations
+        )
+        default = await self._get_or_404(workspace, default_id)
+
+        if "name" in request.model_fields_set:
+            default.name = request.name
+        if "max_budget" in request.model_fields_set:
+            default.max_budget = request.max_budget
+        if "budget_duration_sec" in request.model_fields_set:
+            default.budget_duration_sec = request.budget_duration_sec
+
+        await self.db.commit()
+        await self.db.refresh(default)
+        return WorkspaceMemberBudgetPolicyPublic.from_model(default)
+
+    async def delete_default(self, *, user: User, workspace_id: uuid.UUID, default_id: str) -> None:
+        """Delete a default.
+
+        Only the template row is removed. The ``ScopedBudget`` rows it already
+        materialized (and their spend history) are left exactly as they are;
+        a member joining afterwards no longer gets one from it. Matches
+        ``WorkspaceService.delete_workspace``'s own preference for a stated,
+        intentional non-cascade over a silent one.
+        """
+        workspace = await authorization.resolve_visible_workspace(
+            self.db, user=user, workspace_id=workspace_id, organizations=self.organizations
+        )
+        await authorization.require_workspace_management_access(
+            self.db, user=user, workspace=workspace, organizations=self.organizations
+        )
+        default = await self._get_or_404(workspace, default_id)
+        await self.db.delete(default)
+        await self.db.commit()
+
+
+__all__ = [
+    "WorkspaceBudgetDefaultService",
+    "WorkspaceMemberBudgetPoliciesPublic",
+    "WorkspaceMemberBudgetPolicyCreate",
+    "WorkspaceMemberBudgetPolicyPublic",
+    "WorkspaceMemberBudgetPolicyUpdate",
+]

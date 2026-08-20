@@ -71,4 +71,17 @@ describe("WorkspaceMembersPage", () => {
     // a different fact from "you are in no workspace".
     expect(await screen.findByText("No workspace selected")).toBeInTheDocument()
   })
+
+  it("enables management controls for a workspace owner even without an organization role", async () => {
+    // "member" at the organization level, but "owner" of the selected
+    // workspace itself: the server's OR rule
+    // (`_require_workspace_management_access`), which the page has to match.
+    mockApi({
+      memberships: [{ workspace_id: ALPHA, name: "Alpha", role: "owner" }],
+    })
+    renderPage()
+
+    await screen.findByText("Members of Alpha")
+    expect(await screen.findByRole("button", { name: "Remove" })).toBeEnabled()
+  })
 })

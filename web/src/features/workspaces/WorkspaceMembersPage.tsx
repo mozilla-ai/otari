@@ -1,4 +1,4 @@
-import { canManage } from "@/features/organization/roles"
+import { canManageWorkspace } from "@/features/organization/roles"
 import { WorkspaceMembersPanel } from "@/features/workspaces/WorkspaceMembersPanel"
 import {
   useOrganizationContext,
@@ -21,10 +21,10 @@ export function WorkspaceMembersPage() {
   const context = useOrganizationContext()
   const orgMembers = useOrganizationMembers()
 
-  // Workspace membership is not what grants management here: the organization's
-  // owners and admins manage every workspace in it, which is the rule the
+  // An organization's owners and admins manage every workspace in it, and so
+  // does an owner/admin of this workspace specifically, which is the rule the
   // workspace service enforces server-side.
-  const manages = canManage(context.data)
+  const manages = canManageWorkspace(context.data, selected?.role)
 
   if (!selected) {
     return (

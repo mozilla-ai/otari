@@ -39,19 +39,19 @@ from gateway.models.tenancy import (
     WorkspaceUpdate,
 )
 from gateway.repositories.tenancy import WorkspaceMemberRepository, WorkspaceRepository
+from gateway.services.tenancy import authorization
 from gateway.services.tenancy.errors import (
     InvalidRoleError,
     LastWorkspaceError,
     NotAnOrganizationMemberError,
-    NotAuthorizedError,
     WorkspaceAlreadyExistsError,
     WorkspaceInUseError,
     WorkspaceMemberAlreadyExistsError,
     WorkspaceMemberNotFoundError,
     WorkspaceNameRequiredError,
-    WorkspaceNotFoundError,
 )
 from gateway.services.tenancy.organization_service import OrganizationService
+from gateway.services.tenancy.workspace_budget_default_service import WorkspaceBudgetDefaultService
 
 
 class WorkspaceService:
@@ -62,6 +62,7 @@ class WorkspaceService:
         self.workspaces = WorkspaceRepository(db)
         self.members = WorkspaceMemberRepository(db)
         self.organizations = OrganizationService(db)
+        self.budget_defaults = WorkspaceBudgetDefaultService(db)
 
     # ------------------------------------------------------------------
     # Scoping and authorization
@@ -73,16 +74,15 @@ class WorkspaceService:
     async def _workspace_in_active_organization(self, *, user: User, workspace_id: uuid.UUID) -> Workspace:
         """Resolve a workspace the caller may see, or raise not-found.
 
-        Every "may not see" case answers 404 rather than 403 on purpose: another
-        organization's workspace, and a workspace in this organization that the
-        caller is not a member of, must be indistinguishable from one that does
-        not exist.
+        Delegates to ``services.tenancy.authorization``, shared with
+        ``WorkspaceBudgetDefaultService`` so the visibility rule is defined
+        once.
         """
-        organization = await self._active_organization(user)
-        return await self._workspace_in_organization(
+        return await authorization.resolve_visible_workspace(
+            self.db,
             user=user,
             workspace_id=workspace_id,
-            organization=organization,
+            organizations=self.organizations,
         )
 
     async def _workspace_in_organization(
@@ -98,27 +98,13 @@ class WorkspaceService:
         resolving it twice cost an extra round trip plus a second membership read
         on a path that already does several.
         """
-        workspace = await self.workspaces.get(workspace_id)
-        if workspace is None or workspace.organization_id != organization.id:
-            raise WorkspaceNotFoundError(workspace_id)
-
-        if user.is_superuser:
-            return workspace
-
-        organization_membership = await self.organizations.members.get_active_by_organization_and_user(
-            organization.id,
-            user.id,
+        return await authorization.resolve_workspace_in_organization(
+            self.db,
+            user=user,
+            workspace_id=workspace_id,
+            organization=organization,
+            organizations=self.organizations,
         )
-        if organization_membership is not None and organization_membership.role in MANAGEMENT_ROLES:
-            return workspace
-
-        # Active-only: a suspended membership grants nothing, and the management
-        # check below already reads it that way, so a suspended member could
-        # otherwise read a workspace and its roster while being refused every
-        # action in it.
-        if await self.members.get_active_by_workspace_and_user(workspace.id, user.id) is None:
-            raise WorkspaceNotFoundError(workspace_id)
-        return workspace
 
     @staticmethod
     def _validated_role(role: str) -> str:
@@ -148,27 +134,16 @@ class WorkspaceService:
     async def _require_workspace_management_access(self, *, user: User, workspace: Workspace) -> None:
         """Allow a superuser, an organization owner/admin, or an owner/admin of this workspace.
 
-        The superuser arm is what makes this agree with the two checks either
-        side of it: ``_workspace_in_active_organization`` grants a superuser read
-        on every workspace and ``_enforce_management_role`` grants them
-        organization management, so without it a superuser could delete a
-        workspace but not rename it.
+        Delegates to ``services.tenancy.authorization``, shared with
+        ``WorkspaceBudgetDefaultService`` so the management rule is defined
+        once.
         """
-        if user.is_superuser:
-            return
-
-        organization_membership = await self.organizations.members.get_active_by_organization_and_user(
-            workspace.organization_id,
-            user.id,
+        await authorization.require_workspace_management_access(
+            self.db,
+            user=user,
+            workspace=workspace,
+            organizations=self.organizations,
         )
-        if organization_membership is not None and organization_membership.role in MANAGEMENT_ROLES:
-            return
-
-        membership = await self.members.get_by_workspace_and_user(workspace.id, user.id)
-        if membership is not None and membership.status == "active" and membership.role in MANAGEMENT_ROLES:
-            return
-
-        raise NotAuthorizedError
 
     # ------------------------------------------------------------------
     # Workspace lifecycle
@@ -196,7 +171,12 @@ class WorkspaceService:
                 organization_id=organization.id,
                 created_by_user_id=user.id,
             )
-            await self.members.create(workspace_id=workspace.id, user_id=user.id, role="owner")
+            member = await self.members.create(workspace_id=workspace.id, user_id=user.id, role="owner")
+            # No-op today: a workspace this fresh has no defaults of its own yet.
+            # Called anyway so every WorkspaceMember-creating path materializes
+            # the same way, rather than two of three doing it and this one
+            # relying on being first.
+            await self.budget_defaults.materialize_for_member(member)
             await self.db.commit()
         except IntegrityError:
             await self.db.rollback()
@@ -401,10 +381,18 @@ class WorkspaceService:
         if await self.members.get_by_workspace_and_user(workspace.id, user_id) is not None:
             raise WorkspaceMemberAlreadyExistsError(user_id)
 
+        # Serialized against a concurrent `WorkspaceBudgetDefaultService.create_default`
+        # on this workspace, via the same row lock it takes: without it, this
+        # read of the current defaults and that one's read of the current
+        # members can each run before the other's write commits, and the new
+        # member gets neither.
+        await self.workspaces.lock(workspace.id)
+
         # As in create_workspace: the pre-check races the insert, and the unique
         # constraint is what actually decides.
         try:
             member = await self.members.create(workspace_id=workspace.id, user_id=user_id, role=role)
+            await self.budget_defaults.materialize_for_member(member)
             await self.db.commit()
         except IntegrityError:
             await self.db.rollback()

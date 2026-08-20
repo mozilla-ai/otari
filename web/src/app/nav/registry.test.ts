@@ -58,6 +58,7 @@ describe("nav registry", () => {
       "API keys",
       "Providers",
       "Members",
+      "Budget defaults",
       "Workspaces",
       "Members & roles",
       "Users",

@@ -4709,6 +4709,173 @@
         }
       ],
       "name": "workspaces"
+    },
+    {
+      "item": [
+        {
+          "name": "List Workspace Budget Defaults",
+          "request": {
+            "description": "List the budget defaults attached to a workspace. Any member may read it.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "member-budget-policies"
+              ],
+              "query": [
+                {
+                  "description": "Number of records to skip",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "Maximum number of records to return",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/member-budget-policies?skip=&limit=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Workspace Budget Default",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"provider_key_id\": \"string\"\n}"
+            },
+            "description": "Create a budget default.\n\nMaterializes it into a per-member ``scoped_budgets`` row for every\nexisting active member of the workspace; a member who joins afterwards is\nmaterialized when they join.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "member-budget-policies"
+              ],
+              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/member-budget-policies",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Update Workspace Budget Default",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\"\n}"
+            },
+            "description": "Update a budget default's label or limit.\n\nNot retroactive: members already materialized from this default keep\ntheir existing ceiling; only a member materialized afterwards sees the\nnew one.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "member-budget-policies",
+                ":default_id"
+              ],
+              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/member-budget-policies/:default_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "default_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Workspace Budget Default",
+          "request": {
+            "description": "Delete a budget default.\n\nThe per-member ``scoped_budgets`` rows it already materialized are kept;\na member joining afterwards no longer gets one from it.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "member-budget-policies",
+                ":default_id"
+              ],
+              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/member-budget-policies/:default_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "default_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "workspace-member-budget-policies"
     }
   ],
   "variable": [

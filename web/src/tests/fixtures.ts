@@ -15,6 +15,7 @@ import type {
   UsageSeriesPoint,
   UsageTotals,
   Workspace,
+  WorkspaceBudgetDefault,
   WorkspaceMember,
 } from "@/client"
 
@@ -188,6 +189,22 @@ export function workspaceMember(
     status: "active",
     created_at: "2026-01-01T00:00:00+00:00",
     updated_at: null,
+    ...overrides,
+  }
+}
+
+export function workspaceBudgetDefault(
+  overrides: Partial<WorkspaceBudgetDefault> = {},
+): WorkspaceBudgetDefault {
+  return {
+    id: "66666666-6666-6666-6666-666666666666",
+    workspace_id: "44444444-4444-4444-4444-444444444444",
+    provider_key_id: null,
+    name: "Default member budget",
+    max_budget: 50.0,
+    budget_duration_sec: 2_592_000,
+    created_at: "2026-01-01T00:00:00+00:00",
+    updated_at: "2026-01-01T00:00:00+00:00",
     ...overrides,
   }
 }

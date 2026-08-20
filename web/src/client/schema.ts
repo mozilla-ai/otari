@@ -2582,6 +2582,65 @@ export interface paths {
         patch: operations["update_workspace_v1_workspaces__workspace_id__patch"];
         trace?: never;
     };
+    "/v1/workspaces/{workspace_id}/member-budget-policies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Workspace Budget Defaults
+         * @description List the budget defaults attached to a workspace. Any member may read it.
+         */
+        get: operations["list_workspace_budget_defaults_v1_workspaces__workspace_id__member_budget_policies_get"];
+        put?: never;
+        /**
+         * Create Workspace Budget Default
+         * @description Create a budget default.
+         *
+         *     Materializes it into a per-member ``scoped_budgets`` row for every
+         *     existing active member of the workspace; a member who joins afterwards is
+         *     materialized when they join.
+         */
+        post: operations["create_workspace_budget_default_v1_workspaces__workspace_id__member_budget_policies_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspace_id}/member-budget-policies/{default_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Workspace Budget Default
+         * @description Delete a budget default.
+         *
+         *     The per-member ``scoped_budgets`` rows it already materialized are kept;
+         *     a member joining afterwards no longer gets one from it.
+         */
+        delete: operations["delete_workspace_budget_default_v1_workspaces__workspace_id__member_budget_policies__default_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Workspace Budget Default
+         * @description Update a budget default's label or limit.
+         *
+         *     Not retroactive: members already materialized from this default keep
+         *     their existing ceiling; only a member materialized afterwards sees the
+         *     new one.
+         */
+        patch: operations["update_workspace_budget_default_v1_workspaces__workspace_id__member_budget_policies__default_id__patch"];
+        trace?: never;
+    };
     "/v1/workspaces/{workspace_id}/members": {
         parameters: {
             query?: never;
@@ -6840,6 +6899,80 @@ export interface components {
             /** Name */
             name: string;
         };
+        /** WorkspaceMemberBudgetPoliciesPublic */
+        WorkspaceMemberBudgetPoliciesPublic: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["WorkspaceMemberBudgetPolicyPublic"][];
+        };
+        /**
+         * WorkspaceMemberBudgetPolicyCreate
+         * @description Request body for creating a default.
+         */
+        WorkspaceMemberBudgetPolicyCreate: {
+            /**
+             * Budget Duration Sec
+             * @description Period length in seconds; null never resets
+             */
+            budget_duration_sec?: number | null;
+            /**
+             * Max Budget
+             * @description Maximum USD spend per member in the period
+             */
+            max_budget?: number | null;
+            /**
+             * Name
+             * @description Admin-facing label
+             */
+            name?: string | null;
+            /**
+             * Provider Key Id
+             * @description Narrow the default to one provider instance; null applies to every provider
+             */
+            provider_key_id?: string | null;
+        };
+        /**
+         * WorkspaceMemberBudgetPolicyPublic
+         * @description One default and its template values.
+         */
+        WorkspaceMemberBudgetPolicyPublic: {
+            /** Budget Duration Sec */
+            budget_duration_sec: number | null;
+            /** Created At */
+            created_at: string;
+            /** Id */
+            id: string;
+            /** Max Budget */
+            max_budget: number | null;
+            /** Name */
+            name: string | null;
+            /** Provider Key Id */
+            provider_key_id: string | null;
+            /** Updated At */
+            updated_at: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+        };
+        /**
+         * WorkspaceMemberBudgetPolicyUpdate
+         * @description Request body for updating a default.
+         *
+         *     Not retroactive: a member already materialized from this default keeps
+         *     the value that was in effect when they were materialized. Only a member
+         *     materialized after this update sees the new one.
+         */
+        WorkspaceMemberBudgetPolicyUpdate: {
+            /** Budget Duration Sec */
+            budget_duration_sec?: number | null;
+            /** Max Budget */
+            max_budget?: number | null;
+            /** Name */
+            name?: string | null;
+        };
         /** WorkspaceMemberPublic */
         WorkspaceMemberPublic: {
             /**
@@ -11085,6 +11218,145 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkspacePublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_workspace_budget_defaults_v1_workspaces__workspace_id__member_budget_policies_get: {
+        parameters: {
+            query?: {
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMemberBudgetPoliciesPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_workspace_budget_default_v1_workspaces__workspace_id__member_budget_policies_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceMemberBudgetPolicyCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMemberBudgetPolicyPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_workspace_budget_default_v1_workspaces__workspace_id__member_budget_policies__default_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                default_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Message"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_workspace_budget_default_v1_workspaces__workspace_id__member_budget_policies__default_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                default_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceMemberBudgetPolicyUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMemberBudgetPolicyPublic"];
                 };
             };
             /** @description Validation Error */
