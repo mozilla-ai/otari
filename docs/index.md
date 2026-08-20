@@ -62,3 +62,4 @@ Calling the gateway from your own code.
 ### For contributors
 
 - [Architecture](../ARCHITECTURE.md): the two-plane model and the extension seam (ports, adapters, and capability lines) that mark what Otari's core ships versus what an overlay can add.
+- [Per-workspace tool configuration](architecture/tool-configuration-layers.md): how per-workspace guardrail, web search, code execution, and MCP configuration is resolved on the request path and how it composes over the deployment defaults. A design decision for work that is not built yet.
