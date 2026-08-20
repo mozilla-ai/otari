@@ -274,9 +274,21 @@ def _midnight(moment: datetime) -> datetime:
     return moment.replace(hour=0, minute=0, second=0, microsecond=0)
 
 
+def _first_of_month(moment: datetime) -> datetime:
+    return _midnight(moment).replace(day=1)
+
+
 def _first_of_next_month(moment: datetime) -> datetime:
-    first = _midnight(moment).replace(day=1)
+    first = _first_of_month(moment)
     return first.replace(year=first.year + 1, month=1) if first.month == 12 else first.replace(month=first.month + 1)
+
+
+# The code under test reads the clock itself, so a test that reads its own cannot
+# assert one exact boundary: the two reads straddle a boundary if the call spans
+# one. Bracketing the call and accepting either candidate keeps the assertion
+# race-free while still proving the window came from a boundary and not from the
+# request instant. The exact month arithmetic is pinned in
+# ``tests/unit/test_scoped_budget_periods.py``, where the clock is an argument.
 
 
 @pytest.mark.asyncio
@@ -304,14 +316,19 @@ async def test_an_aligned_period_rolls_onto_the_boundary_not_onto_the_request(
     async_db.add(cap)
     await async_db.commit()
 
+    before = datetime.now(UTC)
     handle = await reserve_budget(async_db, tenancy.user_id, 5.0, scope=tenancy.scope())
+    after = datetime.now(UTC)
     assert handle.scoped_budget_ids == (cap.id,)
     assert await _counters(async_db, cap.id) == (0.0, 5.0)
 
     refreshed = (await async_db.execute(select(ScopedBudget).where(ScopedBudget.id == cap.id))).scalar_one()
     await async_db.refresh(refreshed)
-    assert refreshed.period_start == midnight
-    assert refreshed.period_end == midnight + timedelta(days=1)
+    assert refreshed.period_start in {_midnight(before), _midnight(after)}
+    assert refreshed.period_end == refreshed.period_start + timedelta(days=1)
+    # And the window contains the roll, so the next request is gated on it rather
+    # than rolling again.
+    assert refreshed.period_start <= after < refreshed.period_end
 
 
 @pytest.mark.asyncio
@@ -320,8 +337,7 @@ async def test_a_monthly_ceiling_asleep_for_two_months_lands_in_the_current_one(
 ) -> None:
     """No backfill: the window containing ``now``, with fresh counters, not one
     window per month it slept through."""
-    now = datetime.now(UTC)
-    first_of_month = _midnight(now).replace(day=1)
+    first_of_month = _first_of_month(datetime.now(UTC))
     cap = ScopedBudget(
         scope_type="workspace",
         scope_id=str(tenancy.workspace_id),
@@ -334,12 +350,15 @@ async def test_a_monthly_ceiling_asleep_for_two_months_lands_in_the_current_one(
     async_db.add(cap)
     await async_db.commit()
 
+    before = datetime.now(UTC)
     await reserve_budget(async_db, tenancy.user_id, 1.0, scope=tenancy.scope())
+    after = datetime.now(UTC)
 
     refreshed = (await async_db.execute(select(ScopedBudget).where(ScopedBudget.id == cap.id))).scalar_one()
     await async_db.refresh(refreshed)
-    assert refreshed.period_start == first_of_month
-    assert refreshed.period_end == _first_of_next_month(now)
+    assert refreshed.period_start in {_first_of_month(before), _first_of_month(after)}
+    assert refreshed.period_end == _first_of_next_month(refreshed.period_start)
+    assert refreshed.period_start <= after < refreshed.period_end
     assert refreshed.current_spend == 0.0
 
 
@@ -669,6 +688,7 @@ def test_a_calendar_aligned_ceiling_opens_on_its_boundary(
     """Create writes the window rather than waiting for first spend, and for an
     aligned ceiling that window is the calendar one it was created in."""
     workspace_id = _a_workspace_id(client, master_key_header)
+    before = datetime.now(UTC)
     created = client.post(
         "/v1/scoped-budgets",
         json={
@@ -679,14 +699,15 @@ def test_a_calendar_aligned_ceiling_opens_on_its_boundary(
         },
         headers=master_key_header,
     )
+    after = datetime.now(UTC)
 
     assert created.status_code == 200, created.text
     body = created.json()
     assert body["reset_alignment"] == "calendar_month"
     assert body["budget_duration_sec"] is None
-    now = datetime.now(UTC)
-    assert datetime.fromisoformat(body["period_start"]) == _midnight(now).replace(day=1)
-    assert datetime.fromisoformat(body["period_end"]) == _first_of_next_month(now)
+    period_start = datetime.fromisoformat(body["period_start"])
+    assert period_start in {_first_of_month(before), _first_of_month(after)}
+    assert datetime.fromisoformat(body["period_end"]) == _first_of_next_month(period_start)
 
 
 def test_a_ceiling_can_be_switched_between_the_two_kinds_of_period(
@@ -709,15 +730,17 @@ def test_a_ceiling_can_be_switched_between_the_two_kinds_of_period(
     )
     assert half_switched.status_code == 400, half_switched.text
 
+    before = datetime.now(UTC)
     switched = client.patch(
         f"/v1/scoped-budgets/{created['id']}",
         json={"budget_duration_sec": None, "reset_alignment": "calendar_day"},
         headers=master_key_header,
     )
+    after = datetime.now(UTC)
     assert switched.status_code == 200, switched.text
     assert switched.json()["budget_duration_sec"] is None
     assert switched.json()["reset_alignment"] == "calendar_day"
-    assert datetime.fromisoformat(switched.json()["period_start"]) == _midnight(datetime.now(UTC))
+    assert datetime.fromisoformat(switched.json()["period_start"]) in {_midnight(before), _midnight(after)}
 
     # And back, which is the same rule read the other way round.
     reverted = client.patch(
