@@ -1,6 +1,7 @@
 import { AlertDialog, Button, buttonVariants, Card, Input } from "@heroui/react"
 import { useEffect, useRef, useState } from "react"
 import type { ConfigField, UpdateSettingsRequest } from "@/client"
+import { MailDeliveryCard } from "@/features/settings/MailDeliveryCard"
 import {
   useReencryptProviderCredentials,
   useRotateMasterKey,
@@ -738,6 +739,8 @@ export function SettingsPage() {
       {data ? (
         <SecurityKeysSection masterKeySource={data.master_key_source} />
       ) : null}
+
+      <MailDeliveryCard />
 
       {data ? (
         <p className="text-xs text-muted">

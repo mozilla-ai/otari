@@ -97,6 +97,8 @@ GET /v1/providers/catalog                       # not yet wrapped
 # Runtime settings
 GET /v1/settings                                # not yet wrapped
 PATCH /v1/settings                              # not yet wrapped
+GET /v1/settings/mail                           # not yet wrapped
+POST /v1/settings/mail/test                     # not yet wrapped
 # Model discovery / metadata
 GET /v1/models/discoverable                     # not yet wrapped
 GET /v1/models/metadata                         # not yet wrapped

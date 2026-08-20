@@ -2750,9 +2750,9 @@
             "title": "Deployment Type",
             "type": "string"
           },
-          "invitation_mail_ready": {
-            "description": "Whether this deployment can actually deliver mail (an invitation's accept link), not merely whether an SMTP host is set: it also needs to know its own public URL to put in one. Named for the specific thing it gates rather than 'mail_enabled', since a deployment could one day have mail configured for something else while this is still false. Lets the dashboard hide or disable the invite affordance instead of offering one that would fail at send time. False for a hybrid gateway, which holds no tenancy state to invite anyone into.",
-            "title": "Invitation Mail Ready",
+          "mail_ready": {
+            "description": "Whether this deployment can deliver a message carrying a link back to itself (an invitation's accept link, and the verification and reset links to come), not merely whether a transport is configured: it also needs to know its own public URL to put in one. Lets the dashboard disable or hide a mail-dependent affordance instead of offering one that would fail at send time. Every message this control plane sends carries such a link, which is why this is one flag and not one per feature. False for a hybrid gateway, whose control plane is otari.ai and which sends no mail of its own.",
+            "title": "Mail Ready",
             "type": "boolean"
           },
           "management_url": {
@@ -2791,7 +2791,7 @@
           "session_type",
           "surfaces",
           "management_url",
-          "invitation_mail_ready"
+          "mail_ready"
         ],
         "title": "DeploymentBootstrap",
         "type": "object"
@@ -4076,6 +4076,74 @@
           "default_target"
         ],
         "title": "LearnedPolicy",
+        "type": "object"
+      },
+      "MailSettings": {
+        "description": "What this deployment can send, and what stands in the way if it cannot.",
+        "properties": {
+          "enabled": {
+            "description": "Whether a transport is configured at all.",
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "from_email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The 'From' address on outgoing mail, if one is configured.",
+            "title": "From Email"
+          },
+          "from_name": {
+            "description": "The 'From' display name on outgoing mail.",
+            "title": "From Name",
+            "type": "string"
+          },
+          "missing": {
+            "description": "Settings that must be set before mail works, in config order. Empty exactly when 'ready' is true, so the dashboard can name what to configure rather than only reporting that mail is off.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Missing",
+            "type": "array"
+          },
+          "public_base_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "This deployment's own externally-reachable URL, used to build links in outgoing mail.",
+            "title": "Public Base Url"
+          },
+          "ready": {
+            "description": "Whether a message carrying a link back to this deployment can be sent, which is what every message the control plane sends needs. Matches 'mail_ready' on /v1/bootstrap.",
+            "title": "Ready",
+            "type": "boolean"
+          },
+          "transport": {
+            "description": "The transport a send would use: 'smtp', 'console' (logged, not delivered), or 'none'.",
+            "title": "Transport",
+            "type": "string"
+          }
+        },
+        "required": [
+          "transport",
+          "enabled",
+          "ready",
+          "from_email",
+          "from_name",
+          "public_base_url",
+          "missing"
+        ],
+        "title": "MailSettings",
         "type": "object"
       },
       "ManagedTool": {
@@ -7379,6 +7447,53 @@
           "config"
         ],
         "title": "SearchToolsResponse",
+        "type": "object"
+      },
+      "SendTestMailRequest": {
+        "description": "Where to send the test message.",
+        "properties": {
+          "to": {
+            "description": "Recipient of the test message.",
+            "format": "email",
+            "maxLength": 255,
+            "title": "To",
+            "type": "string"
+          }
+        },
+        "required": [
+          "to"
+        ],
+        "title": "SendTestMailRequest",
+        "type": "object"
+      },
+      "SendTestMailResponse": {
+        "description": "The outcome of one test send.\n\n``reason`` carries the transport's own error text, which is the whole value\nof a test button (an operator needs to know it was a refused login rather\nthan a wrong port). Safe here and only here: this endpoint is master-key\ngated, unlike the public error paths that must not leak internals.",
+        "properties": {
+          "ok": {
+            "title": "Ok",
+            "type": "boolean"
+          },
+          "reason": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reason"
+          },
+          "transport": {
+            "title": "Transport",
+            "type": "string"
+          }
+        },
+        "required": [
+          "ok",
+          "transport"
+        ],
+        "title": "SendTestMailResponse",
         "type": "object"
       },
       "SessionResponse": {
@@ -16924,6 +17039,86 @@
           }
         ],
         "summary": "Update Settings",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/v1/settings/mail": {
+      "get": {
+        "description": "Report the effective outgoing-mail configuration.",
+        "operationId": "get_mail_settings_v1_settings_mail_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MailSettings"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Mail Settings",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/v1/settings/mail/test": {
+      "post": {
+        "description": "Send one templated test message to prove the configuration works.\n\nRefuses with 503 when the deployment cannot send a linked message, naming\nthe missing settings; the dashboard disables the control in that state, so\nreaching this is a direct API call or a race with a configuration change.\n\nThe recipient is the only caller-supplied value: the body is a fixed\ntemplate, so this cannot be used to put chosen text in someone's inbox from\nthe deployment's own address, and the message says outright that no account\nwas created for whoever receives it.",
+        "operationId": "send_test_mail_v1_settings_mail_test_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SendTestMailRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SendTestMailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Send Test Mail",
         "tags": [
           "settings"
         ]

@@ -62,8 +62,9 @@ pricing:
 | `host` | string | `0.0.0.0` | Server bind host |
 | `port` | int | `8000` | Server bind port |
 | `master_key` | string | none | Master key for management endpoints |
-| `public_base_url` | string | none | This deployment's own externally-reachable URL, no trailing slash. Needed to put an absolute link in an invitation email; see [Mail](#mail). |
-| `smtp_host` | string | none | SMTP server host for outgoing mail. Unset disables mail entirely. |
+| `public_base_url` | string | none | This deployment's own externally-reachable URL, no trailing slash. Needed to put an absolute link in outgoing email; see [Mail](#mail). |
+| `mail_transport` | string | `auto` | Which transport delivers outgoing mail: `auto`, `smtp`, `console`, or `none`. See [Mail](#mail). |
+| `smtp_host` | string | none | SMTP server host for outgoing mail. Unset disables mail entirely under the default `auto` transport. |
 | `smtp_port` | int | `587` | SMTP server port |
 | `smtp_user` | string | none | SMTP username, if the server requires auth |
 | `smtp_password` | string | none | SMTP password, if the server requires auth |
@@ -183,19 +184,37 @@ Note the `require_pricing` interaction: it defaults to `true` (fail-closed), so 
 
 ### Mail
 
-Outgoing mail is what delivers an organization invitation's accept link (see [Access control](access-control.md#invitations)). It is optional: with none of this configured, invitations still work, just without an email sent, so an operator shares the accept link another way.
+**Mail is optional, and a deployment that never configures it is a supported one.** Nothing here is required to run Otari; the only thing an unconfigured deployment gives up is the sending, not the feature. An organization invitation is still created and the dashboard hands you its accept link to share yourself (see [Access control](access-control.md#invitations)), and a surface that could not degrade that way is absent rather than silently dropping what you asked it to send.
+
+To turn mail on you need two things: a transport, and this deployment's own public URL. Both, because every message Otari sends carries a link back into this deployment, and a relative link means nothing in an inbox.
+
+```yaml
+public_base_url: "https://otari.example.com"
+mail_transport: smtp
+smtp_host: "smtp.example.com"
+mail_from_email: "otari@example.com"
+```
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `OTARI_PUBLIC_BASE_URL` | none | This deployment's own externally-reachable URL, no trailing slash (e.g. `https://otari.example.com`). Needed to put an absolute link in an email; without it, an invitation is still created but not emailed even if SMTP is configured below. |
-| `OTARI_SMTP_HOST` | none | SMTP server host. Unset disables mail entirely. |
+| `OTARI_PUBLIC_BASE_URL` | none | This deployment's own externally-reachable URL, no trailing slash (e.g. `https://otari.example.com`). Needed to put an absolute link in an email; without it, an invitation is still created but not emailed even when a transport is configured. |
+| `OTARI_MAIL_TRANSPORT` | `auto` | `auto` sends over SMTP when `OTARI_SMTP_HOST` and `OTARI_MAIL_FROM_EMAIL` are both set and sends nothing otherwise; `smtp` requires them and refuses to start without them; `console` logs each message instead of delivering it; `none` turns mail off even where SMTP is configured. |
+| `OTARI_SMTP_HOST` | none | SMTP server host. Unset disables mail entirely under `auto`. |
 | `OTARI_SMTP_PORT` | `587` | SMTP server port. |
 | `OTARI_SMTP_USER` | none | SMTP username, if the server requires auth. |
 | `OTARI_SMTP_PASSWORD` | none | SMTP password, if the server requires auth. |
-| `OTARI_SMTP_TLS` | `true` | Use STARTTLS when connecting. |
-| `OTARI_MAIL_FROM_EMAIL` | none | The `From` address on outgoing mail. Required, alongside `OTARI_SMTP_HOST`, for mail to actually send. |
+| `OTARI_SMTP_TLS` | `true` | Use STARTTLS when connecting. The connection verifies the server certificate against the system trust store. |
+| `OTARI_MAIL_FROM_EMAIL` | none | The `From` address on outgoing mail. Required, alongside `OTARI_SMTP_HOST`, for SMTP to send. |
 | `OTARI_MAIL_FROM_NAME` | `Otari` | The `From` display name on outgoing mail. |
 | `OTARI_INVITATION_EXPIRY_HOURS` | `168` | How long an invitation stays acceptable (default 7 days). |
+
+Setting `OTARI_MAIL_TRANSPORT=smtp` without a host or a from-address fails at startup with a message naming what is missing, rather than accepting invitations for weeks and failing at send time. Leaving the default `auto` never fails: no SMTP settings is the ordinary state of a self-hosted deployment, not a misconfiguration.
+
+`console` is for local development. Every mail-dependent surface is available and every message is written to the gateway log, plain-text variant included, so you can read what an invitation actually says without standing up an SMTP server. It is deliberately not the default: a deployment that silently logged the mail it was asked to send would be exactly the accept-and-drop behavior the optional-mail design rules out.
+
+> **Do not select `console` on a deployment whose logs you ship or share.** The log line contains the message body, and a control-plane message body carries a bearer credential: an invitation's accept token, and later a password-reset token. Anyone who can read the log can accept the invitation. Otari logs a warning at startup when this transport is selected, for that reason.
+
+**Checking it works.** The dashboard's Settings page has an *Email delivery* section reporting the transport in effect, the address mail would come from, and, when mail is off, which settings would turn it on. It also sends a test message. Over the API that is `GET /v1/settings/mail` and `POST /v1/settings/mail/test` (master key, standalone only); the test send returns the transport's own error text when it fails, and refuses with `503` when the deployment has no mail rather than reporting a message it never sent.
 
 ### Built-in tools and guardrails variables
 

@@ -47,6 +47,20 @@ Two mechanisms, both enforced, neither replacing the other.
 ## Built-in tools vs pass-through
 Only `otari_*` tool types are run by the gateway; every other tool type is forwarded to the provider untouched (`src/gateway/api/routes/_tools.py`). `otari_code_execution` → `SandboxBackend` (`services/sandbox_backend.py`), `otari_web_search` → `WebSearchBackend` (`services/web_search_backend.py`). The agentic tool/MCP loop lives in `services/mcp_loop.py`. Request-level guardrails (`services/guardrails.py`) are a caller-opted, input-side check run before the provider; SSRF checks for outbound URLs live in `services/url_safety.py`.
 
+## Outgoing mail
+`services/mail/` is the whole of it, and `Mailer` is the only thing a feature should import. A caller asks two questions and never a third: *can this deployment send a message that links back to itself* (`can_send_links`) and *did this one go out* (`send`/`send_template`). It never learns the transport, never wraps a send in a `try` (the mailer turns a delivery failure into a `MailDelivery`, so a mail failure cannot fail the request that triggered it), and never off-loads its own blocking I/O (`asyncio.to_thread` lives in `Mailer.send`, because smtplib is synchronous socket I/O with a timeout per step).
+
+**Mail is optional, and the no-transport case is answered before a send, not by one.** `select_transport` returns `None` for a deployment that configured none, which is what makes "is mail available" a question a surface can ask while deciding whether to offer an affordance. Two shapes follow, and which one a feature takes is a design decision, not a detail:
+
+- **A surface with a non-mail fallback degrades**: an invitation is created either way, and the accept link is returned for an operator to share (`organization_service.invite_organization_member` gates on `can_send_links`). Never refuse there; refusing takes away a flow that works fine without mail.
+- **A surface with no fallback is absent or refuses up front**: `Mailer.require_ready()` raises `MailNotConfiguredError`, which the API layer renders as a 503 naming the missing settings (`api/routes/mail.py`). This is what the password-reset and verification flows (#650) gate on, and the dashboard hides such a surface off `mail_ready` from `/v1/bootstrap` so the refusal is a race, not the normal path.
+
+Transport selection is `config.mail_transport` (`auto` derives SMTP from `smtp_host` + `mail_from_email`, `console` logs instead of delivering, `none` is off) and an explicit `smtp` missing either setting is refused at load by `validate_mail_transport`, not at send time. `config.mail_ready` is `mail_enabled` plus `public_base_url`, one flag rather than one per feature because every message this control plane sends carries a link into this deployment.
+
+`console` is the one sanctioned exception to the never-log-a-token rule, and it is deliberately narrow: it writes the rendered message body to the log, which for a control-plane message means a bearer credential in a link (an invitation's accept token, a reset token next). Redacting it would leave the transport unable to do the only thing it is for, so instead it is opt-in per deployment, never reachable from the `auto` default, and announced with a startup warning. Do not widen it, and do not add a second logging transport that carries the same content without the same treatment.
+
+A new message is a body template pair under `templates/email/` plus a typed render function (`services/tenancy/invitation_email.py` is the pattern); the shared layout, escaping, and header sanitization belong to `mail.templates` and should not be reimplemented. Placeholders are `{{LIKE_THIS}}` and are filled in one pass, so a value is never rescanned and a placeholder with no value raises rather than reaching an inbox.
+
 ## Runtime credential stores
 Two tables let an operator configure at runtime what previously needed `config.yml`, and both
 follow one shape: a service overlays stored rows onto the config object, keeping a per-config

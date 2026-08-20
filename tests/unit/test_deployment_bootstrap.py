@@ -47,7 +47,7 @@ def test_standalone_reports_a_local_operator_and_the_full_surface_set(tmp_path: 
         "session_type": "local_operator",
         "surfaces": sorted(STANDALONE_SURFACES),
         "management_url": None,
-        "invitation_mail_ready": False,
+        "mail_ready": False,
     }
 
 
@@ -70,6 +70,35 @@ def test_bootstrap_needs_no_credential(tmp_path: Path) -> None:
     # Unauthenticated but not cacheable: the answer describes this gateway's
     # configuration, and a shared cache must not serve one gateway's to another.
     assert anonymous.headers["Cache-Control"] == "private, no-store, no-cache"
+
+
+def test_mail_ready_turns_on_only_with_a_transport_and_a_public_url(tmp_path: Path) -> None:
+    """What the dashboard gates a mail-dependent affordance on.
+
+    A transport alone is not enough: every message the control plane sends
+    carries a link back into this deployment, and it needs its own address to
+    build one.
+    """
+    transport_only = _standalone(tmp_path)
+    transport_only.smtp_host = "smtp.example.com"
+    transport_only.mail_from_email = "otari@example.com"
+
+    with TestClient(create_app(transport_only)) as client:
+        assert client.get("/v1/bootstrap").json()["mail_ready"] is False
+
+    reset_config()
+    reset_db()
+
+    ready = _standalone(tmp_path)
+    ready.smtp_host = "smtp.example.com"
+    ready.mail_from_email = "otari@example.com"
+    ready.public_base_url = "https://otari.example.com"
+
+    with TestClient(create_app(ready)) as client:
+        assert client.get("/v1/bootstrap").json()["mail_ready"] is True
+
+    reset_config()
+    reset_db()
 
 
 def test_every_surface_names_a_route_the_gateway_mounts(tmp_path: Path) -> None:
@@ -96,7 +125,7 @@ def test_hybrid_reports_no_session_no_surfaces_and_the_hosted_url(monkeypatch: p
         "session_type": "none",
         "surfaces": [],
         "management_url": "https://otari.ai",
-        "invitation_mail_ready": False,
+        "mail_ready": False,
     }
 
     reset_config()

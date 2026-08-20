@@ -415,3 +415,14 @@ the `capture_agent_telemetry` setting (per key, or deployment-wide).
 | `GET` | `/v1/agent-telemetry/count` | Total rows matching the filters (`start_date`, `end_date`, `user_id`, `api_key_id`, `name`), mirroring `/v1/usage/count`. Same filter set as the purge below, so it sizes exactly what a "delete all N matching" would remove. | Master key |
 | `GET` | `/v1/agent-telemetry/series` | Row volume over time split by one dimension, for stacked charts. `group_by` is required (`user_id` or `api_key_id`). Top eight groups plus a reconciling `other` fold; sparse points; an `hour` bucket over more than 1000 buckets is rejected with a 422. | Master key |
 | `DELETE` | `/v1/agent-telemetry` | Purge rows by explicit `ids` or, with `by_filter: true`, by `user_id` / `api_key_id` / `name` / date range. Covers behavioral and metric rows alike. A selection matching zero rows succeeds with `deleted: 0`. | Master key |
+
+### Mail
+
+Outgoing mail is optional, and these two endpoints are how an operator sees
+whether this deployment has it and proves that it works. See
+[Configuration](configuration.md#mail).
+
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| `GET` | `/v1/settings/mail` | The transport in effect (`smtp`, `console`, or `none`), the `From` address and display name, this deployment's public base URL, and `missing`: the settings that stand between it and a delivered link, empty exactly when `ready` is true. Never echoes the SMTP password. | Master key |
+| `POST` | `/v1/settings/mail/test` | Send a templated test message to `to`. Returns `{ok, transport, reason}`, where `reason` carries the transport's own error text on a failed send. Refuses with `503` (naming the missing settings) when the deployment cannot send a message that links back to itself, rather than accepting a send it would drop. | Master key |

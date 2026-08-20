@@ -89,6 +89,11 @@ def test_hybrid_mode_disables_dashboard_management_endpoints(monkeypatch: pytest
     with TestClient(app) as client:
         for path in (
             "/v1/settings",
+            # Covered by the /v1/settings/{path} stub: a hybrid gateway sends no
+            # mail of its own, and the mail surface must 404 with the same hint
+            # rather than reporting an unconfigured transport as if it were one
+            # this deployment could configure.
+            "/v1/settings/mail",
             "/v1/aliases",
             "/v1/providers",
             "/v1/pricing",

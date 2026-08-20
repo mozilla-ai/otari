@@ -3805,6 +3805,59 @@
           }
         },
         {
+          "name": "Get Mail Settings",
+          "request": {
+            "description": "Report the effective outgoing-mail configuration.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "settings",
+                "mail"
+              ],
+              "raw": "{{baseUrl}}/v1/settings/mail"
+            }
+          }
+        },
+        {
+          "name": "Send Test Mail",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"to\": \"string\"\n}"
+            },
+            "description": "Send one templated test message to prove the configuration works.\n\nRefuses with 503 when the deployment cannot send a linked message, naming\nthe missing settings; the dashboard disables the control in that state, so\nreaching this is a direct API call or a race with a configuration change.\n\nThe recipient is the only caller-supplied value: the body is a fixed\ntemplate, so this cannot be used to put chosen text in someone's inbox from\nthe deployment's own address, and the message says outright that no account\nwas created for whoever receives it.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "settings",
+                "mail",
+                "test"
+              ],
+              "raw": "{{baseUrl}}/v1/settings/mail/test"
+            }
+          }
+        },
+        {
           "name": "Rotate Master Key",
           "request": {
             "description": "Regenerate the database-backed master key and invalidate the old one.\n\nOnly the first-run generated master key can be rotated here. When a master\nkey is supplied through config or ``OTARI_MASTER_KEY``, the dashboard cannot\ninvalidate it; the operator must change that value and restart instead.\n\nEvery dashboard session is revoked with the rotation (a session only proves\npossession of the now-dead key); the caller's own session is re-minted under\nthe new key, for the same identity it named, so the tab that performed the\nrotation stays signed in as who it was. A caller that authenticated with a\nheader key has no session identity to re-mint for, so it is not handed one:\nit was not signed in to the dashboard to begin with.",

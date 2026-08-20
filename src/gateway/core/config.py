@@ -90,6 +90,10 @@ ENV_BRIDGED_FIELDS = (
 STREAM_MISSING_USAGE_POLICIES = ("estimate", "fail", "allow_free")
 VISION_STRATEGIES = ("describe", "ocr", "off")
 ROUTER_GRANULARITIES = ("trace_sticky", "step")
+# Selectable mail transports, plus the two states that are not a transport:
+# "auto" derives one from whether SMTP is configured, "none" turns mail off
+# even when it is. See GatewayConfig.mail_transport.
+MAIL_TRANSPORT_SETTINGS = ("auto", "smtp", "console", "none")
 
 # Search providers the standalone POST /v1/search endpoint can dispatch to.
 # Declared here rather than in the adapter module so startup validation can
@@ -359,9 +363,23 @@ class GatewayConfig(BaseSettings):
             "its own address, since every other reference is relative to the request."
         ),
     )
+    mail_transport: str = Field(
+        default="auto",
+        description=(
+            "Which transport delivers outgoing mail: 'auto' (default) uses SMTP when "
+            "smtp_host and mail_from_email are both set and sends nothing otherwise, "
+            "'smtp' requires them and refuses to start without them, 'console' logs "
+            "each message instead of delivering it (local development only: the log "
+            "line contains the message body, including the invitation or reset token "
+            "in its link), and 'none' turns mail off even where SMTP is configured."
+        ),
+    )
     smtp_host: str | None = Field(
         default=None,
-        description="SMTP server host for outgoing mail. Unset disables mail entirely.",
+        description=(
+            "SMTP server host for outgoing mail. Unset disables mail entirely under the "
+            "default 'auto' transport."
+        ),
     )
     smtp_port: int = Field(default=587, ge=1, le=65535, description="SMTP server port.")
     smtp_user: str | None = Field(default=None, description="SMTP username, if the server requires auth.")
@@ -904,28 +922,69 @@ class GatewayConfig(BaseSettings):
         return self.effective_mode == "hybrid"
 
     @property
-    def mail_enabled(self) -> bool:
-        """Whether outgoing mail is configured well enough to attempt a send.
+    def effective_mail_transport(self) -> str:
+        """Which transport a send would actually use: ``smtp``, ``console`` or ``none``.
 
-        Both a host and a from-address are required: a host with no from-address
-        would send mail no recipient could reasonably trust, and a from-address
-        with no host has nothing to send through. Mail-dependent surfaces (an
-        invitation's accept link) read this to report themselves unavailable
-        rather than failing at send time, per the no-mail-configured requirement.
+        Resolves the ``auto`` default, which is the state a deployment that has
+        never heard of mail is in: SMTP when both ``smtp_host`` and
+        ``mail_from_email`` are set, and no transport at all otherwise. An
+        explicit ``smtp`` is validated at load (:meth:`validate_mail_transport`)
+        rather than resolved here, so a half-configured deployment that asked
+        for SMTP is refused at startup instead of at send time.
         """
-        return bool(self.smtp_host and self.mail_from_email)
+        configured = self.mail_transport.strip().lower()
+        if configured == "auto":
+            return "smtp" if self.smtp_host and self.mail_from_email else "none"
+        return configured
 
     @property
-    def invitation_mail_ready(self) -> bool:
-        """Whether an invitation email can actually be sent and land somewhere useful.
+    def mail_enabled(self) -> bool:
+        """Whether a transport is configured, so a send is worth attempting.
 
-        ``mail_enabled`` alone is not enough: the email needs an absolute link
-        to put in it, and a deployment is the only one that knows its own
-        address, so ``public_base_url`` has to be set too. Otherwise an
-        invitation is still created (the accept link is still valid, just
-        relative), it is just not emailed.
+        Mail-dependent surfaces read this (or :attr:`mail_ready`, below) to
+        report themselves unavailable rather than failing at send time, per the
+        no-mail-configured requirement.
+        """
+        return self.effective_mail_transport != "none"
+
+    @property
+    def mail_ready(self) -> bool:
+        """Whether this deployment can send a message that links back to itself.
+
+        ``mail_enabled`` alone is not enough: every message the control plane
+        sends carries a link into this deployment (an invitation's accept link,
+        and the verification and password-reset links to come), and a deployment
+        is the only one that knows its own address, so ``public_base_url`` has to
+        be set too. A surface with a fallback degrades to it (an invitation is
+        still created and its accept link returned, just not emailed); a surface
+        with none is absent while this is false.
         """
         return self.mail_enabled and bool(self.public_base_url)
+
+    @property
+    def missing_mail_settings(self) -> tuple[str, ...]:
+        """Which settings stand between this deployment and a delivered link, in config order.
+
+        Empty exactly when :attr:`mail_ready` is true. Reported to the operator
+        (``GET /v1/settings/mail``) so "mail is unavailable" names what to set
+        rather than leaving them to guess, which is the whole difference between
+        an honest no-transport mode and an opaque one.
+        """
+        missing: list[str] = []
+        if self.effective_mail_transport == "none":
+            # Under 'none' the operator turned mail off deliberately, so there
+            # is no missing setting to report; under 'auto' the two SMTP
+            # settings are what would turn it on.
+            if self.mail_transport.strip().lower() == "auto":
+                if not self.smtp_host:
+                    missing.append("smtp_host")
+                if not self.mail_from_email:
+                    missing.append("mail_from_email")
+            else:
+                return ("mail_transport",)
+        if not self.public_base_url:
+            missing.append("public_base_url")
+        return tuple(missing)
 
     def provider_instance_type(self, instance: str) -> str:
         """Return the any-llm implementation backing a provider instance.
@@ -1277,6 +1336,15 @@ class GatewayConfig(BaseSettings):
             raise ValueError(msg)
         return normalized
 
+    @field_validator("mail_transport")
+    @classmethod
+    def _validate_mail_transport(cls, value: str) -> str:
+        normalized = value.strip().lower()
+        if normalized not in MAIL_TRANSPORT_SETTINGS:
+            msg = f"mail_transport must be one of {sorted(MAIL_TRANSPORT_SETTINGS)}, got '{value}'"
+            raise ValueError(msg)
+        return normalized
+
     @field_validator("vision_strategy")
     @classmethod
     def _validate_vision_strategy(cls, value: str) -> str:
@@ -1332,6 +1400,37 @@ class GatewayConfig(BaseSettings):
         if extra_key in platform and float(platform[extra_key]) < 0:
             raise ValueError(f"{extra_key} must be >= 0, got {platform[extra_key]}")
         return platform
+
+    def validate_mail_transport(self) -> None:
+        """Refuse a mail transport the deployment cannot actually run.
+
+        An operator who wrote ``mail_transport: smtp`` asked for delivery, so a
+        missing host or from-address is a misconfiguration and startup says so.
+        That is the difference from the ``auto`` default, where the same two
+        fields being unset is the ordinary state of a deployment that wants no
+        mail: there, nothing is wrong and nothing is refused. Either way the
+        failure never waits until someone presses Invite.
+        """
+        if self.effective_mail_transport == "console":
+            # Once, at load, rather than per send: an operator who selected this
+            # deliberately does not need it repeated, but one who inherited it
+            # from a copied config needs to see it at least once, because the
+            # log it writes carries the token in every link it "delivers".
+            logger.warning(
+                "mail_transport is 'console': outgoing mail is written to the log, token-bearing "
+                "links included, and delivered to nobody. Use 'smtp' to actually send."
+            )
+            return
+        if self.effective_mail_transport != "smtp":
+            return
+        required = (("smtp_host", self.smtp_host), ("mail_from_email", self.mail_from_email))
+        missing = [name for name, value in required if not value]
+        if missing:
+            msg = (
+                f"mail_transport 'smtp' requires {' and '.join(missing)} to be set. "
+                "Set them, or leave mail_transport at its 'auto' default to run without mail."
+            )
+            raise ValueError(msg)
 
     def validate_mode_selection(self) -> None:
         configured_mode = self.configured_mode
@@ -1447,6 +1546,7 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     config.validate_aliases()
     config.validate_routing_policies()
     config.validate_search_tools()
+    config.validate_mail_transport()
     _bridge_yaml_fields_to_env(config, yaml_bridged_fields)
     return config
 

@@ -126,6 +126,22 @@ _CONFIG_VIEW: tuple[tuple[str, tuple[str, ...]], ...] = (
         ),
     ),
     (
+        # smtp_user/smtp_password are deliberately absent: they are credentials,
+        # and this view carries no secret. The mail page (/v1/settings/mail)
+        # reports whether they are in use without echoing either.
+        "Email delivery",
+        (
+            "mail_transport",
+            "public_base_url",
+            "smtp_host",
+            "smtp_port",
+            "smtp_tls",
+            "mail_from_email",
+            "mail_from_name",
+            "invitation_expiry_hours",
+        ),
+    ),
+    (
         "General",
         (
             "enable_metrics",

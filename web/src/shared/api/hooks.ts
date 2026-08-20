@@ -34,6 +34,7 @@ import type {
   InviteOrganizationMemberResult,
   KnownProvider,
   KnownProviderSummary,
+  MailSettings,
   ModelListResponse,
   ModelMetadataResponse,
   OrganizationContext,
@@ -51,6 +52,8 @@ import type {
   RoutingPolicyResponse,
   SearchProviderInfo,
   SearchToolsResponse,
+  SendTestMailRequest,
+  SendTestMailResponse,
   SetPricingRequest,
   SetRoutingPolicyRequest,
   StoredProvider,
@@ -95,6 +98,7 @@ import { isoAgo } from "@/shared/helpers/timeRange"
 const MODELS = "models"
 const PRICING = "pricing"
 const SETTINGS = "settings"
+const MAIL_SETTINGS = "mail-settings"
 const TOOL_SETTINGS = "tool-settings"
 const TOOLS = "tools"
 const SEARCH_TOOLS = "search-tools"
@@ -599,6 +603,40 @@ export function useRotateMasterKey() {
     mutationFn: () =>
       apiFetch<RotateMasterKeyResponse>("/v1/settings/master-key/rotate", {
         method: "POST",
+      }),
+  })
+}
+
+/**
+ * The deployment's outgoing-mail configuration, for the Settings page.
+ *
+ * Distinct from `useDeployment().mail_ready`, which the shell already carries:
+ * that one boolean gates a mail-dependent affordance anywhere in the app, while
+ * this reports *why* mail is (un)available and is worth a request only on the
+ * page that shows it.
+ */
+export function useMailSettings() {
+  return useQuery({
+    queryKey: [MAIL_SETTINGS],
+    queryFn: () => apiFetch<MailSettings>("/v1/settings/mail"),
+    staleTime: 60_000,
+  })
+}
+
+/**
+ * Sends a real message to prove the transport works.
+ *
+ * Nothing is invalidated on success: a test send changes no server state, and
+ * the outcome lives in the mutation's own result. A failure comes back two
+ * ways, and the page distinguishes them: a 200 with `ok: false` is a configured
+ * transport that refused, while a 503 is a deployment with no transport at all.
+ */
+export function useSendTestMail() {
+  return useMutation({
+    mutationFn: (body: SendTestMailRequest) =>
+      apiFetch<SendTestMailResponse>("/v1/settings/mail/test", {
+        method: "POST",
+        body: JSON.stringify(body),
       }),
   })
 }

@@ -7,13 +7,17 @@ authorization matrix (test_tenancy_authorization.py), whose own docstring
 explains the same split.
 """
 
+import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
+import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from gateway.core.config import GatewayConfig
+from gateway.log_config import logger as gateway_logger
 from gateway.models.tenancy import Invitation
 
 
@@ -41,6 +45,54 @@ def _token_from(accept_link: str) -> str:
 def _roster_row(client: TestClient, headers: dict[str, str], email: str) -> dict[str, Any]:
     members = client.get("/v1/organizations/me/members", headers=headers).json()["data"]
     return next(row for row in members if row["email"] == email)
+
+
+def test_invite_emails_the_accept_link_when_a_transport_is_configured(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The other half of the optional-mail design: configured, the message goes out.
+
+    Uses the console transport rather than a patched smtplib, so the whole path
+    an operator's SMTP deployment takes runs for real (readiness, rendering,
+    the off-loaded send) and only the socket is replaced. The gateway logger
+    does not propagate, hence the explicit handler.
+    """
+    monkeypatch.setattr(test_config, "mail_transport", "console")
+    monkeypatch.setattr(test_config, "public_base_url", "https://otari.example.com")
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.INFO, logger="gateway")
+    try:
+        result = _invite(client, master_key_header, email="mailed@example.com")
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+    assert result["mail_sent"] is True
+    # Absolute, because it has to mean something outside a browser.
+    assert result["accept_link"].startswith("https://otari.example.com/#/accept-invitation?token=")
+    assert "You're invited to join" in caplog.text
+    assert result["accept_link"] in caplog.text
+    # The recipient is redacted in the log line even on the success path.
+    assert "mailed@example.com" not in caplog.text
+
+
+def test_invite_is_not_emailed_without_a_public_base_url(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A relative accept link is useless in an inbox, so a transport alone is not enough."""
+    monkeypatch.setattr(test_config, "mail_transport", "console")
+    monkeypatch.setattr(test_config, "public_base_url", None)
+
+    result = _invite(client, master_key_header, email="relative@example.com")
+
+    assert result["mail_sent"] is False
+    assert result["accept_link"].startswith("/#/accept-invitation?token=")
 
 
 def test_invite_lands_invited_with_no_mail_transport_configured(

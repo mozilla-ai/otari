@@ -19,6 +19,24 @@ master_key: YOUR_MASTER_KEY_HERE
 # Prometheus metrics endpoint at /metrics. Set to true to enable.
 # enable_metrics: true
 
+# --- Outgoing mail (optional) ----------------------------------------------
+# Mail is optional and a deployment that never configures it works fine: an
+# organization invitation is still created and the dashboard hands you the
+# accept link to share yourself. Turning mail on takes two things, a transport
+# and this deployment's own public URL, because every message Otari sends
+# carries a link back into it. See docs/configuration.md#mail.
+# public_base_url: "https://otari.example.com"
+# mail_transport: smtp            # auto (default) | smtp | console | none
+#   'console' logs each message instead of sending it, token-bearing links
+#   included, so use it for local development and not where logs are shared.
+# smtp_host: "smtp.example.com"
+# smtp_port: 587
+# smtp_user: "${SMTP_USER}"
+# smtp_password: "${SMTP_PASSWORD}"
+# smtp_tls: true
+# mail_from_email: "otari@example.com"
+# mail_from_name: "Otari"
+
 # --- File uploads & document understanding ---------------------------------
 # The /v1/files endpoints accept uploads; the gateway then resolves file/image
 # content blocks in chat requests. For models that natively understand

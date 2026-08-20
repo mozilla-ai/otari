@@ -1,0 +1,8 @@
+Your Otari mail settings work
+
+An operator sent this from the Otari dashboard at {{PUBLIC_BASE_URL}} to check that
+outgoing mail is configured. It was delivered over {{TRANSPORT}}.
+
+Nothing else is needed. If you weren't expecting this, someone with administrative
+access to that deployment typed your address into its mail settings; no account was
+created for you.

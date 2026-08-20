@@ -490,7 +490,11 @@ lands: the address they are added by is the handle it will claim them with.
 - **Org settings**: rename the organization. There is exactly one.
 - **Settings**: search and toggle runtime settings, and rotate the generated
   master key. Rotating the master key issues a fresh `otari-mk-…` value and keeps
-  your current session signed in.
+  your current session signed in. **Email delivery** at the bottom of the page
+  reports whether this deployment sends mail at all and sends a test message.
+  Mail is optional, so a gateway with none configured says which settings would
+  turn it on (see [Configuration](configuration.md#mail)) and disables the test
+  send rather than offering one that would fail.
 
 ## Install it on your phone
 

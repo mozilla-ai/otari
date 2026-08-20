@@ -7,6 +7,7 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import type {
   ConfigField,
   GatewaySettings,
+  MailSettings,
   ReencryptProviderCredentialsResult,
   StoredProvider,
 } from "@/client"
@@ -147,6 +148,16 @@ const SETTINGS: GatewaySettings = {
   config: CONFIG,
 }
 
+const MAIL_SETTINGS: MailSettings = {
+  transport: "none",
+  enabled: false,
+  ready: false,
+  from_email: null,
+  from_name: "Otari",
+  public_base_url: null,
+  missing: ["smtp_host", "mail_from_email", "public_base_url"],
+}
+
 function storedProvider(
   instance: string,
   last4: string | null,
@@ -212,6 +223,11 @@ function mockApi(
       }
       if (url.includes("/v1/provider-credentials")) {
         return jsonResponse(storedList)
+      }
+      // Ahead of the /v1/settings branch below, which would otherwise answer
+      // the mail card's request with the whole settings payload.
+      if (url.includes("/v1/settings/mail")) {
+        return jsonResponse(MAIL_SETTINGS)
       }
       if (url.includes("/v1/settings/master-key/rotate")) {
         return jsonResponse({ master_key: "otari-mk-new" })

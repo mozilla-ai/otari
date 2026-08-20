@@ -16,6 +16,7 @@ from gateway.api.routes import (
     images,
     invitations,
     keys,
+    mail,
     messages,
     models,
     moderations,
@@ -89,6 +90,7 @@ def register_routers(app: FastAPI, config: GatewayConfig) -> None:
     app.include_router(agent_telemetry.router)
     app.include_router(otlp.router)
     app.include_router(settings.router)
+    app.include_router(mail.router)
     app.include_router(tool_settings.router)
     app.include_router(search_tools.router)
     app.include_router(tools.router)

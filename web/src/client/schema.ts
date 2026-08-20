@@ -2191,6 +2191,55 @@ export interface paths {
         patch: operations["update_settings_v1_settings_patch"];
         trace?: never;
     };
+    "/v1/settings/mail": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Mail Settings
+         * @description Report the effective outgoing-mail configuration.
+         */
+        get: operations["get_mail_settings_v1_settings_mail_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/settings/mail/test": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Send Test Mail
+         * @description Send one templated test message to prove the configuration works.
+         *
+         *     Refuses with 503 when the deployment cannot send a linked message, naming
+         *     the missing settings; the dashboard disables the control in that state, so
+         *     reaching this is a direct API call or a race with a configuration change.
+         *
+         *     The recipient is the only caller-supplied value: the body is a fixed
+         *     template, so this cannot be used to put chosen text in someone's inbox from
+         *     the deployment's own address, and the message says outright that no account
+         *     was created for whoever receives it.
+         */
+        post: operations["send_test_mail_v1_settings_mail_test_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/settings/master-key/rotate": {
         parameters: {
             query?: never;
@@ -4058,10 +4107,10 @@ export interface components {
              */
             deployment_type: "standalone" | "hosted" | "hybrid";
             /**
-             * Invitation Mail Ready
-             * @description Whether this deployment can actually deliver mail (an invitation's accept link), not merely whether an SMTP host is set: it also needs to know its own public URL to put in one. Named for the specific thing it gates rather than 'mail_enabled', since a deployment could one day have mail configured for something else while this is still false. Lets the dashboard hide or disable the invite affordance instead of offering one that would fail at send time. False for a hybrid gateway, which holds no tenancy state to invite anyone into.
+             * Mail Ready
+             * @description Whether this deployment can deliver a message carrying a link back to itself (an invitation's accept link, and the verification and reset links to come), not merely whether a transport is configured: it also needs to know its own public URL to put in one. Lets the dashboard disable or hide a mail-dependent affordance instead of offering one that would fail at send time. Every message this control plane sends carries such a link, which is why this is one flag and not one per feature. False for a hybrid gateway, whose control plane is otari.ai and which sends no mail of its own.
              */
-            invitation_mail_ready: boolean;
+            mail_ready: boolean;
             /**
              * Management Url
              * @description Where the authoritative control plane lives when it is not this deployment. Set for a hybrid gateway so its landing page can link to otari.ai; null otherwise.
@@ -4696,6 +4745,47 @@ export interface components {
             default_target: string;
             /** Name */
             name: string;
+        };
+        /**
+         * MailSettings
+         * @description What this deployment can send, and what stands in the way if it cannot.
+         */
+        MailSettings: {
+            /**
+             * Enabled
+             * @description Whether a transport is configured at all.
+             */
+            enabled: boolean;
+            /**
+             * From Email
+             * @description The 'From' address on outgoing mail, if one is configured.
+             */
+            from_email: string | null;
+            /**
+             * From Name
+             * @description The 'From' display name on outgoing mail.
+             */
+            from_name: string;
+            /**
+             * Missing
+             * @description Settings that must be set before mail works, in config order. Empty exactly when 'ready' is true, so the dashboard can name what to configure rather than only reporting that mail is off.
+             */
+            missing: string[];
+            /**
+             * Public Base Url
+             * @description This deployment's own externally-reachable URL, used to build links in outgoing mail.
+             */
+            public_base_url: string | null;
+            /**
+             * Ready
+             * @description Whether a message carrying a link back to this deployment can be sent, which is what every message the control plane sends needs. Matches 'mail_ready' on /v1/bootstrap.
+             */
+            ready: boolean;
+            /**
+             * Transport
+             * @description The transport a send would use: 'smtp', 'console' (logged, not delivered), or 'none'.
+             */
+            transport: string;
         };
         /**
          * ManagedTool
@@ -6097,6 +6187,35 @@ export interface components {
             config: components["schemas"]["ConfigSearchToolSchema"][];
             /** Stored */
             stored: components["schemas"]["StoredSearchToolSchema"][];
+        };
+        /**
+         * SendTestMailRequest
+         * @description Where to send the test message.
+         */
+        SendTestMailRequest: {
+            /**
+             * To
+             * Format: email
+             * @description Recipient of the test message.
+             */
+            to: string;
+        };
+        /**
+         * SendTestMailResponse
+         * @description The outcome of one test send.
+         *
+         *     ``reason`` carries the transport's own error text, which is the whole value
+         *     of a test button (an operator needs to know it was a refused login rather
+         *     than a wrong port). Safe here and only here: this endpoint is master-key
+         *     gated, unlike the public error paths that must not leak internals.
+         */
+        SendTestMailResponse: {
+            /** Ok */
+            ok: boolean;
+            /** Reason */
+            reason?: string | null;
+            /** Transport */
+            transport: string;
         };
         /**
          * SessionResponse
@@ -10843,6 +10962,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["GatewaySettings"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_mail_settings_v1_settings_mail_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MailSettings"];
+                };
+            };
+        };
+    };
+    send_test_mail_v1_settings_mail_test_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SendTestMailRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SendTestMailResponse"];
                 };
             };
             /** @description Validation Error */

@@ -24,9 +24,7 @@ with several people in it. The scoping below is written as if there could be
 many, because the hosted edition has many and the schema is edition-invariant.
 """
 
-import asyncio
 import hashlib
-import re
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -68,7 +66,7 @@ from gateway.repositories.users_repository import (
     get_or_create_attribution_user,
     live_attribution_user_ids,
 )
-from gateway.services.mail_service import send_mail
+from gateway.services.mail import Mailer, normalized_address
 from gateway.services.tenancy.errors import (
     InvalidEmailError,
     InvitationAlreadyPendingError,
@@ -84,10 +82,6 @@ from gateway.services.tenancy.errors import (
     WorkspaceNotFoundError,
 )
 from gateway.services.tenancy.invitation_email import render_invitation_email
-
-# A shape check, not an authority on deliverability: one @, something either
-# side, a dot in the domain, and no whitespace. See InvalidEmailError.
-_EMAIL_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 
 
 def _validated_organization_name(name: str | None) -> str:
@@ -105,9 +99,13 @@ def _validated_organization_name(name: str | None) -> str:
 
 
 def _validated_email(email: str) -> str:
-    """Normalize an address to lower case, refusing one that cannot be a handle."""
-    candidate = email.strip().lower()
-    if not _EMAIL_PATTERN.match(candidate):
+    """Normalize an address to lower case, refusing one that cannot be a handle.
+
+    The shape check is the mail package's, since "an address Otari would deliver
+    to" is one question whether it is being invited or emailed.
+    """
+    candidate = normalized_address(email)
+    if candidate is None:
         raise InvalidEmailError(email)
     return candidate
 
@@ -122,18 +120,16 @@ def _hash_invitation_token(token: str) -> str:
     return hashlib.sha256(token.encode()).hexdigest()
 
 
-def _invitation_accept_link(config: GatewayConfig, token: str) -> str:
-    """Build the accept-invitation URL, absolute when the deployment knows its own address.
+def _invitation_accept_path(token: str) -> str:
+    """The dashboard path an accept link points at.
 
-    Relative otherwise (``config.public_base_url`` unset): still a valid link
-    an operator can share and a browser already on this dashboard can follow,
-    just not one that means anything outside a browser, which is why sending
-    it by email is gated on ``invitation_mail_ready`` rather than on this.
+    Made absolute by ``Mailer.link`` when the deployment knows its own address,
+    and left relative otherwise: still a valid link an operator can share and a
+    browser already on this dashboard can follow, just not one that means
+    anything outside a browser, which is why sending it by email is gated on
+    ``Mailer.can_send_links`` rather than on this.
     """
-    path = f"/#/accept-invitation?token={token}"
-    if config.public_base_url:
-        return f"{config.public_base_url.rstrip('/')}{path}"
-    return path
+    return f"/#/accept-invitation?token={token}"
 
 
 # The most workspaces a switcher seed carries. Above the repository's paging
@@ -713,23 +709,27 @@ class OrganizationService:
             await self.db.rollback()
             raise OrganizationMemberAlreadyExistsError(email) from None
 
-        accept_link = _invitation_accept_link(config, token)
+        mailer = Mailer(config)
+        accept_link = mailer.link(_invitation_accept_path(token))
         mail_sent = False
-        if config.invitation_mail_ready:
-            subject, html, text = render_invitation_email(
-                organization_name=organization.name,
-                inviter_name=user.full_name or "An organization admin",
-                role=membership.role,
-                accept_link=accept_link,
-                expiry_hours=config.invitation_expiry_hours,
+        # can_send_links, not is_configured: an accept link that is relative
+        # (no public_base_url) means nothing in an inbox, so a deployment that
+        # cannot build an absolute one falls back to the operator sharing it
+        # rather than mailing a link that goes nowhere. This is the degrading
+        # branch of the no-mail design; a surface with no such fallback calls
+        # mailer.require_ready() instead.
+        if mailer.can_send_links:
+            delivery = await mailer.send(
+                to=email,
+                message=render_invitation_email(
+                    organization_name=organization.name,
+                    inviter_name=user.full_name or "An organization admin",
+                    role=membership.role,
+                    accept_link=accept_link,
+                    expiry_hours=config.invitation_expiry_hours,
+                ),
             )
-            # send_mail is synchronous socket I/O (smtplib), and each of
-            # connect/starttls/login/sendmail carries its own 10s timeout, so
-            # calling it directly here could block this request's whole event
-            # loop thread for tens of seconds against a slow or unreachable
-            # SMTP host, stalling every other request the same worker is
-            # serving. Off-loaded to a thread so only this coroutine waits.
-            mail_sent = await asyncio.to_thread(send_mail, config, to=email, subject=subject, html=html, text=text)
+            mail_sent = delivery.delivered
 
         return InviteOrganizationMemberResultPublic(
             invitation_id=invitation.id,

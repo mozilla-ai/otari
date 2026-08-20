@@ -308,7 +308,7 @@ describe("OrganizationMembersPage", () => {
   it("invites a member by email and shows the accept link when mail is not configured", async () => {
     const requests = mockApi({ members: [OWNER] })
     const user = userEvent.setup()
-    renderPage(<OrganizationMembersPage />, { invitation_mail_ready: false })
+    renderPage(<OrganizationMembersPage />, { mail_ready: false })
 
     await user.click(
       await screen.findByRole("button", { name: "Invite member" }),
@@ -339,7 +339,7 @@ describe("OrganizationMembersPage", () => {
   it("says the email will be sent when mail is configured", async () => {
     mockApi({ members: [OWNER] })
     const user = userEvent.setup()
-    renderPage(<OrganizationMembersPage />, { invitation_mail_ready: true })
+    renderPage(<OrganizationMembersPage />, { mail_ready: true })
 
     await user.click(
       await screen.findByRole("button", { name: "Invite member" }),

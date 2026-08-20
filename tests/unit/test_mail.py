@@ -1,0 +1,322 @@
+"""Mail configuration, transport selection, the mailer, and the template renderer.
+
+No real SMTP server is exercised. The transports are covered for the two things
+that must never happen (a send that raises into the request that triggered it,
+and a deployment discovering at send time that it has no mail), and the console
+transport is what proves a *templated message actually sends* without one.
+"""
+
+import logging
+from collections.abc import Iterator
+from unittest.mock import MagicMock, patch
+
+import pytest
+
+from gateway.core.config import GatewayConfig
+from gateway.log_config import logger as gateway_logger
+from gateway.services.mail import (
+    ConsoleTransport,
+    Mailer,
+    MailMessage,
+    MailNotConfiguredError,
+    MailTemplateError,
+    SmtpTransport,
+    normalized_address,
+    render_email,
+    select_transport,
+)
+
+MESSAGE = MailMessage(subject="Hi", html="<p>Hi</p>", text="Hi")
+
+
+@pytest.fixture
+def gateway_logs(caplog: pytest.LogCaptureFixture) -> Iterator[pytest.LogCaptureFixture]:
+    """Route the ``gateway`` logger (which does not propagate) into caplog."""
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.INFO, logger="gateway")
+    try:
+        yield caplog
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+SMTP_CONFIGURED = {"smtp_host": "smtp.example.com", "mail_from_email": "otari@example.com"}
+
+
+def _ready(**overrides: object) -> GatewayConfig:
+    """A config that can send a message carrying a link back to itself."""
+    return GatewayConfig(**{**SMTP_CONFIGURED, "public_base_url": "https://otari.example.com", **overrides})  # type: ignore[arg-type]
+
+
+# --- Configuration: which transport, and is it ready ------------------------
+
+
+def test_mail_is_off_with_nothing_configured() -> None:
+    """The state of every deployment that never heard of mail, and it is not an error."""
+    config = GatewayConfig()
+    assert config.effective_mail_transport == "none"
+    assert config.mail_enabled is False
+    assert config.mail_ready is False
+
+
+def test_auto_selects_smtp_only_with_both_a_host_and_a_from_address() -> None:
+    """A host with no from-address sends mail no recipient could trust; the reverse has nothing to send through."""
+    assert GatewayConfig(smtp_host="smtp.example.com").effective_mail_transport == "none"
+    assert GatewayConfig(mail_from_email="otari@example.com").effective_mail_transport == "none"
+    assert GatewayConfig(**SMTP_CONFIGURED).effective_mail_transport == "smtp"  # type: ignore[arg-type]
+
+
+def test_mail_ready_also_needs_a_public_base_url() -> None:
+    """Every message the control plane sends carries a link back into this deployment."""
+    configured = GatewayConfig(**SMTP_CONFIGURED)  # type: ignore[arg-type]
+    assert configured.mail_enabled is True
+    assert configured.mail_ready is False
+    assert _ready().mail_ready is True
+
+
+def test_none_turns_mail_off_even_where_smtp_is_configured() -> None:
+    config = _ready(mail_transport="none")
+    assert config.effective_mail_transport == "none"
+    assert config.mail_enabled is False
+    assert config.missing_mail_settings == ("mail_transport",)
+
+
+def test_missing_settings_name_what_would_turn_mail_on() -> None:
+    """"Unavailable" is only honest if it says what to set."""
+    assert GatewayConfig().missing_mail_settings == ("smtp_host", "mail_from_email", "public_base_url")
+    assert GatewayConfig(smtp_host="smtp.example.com").missing_mail_settings == (
+        "mail_from_email",
+        "public_base_url",
+    )
+    assert GatewayConfig(**SMTP_CONFIGURED).missing_mail_settings == ("public_base_url",)  # type: ignore[arg-type]
+    assert _ready().missing_mail_settings == ()
+
+
+def test_an_unknown_transport_is_refused_at_load() -> None:
+    with pytest.raises(ValueError, match="mail_transport must be one of"):
+        GatewayConfig(mail_transport="sendgrid")
+
+
+def test_asking_for_smtp_without_smtp_settings_fails_at_startup_not_at_send_time() -> None:
+    config = GatewayConfig(mail_transport="smtp", smtp_host="smtp.example.com")
+    with pytest.raises(ValueError, match="mail_from_email"):
+        config.validate_mail_transport()
+
+
+def test_selecting_console_warns_that_it_writes_tokens_to_the_log(
+    gateway_logs: pytest.LogCaptureFixture,
+) -> None:
+    """The one sanctioned exception to never-log-a-token, so it says so out loud.
+
+    A console "delivery" writes the message body, and an invitation body carries
+    the accept token. The transport is opt-in per deployment and useless without
+    the link, so the trade is announced at startup rather than redacted away.
+    """
+    GatewayConfig(mail_transport="console").validate_mail_transport()
+
+    assert "token-bearing" in gateway_logs.text
+
+
+def test_a_real_transport_warns_about_nothing(gateway_logs: pytest.LogCaptureFixture) -> None:
+    GatewayConfig(**SMTP_CONFIGURED).validate_mail_transport()  # type: ignore[arg-type]
+    GatewayConfig().validate_mail_transport()
+
+    assert gateway_logs.text == ""
+
+
+def test_the_auto_default_validates_clean_with_nothing_configured() -> None:
+    """No mail is the ordinary state of a self-hosted deployment, not a misconfiguration."""
+    GatewayConfig().validate_mail_transport()
+
+
+# --- Transport selection ----------------------------------------------------
+
+
+def test_no_transport_is_an_absent_object_not_a_disabled_one() -> None:
+    """A surface asks whether mail exists; it never has to interpret a flag on a sender."""
+    assert select_transport(GatewayConfig()) is None
+    assert isinstance(select_transport(GatewayConfig(**SMTP_CONFIGURED)), SmtpTransport)  # type: ignore[arg-type]
+    assert isinstance(select_transport(GatewayConfig(mail_transport="console")), ConsoleTransport)
+
+
+def test_console_is_a_transport_without_any_smtp_settings() -> None:
+    mailer = Mailer(GatewayConfig(mail_transport="console", public_base_url="https://otari.example.com"))
+    assert mailer.transport_name == "console"
+    assert mailer.is_configured is True
+    assert mailer.can_send_links is True
+
+
+# --- The mailer -------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_send_reports_the_no_transport_case_rather_than_raising() -> None:
+    delivery = await Mailer(GatewayConfig()).send(to="ada@example.com", message=MESSAGE)
+    assert delivery.delivered is False
+    assert delivery.transport == "none"
+    assert delivery.reason is not None
+
+
+@pytest.mark.asyncio
+async def test_send_reports_a_failure_rather_than_raising() -> None:
+    """An unreachable host must not turn a mail failure into a request failure."""
+    config = _ready(smtp_host="127.0.0.1", smtp_port=1)  # nothing listens here
+    delivery = await Mailer(config).send(to="ada@example.com", message=MESSAGE)
+    assert delivery.delivered is False
+    assert delivery.transport == "smtp"
+    assert delivery.reason is not None
+
+
+@pytest.mark.asyncio
+async def test_a_failure_reason_never_carries_the_recipient_into_the_logs(
+    gateway_logs: pytest.LogCaptureFixture,
+) -> None:
+    config = _ready(smtp_host="127.0.0.1", smtp_port=1)
+    await Mailer(config).send(to="ada@example.com", message=MESSAGE)
+    assert "ada@example.com" not in gateway_logs.text
+    assert "a***@example.com" in gateway_logs.text
+
+
+@pytest.mark.asyncio
+async def test_send_never_raises_even_on_a_malformed_header() -> None:
+    """Defense in depth: message serialization runs before any socket I/O.
+
+    ``as_string()`` is evaluated as a plain argument expression before
+    ``client.sendmail(...)`` is even called, so this raises the same
+    ``HeaderParseError`` a real server would, with no network needed to prove
+    the mailer still reports a failure instead of propagating it.
+    """
+    message = MailMessage(subject="Broken\r\nheader: injected", html="<p>Hi</p>", text="Hi")
+    with patch("gateway.services.mail.transports.smtplib.SMTP") as mock_smtp:
+        mock_smtp.return_value.__enter__.return_value = MagicMock()
+        # Bypasses build_mime's own sanitization by handing the header a value
+        # that only email.header rejects once assembled.
+        with patch("gateway.services.mail.transports.sanitize_header_value", side_effect=lambda value: value):
+            delivery = await Mailer(_ready()).send(to="ada@example.com", message=message)
+    assert delivery.delivered is False
+
+
+@pytest.mark.asyncio
+async def test_send_survives_a_crlf_in_the_configured_from_name() -> None:
+    """mail_from_name is operator config, not caller input the subject path already sanitizes.
+
+    Without stripping it, a stray CR/LF reaches ``as_string()`` unescaped and
+    raises ``HeaderParseError`` on every send, which the mailer would report as
+    a silent undelivered with nothing pointing at the From name as the cause.
+    """
+    config = _ready(mail_from_name="Otari\r\nBcc: attacker@example.com")
+    with patch("gateway.services.mail.transports.smtplib.SMTP") as mock_smtp:
+        mock_smtp.return_value.__enter__.return_value = MagicMock()
+        delivery = await Mailer(config).send(to="ada@example.com", message=MESSAGE)
+    assert delivery.delivered is True
+
+
+@pytest.mark.asyncio
+async def test_a_templated_message_sends_over_a_configured_transport(
+    gateway_logs: pytest.LogCaptureFixture,
+) -> None:
+    """The definition of done, end to end, with no SMTP server to stand up."""
+    mailer = Mailer(GatewayConfig(mail_transport="console", public_base_url="https://otari.example.com"))
+    delivery = await mailer.send_template(
+        "mail_test",
+        to="ada@example.com",
+        subject="Otari test message",
+        values={"PUBLIC_BASE_URL": "https://otari.example.com", "TRANSPORT": "console"},
+    )
+    assert delivery.delivered is True
+    assert delivery.transport == "console"
+    assert "Your Otari mail settings work" in gateway_logs.text
+    # The recipient is redacted here too: these lines land in the same stream.
+    assert "ada@example.com" not in gateway_logs.text
+
+
+def test_require_ready_refuses_and_names_what_is_missing() -> None:
+    """What a surface with no non-mail fallback (password reset) raises."""
+    with pytest.raises(MailNotConfiguredError) as excinfo:
+        Mailer(GatewayConfig()).require_ready()
+    assert excinfo.value.missing == ("smtp_host", "mail_from_email", "public_base_url")
+    assert "smtp_host" in str(excinfo.value)
+
+
+def test_require_ready_passes_once_a_linked_message_can_be_sent() -> None:
+    Mailer(_ready()).require_ready()
+
+
+def test_a_configured_transport_without_a_public_url_still_cannot_send_links() -> None:
+    mailer = Mailer(GatewayConfig(**SMTP_CONFIGURED))  # type: ignore[arg-type]
+    assert mailer.is_configured is True
+    assert mailer.can_send_links is False
+    with pytest.raises(MailNotConfiguredError):
+        mailer.require_ready()
+
+
+def test_link_is_absolute_when_the_deployment_knows_its_address_and_relative_otherwise() -> None:
+    assert Mailer(_ready()).link("/#/accept-invitation?token=abc") == (
+        "https://otari.example.com/#/accept-invitation?token=abc"
+    )
+    assert Mailer(GatewayConfig()).link("/#/accept-invitation?token=abc") == "/#/accept-invitation?token=abc"
+
+
+def test_link_does_not_double_a_trailing_slash() -> None:
+    assert Mailer(_ready(public_base_url="https://otari.example.com/")).link("/x") == "https://otari.example.com/x"
+
+
+# --- The template renderer --------------------------------------------------
+
+
+def test_render_wraps_a_body_in_the_shared_layout() -> None:
+    message = render_email("mail_test", subject="Otari test message", values={"PUBLIC_BASE_URL": "u", "TRANSPORT": "t"})
+    assert message.html.startswith("<!doctype html>")
+    assert "<title>Otari test message</title>" in message.html
+    assert "Your Otari mail settings work" in message.html
+    assert message.text.rstrip().endswith("Otari")
+
+
+def test_a_placeholder_with_no_value_fails_here_rather_than_in_an_inbox() -> None:
+    with pytest.raises(MailTemplateError, match="TRANSPORT"):
+        render_email("mail_test", subject="Otari test message", values={"PUBLIC_BASE_URL": "u"})
+
+
+def test_a_missing_template_is_named() -> None:
+    with pytest.raises(MailTemplateError, match="password_reset"):
+        render_email("password_reset", subject="x", values={})
+
+
+def test_a_reserved_value_name_is_refused_rather_than_silently_overwritten() -> None:
+    with pytest.raises(MailTemplateError, match="SUBJECT"):
+        render_email("mail_test", subject="x", values={"SUBJECT": "mine", "PUBLIC_BASE_URL": "u", "TRANSPORT": "t"})
+
+
+def test_a_value_is_never_rescanned_as_a_placeholder() -> None:
+    """One pass, so a value that looks like a placeholder is emitted verbatim.
+
+    A sequential replace-per-value would substitute into text an earlier pass
+    had just inserted, which is how a free-text organization name becomes an
+    injection into its own email.
+    """
+    message = render_email(
+        "mail_test",
+        subject="{{TRANSPORT}}",
+        values={"PUBLIC_BASE_URL": "{{TRANSPORT}}", "TRANSPORT": "console"},
+    )
+    assert message.subject == "console"
+    assert "{{TRANSPORT}}" in message.text
+
+
+def test_the_subject_is_stripped_of_newlines_but_the_body_is_not() -> None:
+    message = render_email(
+        "mail_test",
+        subject="Test {{TRANSPORT}}",
+        values={"PUBLIC_BASE_URL": "u", "TRANSPORT": "smtp\r\nBcc: attacker@example.com"},
+    )
+    assert "\r" not in message.subject
+    assert "\n" not in message.subject
+
+
+# --- Address handling -------------------------------------------------------
+
+
+def test_normalized_address_lowercases_trims_and_refuses_a_non_address() -> None:
+    assert normalized_address("  Ada@Example.COM ") == "ada@example.com"
+    assert normalized_address("ada@example") is None
+    assert normalized_address("not an address") is None
+    assert normalized_address("") is None

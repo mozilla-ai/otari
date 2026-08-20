@@ -33,6 +33,6 @@ test("the deployment bootstrap is served unauthenticated", async ({
     management_url: null,
     // No SMTP configured in this e2e environment, so invitations are
     // creatable but not emailed; see docs/configuration.md#mail.
-    invitation_mail_ready: false,
+    mail_ready: false,
   })
 })

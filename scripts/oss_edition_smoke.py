@@ -27,6 +27,10 @@ self-hoster walks on day one:
    the expected body proves credential storage, routing, fallback, and dispatch
    all work in the OSS edition.
 8. The usage row for that request is readable back through ``/v1/usage``.
+9. Mail, which this deployment never configured, reports itself unavailable and
+   names what would turn it on, and a send is refused rather than accepted and
+   dropped. That is the state every self-hoster who wants no email is in, so it
+   is the state the gate has to prove still boots and still says so honestly.
 
 Both provider endpoints are a mock OpenAI-compatible server this script runs, so
 the gate needs no provider secret and runs identically on a fork PR.
@@ -481,6 +485,35 @@ def check_bootstrap(base_url: str) -> None:
     log("The deployment bootstrap answers without a credential, as standalone")
 
 
+def check_mail_is_honestly_unavailable(base_url: str, admin: dict[str, str]) -> None:
+    """Assert a deployment with no mail says so, and refuses instead of dropping a send.
+
+    Mail is optional (otari#648), and this smoke configures none, so this is the
+    self-hoster's default state rather than an edge case. Two things have to
+    hold in it: the surface reports what is missing, and a send is refused up
+    front. A 200 here would mean the deployment accepted a message nobody would
+    ever receive.
+    """
+    status, body = _request("GET", f"{base_url}/v1/settings/mail", headers=admin)
+    _expect(status, 200, "GET /v1/settings/mail", body)
+    if not isinstance(body, dict):
+        raise SmokeFailure(f"GET /v1/settings/mail did not return an object: {body!r}")
+    if body.get("transport") != "none" or body.get("ready") is not False:
+        raise SmokeFailure(f"GET /v1/settings/mail reports mail on a deployment with none: {body!r}")
+    if not body.get("missing"):
+        raise SmokeFailure(f"GET /v1/settings/mail names nothing to configure: {body!r}")
+
+    status, body = _request(
+        "POST",
+        f"{base_url}/v1/settings/mail/test",
+        headers=admin,
+        payload={"to": "smoke@example.com"},
+    )
+    if status != 503:
+        raise SmokeFailure(f"POST /v1/settings/mail/test returned {status}, expected a 503 refusal: {body!r}")
+    log("Mail is unconfigured, reports what is missing, and refuses a send rather than dropping it")
+
+
 def create_key(base_url: str, admin: dict[str, str], names: Names) -> str:
     """Create a user and an API key for it, and return the raw key."""
     status, body = _request(
@@ -607,6 +640,7 @@ def smoke(base_url: str, provider: _MockProviderServer, mock_base_url: str, name
     create_fallback_policy(base_url, admin, names)
     run_completion(base_url, key, provider, names)
     check_usage_recorded(base_url, admin, names)
+    check_mail_is_honestly_unavailable(base_url, admin)
 
 
 # --------------------------------------------------------------------------- #
