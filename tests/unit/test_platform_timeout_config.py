@@ -17,9 +17,17 @@ def test_valid_streaming_timeouts_are_accepted() -> None:
             "streaming_first_chunk_timeout_ms": 2000,
             "streaming_first_chunk_timeout_ms_tool_loop": 30000,
             "streaming_final_attempt_extra_first_chunk_timeout_ms": 58000,
+            "usage_inline_timeout_ms": "1500",
         }
     )
     assert config.platform["streaming_final_attempt_extra_first_chunk_timeout_ms"] == 58000
+    assert config.platform["usage_inline_timeout_ms"] == 1500
+
+
+@pytest.mark.parametrize("bad_value", [0, -1, "bad", 1.5, True])
+def test_invalid_usage_inline_timeout_is_rejected(bad_value: object) -> None:
+    with pytest.raises(ValidationError, match="usage_inline_timeout_ms must be a positive integer"):
+        GatewayConfig(platform={"usage_inline_timeout_ms": bad_value})
 
 
 def test_zero_extra_grace_is_allowed() -> None:

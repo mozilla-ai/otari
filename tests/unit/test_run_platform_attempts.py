@@ -451,6 +451,25 @@ async def test_report_platform_usage_returns_completed_cost(monkeypatch: pytest.
 
 
 @pytest.mark.asyncio
+async def test_report_platform_usage_accepts_opaque_correlation_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    correlation_id = "01HX1ABCDEFGHJKMNPQRSTVWXYZ"
+    post_mock = AsyncMock(
+        return_value=httpx.Response(200, json=_completed_usage_body(correlation_id=correlation_id))
+    )
+    monkeypatch.setattr(_platform, "_post_platform", post_mock)
+
+    result = await _platform._report_platform_usage(
+        _usage_config(),
+        correlation_id,
+        "success",
+        CompletionUsage(prompt_tokens=10, completion_tokens=7, total_tokens=17),
+        is_final_attempt=True,
+    )
+
+    assert result == _platform.SettledCost(cost_usd="0.012345", pricing_source="managed")
+
+
+@pytest.mark.asyncio
 @pytest.mark.parametrize("status_code", [202, 204])
 async def test_report_platform_usage_returns_none_without_completed_cost(
     monkeypatch: pytest.MonkeyPatch,

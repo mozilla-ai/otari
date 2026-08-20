@@ -128,7 +128,7 @@ class _UsagePricing(BaseModel):
 
 
 class _CompletedUsageSettlement(BaseModel):
-    correlation_id: uuid.UUID
+    correlation_id: str
     status: Literal["completed"]
     outcome: Literal["success"]
     cost_usd: str = Field(pattern=r"^-?\d+\.\d{6}$")
@@ -1035,14 +1035,13 @@ async def _report_platform_usage(
                     return None
                 try:
                     completed = _CompletedUsageSettlement.model_validate(response.json())
-                    expected_correlation_id = uuid.UUID(correlation_id)
                 except (ValueError, ValidationError):
                     logger.warning(
                         "Platform usage report returned an invalid completed body correlation_id=%s",
                         correlation_id,
                     )
                     return None
-                if completed.correlation_id != expected_correlation_id:
+                if completed.correlation_id != correlation_id:
                     logger.warning(
                         "Platform usage report correlation mismatch expected=%s received=%s",
                         correlation_id,

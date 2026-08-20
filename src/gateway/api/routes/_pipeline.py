@@ -2377,11 +2377,12 @@ async def _await_usage_report(
     config: GatewayConfig,
 ) -> SettledCost | None:
     """Await one report under the inline budget without cancelling accounting."""
+    timeout_seconds = _inline_settlement_timeout_seconds(config)
     task = _start_usage_report(coro, correlation_id)
     try:
         settlement = await asyncio.wait_for(
             asyncio.shield(task),
-            timeout=_inline_settlement_timeout_seconds(config),
+            timeout=timeout_seconds,
         )
     except asyncio.CancelledError:
         raise

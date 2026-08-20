@@ -1245,12 +1245,29 @@ class GatewayConfig(BaseSettings):
     @field_validator("platform")
     @classmethod
     def _validate_platform_streaming_timeouts(cls, platform: dict[str, Any]) -> dict[str, Any]:
-        """Reject non-sensical streaming first-chunk timeout settings at load time.
+        """Reject non-sensical platform timeout settings at load time.
 
-        The per-attempt first-chunk budgets must be positive: a zero or negative
-        wait would treat every attempt as instantly hung. The terminal-attempt
-        extra grace must be non-negative, since it is added on top of the budget.
+        The per-attempt first-chunk and inline-settlement budgets must be
+        positive. The terminal-attempt extra grace must be non-negative, since
+        it is added on top of the first-chunk budget.
         """
+        inline_key = "usage_inline_timeout_ms"
+        if inline_key in platform:
+            raw_inline_timeout = platform[inline_key]
+            try:
+                inline_timeout = int(raw_inline_timeout)
+            except (TypeError, ValueError):
+                raise ValueError(
+                    f"{inline_key} must be a positive integer, got {raw_inline_timeout!r}"
+                ) from None
+            if (
+                isinstance(raw_inline_timeout, bool)
+                or (isinstance(raw_inline_timeout, float) and not raw_inline_timeout.is_integer())
+                or inline_timeout <= 0
+            ):
+                raise ValueError(f"{inline_key} must be a positive integer, got {raw_inline_timeout!r}")
+            platform[inline_key] = inline_timeout
+
         positive_ms_keys = (
             "streaming_first_chunk_timeout_ms",
             "streaming_first_chunk_timeout_ms_tool_loop",
