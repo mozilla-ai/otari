@@ -22,7 +22,6 @@
 - [ ] I ran the Definition of Done checks locally (`make lint`, `make typecheck`, `make test`).
 - [ ] Documentation was updated where necessary.
 - [ ] If the API contract changed, I regenerated the OpenAPI spec (`uv run python scripts/generate_openapi.py`).
-- [ ] **Reconciliation:** if this changes where a surface lands across `otari` and otari.ai, or raises a question about it, that is recorded in an issue in the `otari-migration-m5` milestone (here or in `otari-ai`), not only in the PR.
 
 ## AI Usage
 <!-- Check one -->
