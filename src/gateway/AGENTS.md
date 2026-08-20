@@ -70,9 +70,10 @@ off `RequestContext.workspace_id`, never from a header, and lands on `ToolContex
 tool loop to read. A lower layer may only narrow what the layer above it permits, so a
 workspace row is a veto and a refinement and never a grant, and no row means no narrowing
 (MCP, which has no deployment-level server list to narrow, is the stated exception). The
-reasoning and the per-surface rules are on
-[mozilla-ai/otari#655](https://github.com/mozilla-ai/otari/issues/655); read it before
-building any of #654, #656, #657 or #658.
+question is [#655](https://github.com/mozilla-ai/otari/issues/655) and the reasoning is in
+the PR that answered it,
+[#678](https://github.com/mozilla-ai/otari/pull/678). Read both before building any of
+#654, #656, #657 or #658, each of which settles its own surface under the rule above.
 
 ## Data, sessions, migrations
 ORM entities are in `src/gateway/models/entities.py` (User, APIKey, Budget, ScopedBudget, UsageLog, ModelPricing, BudgetResetLog). The async engine/session factory and `init_db` live in `src/gateway/core/database.py`; routes get a session via the `get_db` dependency, non-request code uses `create_session()`. Alembic migrations are in `alembic/versions/` and run on startup when `auto_migrate` is set.
