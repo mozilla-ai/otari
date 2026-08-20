@@ -40,12 +40,13 @@ from gateway.services.web_search_backend import WebSearchNotReachableError
 T = TypeVar("T")
 
 # Status codes returned by the platform's usage-report endpoint that the
-# gateway should NOT retry. Auth / payment-required / not-found / conflict /
-# unprocessable are all permanent rejection signals — retrying would just
+# gateway should NOT retry. Auth, payment-required, not-found, conflict, gone,
+# and unprocessable are all permanent rejection signals: retrying would just
 # hammer the platform (an overdrawn or missing wallet won't recover within the
-# retry window). 402 is already excluded by the >= 500 retry predicate below;
-# listing it keeps the intent explicit and robust to changes in that predicate.
-_USAGE_NON_RETRYABLE_STATUS_CODES = {401, 402, 404, 409, 422}
+# retry window). Several of these are already excluded by the >= 500 retry
+# predicate below; listing them keeps the intent explicit and robust to changes
+# in that predicate.
+_USAGE_NON_RETRYABLE_STATUS_CODES = {401, 402, 404, 409, 410, 422}
 
 # Statuses on which the billing-message probe runs. A 402 is payment required by
 # definition, so it is handled directly in ``is_provider_billing_error`` without
@@ -1063,7 +1064,7 @@ async def _report_platform_usage(
                     cost_usd=completed.cost_usd,
                     pricing_source=completed.pricing.source,
                 )
-            if response.status_code in _USAGE_NON_RETRYABLE_STATUS_CODES or response.status_code == 410:
+            if response.status_code in _USAGE_NON_RETRYABLE_STATUS_CODES:
                 return None
             should_retry = response.status_code >= 500
         except (httpx.TimeoutException, httpx.NetworkError):
