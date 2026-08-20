@@ -248,7 +248,7 @@ async def streaming_generator(
                         # holding it so the stream keeps flowing, but stay open to
                         # a later carrier rather than giving up on cost outright.
                         if not overflow_logged:
-                            logger.warning(
+                            logger.debug(
                                 "Terminal usage carrier was not terminal for %s; streaming without holding it",
                                 label,
                             )

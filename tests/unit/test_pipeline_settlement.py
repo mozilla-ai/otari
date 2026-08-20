@@ -765,11 +765,11 @@ async def test_carrier_overflow_resumes_streaming_and_settles_on_a_later_carrier
     reporter = _BlockedReporter()
     reporter.install(monkeypatch)
     reporter.release.set()
-    warnings: list[str] = []
+    debug_messages: list[str] = []
 
     class _LoggerRecorder:
-        def warning(self, msg: str, *args: Any) -> None:
-            warnings.append(msg % args if args else msg)
+        def debug(self, msg: str, *args: Any) -> None:
+            debug_messages.append(msg % args if args else msg)
 
         def __getattr__(self, name: str) -> Any:
             return lambda *args, **kwargs: None
@@ -798,7 +798,7 @@ async def test_carrier_overflow_resumes_streaming_and_settles_on_a_later_carrier
     assert '"cost_usd":"0.012345"' in terminal
     assert '"cost_usd"' not in next(part for part in emitted if _chunk_id(part) == "u1")
     assert emitted[-1] == "data: [DONE]\n\n"
-    assert sum("was not terminal" in message for message in warnings) == 1
+    assert sum("was not terminal" in message for message in debug_messages) == 1
 
 
 @pytest.mark.asyncio
