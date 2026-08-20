@@ -699,15 +699,21 @@ async def retrieve_batch_results(
             break
 
     # Sum per-request token usage so batch spend is visible in usage reporting.
+    # The per-line counts are kept as well as summed: the row reports the batch's
+    # totals, but pricing has to happen a line at a time (see below).
     prompt_tokens = 0
     completion_tokens = 0
     total_tokens = 0
+    line_tokens: list[tuple[int, int]] = []
     for item in result.results:
         usage = item.result.usage if item.result is not None else None
         if usage is not None:
-            prompt_tokens += usage.prompt_tokens or 0
-            completion_tokens += usage.completion_tokens or 0
+            line_prompt = usage.prompt_tokens or 0
+            line_completion = usage.completion_tokens or 0
+            prompt_tokens += line_prompt
+            completion_tokens += line_completion
             total_tokens += usage.total_tokens or 0
+            line_tokens.append((line_prompt, line_completion))
 
     cost: Decimal | None = None
     if total_tokens:
@@ -726,15 +732,24 @@ async def retrieve_batch_results(
         )
         if pricing:
             # Through the cost core rather than a local formula, so a batch is
-            # priced by the same arithmetic (and the same threshold tiers) as a
-            # live request. A batch result reports OpenAI-shaped usage, so its
-            # cached tokens, when it reports any, are already inside
+            # priced by the same arithmetic as a live request. **One line at a
+            # time**, because a threshold tier is a per-request cliff: charging
+            # the batch's summed input against it would put a thousand short
+            # requests on the long-context rate that not one of them reached. A
+            # batch result reports OpenAI-shaped usage, so a line's cached
+            # tokens, when it reports any, are already inside its
             # ``prompt_tokens``.
-            cost = calculate_token_cost(
-                pricing,
-                input_tokens=prompt_tokens,
-                output_tokens=completion_tokens,
-                cache_tokens_included=True,
+            cost = sum(
+                (
+                    calculate_token_cost(
+                        pricing,
+                        input_tokens=line_prompt,
+                        output_tokens=line_completion,
+                        cache_tokens_included=True,
+                    )
+                    for line_prompt, line_completion in line_tokens
+                ),
+                Decimal(0),
             )
 
     # Recorded batches are accounted exactly once: the first completed retrieval

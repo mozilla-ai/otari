@@ -827,13 +827,22 @@ def test_retrieve_batch_results_records_tokens_and_cost(
 # ---------------------------------------------------------------------------
 
 
-def _completed_results_patches(tokens: CompletionUsage | None = None) -> tuple[Any, Any]:
-    """Patches returning a completed batch plus a single successful result."""
+def _completed_results_patches(tokens: CompletionUsage | None = None, count: int = 1) -> tuple[Any, Any]:
+    """Patches returning a completed batch plus ``count`` successful results.
+
+    ``count`` exists because a batch is priced one line at a time: a test that
+    cares which rate a line attracts needs more than one of them.
+    """
     mock_completion = MagicMock()
     mock_completion.model = "gpt-4o-mini"
     mock_completion.usage = tokens
     mock_completion.model_dump.return_value = {"id": "chatcmpl-1", "choices": []}
-    mock_result = BatchResult(results=[BatchResultItem(custom_id="req-1", result=mock_completion, error=None)])
+    mock_result = BatchResult(
+        results=[
+            BatchResultItem(custom_id=f"req-{index + 1}", result=mock_completion, error=None)
+            for index in range(count)
+        ]
+    )
     return (
         patch(
             "gateway.api.routes.batches.aretrieve_batch",
@@ -908,6 +917,51 @@ def test_recorded_batch_results_accounted_once(
     user_resp = client.get(f"/v1/users/{user_id}", headers=master_key_header)
     assert user_resp.status_code == 200
     assert user_resp.json()["spend"] == pytest.approx(expected_cost)
+
+
+def test_batch_lines_are_priced_one_request_at_a_time(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+) -> None:
+    """A threshold tier is a per-request cliff, so a batch cannot reach one by summing.
+
+    Three short requests whose *combined* input crosses the tier must each bill at
+    the base rate. Pricing the batch's summed input instead would put every token
+    on the long-context rate that not one of the requests reached.
+    """
+    user_id = api_key_obj["user_id"]
+    pricing_resp = client.post(
+        "/v1/pricing",
+        json={
+            "model_key": "openai:gpt-4o-mini",
+            "input_price_per_million": 1.0,
+            "output_price_per_million": 2.0,
+            "pricing_tiers": [
+                {"min_input_tokens": 200_000, "input_price_per_million": 2.0, "output_price_per_million": 4.0}
+            ],
+        },
+        headers=master_key_header,
+    )
+    assert pricing_resp.status_code == 200
+
+    batch_id = _create_recorded_batch(client, api_key_header, batch_id="batch_tiered")
+
+    line = CompletionUsage(prompt_tokens=100_000, completion_tokens=1_000, total_tokens=101_000)
+    retrieve_patch, results_patch = _completed_results_patches(line, count=3)
+    with retrieve_patch, results_patch:
+        resp = client.get(f"/v1/batches/{batch_id}/results?provider=openai", headers=api_key_header)
+    assert resp.status_code == 200
+
+    usage_resp = client.get(f"/v1/users/{user_id}/usage", headers=master_key_header)
+    results_logs = [log for log in usage_resp.json() if log["endpoint"] == "/v1/batches/results"]
+    assert len(results_logs) == 1
+    assert results_logs[0]["prompt_tokens"] == 300_000
+
+    # Base rates, three times over: 100k input at $1/M plus 1k output at $2/M.
+    expected_cost = 3 * (100_000 / 1_000_000 * 1.0 + 1_000 / 1_000_000 * 2.0)
+    assert results_logs[0]["cost"] == pytest.approx(expected_cost)
 
 
 def test_recorded_batch_results_defers_accounting_until_pricing_exists(

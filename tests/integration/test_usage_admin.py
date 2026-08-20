@@ -43,6 +43,7 @@ def _make_log(
     completion_tokens: int | None = 500,
     cache_read_tokens: int | None = None,
     cache_write_tokens: int | None = None,
+    billing_meters: dict[str, int] | None = None,
     cost: float | None = None,
     status: str = "success",
     timestamp: datetime = _TS,
@@ -66,6 +67,7 @@ def _make_log(
         total_tokens=(prompt_tokens or 0) + (completion_tokens or 0),
         cache_read_tokens=cache_read_tokens,
         cache_write_tokens=cache_write_tokens,
+        billing_meters=billing_meters,
         cost=cost,
         status=status,
     )
@@ -458,6 +460,51 @@ def test_set_price_with_cache_rates(
     # Additive shape: total input = 1000 + 500 cache read. Fresh input = 1000.
     # 1000 * 3/1M + 200 * 15/1M + 500 * 0.3/1M = 0.003 + 0.003 + 0.00015
     assert row.cost == Decimal("0.00615")
+
+
+def test_set_price_recovers_the_inclusive_shape_from_the_stored_meters(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """An OpenAI-shaped import must not have its cached tokens added to the prompt again.
+
+    The convention is not a column, so repricing recovers it from the meters
+    settlement wrote: ``total_input_tokens`` equal to ``prompt_tokens`` means the
+    cached slice was already inside the prompt. Assuming the additive shape here
+    would bill 1500 input tokens for a row that reported 1000.
+    """
+    _make_log(
+        db_session,
+        log_id="imp-inclusive",
+        counts_toward_budget=False,
+        source="codex",
+        prompt_tokens=1000,
+        completion_tokens=200,
+        cache_read_tokens=500,
+        billing_meters={"total_input_tokens": 1000, "fresh_input_tokens": 500},
+        cost=None,
+    )
+    db_session.commit()
+
+    resp = client.post(
+        SET_PRICE_PATH,
+        json={
+            "ids": ["imp-inclusive"],
+            "input_price_per_million": 3.0,
+            "output_price_per_million": 15.0,
+            "cache_read_price_per_million": 0.3,
+        },
+        headers=master_key_header,
+    )
+    assert resp.status_code == 200
+    db_session.expire_all()
+    row = _get(db_session, "imp-inclusive")
+    assert row is not None
+    # Inclusive shape: total input stays 1000, of which 500 are the cached slice.
+    # 500 * 3/1M + 200 * 15/1M + 500 * 0.3/1M = 0.0015 + 0.003 + 0.00015
+    assert row.cost == Decimal("0.00465")
+    assert row.billing_meters is not None
+    assert row.billing_meters["total_input_tokens"] == 1000
+    assert row.billing_meters["fresh_input_tokens"] == 500
 
 
 def test_set_price_only_touches_imported(
