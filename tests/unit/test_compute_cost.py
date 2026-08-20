@@ -16,8 +16,13 @@ Providers report cache tokens two ways, distinguished by
 
 When a cache rate is not configured, those tokens stay in the uncached-input
 bucket and are billed at the full input rate rather than dropped.
+
+Every expectation is exact ``Decimal`` arithmetic, because the cost path is
+(mozilla-ai/otari#661): ``_usd`` spells a meter charge the way the core computes
+it, and the settled total is that sum rounded half-up to the micro-dollar.
 """
 
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -28,6 +33,11 @@ from gateway.api.routes._pipeline import _compute_cost
 from gateway.core.config import PricingConfig, PricingTierConfig
 from gateway.core.usage import GatewayUsage
 from gateway.models.entities import ModelPricing
+
+
+def _usd(tokens: int, rate_per_million: str) -> Decimal:
+    """One meter's exact charge: tokens at a USD-per-million rate."""
+    return Decimal(tokens) * Decimal(rate_per_million) / Decimal(1_000_000)
 
 
 def _pricing(**overrides: float | None) -> ModelPricing:
@@ -52,7 +62,7 @@ def test_no_cache_pricing_uses_plain_rates() -> None:
     pricing = _pricing()
     usage = GatewayUsage(prompt_tokens=1000, completion_tokens=500, total_tokens=1500)
     cost = _compute_cost(pricing, usage)
-    expected = (1000 / 1_000_000) * 30.0 + (500 / 1_000_000) * 60.0
+    expected = _usd(1000, "30.0") + _usd(500, "60.0")
     assert cost == expected
 
 
@@ -68,7 +78,7 @@ def test_no_cache_pricing_with_openai_cache_tokens_billed_at_input_rate() -> Non
         cache_write_tokens=0,
     )
     cost = _compute_cost(pricing, usage)
-    expected = (1000 / 1_000_000) * 30.0 + (500 / 1_000_000) * 60.0
+    expected = _usd(1000, "30.0") + _usd(500, "60.0")
     assert cost == expected
 
 
@@ -86,7 +96,7 @@ def test_no_cache_pricing_anthropic_cache_tokens_billed_at_input_rate() -> None:
     )
     cost = _compute_cost(pricing, usage)
     # total input = 1000 + 400 + 100 = 1500, all at the input rate
-    expected = (1500 / 1_000_000) * 30.0 + (500 / 1_000_000) * 60.0
+    expected = _usd(1500, "30.0") + _usd(500, "60.0")
     assert cost == expected
 
 
@@ -107,7 +117,7 @@ def test_openai_cache_read_discounted_not_double_counted() -> None:
     )
     cost = _compute_cost(pricing, usage)
     # 600 non-cached at full input rate + 400 cached at discount rate
-    expected = (600 / 1_000_000) * 30.0 + (500 / 1_000_000) * 60.0 + (400 / 1_000_000) * 5.0
+    expected = _usd(600, "30.0") + _usd(500, "60.0") + _usd(400, "5.0")
     assert cost == expected
 
 
@@ -116,7 +126,7 @@ def test_openai_cache_read_zero_tokens_no_discount() -> None:
     pricing = _pricing(cache_read_price_per_million=5.0)
     usage = GatewayUsage(prompt_tokens=1000, completion_tokens=500, total_tokens=1500)
     cost = _compute_cost(pricing, usage)
-    expected = (1000 / 1_000_000) * 30.0 + (500 / 1_000_000) * 60.0
+    expected = _usd(1000, "30.0") + _usd(500, "60.0")
     assert cost == expected
 
 
@@ -132,7 +142,7 @@ def test_openai_cache_read_with_cache_write_price_ignored() -> None:
     )
     cost = _compute_cost(pricing, usage)
     # Same as test_openai_cache_read_discounted_not_double_counted; cache_write_price unused
-    expected = (600 / 1_000_000) * 30.0 + (500 / 1_000_000) * 60.0 + (400 / 1_000_000) * 5.0
+    expected = _usd(600, "30.0") + _usd(500, "60.0") + _usd(400, "5.0")
     assert cost == expected
 
 
@@ -154,10 +164,10 @@ def test_anthropic_cache_read_and_write_additive() -> None:
     )
     cost = _compute_cost(pricing, usage)
     expected = (
-        (1000 / 1_000_000) * 30.0  # uncached prompt input
-        + (500 / 1_000_000) * 60.0  # completion
-        + (400 / 1_000_000) * 0.75  # cache read
-        + (100 / 1_000_000) * 3.0  # cache write
+        _usd(1000, "30.0")  # uncached prompt input
+        + _usd(500, "60.0")  # completion
+        + _usd(400, "0.75")  # cache read
+        + _usd(100, "3.0")  # cache write
     )
     assert cost == expected
 
@@ -179,9 +189,9 @@ def test_anthropic_cache_read_only_is_positive_and_additive() -> None:
     )
     cost = _compute_cost(pricing, usage)
     expected = (
-        (100 / 1_000_000) * 30.0  # uncached prompt input
-        + (200 / 1_000_000) * 60.0  # completion
-        + (10000 / 1_000_000) * 0.30  # cache read (additive, discounted rate)
+        _usd(100, "30.0")  # uncached prompt input
+        + _usd(200, "60.0")  # completion
+        + _usd(10000, "0.30")  # cache read (additive, discounted rate)
     )
     assert cost == expected
     assert cost > 0
@@ -202,7 +212,7 @@ def test_anthropic_cache_write_without_read_rate_falls_back_to_input() -> None:
     cost = _compute_cost(pricing, usage)
     # total input = 1500; cache_write (100) priced at its rate, pulled out of the
     # uncached bucket; cache_read (400) has no rate so stays at the input rate.
-    expected = (1400 / 1_000_000) * 30.0 + (500 / 1_000_000) * 60.0 + (100 / 1_000_000) * 3.0
+    expected = _usd(1400, "30.0") + _usd(500, "60.0") + _usd(100, "3.0")
     assert cost == expected
 
 
@@ -221,14 +231,18 @@ def test_anthropic_cache_read_without_write_rate_falls_back_to_input() -> None:
     cost = _compute_cost(pricing, usage)
     # total input = 1500; cache_read (400) priced at its rate; cache_write (100)
     # has no rate so stays at the input rate.
-    expected = (1100 / 1_000_000) * 30.0 + (500 / 1_000_000) * 60.0 + (400 / 1_000_000) * 0.75
+    expected = _usd(1100, "30.0") + _usd(500, "60.0") + _usd(400, "0.75")
     assert cost == expected
 
 
-def test_malformed_cache_counts_are_clamped_never_negative() -> None:
+def test_malformed_cache_counts_lose_their_discount_never_go_negative() -> None:
     """A broken OpenAI-shape payload where cached tokens exceed prompt_tokens must
     not drive the uncached remainder negative (which would credit the budget).
-    The cache buckets are clamped to the input total; cost stays >= 0."""
+
+    The reconciled core drops the cache attribution entirely rather than clamping
+    each bucket, so the whole prompt bills at the input rate: a payload that
+    contradicts itself loses the discount it cannot substantiate. It over-charges
+    against the cache rate and never under-charges, and cost stays >= 0."""
     pricing = _pricing(cache_read_price_per_million=5.0, cache_write_price_per_million=15.0)
     usage = GatewayUsage(
         prompt_tokens=1000,
@@ -239,8 +253,8 @@ def test_malformed_cache_counts_are_clamped_never_negative() -> None:
         cache_tokens_in_prompt=True,  # OpenAI shape: cache is supposed to be a subset
     )
     cost = _compute_cost(pricing, usage)
-    # cache_read clamped to 1000, cache_write clamped to 0, uncached clamped to 0.
-    expected = (1000 / 1_000_000) * 5.0
+    # No cache attribution survives, so all 1000 prompt tokens bill as fresh input.
+    expected = _usd(1000, "30.0")
     assert cost == expected
     assert cost >= 0
 
@@ -255,8 +269,8 @@ def test_convention_flag_drives_discount_vs_additive() -> None:
     openai_cost = _compute_cost(pricing, GatewayUsage(**kwargs, cache_tokens_in_prompt=True))
     anthropic_cost = _compute_cost(pricing, GatewayUsage(**kwargs, cache_tokens_in_prompt=False))
     # OpenAI: 600 input + 400 cache-read. Anthropic: 1000 input + 400 cache-read.
-    assert openai_cost == (600 / 1_000_000) * 30.0 + (400 / 1_000_000) * 5.0
-    assert anthropic_cost == (1000 / 1_000_000) * 30.0 + (400 / 1_000_000) * 5.0
+    assert openai_cost == _usd(600, "30.0") + _usd(400, "5.0")
+    assert anthropic_cost == _usd(1000, "30.0") + _usd(400, "5.0")
     assert anthropic_cost > openai_cost
 
 
@@ -279,12 +293,12 @@ def test_context_pricing_tier_is_a_whole_request_cliff() -> None:
 
     cost = _compute_cost(pricing, usage)
 
-    assert cost == (150_000 / 1_000_000) * 60.0 + (1_000 / 1_000_000) * 120.0 + (100_000 / 1_000_000) * 10.0
+    assert cost == _usd(150_000, "60.0") + _usd(1_000, "120.0") + _usd(100_000, "10.0")
 
 
 def test_anthropic_1h_cache_write_uses_its_own_rate() -> None:
     pricing = _pricing(cache_write_price_per_million=3.75)
-    pricing.cache_write_1h_price_per_million = 6.0
+    pricing.cache_write_1h_price_per_million = Decimal("6")
     usage = GatewayUsage(
         prompt_tokens=1_000,
         completion_tokens=0,
@@ -296,13 +310,13 @@ def test_anthropic_1h_cache_write_uses_its_own_rate() -> None:
 
     cost = _compute_cost(pricing, usage)
 
-    assert cost == (1_000 / 1_000_000) * 30.0 + (200 / 1_000_000) * 3.75 + (100 / 1_000_000) * 6.0
+    assert cost == _usd(1_000, "30.0") + _usd(200, "3.75") + _usd(100, "6.0")
 
 
 def test_anthropic_1h_cache_write_allows_a_free_rate() -> None:
     """A configured $0 1-hour rate must not fall back to the 5-minute rate."""
     pricing = _pricing(cache_write_price_per_million=3.75)
-    pricing.cache_write_1h_price_per_million = 0.0
+    pricing.cache_write_1h_price_per_million = Decimal(0)
     usage = GatewayUsage(
         prompt_tokens=1_000,
         completion_tokens=0,
@@ -312,7 +326,7 @@ def test_anthropic_1h_cache_write_allows_a_free_rate() -> None:
         cache_tokens_in_prompt=False,
     )
 
-    assert _compute_cost(pricing, usage) == (1_000 / 1_000_000) * 30.0
+    assert _compute_cost(pricing, usage) == _usd(1_000, "30.0")
 
 
 # ---------------------------------------------------------------------------
@@ -333,7 +347,7 @@ def test_plain_completion_usage_uses_fallback_cache_read() -> None:
         prompt_tokens_details=PromptTokensDetails(cached_tokens=400),
     )
     cost = _compute_cost(pricing, usage)
-    expected = (600 / 1_000_000) * 30.0 + (500 / 1_000_000) * 60.0 + (400 / 1_000_000) * 5.0
+    expected = _usd(600, "30.0") + _usd(500, "60.0") + _usd(400, "5.0")
     assert cost == expected
 
 

@@ -2,6 +2,7 @@
 
 import logging
 from datetime import UTC, datetime
+from decimal import Decimal
 
 import pytest
 from any_llm.types.completion import CompletionUsage
@@ -554,8 +555,8 @@ async def test_log_usage_finds_pricing_with_legacy_slash_format(async_db: AsyncS
 
     assert len(writer.logs) == 1
     log = writer.logs[0]
-    expected_cost = (1000 / 1_000_000) * 30.0 + (500 / 1_000_000) * 60.0
-    assert log.cost == pytest.approx(expected_cost)
+    expected_cost = (Decimal(1000) * Decimal("30") + Decimal(500) * Decimal("60")) / Decimal(1_000_000)
+    assert log.cost == expected_cost
 
 
 @pytest.mark.asyncio
@@ -598,5 +599,5 @@ async def test_log_usage_finds_pricing_with_colon_format(async_db: AsyncSession)
 
     assert len(writer.logs) == 1
     log = writer.logs[0]
-    expected_cost = (1000 / 1_000_000) * 30.0 + (500 / 1_000_000) * 60.0
-    assert log.cost == pytest.approx(expected_cost)
+    expected_cost = (Decimal(1000) * Decimal("30") + Decimal(500) * Decimal("60")) / Decimal(1_000_000)
+    assert log.cost == expected_cost

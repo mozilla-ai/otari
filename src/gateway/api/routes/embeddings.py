@@ -1,5 +1,6 @@
 """OpenAI-compatible embeddings endpoint."""
 
+from decimal import Decimal
 from typing import Annotated, Any
 
 from any_llm import aembedding
@@ -60,19 +61,19 @@ async def create_embedding(
             result.usage.total_tokens if result.usage else None,
         )
 
-    def compute_cost(result: CreateEmbeddingResponse, pricing: ModelPricing | None) -> float | None:
+    def compute_cost(result: CreateEmbeddingResponse, pricing: ModelPricing | None) -> Decimal | None:
         if result.usage and pricing:
             return input_token_cost(result.usage.prompt_tokens, pricing)
         return None
 
     def compute_meters(
-        result: CreateEmbeddingResponse, pricing: ModelPricing | None, cost: float
+        result: CreateEmbeddingResponse, pricing: ModelPricing | None, cost: Decimal
     ) -> BillingMeters | None:
         if not result.usage or pricing is None:
             return None
         tokens = result.usage.prompt_tokens
-        rate = pricing.input_price_per_million
-        breakdown = [{"meter": "input", "units": tokens, "rate_per_million": rate, "cost": cost}]
+        rate = float(pricing.input_price_per_million)
+        breakdown = [{"meter": "input", "units": tokens, "rate_per_million": rate, "cost": float(cost)}]
         # ``total_input_tokens`` rather than a route-local name: it is the meter the
         # billed-token SQL and the dashboard's token bar already read by name, so
         # the row's own meter becomes the source they use instead of the raw-column

@@ -41,6 +41,7 @@ bill precisely.
 import time
 import uuid
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Annotated, Any, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Path, Request, Response, status
@@ -59,6 +60,7 @@ from gateway.api.routes._pipeline import (
     rate_limit_headers,
 )
 from gateway.core.config import GatewayConfig
+from gateway.core.metered_pricing import quantize_cost
 from gateway.inflight import track_request
 from gateway.log_config import logger
 from gateway.models.entities import APIKey, UsageLog
@@ -315,7 +317,8 @@ async def _dispatch_search(
     reservation = await reserve_budget(
         db,
         user_id,
-        flat_request_cost(pricing),
+        # The reservation ledger is float; the settled cost below stays exact.
+        float(flat_request_cost(pricing)),
         # Deliberately not the pricing key: ``model`` exists only to drive
         # reserve_budget's free-model shortcut, which splits the string through
         # any-llm. A search tool is not an any-llm model, so passing it logs a
@@ -374,7 +377,10 @@ async def _dispatch_search(
         outcome = await run_search(tool, _search_query(request))
         # The provider's own charge is the true cost; the configured flat rate is
         # the fallback for a provider that reports none.
-        cost = outcome.cost_usd if outcome.cost_usd is not None else flat_request_cost(pricing)
+        # Rounded once, here, so the row and the reconciled spend agree.
+        cost = quantize_cost(
+            Decimal(str(outcome.cost_usd)) if outcome.cost_usd is not None else flat_request_cost(pricing)
+        )
         await log_writer.put(
             usage_row(
                 status="success",

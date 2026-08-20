@@ -10,6 +10,7 @@ from genai_prices.types import PriceCalculation, TieredPrices
 from sqlalchemy import case, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.core.metered_pricing import meter_cost, quantize_cost
 from gateway.log_config import logger
 from gateway.models.entities import ModelPricing, OrganizationModelPricing
 
@@ -77,31 +78,35 @@ def _provider_implementation(instance: str | None) -> str | None:
     return implementation
 
 
-def _flat_rate(value: Decimal | TieredPrices) -> float:
-    """Collapse a genai-prices rate to a single USD-per-million float.
+def _flat_rate(value: Decimal | TieredPrices) -> Decimal:
+    """Collapse a genai-prices rate to a single USD-per-million amount.
 
     Tiered models (threshold "cliff" pricing) are flattened to their ``base``
     rate, the price that applies below the first tier, which is the right default
     for the typical request that never crosses a tier boundary.
+
+    genai-prices publishes its rates as ``Decimal`` already, so they are carried
+    rather than narrowed: a rate that reached the cost core through ``float``
+    would arrive as a binary approximation of the published price.
     """
 
     if isinstance(value, TieredPrices):
-        return float(value.base)
-    return float(value)
+        return value.base
+    return value
 
 
-def _rate_at(value: Decimal | TieredPrices | None, threshold: int) -> float | None:
+def _rate_at(value: Decimal | TieredPrices | None, threshold: int) -> Decimal | None:
     if value is None:
         return None
     if not isinstance(value, TieredPrices):
-        return float(value)
+        return value
     rate = value.base
     for tier in value.tiers:
         if tier.start <= threshold:
             rate = tier.price
         else:
             break
-    return float(rate)
+    return rate
 
 
 def _pricing_tiers(price: object) -> list[dict[str, float | int]]:
@@ -114,10 +119,20 @@ def _pricing_tiers(price: object) -> list[dict[str, float | int]]:
     thresholds = sorted(
         {tier.start for value in fields.values() if isinstance(value, TieredPrices) for tier in value.tiers}
     )
+    # A tier rate is a ``float`` where a base rate is a ``Decimal``, because the
+    # two live in different columns: base rates are exact NUMERIC, tiers are
+    # JSON, and JSON has no decimal. Nothing is lost, because the cost core
+    # reads a tier override through ``to_decimal``, which converts a float
+    # through its shortest decimal representation, and every published rate is a
+    # short decimal.
     return [
         {
             "min_input_tokens": threshold,
-            **{field: rate for field, value in fields.items() if (rate := _rate_at(value, threshold)) is not None},
+            **{
+                field: float(rate)
+                for field, value in fields.items()
+                if (rate := _rate_at(value, threshold)) is not None
+            },
         }
         for threshold in thresholds
     ]
@@ -307,7 +322,7 @@ def default_model_pricing(provider: str | None, model: str, as_of: datetime) -> 
         return None
     # Input-only models (embeddings, rerank) legitimately have no output rate;
     # price output at 0 rather than rejecting the whole model.
-    output_rate = _flat_rate(price.output_mtok) if price.output_mtok is not None else 0.0
+    output_rate = _flat_rate(price.output_mtok) if price.output_mtok is not None else Decimal(0)
     cache_read_rate = _flat_rate(price.cache_read_mtok) if price.cache_read_mtok is not None else None
     cache_write_rate = _flat_rate(price.cache_write_mtok) if price.cache_write_mtok is not None else None
 
@@ -496,16 +511,16 @@ async def find_model_pricing(
 # per-unit columns would need a schema migration (deferred; see issue #259).
 
 
-def input_token_cost(tokens: int, pricing: ModelPricing) -> float:
+def input_token_cost(tokens: int, pricing: ModelPricing) -> Decimal:
     """USD cost of ``tokens`` input tokens at the per-million-token rate.
 
     The standard convention: ``input_price_per_million`` is USD per million
     input tokens. Used by embeddings and rerank, which bill input tokens only.
     """
-    return (tokens / 1_000_000) * pricing.input_price_per_million
+    return meter_cost(tokens, pricing.input_price_per_million)
 
 
-def flat_request_cost(pricing: ModelPricing | None) -> float:
+def flat_request_cost(pricing: ModelPricing | None) -> Decimal:
     """Flat USD cost of one request for a model priced per request.
 
     Moderations convention: ``input_price_per_million`` stores the per-request
@@ -513,14 +528,14 @@ def flat_request_cost(pricing: ModelPricing | None) -> float:
     stored rate divided by 1e6. Unpriced models are treated as free.
     """
     if pricing is None or not pricing.input_price_per_million:
-        return 0.0
-    return pricing.input_price_per_million / 1_000_000
+        return Decimal(0)
+    return meter_cost(1, pricing.input_price_per_million)
 
 
 PerRequestMeters = tuple[dict[str, int], list[dict[str, float | int | str]]]
 
 
-def per_request_meters(cost: float) -> PerRequestMeters | None:
+def per_request_meters(cost: Decimal) -> PerRequestMeters | None:
     """This request's billing meters and charge line, priced per request.
 
     One request is one billed meter, so the per-request rate is the cost itself.
@@ -538,7 +553,9 @@ def per_request_meters(cost: float) -> PerRequestMeters | None:
     """
     if not cost:
         return None
-    return {"requests": 1}, [{"meter": "request", "units": 1, "unit_rate": cost, "cost": cost}]
+    # ``float`` because the breakdown is a JSON column; the exact amount is the
+    # row's ``cost``. See ``ChargeLine`` in the cost core.
+    return {"requests": 1}, [{"meter": "request", "units": 1, "unit_rate": float(cost), "cost": float(cost)}]
 
 
 GATEWAY_TOOL_PRICING_PROVIDER = "otari"
@@ -563,7 +580,7 @@ async def price_tool_calls(
     *,
     as_of: datetime | None = None,
     organization_id: uuid.UUID | None = None,
-) -> tuple[float, list[dict[str, float | int | str]], list[str]]:
+) -> tuple[Decimal, list[dict[str, float | int | str]], list[str]]:
     """Price a request's successful gateway-run tool calls.
 
     Returns the total USD cost, one auditable charge line per tool, and the names
@@ -583,10 +600,10 @@ async def price_tool_calls(
     """
     tools = [tool for tool in sorted(billable_calls) if billable_calls[tool] > 0]
     if not tools:
-        return 0.0, [], []
+        return Decimal(0), [], []
     rates = await _tool_rates(db, tools, as_of=as_of, organization_id=organization_id)
 
-    total = 0.0
+    total = Decimal(0)
     lines: list[dict[str, float | int | str]] = []
     unpriced: list[str] = []
     for tool in tools:
@@ -597,8 +614,8 @@ async def price_tool_calls(
         unit_rate = flat_request_cost(pricing)
         cost = units * unit_rate
         total += cost
-        lines.append({"meter": f"{tool}_calls", "units": units, "unit_rate": unit_rate, "cost": cost})
-    return total, lines, unpriced
+        lines.append({"meter": f"{tool}_calls", "units": units, "unit_rate": float(unit_rate), "cost": float(cost)})
+    return quantize_cost(total), lines, unpriced
 
 
 async def _tool_rates(
@@ -672,7 +689,7 @@ async def _tool_rates(
     return found
 
 
-def per_image_cost(n_images: int, pricing: ModelPricing) -> float:
+def per_image_cost(n_images: int, pricing: ModelPricing) -> Decimal:
     """USD cost of ``n_images`` generated images.
 
     Images convention: despite the name, ``input_price_per_million`` stores raw

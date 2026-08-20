@@ -122,7 +122,7 @@ for tool in list(TOOL_UNIT_RATES):
         .order_by(ModelPricing.effective_at.desc())
         .first()
     )
-    TOOL_UNIT_RATES[tool] = (row.input_price_per_million / 1_000_000) if row else None
+    TOOL_UNIT_RATES[tool] = float(row.input_price_per_million / 1_000_000) if row else None
 print(f"tool rates in effect: {TOOL_UNIT_RATES}")
 
 now = datetime.now(UTC)

@@ -10,6 +10,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import get_config, get_db, verify_master_key
 from gateway.core.config import GatewayConfig
 from gateway.models.entities import AgentTelemetry, APIKey, Budget, UsageLog, User
+from gateway.models.money import as_float
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.budget_service import calculate_next_reset
 from gateway.services.model_access import validate_allowed_models
@@ -108,7 +109,7 @@ class UsageLogResponse(BaseModel):
             prompt_tokens=log.prompt_tokens,
             completion_tokens=log.completion_tokens,
             total_tokens=log.total_tokens,
-            cost=log.cost,
+            cost=as_float(log.cost),
             status=log.status,
             error_message=log.error_message,
             latency_ms=log.latency_ms,

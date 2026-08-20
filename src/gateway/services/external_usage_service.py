@@ -17,6 +17,7 @@ completions, and tool payloads are rejected by the request schema, not stored.
 
 import uuid
 from datetime import datetime
+from decimal import Decimal
 
 from fastapi import HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -24,10 +25,9 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.core.usage import GatewayUsage
+from gateway.core.metered_pricing import BillableUsage, ChargeLine, billable_usage, price_billable_usage
 from gateway.log_config import logger
 from gateway.models.entities import APIKey, ModelPricing, UsageLog, User
-from gateway.services.metered_pricing import calculate_metered_cost
 from gateway.services.pricing_service import (
     default_model_pricing,
     default_pricing_enabled,
@@ -267,25 +267,24 @@ def _resolve_pricing(
     return None
 
 
-def _build_usage(event: ExternalUsageEvent) -> GatewayUsage:
-    """Map an imported event onto a GatewayUsage for cost calculation.
+def _build_usage(event: ExternalUsageEvent) -> BillableUsage:
+    """Normalize an imported event's token counts for pricing.
 
-    ``cache_tokens_in_prompt`` carries the event's token convention: ``False`` for
-    the Anthropic / Claude Code shape (``input_tokens`` excludes the additive cache
-    buckets, the default) and ``True`` for the OpenAI shape (cached tokens are a
-    subset of ``input_tokens``). The cost calculation reads it to normalize both
-    onto one convention rather than double-counting cached tokens. Passing a plain
-    dict here would read as all-zero (``billable_usage`` uses ``getattr``), so a
-    real GatewayUsage is required.
+    ``cache_tokens_in_prompt`` carries the event's token convention, and the
+    submitter states it per event: ``False`` for the Anthropic / Claude Code
+    shape (``input_tokens`` excludes the additive cache buckets, the default)
+    and ``True`` for the OpenAI shape (cached tokens are a subset of
+    ``input_tokens``). It is passed straight through to the cost core, which
+    has no default for it, so an ingest that ever stopped carrying the flag
+    would fail to compile rather than quietly price one shape as the other.
     """
-    return GatewayUsage(
-        prompt_tokens=event.input_tokens,
-        completion_tokens=event.output_tokens,
-        total_tokens=event.input_tokens + event.output_tokens,
+    return billable_usage(
+        input_tokens=event.input_tokens,
+        output_tokens=event.output_tokens,
         cache_read_tokens=event.cache_read_tokens,
         cache_write_tokens=event.cache_write_tokens,
         cache_write_1h_tokens=event.cache_write_1h_tokens,
-        cache_tokens_in_prompt=event.cache_tokens_in_prompt,
+        cache_tokens_included=event.cache_tokens_in_prompt,
     )
 
 
@@ -297,11 +296,11 @@ def _build_row(
     api_key_id: str | None,
     workspace_id: uuid.UUID,
 ) -> UsageLog:
-    cost: float | None = None
+    cost: Decimal | None = None
     meters: dict[str, int] | None = None
-    breakdown: list[dict[str, float | int | str]] | None = None
+    breakdown: list[ChargeLine] | None = None
     if pricing is not None:
-        cost, meters, breakdown = calculate_metered_cost(pricing, _build_usage(event))
+        cost, meters, breakdown = price_billable_usage(pricing, _build_usage(event))
     return UsageLog(
         workspace_id=workspace_id,
         api_key_id=api_key_id,

@@ -1,6 +1,7 @@
 """Tests for the shared find_model_pricing helper."""
 
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 
 import pytest
 from sqlalchemy import func, select
@@ -221,8 +222,8 @@ async def test_find_pricing_db_overrides_genai_defaults(async_db: AsyncSession) 
 
     pricing = await find_model_pricing(async_db, "openai", "gpt-4o")
     assert pricing is not None
-    assert pricing.input_price_per_million == 0.123
-    assert pricing.output_price_per_million == 0.456
+    assert pricing.input_price_per_million == Decimal("0.123")
+    assert pricing.output_price_per_million == Decimal("0.456")
 
 
 @pytest.mark.asyncio

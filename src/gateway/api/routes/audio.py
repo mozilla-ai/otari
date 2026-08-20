@@ -1,5 +1,6 @@
 """OpenAI-compatible audio transcription and speech endpoints."""
 
+from decimal import Decimal
 from typing import Annotated, Any
 
 from any_llm import aspeech, atranscription
@@ -84,13 +85,13 @@ async def create_transcription(
 
         return await atranscription(**transcription_kwargs)
 
-    def compute_cost(result: Transcription, pricing: ModelPricing | None) -> float:
+    def compute_cost(result: Transcription, pricing: ModelPricing | None) -> Decimal:
         # Audio bills per request like moderations: ``input_price_per_million``
         # stores the per-request rate scaled by 1e6 (see flat_request_cost), and
         # an unpriced model is free by design.
         return flat_request_cost(pricing)
 
-    def compute_meters(result: Transcription, pricing: ModelPricing | None, cost: float) -> BillingMeters | None:
+    def compute_meters(result: Transcription, pricing: ModelPricing | None, cost: Decimal) -> BillingMeters | None:
         return per_request_meters(cost)
 
     # Audio is exempt from require_pricing and has no measurable cost unit yet
@@ -186,13 +187,13 @@ async def create_speech(
         }
         return await aspeech(**speech_kwargs)
 
-    def compute_cost(result: bytes, pricing: ModelPricing | None) -> float:
+    def compute_cost(result: bytes, pricing: ModelPricing | None) -> Decimal:
         # Speech bills per request like moderations: ``input_price_per_million``
         # stores the per-request rate scaled by 1e6 (see flat_request_cost), and
         # an unpriced model is free by design.
         return flat_request_cost(pricing)
 
-    def compute_meters(result: bytes, pricing: ModelPricing | None, cost: float) -> BillingMeters | None:
+    def compute_meters(result: bytes, pricing: ModelPricing | None, cost: Decimal) -> BillingMeters | None:
         return per_request_meters(cost)
 
     # Audio is exempt from require_pricing and has no measurable cost unit yet

@@ -173,7 +173,7 @@ async def test_search_calls_are_metered_priced_and_spent(
 
     # The part that matters: the money reached the ledger, not just the log.
     after = _spend(db_session_factory, user_id)
-    assert after - before == pytest.approx(row.cost, rel=1e-6)
+    assert after - before == pytest.approx(float(row.cost), rel=1e-6)
 
 
 @pytest.mark.asyncio

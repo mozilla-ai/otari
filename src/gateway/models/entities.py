@@ -1,5 +1,6 @@
 import uuid
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 
 from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Index, Text, UniqueConstraint, Uuid, text
@@ -9,6 +10,7 @@ from sqlmodel import SQLModel
 # The timezone-aware timestamp type the tenancy tables already use. Imported
 # rather than redefined: it exists because the engines disagree about
 # ``timezone=True``, and two copies of that reasoning would drift.
+from gateway.models.money import UsdCost, UsdRate
 from gateway.models.tenancy import UtcDateTime
 
 
@@ -497,16 +499,16 @@ class ModelPricing(Base):
         primary_key=True,
         default=lambda: datetime.now(UTC),
     )
-    input_price_per_million: Mapped[float] = mapped_column()
-    output_price_per_million: Mapped[float] = mapped_column()
+    input_price_per_million: Mapped[Decimal] = mapped_column(UsdRate())
+    output_price_per_million: Mapped[Decimal] = mapped_column(UsdRate())
     # Nullable: providers without prompt caching (or models without a
     # discounted cache rate) leave these unset. When set, the cost
     # calculation prices cache_read_tokens / cache_write_tokens at these
     # per-million-token rates, following the provider inclusion convention
     # (see log_usage in _pipeline.py).
-    cache_read_price_per_million: Mapped[float | None] = mapped_column(nullable=True)
-    cache_write_price_per_million: Mapped[float | None] = mapped_column(nullable=True)
-    cache_write_1h_price_per_million: Mapped[float | None] = mapped_column(nullable=True)
+    cache_read_price_per_million: Mapped[Decimal | None] = mapped_column(UsdRate(), nullable=True)
+    cache_write_price_per_million: Mapped[Decimal | None] = mapped_column(UsdRate(), nullable=True)
+    cache_write_1h_price_per_million: Mapped[Decimal | None] = mapped_column(UsdRate(), nullable=True)
     # Ordered threshold rules. Each rule applies its supplied rates to the
     # entire request once ``total_input_tokens`` reaches ``min_input_tokens``.
     pricing_tiers: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
@@ -584,7 +586,10 @@ class UsageLog(Base):
     cache_write_1h_tokens: Mapped[int | None] = mapped_column()
     billing_meters: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     pricing_breakdown: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
-    cost: Mapped[float | None] = mapped_column()
+    # The settled amount, and the accounting truth for this row
+    # (mozilla-ai/otari-ai#1751). Exact to the micro-dollar; see
+    # ``models/money.py`` for what that costs on each engine.
+    cost: Mapped[Decimal | None] = mapped_column(UsdCost())
 
     # "success", "error", or "absorbed". ``absorbed`` is a failed attempt that a
     # routing policy recovered from by trying the next candidate: the request
@@ -1132,14 +1137,14 @@ class OrganizationModelPricing(Base):
         Uuid, ForeignKey("organization.id", ondelete="CASCADE"), nullable=False
     )
     model_key: Mapped[str] = mapped_column()
-    input_price_per_million: Mapped[float] = mapped_column()
-    output_price_per_million: Mapped[float] = mapped_column()
+    input_price_per_million: Mapped[Decimal] = mapped_column(UsdRate())
+    output_price_per_million: Mapped[Decimal] = mapped_column(UsdRate())
     # Nullable for the same reason ``ModelPricing``'s are: a provider without
     # prompt caching, or a model with no discounted cache rate, leaves them unset
     # and the cost calculation falls back the way it already does.
-    cache_read_price_per_million: Mapped[float | None] = mapped_column(nullable=True)
-    cache_write_price_per_million: Mapped[float | None] = mapped_column(nullable=True)
-    cache_write_1h_price_per_million: Mapped[float | None] = mapped_column(nullable=True)
+    cache_read_price_per_million: Mapped[Decimal | None] = mapped_column(UsdRate(), nullable=True)
+    cache_write_price_per_million: Mapped[Decimal | None] = mapped_column(UsdRate(), nullable=True)
+    cache_write_1h_price_per_million: Mapped[Decimal | None] = mapped_column(UsdRate(), nullable=True)
     # Same shape and same ``min_input_tokens`` key as ``ModelPricing``, so the
     # transient row an override resolves into needs no tier translation.
     pricing_tiers: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)

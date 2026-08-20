@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
+from decimal import Decimal
 
 import pytest
 from any_llm.types.completion import CompletionUsage
@@ -53,7 +54,7 @@ async def test_log_usage_records_usage_data(async_db: AsyncSession) -> None:
     log = writer.logs[0]
     assert log.prompt_tokens == 1000
     assert log.completion_tokens == 500
-    assert log.cost == pytest.approx((1000 / 1_000_000) * 2.0 + (500 / 1_000_000) * 4.0)
+    assert log.cost == (Decimal(1000) * Decimal("2") + Decimal(500) * Decimal("4")) / Decimal(1_000_000)
     assert log.status == "success"
 
 

@@ -35,6 +35,7 @@ from gateway.api.deps import CurrentIdentity, get_config, get_db, verify_master_
 from gateway.api.routes.pricing import PricingTier
 from gateway.core.config import GatewayConfig
 from gateway.models.entities import OrganizationModelPricing
+from gateway.models.money import as_float
 from gateway.services.organization_pricing_service import (
     OrganizationPricingService,
     PricingOverrideInput,
@@ -173,11 +174,11 @@ class OrganizationModelPricingPublic(BaseModel):
             id=override.id,
             organization_id=override.organization_id,
             model_key=override.model_key,
-            input_price_per_million=override.input_price_per_million,
-            output_price_per_million=override.output_price_per_million,
-            cache_read_price_per_million=override.cache_read_price_per_million,
-            cache_write_price_per_million=override.cache_write_price_per_million,
-            cache_write_1h_price_per_million=override.cache_write_1h_price_per_million,
+            input_price_per_million=float(override.input_price_per_million),
+            output_price_per_million=float(override.output_price_per_million),
+            cache_read_price_per_million=as_float(override.cache_read_price_per_million),
+            cache_write_price_per_million=as_float(override.cache_write_price_per_million),
+            cache_write_1h_price_per_million=as_float(override.cache_write_1h_price_per_million),
             pricing_tiers=[PricingTier.model_validate(tier) for tier in override.pricing_tiers or []],
             effective_from=override.effective_from,
             effective_to=override.effective_to,

@@ -11,13 +11,19 @@ token semantics here mirror payloads captured from the real clients.
 import gzip
 import json
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any
 
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from gateway.models.entities import UsageLog, User
+
+
+def _usd(tokens: int, rate_per_million: str) -> Decimal:
+    """One meter's exact charge, the way the cost core computes it."""
+    return Decimal(tokens) * Decimal(rate_per_million) / Decimal(1_000_000)
+
 
 _PATH = "/v1/logs"
 
@@ -109,8 +115,8 @@ def test_otlp_api_request_is_ingested_and_priced(
     assert row.billing_meters["cache_write_1h_tokens"] == 0
     # Otari prices at its own configured rates (Claude Code's cost_usd is ignored):
     # 1200 fresh input + 450 output + 8000 cache read + 1024 cache writes at the 5m rate.
-    expected = (1200 * 15.0 + 450 * 75.0 + 8000 * 1.5 + 1024 * 18.75) / 1_000_000
-    assert row.cost == pytest.approx(expected)
+    expected = _usd(1200, "15") + _usd(450, "75") + _usd(8000, "1.5") + _usd(1024, "18.75")
+    assert row.cost == expected
     # The email attribute present in the OTLP record must never be persisted.
     assert "example.com" not in (row.source_label or "")
 
@@ -214,8 +220,8 @@ def test_otlp_traces_gen_ai_is_ingested(
     assert row.prompt_tokens == 1000 and row.completion_tokens == 50 and row.cache_read_tokens == 200
     assert row.source_label == "proj-x"
     # De-included price: (1000 - 200) input + 200 cache-read + 50 output.
-    expected = (800 * 2.5 + 200 * 1.25 + 50 * 10.0) / 1_000_000
-    assert row.cost == pytest.approx(expected)
+    expected = _usd(800, "2.5") + _usd(200, "1.25") + _usd(50, "10")
+    assert row.cost == expected
     assert row.counts_toward_budget is False
 
 
@@ -278,8 +284,8 @@ def test_otlp_codex_sse_event_is_ingested_and_priced(
     # Raw counts stored as reported; input stays inclusive of the cached slice.
     assert row.prompt_tokens == 1000 and row.completion_tokens == 100 and row.cache_read_tokens == 200
     # De-included price: cached 200 billed once at the cache-read rate, not twice.
-    expected = (800 * 0.15 + 200 * 0.075 + 100 * 0.6) / 1_000_000
-    assert row.cost == pytest.approx(expected)
+    expected = _usd(800, "0.15") + _usd(200, "0.075") + _usd(100, "0.6")
+    assert row.cost == expected
 
 
 def test_otlp_codex_non_completed_sse_event_skipped(
@@ -334,8 +340,8 @@ def test_otlp_codex_api_request_path(
     row = db_session.query(UsageLog).filter(UsageLog.source_event_id == "resp_codex_http_1").one()
     assert row.source == "codex" and row.provider == "openai" and row.model == "gpt-4o-mini"
     assert row.cache_read_tokens == 200
-    expected = (800 * 0.15 + 200 * 0.075 + 100 * 0.6) / 1_000_000
-    assert row.cost == pytest.approx(expected)
+    expected = _usd(800, "0.15") + _usd(200, "0.075") + _usd(100, "0.6")
+    assert row.cost == expected
 
 
 def test_otlp_codex_protobuf_roundtrip(

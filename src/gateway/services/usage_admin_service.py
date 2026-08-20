@@ -28,11 +28,10 @@ from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.core.metered_pricing import BillableUsage, billable_usage, price_billable_usage
 from gateway.core.sql import MAX_FILTER_VALUES, match_any, utc_bound
-from gateway.core.usage import GatewayUsage
 from gateway.log_config import logger
 from gateway.models.entities import ModelPricing, UsageLog
-from gateway.services.metered_pricing import calculate_metered_cost
 from gateway.services.tool_usage import TOOL_METER_NAMESPACE
 
 # Cap on an explicit id list. Page selections drive the id path and the largest
@@ -225,22 +224,37 @@ async def delete_usage(db: AsyncSession, request: UsageDeleteRequest) -> UsageDe
     return UsageDeleteResult(deleted=deleted)
 
 
-def _row_usage(row: UsageLog) -> GatewayUsage:
-    """Rebuild billing usage from a stored row's token counts.
+def _row_cache_tokens_included(row: UsageLog) -> bool:
+    """Which cached-token convention a stored row was priced under.
 
-    The per-event cache convention (``cache_tokens_in_prompt``) is not persisted, so
-    this assumes the additive shape (cache buckets sit outside ``prompt_tokens``), the
-    ingest default and the Anthropic / Claude Code convention imported usage carries.
-    Rows with no cache tokens price identically under either shape.
+    The convention is not a column, so it is recovered from the meters the
+    pricing wrote: ``total_input_tokens`` equals ``prompt_tokens`` under the
+    inclusive (OpenAI) shape and exceeds it by the cache buckets under the
+    additive (Anthropic) one. That is a fact recorded at settlement, not a
+    guess, so a row imported either way reprices the way it was priced.
+
+    A row with no meters (never priced, or priced before the meters existed)
+    falls back to the additive shape, which is the ingest default and the
+    convention every Claude Code import carries. A row with no cache tokens
+    prices identically under either shape, so the fallback only decides rows
+    that were both unpriced and cached.
     """
-    return GatewayUsage(
-        prompt_tokens=row.prompt_tokens or 0,
-        completion_tokens=row.completion_tokens or 0,
-        total_tokens=row.total_tokens or 0,
+    meters = row.billing_meters or {}
+    total_input = meters.get("total_input_tokens")
+    if not isinstance(total_input, int):
+        return False
+    return total_input == (row.prompt_tokens or 0)
+
+
+def _row_usage(row: UsageLog) -> BillableUsage:
+    """Rebuild billing meters from a stored row's token counts."""
+    return billable_usage(
+        input_tokens=row.prompt_tokens or 0,
+        output_tokens=row.completion_tokens or 0,
         cache_read_tokens=row.cache_read_tokens or 0,
         cache_write_tokens=row.cache_write_tokens or 0,
         cache_write_1h_tokens=row.cache_write_1h_tokens or 0,
-        cache_tokens_in_prompt=False,
+        cache_tokens_included=_row_cache_tokens_included(row),
     )
 
 
@@ -288,7 +302,7 @@ async def set_usage_price(db: AsyncSession, request: UsageSetPriceRequest) -> Us
                 break
             for row in rows:
                 result.matched += 1
-                cost, meters, breakdown = calculate_metered_cost(pricing, _row_usage(row))
+                cost, meters, breakdown = price_billable_usage(pricing, _row_usage(row))
                 if cost == row.cost:
                     result.unchanged += 1
                     continue

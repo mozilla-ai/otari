@@ -27,6 +27,7 @@ import uuid
 from collections.abc import Awaitable, Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Any, Generic, TypeVar
 
 from any_llm.exceptions import AnyLLMError
@@ -45,6 +46,7 @@ from gateway.api.routes._pipeline import (
 )
 from gateway.api.routes._platform import _classify_upstream_error
 from gateway.core.config import GatewayConfig
+from gateway.core.metered_pricing import quantize_cost
 from gateway.inflight import track_request
 from gateway.log_config import logger
 from gateway.model_labeling import relabel_model
@@ -73,7 +75,7 @@ ResultT = TypeVar("ResultT")
 PASSTHROUGH_PROVIDER_ERROR_DETAIL = "The request could not be completed by the provider"
 
 # A route's non-token charge lines: the meters dict and the auditable breakdown,
-# matching the shape ``calculate_metered_cost`` and ``price_tool_calls`` already
+# matching the shape ``price_billable_usage`` and ``price_tool_calls`` already
 # write for the chat and tool-charge paths.
 BillingMeters = tuple[dict[str, Any], list[dict[str, Any]]]
 
@@ -139,8 +141,8 @@ async def run_passthrough(
     estimate: Callable[[ModelPricing | None], float] | None = None,
     enforce_require_pricing: bool = False,
     usage_tokens: Callable[[ResultT], tuple[int | None, int | None, int | None]] | None = None,
-    compute_cost: Callable[[ResultT, ModelPricing | None], float | None] | None = None,
-    compute_meters: Callable[[ResultT, ModelPricing | None, float], BillingMeters | None] | None = None,
+    compute_cost: Callable[[ResultT, ModelPricing | None], Decimal | None] | None = None,
+    compute_meters: Callable[[ResultT, ModelPricing | None, Decimal], BillingMeters | None] | None = None,
     map_provider_error: Callable[[Exception], HTTPException | None] | None = None,
     reserve_before_resolve: bool = False,
     relabel: bool = True,
@@ -495,10 +497,16 @@ async def run_passthrough(
             total_tokens=total_tokens,
         )
 
-        cost = compute_cost(result, pricing) if compute_cost else None
-        if cost is not None:
+        # Rounded here, once, so the row and the spend it reconciles settle at the
+        # same amount: the column would round the row on its own, and the ledger
+        # would then hold a fraction of a micro-dollar the row does not show.
+        raw_cost = compute_cost(result, pricing) if compute_cost else None
+        cost = quantize_cost(raw_cost) if raw_cost is not None else None
+        if cost is not None and raw_cost is not None:
             usage_log.cost = cost
-            billing = compute_meters(result, pricing, cost) if compute_meters else None
+            # The charge lines get the unrounded amount, the same way the token
+            # path's do: the column is the amount, the lines explain it.
+            billing = compute_meters(result, pricing, raw_cost) if compute_meters else None
             if billing is not None:
                 usage_log.billing_meters, usage_log.pricing_breakdown = billing
 

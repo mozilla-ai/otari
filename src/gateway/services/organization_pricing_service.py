@@ -36,6 +36,7 @@ from sqlalchemy import func, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.models.entities import OrganizationModelPricing
+from gateway.models.money import to_usd, to_usd_or_none
 from gateway.models.tenancy import User as TenancyUser
 from gateway.services.pricing_service import normalize_effective_at
 from gateway.services.tenancy.errors import (
@@ -211,11 +212,11 @@ class OrganizationPricingService:
         row = OrganizationModelPricing(
             organization_id=organization_id,
             model_key=model_key,
-            input_price_per_million=override.input_price_per_million,
-            output_price_per_million=override.output_price_per_million,
-            cache_read_price_per_million=override.cache_read_price_per_million,
-            cache_write_price_per_million=override.cache_write_price_per_million,
-            cache_write_1h_price_per_million=override.cache_write_1h_price_per_million,
+            input_price_per_million=to_usd(override.input_price_per_million),
+            output_price_per_million=to_usd(override.output_price_per_million),
+            cache_read_price_per_million=to_usd_or_none(override.cache_read_price_per_million),
+            cache_write_price_per_million=to_usd_or_none(override.cache_write_price_per_million),
+            cache_write_1h_price_per_million=to_usd_or_none(override.cache_write_1h_price_per_million),
             pricing_tiers=override.pricing_tiers,
             effective_from=effective_from,
             effective_to=effective_to,
@@ -272,11 +273,11 @@ class OrganizationPricingService:
             exclude_id=row.id,
         )
 
-        row.input_price_per_million = override.input_price_per_million
-        row.output_price_per_million = override.output_price_per_million
-        row.cache_read_price_per_million = override.cache_read_price_per_million
-        row.cache_write_price_per_million = override.cache_write_price_per_million
-        row.cache_write_1h_price_per_million = override.cache_write_1h_price_per_million
+        row.input_price_per_million = to_usd(override.input_price_per_million)
+        row.output_price_per_million = to_usd(override.output_price_per_million)
+        row.cache_read_price_per_million = to_usd_or_none(override.cache_read_price_per_million)
+        row.cache_write_price_per_million = to_usd_or_none(override.cache_write_price_per_million)
+        row.cache_write_1h_price_per_million = to_usd_or_none(override.cache_write_1h_price_per_million)
         row.pricing_tiers = override.pricing_tiers
         row.effective_from = effective_from
         row.effective_to = effective_to

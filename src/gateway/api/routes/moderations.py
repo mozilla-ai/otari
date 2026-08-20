@@ -1,5 +1,6 @@
 """OpenAI-compatible moderations endpoint."""
 
+from decimal import Decimal
 from typing import Annotated, Any
 
 from any_llm import amoderation
@@ -68,11 +69,15 @@ async def create_moderation(
     # configured rate counts (pricing_use_defaults=False below): genai-prices
     # quotes per million tokens, so a moderation model whose name matches a chat
     # model in that dataset would otherwise bill a token rate per request.
-    def compute_cost(result: ModerationResponse, pricing: ModelPricing | None) -> float:
+    def compute_cost(result: ModerationResponse, pricing: ModelPricing | None) -> Decimal:
         return flat_request_cost(pricing)
 
-    def compute_meters(result: ModerationResponse, pricing: ModelPricing | None, cost: float) -> BillingMeters | None:
+    def compute_meters(result: ModerationResponse, pricing: ModelPricing | None, cost: Decimal) -> BillingMeters | None:
         return per_request_meters(cost)
+
+    def estimate(pricing: ModelPricing | None) -> float:
+        # The reservation ledger is float; the settled cost above stays exact.
+        return float(flat_request_cost(pricing))
 
     def usage_tokens(result: ModerationResponse) -> tuple[int | None, int | None, int | None]:
         return (None, 0, None)
@@ -99,7 +104,7 @@ async def create_moderation(
         user=request.user,
         call_provider=call_provider,
         pricing_use_defaults=False,
-        estimate=flat_request_cost,
+        estimate=estimate,
         usage_tokens=usage_tokens,
         compute_cost=compute_cost,
         compute_meters=compute_meters,

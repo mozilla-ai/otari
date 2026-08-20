@@ -24,6 +24,7 @@ from gateway.core.config import GatewayConfig
 from gateway.core.sql import MAX_FILTER_VALUES, match_any, utc_bound
 from gateway.inflight import get_registry
 from gateway.models.entities import APIKey, UsageLog, User
+from gateway.models.money import as_float
 from gateway.services.external_usage_service import (
     ExternalEventsRequest,
     ExternalIngestResult,
@@ -225,7 +226,7 @@ class UsageEntry(BaseModel):
             cache_write_1h_tokens=log.cache_write_1h_tokens,
             billing_meters=log.billing_meters,
             pricing_breakdown=log.pricing_breakdown,
-            cost=log.cost,
+            cost=as_float(log.cost),
             status=log.status,
             error_message=log.error_message,
             status_code=log.status_code,
@@ -930,7 +931,7 @@ def _billed_expr(meter: str, fallback: Any) -> Any:
     """A per-row billed token meter, as a summable SQL expression.
 
     Providers disagree on whether cache tokens are counted inside
-    ``prompt_tokens`` (see ``services/metered_pricing.billable_usage``), so raw
+    ``prompt_tokens`` (see ``core/metered_pricing.billable_usage``), so raw
     column sums cannot be split into a billed composition. The pricing writers
     resolve that into ``billing_meters`` when a row is priced; prefer that, and
     fall back to the raw column under the subset convention for meterless rows,

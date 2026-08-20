@@ -5,6 +5,7 @@ import os
 import tempfile
 import uuid
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Annotated, Any
 
 from any_llm import AnyLLM, LLMProvider
@@ -20,6 +21,7 @@ from gateway.api.routes._helpers import resolve_user_id
 from gateway.api.routes._pipeline import _raise_for_unresolvable_model, failure_status_code
 from gateway.api.routes.chat import rate_limit_headers
 from gateway.core.config import GatewayConfig
+from gateway.core.metered_pricing import calculate_token_cost
 from gateway.log_config import logger
 from gateway.models.entities import APIKey, BatchRecord, UsageLog
 from gateway.rate_limit import check_rate_limit
@@ -91,7 +93,7 @@ async def log_batch_usage(
     prompt_tokens: int | None = None,
     completion_tokens: int | None = None,
     total_tokens: int | None = None,
-    cost: float | None = None,
+    cost: Decimal | None = None,
     counts_toward_budget: bool = True,
     workspace_id: uuid.UUID | None = None,
 ) -> None:
@@ -707,7 +709,7 @@ async def retrieve_batch_results(
             completion_tokens += usage.completion_tokens or 0
             total_tokens += usage.total_tokens or 0
 
-    cost: float | None = None
+    cost: Decimal | None = None
     if total_tokens:
         # Rates follow the batch's originating workspace (`origin_workspace_id`,
         # resolved above), for the same reason the budget exemption above and
@@ -723,9 +725,17 @@ async def retrieve_batch_results(
             organization_id=await organization_for_workspace_id(db, origin_workspace_id),
         )
         if pricing:
-            cost = (prompt_tokens / 1_000_000) * pricing.input_price_per_million + (
-                completion_tokens / 1_000_000
-            ) * pricing.output_price_per_million
+            # Through the cost core rather than a local formula, so a batch is
+            # priced by the same arithmetic (and the same threshold tiers) as a
+            # live request. A batch result reports OpenAI-shaped usage, so its
+            # cached tokens, when it reports any, are already inside
+            # ``prompt_tokens``.
+            cost = calculate_token_cost(
+                pricing,
+                input_tokens=prompt_tokens,
+                output_tokens=completion_tokens,
+                cache_tokens_included=True,
+            )
 
     # Recorded batches are accounted exactly once: the first completed retrieval
     # claims the accounting slot, logs usage, and folds the cost into the owner's

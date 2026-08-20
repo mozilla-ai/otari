@@ -34,6 +34,11 @@ settlement path: a streaming response outlives its route handler, and the
 `finally` that wraps the whole ASGI call is the only place that runs exactly once
 per request (the same reason `gateway_active_requests` is instrumented there).
 
+## Cost math
+`src/gateway/core/metered_pricing.py` is the only place a cost is derived from a rate: settlement, the reserve-time estimate, repricing, and imported usage all go through it. It is `Decimal` throughout, takes no database, and reads a pricing object structurally, so a stored `ModelPricing`, an organization override, and a genai-prices default are all priced by one implementation. Two rules it enforces rather than assumes: **which cached-token convention a caller speaks is an argument with no default** (`cache_tokens_included`; `GatewayUsage.cache_tokens_in_prompt` is where the request path gets it), and **rounding happens once**, half-up, to the micro-dollar, at the point an amount becomes a settled total. The pricing *lookup* chain, which is a different concern, stays in `services/pricing_service.py`.
+
+Money columns (`model_pricing` and `organization_model_pricing` rates, `usage_logs.cost`) are the exact types in `models/money.py`, not floats. The budget counters (`users.spend`, `users.reserved`, `scoped_budgets`) are still floats, so the settled `Decimal` is narrowed at exactly two named boundaries, both in `budget_service.py` (`estimate_cost`, `reconcile_reservation`).
+
 ## Budget enforcement
 Two mechanisms, both enforced, neither replacing the other.
 

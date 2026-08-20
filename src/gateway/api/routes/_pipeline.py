@@ -39,6 +39,7 @@ from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
+from decimal import Decimal
 from enum import Enum, auto
 from typing import Any, Generic, Literal, NamedTuple, NoReturn, Protocol, TypeVar
 from urllib.parse import ParseResult, urlparse
@@ -95,6 +96,7 @@ from gateway.api.routes._tools import (
 )
 from gateway.core.config import GatewayConfig
 from gateway.core.env import otari_env
+from gateway.core.metered_pricing import calculate_metered_cost
 from gateway.core.usage import cache_read_tokens_of, cache_write_1h_tokens_of, cache_write_tokens_of
 from gateway.inflight import track_request
 from gateway.log_config import logger
@@ -121,7 +123,6 @@ from gateway.services.mcp_loop import (
     MaxToolIterationsExceeded,
     ToolBackend,
 )
-from gateway.services.metered_pricing import calculate_metered_cost
 from gateway.services.model_access import is_model_allowed, model_not_allowed_detail, resolve_request_allowlist
 from gateway.services.policy_store import resolve_effective_policy
 from gateway.services.pricing_service import (
@@ -605,7 +606,7 @@ class RequestContext:
         # it here lets the single release site reconcile it instead of refunding,
         # which is what keeps ``users.spend`` matching the row: ``refund_reservation``
         # releases the hold *without* writing spend.
-        self.tool_charge: float = 0.0
+        self.tool_charge: Decimal = Decimal(0)
         # Monotonic clock reading taken at the very start of the handler
         # preamble; used to compute the usage log's latency_ms at settlement.
         self.started_at = started_at
@@ -773,7 +774,7 @@ async def _bill_vision_side_call(
             strategy=config.budget_strategy,
             counts_toward_budget=counts_toward_budget,
         ),
-        cost or 0.0,
+        cost or Decimal(0),
     )
 
 
@@ -1876,7 +1877,7 @@ async def _require_tool_pricing(
 # ---------------------------------------------------------------------------
 
 
-def _compute_cost(pricing: ModelPricing, usage_data: CompletionUsage) -> float:
+def _compute_cost(pricing: ModelPricing, usage_data: CompletionUsage) -> Decimal:
     """Compute standalone cost through the threshold-aware meter calculator."""
     cost, _, _ = calculate_metered_cost(pricing, usage_data)
     return cost
@@ -1906,13 +1907,13 @@ async def log_usage(
     usage_override: CompletionUsage | None = None,
     error: str | None = None,
     status_code: int | None = None,
-    cost_override: float | None = None,
+    cost_override: Decimal | float | None = None,
     latency_ms: int | None = None,
     counts_toward_budget: bool = True,
     attribution: RoutingAttribution | None = None,
     tool_tally: ToolUsageTally | None = None,
     workspace_id: uuid.UUID | None = None,
-) -> float | None:
+) -> Decimal | None:
     """Log API usage to the database and return the computed cost.
 
     Spend is not written here; the budget reservation reconcile path owns
@@ -2031,7 +2032,9 @@ async def log_usage(
     # stream-missing-usage estimate policy), record that amount on the log row
     # so usage_logs.cost stays consistent with the spend that was reconciled.
     if cost_override is not None:
-        usage_log.cost = cost_override
+        # The estimate paths still hold a float (``users.reserved`` is one), so
+        # the amount is made exact here rather than at each call site.
+        usage_log.cost = Decimal(str(cost_override))
 
     # Gateway-run tool calls are a separate charge from the model's tokens, so they
     # are folded in last: after the token branch (which may not have run at all) and
@@ -2043,7 +2046,8 @@ async def log_usage(
     # row that happens to cost 0 still reports, matching the previous behavior; only
     # a row with no cost at all (None) is skipped.
     if usage_log.cost is not None:
-        record_cost(str(provider or ""), model, usage_log.cost)
+        # The metrics registry speaks float; the row keeps the exact amount.
+        record_cost(str(provider or ""), model, float(usage_log.cost))
 
     await log_writer.put(usage_log)
     return usage_log.cost
@@ -2108,7 +2112,7 @@ async def _apply_tool_charges(
     if lines:
         usage_log.pricing_breakdown = list(usage_log.pricing_breakdown or []) + lines
     if tool_cost:
-        usage_log.cost = (usage_log.cost or 0.0) + tool_cost
+        usage_log.cost = (usage_log.cost or Decimal(0)) + tool_cost
     for tool in unpriced:
         logger.warning(
             "Gateway tool '%s' ran %d time(s) but has no pricing; recorded without cost. "
@@ -2606,7 +2610,7 @@ def build_streaming_response(
             workspace_id=workspace_id,
         )
         if reservation is not None:
-            await reconcile_reservation(db, reservation, actual_cost or 0.0)
+            await reconcile_reservation(db, reservation, actual_cost or Decimal(0))
         return None
 
     async def _on_no_usage() -> None:
@@ -3458,7 +3462,7 @@ async def log_exhausted_plan(
         tool_tally=tool_tally,
         workspace_id=ctx.workspace_id,
     )
-    ctx.tool_charge = cost or 0.0
+    ctx.tool_charge = cost or Decimal(0)
 
 
 async def log_absorbed_attempt(
@@ -3594,7 +3598,7 @@ async def run_standalone_non_stream(
                 response.headers[key] = value
         if ctx.db is not None:
             usage_data = adapter.extract_usage(result)
-            actual_cost: float | None = None
+            actual_cost: Decimal | None = None
             # A request whose provider reported no usage still owes for the tool
             # calls it ran, so a non-empty tally forces the row that
             # ``log_success_without_usage = False`` would otherwise suppress.
@@ -3615,7 +3619,7 @@ async def run_standalone_non_stream(
                     workspace_id=ctx.workspace_id,
                 )
             if ctx.reservation is not None:
-                await reconcile_reservation(ctx.db, ctx.reservation, actual_cost or 0.0)
+                await reconcile_reservation(ctx.db, ctx.reservation, actual_cost or Decimal(0))
         if display_model is not None:
             relabel_model(result, display_model)
         return result

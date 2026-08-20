@@ -14,6 +14,7 @@ from gateway.api.routes.pricing import PricingTier
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import APIKey, ModelPricing
+from gateway.models.money import as_float
 from gateway.models.routing import PolicySpec
 from gateway.services.alias_service import effective_aliases
 from gateway.services.model_access import is_model_allowed, resolve_request_allowlist
@@ -238,11 +239,11 @@ def _model_from_pricing(pricing: ModelPricing) -> ModelObject:
         created=created,
         owned_by=_owner_from_key(pricing.model_key),
         pricing=ModelPricingInfo(
-            input_price_per_million=pricing.input_price_per_million,
-            output_price_per_million=pricing.output_price_per_million,
-            cache_read_price_per_million=pricing.cache_read_price_per_million,
-            cache_write_price_per_million=pricing.cache_write_price_per_million,
-            cache_write_1h_price_per_million=pricing.cache_write_1h_price_per_million,
+            input_price_per_million=float(pricing.input_price_per_million),
+            output_price_per_million=float(pricing.output_price_per_million),
+            cache_read_price_per_million=as_float(pricing.cache_read_price_per_million),
+            cache_write_price_per_million=as_float(pricing.cache_write_price_per_million),
+            cache_write_1h_price_per_million=as_float(pricing.cache_write_1h_price_per_million),
             pricing_tiers=pricing.pricing_tiers or [],
         ),
         pricing_source="configured",
@@ -268,11 +269,11 @@ def _alias_model(
         created=0,
         owned_by=ALIAS_OWNED_BY,
         pricing=ModelPricingInfo(
-            input_price_per_million=pricing.input_price_per_million,
-            output_price_per_million=pricing.output_price_per_million,
-            cache_read_price_per_million=pricing.cache_read_price_per_million,
-            cache_write_price_per_million=pricing.cache_write_price_per_million,
-            cache_write_1h_price_per_million=pricing.cache_write_1h_price_per_million,
+            input_price_per_million=float(pricing.input_price_per_million),
+            output_price_per_million=float(pricing.output_price_per_million),
+            cache_read_price_per_million=as_float(pricing.cache_read_price_per_million),
+            cache_write_price_per_million=as_float(pricing.cache_write_price_per_million),
+            cache_write_1h_price_per_million=as_float(pricing.cache_write_1h_price_per_million),
             pricing_tiers=pricing.pricing_tiers or [],
         )
         if pricing
@@ -373,11 +374,11 @@ def _apply_default_pricing(obj: ModelObject, pricing_selector: str | None = None
     default = default_model_pricing(provider, model_name, normalize_effective_at(None))
     if default is not None:
         obj.pricing = ModelPricingInfo(
-            input_price_per_million=default.input_price_per_million,
-            output_price_per_million=default.output_price_per_million,
-            cache_read_price_per_million=default.cache_read_price_per_million,
-            cache_write_price_per_million=default.cache_write_price_per_million,
-            cache_write_1h_price_per_million=default.cache_write_1h_price_per_million,
+            input_price_per_million=float(default.input_price_per_million),
+            output_price_per_million=float(default.output_price_per_million),
+            cache_read_price_per_million=as_float(default.cache_read_price_per_million),
+            cache_write_price_per_million=as_float(default.cache_write_price_per_million),
+            cache_write_1h_price_per_million=as_float(default.cache_write_1h_price_per_million),
             pricing_tiers=default.pricing_tiers or [],
         )
         obj.pricing_source = "default"
@@ -495,11 +496,11 @@ async def list_models(
                 created=_created_timestamp(model),
                 owned_by=provider_name,
                 pricing=ModelPricingInfo(
-                    input_price_per_million=pricing.input_price_per_million,
-                    output_price_per_million=pricing.output_price_per_million,
-                    cache_read_price_per_million=pricing.cache_read_price_per_million,
-                    cache_write_price_per_million=pricing.cache_write_price_per_million,
-                    cache_write_1h_price_per_million=pricing.cache_write_1h_price_per_million,
+                    input_price_per_million=float(pricing.input_price_per_million),
+                    output_price_per_million=float(pricing.output_price_per_million),
+                    cache_read_price_per_million=as_float(pricing.cache_read_price_per_million),
+                    cache_write_price_per_million=as_float(pricing.cache_write_price_per_million),
+                    cache_write_1h_price_per_million=as_float(pricing.cache_write_1h_price_per_million),
                     pricing_tiers=pricing.pricing_tiers or [],
                 )
                 if pricing
@@ -747,11 +748,11 @@ async def get_model(
             created=_created_timestamp(discovered_model),
             owned_by=discovered_provider,
             pricing=ModelPricingInfo(
-                input_price_per_million=pricing.input_price_per_million,
-                output_price_per_million=pricing.output_price_per_million,
-                cache_read_price_per_million=pricing.cache_read_price_per_million,
-                cache_write_price_per_million=pricing.cache_write_price_per_million,
-                cache_write_1h_price_per_million=pricing.cache_write_1h_price_per_million,
+                input_price_per_million=float(pricing.input_price_per_million),
+                output_price_per_million=float(pricing.output_price_per_million),
+                cache_read_price_per_million=as_float(pricing.cache_read_price_per_million),
+                cache_write_price_per_million=as_float(pricing.cache_write_price_per_million),
+                cache_write_1h_price_per_million=as_float(pricing.cache_write_1h_price_per_million),
                 pricing_tiers=pricing.pricing_tiers or [],
             )
             if pricing

@@ -3,6 +3,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Literal
 
 from any_llm import AnyLLM
@@ -12,11 +13,11 @@ from sqlalchemy import case, select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.core.metered_pricing import estimate_metered_cost
 from gateway.log_config import logger
 from gateway.metrics import record_budget_exceeded
 from gateway.models.entities import Budget, BudgetResetLog, ModelPricing, User
 from gateway.repositories.users_repository import get_active_user
-from gateway.services.metered_pricing import estimate_metered_cost
 from gateway.services.pricing_service import find_model_pricing
 from gateway.services.provider_kwargs import provider_key
 from gateway.services.scoped_budget_service import (
@@ -221,7 +222,8 @@ def estimate_cost(
     """Estimate request cost up front for budget pre-debit.
 
     There is no tokenizer in the gateway, so prompt tokens are approximated as
-    ``chars / 4`` (a common rough heuristic). Output tokens default to the
+    ``chars / 4`` (a common rough heuristic), rounded up to a whole token.
+    Output tokens default to the
     request's declared max, falling back to ``default_output_tokens`` when the
     caller leaves the output unbounded. When Anthropic cache creation is
     requested, the input is conservatively reserved at the cache-write rate,
@@ -230,17 +232,26 @@ def estimate_cost(
     """
     if pricing is None:
         return 0.0
-    prompt_tokens = max(prompt_chars, 0) / 4
+    # Whole tokens, rounded up: a fraction of a token is not billable, and the
+    # estimate is an upper bound, so the fraction rounds towards the gateway.
+    prompt_tokens = (max(prompt_chars, 0) + 3) // 4
     # `is None` rather than falsy: max_output_tokens == 0 is an explicit "no
     # output" bound and must not fall through to the default cap. Clamp negatives
     # so a hostile max_output_tokens can't produce a negative estimate.
     output_tokens = max_output_tokens if max_output_tokens is not None else default_output_tokens
     output_tokens = max(output_tokens, 0)
-    return estimate_metered_cost(
-        pricing,
-        estimated_input_tokens=prompt_tokens,
-        estimated_output_tokens=output_tokens,
-        cache_write_ttl=cache_write_ttl,
+    # Narrowed to float here, once: the reservation counters (``users.reserved``,
+    # ``scoped_budgets.reserved_spend``) are float columns, and converting the
+    # budget ledger is not this change (mozilla-ai/otari#661 covers the rate and
+    # the settled row). The estimate is a held upper bound that is reconciled
+    # against an exact settled cost, so the conversion cannot reach accounting.
+    return float(
+        estimate_metered_cost(
+            pricing,
+            estimated_input_tokens=prompt_tokens,
+            estimated_output_tokens=output_tokens,
+            cache_write_ttl=cache_write_ttl,
+        )
     )
 
 
@@ -432,7 +443,7 @@ def _release_reserved(estimate: float) -> object:
     )
 
 
-async def reconcile_reservation(db: AsyncSession, handle: ReservationHandle, actual_cost: float) -> None:
+async def reconcile_reservation(db: AsyncSession, handle: ReservationHandle, actual_cost: Decimal | float) -> None:
     """Settle a reservation: record actual spend and release the held estimate.
 
     Note: if this UPDATE/commit fails (e.g. a transient DB error after the
@@ -447,15 +458,17 @@ async def reconcile_reservation(db: AsyncSession, handle: ReservationHandle, act
     reservation). Runs inline in the request, not in the (possibly batched) log
     writer, so the next request's reservation sees fresh totals.
     """
-    # Never let a negative cost reduce recorded spend.
-    actual_cost = max(actual_cost, 0.0)
+    # The settled cost arrives exact and is narrowed here, at the one place it
+    # meets the float spend counters (see :func:`estimate_cost`). Never let a
+    # negative cost reduce recorded spend.
+    spent = max(float(actual_cost), 0.0)
     values: dict[str, object] = {}
     # Budget-exempt rows are recorded (their cost still lands on the usage row) but
     # never fold into users.spend, so they cannot gate a later request. Gating the
     # spend write here (not merely skipping the reserve) is what makes an empty
     # handle safe at every reconcile site.
-    if actual_cost and handle.counts_toward_budget:
-        values["spend"] = User.spend + actual_cost
+    if spent and handle.counts_toward_budget:
+        values["spend"] = User.spend + spent
     if handle.reserved:
         values["reserved"] = _release_reserved(handle.estimate)
     # Every scoped ceiling the reservation held against has to be unwound too, or
@@ -463,7 +476,7 @@ async def reconcile_reservation(db: AsyncSession, handle: ReservationHandle, act
     await settle_scoped(
         db,
         handle.scoped_budget_ids,
-        actual_cost=actual_cost,
+        actual_cost=spent,
         held=handle.scoped_estimate,
         counts_toward_budget=handle.counts_toward_budget,
     )
@@ -478,7 +491,7 @@ async def reconcile_reservation(db: AsyncSession, handle: ReservationHandle, act
     await db.commit()
 
 
-async def record_external_spend(db: AsyncSession, user_id: str, cost: float) -> None:
+async def record_external_spend(db: AsyncSession, user_id: str, cost: Decimal | float) -> None:
     """Fold already-incurred cost into ``users.spend`` outside the reservation flow.
 
     Used by asynchronous billable paths (batch results) where the create-time

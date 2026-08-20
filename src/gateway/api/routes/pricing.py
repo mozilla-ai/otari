@@ -12,6 +12,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import get_config, get_db, verify_api_key_or_master_key, verify_master_key
 from gateway.core.config import GatewayConfig
 from gateway.models.entities import ModelPricing
+from gateway.models.money import as_float, to_usd, to_usd_or_none
 from gateway.services.alias_service import all_alias_names, resolve_effective_alias
 from gateway.services.policy_store import all_policy_names, resolve_effective_policy
 from gateway.services.pricing_refresh_service import (
@@ -103,11 +104,11 @@ class PricingResponse(BaseModel):
         return cls(
             model_key=pricing.model_key,
             effective_at=pricing.effective_at.isoformat(),
-            input_price_per_million=pricing.input_price_per_million,
-            output_price_per_million=pricing.output_price_per_million,
-            cache_read_price_per_million=pricing.cache_read_price_per_million,
-            cache_write_price_per_million=pricing.cache_write_price_per_million,
-            cache_write_1h_price_per_million=pricing.cache_write_1h_price_per_million,
+            input_price_per_million=float(pricing.input_price_per_million),
+            output_price_per_million=float(pricing.output_price_per_million),
+            cache_read_price_per_million=as_float(pricing.cache_read_price_per_million),
+            cache_write_price_per_million=as_float(pricing.cache_write_price_per_million),
+            cache_write_1h_price_per_million=as_float(pricing.cache_write_1h_price_per_million),
             pricing_tiers=[PricingTier.model_validate(tier) for tier in pricing.pricing_tiers or []],
             created_at=pricing.created_at.isoformat(),
             updated_at=pricing.updated_at.isoformat(),
@@ -360,17 +361,20 @@ async def set_pricing(
                 .limit(1)
             )
         ).scalar_one_or_none()
-    cache_read = (
+    # ``to_usd`` on the way in: the request carries JSON numbers (floats) and
+    # the columns are exact, so the conversion is spelled here rather than left
+    # to happen invisibly at flush.
+    cache_read = to_usd_or_none(
         request.cache_read_price_per_million
         if cache_read_set
         else (latest.cache_read_price_per_million if latest else None)
     )
-    cache_write = (
+    cache_write = to_usd_or_none(
         request.cache_write_price_per_million
         if cache_write_set
         else (latest.cache_write_price_per_million if latest else None)
     )
-    cache_write_1h = (
+    cache_write_1h = to_usd_or_none(
         request.cache_write_1h_price_per_million
         if cache_write_1h_set
         else (latest.cache_write_1h_price_per_million if latest else None)
@@ -390,8 +394,8 @@ async def set_pricing(
     pricing = result.scalar_one_or_none()
 
     if pricing:
-        pricing.input_price_per_million = request.input_price_per_million
-        pricing.output_price_per_million = request.output_price_per_million
+        pricing.input_price_per_million = to_usd(request.input_price_per_million)
+        pricing.output_price_per_million = to_usd(request.output_price_per_million)
         pricing.cache_read_price_per_million = cache_read
         pricing.cache_write_price_per_million = cache_write
         pricing.cache_write_1h_price_per_million = cache_write_1h
@@ -400,8 +404,8 @@ async def set_pricing(
         pricing = ModelPricing(
             model_key=normalized_key,
             effective_at=effective_at,
-            input_price_per_million=request.input_price_per_million,
-            output_price_per_million=request.output_price_per_million,
+            input_price_per_million=to_usd(request.input_price_per_million),
+            output_price_per_million=to_usd(request.output_price_per_million),
             cache_read_price_per_million=cache_read,
             cache_write_price_per_million=cache_write,
             cache_write_1h_price_per_million=cache_write_1h,

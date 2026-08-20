@@ -7,8 +7,8 @@ enforced gateway rows and ``users.spend`` are never affected.
 from __future__ import annotations
 
 from datetime import UTC, datetime
+from decimal import Decimal
 
-import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
@@ -242,7 +242,7 @@ def test_ops_skip_budget_exempt_gateway_rows(
     )
     assert resp.json() == {"matched": 0, "updated": 0, "unchanged": 0}
     db_session.expire_all()
-    assert _get(db_session, "gw-exempt").cost == 0.5  # type: ignore[union-attr]
+    assert _get(db_session, "gw-exempt").cost == Decimal("0.5")  # type: ignore[union-attr]
 
 
 def test_delete_by_filter_scopes_to_the_named_models_only(
@@ -417,7 +417,7 @@ def test_set_price_by_ids_recomputes_cost(
     row = _get(db_session, "imp-1")
     assert row is not None
     # 1000 input @ $3/1M + 500 output @ $15/1M = 0.003 + 0.0075
-    assert row.cost == pytest.approx(0.0105)
+    assert row.cost == Decimal("0.0105")
     assert row.billing_meters is not None
     assert row.billing_meters["fresh_input_tokens"] == 1000
     assert row.billing_meters["completion_tokens"] == 500
@@ -457,7 +457,7 @@ def test_set_price_with_cache_rates(
     assert row is not None
     # Additive shape: total input = 1000 + 500 cache read. Fresh input = 1000.
     # 1000 * 3/1M + 200 * 15/1M + 500 * 0.3/1M = 0.003 + 0.003 + 0.00015
-    assert row.cost == pytest.approx(0.00615)
+    assert row.cost == Decimal("0.00615")
 
 
 def test_set_price_only_touches_imported(
@@ -481,7 +481,7 @@ def test_set_price_only_touches_imported(
     db_session.expire_all()
     row = _get(db_session, "gw-1")
     assert row is not None
-    assert row.cost == 0.99  # untouched
+    assert row.cost == Decimal("0.99")  # untouched
 
 
 def test_set_price_reports_unchanged_on_second_run(

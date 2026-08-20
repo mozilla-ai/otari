@@ -453,6 +453,22 @@ pricing:
 
 Config pricing sets initial values. Pricing set via the `/v1/pricing` API takes precedence.
 
+#### How amounts are stored and rounded
+
+Rates and settled costs are exact decimals, not binary floating point. A rate is
+stored to 8 decimal places, far finer than any published price, so a rate you
+type is the rate that prices your traffic. Costs are computed exactly and
+rounded **once, half-up, to the micro-dollar** (0.000001 USD), which is the scale
+of the `cost` column on a usage row. That is the only rounding in the cost path:
+a charge below half a micro-dollar settles at zero, and one at or above it
+settles at one micro-dollar.
+
+Exactness at rest needs PostgreSQL. SQLite, the default for a single-node
+deployment, has no decimal storage type and keeps the value as a float; the
+gateway still computes and rounds identically on both, and a rounded amount
+survives the round trip, but a deployment doing real accounting should run
+PostgreSQL.
+
 A pricing entry whose provider is not listed in the `providers` section is skipped at startup with a warning, not treated as a fatal error: the provider may still be reachable through environment credentials (any-llm reads keys like `OPENAI_API_KEY`), so a pricing/provider mismatch should not abort the gateway. To have such an entry take effect, add the provider to the `providers` section.
 
 #### Cache token pricing

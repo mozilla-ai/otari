@@ -1,5 +1,6 @@
 """OpenAI-compatible image generation endpoint."""
 
+from decimal import Decimal
 from typing import Annotated, Any
 
 from any_llm import aimage_generation
@@ -55,19 +56,27 @@ async def create_image(
     requested_images = request.n if request.n is not None else 1
 
     def estimate(pricing: ModelPricing | None) -> float:
-        return per_image_cost(requested_images, pricing) if pricing else 0.0
+        # The reservation ledger is float; the settled amount below is not.
+        return float(per_image_cost(requested_images, pricing)) if pricing else 0.0
 
-    def compute_cost(result: ImagesResponse, pricing: ModelPricing | None) -> float | None:
+    def compute_cost(result: ImagesResponse, pricing: ModelPricing | None) -> Decimal | None:
         if pricing is None:
             return None
         n_images = len(result.data) if result.data else requested_images
         return per_image_cost(n_images, pricing)
 
-    def compute_meters(result: ImagesResponse, pricing: ModelPricing | None, cost: float) -> BillingMeters | None:
+    def compute_meters(result: ImagesResponse, pricing: ModelPricing | None, cost: Decimal) -> BillingMeters | None:
         if pricing is None:
             return None
         n_images = len(result.data) if result.data else requested_images
-        breakdown = [{"meter": "images", "units": n_images, "unit_rate": pricing.input_price_per_million, "cost": cost}]
+        breakdown = [
+            {
+                "meter": "images",
+                "units": n_images,
+                "unit_rate": float(pricing.input_price_per_million),
+                "cost": float(cost),
+            }
+        ]
         return {"images": n_images}, breakdown
 
     async def call_provider(resolved: ResolvedProvider) -> ImagesResponse:

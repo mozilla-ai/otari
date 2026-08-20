@@ -1,5 +1,6 @@
 """Rerank endpoint — reorder documents by relevance to a query."""
 
+from decimal import Decimal
 from typing import Annotated, Any
 
 from any_llm import arerank
@@ -58,18 +59,18 @@ async def create_rerank(
         total_tokens = result.usage.total_tokens if result.usage else None
         return (total_tokens, 0, total_tokens)
 
-    def compute_cost(result: RerankResponse, pricing: ModelPricing | None) -> float | None:
+    def compute_cost(result: RerankResponse, pricing: ModelPricing | None) -> Decimal | None:
         total_tokens = result.usage.total_tokens if result.usage else None
         if result.usage and pricing and total_tokens:
             return input_token_cost(total_tokens, pricing)
         return None
 
-    def compute_meters(result: RerankResponse, pricing: ModelPricing | None, cost: float) -> BillingMeters | None:
+    def compute_meters(result: RerankResponse, pricing: ModelPricing | None, cost: Decimal) -> BillingMeters | None:
         total_tokens = result.usage.total_tokens if result.usage else None
         if not pricing or not total_tokens:
             return None
-        rate = pricing.input_price_per_million
-        breakdown = [{"meter": "input", "units": total_tokens, "rate_per_million": rate, "cost": cost}]
+        rate = float(pricing.input_price_per_million)
+        breakdown = [{"meter": "input", "units": total_tokens, "rate_per_million": rate, "cost": float(cost)}]
         # See embeddings: the canonical meter name is what the billed-token SQL and
         # the dashboard read. Rerank logs the same count as its prompt tokens, so
         # this reports the value the fallback already produced.

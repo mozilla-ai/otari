@@ -8,13 +8,13 @@ from any_llm.types.completion import CreateEmbeddingResponse, Embedding, Usage
 from fastapi.testclient import TestClient
 
 
-def _mock_embedding_response() -> CreateEmbeddingResponse:
+def _mock_embedding_response(prompt_tokens: int = 10) -> CreateEmbeddingResponse:
     """Build a real CreateEmbeddingResponse for testing."""
     return CreateEmbeddingResponse(
         data=[Embedding(embedding=[0.1, 0.2, 0.3], index=0, object="embedding")],
         model="text-embedding-3-small",
         object="list",
-        usage=Usage(prompt_tokens=10, total_tokens=10),
+        usage=Usage(prompt_tokens=prompt_tokens, total_tokens=prompt_tokens),
     )
 
 
@@ -200,7 +200,12 @@ def test_embeddings_cost_tracked_with_pricing(
     api_key_header: dict[str, str],
     api_key_obj: dict[str, Any],
 ) -> None:
-    """POST /v1/embeddings calculates cost when model pricing exists."""
+    """POST /v1/embeddings calculates cost when model pricing exists.
+
+    A realistic prompt, because settlement is to the micro-dollar: ten tokens at
+    $0.02 per million is two ten-millionths of a dollar, which the cost column
+    cannot hold and rounds to zero.
+    """
     client.post(
         "/v1/pricing",
         json={
@@ -211,7 +216,7 @@ def test_embeddings_cost_tracked_with_pricing(
         headers=master_key_header,
     )
 
-    mock_resp = _mock_embedding_response()
+    mock_resp = _mock_embedding_response(prompt_tokens=1_000)
     user_id = api_key_obj["user_id"]
 
     with patch("gateway.api.routes.embeddings.aembedding", new_callable=AsyncMock, return_value=mock_resp):
