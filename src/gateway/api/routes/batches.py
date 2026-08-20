@@ -40,7 +40,7 @@ from gateway.services.model_access import is_model_allowed, model_not_allowed_de
 from gateway.services.pricing_service import find_model_pricing
 from gateway.services.provider_kwargs import get_provider_kwargs, resolve_provider_selector
 from gateway.services.scoped_budget_service import BudgetScopeRequest
-from gateway.services.workspace_scope import workspace_for_key_id
+from gateway.services.workspace_scope import organization_for_key_id, workspace_for_key_id
 
 router = APIRouter(prefix="/v1/batches", tags=["batches"])
 
@@ -311,6 +311,9 @@ async def create_batch(
         strategy=config.budget_strategy,
         counts_toward_budget=not budget_exempt,
         scope=BudgetScopeRequest(api_key=api_key, provider_instance=resolved.instance),
+        # So the free-model shortcut reads this organization's rate, the same one
+        # the results are priced at when they are retrieved.
+        organization_id=await organization_for_key_id(db, api_key_id),
     )
 
     # Stamp the billed user into the provider-side metadata so ownership can be
@@ -598,7 +601,12 @@ async def retrieve_batch_results(
 
     cost: float | None = None
     if total_tokens:
-        pricing = await find_model_pricing(db, provider_enum.value, batch_model)
+        pricing = await find_model_pricing(
+            db,
+            provider_enum.value,
+            batch_model,
+            organization_id=await organization_for_key_id(db, api_key_id),
+        )
         if pricing:
             cost = (prompt_tokens / 1_000_000) * pricing.input_price_per_million + (
                 completion_tokens / 1_000_000

@@ -60,11 +60,15 @@ def _ctx(
     """A context carrying only what the top-up reads.
 
     Deliberately a SimpleNamespace rather than a real ``RequestContext``: the
-    function touches five attributes, and building the real thing would drag in
+    function touches six attributes, and building the real thing would drag in
     auth, rate limiting, and the allow-list resolver for no added coverage.
     """
     return SimpleNamespace(
         db=cast(AsyncSession, db) if db is not None else None,
+        # Resolved once in the preamble on a real request. None is "this
+        # organization has no rate override", so the top-up prices against the
+        # deployment list, which is what ``_PRICES`` below stands in for.
+        organization_id=None,
         reservation=reservation
         or ReservationHandle(
             user_id="user-1",
@@ -87,7 +91,11 @@ def increases(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     """Record every top-up delta, with pricing stubbed from ``_PRICES``."""
     recorded: list[float] = []
 
-    async def fake_find_pricing(_db: Any, instance: str, model: str) -> Any:
+    async def fake_find_pricing(
+        _db: Any, instance: str, model: str, *, organization_id: Any = None, **_kwargs: Any
+    ) -> Any:
+        # ``organization_id`` is named rather than swallowed by ``**_kwargs`` so
+        # this fake keeps failing if the real signature stops passing it.
         price = _PRICES.get((instance, model))
         return None if price is None else SimpleNamespace(price=price)
 

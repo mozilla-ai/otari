@@ -241,6 +241,16 @@ def _resolve_pricing(
     Mirrors ``find_model_pricing``: canonical key, then legacy key, then the genai
     default (when enabled). Stored rows win over the default, and the newest row
     effective at or before the timestamp is chosen, so historical rates are honored.
+
+    One deliberate divergence: per-organization rate overrides
+    (``organization_model_pricing``) are *not* consulted, so imported usage prices
+    against the deployment list even when the organization has overridden a model.
+    That is a known inconsistency, held back rather than missed. The overrides
+    carry interval periods where this index carries an effective-at series, so
+    honoring them here is a second resolution shape rather than one more lookup,
+    and which external-usage ingest survives the rehome at all is still an open
+    decision (otari-ai#1751, which folds in exactly this ingest question). Building
+    it into this path before that lands risks writing it twice.
     """
     lookup = normalize_effective_at(timestamp)
     for key in _model_keys(provider, model):

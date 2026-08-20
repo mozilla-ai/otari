@@ -1822,6 +1822,135 @@
     {
       "item": [
         {
+          "name": "List Organization Pricing",
+          "request": {
+            "description": "List the organization's rate overrides.\n\nReadable by any member: these rates decide what the caller's own requests\ncost, so they are not withheld from the people billed at them. Writing needs\nan owner or admin.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "pricing"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/pricing"
+            }
+          }
+        },
+        {
+          "name": "Create Organization Pricing",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"input_price_per_million\": 0,\n  \"output_price_per_million\": 0,\n  \"model_key\": \"string\"\n}"
+            },
+            "description": "Set the organization's rate for a model over a period.\n\nRefused with a 409 when the period overlaps one already stored for that model,\nnaming the period it collides with, rather than shadowing it.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "pricing"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/pricing"
+            }
+          }
+        },
+        {
+          "name": "Replace Organization Pricing",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"input_price_per_million\": 0,\n  \"output_price_per_million\": 0\n}"
+            },
+            "description": "Replace an override's rates and period.\n\nFuture requests in the period price at the new rate; usage already settled\nkeeps the cost it was billed, because a settled cost is stored on the usage\nrow rather than recomputed.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PUT",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "pricing",
+                ":pricing_id"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/pricing/:pricing_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "pricing_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Organization Pricing",
+          "request": {
+            "description": "Remove an override, returning the model to the deployment price list.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "pricing",
+                ":pricing_id"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/pricing/:pricing_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "pricing_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "organization-pricing"
+    },
+    {
+      "item": [
+        {
           "name": "List Pricing",
           "request": {
             "description": "List all model pricing.",

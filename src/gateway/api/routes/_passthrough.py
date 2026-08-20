@@ -65,7 +65,7 @@ from gateway.services.pricing_service import (
 )
 from gateway.services.provider_kwargs import ResolvedProvider, resolve_provider_selector
 from gateway.services.scoped_budget_service import BudgetScopeRequest
-from gateway.services.workspace_scope import workspace_for_key_id
+from gateway.services.workspace_scope import organization_for_key_id, workspace_for_key_id
 
 ResultT = TypeVar("ResultT")
 
@@ -209,6 +209,10 @@ async def run_passthrough(
     started_at = time.monotonic()
     api_key, is_master_key = auth_result
     api_key_id = api_key.id if api_key else None
+    # Resolved once for this request: it decides both what the model costs and
+    # whether the free-model shortcut applies, and a master-key caller's
+    # workspace lookup is deliberately never memoized.
+    organization_id = await organization_for_key_id(db, api_key_id)
     # A key flagged exclude_from_budget logs cost but is never reserved or folded
     # into users.spend. Threaded through the reservation handle (so reconcile skips
     # the spend write) and stamped on the usage row.
@@ -284,6 +288,7 @@ async def run_passthrough(
                 strategy=config.budget_strategy,
                 counts_toward_budget=not budget_exempt,
                 scope=BudgetScopeRequest(api_key=api_key, provider_instance=row_provider),
+                organization_id=organization_id,
             )
         except HTTPException as exc:
             if exc.status_code != status.HTTP_404_NOT_FOUND:
@@ -322,7 +327,11 @@ async def run_passthrough(
             # failed lookup must refund before propagating or the estimate leaks.
             try:
                 pricing = await find_model_pricing(
-                    db, resolved.instance, resolved.model, use_defaults=pricing_use_defaults
+                    db,
+                    resolved.instance,
+                    resolved.model,
+                    use_defaults=pricing_use_defaults,
+                    organization_id=organization_id,
                 )
             except Exception:
                 # The realistic failure is a DB error, which leaves the session
@@ -347,7 +356,11 @@ async def run_passthrough(
             _raise_for_unresolvable_model(model, exc)
         if lookup_pricing:
             pricing = await find_model_pricing(
-                db, resolved.instance, resolved.model, use_defaults=pricing_use_defaults
+                db,
+                resolved.instance,
+                resolved.model,
+                use_defaults=pricing_use_defaults,
+                organization_id=organization_id,
             )
         # Reserve first so user/blocked/budget rejections (404/403) precede the
         # missing-pricing rejection (402); refund if we then reject for no pricing.

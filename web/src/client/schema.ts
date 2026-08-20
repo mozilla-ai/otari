@@ -1085,6 +1085,65 @@ export interface paths {
         patch: operations["update_active_organization_member_v1_organizations_me_members__organization_member_id__patch"];
         trace?: never;
     };
+    "/v1/organizations/me/pricing": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Organization Pricing
+         * @description List the organization's rate overrides.
+         *
+         *     Readable by any member: these rates decide what the caller's own requests
+         *     cost, so they are not withheld from the people billed at them. Writing needs
+         *     an owner or admin.
+         */
+        get: operations["list_organization_pricing_v1_organizations_me_pricing_get"];
+        put?: never;
+        /**
+         * Create Organization Pricing
+         * @description Set the organization's rate for a model over a period.
+         *
+         *     Refused with a 409 when the period overlaps one already stored for that model,
+         *     naming the period it collides with, rather than shadowing it.
+         */
+        post: operations["create_organization_pricing_v1_organizations_me_pricing_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/organizations/me/pricing/{pricing_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Replace Organization Pricing
+         * @description Replace an override's rates and period.
+         *
+         *     Future requests in the period price at the new rate; usage already settled
+         *     keeps the cost it was billed, because a settled cost is stored on the usage
+         *     row rather than recomputed.
+         */
+        put: operations["replace_organization_pricing_v1_organizations_me_pricing__pricing_id__put"];
+        post?: never;
+        /**
+         * Delete Organization Pricing
+         * @description Remove an override, returning the model to the deployment price list.
+         */
+        delete: operations["delete_organization_pricing_v1_organizations_me_pricing__pricing_id__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/pricing": {
         parameters: {
             query?: never;
@@ -4542,6 +4601,174 @@ export interface components {
             status: string;
             /** Workspace Memberships */
             workspace_memberships?: components["schemas"]["CallerWorkspaceMembershipPublic"][];
+        };
+        /**
+         * OrganizationModelPricingCreate
+         * @description Create one rate override for a model, for a period.
+         */
+        OrganizationModelPricingCreate: {
+            /**
+             * Cache Read Price Per Million
+             * @description Price per 1M cached-input tokens
+             */
+            cache_read_price_per_million?: number | null;
+            /**
+             * Cache Write 1H Price Per Million
+             * @description Price per 1M Anthropic 1-hour cache-write tokens
+             */
+            cache_write_1h_price_per_million?: number | null;
+            /**
+             * Cache Write Price Per Million
+             * @description Price per 1M cache-write (creation) tokens
+             */
+            cache_write_price_per_million?: number | null;
+            /**
+             * Effective From
+             * @description ISO 8601 datetime from which this rate applies, inclusive. Defaults to now.
+             */
+            effective_from?: string | null;
+            /**
+             * Effective To
+             * @description ISO 8601 datetime at which this rate stops applying, exclusive. Null leaves it open ended. Because the end is exclusive, the next period may begin at exactly this instant without overlapping.
+             */
+            effective_to?: string | null;
+            /**
+             * Input Price Per Million
+             * @description Price per 1M input tokens
+             */
+            input_price_per_million: number;
+            /**
+             * Model Key
+             * @description Model identifier in 'provider:model' form, matching the key the deployment price list uses. A provider instance name is valid here ('home_lab:llama-3'), because pricing keys on the instance a request resolves to.
+             */
+            model_key: string;
+            /**
+             * Output Price Per Million
+             * @description Price per 1M output tokens
+             */
+            output_price_per_million: number;
+            /**
+             * Pricing Tiers
+             * @description Whole-request context thresholds. Fields omitted by a tier inherit the base rate.
+             */
+            pricing_tiers?: components["schemas"]["PricingTier"][] | null;
+        };
+        /**
+         * OrganizationModelPricingPublic
+         * @description One stored rate override.
+         */
+        OrganizationModelPricingPublic: {
+            /** Cache Read Price Per Million */
+            cache_read_price_per_million: number | null;
+            /** Cache Write 1H Price Per Million */
+            cache_write_1h_price_per_million: number | null;
+            /** Cache Write Price Per Million */
+            cache_write_price_per_million: number | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Effective From
+             * Format: date-time
+             */
+            effective_from: string;
+            /** Effective To */
+            effective_to: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Input Price Per Million */
+            input_price_per_million: number;
+            /** Model Key */
+            model_key: string;
+            /**
+             * Organization Id
+             * Format: uuid
+             */
+            organization_id: string;
+            /** Output Price Per Million */
+            output_price_per_million: number;
+            /** Pricing Tiers */
+            pricing_tiers: components["schemas"]["PricingTier"][];
+            /**
+             * Updated At
+             * Format: date-time
+             */
+            updated_at: string;
+        };
+        /**
+         * OrganizationModelPricingUpdate
+         * @description Replace an override's rates and period.
+         *
+         *     A full replacement rather than a patch: every rate field is present in the
+         *     body and an omitted optional rate is cleared, so the stored row is exactly
+         *     what was sent. That is the opposite of ``POST /v1/pricing``, which inherits an
+         *     omitted cache rate from the model's previous version, and deliberately so:
+         *     that surface versions a catalog where each write adds a row, while this one
+         *     edits a single row in place and an inheriting patch would make the result
+         *     depend on what happened to be stored before.
+         *
+         *     ``model_key`` is absent because it is immutable. Repointing an override at
+         *     another model is retiring one and creating another, which is two requests.
+         */
+        OrganizationModelPricingUpdate: {
+            /**
+             * Cache Read Price Per Million
+             * @description Price per 1M cached-input tokens
+             */
+            cache_read_price_per_million?: number | null;
+            /**
+             * Cache Write 1H Price Per Million
+             * @description Price per 1M Anthropic 1-hour cache-write tokens
+             */
+            cache_write_1h_price_per_million?: number | null;
+            /**
+             * Cache Write Price Per Million
+             * @description Price per 1M cache-write (creation) tokens
+             */
+            cache_write_price_per_million?: number | null;
+            /**
+             * Effective From
+             * @description ISO 8601 datetime from which this rate applies, inclusive. Defaults to now.
+             */
+            effective_from?: string | null;
+            /**
+             * Effective To
+             * @description ISO 8601 datetime at which this rate stops applying, exclusive. Null leaves it open ended. Because the end is exclusive, the next period may begin at exactly this instant without overlapping.
+             */
+            effective_to?: string | null;
+            /**
+             * Input Price Per Million
+             * @description Price per 1M input tokens
+             */
+            input_price_per_million: number;
+            /**
+             * Output Price Per Million
+             * @description Price per 1M output tokens
+             */
+            output_price_per_million: number;
+            /**
+             * Pricing Tiers
+             * @description Whole-request context thresholds. Fields omitted by a tier inherit the base rate.
+             */
+            pricing_tiers?: components["schemas"]["PricingTier"][] | null;
+        };
+        /**
+         * OrganizationModelPricingsPublic
+         * @description Every override in the organization, with a count.
+         *
+         *     The envelope shape the platform's equivalent endpoint returns, kept so the
+         *     generated dashboard client stays recognizable across both trees.
+         */
+        OrganizationModelPricingsPublic: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["OrganizationModelPricingPublic"][];
         };
         /** OrganizationPublic */
         OrganizationPublic: {
@@ -8170,6 +8397,123 @@ export interface operations {
                 content: {
                     "application/json": components["schemas"]["ActiveOrganizationMemberPublic"];
                 };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_organization_pricing_v1_organizations_me_pricing_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationModelPricingsPublic"];
+                };
+            };
+        };
+    };
+    create_organization_pricing_v1_organizations_me_pricing_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrganizationModelPricingCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationModelPricingPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    replace_organization_pricing_v1_organizations_me_pricing__pricing_id__put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pricing_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrganizationModelPricingUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationModelPricingPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_organization_pricing_v1_organizations_me_pricing__pricing_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                pricing_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
             };
             /** @description Validation Error */
             422: {

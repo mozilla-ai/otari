@@ -77,7 +77,7 @@ from gateway.services.search_backend import (
     resolve_search_tool,
     run_search,
 )
-from gateway.services.workspace_scope import workspace_for_key_id
+from gateway.services.workspace_scope import organization_for_key_id, workspace_for_key_id
 
 router = APIRouter(prefix="/v1", tags=["search"])
 
@@ -305,7 +305,13 @@ async def _dispatch_search(
 
     # A search tool is not a model, so the community default-pricing dataset can
     # only produce a false match on the tool's name.
-    pricing = await find_model_pricing(db, tool.provider, tool.name, use_defaults=False)
+    pricing = await find_model_pricing(
+        db,
+        tool.provider,
+        tool.name,
+        use_defaults=False,
+        organization_id=await organization_for_key_id(db, api_key_id),
+    )
     reservation = await reserve_budget(
         db,
         user_id,

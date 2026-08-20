@@ -156,7 +156,11 @@ from gateway.services.tool_usage import (
 )
 from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 from gateway.services.web_search_backend import WEB_SEARCH_TOOL_NAME, WebSearchNotReachableError
-from gateway.services.workspace_scope import workspace_for_key_id
+from gateway.services.workspace_scope import (
+    organization_for_key_id,
+    organization_for_workspace_id,
+    workspace_for_key_id,
+)
 from gateway.streaming import (
     StreamFormat,
     StreamingAttemptFailure,
@@ -567,6 +571,7 @@ class RequestContext:
         plan: CompiledPlan | None = None,
         estimate_inputs: "EstimateInputs | None" = None,
         request_group_id: str | None = None,
+        organization_id: uuid.UUID | None = None,
     ) -> None:
         self.config = config
         self.db = db
@@ -575,6 +580,14 @@ class RequestContext:
         self.route = route
         self.user_token = user_token
         self.api_key_id = api_key_id
+        # The organization whose rate overrides price this request, resolved once
+        # in the preamble rather than at each pricing lookup. Resolving per lookup
+        # would be cheap for a keyed request (both hops memoize on immutable
+        # columns) and not for a master-key one, whose workspace comes from
+        # ``default_workspace_id``, which is deliberately never memoized and is
+        # two indexed reads every time. A fallover repricing each candidate would
+        # pay that per candidate.
+        self.organization_id = organization_id
         self.user_id = user_id
         self.rate_limit_info = rate_limit_info
         self.reservation = reservation
@@ -819,7 +832,12 @@ async def top_up_reservation_for_attempt(ctx: RequestContext, attempt: Attempt) 
     """
     if ctx.db is None or ctx.reservation is None or ctx.estimate_inputs is None:
         return
-    pricing = await find_model_pricing(ctx.db, attempt.instance, attempt.model)
+    pricing = await find_model_pricing(
+        ctx.db,
+        attempt.instance,
+        attempt.model,
+        organization_id=ctx.organization_id,
+    )
     # `require_pricing` is a billing safety gate: it refuses a request the gateway
     # cannot price, because it then cannot debit it. The gate at admission prices
     # only the head candidate, so without this an unpriced model that 402s when
@@ -1023,6 +1041,10 @@ async def resolve_request_context(
     route: ResolvedRoute | None = None
     user_token: str | None = None
     api_key_id: str | None = None
+    # Stays None in hybrid mode, where there is no local tenancy to price
+    # against: the platform owns rates there and this gateway never reads
+    # ``organization_model_pricing``.
+    organization_id: uuid.UUID | None = None
     user_id: str | None = None
     rate_limit_info: RateLimitInfo | None = None
     reservation: ReservationHandle | None = None
@@ -1182,7 +1204,13 @@ async def resolve_request_context(
             )
             raise adapter.error(403, not_allowed_detail, ErrorKind.PERMISSION)
 
-        gate_pricing = await find_model_pricing(db, gate_instance, gate_model)
+        organization_id = await organization_for_key_id(db, api_key_id)
+        gate_pricing = await find_model_pricing(
+            db,
+            gate_instance,
+            gate_model,
+            organization_id=organization_id,
+        )
         # Captured so a fallover can reprice against a different candidate; see
         # `top_up_reservation_for_attempt`.
         estimate_inputs = EstimateInputs(
@@ -1222,6 +1250,9 @@ async def resolve_request_context(
                 # ceilings resolved here: repricing changes the amount held, not
                 # which caps the request was admitted against.
                 scope=BudgetScopeRequest(api_key=api_key, provider_instance=gate_instance),
+                # Already resolved for the pricing gate above, so the free-model
+                # check reads the same rate the estimate was built from.
+                organization_id=organization_id,
             )
         except HTTPException as exc:
             # A blocked or over-budget user is refused inside reserve_budget,
@@ -1366,6 +1397,7 @@ async def resolve_request_context(
         plan=plan,
         estimate_inputs=estimate_inputs,
         request_group_id=str(uuid.uuid4()) if plan is not None else None,
+        organization_id=organization_id,
     )
 
 
@@ -1747,7 +1779,13 @@ async def _require_tool_pricing(
     if use_web_search:
         tools.append(WEB_SEARCH_TOOL_NAME)
     for tool in tools:
-        pricing = await find_model_pricing(ctx.db, GATEWAY_TOOL_PRICING_PROVIDER, tool, use_defaults=False)
+        pricing = await find_model_pricing(
+            ctx.db,
+            GATEWAY_TOOL_PRICING_PROVIDER,
+            tool,
+            use_defaults=False,
+            organization_id=ctx.organization_id,
+        )
         if pricing is None:
             key = gateway_tool_pricing_key(tool)
             detail = UNPRICED_TOOL_DETAIL_TEMPLATE.format(tool=tool, key=key)
@@ -1896,7 +1934,18 @@ async def log_usage(
             usage_data.completion_tokens,
         )
 
-        pricing = await find_model_pricing(db, provider, model, as_of=usage_log.timestamp)
+        # The organization comes off the key, via the workspace already resolved
+        # for the row above, so a settled cost uses the same rate the admission
+        # gate estimated against. Both lookups are memoized on immutable columns,
+        # so this is dictionary reads rather than queries after the first request
+        # on a key.
+        pricing = await find_model_pricing(
+            db,
+            provider,
+            model,
+            as_of=usage_log.timestamp,
+            organization_id=await organization_for_workspace_id(db, usage_log.workspace_id),
+        )
         if pricing:
             cost, meters, breakdown = calculate_metered_cost(pricing, usage_data)
             usage_log.cost = cost
@@ -1964,7 +2013,12 @@ async def _apply_tool_charges(
         commit_meters()
         return
     try:
-        tool_cost, lines, unpriced = await price_tool_calls(db, billable, as_of=usage_log.timestamp)
+        tool_cost, lines, unpriced = await price_tool_calls(
+            db,
+            billable,
+            as_of=usage_log.timestamp,
+            organization_id=await organization_for_workspace_id(db, usage_log.workspace_id),
+        )
     except SQLAlchemyError:
         logger.exception("Failed to price gateway tool calls; counts recorded without cost")
         commit_meters()

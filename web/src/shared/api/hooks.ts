@@ -15,6 +15,7 @@ import type {
   CreateKeyResponse,
   CreateOrganizationMemberRequest,
   CreateOrganizationMemberResult,
+  CreateOrganizationPricingOverride,
   CreateSearchToolRequest,
   CreateStoredProviderRequest,
   CreateUserRequest,
@@ -32,6 +33,8 @@ import type {
   ModelMetadataResponse,
   OrganizationContext,
   OrganizationMember,
+  OrganizationPricingOverride,
+  OrganizationPricingOverrides,
   PricingRefreshPreview,
   PricingResponse,
   ProviderHealthResponse,
@@ -56,6 +59,7 @@ import type {
   UpdateBudgetRequest,
   UpdateKeyRequest,
   UpdateOrganizationMemberRequest,
+  UpdateOrganizationPricingOverride,
   UpdateOrganizationRequest,
   UpdateSearchToolRequest,
   UpdateSettingsRequest,
@@ -111,6 +115,10 @@ const ORGANIZATIONS = "organizations"
 // organizations invalidates both, but a role change invalidates only the roster,
 // and nesting would re-read the context (and every page gated on it) as well.
 const ORGANIZATION_MEMBERS = "organization-members"
+// Its own key rather than a child of ORGANIZATIONS, for the reason the members
+// key is: the organization context is read on nearly every page, and a rate
+// edit should not make all of them refetch.
+const ORGANIZATION_PRICING = "organization-pricing"
 const WORKSPACES = "workspaces"
 
 // How often an open tab asks whether the app it is running is still the one the
@@ -1647,5 +1655,85 @@ export function useRemoveWorkspaceMember() {
       // the caller in or out of a workspace has to refresh it too.
       void queryClient.invalidateQueries({ queryKey: [ORGANIZATIONS] })
     },
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Per-organization rate overrides
+//
+// A second, narrower price list above the deployment one (`usePricing` above).
+// A model with no override here is priced by that list, so the two are read
+// together on the page and never merged in the cache: an override is a row an
+// operator manages, not a variant of a deployment price.
+//
+// Any member may read; only an owner or admin may write, which the server
+// enforces and `canManage` mirrors so a refused control is disabled rather
+// than offered.
+// ---------------------------------------------------------------------------
+
+export function useOrganizationPricing(enabled = true) {
+  return useQuery({
+    queryKey: [ORGANIZATION_PRICING],
+    queryFn: async () => {
+      const response = await apiFetch<OrganizationPricingOverrides>(
+        "/v1/organizations/me/pricing",
+      )
+      return response.data
+    },
+    staleTime: 60_000,
+    enabled,
+  })
+}
+
+// MODELS is invalidated alongside, as the deployment pricing mutations do: the
+// catalog carries each model's effective price, so a new override changes what
+// that page shows.
+function invalidateOrganizationPricing(
+  queryClient: ReturnType<typeof useQueryClient>,
+) {
+  void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_PRICING] })
+  void queryClient.invalidateQueries({ queryKey: [MODELS] })
+}
+
+export function useCreateOrganizationPricing() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: CreateOrganizationPricingOverride) =>
+      apiFetch<OrganizationPricingOverride>("/v1/organizations/me/pricing", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => invalidateOrganizationPricing(queryClient),
+  })
+}
+
+// PUT, not PATCH: the endpoint replaces the row, so an omitted optional rate is
+// cleared rather than inherited. The form therefore always sends every field.
+export function useReplaceOrganizationPricing() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      id,
+      body,
+    }: {
+      id: string
+      body: UpdateOrganizationPricingOverride
+    }) =>
+      apiFetch<OrganizationPricingOverride>(
+        `/v1/organizations/me/pricing/${encodeURIComponent(id)}`,
+        { method: "PUT", body: JSON.stringify(body) },
+      ),
+    onSuccess: () => invalidateOrganizationPricing(queryClient),
+  })
+}
+
+export function useDeleteOrganizationPricing() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<void>(`/v1/organizations/me/pricing/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      }),
+    onSuccess: () => invalidateOrganizationPricing(queryClient),
   })
 }

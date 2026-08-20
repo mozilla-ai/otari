@@ -431,6 +431,18 @@ class KnnRoutingMemory:
         the lookup keys on the same ``instance:model`` the request will be billed
         under. A candidate naming a provider *instance* would otherwise be priced
         against its implementation name and look unpriced.
+
+        Deliberately reads the *deployment* price list, not an organization's rate
+        overrides, so a router's ranking can differ from what the chosen request
+        settles at. Three reasons it stays that way. This is a preference and not
+        a charge, so nothing is billed wrong. ``decide_ordering`` carries no key
+        and no session (``_candidate_prices`` opens its own), and the surface it
+        shares with ``explain`` and the CLI is required to stay callable with no
+        request at all, so an organization could only arrive by widening that
+        boundary. And the refusal below cannot fire spuriously for an
+        override-only price: ``unpriced_router_candidates`` validates a policy's
+        candidates against the deployment list when the policy is written, so a
+        candidate priced only by an override never becomes a stored policy.
         """
         try:
             resolved = resolve_provider_selector(self.config, selector)

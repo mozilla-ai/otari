@@ -187,3 +187,7 @@ GET /v1/workspaces/{workspace_id}/members                   # dashboard-only
 POST /v1/workspaces/{workspace_id}/members/{user_id}        # dashboard-only
 PATCH /v1/workspaces/{workspace_id}/members/{user_id}       # dashboard-only
 DELETE /v1/workspaces/{workspace_id}/members/{user_id}      # dashboard-only
+GET /v1/organizations/me/pricing                            # dashboard-only
+POST /v1/organizations/me/pricing                           # dashboard-only
+PUT /v1/organizations/me/pricing/{pricing_id}               # dashboard-only
+DELETE /v1/organizations/me/pricing/{pricing_id}            # dashboard-only

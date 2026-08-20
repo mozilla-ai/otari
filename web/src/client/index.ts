@@ -195,6 +195,17 @@ export function isPricingTier(tier: StoredPricingTier): tier is PricingTier {
   )
 }
 export type SetPricingRequest = Schemas["SetPricingRequest"]
+// Per-organization rate overrides, which sit above the deployment price list
+// above. Same DTO names as otari.ai's own endpoint, so the two clients stay
+// recognizable side by side.
+export type OrganizationPricingOverride =
+  Schemas["OrganizationModelPricingPublic"]
+export type OrganizationPricingOverrides =
+  Schemas["OrganizationModelPricingsPublic"]
+export type CreateOrganizationPricingOverride =
+  Schemas["OrganizationModelPricingCreate"]
+export type UpdateOrganizationPricingOverride =
+  Schemas["OrganizationModelPricingUpdate"]
 export type PricingRefreshChange = Schemas["PricingRefreshChangeResponse"]
 export type PricingRefreshPreview = Schemas["PricingRefreshPreviewResponse"]
 export type ProviderInfo = Schemas["ProviderInfoSchema"]

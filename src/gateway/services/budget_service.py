@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime, timedelta
 from typing import Literal
@@ -130,6 +131,7 @@ async def _is_model_free(
     model: str,
     *,
     pricing_provider: str | None = None,
+    organization_id: uuid.UUID | None = None,
 ) -> bool:
     """Check if a model is free (both input and output prices are 0).
 
@@ -138,6 +140,10 @@ async def _is_model_free(
         model: Model identifier (e.g., "provider/model" or "model")
         pricing_provider: Resolved provider instance, when ``model`` is already
             the bare model name.
+        organization_id: Whose rates decide it. A model the deployment prices at
+            zero is not free to an organization that overrode it, and one the
+            deployment charges for is free to an organization that overrode it to
+            zero, so this has to be the same resolution the request is billed by.
 
     Returns:
         True if the model is free, False otherwise or if pricing not found
@@ -149,7 +155,7 @@ async def _is_model_free(
             pricing_provider = provider_key(provider) or None
         else:
             model_name = model
-        pricing = await find_model_pricing(db, pricing_provider, model_name)
+        pricing = await find_model_pricing(db, pricing_provider, model_name, organization_id=organization_id)
         if pricing:
             return pricing.input_price_per_million == 0 and pricing.output_price_per_million == 0
     except (AnyLLMError, ValueError, SQLAlchemyError) as e:
@@ -248,6 +254,7 @@ async def reserve_budget(
     strategy: str = "for_update",
     counts_toward_budget: bool = True,
     scope: BudgetScopeRequest | None = None,
+    organization_id: uuid.UUID | None = None,
 ) -> ReservationHandle:
     """Atomically pre-debit an estimated cost against every budget that applies.
 
@@ -258,6 +265,13 @@ async def reserve_budget(
     conditional UPDATE: if it would push ``spend + reserved`` past ``max_budget``
     the row count is zero and we reject with 403. No row lock is held across the
     provider network call.
+
+    ``organization_id`` is whose rate overrides decide whether ``model`` is free,
+    and it is passed in rather than derived here: the caller has already resolved
+    it for its own pricing lookup, and re-deriving it would repeat the two
+    un-memoized reads a master-key request pays for ``default_workspace_id``.
+    Omitted, the free-model check reads the deployment price list, which is what
+    it did before overrides existed.
 
     ``scope`` opts the request into the second mechanism, the tenancy-scoped
     ceilings in ``scoped_budgets``. Those are resolved from the workspace the
@@ -323,8 +337,10 @@ async def reserve_budget(
         return no_reservation
 
     # Free models do not consume budget; nothing to reserve on either mechanism.
-    # Reconciliation will add their (zero) cost to spend.
-    if model and await _is_model_free(db, model, pricing_provider=pricing_provider):
+    # Reconciliation will add their (zero) cost to spend. Priced at the caller's
+    # organization's rate, so "free" means free at what this request will settle
+    # at rather than at the deployment's list price.
+    if model and await _is_model_free(db, model, pricing_provider=pricing_provider, organization_id=organization_id):
         return no_reservation
 
     if scoped:

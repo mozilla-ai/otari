@@ -185,6 +185,39 @@ class LastWorkspaceError(TenancyValidationError):
         )
 
 
+# The two below are pricing errors in a tenancy module, because the status
+# mapping is what decides where an error class lives here: one handler is
+# registered for ``TenancyError`` (see `gateway.main`), so an organization-scoped
+# error that wants a status rather than a 500 has to descend from it. Naming them
+# for what they are keeps that visible.
+class OrganizationPricingNotFoundError(TenancyNotFoundError):
+    """No pricing override with this id in the caller's organization.
+
+    One status for "never existed" and "belongs to another organization", the same
+    rule the base class states: a distinguishable 404 would tell one tenant which
+    ids exist in another.
+    """
+
+    def __init__(self, pricing_id: object):
+        super().__init__(f"Pricing override {pricing_id} not found")
+
+
+class OrganizationPricingOverlapError(TenancyConflictError):
+    """A period that would overlap one this organization already priced.
+
+    ``model_pricing`` lets a later row shadow an earlier one, because a catalog is
+    re-imported wholesale. An override is a commitment for a period, so two
+    periods covering one instant is an unanswerable question rather than a newest
+    wins rule, and it is refused with both periods named.
+    """
+
+    def __init__(self, model_key: str, existing_period: str):
+        super().__init__(
+            f"An override for '{model_key}' already covers part of that period ({existing_period}). "
+            "Change this period, or edit the existing override instead."
+        )
+
+
 __all__ = [
     "ForeignTenancyError",
     "InvalidEmailError",
@@ -197,6 +230,8 @@ __all__ = [
     "OrganizationMemberNotFoundError",
     "OrganizationNameRequiredError",
     "OrganizationNotFoundError",
+    "OrganizationPricingNotFoundError",
+    "OrganizationPricingOverlapError",
     "TenancyConflictError",
     "TenancyError",
     "TenancyForbiddenError",

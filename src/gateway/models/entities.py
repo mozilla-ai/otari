@@ -983,3 +983,139 @@ class ScopedBudget(Base):
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
+
+
+class OrganizationModelPricing(Base):
+    """One organization's rate for a model, sitting above the deployment price list.
+
+    ``model_pricing`` carries no tenancy column: it is one price list for the
+    whole deployment. This table is the layer above it, so an organization can
+    price the models it uses at its own negotiated rates while every other
+    organization, and every model it has not overridden, keeps resolving exactly
+    as before. Resolution order is override, then deployment row, then the
+    genai-prices dataset (`services.pricing_service.find_model_pricing`).
+
+    **Keyed on ``model_key``, not a split provider and model.** The platform's
+    equivalent table (`otari-ai` ``organization_model_pricing``) carries
+    ``provider`` and ``model`` as separate columns. Here the whole pricing chain
+    keys on one ``provider:model`` string, and that string is not always a
+    provider and a model: a pricing key names a provider *instance*
+    (``home_lab:llama-3``, over ``provider_type: openai``) and sometimes no model
+    at all (``otari:web_search``). Splitting it would make an override
+    unmatchable for exactly the keys an operator is most likely to have priced by
+    hand, so the override keys the same way the row it overrides does.
+
+    **An interval, where ``model_pricing`` carries a version series.** A price in
+    ``model_pricing`` is ``(model_key, effective_at)`` and a later row silently
+    shadows an earlier one, which is the right shape for a catalog an operator
+    re-imports. An override is a commitment for a period, so it carries both ends
+    and overlapping periods for one model are refused rather than shadowed
+    (`services.organization_pricing_service`). ``effective_to`` NULL means open
+    ended.
+
+    **The overlap rule is enforced in the service, not by the database.** The
+    natural constraint is a PostgreSQL ``EXCLUDE`` over a ``tstzrange``, and the
+    platform has one. SQLite has no exclusion constraint and no range type, and
+    it is what the OSS edition ships by default, so a database-side rule would
+    hold on one engine and be a comment on the other. The unique index below is
+    what both engines can enforce: it stops the exact-duplicate start, which is
+    the collision two concurrent writers actually produce, while a partial
+    overlap between two simultaneous inserts remains a narrow race the service's
+    check can lose. Single-writer configuration traffic, and a wrong rate is
+    visible and correctable rather than silent.
+
+    Rates are ``float`` to match ``ModelPricing``, deliberately. An override
+    resolves *into* a transient ``ModelPricing`` so every existing caller and the
+    whole cost-math core stay untouched, which they could not if the two tables
+    disagreed about the type of money. Making both exact is #661, and it is one
+    migration over both tables rather than a conversion this table arrives
+    half-way through.
+    """
+
+    __tablename__ = "organization_model_pricing"
+    __table_args__ = (
+        # One index, doing both jobs, because they want the same columns in the
+        # same order. As a constraint it refuses two rows for one key that begin
+        # at the same instant, which is the part of the overlap rule either
+        # engine can hold (see the class docstring for why the rest is in the
+        # service). As an index it serves the resolution lookup: the two equality
+        # columns lead, so the request path gets a prefix scan, and
+        # ``effective_from`` trails so picking the newest applicable period is
+        # index-ordered rather than a sort.
+        Index(
+            "uq_organization_model_pricing_period_start",
+            "organization_id",
+            "model_key",
+            "effective_from",
+            unique=True,
+        ),
+        # An inverted period would resolve for no instant at all, so it is a
+        # storage error rather than a pricing decision. Equal ends are refused
+        # too: a zero-width period is the same silent nothing.
+        CheckConstraint(
+            "effective_to IS NULL OR effective_to > effective_from",
+            name="ck_organization_model_pricing_period_ordered",
+        ),
+        # Negative money prices a request as a credit. The service rejects it
+        # with a message; these are the backstop for a writer that is not the
+        # service, and they are spelled out per column because a single check
+        # over all five would not say which rate was wrong.
+        CheckConstraint(
+            "input_price_per_million >= 0",
+            name="ck_organization_model_pricing_input_non_negative",
+        ),
+        CheckConstraint(
+            "output_price_per_million >= 0",
+            name="ck_organization_model_pricing_output_non_negative",
+        ),
+        CheckConstraint(
+            "cache_read_price_per_million IS NULL OR cache_read_price_per_million >= 0",
+            name="ck_organization_model_pricing_cache_read_non_negative",
+        ),
+        CheckConstraint(
+            "cache_write_price_per_million IS NULL OR cache_write_price_per_million >= 0",
+            name="ck_organization_model_pricing_cache_write_non_negative",
+        ),
+        CheckConstraint(
+            "cache_write_1h_price_per_million IS NULL OR cache_write_1h_price_per_million >= 0",
+            name="ck_organization_model_pricing_cache_write_1h_non_negative",
+        ),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    # CASCADE, where the request-plane tables above use RESTRICT. Those are kept
+    # because a workspace's spend history must survive it; an override is
+    # configuration, and an organization's rates mean nothing once the
+    # organization is gone. The usage rows priced under it keep their own settled
+    # cost, so deleting this loses no accounting.
+    # No ``index=True``: the composite lookup index below leads on this column,
+    # so a plain one on it would be a second index serving queries the first
+    # already answers, paid for on every write.
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("organization.id", ondelete="CASCADE"), nullable=False
+    )
+    model_key: Mapped[str] = mapped_column()
+    input_price_per_million: Mapped[float] = mapped_column()
+    output_price_per_million: Mapped[float] = mapped_column()
+    # Nullable for the same reason ``ModelPricing``'s are: a provider without
+    # prompt caching, or a model with no discounted cache rate, leaves them unset
+    # and the cost calculation falls back the way it already does.
+    cache_read_price_per_million: Mapped[float | None] = mapped_column(nullable=True)
+    cache_write_price_per_million: Mapped[float | None] = mapped_column(nullable=True)
+    cache_write_1h_price_per_million: Mapped[float | None] = mapped_column(nullable=True)
+    # Same shape and same ``min_input_tokens`` key as ``ModelPricing``, so the
+    # transient row an override resolves into needs no tier translation.
+    pricing_tiers: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    effective_from: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+    )
+    # NULL means open ended, which is the common case: an organization sets a
+    # rate and it applies until something replaces it.
+    effective_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )

@@ -41,10 +41,23 @@ from gateway.services.tenancy.provisioning_service import (
 # leaves its entry behind, which is inert: nothing can authenticate on it again.
 _key_workspace: dict[str, uuid.UUID] = {}
 
+# workspace id -> the organization that owns it, for the same reason and with the
+# same safety argument as the cache above: the column is written once at creation
+# and nothing moves a workspace between organizations. An endpoint that did would
+# have to clear this, and pricing would serve the old organization's rates until
+# it did.
+_workspace_organization: dict[uuid.UUID, uuid.UUID] = {}
+
 
 def reset_key_workspace_cache() -> None:
-    """Drop the cached key workspaces (between tests that swap databases)."""
+    """Drop the cached key workspaces and workspace organizations.
+
+    Called between tests that swap databases. Both caches are keyed on ids that a
+    fresh database re-mints, so leaving either behind would hand the next test a
+    workspace or organization that does not exist in it.
+    """
     _key_workspace.clear()
+    _workspace_organization.clear()
 
 
 async def default_workspace_id(db: AsyncSession) -> uuid.UUID:
@@ -138,8 +151,59 @@ async def resolve_workspace_id(db: AsyncSession, api_key: APIKey | None) -> uuid
     return await default_workspace_id(db)
 
 
+async def organization_for_workspace_id(db: AsyncSession, workspace_id: uuid.UUID) -> uuid.UUID | None:
+    """The organization owning a workspace, memoized, or ``None`` if it has none.
+
+    Read by pricing resolution, which needs the organization to look for a rate
+    override before falling back to the deployment price list.
+
+    Memoized on the same argument the key cache is: a workspace's organization is
+    immutable here. ``Workspace.organization_id`` is set at creation and every
+    other reference to it filters or compares; there is no endpoint that moves a
+    workspace between organizations, and adding one would have to drop this cache
+    (the docstring on the cache below says so, so it is not a silent trap).
+
+    ``None`` rather than an exception for a workspace that resolves to nothing,
+    because the caller's next step is to skip the override and price against the
+    deployment row. A missing workspace must not fail a request that would
+    otherwise be priced and served.
+    """
+    cached = _workspace_organization.get(workspace_id)
+    if cached is not None:
+        return cached
+
+    resolved = (
+        await db.execute(select(col(Workspace.organization_id)).where(col(Workspace.id) == workspace_id))
+    ).scalar_one_or_none()
+    if resolved is None:
+        return None
+
+    _workspace_organization[workspace_id] = resolved
+    return resolved
+
+
+async def organization_for_key_id(db: AsyncSession, api_key_id: str | None) -> uuid.UUID | None:
+    """The organization whose pricing overrides apply to this request.
+
+    The key names the workspace and the workspace names the organization, so this
+    is the two existing lookups composed. A master-key request has no key row and
+    lands in the default workspace, which is the operator acting deployment-wide,
+    so it resolves to that workspace's organization and is priced under the same
+    overrides as the rest of the deployment.
+
+    Deliberately never read from a header. The organization decides what a request
+    costs, so taking it from something the caller controls would let anyone bill
+    at another organization's negotiated rate; it comes off the key, exactly as
+    the workspace does.
+    """
+    workspace_id = await workspace_for_key_id(db, api_key_id)
+    return await organization_for_workspace_id(db, workspace_id)
+
+
 __all__ = [
     "default_workspace_id",
+    "organization_for_key_id",
+    "organization_for_workspace_id",
     "reset_key_workspace_cache",
     "resolve_workspace_id",
     "workspace_for_key_id",

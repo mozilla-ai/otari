@@ -4838,6 +4838,353 @@
         "title": "OrganizationMembershipContextPublic",
         "type": "object"
       },
+      "OrganizationModelPricingCreate": {
+        "description": "Create one rate override for a model, for a period.",
+        "properties": {
+          "cache_read_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Price per 1M cached-input tokens",
+            "title": "Cache Read Price Per Million"
+          },
+          "cache_write_1h_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Price per 1M Anthropic 1-hour cache-write tokens",
+            "title": "Cache Write 1H Price Per Million"
+          },
+          "cache_write_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Price per 1M cache-write (creation) tokens",
+            "title": "Cache Write Price Per Million"
+          },
+          "effective_from": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO 8601 datetime from which this rate applies, inclusive. Defaults to now.",
+            "title": "Effective From"
+          },
+          "effective_to": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO 8601 datetime at which this rate stops applying, exclusive. Null leaves it open ended. Because the end is exclusive, the next period may begin at exactly this instant without overlapping.",
+            "title": "Effective To"
+          },
+          "input_price_per_million": {
+            "description": "Price per 1M input tokens",
+            "minimum": 0.0,
+            "title": "Input Price Per Million",
+            "type": "number"
+          },
+          "model_key": {
+            "description": "Model identifier in 'provider:model' form, matching the key the deployment price list uses. A provider instance name is valid here ('home_lab:llama-3'), because pricing keys on the instance a request resolves to.",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Model Key",
+            "type": "string"
+          },
+          "output_price_per_million": {
+            "description": "Price per 1M output tokens",
+            "minimum": 0.0,
+            "title": "Output Price Per Million",
+            "type": "number"
+          },
+          "pricing_tiers": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/PricingTier"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whole-request context thresholds. Fields omitted by a tier inherit the base rate.",
+            "title": "Pricing Tiers"
+          }
+        },
+        "required": [
+          "input_price_per_million",
+          "output_price_per_million",
+          "model_key"
+        ],
+        "title": "OrganizationModelPricingCreate",
+        "type": "object"
+      },
+      "OrganizationModelPricingPublic": {
+        "description": "One stored rate override.",
+        "properties": {
+          "cache_read_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Read Price Per Million"
+          },
+          "cache_write_1h_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write 1H Price Per Million"
+          },
+          "cache_write_price_per_million": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cache Write Price Per Million"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "effective_from": {
+            "format": "date-time",
+            "title": "Effective From",
+            "type": "string"
+          },
+          "effective_to": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Effective To"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "input_price_per_million": {
+            "title": "Input Price Per Million",
+            "type": "number"
+          },
+          "model_key": {
+            "title": "Model Key",
+            "type": "string"
+          },
+          "organization_id": {
+            "format": "uuid",
+            "title": "Organization Id",
+            "type": "string"
+          },
+          "output_price_per_million": {
+            "title": "Output Price Per Million",
+            "type": "number"
+          },
+          "pricing_tiers": {
+            "items": {
+              "$ref": "#/components/schemas/PricingTier"
+            },
+            "title": "Pricing Tiers",
+            "type": "array"
+          },
+          "updated_at": {
+            "format": "date-time",
+            "title": "Updated At",
+            "type": "string"
+          }
+        },
+        "required": [
+          "id",
+          "organization_id",
+          "model_key",
+          "input_price_per_million",
+          "output_price_per_million",
+          "cache_read_price_per_million",
+          "cache_write_price_per_million",
+          "cache_write_1h_price_per_million",
+          "pricing_tiers",
+          "effective_from",
+          "effective_to",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "OrganizationModelPricingPublic",
+        "type": "object"
+      },
+      "OrganizationModelPricingUpdate": {
+        "description": "Replace an override's rates and period.\n\nA full replacement rather than a patch: every rate field is present in the\nbody and an omitted optional rate is cleared, so the stored row is exactly\nwhat was sent. That is the opposite of ``POST /v1/pricing``, which inherits an\nomitted cache rate from the model's previous version, and deliberately so:\nthat surface versions a catalog where each write adds a row, while this one\nedits a single row in place and an inheriting patch would make the result\ndepend on what happened to be stored before.\n\n``model_key`` is absent because it is immutable. Repointing an override at\nanother model is retiring one and creating another, which is two requests.",
+        "properties": {
+          "cache_read_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Price per 1M cached-input tokens",
+            "title": "Cache Read Price Per Million"
+          },
+          "cache_write_1h_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Price per 1M Anthropic 1-hour cache-write tokens",
+            "title": "Cache Write 1H Price Per Million"
+          },
+          "cache_write_price_per_million": {
+            "anyOf": [
+              {
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Price per 1M cache-write (creation) tokens",
+            "title": "Cache Write Price Per Million"
+          },
+          "effective_from": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO 8601 datetime from which this rate applies, inclusive. Defaults to now.",
+            "title": "Effective From"
+          },
+          "effective_to": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "ISO 8601 datetime at which this rate stops applying, exclusive. Null leaves it open ended. Because the end is exclusive, the next period may begin at exactly this instant without overlapping.",
+            "title": "Effective To"
+          },
+          "input_price_per_million": {
+            "description": "Price per 1M input tokens",
+            "minimum": 0.0,
+            "title": "Input Price Per Million",
+            "type": "number"
+          },
+          "output_price_per_million": {
+            "description": "Price per 1M output tokens",
+            "minimum": 0.0,
+            "title": "Output Price Per Million",
+            "type": "number"
+          },
+          "pricing_tiers": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/PricingTier"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Whole-request context thresholds. Fields omitted by a tier inherit the base rate.",
+            "title": "Pricing Tiers"
+          }
+        },
+        "required": [
+          "input_price_per_million",
+          "output_price_per_million"
+        ],
+        "title": "OrganizationModelPricingUpdate",
+        "type": "object"
+      },
+      "OrganizationModelPricingsPublic": {
+        "description": "Every override in the organization, with a count.\n\nThe envelope shape the platform's equivalent endpoint returns, kept so the\ngenerated dashboard client stays recognizable across both trees.",
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/OrganizationModelPricingPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "OrganizationModelPricingsPublic",
+        "type": "object"
+      },
       "OrganizationPublic": {
         "properties": {
           "created_at": {
@@ -12993,6 +13340,189 @@
         "summary": "Update Active Organization Member",
         "tags": [
           "organizations"
+        ]
+      }
+    },
+    "/v1/organizations/me/pricing": {
+      "get": {
+        "description": "List the organization's rate overrides.\n\nReadable by any member: these rates decide what the caller's own requests\ncost, so they are not withheld from the people billed at them. Writing needs\nan owner or admin.",
+        "operationId": "list_organization_pricing_v1_organizations_me_pricing_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationModelPricingsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Organization Pricing",
+        "tags": [
+          "organization-pricing"
+        ]
+      },
+      "post": {
+        "description": "Set the organization's rate for a model over a period.\n\nRefused with a 409 when the period overlaps one already stored for that model,\nnaming the period it collides with, rather than shadowing it.",
+        "operationId": "create_organization_pricing_v1_organizations_me_pricing_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationModelPricingCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationModelPricingPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Organization Pricing",
+        "tags": [
+          "organization-pricing"
+        ]
+      }
+    },
+    "/v1/organizations/me/pricing/{pricing_id}": {
+      "delete": {
+        "description": "Remove an override, returning the model to the deployment price list.",
+        "operationId": "delete_organization_pricing_v1_organizations_me_pricing__pricing_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pricing_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Pricing Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Organization Pricing",
+        "tags": [
+          "organization-pricing"
+        ]
+      },
+      "put": {
+        "description": "Replace an override's rates and period.\n\nFuture requests in the period price at the new rate; usage already settled\nkeeps the cost it was billed, because a settled cost is stored on the usage\nrow rather than recomputed.",
+        "operationId": "replace_organization_pricing_v1_organizations_me_pricing__pricing_id__put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "pricing_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Pricing Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationModelPricingUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationModelPricingPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Replace Organization Pricing",
+        "tags": [
+          "organization-pricing"
         ]
       }
     },

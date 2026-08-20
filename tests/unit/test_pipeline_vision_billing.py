@@ -54,6 +54,12 @@ class _Recorder:
         async def fake_resolve_allowlist(*args: Any, **kwargs: Any) -> None:
             return None
 
+        # Same reason: the preamble resolves the key's organization to pick up any
+        # rate override, which walks api_keys and workspace. None means "no
+        # override", which is what this test's deployment-wide pricing assumes.
+        async def fake_organization_for_key_id(*args: Any, **kwargs: Any) -> None:
+            return None
+
         async def fake_reserve(*args: Any, **kwargs: Any) -> ReservationHandle:
             self.reserve_calls.append(kwargs)
             return ReservationHandle(user_id="user-1", estimate=0.0, reserved=True, strategy="for_update")
@@ -76,6 +82,7 @@ class _Recorder:
         monkeypatch.setattr(pipeline, "check_rate_limit", lambda request, user_id: None)
         monkeypatch.setattr(pipeline, "find_model_pricing", fake_find_pricing)
         monkeypatch.setattr(pipeline, "resolve_request_allowlist", fake_resolve_allowlist)
+        monkeypatch.setattr(pipeline, "organization_for_key_id", fake_organization_for_key_id)
         monkeypatch.setattr(pipeline, "reserve_budget", fake_reserve)
         monkeypatch.setattr(pipeline, "increase_reservation", fake_increase)
         monkeypatch.setattr(pipeline, "log_usage", fake_log_usage)
@@ -164,6 +171,10 @@ async def test_reservation_uses_the_resolved_provider_for_pricing(monkeypatch: p
         "pricing_provider": "openai",
         "strategy": "for_update",
         "counts_toward_budget": True,
+        # The preamble resolves the caller's organization once and hands it to the
+        # reservation, so the free-model shortcut prices at the same rate the
+        # request settles at. None here is the stub above saying "no override".
+        "organization_id": None,
     }
     # The scoped ceilings narrow on the same resolved provider the pricing does,
     # and bill to the key that authenticated the request.
