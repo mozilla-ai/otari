@@ -377,6 +377,45 @@ def test_rotation_re_mints_the_session_for_the_same_identity(tmp_path: Path, mon
         assert client.get("/v1/organizations/me").status_code == 200
 
 
+_COMPLETION_BODY = {"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]}
+
+
+def test_the_cookie_authenticates_the_request_plane_too(tmp_path: Path) -> None:
+    """The two auth sites that resolve the cookie by hand rather than by injection.
+
+    ``resolve_request_context`` and ``/v1/messages/count_tokens`` call the auth
+    dependency directly, so FastAPI cannot inject the session identity and each
+    has to resolve it itself. The cookie check used to sit inside
+    ``verify_api_key_or_master_key``, which meant every caller got it for free; a
+    site left un-updated when it moved out would stop accepting the cookie and
+    nothing else in this file would notice.
+
+    Chat stops at the master-key user gate rather than at 401: a cookie carries
+    master-key authority, and a master key has to name the user it spends for.
+    """
+    with TestClient(create_app(_config(tmp_path))) as client:
+        _sign_in(client)
+
+        assert client.post("/v1/messages/count_tokens", json=_COMPLETION_BODY).status_code == 200
+
+        chat = client.post("/v1/chat/completions", json=_COMPLETION_BODY)
+        assert chat.status_code == 400, chat.text
+        assert "'user' field is required" in chat.json()["detail"]
+
+
+def test_the_request_plane_still_refuses_anonymous_and_cross_site_callers(tmp_path: Path) -> None:
+    """Hoisting the cookie check out of the dependency must not have loosened it."""
+    with TestClient(create_app(_config(tmp_path))) as client:
+        assert client.post("/v1/chat/completions", json=_COMPLETION_BODY).status_code == 401
+        assert client.post("/v1/messages/count_tokens", json=_COMPLETION_BODY).status_code == 401
+
+        _sign_in(client)
+        cross_site = {"Sec-Fetch-Site": "cross-site"}
+        assert client.post("/v1/chat/completions", json=_COMPLETION_BODY, headers=cross_site).status_code == 401
+        counted = client.post("/v1/messages/count_tokens", json=_COMPLETION_BODY, headers=cross_site)
+        assert counted.status_code == 401
+
+
 def _rate_limited_config(tmp_path: Path, *, limit: int | None) -> GatewayConfig:
     return GatewayConfig(
         database_url=f"sqlite:///{tmp_path / 'session-rate-limit-test.db'}",
