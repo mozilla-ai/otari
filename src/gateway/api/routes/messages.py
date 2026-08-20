@@ -261,11 +261,25 @@ _ERROR_KIND_TO_ANTHROPIC_TYPE = {
 }
 
 
+def _reasoning_tokens_of_anthropic(part: Any) -> int:
+    thinking = getattr(part, "thinking_tokens", None)
+    if thinking is not None:
+        return int(thinking)
+    reasoning = getattr(part, "reasoning_tokens", None)
+    if reasoning is not None:
+        return int(reasoning)
+    return 0
+
+
 def _billable_messages_usage(usage: Any) -> GatewayUsage:
     """Use per-iteration totals when Anthropic reports compaction sampling."""
     billable_parts = list(getattr(usage, "iterations", None) or []) or [usage]
     input_tokens = sum((getattr(part, "input_tokens", None) or 0) for part in billable_parts)
     output_tokens = sum((getattr(part, "output_tokens", None) or 0) for part in billable_parts)
+    reasoning_tokens = sum(
+        _reasoning_tokens_of_anthropic(part)
+        for part in billable_parts
+    )
     return GatewayUsage(
         prompt_tokens=input_tokens,
         completion_tokens=output_tokens,
@@ -278,6 +292,7 @@ def _billable_messages_usage(usage: Any) -> GatewayUsage:
         ),
         cache_write_1h_tokens=sum(_cache_write_1h_tokens(part) for part in billable_parts),
         cache_tokens_in_prompt=False,
+        reasoning_tokens=reasoning_tokens,
     )
 
 
@@ -289,7 +304,12 @@ def _messages_stream_usage(event: MessageStreamEvent) -> CompletionUsage | None:
         input_tokens = usage.input_tokens or 0
         cache_read = usage.cache_read_input_tokens or 0
         cache_write = usage.cache_creation_input_tokens or 0
-        if input_tokens or cache_read or cache_write:
+        reasoning_tokens = _reasoning_tokens_of_anthropic(usage)
+        has_reasoning = (
+            getattr(usage, "thinking_tokens", None) is not None
+            or getattr(usage, "reasoning_tokens", None) is not None
+        )
+        if input_tokens or cache_read or cache_write or has_reasoning:
             return GatewayUsage(
                 prompt_tokens=input_tokens,
                 completion_tokens=0,
@@ -298,6 +318,7 @@ def _messages_stream_usage(event: MessageStreamEvent) -> CompletionUsage | None:
                 cache_write_tokens=cache_write,
                 cache_write_1h_tokens=_cache_write_1h_tokens(usage),
                 cache_tokens_in_prompt=False,
+                reasoning_tokens=reasoning_tokens,
             )
     return None
 

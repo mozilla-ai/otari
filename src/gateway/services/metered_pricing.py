@@ -8,6 +8,7 @@ from gateway.core.usage import (
     cache_tokens_in_prompt_of,
     cache_write_1h_tokens_of,
     cache_write_tokens_of,
+    reasoning_tokens_of,
 )
 from gateway.models.entities import ModelPricing
 
@@ -29,6 +30,7 @@ class BillableUsage:
     cache_read_tokens: int
     cache_write_tokens: int
     cache_write_1h_tokens: int
+    reasoning_tokens: int
 
     @property
     def cache_write_base_tokens(self) -> int:
@@ -42,6 +44,7 @@ def billable_usage(usage: Any) -> BillableUsage:
     cache_read = max(cache_read_tokens_of(usage), 0)
     cache_write = max(cache_write_tokens_of(usage), 0)
     cache_write_1h = min(max(cache_write_1h_tokens_of(usage), 0), cache_write)
+    reasoning = min(max(reasoning_tokens_of(usage), 0), completion_tokens)
 
     if cache_tokens_in_prompt_of(usage):
         cache_read = min(cache_read, prompt_tokens)
@@ -57,6 +60,7 @@ def billable_usage(usage: Any) -> BillableUsage:
         cache_read_tokens=cache_read,
         cache_write_tokens=cache_write,
         cache_write_1h_tokens=cache_write_1h,
+        reasoning_tokens=reasoning,
     )
 
 
@@ -151,6 +155,7 @@ def calculate_metered_cost(
         "cache_write_tokens": billable.cache_write_tokens,
         "cache_write_1h_tokens": billable.cache_write_1h_tokens,
         "completion_tokens": billable.completion_tokens,
+        "reasoning_tokens": billable.reasoning_tokens,
     }
     lines: list[dict[str, float | int | str]] = []
 

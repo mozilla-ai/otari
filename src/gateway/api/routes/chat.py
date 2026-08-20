@@ -158,12 +158,16 @@ class _ChatAdapter:
         if not chunk.usage:
             return None
         details = chunk.usage.prompt_tokens_details
+        completion_details = chunk.usage.completion_tokens_details
+        reasoning_tokens = (completion_details.reasoning_tokens or 0) if completion_details is not None else 0
         return GatewayUsage(
             prompt_tokens=chunk.usage.prompt_tokens or 0,
             completion_tokens=chunk.usage.completion_tokens or 0,
             total_tokens=chunk.usage.total_tokens or 0,
             prompt_tokens_details=details,
+            completion_tokens_details=completion_details,
             cache_read_tokens=(details.cached_tokens or 0) if details is not None else 0,
+            reasoning_tokens=reasoning_tokens,
         )
 
     def extract_usage(self, result: ChatCompletion) -> CompletionUsage | None:
