@@ -229,9 +229,9 @@ def _row_cache_tokens_included(row: UsageLog) -> bool:
 
     The convention is not a column, so it is recovered from the meters the
     pricing wrote: ``total_input_tokens`` equals ``prompt_tokens`` under the
-    inclusive (OpenAI) shape and exceeds it by the cache buckets under the
-    additive (Anthropic) one. That is a fact recorded at settlement, not a
-    guess, so a row imported either way reprices the way it was priced.
+    inclusive shape and exceeds it by the cache buckets under the additive one.
+    That is a fact recorded at settlement, not a guess, so a row imported either
+    way reprices the way it was priced.
 
     A row with no meters (never priced, or priced before the meters existed)
     falls back to the additive shape, which is the ingest default and the

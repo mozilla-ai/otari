@@ -226,6 +226,26 @@ def test_an_unpriced_1h_write_bills_at_the_ordinary_cache_write_rate() -> None:
     assert cost == Decimal("0.000375")
 
 
+def test_sub_amounts_of_one_row_can_be_summed_before_the_row_is_rounded() -> None:
+    """Rounding per line would round the row once per line, not once.
+
+    A batch is one usage row priced a request at a time, so a line is not a
+    settled total. Ten thousand identical lines of 200 input and 2 output
+    tokens at gpt-4o-mini rates come to $0.312; rounding each line to the
+    micro-dollar first loses $0.002 of it, every time, in the same direction.
+    """
+    pricing = _pricing(input_price_per_million=Decimal("0.15"), output_price_per_million=Decimal("0.6"))
+    counts: dict[str, Any] = {"input_tokens": 200, "output_tokens": 2, "cache_tokens_included": True}
+
+    exact_line = calculate_token_cost(pricing, quantize=False, **counts)
+    settled_line = calculate_token_cost(pricing, **counts)
+
+    assert exact_line == Decimal("0.0000312")
+    assert settled_line == Decimal("0.000031")
+    assert quantize_cost(exact_line * 10_000) == Decimal("0.312000")
+    assert settled_line * 10_000 == Decimal("0.310000")
+
+
 # ---------------------------------------------------------------------------
 # Meters and charge lines
 # ---------------------------------------------------------------------------

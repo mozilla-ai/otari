@@ -21,7 +21,7 @@ from gateway.api.routes._helpers import resolve_user_id
 from gateway.api.routes._pipeline import _raise_for_unresolvable_model, failure_status_code
 from gateway.api.routes.chat import rate_limit_headers
 from gateway.core.config import GatewayConfig
-from gateway.core.metered_pricing import calculate_token_cost
+from gateway.core.metered_pricing import calculate_token_cost, quantize_cost
 from gateway.log_config import logger
 from gateway.models.entities import APIKey, BatchRecord, UsageLog
 from gateway.rate_limit import check_rate_limit
@@ -739,17 +739,26 @@ async def retrieve_batch_results(
             # batch result reports OpenAI-shaped usage, so a line's cached
             # tokens, when it reports any, are already inside its
             # ``prompt_tokens``.
-            cost = sum(
-                (
-                    calculate_token_cost(
-                        pricing,
-                        input_tokens=line_prompt,
-                        output_tokens=line_completion,
-                        cache_tokens_included=True,
-                    )
-                    for line_prompt, line_completion in line_tokens
-                ),
-                Decimal(0),
+            #
+            # The lines are summed exactly and the *batch* is rounded once
+            # (``quantize=False``): a line is not a settled total, and rounding
+            # each one would round the row once per line, which on a batch of
+            # many identical short requests is a systematic shortfall rather
+            # than a wash.
+            cost = quantize_cost(
+                sum(
+                    (
+                        calculate_token_cost(
+                            pricing,
+                            input_tokens=line_prompt,
+                            output_tokens=line_completion,
+                            cache_tokens_included=True,
+                            quantize=False,
+                        )
+                        for line_prompt, line_completion in line_tokens
+                    ),
+                    Decimal(0),
+                )
             )
 
     # Recorded batches are accounted exactly once: the first completed retrieval

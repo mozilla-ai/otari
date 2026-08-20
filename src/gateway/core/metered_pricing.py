@@ -187,9 +187,8 @@ def billable_usage(
 ) -> BillableUsage:
     """Normalize reported token counts into the billable meters.
 
-    ``cache_tokens_included`` has no default on purpose: which convention a
-    caller speaks is a fact about the provider that reported the usage, not
-    something this module may assume (see the module docstring).
+    ``cache_tokens_included`` has no default on purpose; the module docstring
+    says why.
 
     1h cache writes are a subset of cache writes, so a count larger than the
     write total is clamped to it rather than double-charged.
@@ -241,9 +240,8 @@ def billable_usage_of(usage: CompletionUsage) -> BillableUsage:
     """Normalize a provider usage carrier, reading the convention off the carrier.
 
     ``GatewayUsage.cache_tokens_in_prompt`` is where the request path records
-    which convention the provider spoke (``False`` on the Anthropic path). A
-    plain ``CompletionUsage`` is OpenAI-shaped and reads as inclusive, which is
-    what :func:`~gateway.core.usage.cache_tokens_in_prompt_of` returns for it.
+    which convention the provider spoke, and a plain ``CompletionUsage`` reads
+    as inclusive.
     """
     return billable_usage(
         input_tokens=max(int(usage.prompt_tokens or 0), 0),
@@ -341,21 +339,19 @@ def _charge_line(meter: str, units: int, rate: Decimal, cost: Decimal) -> Charge
     return {"meter": meter, "units": units, "rate_per_million": float(rate), "cost": float(cost)}
 
 
-def price_billable_usage(
+def _price_meters(
     pricing: typing.Any,
     usage: BillableUsage,
 ) -> tuple[Decimal, dict[str, int], list[ChargeLine]]:
-    """Price normalized token meters and return auditable charge lines.
+    """The exact total, the meters, and the charge lines, before any rounding.
+
+    Split out from :func:`price_billable_usage` so a caller that prices several
+    sub-amounts into one row can sum them exactly and round the row once.
 
     Each input token bills exactly once, under whichever meter it belongs to: a
     cache read, a cache write on either TTL, or fresh input. A meter with no
     configured rate leaves its tokens in the fresh-input bucket, so an unpriced
     cache meter costs the input rate instead of nothing.
-
-    The returned cost is rounded once, by :func:`quantize_cost`, after the
-    meters have been summed exactly. Charge lines carry the unrounded per-meter
-    amount as a float, so a breakdown can differ from the row's total by less
-    than half a micro-dollar; the column is the amount, the lines explain it.
     """
     rates = effective_rates(pricing, usage.total_input_tokens)
 
@@ -400,6 +396,21 @@ def price_billable_usage(
         charge("cache_write_5m", usage.cache_write_base_tokens, rates.cache_write_price_per_million)
     if write_1h_rate is not None:
         charge("cache_write_1h", usage.cache_write_1h_tokens, write_1h_rate)
+    return cost, meters, lines
+
+
+def price_billable_usage(
+    pricing: typing.Any,
+    usage: BillableUsage,
+) -> tuple[Decimal, dict[str, int], list[ChargeLine]]:
+    """Settle normalized token meters and return auditable charge lines.
+
+    The returned cost is rounded once, by :func:`quantize_cost`, after the
+    meters have been summed exactly. Charge lines carry the unrounded per-meter
+    amount as a float, so a breakdown can differ from the row's total by less
+    than half a micro-dollar; the column is the amount, the lines explain it.
+    """
+    cost, meters, lines = _price_meters(pricing, usage)
     return quantize_cost(cost), meters, lines
 
 
@@ -425,9 +436,17 @@ def calculate_token_cost(
     cache_read_tokens: int = 0,
     cache_write_tokens: int = 0,
     cache_write_1h_tokens: int = 0,
+    quantize: bool = True,
 ) -> Decimal:
-    """Price loose token counts, for a caller with no usage carrier and no breakdown."""
-    cost, _, _ = price_billable_usage(
+    """Price loose token counts, for a caller with no usage carrier and no breakdown.
+
+    ``quantize=False`` returns the exact amount instead of a settled one, for a
+    caller that prices several sub-amounts into a single row: rounding each of
+    them would round the row once per sub-amount, which is what a batch of a
+    thousand identical short requests turns into a visible shortfall. Such a
+    caller sums the exact amounts and applies :func:`quantize_cost` once.
+    """
+    cost, _, _ = _price_meters(
         pricing,
         billable_usage(
             input_tokens=input_tokens,
@@ -438,7 +457,7 @@ def calculate_token_cost(
             cache_tokens_included=cache_tokens_included,
         ),
     )
-    return cost
+    return quantize_cost(cost) if quantize else cost
 
 
 def estimate_metered_cost(

@@ -10,7 +10,7 @@ from genai_prices.types import PriceCalculation, TieredPrices
 from sqlalchemy import case, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.core.metered_pricing import meter_cost, quantize_cost
+from gateway.core.metered_pricing import meter_cost, quantize_cost, to_decimal
 from gateway.log_config import logger
 from gateway.models.entities import ModelPricing, OrganizationModelPricing
 
@@ -511,13 +511,30 @@ async def find_model_pricing(
 # per-unit columns would need a schema migration (deferred; see issue #259).
 
 
+def _input_rate(pricing: ModelPricing) -> Decimal:
+    """The row's input rate, coerced the way the cost core coerces one.
+
+    A stored row hands back a ``Decimal`` and every construction site in the
+    tree now builds one, so this is defensive rather than load-bearing. It is
+    here because these three helpers are the only rate readers that do not go
+    through ``effective_rates``: without it, a transient row built from a JSON
+    number would raise ``TypeError`` deep in an arithmetic expression on a live
+    billing route, or (for :func:`per_image_cost`) return a ``float`` that
+    quietly contradicts the annotation.
+    """
+    rate = to_decimal(pricing.input_price_per_million)
+    if rate is None:
+        raise ValueError("Pricing carries no usable input rate")
+    return rate
+
+
 def input_token_cost(tokens: int, pricing: ModelPricing) -> Decimal:
     """USD cost of ``tokens`` input tokens at the per-million-token rate.
 
     The standard convention: ``input_price_per_million`` is USD per million
     input tokens. Used by embeddings and rerank, which bill input tokens only.
     """
-    return meter_cost(tokens, pricing.input_price_per_million)
+    return meter_cost(tokens, _input_rate(pricing))
 
 
 def flat_request_cost(pricing: ModelPricing | None) -> Decimal:
@@ -529,7 +546,11 @@ def flat_request_cost(pricing: ModelPricing | None) -> Decimal:
     """
     if pricing is None or not pricing.input_price_per_million:
         return Decimal(0)
-    return meter_cost(1, pricing.input_price_per_million)
+    # An unreadable rate reads as unpriced here rather than raising: every route
+    # on this convention is exempt from ``require_pricing`` and settles an
+    # unpriced model at $0 by design.
+    rate = to_decimal(pricing.input_price_per_million)
+    return Decimal(0) if rate is None else meter_cost(1, rate)
 
 
 PerRequestMeters = tuple[dict[str, int], list[dict[str, float | int | str]]]
@@ -695,7 +716,7 @@ def per_image_cost(n_images: int, pricing: ModelPricing) -> Decimal:
     Images convention: despite the name, ``input_price_per_million`` stores raw
     USD per image (no scaling, no division).
     """
-    return n_images * pricing.input_price_per_million
+    return n_images * _input_rate(pricing)
 
 
 def pricing_required_but_missing(pricing: ModelPricing | None, *, require_pricing: bool) -> bool:

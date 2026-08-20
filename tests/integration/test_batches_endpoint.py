@@ -964,6 +964,42 @@ def test_batch_lines_are_priced_one_request_at_a_time(
     assert results_logs[0]["cost"] == pytest.approx(expected_cost)
 
 
+def test_a_batch_is_rounded_once_not_once_per_line(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+) -> None:
+    """A line is not a settled total, so its sub-micro-dollar tail must survive.
+
+    Three lines of 200 input and 2 output at $0.15 / $0.60 per million come to
+    $0.0000936, which settles at $0.000094. Rounding each line first would floor
+    each one to $0.000031 and settle the row a micro-dollar light, in the same
+    direction every time.
+    """
+    user_id = api_key_obj["user_id"]
+    client.post(
+        "/v1/pricing",
+        json={
+            "model_key": "openai:gpt-4o-mini",
+            "input_price_per_million": 0.15,
+            "output_price_per_million": 0.6,
+        },
+        headers=master_key_header,
+    )
+
+    batch_id = _create_recorded_batch(client, api_key_header, batch_id="batch_rounding")
+    line = CompletionUsage(prompt_tokens=200, completion_tokens=2, total_tokens=202)
+    retrieve_patch, results_patch = _completed_results_patches(line, count=3)
+    with retrieve_patch, results_patch:
+        resp = client.get(f"/v1/batches/{batch_id}/results?provider=openai", headers=api_key_header)
+    assert resp.status_code == 200
+
+    usage_resp = client.get(f"/v1/users/{user_id}/usage", headers=master_key_header)
+    results_logs = [log for log in usage_resp.json() if log["endpoint"] == "/v1/batches/results"]
+    assert results_logs[0]["cost"] == pytest.approx(0.000094)
+
+
 def test_recorded_batch_results_defers_accounting_until_pricing_exists(
     client: TestClient,
     master_key_header: dict[str, str],

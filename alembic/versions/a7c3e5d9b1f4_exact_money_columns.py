@@ -22,11 +22,13 @@ published rate has.
 keeps six decimals, so an existing amount is rounded to the micro-dollar as it
 converts: ``0.1234567`` becomes ``0.123457``, and anything below half a
 micro-dollar (a handful of embedding or moderation tokens on a cheap model)
-becomes ``0.000000``. The downgrade restores the column type and cannot restore
-those digits, so a deployment's historical spend total can shift very slightly
-downward on upgrade. That is the scale mozilla-ai/otari-ai#1751 chose for the
-accounting truth; it is recorded here because nothing else would tell an
-operator why last month's total changed.
+becomes ``0.000000``. Rounding is half away from zero, so a row moves up as
+readily as down and a deployment's historical spend total can shift very
+slightly either way, by less than half a micro-dollar per row. The downgrade
+restores the column type and cannot restore the discarded digits. That scale is
+what mozilla-ai/otari-ai#1751 chose for the accounting truth; it is recorded
+here because nothing else would tell an operator why last month's total
+changed.
 
 **On PostgreSQL this rewrites ``usage_logs``.** ``double precision`` to
 ``numeric`` is not binary-coercible, so the ALTER copies the whole table under
@@ -59,6 +61,27 @@ _RATE_COLUMNS = (
     ("cache_write_price_per_million", True),
     ("cache_write_1h_price_per_million", True),
 )
+
+# ``organization_model_pricing``'s non-negative rate checks, by constraint name.
+# PostgreSQL keeps a CHECK written against the column's *old* type and rewrites
+# it as ``(col)::double precision >= (0)::double precision`` when the column is
+# retyped. Still correct, but a migrated database would then describe these
+# constraints differently from one built by ``create_all``, which is the same
+# drift the SQLite rebuild below exists to avoid. So they are dropped and
+# recreated against the new type.
+_RATE_CHECKS = {
+    "ck_organization_model_pricing_input_non_negative": "input_price_per_million >= 0",
+    "ck_organization_model_pricing_output_non_negative": "output_price_per_million >= 0",
+    "ck_organization_model_pricing_cache_read_non_negative": (
+        "cache_read_price_per_million IS NULL OR cache_read_price_per_million >= 0"
+    ),
+    "ck_organization_model_pricing_cache_write_non_negative": (
+        "cache_write_price_per_million IS NULL OR cache_write_price_per_million >= 0"
+    ),
+    "ck_organization_model_pricing_cache_write_1h_non_negative": (
+        "cache_write_1h_price_per_million IS NULL OR cache_write_1h_price_per_million >= 0"
+    ),
+}
 _PRICING_TABLES = ("model_pricing", "organization_model_pricing")
 
 # Spelled out rather than imported from ``gateway.models.money``: a migration
@@ -186,6 +209,10 @@ def _convert(to_numeric: bool) -> None:
                 existing_nullable=nullable,
                 postgresql_using=f"{name}::{'numeric' if to_numeric else 'double precision'}",
             )
+        if table == "organization_model_pricing":
+            for constraint, condition in _RATE_CHECKS.items():
+                op.drop_constraint(constraint, table, type_="check")
+                op.create_check_constraint(constraint, table, condition)
 
     if is_sqlite:
         # usage_logs carries no CHECK constraint, so reflection describes it

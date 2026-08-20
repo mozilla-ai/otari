@@ -22,12 +22,14 @@ import pytest
 from alembic import command
 from alembic.config import Config
 from sqlalchemy import func, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from conftest import seed_workspace_id
 from gateway.core.metered_pricing import calculate_metered_cost
 from gateway.core.usage import GatewayUsage
-from gateway.models.entities import ModelPricing, UsageLog
+from gateway.models.entities import ModelPricing, OrganizationModelPricing, UsageLog
+from gateway.models.tenancy import Organization
 from gateway.services.pricing_service import default_model_pricing
 
 # Rates an operator's price list actually holds, taken from the catalog the
@@ -191,6 +193,33 @@ def test_a_cost_below_the_column_scale_rounds_half_up_on_write(
 
     assert row is not None
     assert row.cost == stored
+
+
+def test_the_rate_checks_still_refuse_a_negative_rate_after_the_conversion(test_db: Session) -> None:
+    """The constraints have to survive the retype, and mean the same thing after it.
+
+    PostgreSQL keeps a CHECK written against the column's old type, so the
+    migration recreates these five against the new one. That is a rewrite of a
+    money guard, which is worth an error-path test on the engine that does it
+    rather than a reading of the DDL.
+    """
+    organization_id = test_db.execute(select(Organization.id)).scalars().first()
+    assert organization_id is not None
+    override = {
+        "organization_id": organization_id,
+        "model_key": "openai:gpt-4o",
+        "output_price_per_million": Decimal("1"),
+        "pricing_tiers": [],
+        "effective_from": _TS,
+    }
+
+    test_db.add(OrganizationModelPricing(input_price_per_million=Decimal("-1"), **override))
+    with pytest.raises(IntegrityError):
+        test_db.flush()
+    test_db.rollback()
+
+    test_db.add(OrganizationModelPricing(input_price_per_million=Decimal("0.5"), **override))
+    test_db.flush()
 
 
 def test_the_migration_round_trips_on_postgresql_with_rows_in_the_table(

@@ -270,13 +270,12 @@ def _resolve_pricing(
 def _build_usage(event: ExternalUsageEvent) -> BillableUsage:
     """Normalize an imported event's token counts for pricing.
 
-    ``cache_tokens_in_prompt`` carries the event's token convention, and the
-    submitter states it per event: ``False`` for the Anthropic / Claude Code
-    shape (``input_tokens`` excludes the additive cache buckets, the default)
-    and ``True`` for the OpenAI shape (cached tokens are a subset of
-    ``input_tokens``). It is passed straight through to the cost core, which
-    has no default for it, so an ingest that ever stopped carrying the flag
-    would fail to compile rather than quietly price one shape as the other.
+    The submitter states the cached-token convention per event (the default is
+    the additive Anthropic / Claude Code shape), and it is passed straight
+    through to the cost core, which has no default for it. An ingest that
+    stopped carrying the flag would therefore fail to compile rather than
+    quietly price one shape as the other. See ``core/metered_pricing`` for what
+    the two conventions are.
     """
     return billable_usage(
         input_tokens=event.input_tokens,

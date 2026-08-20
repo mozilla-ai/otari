@@ -1066,12 +1066,11 @@ class OrganizationModelPricing(Base):
     check can lose. Single-writer configuration traffic, and a wrong rate is
     visible and correctable rather than silent.
 
-    Rates are ``float`` to match ``ModelPricing``, deliberately. An override
-    resolves *into* a transient ``ModelPricing`` so every existing caller and the
-    whole cost-math core stay untouched, which they could not if the two tables
-    disagreed about the type of money. Making both exact is #661, and it is one
-    migration over both tables rather than a conversion this table arrives
-    half-way through.
+    Rates are the exact ``UsdRate`` type ``ModelPricing`` uses, and the two
+    tables carry it together (#661, one migration over both). An override
+    resolves *into* a transient ``ModelPricing``, so one implementation of the
+    cost math prices both, which it could not if they disagreed about the type
+    of money.
     """
 
     __tablename__ = "organization_model_pricing"

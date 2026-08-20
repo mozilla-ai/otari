@@ -466,9 +466,10 @@ settles at one micro-dollar.
 Upgrading an existing deployment converts the stored values in place. Rates
 convert exactly. Costs are rounded to the micro-dollar as they convert, so a
 historical row that recorded a fraction of a micro-dollar (a few tokens of a
-cheap embedding model) settles to `0.000000` and a deployment's lifetime spend
-total can move very slightly downward. The conversion is one way: downgrading
-restores the column type, not the discarded digits.
+cheap embedding model) settles to `0.000000`, and a deployment's lifetime spend
+total can move very slightly in either direction (under half a micro-dollar per
+row). The conversion is one way: downgrading restores the column type, not the
+discarded digits.
 
 Exactness at rest needs PostgreSQL. SQLite, the default for a single-node
 deployment, has no decimal storage type and keeps the value as a float; the
