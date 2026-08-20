@@ -12,8 +12,12 @@ import type { NavLabelOverride } from "./types"
  *
  * One list for both rails, because a section id is unique across the two.
  *
- * Same shape and same name as
- * `otari-ai/frontend/src/app/nav/overlayLabelOverrides.ts`, so the two
- * registries compose when the control-plane UI converges at M5.
+ * The module name, this export's name, and the type and helper behind it are
+ * `otari-ai/frontend/src/app/nav/overlayLabelOverrides.ts`'s, so the two
+ * registries compose when the control-plane UI converges at M5. The entries
+ * themselves are not interchangeable: two of `NavLabelOverride`'s field names
+ * differ from the platform's, because the registries' shapes differ, and its
+ * docstring in `types.ts` says which and why. Read that before porting a list
+ * across.
  */
 export const OVERLAY_NAV_LABEL_OVERRIDES: readonly NavLabelOverride[] = []
