@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { OrganizationContext, OrganizationPricingOverride } from "@/client"
-import { OrganizationPricingPage } from "@/features/organization/OrganizationPricingPage"
+import { RateOverridesCard } from "@/features/organization/RateOverridesCard"
 import { organizationContext } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
 
@@ -86,7 +86,7 @@ function renderPage() {
   })
   return renderWithRouter(
     <QueryClientProvider client={client}>
-      <OrganizationPricingPage />
+      <RateOverridesCard />
     </QueryClientProvider>,
   )
 }
@@ -95,7 +95,7 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
-describe("OrganizationPricingPage", () => {
+describe("RateOverridesCard", () => {
   it("lists the organization's overrides with their rates and period", async () => {
     mockApi({ overrides: [pricingOverride()] })
 
@@ -126,9 +126,7 @@ describe("OrganizationPricingPage", () => {
 
     await renderPage()
 
-    expect(
-      await screen.findByRole("heading", { name: /no rate overrides/i }),
-    ).toBeInTheDocument()
+    expect(await screen.findByText(/no override yet/i)).toBeInTheDocument()
   })
 
   // A failed list also leaves `rows` empty, and the empty state asserts that
@@ -148,8 +146,10 @@ describe("OrganizationPricingPage", () => {
     expect(
       await screen.findByText(/pricing is unavailable/i),
     ).toBeInTheDocument()
+    // The empty row says nothing about the catalog, so it cannot assert a fact
+    // the request never returned.
     expect(
-      screen.queryByRole("heading", { name: /no rate overrides/i }),
+      screen.queryByText(/priced by the deployment price list/i),
     ).not.toBeInTheDocument()
   })
 

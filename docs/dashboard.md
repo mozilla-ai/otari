@@ -453,16 +453,6 @@ lands: the address they are added by is the handle it will claim them with.
   default model access for a user's keys. Distinct from members: a member is a
   person who signs in, a user is what spend is attributed to, and the two merge
   once the request plane is re-parented onto tenancy.
-- **Rate overrides**: what this organization pays for a model, above the
-  deployment price list that Models edits. Each override names a model, its
-  per-million rates, and the period they apply for; requests in that period are
-  billed at them, and a model with no override keeps being priced by the
-  deployment. Two overrides for one model may not cover the same moment, so an
-  overlapping period is refused rather than quietly taking precedence. The end
-  of a period is exclusive, which is what lets the next one start at exactly
-  that moment. Deleting an override returns the model to the deployment price
-  list from the next request; usage already billed keeps the cost it was
-  charged. Owners and admins can change these; everyone else can read them.
 
 ### Cost & billing
 
@@ -477,6 +467,17 @@ lands: the address they are added by is the handle it will claim them with.
   updates** fetches the upstream `genai-prices` catalog and shows what would
   change before anything is saved; custom prices are never touched by it. A single
   model's rate is still edited beside the model, on Models.
+
+  Under the catalog, **Rate overrides** is what this organization pays instead,
+  for the models it has negotiated. Each override names a model, its per-million
+  rates, and the period they apply for; a request in that period is billed at
+  them, and a model with no override is priced by the catalog above. Two
+  overrides for one model may not cover the same moment, so an overlapping period
+  is refused rather than quietly taking precedence, and the end of a period is
+  exclusive, which is what lets the next one start at exactly that moment.
+  Deleting an override returns the model to the catalog rate from the next
+  request; usage already billed keeps the cost it was charged. Owners and admins
+  can change these; every member can read them.
 
 ### General
 

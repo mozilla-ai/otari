@@ -1,4 +1,4 @@
-import { Button, Chip } from "@heroui/react"
+import { Button, Card, Chip } from "@heroui/react"
 import { useState } from "react"
 
 import type { OrganizationPricingOverride } from "@/client"
@@ -11,12 +11,7 @@ import {
 } from "@/shared/api/hooks"
 import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
-import {
-  EmptyState,
-  ErrorBanner,
-  InfoBanner,
-  PageHeader,
-} from "@/shared/components/ui"
+import { ErrorBanner, InfoBanner } from "@/shared/components/ui"
 import { formatDateTime } from "@/shared/helpers/format"
 import {
   PricingOverrideDialog,
@@ -25,14 +20,14 @@ import {
 import { overrideStatus } from "./pricingOverride"
 import { canManage } from "./roles"
 
-// What this organization pays for a model, above the deployment price list the
-// Models page edits.
+// What this organization pays for a model, above the catalog the rest of this
+// page shows.
 //
-// Two price lists, not one merged view. A request resolves the override first
-// and the deployment row second, so an override is a row an operator manages in
-// its own right rather than a variant of a deployment price, and showing them
-// merged would hide which of the two a bill came from. The resolution order
-// lives in `services/pricing_service.py`.
+// A section of Model pricing rather than a destination of its own, because an
+// operator asking "what does this model cost us" is asking one question. Two
+// cards on that page and not one merged table, though: a request resolves the
+// override first and the catalog row second (`services/pricing_service.py`), so
+// a single list would hide which of the two a bill came from.
 //
 // A period is half-open, so two of them may meet at an instant without
 // overlapping, and overlapping periods for one model are refused rather than
@@ -62,7 +57,7 @@ function period(override: OrganizationPricingOverride): string {
   return `${from} to ${formatDateTime(override.effective_to)}`
 }
 
-export function OrganizationPricingPage() {
+export function RateOverridesCard() {
   const context = useOrganizationContext()
   const overrides = useOrganizationPricing()
   const create = useCreateOrganizationPricing()
@@ -187,16 +182,25 @@ export function OrganizationPricingPage() {
   ]
 
   return (
-    <div className="flex flex-col gap-6">
-      <PageHeader
-        title="Rate overrides"
-        description="What this organization pays for a model, above the deployment's own price list. A model with no override here is priced by that list, and then by the public pricing dataset."
-        action={
-          <Button variant="primary" isDisabled={!canEdit} onPress={openAdd}>
-            Add override
-          </Button>
-        }
-      />
+    <section className="flex flex-col gap-2">
+      <div className="flex flex-wrap items-center justify-between gap-2">
+        <h2 className="text-sm font-semibold text-foreground">
+          Rate overrides
+        </h2>
+        <Button
+          size="sm"
+          variant="primary"
+          isDisabled={!canEdit}
+          onPress={openAdd}
+        >
+          Add override
+        </Button>
+      </div>
+
+      <p className="text-sm text-muted">
+        This organization&rsquo;s own rate for a model, applied ahead of the
+        catalog above. A model with no override here is priced by that catalog.
+      </p>
 
       {canEdit ? null : (
         <InfoBanner>
@@ -207,24 +211,21 @@ export function OrganizationPricingPage() {
 
       <ErrorBanner error={overrides.error} />
 
-      {/* Gated on the error too: a failed request also leaves `rows` empty, and
-          the empty state's copy asserts that every model is priced by the
-          deployment list, which the page cannot know when the list never
-          arrived. */}
-      {!overrides.isPending && !overrides.error && rows.length === 0 ? (
-        <EmptyState
-          title="No rate overrides"
-          description="Every model is priced by the deployment price list. Add an override to bill this organization at its own negotiated rate for a model."
-        />
-      ) : (
-        <DataTable
-          ariaLabel="Organization rate overrides"
-          columns={columns}
-          rows={rows}
-          getRowKey={(row) => row.id}
-          isLoading={overrides.isPending && !overrides.data}
-        />
-      )}
+      <Card>
+        <Card.Content className="p-0">
+          <DataTable
+            ariaLabel="Organization rate overrides"
+            columns={columns}
+            rows={rows}
+            getRowKey={(row) => row.id}
+            isLoading={overrides.isPending && !overrides.data}
+            // Deliberately asserts nothing about the catalog: an empty table is
+            // also what a failed request leaves behind, and the banner above is
+            // the only thing that knows which of the two happened.
+            emptyContent="No override yet. Add one to bill this organization at its own rate for a model."
+          />
+        </Card.Content>
+      </Card>
 
       <PricingOverrideDialog
         isOpen={isDialogOpen}
@@ -244,7 +245,7 @@ export function OrganizationPricingPage() {
         heading="Delete rate override"
         body={
           pendingDelete
-            ? `${pendingDelete.model_key} returns to the deployment price list from the next request. Usage already billed at this rate keeps the cost it was charged.`
+            ? `${pendingDelete.model_key} returns to the catalog rate from the next request. Usage already billed at this rate keeps the cost it was charged.`
             : null
         }
         confirmLabel="Delete override"
@@ -257,6 +258,6 @@ export function OrganizationPricingPage() {
           })
         }}
       />
-    </div>
+    </section>
   )
 }

@@ -3,6 +3,10 @@ import { Link } from "@tanstack/react-router"
 
 import type { PricingRefreshPreview, PricingResponse } from "@/client"
 import { currentPricing } from "@/features/models/pricing"
+// Feature-to-feature, which the boundary rules allow: the overrides are the
+// organization's own rates above this catalog, so they belong on this page while
+// the tenancy feature keeps owning them.
+import { RateOverridesCard } from "@/features/organization/RateOverridesCard"
 import {
   useConfirmPricingRefresh,
   usePreviewPricingRefresh,
@@ -310,11 +314,12 @@ export function ModelPricingPage() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Model pricing"
-        description="What this gateway meters a request at. Rates apply to every workspace and every key in the organization."
+        description="What this gateway meters a request at. The catalog applies to every workspace and every key in the organization; a rate override below applies to this organization ahead of it."
       />
       <CatalogPolicy />
       <PricingRefreshSection />
       <PriceTable />
+      <RateOverridesCard />
     </div>
   )
 }
