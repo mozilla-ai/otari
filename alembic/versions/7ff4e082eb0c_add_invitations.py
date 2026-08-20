@@ -11,8 +11,13 @@ table points at (``organization``, ``organization_member``, ``user``) already
 exists.
 
 Revision ID: 7ff4e082eb0c
-Revises: a3c7e1b9d5f2
+Revises: c8f2a6b4e9d3
 Create Date: 2026-08-19 00:00:00.000000
+
+Rebased onto ``c8f2a6b4e9d3`` (not the original ``a3c7e1b9d5f2``): that merge
+revision landed on main while this one was in flight, rejoining the two other
+branches ``a3c7e1b9d5f2`` had forked into. Chaining here instead of adding a
+second merge keeps the graph at one head without a redundant no-op revision.
 
 """
 
@@ -23,7 +28,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "7ff4e082eb0c"
-down_revision: str | Sequence[str] | None = "a3c7e1b9d5f2"
+down_revision: str | Sequence[str] | None = "c8f2a6b4e9d3"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
