@@ -24,6 +24,7 @@ from alembic.config import Config
 from sqlalchemy import func, select, text
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
+from sqlmodel import col
 
 from conftest import seed_workspace_id
 from gateway.core.metered_pricing import calculate_metered_cost
@@ -45,7 +46,7 @@ _TS = datetime(2026, 7, 1, 12, 0, tzinfo=UTC)
 
 _ALEMBIC_DIR = Path(__file__).resolve().parents[2] / "alembic"
 _MONEY_REVISION = "a7c3e5d9b1f4"
-_BEFORE_MONEY = "f7a2c4e6b8d1"
+_BEFORE_MONEY = "7c5ba82a601b"
 
 
 def _alembic_config(database_url: str) -> Config:
@@ -203,7 +204,8 @@ def test_the_rate_checks_still_refuse_a_negative_rate_after_the_conversion(test_
     money guard, which is worth an error-path test on the engine that does it
     rather than a reading of the DDL.
     """
-    organization_id = test_db.execute(select(Organization.id)).scalars().first()
+    # ``col()`` because ``Organization`` is a SQLModel class; see the backend skill.
+    organization_id = test_db.execute(select(col(Organization.id))).scalars().first()
     assert organization_id is not None
     override = {
         "organization_id": organization_id,

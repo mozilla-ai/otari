@@ -34,7 +34,7 @@ from gateway.services.pricing_service import default_model_pricing
 
 _ALEMBIC_DIR = Path(__file__).resolve().parents[2] / "alembic"
 _MONEY_REVISION = "a7c3e5d9b1f4"
-_BEFORE_MONEY = "f7a2c4e6b8d1"
+_BEFORE_MONEY = "7c5ba82a601b"
 
 _RATE_COLUMNS = (
     "input_price_per_million",

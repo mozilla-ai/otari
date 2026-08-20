@@ -1,7 +1,7 @@
 """store rates and settled costs as exact numerics
 
 Revision ID: a7c3e5d9b1f4
-Revises: f7a2c4e6b8d1
+Revises: 7c5ba82a601b
 Create Date: 2026-08-20 10:00:00.000000
 
 The rate columns on ``model_pricing`` and ``organization_model_pricing``, and
@@ -50,7 +50,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "a7c3e5d9b1f4"
-down_revision: str | Sequence[str] | None = "f7a2c4e6b8d1"
+down_revision: str | Sequence[str] | None = "7c5ba82a601b"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
