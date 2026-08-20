@@ -29,7 +29,7 @@ from gateway.services.organization_pricing_service import (
     OrganizationPricingService,
     validate_period,
 )
-from gateway.services.pricing_service import find_model_pricing
+from gateway.services.pricing_service import find_model_pricing, price_tool_calls
 from gateway.services.tenancy.errors import (
     OrganizationPricingOverlapError,
     TenancyValidationError,
@@ -270,20 +270,90 @@ def test_a_resolved_override_is_never_persisted() -> None:
 def test_a_resolved_override_carries_an_aware_timestamp() -> None:
     """``effective_at`` reads back UTC-aware even on SQLite.
 
-    ``DateTime(timezone=True)`` is a no-op there, so without the explicit stamp a
-    caller comparing this against an aware timestamp would raise instead of
-    compare.
+    ``expire_all`` is what makes this a real assertion. Without it the ``select``
+    below returns the instance still in the identity map, carrying the aware value
+    it was *constructed* from, so the SQLite round-trip never happens and the test
+    passes whatever the column type is. Expiring forces the read.
     """
 
     async def scenario(session: AsyncSession) -> None:
         organization_id = await _organization(session)
         await _override(session, organization_id)
+        await session.commit()
+        session.expire_all()
 
         pricing = await find_model_pricing(session, "openai", "gpt-4o", as_of=_NOW, organization_id=organization_id)
 
         assert pricing is not None
         assert pricing.effective_at.tzinfo is not None
         assert pricing.effective_at.utcoffset() == timedelta(0)
+
+    _run(scenario)
+
+
+def test_the_stored_period_reads_back_aware_on_sqlite() -> None:
+    """The column type, asserted on the engine the OSS edition ships.
+
+    This is the wire shape, not the cost path: ``OrganizationModelPricingPublic``
+    serializes these columns straight out, and a browser parses an offset-less
+    date-time as *local*, which would shift the period every time the Edit dialog
+    round-tripped it. ``UtcDateTime`` is what keeps the offset; a plain
+    ``DateTime(timezone=True)`` is a no-op here and this test fails against it.
+    """
+
+    async def scenario(session: AsyncSession) -> None:
+        organization_id = await _organization(session)
+        stored = await _override(
+            session,
+            organization_id,
+            effective_from=_NOW,
+            effective_to=_NOW + timedelta(days=1),
+        )
+        # Read the id before expiring: afterwards touching the stale instance
+        # would trigger a lazy refresh outside the async context.
+        stored_id = stored.id
+        await session.commit()
+        session.expire_all()
+
+        row = await session.get(OrganizationModelPricing, stored_id)
+
+        assert row is not None
+        for column, value in (
+            ("effective_from", row.effective_from),
+            ("effective_to", row.effective_to),
+            ("created_at", row.created_at),
+            ("updated_at", row.updated_at),
+        ):
+            assert value is not None, column
+            assert value.tzinfo is not None, f"{column} read back naive"
+            assert value.utcoffset() == timedelta(0), column
+        # The instant survives the round trip, not just the awareness.
+        assert row.effective_from == _NOW
+
+    _run(scenario)
+
+
+def test_a_naive_period_is_refused_rather_than_stored_ambiguously() -> None:
+    """``UtcDateTime`` refuses a naive write instead of guessing a zone.
+
+    The engines disagree about what a naive value means, so storing one is how a
+    period ends up hours off with nothing to show for it.
+    """
+
+    async def scenario(session: AsyncSession) -> None:
+        organization_id = await _organization(session)
+        session.add(
+            OrganizationModelPricing(
+                organization_id=organization_id,
+                model_key=_MODEL_KEY,
+                input_price_per_million=1.0,
+                output_price_per_million=2.0,
+                effective_from=datetime(2026, 8, 20, 12, 0),  # noqa: DTZ001
+                pricing_tiers=[],
+            )
+        )
+        with pytest.raises(Exception, match="timezone-aware"):
+            await session.flush()
 
     _run(scenario)
 
@@ -445,3 +515,40 @@ def test_a_period_must_end_after_it_starts(offset_days: int, refused: bool) -> N
 def test_an_open_ended_period_is_always_valid() -> None:
     """No end is the common case, not a missing value to be rejected."""
     validate_period(_NOW, None)
+
+
+def test_the_tool_gate_and_the_settlement_agree_on_both_key_spellings() -> None:
+    """A tool priced only under the legacy slash key must still settle at that rate.
+
+    The require-pricing gate resolves through ``find_model_pricing``, which tries
+    ``otari:web_search`` and ``otari/web_search``. The batched settlement lookup
+    matched only the canonical form, so an override stored under the slash
+    spelling admitted the request and then charged zero: the tool ran, the row
+    recorded no cost. Writes normalize now, which stops new rows landing that way,
+    but the read side is what closes it for a key whose prefix normalization
+    cannot resolve.
+    """
+
+    async def scenario(session: AsyncSession) -> None:
+        organization_id = await _organization(session)
+        await _override(
+            session,
+            organization_id,
+            rate=1_000_000.0,  # the per-request convention: stored rate / 1e6 = $1.00
+            model_key="otari/web_search",
+            effective_from=_NOW - timedelta(days=1),
+        )
+
+        gate = await find_model_pricing(
+            session, "otari", "web_search", as_of=_NOW, use_defaults=False, organization_id=organization_id
+        )
+        total, lines, unpriced = await price_tool_calls(
+            session, {"web_search": 1}, as_of=_NOW, organization_id=organization_id
+        )
+
+        assert gate is not None, "the gate admits the request"
+        assert unpriced == [], "so the settlement must not call it unpriced"
+        assert total == 1.0
+        assert lines[0]["cost"] == 1.0
+
+    _run(scenario)

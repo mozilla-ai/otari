@@ -293,6 +293,10 @@ Tenancy above users and keys; see [Access control](access-control.md#organizatio
 | `POST` | `/v1/organizations/me/members` | Add a member by email, optionally into workspaces at the same time. | Master key |
 | `PATCH` | `/v1/organizations/me/members/{organization_member_id}` | Change a member's role or status. | Master key |
 | `DELETE` | `/v1/organizations/me/members/{organization_member_id}` | Remove a member (suspends the membership). | Master key |
+| `GET` | `/v1/organizations/me/pricing` | List the organization's model rate overrides, paged. | Master key |
+| `POST` | `/v1/organizations/me/pricing` | Set the organization's rate for a model over a period. | Master key |
+| `PUT` | `/v1/organizations/me/pricing/{pricing_id}` | Replace an override's rates and period. | Master key |
+| `DELETE` | `/v1/organizations/me/pricing/{pricing_id}` | Remove an override, returning the model to the deployment price list. | Master key |
 
 ### Workspaces
 

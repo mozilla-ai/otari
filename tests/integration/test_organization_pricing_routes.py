@@ -226,6 +226,88 @@ def test_a_replacement_without_a_start_is_refused(
     assert listed[0]["effective_from"] == created.json()["effective_from"]
 
 
+def test_the_two_spellings_of_one_model_collapse_to_one_key(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """A slash-form key is normalized on write, so it cannot shadow the canonical one.
+
+    Stored verbatim these were two rows: the overlap rule saw no collision,
+    resolution preferred the canonical spelling so the other sat dormant, and
+    deleting the canonical one silently promoted it to the live rate.
+    """
+    canonical = client.post(_ENDPOINT, json=_body(model_key="openai:gpt-4o"), headers=master_key_header)
+    assert canonical.status_code == status.HTTP_201_CREATED, canonical.text
+
+    slashed = client.post(
+        _ENDPOINT,
+        json=_body(model_key="openai/gpt-4o", input_price_per_million=99.0),
+        headers=master_key_header,
+    )
+
+    # Same key after normalization, same open-ended period, so it is a conflict.
+    assert slashed.status_code == status.HTTP_409_CONFLICT, slashed.text
+    listed = client.get(_ENDPOINT, headers=master_key_header).json()
+    assert listed["count"] == 1
+    assert listed["data"][0]["model_key"] == "openai:gpt-4o"
+    assert listed["data"][0]["input_price_per_million"] != 99.0
+
+
+def test_a_slash_form_key_is_stored_canonically(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """The stored key is the one resolution looks for, whichever form was sent."""
+    created = client.post(_ENDPOINT, json=_body(model_key="openai/gpt-4o"), headers=master_key_header)
+
+    assert created.status_code == status.HTTP_201_CREATED, created.text
+    assert created.json()["model_key"] == "openai:gpt-4o"
+
+
+def test_repeated_tier_thresholds_are_refused(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """Two rates for one threshold is a question with no answer.
+
+    The cost core resolves a tie by taking the first applicable entry, so which
+    rate applied would depend on JSON array order. ``POST /v1/pricing`` and
+    ``GatewayConfig`` already refuse it; this surface has to as well.
+    """
+    response = client.post(
+        _ENDPOINT,
+        json=_body(
+            pricing_tiers=[
+                {"min_input_tokens": 128000, "input_price_per_million": 5.0},
+                {"min_input_tokens": 128000, "input_price_per_million": 9.0},
+            ]
+        ),
+        headers=master_key_header,
+    )
+
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT, response.text
+    assert "min_input_tokens" in response.text
+
+
+def test_distinct_tier_thresholds_are_accepted(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    created = client.post(
+        _ENDPOINT,
+        json=_body(
+            pricing_tiers=[
+                {"min_input_tokens": 128000, "input_price_per_million": 5.0},
+                {"min_input_tokens": 256000, "input_price_per_million": 9.0},
+            ]
+        ),
+        headers=master_key_header,
+    )
+
+    assert created.status_code == status.HTTP_201_CREATED, created.text
+    assert len(created.json()["pricing_tiers"]) == 2
+
+
 def test_an_unknown_override_id_is_a_404(
     client: TestClient,
     master_key_header: dict[str, str],

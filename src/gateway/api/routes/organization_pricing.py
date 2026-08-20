@@ -22,22 +22,24 @@ from datetime import UTC, datetime
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, model_validator
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import CurrentIdentity, get_db, verify_master_key
+from gateway.api.deps import CurrentIdentity, get_config, get_db, verify_master_key
 
 # The tier shape comes from the deployment pricing route rather than a second
 # copy here. An override resolves into a transient ``ModelPricing`` and is read by
 # the same cost-math core, so a tier that meant something different on this
 # surface would be a silent mispricing.
 from gateway.api.routes.pricing import PricingTier
+from gateway.core.config import GatewayConfig
 from gateway.models.entities import OrganizationModelPricing
 from gateway.services.organization_pricing_service import (
     OrganizationPricingService,
     PricingOverrideInput,
 )
+from gateway.services.provider_kwargs import normalize_pricing_key
 
 # Master key on the router, as every standalone management router declares it.
 # The role gate is a separate question answered in the service: the credential
@@ -92,6 +94,23 @@ class OrganizationModelPricingRates(BaseModel):
     )
     effective_from: datetime | None = Field(default=None, description=_EFFECTIVE_FROM_DESCRIPTION)
     effective_to: datetime | None = Field(default=None, description=_EFFECTIVE_TO_DESCRIPTION)
+
+    @model_validator(mode="after")
+    def validate_unique_tier_thresholds(self) -> "OrganizationModelPricingRates":
+        """Refuse two tiers that share a threshold.
+
+        The same rule ``SetPricingRequest`` and ``GatewayConfig`` already carry,
+        and it has to be here too because the cost core resolves a tie by taking
+        the first applicable entry (``max(applicable, key=...)`` in
+        ``metered_pricing``), which makes the winning rate depend on JSON array
+        order. Two rates for one threshold is a question with no answer, so it is
+        refused rather than resolved arbitrarily.
+        """
+        if self.pricing_tiers is not None:
+            thresholds = [tier.min_input_tokens for tier in self.pricing_tiers]
+            if len(thresholds) != len(set(thresholds)):
+                raise ValueError("pricing_tiers must not repeat min_input_tokens")
+        return self
 
 
 class OrganizationModelPricingCreate(OrganizationModelPricingRates):
@@ -273,13 +292,24 @@ async def create_organization_pricing(
     identity: CurrentIdentity,
     service: ServiceDep,
     db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> OrganizationModelPricingPublic:
     """Set the organization's rate for a model over a period.
 
     Refused with a 409 when the period overlaps one already stored for that model,
     naming the period it collides with, rather than shadowing it.
+
+    The key is normalized to its canonical ``instance:model`` form first, the same
+    call ``POST /v1/pricing`` makes, and that is what makes one model one row
+    rather than one per spelling. Stored verbatim, ``openai:gpt-4o`` and
+    ``openai/gpt-4o`` are two keys: the overlap rule would not see them as
+    colliding, resolution prefers the canonical one so the other sits dormant
+    until the first is deleted, and the batched tool-rate lookup matches only the
+    canonical form, so a tool priced under the slash spelling would pass the
+    require-pricing gate and then settle at zero.
     """
-    override = await service.create_for_caller(identity, body.model_key, _to_input(body))
+    model_key = normalize_pricing_key(config, body.model_key)
+    override = await service.create_for_caller(identity, model_key, _to_input(body))
     response = OrganizationModelPricingPublic.from_model(override)
     await _commit(db)
     return response

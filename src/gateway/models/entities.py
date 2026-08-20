@@ -6,6 +6,11 @@ from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Index, Text,
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlmodel import SQLModel
 
+# The timezone-aware timestamp type the tenancy tables already use. Imported
+# rather than redefined: it exists because the engines disagree about
+# ``timezone=True``, and two copies of that reasoning would drift.
+from gateway.models.tenancy import UtcDateTime
+
 
 class Base(DeclarativeBase):
     """Base class for SQLAlchemy models.
@@ -1106,16 +1111,31 @@ class OrganizationModelPricing(Base):
     # Same shape and same ``min_input_tokens`` key as ``ModelPricing``, so the
     # transient row an override resolves into needs no tier translation.
     pricing_tiers: Mapped[list[dict[str, Any]]] = mapped_column(JSON, default=list)
+    # ``UtcDateTime``, not ``DateTime(timezone=True)``, and this is the one place
+    # in this file where that distinction is load-bearing. The flag is a no-op on
+    # SQLite, which is what ``core/config.py`` defaults ``database_url`` to, so a
+    # plain column reads back naive there and this table's timestamps are the
+    # ones that go out over the wire: ``OrganizationModelPricingPublic`` would
+    # serialize them with no offset, a browser parses an offset-less date-time as
+    # *local*, and the Edit dialog would then round-trip the period shifted by
+    # the reader's UTC offset on every save. ``UtcDateTime.impl`` is
+    # ``DateTime(timezone=True)``, so the DDL and the migration are unchanged; it
+    # normalizes on the way in and stamps UTC on the way out.
+    #
+    # ``ModelPricing`` above keeps the plain column because nothing renders its
+    # ``effective_at`` into an editable control; the transient row an override
+    # resolves into is stamped in ``_override_as_model_pricing`` for the cost
+    # path, which is a different fix for a different reader.
     effective_from: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
+        UtcDateTime(),
         default=lambda: datetime.now(UTC),
     )
     # NULL means open ended, which is the common case: an organization sets a
     # rate and it applies until something replaces it.
-    effective_to: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    effective_to: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
+        UtcDateTime(),
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )

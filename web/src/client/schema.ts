@@ -1112,6 +1112,15 @@ export interface paths {
          *
          *     Refused with a 409 when the period overlaps one already stored for that model,
          *     naming the period it collides with, rather than shadowing it.
+         *
+         *     The key is normalized to its canonical ``instance:model`` form first, the same
+         *     call ``POST /v1/pricing`` makes, and that is what makes one model one row
+         *     rather than one per spelling. Stored verbatim, ``openai:gpt-4o`` and
+         *     ``openai/gpt-4o`` are two keys: the overlap rule would not see them as
+         *     colliding, resolution prefers the canonical one so the other sits dormant
+         *     until the first is deleted, and the batched tool-rate lookup matches only the
+         *     canonical form, so a tool priced under the slash spelling would pass the
+         *     require-pricing gate and then settle at zero.
          */
         post: operations["create_organization_pricing_v1_organizations_me_pricing_post"];
         delete?: never;

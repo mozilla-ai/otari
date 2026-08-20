@@ -13407,7 +13407,7 @@
         ]
       },
       "post": {
-        "description": "Set the organization's rate for a model over a period.\n\nRefused with a 409 when the period overlaps one already stored for that model,\nnaming the period it collides with, rather than shadowing it.",
+        "description": "Set the organization's rate for a model over a period.\n\nRefused with a 409 when the period overlaps one already stored for that model,\nnaming the period it collides with, rather than shadowing it.\n\nThe key is normalized to its canonical ``instance:model`` form first, the same\ncall ``POST /v1/pricing`` makes, and that is what makes one model one row\nrather than one per spelling. Stored verbatim, ``openai:gpt-4o`` and\n``openai/gpt-4o`` are two keys: the overlap rule would not see them as\ncolliding, resolution prefers the canonical one so the other sits dormant\nuntil the first is deleted, and the batched tool-rate lookup matches only the\ncanonical form, so a tool priced under the slash spelling would pass the\nrequire-pricing gate and then settle at zero.",
         "operationId": "create_organization_pricing_v1_organizations_me_pricing_post",
         "requestBody": {
           "content": {

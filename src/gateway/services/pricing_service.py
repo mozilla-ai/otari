@@ -618,7 +618,23 @@ async def _tool_rates(
     (see the note in :func:`price_tool_calls`).
     """
     lookup_time = normalize_effective_at(as_of)
-    keys = {f"{GATEWAY_TOOL_PRICING_PROVIDER}:{tool}": tool for tool in tools}
+    # Both spellings, mapped back to the tool, because the gate that admits the
+    # request resolves through ``find_model_pricing`` and that tries the canonical
+    # ``otari:tool`` *and* the legacy ``otari/tool``. Matching only the canonical
+    # one here made the gate and the settlement disagree: a tool priced under the
+    # slash spelling passed the require-pricing check and then settled at zero.
+    # Writes normalize now, which stops new rows landing in the legacy form, but
+    # ``normalize_pricing_key`` returns a key unchanged when its prefix is an
+    # unconfigured instance, so the read side closes the gap rather than trusting
+    # that it never happens.
+    keys = {
+        key: tool
+        for tool in tools
+        for key in (
+            f"{GATEWAY_TOOL_PRICING_PROVIDER}:{tool}",
+            f"{GATEWAY_TOOL_PRICING_PROVIDER}/{tool}",
+        )
+    }
     stmt = (
         select(ModelPricing)
         .where(ModelPricing.model_key.in_(keys), ModelPricing.effective_at <= lookup_time)
