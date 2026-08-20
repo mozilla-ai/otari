@@ -25,6 +25,10 @@ S = TypeVar("S")  # Settlement type, opaque to this module
 
 
 DEFAULT_FIRST_CHUNK_TIMEOUT_SECONDS = 2.0
+# Most chunks held behind a designated cost carrier, the carrier included. The
+# real terminal suffix is short (a usage chunk, or ``message_delta`` plus
+# ``message_stop``); anything longer means the carrier was not terminal, and the
+# stream resumes rather than waiting on settlement to release the rest.
 _MAX_TERMINAL_BUFFER_CHUNKS = 4
 
 
@@ -189,7 +193,10 @@ async def streaming_generator(
             pending. 0 disables.
         settle_before_done: Buffer the designated terminal suffix and settle usage
             before emitting it. Standalone callers leave this false.
-        is_cost_carrier: Identifies the terminal provider object that can carry cost.
+        is_cost_carrier: Identifies a provider object that can carry cost. The last
+            match in the stream wins, so a predicate that also matches a non-terminal
+            object (a chat tool loop forwards one usage chunk per iteration) costs no
+            buffering beyond the chunks between that match and the next one.
         attach_settlement: Mutates that carrier with the opaque settlement value.
 
     """
@@ -199,7 +206,7 @@ async def streaming_generator(
     terminal_buffer: list[Any] = []
     cost_carrier: Any | None = None
     buffering_terminal = False
-    buffering_abandoned = False
+    overflow_logged = False
     settlement_task: asyncio.Task[S | None] | None = None
 
     keepalive_interval = keepalive_interval_seconds if fmt.keepalive else 0.0
@@ -220,30 +227,40 @@ async def streaming_generator(
                     usage = _merge_usage(usage, chunk_usage)
                     has_usage = True
 
-                if buffering_terminal:
+                if settle_before_done and is_cost_carrier is not None and is_cost_carrier(chunk):
+                    # A later carrier supersedes an earlier one. A chat tool loop
+                    # forwards one ``include_usage`` chunk per iteration, so the
+                    # first one is not terminal; flushing here keeps the next
+                    # iteration's answer streaming instead of holding it behind a
+                    # carrier that is not the last, and leaves cost on the chunk
+                    # that really ends the stream.
+                    for buffered_chunk in terminal_buffer:
+                        yield _format(buffered_chunk)
+                    terminal_buffer.clear()
+                    cost_carrier = chunk
                     terminal_buffer.append(chunk)
-                    if len(terminal_buffer) > _MAX_TERMINAL_BUFFER_CHUNKS:
-                        logger.warning(
-                            "Terminal usage carrier arrived too early for %s; disabling inline cost",
-                            label,
-                        )
+                    buffering_terminal = True
+                    continue
+
+                if buffering_terminal:
+                    if len(terminal_buffer) >= _MAX_TERMINAL_BUFFER_CHUNKS:
+                        # The designated carrier was not terminal after all. Stop
+                        # holding it so the stream keeps flowing, but stay open to
+                        # a later carrier rather than giving up on cost outright.
+                        if not overflow_logged:
+                            logger.warning(
+                                "Terminal usage carrier was not terminal for %s; streaming without holding it",
+                                label,
+                            )
+                            overflow_logged = True
                         for buffered_chunk in terminal_buffer:
                             yield _format(buffered_chunk)
                         terminal_buffer.clear()
                         cost_carrier = None
                         buffering_terminal = False
-                        buffering_abandoned = True
-                    continue
-
-                if (
-                    settle_before_done
-                    and not buffering_abandoned
-                    and is_cost_carrier is not None
-                    and is_cost_carrier(chunk)
-                ):
-                    cost_carrier = chunk
+                        yield _format(chunk)
+                        continue
                     terminal_buffer.append(chunk)
-                    buffering_terminal = True
                     continue
 
                 yield _format(chunk)
@@ -251,7 +268,7 @@ async def streaming_generator(
         # Once the upstream is exhausted, hybrid mode settles before emitting
         # the buffered terminal suffix. Standalone mode retains the historical
         # order: chunks, done marker, then reconciliation.
-        if settle_before_done and not buffering_abandoned:
+        if settle_before_done:
             settled = True
             settlement: S | None = None
             try:
@@ -285,19 +302,14 @@ async def streaming_generator(
             terminal_buffer.clear()
             yield fmt.done_marker
         else:
-            for buffered_chunk in terminal_buffer:
-                yield _format(buffered_chunk)
-            terminal_buffer.clear()
             yield fmt.done_marker
+
+            # Settle on normal completion. Guard the callbacks so a logging failure
+            # can't be mistaken for an incomplete (disconnected) stream.
             settled = True
             try:
                 if has_usage:
-                    settlement = await on_complete(usage)
-                    if settle_before_done and settlement is not None and attach_settlement is not None:
-                        try:
-                            attach_settlement(None, settlement)
-                        except Exception as attach_err:
-                            logger.error("Failed to attach streaming settlement for %s: %s", label, attach_err)
+                    await on_complete(usage)
                 elif on_no_usage is not None:
                     await on_no_usage()
             except Exception as log_err:

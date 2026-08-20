@@ -15,6 +15,7 @@ platform-fallback streaming paths. These tests pin that contract:
 """
 
 import asyncio
+import re
 import time
 from collections.abc import AsyncIterator
 from typing import Any, cast
@@ -33,6 +34,7 @@ from any_llm.types.completion import (
 from fastapi import BackgroundTasks, HTTPException, Response
 
 import gateway.api.routes._pipeline as pipeline
+import gateway.streaming as streaming
 from gateway.api.routes import chat, messages, responses
 from gateway.api.routes._pipeline import (
     RequestContext,
@@ -642,6 +644,272 @@ async def test_platform_non_stream_awaits_and_attaches_settlement(
     assert result.usage is not None
     assert getattr(result.usage, "cost_usd", None) == "0.012345"
     assert getattr(result.usage, "pricing_source", None) == "managed"
+
+
+# ---------------------------------------------------------------------------
+# Terminal cost buffering: only the last carrier is held
+# ---------------------------------------------------------------------------
+
+
+def _content_chunk(chunk_id: str, text: str) -> ChatCompletionChunk:
+    return ChatCompletionChunk(
+        id=chunk_id,
+        choices=[ChunkChoice(delta=ChoiceDelta(content=text, role="assistant"), finish_reason=None, index=0)],
+        created=0,
+        model="gpt-4",
+        object="chat.completion.chunk",
+        usage=None,
+    )
+
+
+def _usage_chunk(chunk_id: str, prompt_tokens: int) -> ChatCompletionChunk:
+    """An OpenAI ``include_usage`` chunk: usage, no choices."""
+    return ChatCompletionChunk(
+        id=chunk_id,
+        choices=[],
+        created=0,
+        model="gpt-4",
+        object="chat.completion.chunk",
+        usage=CompletionUsage(prompt_tokens=prompt_tokens, completion_tokens=1, total_tokens=prompt_tokens + 1),
+    )
+
+
+class _BlockedReporter:
+    """A usage reporter that parks until released, so ordering is observable."""
+
+    def __init__(self, settlement: SettledCost | None = None) -> None:
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+        self._settlement = settlement or SettledCost(cost_usd="0.012345", pricing_source="managed")
+
+    def install(self, monkeypatch: pytest.MonkeyPatch) -> None:
+        async def fake_report(**kwargs: Any) -> SettledCost | None:
+            self.started.set()
+            await self.release.wait()
+            return self._settlement
+
+        monkeypatch.setattr(pipeline, "_report_platform_usage", fake_report)
+
+
+def _build_platform_stream(
+    stream: AsyncIterator[ChatCompletionChunk],
+    *,
+    config: GatewayConfig | None = None,
+    display_model: str | None = None,
+) -> AsyncIterator[str]:
+    response = build_streaming_response(
+        adapter=chat._ADAPTER,
+        stream=stream,
+        provider=LLMProvider.OPENAI,
+        model="gpt-4",
+        config=config or GatewayConfig(platform={"usage_inline_timeout_ms": 5000}),
+        db=None,
+        log_writer=None,
+        api_key_id=None,
+        user_id=None,
+        rate_limit_info=None,
+        reservation=None,
+        display_model=display_model,
+        platform_correlation_id="corr-1",
+    )
+    return cast(AsyncIterator[str], response.body_iterator)
+
+
+@pytest.mark.asyncio
+async def test_intermediate_usage_chunk_does_not_hold_the_final_answer(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A chat tool loop forwards one ``include_usage`` chunk per iteration.
+
+    The first one matches the carrier predicate but is not terminal, so holding
+    it would park the next iteration's answer behind settlement and leave cost on
+    a chunk the client has already passed.
+    """
+    reporter = _BlockedReporter()
+    reporter.install(monkeypatch)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield _content_chunk("c0", "thinking")
+        yield _usage_chunk("u1", 10)  # iteration 1's usage chunk, not terminal
+        yield _content_chunk("c1", "final")
+        yield _content_chunk("c2", "answer")
+        yield _usage_chunk("u2", 20)  # the real terminal carrier
+
+    iterator = _build_platform_stream(stream())
+
+    # Everything up to the real terminal carrier streams without waiting.
+    streamed = [await asyncio.wait_for(iterator.__anext__(), timeout=1) for _ in range(4)]
+    assert [_chunk_id(part) for part in streamed] == ["c0", "u1", "c1", "c2"]
+    assert not reporter.started.is_set()
+
+    pending_terminal = asyncio.ensure_future(iterator.__anext__())
+    await asyncio.wait_for(reporter.started.wait(), timeout=1)
+    assert not pending_terminal.done()
+
+    reporter.release.set()
+    terminal = await asyncio.wait_for(pending_terminal, timeout=1)
+    assert _chunk_id(terminal) == "u2"
+    assert '"cost_usd":"0.012345"' in terminal
+    assert not any("cost_usd" in part for part in streamed)
+
+
+@pytest.mark.asyncio
+async def test_carrier_overflow_resumes_streaming_and_settles_on_a_later_carrier(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """More chunks than the cap after a carrier means it was not terminal.
+
+    The held chunks are released in order and a later carrier still takes the
+    cost, so a long final answer neither stalls nor loses inline cost.
+    """
+    reporter = _BlockedReporter()
+    reporter.install(monkeypatch)
+    reporter.release.set()
+    warnings: list[str] = []
+
+    class _LoggerRecorder:
+        def warning(self, msg: str, *args: Any) -> None:
+            warnings.append(msg % args if args else msg)
+
+        def __getattr__(self, name: str) -> Any:
+            return lambda *args, **kwargs: None
+
+    monkeypatch.setattr(streaming, "logger", _LoggerRecorder())
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield _usage_chunk("u1", 10)
+        for index in range(6):
+            yield _content_chunk(f"c{index}", f"part-{index}")
+        yield _usage_chunk("u2", 20)
+
+    emitted = [part async for part in _build_platform_stream(stream())]
+
+    assert [_chunk_id(part) for part in emitted if _chunk_id(part)] == [
+        "u1",
+        "c0",
+        "c1",
+        "c2",
+        "c3",
+        "c4",
+        "c5",
+        "u2",
+    ]
+    terminal = next(part for part in emitted if _chunk_id(part) == "u2")
+    assert '"cost_usd":"0.012345"' in terminal
+    assert '"cost_usd"' not in next(part for part in emitted if _chunk_id(part) == "u1")
+    assert emitted[-1] == "data: [DONE]\n\n"
+    assert sum("was not terminal" in message for message in warnings) == 1
+
+
+@pytest.mark.asyncio
+async def test_buffered_terminal_carrier_is_relabeled_to_the_display_model(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The buffered path must relabel exactly like the unbuffered one.
+
+    Hybrid passes no ``display_model`` today; this keeps the buffer from becoming
+    the reason a real provider model leaks past an alias later.
+    """
+    reporter = _BlockedReporter()
+    reporter.install(monkeypatch)
+    reporter.release.set()
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield _content_chunk("c0", "hi")
+        yield _usage_chunk("u1", 10)
+
+    emitted = [part async for part in _build_platform_stream(stream(), display_model="my-alias")]
+
+    assert all("gpt-4" not in part for part in emitted)
+    terminal = next(part for part in emitted if _chunk_id(part) == "u1")
+    assert '"model":"my-alias"' in terminal
+    assert '"cost_usd":"0.012345"' in terminal
+
+
+@pytest.mark.asyncio
+async def test_mid_stream_error_emits_the_buffered_carrier_before_the_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reporter = _BlockedReporter()
+    reporter.install(monkeypatch)
+    reporter.release.set()
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield _content_chunk("c0", "hi")
+        yield _usage_chunk("u1", 10)
+        raise RuntimeError("upstream died")
+
+    emitted = [part async for part in _build_platform_stream(stream())]
+
+    assert [_chunk_id(part) for part in emitted if _chunk_id(part)] == ["c0", "u1"]
+    assert "cost_usd" not in "".join(emitted)
+    assert "An error occurred during streaming" in emitted[-2]
+    assert emitted[-1] == "data: [DONE]\n\n"
+
+
+@pytest.mark.asyncio
+async def test_keepalives_continue_while_terminal_settlement_is_pending(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reporter = _BlockedReporter()
+    reporter.install(monkeypatch)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield _usage_chunk("u1", 10)
+
+    iterator = _build_platform_stream(
+        stream(),
+        config=GatewayConfig(
+            streaming_keepalive_interval_ms=10,
+            platform={"usage_inline_timeout_ms": 5000},
+        ),
+    )
+
+    first = await asyncio.wait_for(iterator.__anext__(), timeout=1)
+    assert first == ": keepalive\n\n"
+
+    reporter.release.set()
+    rest = [part async for part in iterator]
+    assert _chunk_id(rest[0]) == "u1"
+    assert '"cost_usd":"0.012345"' in rest[0]
+
+
+@pytest.mark.asyncio
+async def test_cancellation_while_settling_leaves_the_report_running(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracked: set[asyncio.Task[SettledCost | None]] = set()
+    monkeypatch.setattr(pipeline, "_USAGE_REPORT_TASKS", tracked)
+    reporter = _BlockedReporter()
+    reporter.install(monkeypatch)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield _usage_chunk("u1", 10)
+
+    iterator = _build_platform_stream(stream())
+    pending = asyncio.ensure_future(iterator.__anext__())
+    await asyncio.wait_for(reporter.started.wait(), timeout=1)
+
+    pending.cancel()
+    with pytest.raises(asyncio.CancelledError):
+        await pending
+    await cast(Any, iterator).aclose()
+
+    assert len(tracked) == 1
+    report_task = next(iter(tracked))
+    assert not report_task.cancelled()
+
+    reporter.release.set()
+    assert await asyncio.wait_for(report_task, timeout=1) == SettledCost(
+        cost_usd="0.012345",
+        pricing_source="managed",
+    )
+
+
+def _chunk_id(part: str) -> str | None:
+    """The ``id`` of a chunk in an SSE data line, or None for a non-data frame."""
+    match = re.search(r'"id":"([^"]+)"', part)
+    return match.group(1) if match else None
 
 
 # ---------------------------------------------------------------------------
