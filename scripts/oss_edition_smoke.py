@@ -500,7 +500,8 @@ def check_mail_is_honestly_unavailable(base_url: str, admin: dict[str, str]) -> 
         raise SmokeFailure(f"GET /v1/settings/mail did not return an object: {body!r}")
     if body.get("transport") != "none" or body.get("ready") is not False:
         raise SmokeFailure(f"GET /v1/settings/mail reports mail on a deployment with none: {body!r}")
-    if not body.get("missing"):
+    missing = body.get("missing")
+    if not missing:
         raise SmokeFailure(f"GET /v1/settings/mail names nothing to configure: {body!r}")
 
     status, body = _request(
@@ -511,6 +512,14 @@ def check_mail_is_honestly_unavailable(base_url: str, admin: dict[str, str]) -> 
     )
     if status != 503:
         raise SmokeFailure(f"POST /v1/settings/mail/test returned {status}, expected a 503 refusal: {body!r}")
+    # The status alone is not the property worth gating on: any 503 would pass
+    # that, including one from an unrelated outage. What this design promises is
+    # that the refusal *names what to set*, so the refusal is checked against
+    # the settings the status endpoint just reported as missing.
+    detail = body.get("detail", "") if isinstance(body, dict) else ""
+    unnamed = [setting for setting in missing if setting not in detail]
+    if unnamed:
+        raise SmokeFailure(f"the 503 refusal does not name {unnamed}: {detail!r}")
     log("Mail is unconfigured, reports what is missing, and refuses a send rather than dropping it")
 
 

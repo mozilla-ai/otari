@@ -9,7 +9,10 @@
     <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#f4f5f6; padding:32px 0;">
       <tr>
         <td align="center">
-          <table role="presentation" width="480" cellpadding="0" cellspacing="0" style="background-color:#ffffff; border-radius:12px; padding:32px; max-width:480px;">
+          <!-- width="100%" with the pixel cap in CSS, not width="480": some mobile
+                 clients honor the HTML attribute over max-width and render a 480px
+                 card inside a 360px viewport, which scrolls sideways. -->
+            <table role="presentation" width="100%" cellpadding="0" cellspacing="0" style="background-color:#ffffff; border-radius:12px; padding:32px; max-width:480px;">
             <tr>
               <td>
                 <p style="margin:0 0 24px 0; font-size:20px; font-weight:600; color:#0f172a;">Otari</p>

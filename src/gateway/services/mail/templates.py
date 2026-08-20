@@ -44,6 +44,13 @@ class MailTemplateError(Exception):
     """A template and the values it was rendered with do not agree."""
 
 
+# A template name is a fixed identifier this codebase ships, never caller data.
+# Enforced rather than documented because ``name`` is interpolated into a
+# resource path and the result is cached forever: a name from outside would be
+# both a traversal read and an unbounded cache.
+_TEMPLATE_NAME = re.compile(r"\A_?[a-z][a-z0-9_]*\.(html|txt)\Z")
+
+
 @lru_cache(maxsize=None)
 def _load(name: str) -> str:
     """Read one template file out of the installed package.
@@ -52,9 +59,15 @@ def _load(name: str) -> str:
     rendered per request. ``resources.files`` rather than a path relative to
     this module, so it also resolves inside a wheel or a zipimport.
     """
+    if not _TEMPLATE_NAME.match(name):
+        raise MailTemplateError(f"Not a valid email template name: {name!r}")
     try:
         return resources.files("gateway").joinpath(f"templates/email/{name}").read_text(encoding="utf-8")
-    except (FileNotFoundError, OSError) as exc:
+    # KeyError is how a missing entry surfaces from a zipimported package
+    # (zipfile.Path.read_text), where OSError is what a real filesystem raises;
+    # a wheel installed as a zip would otherwise fail differently from a
+    # checkout, which is the environment least likely to be tested.
+    except (OSError, KeyError) as exc:
         raise MailTemplateError(f"Missing email template: {name}") from exc
 
 

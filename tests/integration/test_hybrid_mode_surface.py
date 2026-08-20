@@ -109,6 +109,12 @@ def test_hybrid_mode_disables_dashboard_management_endpoints(monkeypatch: pytest
         patch_settings = client.patch("/v1/settings", json={"model_discovery": False})
         assert patch_settings.status_code == 404
         assert patch_settings.json() == expected
+        # The send route specifically, not just the status GET: a regression that
+        # left POST mounted while GET was stubbed would expose the one mail route
+        # that does something.
+        post_mail_test = client.post("/v1/settings/mail/test", json={"to": "ada@example.com"})
+        assert post_mail_test.status_code == 404
+        assert post_mail_test.json() == expected
         post_alias = client.post("/v1/aliases", json={"name": "x", "target": "anthropic:claude-opus-4"})
         assert post_alias.status_code == 404
         assert post_alias.json() == expected

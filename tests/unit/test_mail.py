@@ -19,6 +19,7 @@ from gateway.log_config import logger as gateway_logger
 from gateway.services import mail as mail_package
 from gateway.services.mail import (
     ConsoleTransport,
+    MailEnvelope,
     Mailer,
     MailMessage,
     MailNotConfiguredError,
@@ -28,8 +29,31 @@ from gateway.services.mail import (
     render_email,
     select_transport,
 )
+from gateway.services.mail.templates import _load
+from gateway.services.mail.transports import build_mime
 
 MESSAGE = MailMessage(subject="Hi", html="<p>Hi</p>", text="Hi")
+
+
+@pytest.fixture(autouse=True)
+def _mail_env(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pin every test here to its own inputs.
+
+    ``GatewayConfig()`` layers ``OTARI_*`` env vars (and a ``.env``) over its
+    defaults, so a developer with ``OTARI_SMTP_HOST`` exported would flip the
+    assertions about an unconfigured deployment, which are most of this file.
+    """
+    for name in (
+        "OTARI_MAIL_TRANSPORT",
+        "OTARI_SMTP_HOST",
+        "OTARI_SMTP_PORT",
+        "OTARI_SMTP_USER",
+        "OTARI_SMTP_PASSWORD",
+        "OTARI_MAIL_FROM_EMAIL",
+        "OTARI_MAIL_FROM_NAME",
+        "OTARI_PUBLIC_BASE_URL",
+    ):
+        monkeypatch.delenv(name, raising=False)
 
 
 @pytest.fixture
@@ -210,8 +234,12 @@ async def test_send_reports_the_no_transport_case_rather_than_raising() -> None:
 @pytest.mark.asyncio
 async def test_send_reports_a_failure_rather_than_raising() -> None:
     """An unreachable host must not turn a mail failure into a request failure."""
-    config = _ready(smtp_host="127.0.0.1", smtp_port=1)  # nothing listens here
-    delivery = await Mailer(config).send(to="ada@example.com", message=MESSAGE)
+    # Patched rather than dialing a closed port: on a network that black-holes
+    # loopback instead of refusing, a real connect would wait out
+    # SMTP_TIMEOUT_SECONDS before this assertion could pass.
+    config = _ready()
+    with patch("gateway.services.mail.transports.smtplib.SMTP", side_effect=OSError("connection refused")):
+        delivery = await Mailer(config).send(to="ada@example.com", message=MESSAGE)
     assert delivery.delivered is False
     assert delivery.transport == "smtp"
     assert delivery.reason is not None
@@ -221,8 +249,9 @@ async def test_send_reports_a_failure_rather_than_raising() -> None:
 async def test_a_failure_reason_never_carries_the_recipient_into_the_logs(
     gateway_logs: pytest.LogCaptureFixture,
 ) -> None:
-    config = _ready(smtp_host="127.0.0.1", smtp_port=1)
-    await Mailer(config).send(to="ada@example.com", message=MESSAGE)
+    config = _ready()
+    with patch("gateway.services.mail.transports.smtplib.SMTP", side_effect=OSError("connection refused")):
+        await Mailer(config).send(to="ada@example.com", message=MESSAGE)
     assert "ada@example.com" not in gateway_logs.text
     assert "a***@example.com" in gateway_logs.text
 
@@ -244,6 +273,56 @@ async def test_send_never_raises_even_on_a_malformed_header() -> None:
         with patch("gateway.services.mail.transports.sanitize_header_value", side_effect=lambda value: value):
             delivery = await Mailer(_ready()).send(to="ada@example.com", message=message)
     assert delivery.delivered is False
+
+
+@pytest.mark.asyncio
+async def test_send_never_raises_on_a_crlf_in_an_address() -> None:
+    """smtplib puts the envelope addresses on the wire itself, so sanitizing the header is not enough.
+
+    ``build_mime`` sanitized the ``To`` header while ``sendmail`` received the
+    raw value, so a CR/LF in a recipient left the message clean and the wire
+    dirty: smtplib refused it with ``ValueError``, which was outside this
+    transport's except clause and propagated out of ``Mailer.send`` into the
+    caller's request. That is the never-raises contract broken, and it was
+    reachable by any caller that had not validated its address first (both of
+    today's had, which is precisely why nothing caught it).
+    """
+    config = _ready()
+    injected = "ada@example.com>\r\nRCPT TO:<attacker@evil.example"
+
+    with patch("gateway.services.mail.transports.smtplib.SMTP") as mock_smtp:
+        client = MagicMock()
+        mock_smtp.return_value.__enter__.return_value = client
+        delivery = await Mailer(config).send(to=injected, message=MESSAGE)
+
+    # Did not raise, which is the contract.
+    assert delivery.transport == "smtp"
+    # And the addresses smtplib was handed carry no newline, which is why it
+    # cannot raise: asserting on the call rather than on the delivery outcome,
+    # because a mocked server would accept anything and prove nothing.
+    sender, recipients, _body = client.sendmail.call_args.args
+    assert "\r" not in sender and "\n" not in sender
+    for recipient in recipients:
+        assert "\r" not in recipient, recipient
+        assert "\n" not in recipient, recipient
+
+
+def test_build_mime_puts_no_newline_in_any_header() -> None:
+    """The header half of the same guarantee, asserted on the assembled message."""
+    envelope = MailEnvelope(
+        to="ada@example.com>\r\nBcc: attacker@evil.example",
+        sender_email="otari@example.com\r\nBcc: attacker@evil.example",
+        sender_name="Otari\r\nBcc: attacker@evil.example",
+        message=MESSAGE,
+    )
+
+    assembled = build_mime(envelope)
+
+    for header in ("From", "To", "Subject"):
+        assert "\r" not in assembled[header], header
+        assert "\n" not in assembled[header], header
+    # And it serializes, which is what a raw newline would have prevented.
+    assert assembled.as_string()
 
 
 @pytest.mark.asyncio
@@ -325,6 +404,26 @@ def test_render_wraps_a_body_in_the_shared_layout() -> None:
 def test_a_placeholder_with_no_value_fails_here_rather_than_in_an_inbox() -> None:
     with pytest.raises(MailTemplateError, match="TRANSPORT"):
         render_email("mail_test", subject="Otari test message", values={"PUBLIC_BASE_URL": "u"})
+
+
+def test_every_shipped_template_loads() -> None:
+    """The name constraint below must not reject a template this package ships.
+
+    ``_layout.html`` starts with an underscore, so a stricter pattern would have
+    broken every message while each body template still looked fine on its own.
+    """
+    package = Path(mail_package.__file__).parents[2] / "templates" / "email"
+    shipped = sorted(path.name for path in package.iterdir() if path.suffix in {".html", ".txt"})
+    assert shipped, "no templates found; this test would pass vacuously"
+    for name in shipped:
+        assert _load(name)
+
+
+def test_a_template_name_that_is_not_ours_is_refused() -> None:
+    """``name`` is interpolated into a resource path and the result is cached forever."""
+    for name in ("../../../etc/passwd", "..%2fsecrets.html", "/etc/passwd", "nope.exe", ""):
+        with pytest.raises(MailTemplateError, match="valid email template name"):
+            _load(name)
 
 
 def test_a_missing_template_is_named() -> None:

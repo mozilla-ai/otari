@@ -39,14 +39,11 @@ function MissingSettings({ missing }: { missing: string[] }) {
 }
 
 /**
- * Outgoing mail: what this deployment would send through, and proof that it can.
+ * Outgoing mail: the transport in effect, and a test send to prove it works.
  *
- * The page half of the no-transport design. A deployment with no mail is a
- * supported configuration, not a fault, so this states that plainly and names
- * the settings that would change it rather than leaving an operator to discover
- * the answer the first time an invitation silently fails to arrive. The test
- * send is disabled with the same reason, so the affordance is never offered in
- * a state where it would fail.
+ * Reports the settings that would turn mail on when it is off, and disables the
+ * test send in that state rather than offering one that would fail. Why mail is
+ * optional at all is in docs/configuration.md#mail.
  */
 export function MailDeliveryCard() {
   const mail = useMailSettings()
@@ -130,7 +127,12 @@ export function MailDeliveryCard() {
                 aria-live="polite"
               >
                 {result.ok
-                  ? `Sent over ${result.transport}. Check the recipient's inbox.`
+                  ? result.transport === "console"
+                    ? // The console transport delivers to nobody, so telling an
+                      // operator to check an inbox would send them looking for a
+                      // message that was only ever written to the gateway log.
+                      "Written to the gateway log. The console transport delivers to nobody."
+                    : `Sent over ${result.transport}. Check the recipient's inbox.`
                   : `Not sent: ${result.reason ?? "the transport gave no reason."}`}
               </p>
             ) : null}

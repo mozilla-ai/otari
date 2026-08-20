@@ -155,11 +155,36 @@ describe("MailDeliveryCard", () => {
     expect(await screen.findByText(/Sent over smtp/)).toBeInTheDocument()
   })
 
+  it("does not tell an operator to check an inbox for a console send", async () => {
+    // The console transport writes to the log and delivers to nobody, so the
+    // inbox wording would send them looking for a message that never left.
+    mockApi(
+      { ...READY, transport: "console" },
+      { ok: true, transport: "console", reason: null },
+    )
+    renderCard()
+
+    await screen.findByText("Console (logged, not delivered)")
+    await userEvent.type(screen.getByLabelText("Recipient"), "ada@example.com")
+    await userEvent.click(
+      screen.getByRole("button", { name: "Send test email" }),
+    )
+
+    expect(
+      await screen.findByText(/Written to the gateway log/),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/recipient's inbox/)).not.toBeInTheDocument()
+  })
+
   it("shows the transport's own reason when a configured send fails", async () => {
     mockApi(READY, {
       ok: false,
       transport: "smtp",
-      reason: "SMTPAuthenticationError: 535 bad credentials",
+      // A neutral sentinel, deliberately not a real exception string: the
+      // contract is "whatever reason the server reported reaches the operator",
+      // and pinning an SMTP exception format here would make one library's
+      // wording into a UI contract this component never promised.
+      reason: "the-reason-the-server-gave",
     })
     renderCard()
 
@@ -169,7 +194,9 @@ describe("MailDeliveryCard", () => {
       screen.getByRole("button", { name: "Send test email" }),
     )
 
-    expect(await screen.findByText(/535 bad credentials/)).toBeInTheDocument()
+    expect(
+      await screen.findByText(/the-reason-the-server-gave/),
+    ).toBeInTheDocument()
   })
 
   it("surfaces the server's refusal when mail is turned off between load and send", async () => {

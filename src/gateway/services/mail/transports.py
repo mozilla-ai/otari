@@ -80,7 +80,7 @@ def build_mime(envelope: MailEnvelope) -> MIMEMultipart:
     # already have sanitized (unlike the subject): a stray CR/LF in it would
     # raise HeaderParseError on every send, silently and from then on, with one
     # warning line that never points at the From name as the cause.
-    message["From"] = f"{sanitize_header_value(envelope.sender_name)} <{envelope.sender_email}>"
+    message["From"] = f"{sanitize_header_value(envelope.sender_name)} <{sanitize_header_value(envelope.sender_email)}>"
     message["To"] = sanitize_header_value(envelope.to)
     # Plain text first, then HTML: per RFC 2046, a mail client renders the last
     # alternative it understands, so this is the order that prefers HTML.
@@ -133,8 +133,24 @@ class SmtpTransport:
                 # the message above only stages the values); MessageError is in
                 # the except clause as defense in depth, since build_mime
                 # already sanitizes every header this codebase produces.
-                client.sendmail(envelope.sender_email, [envelope.to], build_mime(envelope).as_string())
-        except (OSError, smtplib.SMTPException, MessageError, UnicodeError) as exc:
+                # Sanitized here as well as in the header: smtplib puts these
+                # two straight into MAIL FROM / RCPT TO, and a newline in either
+                # raises ValueError out of sendmail rather than failing message
+                # assembly. Sanitizing only the header left the addresses clean
+                # in the message and raw on the wire, which is how a CR/LF in a
+                # recipient escaped every guard above it.
+                client.sendmail(
+                    sanitize_header_value(envelope.sender_email),
+                    [sanitize_header_value(envelope.to)],
+                    build_mime(envelope).as_string(),
+                )
+        # ValueError is smtplib's own refusal to put a newline on the wire, and
+        # it is caught for the same reason the rest are: this method's contract
+        # is that it raises MailDeliveryError or nothing, so a caller never has
+        # a mail failure become a request failure. It should now be unreachable
+        # given the sanitizing above, which is exactly why it is caught rather
+        # than relied upon to stay unreachable.
+        except (OSError, smtplib.SMTPException, MessageError, UnicodeError, ValueError) as exc:
             raise MailDeliveryError(f"{type(exc).__name__}: {exc}") from exc
 
 
