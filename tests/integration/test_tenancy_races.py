@@ -418,3 +418,74 @@ async def test_concurrent_accepts_of_one_invitation_produce_one_active_membershi
         {workspace.id: "viewer"}, membership.user_id
     )
     assert len(workspace_members) == 1
+
+
+async def test_concurrent_accept_and_revoke_of_one_invitation_produce_one_consistent_outcome(
+    async_db: AsyncSession,
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """revoke_organization_member_invitation_for_user races accept_invitation too.
+
+    Both are check-then-act on the same invitation's `pending` status, and
+    until revoke's organization lock moved ahead of its own reads, this had a
+    worse failure mode than the accept-vs-accept race above: revoke's read of
+    the invitation and membership happened before it took any lock, so a
+    revoke that started just ahead of a winning accept could sit on the lock
+    call inside `_validate_membership_update`, wake up once that accept had
+    fully committed, and then unconditionally overwrite the accept's
+    `active`/`accepted` state with its own stale, pre-lock `suspended`/
+    `cancelled` write. Both operations would report success, and the invitee
+    who just accepted would silently lose the membership they were told they
+    had.
+    """
+    organization, owner = await _seed_owner(async_db)
+    owner_row = await UserRepository(async_db).get(owner.id)
+    assert owner_row is not None
+    invited = await OrganizationService(async_db).invite_active_organization_member_for_user(
+        user=owner_row,
+        request=InviteOrganizationMemberRequest(email="ivy@example.com"),
+        config=GatewayConfig(),
+    )
+    token = invited.accept_link.split("token=")[1]
+    assert invited.invitation_id is not None
+
+    async def accept(session: AsyncSession) -> object:
+        return await OrganizationService(session).accept_invitation(token)
+
+    async def revoke(session: AsyncSession) -> object:
+        user = await UserRepository(session).get(owner.id)
+        assert user is not None
+        assert invited.invitation_id is not None
+        await OrganizationService(session).revoke_organization_member_invitation_for_user(
+            user=user,
+            invitation_id=invited.invitation_id,
+        )
+        return None
+
+    async def run_one(attempt: Callable[[AsyncSession], object]) -> object:
+        async with sessions() as session:
+            try:
+                return await attempt(session)  # type: ignore[misc]
+            except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
+                return exc
+
+    outcomes = list(await asyncio.gather(*(run_one(attempt) for attempt in (accept, revoke))))
+
+    # Exactly one side has to lose, and lose with the mapped error: accept and
+    # revoke are different operations, but they are still racing the same
+    # pending-to-something-else transition, so only one may win it.
+    losses = [outcome for outcome in outcomes if isinstance(outcome, InvitationAlreadyUsedError)]
+    assert len(losses) == 1
+
+    async_db.expire_all()
+    invitation = await InvitationRepository(async_db).get(invited.invitation_id)
+    membership = await OrganizationMemberRepository(async_db).get(invited.organization_member_id)
+    assert invitation is not None
+    assert membership is not None
+    # The invitation and its paired membership have to agree on which
+    # operation won, never a mix showing one operation's write and the other's
+    # leftover state.
+    assert (invitation.status, membership.status) in {
+        ("accepted", "active"),
+        ("cancelled", "suspended"),
+    }

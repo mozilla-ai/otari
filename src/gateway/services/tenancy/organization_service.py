@@ -758,6 +758,18 @@ class OrganizationService:
             organization=organization,
         )
 
+        # Locked before the invitation is read, not only inside
+        # _validate_membership_update below: accept_invitation holds this same
+        # lock across its own read-then-write, so taking it first here means
+        # this call runs entirely before that accept commits or entirely
+        # after, never in between. Without this, the read just below could see
+        # a still-"pending" invitation, block on the lock while a concurrent
+        # accept commits, and then unconditionally overwrite the now-accepted
+        # membership back to "suspended" and the invitation back to
+        # "cancelled". Re-acquiring the same row lock a few lines later, inside
+        # _validate_membership_update, is a no-op within one transaction.
+        await self.organizations.lock(organization.id)
+
         invitation = await self.invitations.get(invitation_id)
         if invitation is None or invitation.organization_id != organization.id:
             raise InvitationNotFoundError(invitation_id)
