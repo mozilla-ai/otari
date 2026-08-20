@@ -148,6 +148,7 @@ from gateway.services.sandbox_backend import (
     SandboxNotReachableError,
 )
 from gateway.services.scoped_budget_service import BudgetScopeRequest
+from gateway.services.tenancy.org_provider_key_service import cached_org_model_restriction
 from gateway.services.tool_usage import (
     MAX_TOOL_NAMES,
     OVERFLOW_TOOL_NAME,
@@ -157,8 +158,8 @@ from gateway.services.tool_usage import (
 from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 from gateway.services.web_search_backend import WEB_SEARCH_TOOL_NAME, WebSearchNotReachableError
 from gateway.services.workspace_scope import (
-    organization_for_key_id,
     organization_for_workspace_id,
+    resolve_workspace_id,
     workspace_for_key_id,
 )
 from gateway.streaming import (
@@ -567,6 +568,7 @@ class RequestContext:
         rate_limit_info: RateLimitInfo | None,
         reservation: ReservationHandle | None,
         started_at: float,
+        workspace_id: uuid.UUID | None = None,
         resolved_provider: ResolvedProvider | None = None,
         plan: CompiledPlan | None = None,
         estimate_inputs: "EstimateInputs | None" = None,
@@ -589,6 +591,12 @@ class RequestContext:
         # pay that per candidate.
         self.organization_id = organization_id
         self.user_id = user_id
+        # Standalone-only, `None` in hybrid mode: the workspace this request
+        # bills to, resolved once in the preamble (`resolve_workspace_id`) and
+        # reused here for the rare fallback resolve in `resolve_dispatch_provider`,
+        # so a request whose gate-check selector was unparseable still gets
+        # organization-scoped provider keys on its real dispatch attempt.
+        self.workspace_id = workspace_id
         self.rate_limit_info = rate_limit_info
         self.reservation = reservation
         # USD already written onto a failure row for gateway-run tool calls. A
@@ -672,7 +680,7 @@ async def resolve_dispatch_provider(
     if ctx.resolved_provider is not None:
         return ctx.resolved_provider
     try:
-        return resolve_provider_selector(config, model_selector, ctx.user_id)
+        return resolve_provider_selector(config, model_selector, ctx.user_id, workspace_id=ctx.workspace_id)
     except (ValueError, AnyLLMError) as exc:
         # The preamble deliberately tolerated this selector, so a reservation is
         # already held: refund it, then record the drop. The hold is not always
@@ -915,6 +923,7 @@ async def _compile_request_plan(
     endpoint: str,
     started_at: float,
     routing_signal: Callable[[], RoutingSignal] | None = None,
+    workspace_id: uuid.UUID | None = None,
 ) -> CompiledPlan | None:
     """Compile ``model`` into a plan when it names a routing policy, else ``None``.
 
@@ -967,6 +976,7 @@ async def _compile_request_plan(
             allowlist=allowlist,
             budget=budget,
             router_ordering=router_ordering,
+            workspace_id=workspace_id,
         )
     except NoEligibleCandidatesError as exc:
         logger.warning("%s", exc.operator_detail)
@@ -1046,6 +1056,7 @@ async def resolve_request_context(
     # ``organization_model_pricing``.
     organization_id: uuid.UUID | None = None
     user_id: str | None = None
+    workspace_id: uuid.UUID | None = None
     rate_limit_info: RateLimitInfo | None = None
     reservation: ReservationHandle | None = None
     resolved_provider: ResolvedProvider | None = None
@@ -1088,6 +1099,16 @@ async def resolve_request_context(
         session_identity = await get_session_identity(raw_request, db, config)
         api_key, is_master_key = await verify_api_key_or_master_key(raw_request, db, config, session_identity)
         api_key_id = api_key.id if api_key else None
+        # Zero I/O for a keyed request: `api_key.workspace_id` is already an
+        # in-memory attribute on the row just loaded. Only a master-key request
+        # pays a lookup, which `resolve_workspace_id` itself accepts as
+        # operator traffic (see its docstring). Used below to resolve
+        # organization-scoped provider keys for a bare provider selector; an
+        # instance-addressed one never consults it (`provider_kwargs.py`). A
+        # master-key call therefore only ever reaches the *default* workspace's
+        # organization's keys, not every organization the deployment holds
+        # (`workspace_scope.py`'s docstring).
+        workspace_id = await resolve_workspace_id(db, api_key)
         try:
             user_id = resolve_user_id(
                 user_id_from_request=user_id_from_request,
@@ -1160,6 +1181,7 @@ async def resolve_request_context(
             endpoint=adapter.endpoint,
             started_at=started_at,
             routing_signal=routing_signal,
+            workspace_id=workspace_id,
         )
         if plan is not None:
             head = plan.head
@@ -1173,7 +1195,7 @@ async def resolve_request_context(
             )
         else:
             try:
-                resolved = resolve_provider_selector(config, model, user_id)
+                resolved = resolve_provider_selector(config, model, user_id, workspace_id=workspace_id)
                 gate_instance, gate_impl, gate_model = resolved.instance, resolved.provider, resolved.model
                 # Reused by the route handler for dispatch (see `RequestContext.resolved_provider`)
                 # instead of calling `resolve_provider_selector` a second time.
@@ -1207,7 +1229,42 @@ async def resolve_request_context(
             )
             raise adapter.error(403, not_allowed_detail, ErrorKind.PERMISSION)
 
-        organization_id = await organization_for_key_id(db, api_key_id)
+        # Organization-scoped model restriction (otari#643): the org key
+        # resolved for this workspace+provider may narrow which models it
+        # serves. Applies only when the selector did not name a configured
+        # instance, the same condition `provider_kwargs.get_provider_kwargs`
+        # uses to decide whether to consult the organization overlay at all;
+        # an instance-addressed selector never reaches an organization key,
+        # so it is never subject to this restriction either.
+        if (
+            workspace_id is not None
+            and gate_instance is not None
+            and gate_impl is not None
+            and gate_instance not in config.providers
+        ):
+            org_allowlist = cached_org_model_restriction(workspace_id, gate_impl.value)
+            if org_allowlist is not None and gate_model not in org_allowlist:
+                not_allowed_detail = model_not_allowed_detail(model)
+                await log_gateway_rejection(
+                    db=db,
+                    log_writer=log_writer,
+                    api_key_id=api_key_id,
+                    user_id=user_id,
+                    model=gate_model,
+                    provider=gate_instance,
+                    endpoint=adapter.endpoint,
+                    detail=not_allowed_detail,
+                    status_code=status.HTTP_403_FORBIDDEN,
+                    started_at=started_at,
+                )
+                raise adapter.error(403, not_allowed_detail, ErrorKind.PERMISSION)
+
+        # Derived from the workspace already resolved above, not via
+        # `organization_for_key_id` (which would re-derive the same workspace
+        # from `api_key_id` internally): a master-key request's workspace
+        # lookup is deliberately never memoized, so re-deriving it here would
+        # pay that cost twice for one request.
+        organization_id = await organization_for_workspace_id(db, workspace_id)
         gate_pricing = await find_model_pricing(
             db,
             gate_instance,
@@ -1396,6 +1453,7 @@ async def resolve_request_context(
         rate_limit_info=rate_limit_info,
         reservation=reservation,
         started_at=started_at,
+        workspace_id=workspace_id,
         resolved_provider=resolved_provider,
         plan=plan,
         estimate_inputs=estimate_inputs,
@@ -1853,6 +1911,7 @@ async def log_usage(
     counts_toward_budget: bool = True,
     attribution: RoutingAttribution | None = None,
     tool_tally: ToolUsageTally | None = None,
+    workspace_id: uuid.UUID | None = None,
 ) -> float | None:
     """Log API usage to the database and return the computed cost.
 
@@ -1892,6 +1951,16 @@ async def log_usage(
             when the caller has no meaningful duration to record
         attribution: Which routing policy produced this row and where in its plan,
             or None for a request that named a plain model
+        workspace_id: The workspace already resolved for this request (from
+            ``resolve_workspace_id``/``RequestContext.workspace_id``), reused
+            instead of re-deriving it. Every ``ctx``-bearing caller has this for
+            free; only callers with no request context in scope (a gateway
+            rejection logged before one exists, the vision side-call billed
+            during normalization) omit it and pay ``workspace_for_key_id``'s own
+            lookup, which is cheap for a keyed request (memoized on
+            ``api_key_id``) and the same un-memoized cost a master-key request
+            already pays once elsewhere -- passing it explicitly here is what
+            avoids paying that twice on the same request.
 
     Returns:
         The computed cost for this request, or None when usage/pricing is absent.
@@ -1899,7 +1968,7 @@ async def log_usage(
     """
     usage_log = UsageLog(
         id=str(uuid.uuid4()),
-        workspace_id=await workspace_for_key_id(db, api_key_id),
+        workspace_id=workspace_id if workspace_id is not None else await workspace_for_key_id(db, api_key_id),
         api_key_id=api_key_id,
         user_id=user_id,
         timestamp=datetime.now(UTC),
@@ -2235,6 +2304,7 @@ async def _log_failure_and_refund(
         counts_toward_budget=_handle_counts_toward_budget(ctx.reservation),
         attribution=attribution,
         tool_tally=tool_tally,
+        workspace_id=ctx.workspace_id,
     )
     if ctx.reservation is not None:
         if cost:
@@ -2479,6 +2549,7 @@ def build_streaming_response(
     display_model: str | None = None,
     attribution: RoutingAttribution | None = None,
     tool_tally: ToolUsageTally | None = None,
+    workspace_id: uuid.UUID | None = None,
 ) -> StreamingResponse:
     """Wrap an already-opened upstream stream in an SSE response.
 
@@ -2532,6 +2603,7 @@ def build_streaming_response(
             counts_toward_budget=_handle_counts_toward_budget(reservation),
             attribution=attribution,
             tool_tally=tool_tally,
+            workspace_id=workspace_id,
         )
         if reservation is not None:
             await reconcile_reservation(db, reservation, actual_cost or 0.0)
@@ -2574,6 +2646,7 @@ def build_streaming_response(
                 counts_toward_budget=reservation.counts_toward_budget,
                 attribution=attribution,
                 tool_tally=tool_tally,
+                workspace_id=workspace_id,
             )
             # "Free" is about the tokens the provider never reported, not about
             # tool calls the gateway definitely ran and owes for.
@@ -2600,6 +2673,7 @@ def build_streaming_response(
             counts_toward_budget=reservation.counts_toward_budget,
             attribution=attribution,
             tool_tally=tool_tally,
+            workspace_id=workspace_id,
         )
         # The estimate covers the unreported tokens; log_usage adds any tool cost on
         # top of it, so reconcile against the row's total rather than the estimate.
@@ -2636,6 +2710,7 @@ def build_streaming_response(
             counts_toward_budget=_handle_counts_toward_budget(reservation),
             attribution=attribution,
             tool_tally=tool_tally,
+            workspace_id=workspace_id,
         )
         if reservation is not None:
             # A stream that died after running searches still owes for them, and a
@@ -2670,6 +2745,7 @@ def build_streaming_response(
                 latency_ms=_elapsed_ms(started_at),
                 counts_toward_budget=_handle_counts_toward_budget(reservation),
                 tool_tally=tool_tally,
+                workspace_id=workspace_id,
             )
             if abandoned_cost:
                 await reconcile_reservation(db, reservation, abandoned_cost)
@@ -2879,6 +2955,7 @@ async def run_single_attempt_stream(
         rate_limit_info=ctx.rate_limit_info,
         reservation=ctx.reservation,
         started_at=ctx.started_at,
+        workspace_id=ctx.workspace_id,
         platform_correlation_id=platform_correlation_id,
         platform_request_id=platform_request_id,
         session_label=session_label,
@@ -3379,6 +3456,7 @@ async def log_exhausted_plan(
         counts_toward_budget=_handle_counts_toward_budget(ctx.reservation),
         attribution=_failure_attribution(ctx, last),
         tool_tally=tool_tally,
+        workspace_id=ctx.workspace_id,
     )
     ctx.tool_charge = cost or 0.0
 
@@ -3418,6 +3496,7 @@ async def log_absorbed_attempt(
             latency_ms=_elapsed_ms(ctx.started_at),
             counts_toward_budget=False,
             attribution=_attribution_for(ctx, attempt, absorbed=True),
+            workspace_id=ctx.workspace_id,
         )
     except Exception:
         logger.warning(
@@ -3533,6 +3612,7 @@ async def run_standalone_non_stream(
                     counts_toward_budget=_handle_counts_toward_budget(ctx.reservation),
                     attribution=attribution,
                     tool_tally=tool_ctx.tally,
+                    workspace_id=ctx.workspace_id,
                 )
             if ctx.reservation is not None:
                 await reconcile_reservation(ctx.db, ctx.reservation, actual_cost or 0.0)

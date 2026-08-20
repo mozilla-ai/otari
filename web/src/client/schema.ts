@@ -1256,6 +1256,114 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/organizations/me/provider-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Org Provider Keys
+         * @description List the caller's organization's provider keys. Any active member may read it.
+         */
+        get: operations["list_org_provider_keys_v1_organizations_me_provider_keys_get"];
+        put?: never;
+        /**
+         * Create Org Provider Key
+         * @description Create a provider key in the caller's organization. Organization owners and admins only.
+         */
+        post: operations["create_org_provider_key_v1_organizations_me_provider_keys_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/organizations/me/provider-keys/{key_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Org Provider Key
+         * @description Permanently delete an archived key. Organization owners and admins only.
+         */
+        delete: operations["delete_org_provider_key_v1_organizations_me_provider_keys__key_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Org Provider Key
+         * @description Change a key's name, credential, base URL, or client args. Organization owners and admins only.
+         */
+        patch: operations["update_org_provider_key_v1_organizations_me_provider_keys__key_id__patch"];
+        trace?: never;
+    };
+    "/v1/organizations/me/provider-keys/{key_id}/archive": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Archive Org Provider Key
+         * @description Archive a key. Organization owners and admins only.
+         */
+        post: operations["archive_org_provider_key_v1_organizations_me_provider_keys__key_id__archive_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/organizations/me/provider-keys/{key_id}/default": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Set Org Provider Key Default
+         * @description Make a key the organization's default for its provider. Organization owners and admins only.
+         */
+        post: operations["set_org_provider_key_default_v1_organizations_me_provider_keys__key_id__default_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/organizations/me/provider-keys/{key_id}/restore": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Restore Org Provider Key
+         * @description Restore an archived key. Organization owners and admins only.
+         */
+        post: operations["restore_org_provider_key_v1_organizations_me_provider_keys__key_id__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/pricing": {
         parameters: {
             query?: never;
@@ -2687,6 +2795,94 @@ export interface paths {
          * @description Change a workspace member's role.
          */
         patch: operations["update_workspace_member_role_v1_workspaces__workspace_id__members__user_id__patch"];
+        trace?: never;
+    };
+    "/v1/workspaces/{workspace_id}/provider-keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Workspace Provider Keys
+         * @description The effective view of every key visible to this workspace. Any member of the workspace may read it.
+         */
+        get: operations["list_workspace_provider_keys_v1_workspaces__workspace_id__provider_keys_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspace_id}/provider-keys/{key_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Reset Workspace Provider Key Override
+         * @description Remove this workspace's override, reverting to full inheritance. Idempotent.
+         */
+        delete: operations["reset_workspace_provider_key_override_v1_workspaces__workspace_id__provider_keys__key_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Set Workspace Provider Key Override
+         * @description Pin or disable a key for this workspace. Organization owners/admins or this workspace's owners/admins.
+         */
+        patch: operations["set_workspace_provider_key_override_v1_workspaces__workspace_id__provider_keys__key_id__patch"];
+        trace?: never;
+    };
+    "/v1/workspaces/{workspace_id}/provider-keys/{key_id}/models": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Workspace Provider Key Model Restrictions
+         * @description List this workspace's model allow-list for a key. Empty means every model is allowed.
+         */
+        get: operations["list_workspace_provider_key_model_restrictions_v1_workspaces__workspace_id__provider_keys__key_id__models_get"];
+        put?: never;
+        /**
+         * Add Workspace Provider Key Model Restriction
+         * @description Narrow this workspace's allow-list for a key to include one more model. Idempotent.
+         */
+        post: operations["add_workspace_provider_key_model_restriction_v1_workspaces__workspace_id__provider_keys__key_id__models_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspace_id}/provider-keys/{key_id}/models/{model}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Remove Workspace Provider Key Model Restriction
+         * @description Remove one model from this workspace's allow-list for a key. Idempotent.
+         */
+        delete: operations["remove_workspace_provider_key_model_restriction_v1_workspaces__workspace_id__provider_keys__key_id__models__model__delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
         trace?: never;
     };
 }
@@ -4865,6 +5061,90 @@ export interface components {
             } | null;
         };
         /**
+         * OrgProviderKeyCreateRequest
+         * @description What a caller sends to create a key.
+         *
+         *     The plaintext key is never stored as sent: the service encrypts it
+         *     (`services/secret_box.py`) and keeps only the ciphertext and ``last4``,
+         *     the same convention `entities.ProviderCredential` already uses.
+         */
+        OrgProviderKeyCreateRequest: {
+            /** Api Base */
+            api_base?: string | null;
+            /** Api Key */
+            api_key?: string | null;
+            /** Client Args */
+            client_args?: {
+                [key: string]: unknown;
+            } | null;
+            /** Name */
+            name: string;
+            /** Provider */
+            provider: string;
+        };
+        /**
+         * OrgProviderKeyPublic
+         * @description The API-facing shape. Never carries the key, only whether one is set.
+         */
+        OrgProviderKeyPublic: {
+            /** Api Base */
+            api_base?: string | null;
+            /** Archived At */
+            archived_at?: string | null;
+            /** Client Args */
+            client_args?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Is Org Default */
+            is_org_default: boolean;
+            /** Last4 */
+            last4?: string | null;
+            /** Name */
+            name: string;
+            /**
+             * Organization Id
+             * Format: uuid
+             */
+            organization_id: string;
+            /** Provider */
+            provider: string;
+            /** Updated At */
+            updated_at?: string | null;
+        };
+        /**
+         * OrgProviderKeyUpdateRequest
+         * @description A partial update. Every field is optional; only what is set is applied.
+         */
+        OrgProviderKeyUpdateRequest: {
+            /** Api Base */
+            api_base?: string | null;
+            /** Api Key */
+            api_key?: string | null;
+            /** Client Args */
+            client_args?: {
+                [key: string]: unknown;
+            } | null;
+            /** Name */
+            name?: string | null;
+        };
+        /** OrgProviderKeysPublic */
+        OrgProviderKeysPublic: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["OrgProviderKeyPublic"][];
+        };
+        /**
          * OrganizationMembershipContextPublic
          * @description An organization plus the caller's standing in it.
          *
@@ -7015,6 +7295,62 @@ export interface components {
             /** Data */
             data: components["schemas"]["WorkspaceMemberPublic"][];
         };
+        /**
+         * WorkspaceProviderKeyOverridePublic
+         * @description The effective view for one workspace+key: raw override flags plus the resolution.
+         */
+        WorkspaceProviderKeyOverridePublic: {
+            /** Disabled */
+            disabled: boolean;
+            /** Is Default */
+            is_default: boolean;
+            /** Is Effective Default */
+            is_effective_default: boolean;
+            /** Is Effective Enabled */
+            is_effective_enabled: boolean;
+            /**
+             * Org Provider Key Id
+             * Format: uuid
+             */
+            org_provider_key_id: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+        };
+        /**
+         * WorkspaceProviderKeyOverrideRequest
+         * @description Tri-state: an omitted field leaves that flag unchanged.
+         *
+         *     Both fields false, whether that is the merged result or a value sent
+         *     explicitly, is a no-op the service deletes rather than stores: absence of
+         *     a row already means full inheritance from the organization default.
+         *     Setting one true auto-resolves the other when they would otherwise
+         *     conflict (pinning re-enables a disabled key; disabling un-pins a pinned
+         *     one); sending both true explicitly is refused.
+         */
+        WorkspaceProviderKeyOverrideRequest: {
+            /** Disabled */
+            disabled?: boolean | null;
+            /** Is Default */
+            is_default?: boolean | null;
+        };
+        /** WorkspaceProviderKeyOverridesPublic */
+        WorkspaceProviderKeyOverridesPublic: {
+            /** Data */
+            data: components["schemas"]["WorkspaceProviderKeyOverridePublic"][];
+        };
+        /** WorkspaceProviderModelRestrictionRequest */
+        WorkspaceProviderModelRestrictionRequest: {
+            /** Model */
+            model: string;
+        };
+        /** WorkspaceProviderModelRestrictionsPublic */
+        WorkspaceProviderModelRestrictionsPublic: {
+            /** Models */
+            models: string[];
+        };
         /** WorkspacePublic */
         WorkspacePublic: {
             /**
@@ -9055,6 +9391,234 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_org_provider_keys_v1_organizations_me_provider_keys_get: {
+        parameters: {
+            query?: {
+                /** @description Include archived keys. */
+                include_archived?: boolean;
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgProviderKeysPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_org_provider_key_v1_organizations_me_provider_keys_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrgProviderKeyCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgProviderKeyPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_org_provider_key_v1_organizations_me_provider_keys__key_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Message"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_org_provider_key_v1_organizations_me_provider_keys__key_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrgProviderKeyUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgProviderKeyPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    archive_org_provider_key_v1_organizations_me_provider_keys__key_id__archive_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgProviderKeyPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_org_provider_key_default_v1_organizations_me_provider_keys__key_id__default_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgProviderKeyPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    restore_org_provider_key_v1_organizations_me_provider_keys__key_id__restore_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrgProviderKeyPublic"];
+                };
             };
             /** @description Validation Error */
             422: {
@@ -11495,6 +12059,206 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkspaceMemberPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_workspace_provider_keys_v1_workspaces__workspace_id__provider_keys_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceProviderKeyOverridesPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    reset_workspace_provider_key_override_v1_workspaces__workspace_id__provider_keys__key_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Message"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_workspace_provider_key_override_v1_workspaces__workspace_id__provider_keys__key_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceProviderKeyOverrideRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceProviderKeyOverridePublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_workspace_provider_key_model_restrictions_v1_workspaces__workspace_id__provider_keys__key_id__models_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceProviderModelRestrictionsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    add_workspace_provider_key_model_restriction_v1_workspaces__workspace_id__provider_keys__key_id__models_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceProviderModelRestrictionRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Message"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    remove_workspace_provider_key_model_restriction_v1_workspaces__workspace_id__provider_keys__key_id__models__model__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                key_id: string;
+                model: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Message"];
                 };
             };
             /** @description Validation Error */

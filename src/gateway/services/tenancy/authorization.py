@@ -86,7 +86,14 @@ async def require_workspace_management_access(
     workspace: Workspace,
     organizations: OrganizationService,
 ) -> None:
-    """Allow a superuser, an organization owner/admin, or an owner/admin of this workspace."""
+    """Allow a superuser, an organization owner/admin, or an owner/admin of this workspace.
+
+    The superuser arm is what makes this agree with the two checks either side
+    of it: ``resolve_visible_workspace`` grants a superuser read on every
+    workspace, and organization-level management access grants them
+    organization management, so without it a superuser could delete a
+    workspace but not rename it.
+    """
     if user.is_superuser:
         return
 

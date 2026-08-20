@@ -71,7 +71,7 @@ class WorkspaceService:
     async def _active_organization(self, user: User) -> Organization:
         return await self.organizations.get_active_organization_for_user(user)
 
-    async def _workspace_in_active_organization(self, *, user: User, workspace_id: uuid.UUID) -> Workspace:
+    async def workspace_in_active_organization(self, *, user: User, workspace_id: uuid.UUID) -> Workspace:
         """Resolve a workspace the caller may see, or raise not-found.
 
         Delegates to ``services.tenancy.authorization``, shared with
@@ -136,7 +136,11 @@ class WorkspaceService:
 
         Delegates to ``services.tenancy.authorization``, shared with
         ``WorkspaceBudgetDefaultService`` so the management rule is defined
-        once.
+        once. Private: `services.tenancy.org_provider_key_service` needs the
+        same rule for workspace-scoped provider-key overrides and model
+        restrictions, and calls ``authorization.require_workspace_management_access``
+        directly rather than through this instance method, so there is one
+        shared entry point rather than two.
         """
         await authorization.require_workspace_management_access(
             self.db,
@@ -186,7 +190,7 @@ class WorkspaceService:
 
     async def get_workspace(self, *, user: User, workspace_id: uuid.UUID) -> WorkspacePublic:
         """Return one workspace the caller may see."""
-        workspace = await self._workspace_in_active_organization(user=user, workspace_id=workspace_id)
+        workspace = await self.workspace_in_active_organization(user=user, workspace_id=workspace_id)
         return WorkspacePublic.model_validate(workspace)
 
     async def list_workspaces(self, *, user: User, skip: int = 0, limit: int = 100) -> WorkspacesPublic:
@@ -230,7 +234,7 @@ class WorkspaceService:
         workspace_update: WorkspaceUpdate,
     ) -> WorkspacePublic:
         """Rename a workspace or change its description."""
-        workspace = await self._workspace_in_active_organization(user=user, workspace_id=workspace_id)
+        workspace = await self.workspace_in_active_organization(user=user, workspace_id=workspace_id)
         await self._require_workspace_management_access(user=user, workspace=workspace)
 
         update_data = workspace_update.model_dump(exclude_unset=True)
@@ -348,7 +352,7 @@ class WorkspaceService:
         limit: int = 100,
     ) -> WorkspaceMembersPublic:
         """List a workspace's members. Any member of the workspace may read it."""
-        workspace = await self._workspace_in_active_organization(user=user, workspace_id=workspace_id)
+        workspace = await self.workspace_in_active_organization(user=user, workspace_id=workspace_id)
         members, count = await self.members.get_by_workspace(workspace.id, skip=skip, limit=limit)
         return WorkspaceMembersPublic(
             data=[WorkspaceMemberPublic.model_validate(member) for member in members],
@@ -368,7 +372,7 @@ class WorkspaceService:
         Membership of the organization is a precondition, not something this
         grants: a workspace cannot be a back door into the tenant.
         """
-        workspace = await self._workspace_in_active_organization(user=user, workspace_id=workspace_id)
+        workspace = await self.workspace_in_active_organization(user=user, workspace_id=workspace_id)
         await self._require_workspace_management_access(user=user, workspace=workspace)
         role = self._validated_role(role)
 
@@ -408,7 +412,7 @@ class WorkspaceService:
         role: str,
     ) -> WorkspaceMemberPublic:
         """Change a workspace member's role."""
-        workspace = await self._workspace_in_active_organization(user=user, workspace_id=workspace_id)
+        workspace = await self.workspace_in_active_organization(user=user, workspace_id=workspace_id)
         await self._require_workspace_management_access(user=user, workspace=workspace)
         role = self._validated_role(role)
 
@@ -422,7 +426,7 @@ class WorkspaceService:
 
     async def remove_member(self, *, user: User, workspace_id: uuid.UUID, user_id: uuid.UUID) -> None:
         """Remove a member from a workspace. Idempotent."""
-        workspace = await self._workspace_in_active_organization(user=user, workspace_id=workspace_id)
+        workspace = await self.workspace_in_active_organization(user=user, workspace_id=workspace_id)
         await self._require_workspace_management_access(user=user, workspace=workspace)
 
         member = await self.members.get_by_workspace_and_user(workspace.id, user_id)

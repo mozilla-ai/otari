@@ -15,6 +15,7 @@ instance had been deleted to go audit their allow-lists.
 """
 
 import logging
+import uuid
 from collections.abc import Callable, Iterator
 
 import pytest
@@ -29,6 +30,7 @@ from gateway.services.routing import (
     compile_policy,
     selection_consults_router,
 )
+from gateway.services.tenancy import org_provider_key_service as org_store
 
 
 @pytest.fixture
@@ -107,6 +109,45 @@ def test_a_mixed_drop_reports_the_actionable_one(config: GatewayConfig) -> None:
 
     assert exc_info.value.status_code == 403
     assert {item.reason for item in exc_info.value.dropped} == {"not_allowed", "unresolvable"}
+
+
+@pytest.fixture(autouse=True)
+def _clean_org_restriction_cache() -> Iterator[None]:
+    org_store._org_model_restrictions.clear()
+    yield
+    org_store._org_model_restrictions.clear()
+
+
+def test_a_fallover_candidate_violating_the_org_restriction_is_dropped(config: GatewayConfig) -> None:
+    """Regression: the org-scoped model restriction was checked only against
+    `plan.head` in `_pipeline.py`, so a `router`/`on_failure` candidate beyond
+    it could still dispatch a model the workspace's organization key
+    excludes. `anthropic` names no configured instance, so both candidates
+    resolve through the bare-selector, organization-scoped fallback.
+    """
+    workspace_id = uuid.uuid4()
+    org_store._org_model_restrictions[(workspace_id, "anthropic")] = ["claude-3-opus"]
+
+    plan = compile_policy(
+        config,
+        "restricted",
+        _spec("anthropic:claude-3-opus", "anthropic:claude-3-haiku"),
+        workspace_id=workspace_id,
+    )
+
+    assert [attempt.model for attempt in plan.attempts] == ["claude-3-opus"]
+
+
+def test_an_instance_addressed_candidate_ignores_the_org_restriction(config: GatewayConfig) -> None:
+    """`openai` is a configured instance in `config`, so it never consults the
+    organization overlay, even when a restriction happens to be cached under
+    the same provider name for this workspace."""
+    workspace_id = uuid.uuid4()
+    org_store._org_model_restrictions[(workspace_id, "openai")] = ["gpt-5-nano"]
+
+    plan = compile_policy(config, "unaffected", _spec("openai:gpt-5-mini"), workspace_id=workspace_id)
+
+    assert [attempt.model for attempt in plan.attempts] == ["gpt-5-mini"]
 
 
 def _router_spec(*candidates: str) -> PolicySpec:

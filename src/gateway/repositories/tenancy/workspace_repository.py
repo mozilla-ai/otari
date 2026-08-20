@@ -26,6 +26,34 @@ class WorkspaceRepository(BaseRepository[Workspace, WorkspaceCreate, WorkspaceUp
     def __init__(self, db: AsyncSession):
         super().__init__(db, Workspace)
 
+    async def lock(self, workspace_id: uuid.UUID) -> None:
+        """Take a row lock on the workspace, serializing what is read and written against it.
+
+        Mirrors ``OrganizationRepository.lock``: a writer that reads several of
+        a workspace's own rows, decides something from their combined state,
+        and writes based on that decision needs the whole read-decide-write
+        sequence to run as if serialized, which no single row's unique index
+        can enforce on its own. Two independent races share this lock:
+
+        - "At most one pinned provider-key override per workspace+provider"
+          spans a variable set of override rows, one per candidate key.
+        - A budget default's creation reads the workspace's current members
+          before materializing, and a concurrent membership-creation path
+          reads the workspace's current defaults before materializing the new
+          member; without a shared lock both transactions can run their read
+          before either commits its write, and the member who joined right
+          around the default's creation gets neither's ceiling. Every
+          membership-creation path (``WorkspaceService.create_workspace``
+          excepted, since a just-created workspace has no default that could
+          race it) takes this same lock before its own read, so the two either
+          serialize or, for ``create_workspace``, never overlap.
+
+        ``FOR UPDATE`` is a no-op on SQLite, which admits one writer at a time
+        for the whole database anyway; PostgreSQL is where this is
+        load-bearing.
+        """
+        await self.db.execute(select(col(Workspace.id)).where(col(Workspace.id) == workspace_id).with_for_update())
+
     async def get_by_ids(self, workspace_ids: Collection[uuid.UUID]) -> Sequence[Workspace]:
         """Return the workspaces named by a batch of ids (order unspecified).
 
@@ -36,26 +64,6 @@ class WorkspaceRepository(BaseRepository[Workspace, WorkspaceCreate, WorkspaceUp
             return []
         result = await self.db.execute(select(Workspace).where(col(Workspace.id).in_(list(workspace_ids))))
         return list(result.scalars().all())
-
-    async def lock(self, workspace_id: uuid.UUID) -> None:
-        """Take a row lock on the workspace, serializing what is read against it.
-
-        Mirrors ``OrganizationRepository.lock``. What it serializes here: a
-        budget default's creation reads the workspace's current members before
-        materializing, and a concurrent membership-creation path reads the
-        workspace's current defaults before materializing the new member;
-        without a shared lock both transactions can run their read before
-        either commits its write, and the member who joined right around the
-        default's creation gets neither's ceiling. Every membership-creation
-        path (``WorkspaceService.create_workspace`` excepted, since a
-        just-created workspace has no default that could race it) takes this
-        same lock before its own read, so the two either serialize or, for
-        ``create_workspace``, never overlap.
-
-        ``FOR UPDATE`` is a no-op on SQLite; see the organization lock's own
-        note on why that is fine.
-        """
-        await self.db.execute(select(col(Workspace.id)).where(col(Workspace.id) == workspace_id).with_for_update())
 
     async def get_by_organization(
         self,

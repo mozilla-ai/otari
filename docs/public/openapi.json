@@ -4967,6 +4967,237 @@
         "title": "ModerationResult",
         "type": "object"
       },
+      "OrgProviderKeyCreateRequest": {
+        "description": "What a caller sends to create a key.\n\nThe plaintext key is never stored as sent: the service encrypts it\n(`services/secret_box.py`) and keeps only the ciphertext and ``last4``,\nthe same convention `entities.ProviderCredential` already uses.",
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "client_args": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Args"
+          },
+          "name": {
+            "maxLength": 255,
+            "title": "Name",
+            "type": "string"
+          },
+          "provider": {
+            "maxLength": 255,
+            "title": "Provider",
+            "type": "string"
+          }
+        },
+        "required": [
+          "provider",
+          "name"
+        ],
+        "title": "OrgProviderKeyCreateRequest",
+        "type": "object"
+      },
+      "OrgProviderKeyPublic": {
+        "description": "The API-facing shape. Never carries the key, only whether one is set.",
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
+          "archived_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Archived At"
+          },
+          "client_args": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Args"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "is_org_default": {
+            "title": "Is Org Default",
+            "type": "boolean"
+          },
+          "last4": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last4"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "organization_id": {
+            "format": "uuid",
+            "title": "Organization Id",
+            "type": "string"
+          },
+          "provider": {
+            "title": "Provider",
+            "type": "string"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          }
+        },
+        "required": [
+          "id",
+          "organization_id",
+          "provider",
+          "name",
+          "is_org_default",
+          "created_at"
+        ],
+        "title": "OrgProviderKeyPublic",
+        "type": "object"
+      },
+      "OrgProviderKeyUpdateRequest": {
+        "description": "A partial update. Every field is optional; only what is set is applied.",
+        "properties": {
+          "api_base": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Base"
+          },
+          "api_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Api Key"
+          },
+          "client_args": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Client Args"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Name"
+          }
+        },
+        "title": "OrgProviderKeyUpdateRequest",
+        "type": "object"
+      },
+      "OrgProviderKeysPublic": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/OrgProviderKeyPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "OrgProviderKeysPublic",
+        "type": "object"
+      },
       "OrganizationMembershipContextPublic": {
         "description": "An organization plus the caller's standing in it.\n\nWhat every tenancy page reads first: which organization it is looking at,\nand what the caller may do there.",
         "properties": {
@@ -10435,6 +10666,122 @@
         "title": "WorkspaceMembersPublic",
         "type": "object"
       },
+      "WorkspaceProviderKeyOverridePublic": {
+        "description": "The effective view for one workspace+key: raw override flags plus the resolution.",
+        "properties": {
+          "disabled": {
+            "title": "Disabled",
+            "type": "boolean"
+          },
+          "is_default": {
+            "title": "Is Default",
+            "type": "boolean"
+          },
+          "is_effective_default": {
+            "title": "Is Effective Default",
+            "type": "boolean"
+          },
+          "is_effective_enabled": {
+            "title": "Is Effective Enabled",
+            "type": "boolean"
+          },
+          "org_provider_key_id": {
+            "format": "uuid",
+            "title": "Org Provider Key Id",
+            "type": "string"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace_id",
+          "org_provider_key_id",
+          "is_default",
+          "disabled",
+          "is_effective_default",
+          "is_effective_enabled"
+        ],
+        "title": "WorkspaceProviderKeyOverridePublic",
+        "type": "object"
+      },
+      "WorkspaceProviderKeyOverrideRequest": {
+        "description": "Tri-state: an omitted field leaves that flag unchanged.\n\nBoth fields false, whether that is the merged result or a value sent\nexplicitly, is a no-op the service deletes rather than stores: absence of\na row already means full inheritance from the organization default.\nSetting one true auto-resolves the other when they would otherwise\nconflict (pinning re-enables a disabled key; disabling un-pins a pinned\none); sending both true explicitly is refused.",
+        "properties": {
+          "disabled": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Disabled"
+          },
+          "is_default": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Default"
+          }
+        },
+        "title": "WorkspaceProviderKeyOverrideRequest",
+        "type": "object"
+      },
+      "WorkspaceProviderKeyOverridesPublic": {
+        "properties": {
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/WorkspaceProviderKeyOverridePublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data"
+        ],
+        "title": "WorkspaceProviderKeyOverridesPublic",
+        "type": "object"
+      },
+      "WorkspaceProviderModelRestrictionRequest": {
+        "properties": {
+          "model": {
+            "maxLength": 255,
+            "title": "Model",
+            "type": "string"
+          }
+        },
+        "required": [
+          "model"
+        ],
+        "title": "WorkspaceProviderModelRestrictionRequest",
+        "type": "object"
+      },
+      "WorkspaceProviderModelRestrictionsPublic": {
+        "properties": {
+          "models": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Models",
+            "type": "array"
+          }
+        },
+        "required": [
+          "models"
+        ],
+        "title": "WorkspaceProviderModelRestrictionsPublic",
+        "type": "object"
+      },
       "WorkspacePublic": {
         "properties": {
           "created_at": {
@@ -14144,6 +14491,403 @@
         "summary": "Replace Organization Pricing",
         "tags": [
           "organization-pricing"
+        ]
+      }
+    },
+    "/v1/organizations/me/provider-keys": {
+      "get": {
+        "description": "List the caller's organization's provider keys. Any active member may read it.",
+        "operationId": "list_org_provider_keys_v1_organizations_me_provider_keys_get",
+        "parameters": [
+          {
+            "description": "Include archived keys.",
+            "in": "query",
+            "name": "include_archived",
+            "required": false,
+            "schema": {
+              "default": false,
+              "description": "Include archived keys.",
+              "title": "Include Archived",
+              "type": "boolean"
+            }
+          },
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of records to return",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgProviderKeysPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Org Provider Keys",
+        "tags": [
+          "provider-keys"
+        ]
+      },
+      "post": {
+        "description": "Create a provider key in the caller's organization. Organization owners and admins only.",
+        "operationId": "create_org_provider_key_v1_organizations_me_provider_keys_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrgProviderKeyCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgProviderKeyPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Org Provider Key",
+        "tags": [
+          "provider-keys"
+        ]
+      }
+    },
+    "/v1/organizations/me/provider-keys/{key_id}": {
+      "delete": {
+        "description": "Permanently delete an archived key. Organization owners and admins only.",
+        "operationId": "delete_org_provider_key_v1_organizations_me_provider_keys__key_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Org Provider Key",
+        "tags": [
+          "provider-keys"
+        ]
+      },
+      "patch": {
+        "description": "Change a key's name, credential, base URL, or client args. Organization owners and admins only.",
+        "operationId": "update_org_provider_key_v1_organizations_me_provider_keys__key_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrgProviderKeyUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgProviderKeyPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Org Provider Key",
+        "tags": [
+          "provider-keys"
+        ]
+      }
+    },
+    "/v1/organizations/me/provider-keys/{key_id}/archive": {
+      "post": {
+        "description": "Archive a key. Organization owners and admins only.",
+        "operationId": "archive_org_provider_key_v1_organizations_me_provider_keys__key_id__archive_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgProviderKeyPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Archive Org Provider Key",
+        "tags": [
+          "provider-keys"
+        ]
+      }
+    },
+    "/v1/organizations/me/provider-keys/{key_id}/default": {
+      "post": {
+        "description": "Make a key the organization's default for its provider. Organization owners and admins only.",
+        "operationId": "set_org_provider_key_default_v1_organizations_me_provider_keys__key_id__default_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgProviderKeyPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Set Org Provider Key Default",
+        "tags": [
+          "provider-keys"
+        ]
+      }
+    },
+    "/v1/organizations/me/provider-keys/{key_id}/restore": {
+      "post": {
+        "description": "Restore an archived key. Organization owners and admins only.",
+        "operationId": "restore_org_provider_key_v1_organizations_me_provider_keys__key_id__restore_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrgProviderKeyPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Restore Org Provider Key",
+        "tags": [
+          "provider-keys"
         ]
       }
     },
@@ -19589,6 +20333,393 @@
         "summary": "Add Workspace Member",
         "tags": [
           "workspaces"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/provider-keys": {
+      "get": {
+        "description": "The effective view of every key visible to this workspace. Any member of the workspace may read it.",
+        "operationId": "list_workspace_provider_keys_v1_workspaces__workspace_id__provider_keys_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProviderKeyOverridesPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Workspace Provider Keys",
+        "tags": [
+          "provider-keys"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/provider-keys/{key_id}": {
+      "delete": {
+        "description": "Remove this workspace's override, reverting to full inheritance. Idempotent.",
+        "operationId": "reset_workspace_provider_key_override_v1_workspaces__workspace_id__provider_keys__key_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Reset Workspace Provider Key Override",
+        "tags": [
+          "provider-keys"
+        ]
+      },
+      "patch": {
+        "description": "Pin or disable a key for this workspace. Organization owners/admins or this workspace's owners/admins.",
+        "operationId": "set_workspace_provider_key_override_v1_workspaces__workspace_id__provider_keys__key_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceProviderKeyOverrideRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProviderKeyOverridePublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Set Workspace Provider Key Override",
+        "tags": [
+          "provider-keys"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/provider-keys/{key_id}/models": {
+      "get": {
+        "description": "List this workspace's model allow-list for a key. Empty means every model is allowed.",
+        "operationId": "list_workspace_provider_key_model_restrictions_v1_workspaces__workspace_id__provider_keys__key_id__models_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceProviderModelRestrictionsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Workspace Provider Key Model Restrictions",
+        "tags": [
+          "provider-keys"
+        ]
+      },
+      "post": {
+        "description": "Narrow this workspace's allow-list for a key to include one more model. Idempotent.",
+        "operationId": "add_workspace_provider_key_model_restriction_v1_workspaces__workspace_id__provider_keys__key_id__models_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceProviderModelRestrictionRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Add Workspace Provider Key Model Restriction",
+        "tags": [
+          "provider-keys"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/provider-keys/{key_id}/models/{model}": {
+      "delete": {
+        "description": "Remove one model from this workspace's allow-list for a key. Idempotent.",
+        "operationId": "remove_workspace_provider_key_model_restriction_v1_workspaces__workspace_id__provider_keys__key_id__models__model__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Key Id",
+              "type": "string"
+            }
+          },
+          {
+            "in": "path",
+            "name": "model",
+            "required": true,
+            "schema": {
+              "title": "Model",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Remove Workspace Provider Key Model Restriction",
+        "tags": [
+          "provider-keys"
         ]
       }
     }

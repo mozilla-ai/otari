@@ -17,6 +17,7 @@ platform-fallback streaming paths. These tests pin that contract:
 import asyncio
 import re
 import time
+import uuid
 from collections.abc import AsyncIterator
 from typing import Any, cast
 
@@ -40,6 +41,7 @@ from gateway.api.routes._pipeline import (
     RequestContext,
     ToolContext,
     build_streaming_response,
+    log_usage,
     prepare_gateway_tools,
     run_platform_non_stream,
     run_single_attempt_stream,
@@ -85,6 +87,7 @@ def _ctx(
     log_writer: Any = None,
     reservation: ReservationHandle | None = None,
     rate_limit_info: RateLimitInfo | None = None,
+    workspace_id: uuid.UUID | None = None,
 ) -> RequestContext:
     return RequestContext(
         config=config,
@@ -98,6 +101,7 @@ def _ctx(
         rate_limit_info=rate_limit_info,
         reservation=reservation,
         started_at=time.monotonic(),
+        workspace_id=workspace_id,
     )
 
 
@@ -279,7 +283,12 @@ def _reservation(estimate: float = 0.5) -> ReservationHandle:
     return ReservationHandle(user_id="user-1", estimate=estimate, reserved=True, strategy="for_update")
 
 
-def _build(stream: AsyncIterator[ChatCompletionChunk], config: GatewayConfig) -> Any:
+def _build(
+    stream: AsyncIterator[ChatCompletionChunk],
+    config: GatewayConfig,
+    *,
+    workspace_id: uuid.UUID | None = None,
+) -> Any:
     return build_streaming_response(
         adapter=chat._ADAPTER,
         stream=stream,
@@ -292,6 +301,7 @@ def _build(stream: AsyncIterator[ChatCompletionChunk], config: GatewayConfig) ->
         user_id="user-1",
         rate_limit_info=None,
         reservation=_reservation(),
+        workspace_id=workspace_id,
     )
 
 
@@ -373,6 +383,108 @@ async def test_client_disconnect_refunds(monkeypatch: pytest.MonkeyPatch) -> Non
 
     assert settlement.refunded == 1
     assert settlement.reconciled == []
+
+
+class _FakeLogWriter:
+    def __init__(self) -> None:
+        self.put_rows: list[Any] = []
+
+    async def put(self, row: Any) -> None:
+        self.put_rows.append(row)
+
+
+@pytest.mark.asyncio
+async def test_log_usage_skips_the_workspace_lookup_when_given_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The whole point of threading ``workspace_id`` through: a caller that
+    already resolved it must not pay ``workspace_for_key_id``'s own lookup a
+    second time. For a master-key request (``api_key_id=None``) that lookup is
+    the un-memoized ``default_workspace_id`` query the preamble already paid.
+    """
+    lookups = 0
+
+    async def counting_workspace_for_key_id(db: Any, api_key_id: str | None) -> uuid.UUID:
+        nonlocal lookups
+        lookups += 1
+        return uuid.uuid4()
+
+    monkeypatch.setattr(pipeline, "workspace_for_key_id", counting_workspace_for_key_id)
+    workspace_id = uuid.uuid4()
+
+    await log_usage(
+        db=cast(Any, object()),
+        log_writer=cast(Any, _FakeLogWriter()),
+        api_key_id=None,
+        model="gpt-4",
+        provider="openai",
+        endpoint="/v1/chat/completions",
+        workspace_id=workspace_id,
+    )
+
+    assert lookups == 0
+
+
+@pytest.mark.asyncio
+async def test_log_usage_still_resolves_the_workspace_when_not_given_one(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The fallback stays intact for the callers that have no context to draw
+    ``workspace_id`` from (a rejection logged before one exists, the vision
+    side-call)."""
+    lookups = 0
+    resolved = uuid.uuid4()
+
+    async def counting_workspace_for_key_id(db: Any, api_key_id: str | None) -> uuid.UUID:
+        nonlocal lookups
+        lookups += 1
+        return resolved
+
+    monkeypatch.setattr(pipeline, "workspace_for_key_id", counting_workspace_for_key_id)
+    log_writer = _FakeLogWriter()
+
+    await log_usage(
+        db=cast(Any, object()),
+        log_writer=cast(Any, log_writer),
+        api_key_id=None,
+        model="gpt-4",
+        provider="openai",
+        endpoint="/v1/chat/completions",
+    )
+
+    assert lookups == 1
+    assert log_writer.put_rows[0].workspace_id == resolved
+
+
+@pytest.mark.asyncio
+async def test_stream_settlement_forwards_the_contexts_workspace_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``ctx.workspace_id``, already resolved once in the preamble, reaches
+    ``log_usage`` rather than being silently dropped and re-derived there
+    (otari#643 follow-up: a master-key request must not pay the un-memoized
+    default-workspace lookup twice for one request).
+    """
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    workspace_id = uuid.uuid4()
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield _chunk(CompletionUsage(prompt_tokens=10, completion_tokens=5, total_tokens=15))
+
+    await _drain(_build(stream(), GatewayConfig(), workspace_id=workspace_id))
+
+    assert settlement.logged[0]["workspace_id"] == workspace_id
+
+
+@pytest.mark.asyncio
+async def test_standalone_non_stream_forwards_the_contexts_workspace_id(monkeypatch: pytest.MonkeyPatch) -> None:
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    workspace_id = uuid.uuid4()
+
+    await _run_standalone(
+        monkeypatch,
+        result=_completion(usage=_usage()),
+        reservation=_reservation(),
+        workspace_id=workspace_id,
+    )
+
+    assert settlement.logged[0]["workspace_id"] == workspace_id
 
 
 # ---------------------------------------------------------------------------
@@ -1080,6 +1192,7 @@ async def _run_standalone(
     rate_limit_info: RateLimitInfo | None = None,
     db: Any = None,
     display_model: str | None = None,
+    workspace_id: uuid.UUID | None = None,
 ) -> tuple[Any, Response]:
     """Drive the standalone non-streaming path with a faked provider call."""
 
@@ -1096,6 +1209,7 @@ async def _run_standalone(
         log_writer=object(),
         reservation=reservation,
         rate_limit_info=rate_limit_info,
+        workspace_id=workspace_id,
     )
     response = Response()
     returned = await run_standalone_non_stream(

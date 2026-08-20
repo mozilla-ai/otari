@@ -201,3 +201,21 @@ GET /v1/workspaces/{workspace_id}/member-budget-policies                 # dashb
 POST /v1/workspaces/{workspace_id}/member-budget-policies                # dashboard-only
 PATCH /v1/workspaces/{workspace_id}/member-budget-policies/{default_id}  # dashboard-only
 DELETE /v1/workspaces/{workspace_id}/member-budget-policies/{default_id} # dashboard-only
+# Organization-scoped provider keys (otari-ai#1748, otari#643): the same
+# tenancy-admin surface as the organization/workspace rows just above, and
+# excluded for the same reason. An SDK caller acts inside one workspace with a
+# key that already carries its resolved credentials; managing which
+# organization-scoped BYO key a workspace defaults to is a dashboard concern.
+GET /v1/organizations/me/provider-keys                                    # dashboard-only
+POST /v1/organizations/me/provider-keys                                   # dashboard-only
+PATCH /v1/organizations/me/provider-keys/{key_id}                         # dashboard-only
+DELETE /v1/organizations/me/provider-keys/{key_id}                        # dashboard-only
+POST /v1/organizations/me/provider-keys/{key_id}/archive                  # dashboard-only
+POST /v1/organizations/me/provider-keys/{key_id}/restore                  # dashboard-only
+POST /v1/organizations/me/provider-keys/{key_id}/default                  # dashboard-only
+GET /v1/workspaces/{workspace_id}/provider-keys                           # dashboard-only
+PATCH /v1/workspaces/{workspace_id}/provider-keys/{key_id}                # dashboard-only
+DELETE /v1/workspaces/{workspace_id}/provider-keys/{key_id}               # dashboard-only
+GET /v1/workspaces/{workspace_id}/provider-keys/{key_id}/models           # dashboard-only
+POST /v1/workspaces/{workspace_id}/provider-keys/{key_id}/models          # dashboard-only
+DELETE /v1/workspaces/{workspace_id}/provider-keys/{key_id}/models/{model} # dashboard-only

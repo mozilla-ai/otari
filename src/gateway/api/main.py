@@ -19,6 +19,7 @@ from gateway.api.routes import (
     messages,
     models,
     moderations,
+    org_provider_keys,
     organization_pricing,
     organizations,
     otlp,
@@ -76,6 +77,8 @@ def register_routers(app: FastAPI, config: GatewayConfig) -> None:
     app.include_router(workspaces.router)
     app.include_router(invitations.router)
     app.include_router(workspace_member_budget_policies.router)
+    app.include_router(org_provider_keys.org_router)
+    app.include_router(org_provider_keys.workspace_router)
     app.include_router(budgets.router)
     app.include_router(scoped_budgets.router)
     app.include_router(aliases.router)

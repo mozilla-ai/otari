@@ -65,6 +65,11 @@ from gateway.services.search_tool_store_service import (
 )
 from gateway.services.secret_box import validate_secret_key
 from gateway.services.tenancy.errors import TenancyError
+from gateway.services.tenancy.org_provider_key_service import (
+    load_org_provider_keys_at_startup,
+    reset_org_provider_cache,
+    run_org_provider_refresher,
+)
 from gateway.services.tool_settings_service import apply_overrides_from_db as apply_tool_overrides_from_db
 from gateway.version import __version__
 
@@ -237,6 +242,7 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
         alias_refresher: asyncio.Task[None] | None = None
         policy_refresher: asyncio.Task[None] | None = None
         provider_refresher: asyncio.Task[None] | None = None
+        org_provider_refresher: asyncio.Task[None] | None = None
         search_tool_refresher: asyncio.Task[None] | None = None
         price_refresher: asyncio.Task[None] | None = None
         discovery_refresher: asyncio.Task[None] | None = None
@@ -281,6 +287,12 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
                 # provider added at runtime is visible to everything that reads
                 # config.providers (pricing seeding, discovery, dispatch).
                 await load_providers_at_startup(session, config)
+                # Organization-scoped provider keys (otari-ai#1748, otari#643):
+                # a disjoint overlay from the one above, keyed by
+                # (workspace_id, provider) rather than instance name. Empty on
+                # a fresh database (no workspace or key exists yet), the same
+                # posture load_providers_at_startup takes.
+                await load_org_provider_keys_at_startup(session)
                 await bootstrap_first_api_key(config, session)
                 await initialize_pricing_from_config(config, session)
                 await warn_if_require_pricing_without_pricing(config, session)
@@ -303,6 +315,10 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
             # config.providers synchronously, so the overlay is reloaded on a TTL
             # to converge sibling workers and replicas after a dashboard write.
             provider_refresher = asyncio.create_task(run_provider_refresher(config))
+            # Organization-scoped provider keys are the same shape, keyed by
+            # (workspace_id, provider) instead of instance name; see
+            # `services/tenancy/org_provider_key_service.py`'s module docstring.
+            org_provider_refresher = asyncio.create_task(run_org_provider_refresher())
             # Search tools are the provider overlay's twin: resolve_search_tool
             # reads config.search_tools synchronously, so the overlay is reloaded
             # on a TTL to converge sibling workers and replicas after a write.
@@ -345,6 +361,7 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
                 (alias_refresher, "alias"),
                 (policy_refresher, "policy"),
                 (provider_refresher, "provider"),
+                (org_provider_refresher, "organization provider key"),
                 (search_tool_refresher, "search tool"),
                 (price_refresher, "price snapshot"),
                 (discovery_refresher, "model discovery"),
@@ -357,6 +374,8 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
                 reset_policy_cache()
             if provider_refresher is not None:
                 reset_provider_cache()
+            if org_provider_refresher is not None:
+                reset_org_provider_cache()
             if search_tool_refresher is not None:
                 reset_search_tool_cache()
             if discovery_refresher is not None:

@@ -65,7 +65,8 @@ from gateway.services.pricing_service import (
 )
 from gateway.services.provider_kwargs import ResolvedProvider, resolve_provider_selector
 from gateway.services.scoped_budget_service import BudgetScopeRequest
-from gateway.services.workspace_scope import organization_for_key_id, workspace_for_key_id
+from gateway.services.tenancy.org_provider_key_service import cached_org_model_restriction
+from gateway.services.workspace_scope import organization_for_workspace_id, resolve_workspace_id
 
 ResultT = TypeVar("ResultT")
 
@@ -209,10 +210,17 @@ async def run_passthrough(
     started_at = time.monotonic()
     api_key, is_master_key = auth_result
     api_key_id = api_key.id if api_key else None
-    # Resolved once for this request: it decides both what the model costs and
-    # whether the free-model shortcut applies, and a master-key caller's
-    # workspace lookup is deliberately never memoized.
-    organization_id = await organization_for_key_id(db, api_key_id)
+    # Zero I/O for a keyed request (see `_pipeline.resolve_request_context`'s
+    # equivalent comment); only a master-key request pays a lookup. Fixed for
+    # the whole request, so this also becomes the usage row's workspace below.
+    workspace_id = await resolve_workspace_id(db, api_key)
+    # Derived from the workspace already resolved above, not via
+    # `organization_for_key_id` (which would re-derive the same workspace from
+    # `api_key_id` internally): a master-key request's workspace lookup is
+    # deliberately never memoized, so re-deriving it here would pay that cost
+    # twice for one request. Decides both what the model costs and whether the
+    # free-model shortcut applies.
+    organization_id = await organization_for_workspace_id(db, workspace_id)
     # A key flagged exclude_from_budget logs cost but is never reserved or folded
     # into users.spend. Threaded through the reservation handle (so reconcile skips
     # the spend write) and stamped on the usage row.
@@ -312,7 +320,7 @@ async def run_passthrough(
         # The reservation is already held, so refund it before mapping an
         # unresolvable selector to 400; otherwise the estimate leaks.
         try:
-            resolved = resolve_provider_selector(config, model, user_id)
+            resolved = resolve_provider_selector(config, model, user_id, workspace_id=workspace_id)
         except (ValueError, AnyLLMError) as exc:
             await refund_reservation(db, reservation)
             await _log_rejection(
@@ -344,7 +352,7 @@ async def run_passthrough(
                 raise
     else:
         try:
-            resolved = resolve_provider_selector(config, model, user_id)
+            resolved = resolve_provider_selector(config, model, user_id, workspace_id=workspace_id)
         except (ValueError, AnyLLMError) as exc:
             # Nothing is reserved yet on this branch, so there is no refund to do.
             await _log_rejection(
@@ -412,9 +420,30 @@ async def run_passthrough(
             detail=not_allowed_detail,
         )
 
-    # Resolved here rather than in the closure below: the builder is
-    # synchronous, and the workspace is fixed for the whole request anyway.
-    usage_workspace_id = await workspace_for_key_id(db, api_key_id)
+    # Organization-scoped model restriction (otari#643): mirrors `_pipeline.py`'s
+    # equivalent gate. Applies only when the selector did not name a
+    # configured instance, the same condition `provider_kwargs.get_provider_kwargs`
+    # uses to decide whether to consult the organization overlay at all.
+    if workspace_id is not None and resolved.instance not in config.providers:
+        org_allowlist = cached_org_model_restriction(workspace_id, resolved.provider.value)
+        if org_allowlist is not None and resolved.model not in org_allowlist:
+            await refund_reservation(db, reservation)
+            not_allowed_detail = model_not_allowed_detail(model)
+            await _log_rejection(
+                not_allowed_detail,
+                row_model=resolved.model,
+                row_provider=resolved.instance,
+                status_code=status.HTTP_403_FORBIDDEN,
+            )
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=not_allowed_detail,
+            )
+
+    # Already resolved above (needed there for organization-scoped provider
+    # credentials); reused here rather than re-derived, since it is fixed for
+    # the whole request either way.
+    usage_workspace_id = workspace_id
 
     def _usage_row(row_status: str, **outcome: Any) -> UsageLog:
         """Build this request's usage row, varying only the outcome columns.

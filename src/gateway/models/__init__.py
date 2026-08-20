@@ -15,4 +15,4 @@ schema-less request/response modules beside them (`guardrails`, `mcp`,
 `routing`) contribute nothing to the metadata and stay out of it.
 """
 
-from gateway.models import entities, tenancy  # noqa: F401
+from gateway.models import entities, provider_keys, tenancy  # noqa: F401

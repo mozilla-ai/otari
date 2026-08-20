@@ -40,7 +40,12 @@ from gateway.services.model_access import is_model_allowed, model_not_allowed_de
 from gateway.services.pricing_service import find_model_pricing
 from gateway.services.provider_kwargs import get_provider_kwargs, resolve_provider_selector
 from gateway.services.scoped_budget_service import BudgetScopeRequest
-from gateway.services.workspace_scope import organization_for_key_id, workspace_for_key_id
+from gateway.services.tenancy.org_provider_key_service import cached_org_model_restriction
+from gateway.services.workspace_scope import (
+    organization_for_workspace_id,
+    resolve_workspace_id,
+    workspace_for_key_id,
+)
 
 router = APIRouter(prefix="/v1/batches", tags=["batches"])
 
@@ -140,19 +145,49 @@ def _parse_provider(provider: str) -> LLMProvider:
         ) from e
 
 
-def _resolve_batch_provider(config: GatewayConfig, provider: str) -> tuple[LLMProvider, dict[str, Any]]:
+def _resolve_batch_provider(
+    config: GatewayConfig, provider: str, *, workspace_id: uuid.UUID | None = None
+) -> tuple[LLMProvider, dict[str, Any]]:
     """Resolve a batch ``provider`` query param into (implementation, kwargs).
 
     The value is either a configured instance name (resolved to its
     ``provider_type`` with the instance's credentials) or a real any-llm
     provider, mirroring what ``create_batch`` echoes back as the batch's
-    ``provider`` field.
+    ``provider`` field. ``workspace_id`` reaches ``get_provider_kwargs``
+    unchanged: consulted only when ``provider`` names no configured instance,
+    the same organization-scoped fallback ``create_batch`` uses, so a batch
+    created against an organization key stays reachable by every later
+    lifecycle call (retrieve, cancel, list, results) rather than only at
+    creation. For retrieve/cancel/results the caller passes the batch's own
+    stored ``workspace_id`` (see ``_lifecycle_workspace_id``), not necessarily
+    its own current one, so credentials resolve from the organization that
+    created the batch even for a master-key or cross-workspace call;
+    ``list_batches`` has no batch id to key off of and keeps using the
+    caller's own workspace.
     """
     if provider in config.providers:
         impl = LLMProvider(config.provider_instance_type(provider))
         return impl, get_provider_kwargs(config, impl, instance=provider)
     impl = _parse_provider(provider)
-    return impl, get_provider_kwargs(config, impl)
+    return impl, get_provider_kwargs(config, impl, workspace_id=workspace_id)
+
+
+async def _lifecycle_workspace_id(
+    db: AsyncSession, record: BatchRecord | None, api_key: APIKey | None
+) -> uuid.UUID:
+    """Which workspace's organization-scoped credentials a lifecycle call should use.
+
+    The batch's own stored ``workspace_id`` when there is a record that has one
+    (the workspace it was *created* in), so a master-key or legitimately
+    cross-workspace retrieve/cancel/results still resolves the right
+    organization's key. Falls back to the caller's own workspace only for
+    legacy batches with no record, or one predating this column -- the same
+    fallback shape ``_owns_batch``/``_authorize_legacy_batch`` already use for
+    ownership.
+    """
+    if record is not None and record.workspace_id is not None:
+        return record.workspace_id
+    return await resolve_workspace_id(db, api_key)
 
 
 def _owns_batch(batch: Batch, api_key: APIKey | None, is_master_key: bool) -> bool:
@@ -172,35 +207,56 @@ def _owns_batch(batch: Batch, api_key: APIKey | None, is_master_key: bool) -> bo
     return owner == requester
 
 
-async def _authorize_batch(
-    db: AsyncSession,
-    batch: Batch,
+def _authorize_record(
+    record: BatchRecord,
     batch_id: str,
     api_key: APIKey | None,
     is_master_key: bool,
-) -> BatchRecord | None:
-    """Authorize access to ``batch`` and return its stored record, if any.
+) -> None:
+    """Authorize access to a batch using only its stored record. No upstream call needed.
 
-    When a local record exists the check is strict: only its owner (or the
-    master key) may access the batch, regardless of whether the provider
-    round-tripped the metadata marker. Legacy batches with no record fall back to
-    the metadata-anchored :func:`_owns_batch` check. Raises 404 (not 403) on
-    denial so a foreign key cannot probe which batch ids exist.
+    Deliberately callable *before* the batch is retrieved from the provider:
+    ``record.workspace_id`` decides which organization's BYO credential a
+    lifecycle call dispatches with (see :func:`_lifecycle_workspace_id`), so
+    checking ownership only after that dispatch would let an unauthorized
+    caller cause the gateway to spend another organization's provider
+    credential before ever learning the batch is not theirs. Only the
+    strict, record-based check needs to run this early; the legacy,
+    metadata-anchored fallback (:func:`_authorize_legacy_batch`) has no such
+    risk, because a record-less batch has no stored workspace to leak --
+    credentials there already resolve to the caller's own.
+
+    Raises 404 (not 403) on denial so a foreign key cannot probe which batch
+    ids exist.
     """
-    record = await get_batch_record(db, batch_id)
     if is_master_key:
-        return record
-    if record is not None:
-        requester = str(api_key.user_id) if api_key and api_key.user_id else None
-        authorized = record.user_id == requester
-    else:
-        authorized = _owns_batch(batch, api_key, is_master_key)
-    if not authorized:
+        return
+    requester = str(api_key.user_id) if api_key and api_key.user_id else None
+    if record.user_id != requester:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Batch '{batch_id}' not found",
         )
-    return record
+
+
+def _authorize_legacy_batch(
+    batch: Batch,
+    batch_id: str,
+    api_key: APIKey | None,
+    is_master_key: bool,
+) -> None:
+    """Authorize a record-less (legacy) batch via the provider-side metadata marker.
+
+    Only reached when :func:`get_batch_record` found no row, so this is
+    necessarily after the batch has already been fetched from the provider
+    (the metadata marker lives on the provider's own object); see
+    :func:`_authorize_record` for why that ordering is safe only in this case.
+    """
+    if not _owns_batch(batch, api_key, is_master_key):
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Batch '{batch_id}' not found",
+        )
 
 
 async def _retrieve_batch_or_502(
@@ -278,8 +334,11 @@ async def create_batch(
 
     rate_limit_info = check_rate_limit(raw_request, user_id)
 
+    # Zero I/O for a keyed request (see `_pipeline.resolve_request_context`'s
+    # equivalent comment); only a master-key request pays a lookup.
+    workspace_id = await resolve_workspace_id(db, api_key)
     try:
-        resolved = resolve_provider_selector(config, request.model, user_id)
+        resolved = resolve_provider_selector(config, request.model, user_id, workspace_id=workspace_id)
     except (ValueError, AnyLLMError) as exc:
         _raise_for_unresolvable_model(request.model, exc)
     provider, model = resolved.provider, resolved.model
@@ -295,6 +354,18 @@ async def create_batch(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=model_not_allowed_detail(request.model),
         )
+
+    # Organization-scoped model restriction (otari#643): mirrors `_pipeline.py`'s
+    # equivalent gate. Applies only when the selector did not name a
+    # configured instance, the same condition `provider_kwargs.get_provider_kwargs`
+    # uses to decide whether to consult the organization overlay at all.
+    if workspace_id is not None and resolved.instance not in config.providers:
+        org_allowlist = cached_org_model_restriction(workspace_id, provider.value)
+        if org_allowlist is not None and model not in org_allowlist:
+            raise HTTPException(
+                status_code=status.HTTP_403_FORBIDDEN,
+                detail=model_not_allowed_detail(request.model),
+            )
 
     # Validate provider supports batch operations
     provider_class = AnyLLM.get_provider_class(provider)
@@ -322,8 +393,11 @@ async def create_batch(
         counts_toward_budget=not budget_exempt,
         scope=BudgetScopeRequest(api_key=api_key, provider_instance=resolved.instance),
         # So the free-model shortcut reads this organization's rate, the same one
-        # the results are priced at when they are retrieved.
-        organization_id=await organization_for_key_id(db, api_key_id),
+        # the results are priced at when they are retrieved. Derived from the
+        # workspace already resolved above (not `organization_for_key_id`,
+        # which would re-derive it from `api_key_id` and pay a master-key
+        # request's un-memoized workspace lookup a second time).
+        organization_id=await organization_for_workspace_id(db, workspace_id),
     )
 
     # Stamp the billed user into the provider-side metadata so ownership can be
@@ -405,6 +479,7 @@ async def create_batch(
         user_id=user_id,
         api_key_id=api_key_id,
         model=model,
+        workspace_id=workspace_id,
     )
 
     if rate_limit_info:
@@ -427,10 +502,16 @@ async def retrieve_batch(
 ) -> dict[str, Any]:
     """Retrieve the status of a batch."""
     api_key, is_master_key = auth_result
-    provider_enum, provider_kwargs = _resolve_batch_provider(config, provider)
+    record = await get_batch_record(db, batch_id)
+    if record is not None:
+        _authorize_record(record, batch_id, api_key, is_master_key)
+    provider_enum, provider_kwargs = _resolve_batch_provider(
+        config, provider, workspace_id=await _lifecycle_workspace_id(db, record, api_key)
+    )
 
     batch = await _retrieve_batch_or_502(provider_enum, batch_id, provider, provider_kwargs)
-    await _authorize_batch(db, batch, batch_id, api_key, is_master_key)
+    if record is None:
+        _authorize_legacy_batch(batch, batch_id, api_key, is_master_key)
 
     response_data = batch.model_dump()
     response_data["provider"] = provider
@@ -448,10 +529,16 @@ async def cancel_batch(
 ) -> dict[str, Any]:
     """Cancel a batch."""
     api_key, is_master_key = auth_result
-    provider_enum, provider_kwargs = _resolve_batch_provider(config, provider)
+    record = await get_batch_record(db, batch_id)
+    if record is not None:
+        _authorize_record(record, batch_id, api_key, is_master_key)
+    provider_enum, provider_kwargs = _resolve_batch_provider(
+        config, provider, workspace_id=await _lifecycle_workspace_id(db, record, api_key)
+    )
 
     existing = await _retrieve_batch_or_502(provider_enum, batch_id, provider, provider_kwargs)
-    await _authorize_batch(db, existing, batch_id, api_key, is_master_key)
+    if record is None:
+        _authorize_legacy_batch(existing, batch_id, api_key, is_master_key)
 
     try:
         batch: Batch = await acancel_batch(
@@ -490,7 +577,9 @@ async def list_batches(
     may contain fewer than ``limit`` items.
     """
     api_key, is_master_key = auth_result
-    provider_enum, provider_kwargs = _resolve_batch_provider(config, provider)
+    provider_enum, provider_kwargs = _resolve_batch_provider(
+        config, provider, workspace_id=await resolve_workspace_id(db, api_key)
+    )
 
     list_kwargs: dict[str, Any] = {**provider_kwargs}
     if after is not None:
@@ -549,10 +638,19 @@ async def retrieve_batch_results(
     api_key, is_master_key = auth_result
     api_key_id = api_key.id if api_key else None
 
-    provider_enum, provider_kwargs = _resolve_batch_provider(config, provider)
+    record = await get_batch_record(db, batch_id)
+    if record is not None:
+        _authorize_record(record, batch_id, api_key, is_master_key)
+    # The batch's originating workspace, reused below for pricing and the usage
+    # row: both attribute to the creator, exactly like the credentials just
+    # resolved from it, so one resolve serves all three rather than each
+    # re-deriving its own notion of "whose batch is this" from `api_key_id`.
+    origin_workspace_id = await _lifecycle_workspace_id(db, record, api_key)
+    provider_enum, provider_kwargs = _resolve_batch_provider(config, provider, workspace_id=origin_workspace_id)
 
     batch = await _retrieve_batch_or_502(provider_enum, batch_id, provider, provider_kwargs)
-    record = await _authorize_batch(db, batch, batch_id, api_key, is_master_key)
+    if record is None:
+        _authorize_legacy_batch(batch, batch_id, api_key, is_master_key)
 
     # Attribute usage to the batch owner: the stored record when present (strict,
     # so a master-key retrieval bills the true owner), else the metadata marker
@@ -609,26 +707,20 @@ async def retrieve_batch_results(
             completion_tokens += usage.completion_tokens or 0
             total_tokens += usage.total_tokens or 0
 
-    # Rates and the usage row's workspace follow the key that CREATED the batch,
-    # for the same reason the budget exemption above does and the owner
-    # attribution before it: the cost is billed to that key's owner, so it has to
-    # be priced at that key's organization and recorded in its workspace. Scoping
-    # to the retriever would let a master-key retrieval, or a second key of the
-    # same user in another organization, settle the batch at rates its owner never
-    # negotiated. A record with no originating key (it was deleted) falls back to
-    # the retriever, which is the only organization still knowable.
-    #
-    # Resolved before the token check, because the usage row below is written
-    # whether or not there were billable tokens.
-    billing_key_id = record.api_key_id if record is not None and record.api_key_id is not None else api_key_id
-
     cost: float | None = None
     if total_tokens:
+        # Rates follow the batch's originating workspace (`origin_workspace_id`,
+        # resolved above), for the same reason the budget exemption above and
+        # the owner attribution before it do: the cost is billed to the
+        # creator, so it has to be priced at the creator's organization.
+        # Scoping to the retriever would let a master-key retrieval, or a
+        # second key of the same user in another organization, settle the
+        # batch at rates its owner never negotiated.
         pricing = await find_model_pricing(
             db,
             provider_enum.value,
             batch_model,
-            organization_id=await organization_for_key_id(db, billing_key_id),
+            organization_id=await organization_for_workspace_id(db, origin_workspace_id),
         )
         if pricing:
             cost = (prompt_tokens / 1_000_000) * pricing.input_price_per_million + (
@@ -673,7 +765,7 @@ async def retrieve_batch_results(
             counts_toward_budget=not batch_exempt,
             # The creator's workspace, matching the user and the rates this row
             # was priced at; see the note on ``log_batch_usage``.
-            workspace_id=await workspace_for_key_id(db, billing_key_id),
+            workspace_id=origin_workspace_id,
         )
         if record is not None:
             if cost and user_id and not batch_exempt:

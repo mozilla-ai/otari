@@ -2098,6 +2098,471 @@
     {
       "item": [
         {
+          "name": "List Org Provider Keys",
+          "request": {
+            "description": "List the caller's organization's provider keys. Any active member may read it.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "provider-keys"
+              ],
+              "query": [
+                {
+                  "description": "Include archived keys.",
+                  "disabled": true,
+                  "key": "include_archived",
+                  "value": ""
+                },
+                {
+                  "description": "Number of records to skip",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "Maximum number of records to return",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/provider-keys?include_archived=&skip=&limit="
+            }
+          }
+        },
+        {
+          "name": "Create Org Provider Key",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"provider\": \"string\",\n  \"name\": \"string\"\n}"
+            },
+            "description": "Create a provider key in the caller's organization. Organization owners and admins only.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "provider-keys"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/provider-keys"
+            }
+          }
+        },
+        {
+          "name": "Update Org Provider Key",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"api_base\": \"string\",\n  \"api_key\": \"string\",\n  \"client_args\": {},\n  \"name\": \"string\"\n}"
+            },
+            "description": "Change a key's name, credential, base URL, or client args. Organization owners and admins only.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "provider-keys",
+                ":key_id"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/provider-keys/:key_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Org Provider Key",
+          "request": {
+            "description": "Permanently delete an archived key. Organization owners and admins only.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "provider-keys",
+                ":key_id"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/provider-keys/:key_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Archive Org Provider Key",
+          "request": {
+            "description": "Archive a key. Organization owners and admins only.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "provider-keys",
+                ":key_id",
+                "archive"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/provider-keys/:key_id/archive",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Set Org Provider Key Default",
+          "request": {
+            "description": "Make a key the organization's default for its provider. Organization owners and admins only.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "provider-keys",
+                ":key_id",
+                "default"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/provider-keys/:key_id/default",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Restore Org Provider Key",
+          "request": {
+            "description": "Restore an archived key. Organization owners and admins only.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "provider-keys",
+                ":key_id",
+                "restore"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/provider-keys/:key_id/restore",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Workspace Provider Keys",
+          "request": {
+            "description": "The effective view of every key visible to this workspace. Any member of the workspace may read it.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "provider-keys"
+              ],
+              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/provider-keys",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Set Workspace Provider Key Override",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"disabled\": false,\n  \"is_default\": false\n}"
+            },
+            "description": "Pin or disable a key for this workspace. Organization owners/admins or this workspace's owners/admins.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "provider-keys",
+                ":key_id"
+              ],
+              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/provider-keys/:key_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Reset Workspace Provider Key Override",
+          "request": {
+            "description": "Remove this workspace's override, reverting to full inheritance. Idempotent.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "provider-keys",
+                ":key_id"
+              ],
+              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/provider-keys/:key_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "List Workspace Provider Key Model Restrictions",
+          "request": {
+            "description": "List this workspace's model allow-list for a key. Empty means every model is allowed.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "provider-keys",
+                ":key_id",
+                "models"
+              ],
+              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/provider-keys/:key_id/models",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Add Workspace Provider Key Model Restriction",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"model\": \"string\"\n}"
+            },
+            "description": "Narrow this workspace's allow-list for a key to include one more model. Idempotent.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "provider-keys",
+                ":key_id",
+                "models"
+              ],
+              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/provider-keys/:key_id/models",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Remove Workspace Provider Key Model Restriction",
+          "request": {
+            "description": "Remove one model from this workspace's allow-list for a key. Idempotent.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "provider-keys",
+                ":key_id",
+                "models",
+                ":model"
+              ],
+              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/provider-keys/:key_id/models/:model",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                },
+                {
+                  "description": "path parameter",
+                  "key": "model",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "provider-keys"
+    },
+    {
+      "item": [
+        {
           "name": "List Pricing",
           "request": {
             "description": "List all model pricing.",

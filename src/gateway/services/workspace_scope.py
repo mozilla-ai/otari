@@ -11,6 +11,17 @@ only two sources:
   default workspace: the operator acting deployment-wide, which is what the
   master key means.
 
+This id is not only a billing label. Since otari#643, it also decides *whose*
+organization-scoped provider keys satisfy a bare ``provider:model`` selector
+(one naming no ``config.providers`` instance) via
+``services/provider_kwargs.get_provider_kwargs``: a keyed request resolves
+through its own workspace's organization, and a **master-key** request
+therefore resolves through the default workspace's organization, not through
+every organization the deployment holds. An operator running several
+organizations behind one gateway who calls a bare selector with the master
+key gets the default workspace's key or none, the same as any other
+deployment-wide write this module resolves.
+
 The default is resolved per call and deliberately not memoized. ``RESTRICT``
 looks like it makes a cached id safe, since a workspace holding request-plane
 rows cannot be deleted, but it does not cover a default holding *nothing*, which

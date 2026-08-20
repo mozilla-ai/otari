@@ -18,6 +18,7 @@ from gateway.log_config import logger
 from gateway.models.entities import BatchRecord
 
 if TYPE_CHECKING:
+    import uuid
     from collections.abc import Iterable
 
     from sqlalchemy.ext.asyncio import AsyncSession
@@ -31,12 +32,17 @@ async def record_batch(
     user_id: str,
     api_key_id: str | None,
     model: str,
+    workspace_id: uuid.UUID | None = None,
 ) -> None:
     """Persist an ownership record for a newly created batch.
 
     Best-effort: the provider has already accepted the batch, so a failure to
     persist the record must not fail the request. Ownership then degrades to the
     metadata-anchored fallback (the ``otari_user_id`` marker) for that batch.
+
+    ``workspace_id`` anchors which workspace's organization-scoped provider key
+    (otari#643) later lifecycle calls (retrieve/cancel/results) should resolve
+    credentials from, rather than the retriever's own current workspace.
     """
     db.add(
         BatchRecord(
@@ -45,6 +51,7 @@ async def record_batch(
             user_id=user_id,
             api_key_id=api_key_id,
             model=model,
+            workspace_id=workspace_id,
         )
     )
     try:

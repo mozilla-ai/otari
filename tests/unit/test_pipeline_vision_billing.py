@@ -7,6 +7,7 @@ even when the top-up rejects with 402, while the main reservation is still
 refunded.
 """
 
+import uuid
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -36,13 +37,17 @@ class _Recorder:
     def install(self, monkeypatch: pytest.MonkeyPatch, *, topup_status: int | None) -> None:
         async def fake_verify(*args: Any, **kwargs: Any) -> tuple[Any, bool]:
             # allowed_models mirrors the real APIKey column (None = unrestricted); the
-            # pipeline's model-access check reads it.
+            # pipeline's model-access check reads it. workspace_id mirrors the
+            # same column resolve_workspace_id reads for organization-scoped
+            # provider keys (otari#643); a fixed value is fine, nothing here
+            # exercises that resolution.
             return SimpleNamespace(
                 id="key-1",
                 user_id="user-1",
                 allowed_models=None,
                 exclude_from_budget=False,
                 reject_user_mismatch=None,
+                workspace_id=uuid.uuid4(),
             ), False
 
         async def fake_find_pricing(*args: Any, **kwargs: Any) -> None:
@@ -54,10 +59,10 @@ class _Recorder:
         async def fake_resolve_allowlist(*args: Any, **kwargs: Any) -> None:
             return None
 
-        # Same reason: the preamble resolves the key's organization to pick up any
-        # rate override, which walks api_keys and workspace. None means "no
-        # override", which is what this test's deployment-wide pricing assumes.
-        async def fake_organization_for_key_id(*args: Any, **kwargs: Any) -> None:
+        # Same reason: the preamble resolves the already-known workspace's
+        # organization to pick up any rate override. None means "no override",
+        # which is what this test's deployment-wide pricing assumes.
+        async def fake_organization_for_workspace_id(*args: Any, **kwargs: Any) -> None:
             return None
 
         async def fake_reserve(*args: Any, **kwargs: Any) -> ReservationHandle:
@@ -82,7 +87,7 @@ class _Recorder:
         monkeypatch.setattr(pipeline, "check_rate_limit", lambda request, user_id: None)
         monkeypatch.setattr(pipeline, "find_model_pricing", fake_find_pricing)
         monkeypatch.setattr(pipeline, "resolve_request_allowlist", fake_resolve_allowlist)
-        monkeypatch.setattr(pipeline, "organization_for_key_id", fake_organization_for_key_id)
+        monkeypatch.setattr(pipeline, "organization_for_workspace_id", fake_organization_for_workspace_id)
         monkeypatch.setattr(pipeline, "reserve_budget", fake_reserve)
         monkeypatch.setattr(pipeline, "increase_reservation", fake_increase)
         monkeypatch.setattr(pipeline, "log_usage", fake_log_usage)

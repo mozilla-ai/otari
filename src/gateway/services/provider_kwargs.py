@@ -7,9 +7,25 @@ budgeting, and usage logs are keyed on, while the *implementation* is what
 any-llm is actually dispatched against. When an instance name is itself a real
 any-llm provider (the common case, no ``provider_type`` declared), the two
 coincide and behavior is identical to splitting the selector directly.
+
+**Organization-scoped provider keys** (otari-ai#1748, otari#643) are a second,
+disjoint credential source, consulted only when ``workspace_id`` is passed and
+only for a *bare* ``provider:model``/``provider/model`` selector, i.e. one with
+no matching ``config.providers`` instance. An ``instance:model`` selector
+always resolves through ``config.providers`` exactly as before and never
+touches organization-scoped keys, by construction: the two addressing schemes
+occupy disjoint selector shapes rather than one layering over the other. See
+``services/tenancy/org_provider_key_service.py`` for the overlay this reads.
+
+``workspace_id`` is per-request, not per-deployment: which organization's keys
+a master-key request's bare selector can reach is the default workspace's
+organization, not every organization the gateway holds. See
+``services/workspace_scope.py`` for why a master-key request resolves to that
+one workspace at all.
 """
 
 import os
+import uuid
 from dataclasses import dataclass
 from typing import Any
 
@@ -20,6 +36,7 @@ from gateway.auth.vertex_auth import setup_vertex_environment
 from gateway.core.config import GatewayConfig, provider_credential_env_names
 from gateway.services.alias_service import resolve_effective_alias
 from gateway.services.policy_store import resolve_effective_policy
+from gateway.services.tenancy.org_provider_key_service import cached_org_provider_kwargs
 
 # Keys that describe an instance to otari but are not credentials any-llm
 # understands, so they must be stripped before the provider call.
@@ -66,6 +83,8 @@ def get_provider_kwargs(
     config: GatewayConfig,
     provider: LLMProvider,
     instance: str | None = None,
+    *,
+    workspace_id: uuid.UUID | None = None,
 ) -> dict[str, Any]:
     """Get provider kwargs from config for any-llm calls.
 
@@ -76,6 +95,10 @@ def get_provider_kwargs(
         instance: Configured instance name to read credentials from. Defaults to
             ``provider.value`` so existing call sites that key by implementation
             keep working unchanged.
+        workspace_id: The requesting workspace, if any. Consulted only as a
+            fallback, when no ``config.providers`` entry answers ``lookup``:
+            organization-scoped keys never shadow an instance or config.yml
+            provider, they only fill the gap when neither exists.
 
     Returns:
         Dictionary of provider kwargs (credentials, client_args, etc.) with the
@@ -85,6 +108,8 @@ def get_provider_kwargs(
     lookup = instance if instance is not None else provider.value
     kwargs: dict[str, Any] = {}
     raw_config = config.providers.get(lookup)
+    if raw_config is None and workspace_id is not None:
+        raw_config = cached_org_provider_kwargs(workspace_id, provider.value)
     if raw_config is not None:
         provider_config = {k: v for k, v in raw_config.items() if k not in _INSTANCE_META_KEYS}
 
@@ -170,14 +195,21 @@ def split_selector(model_selector: str) -> tuple[str, str] | None:
 
 
 def resolve_provider_selector(
-    config: GatewayConfig, model_selector: str, user_id: str | None = None
+    config: GatewayConfig,
+    model_selector: str,
+    user_id: str | None = None,
+    *,
+    workspace_id: uuid.UUID | None = None,
 ) -> ResolvedProvider:
     """Resolve a request model selector into instance, implementation, and kwargs.
 
     A selector whose prefix names a configured instance resolves to that
     instance's ``provider_type`` (defaulting to the instance name). Otherwise the
     selector is split by any-llm directly, so unconfigured selectors and the
-    legacy ``provider/model`` form keep working exactly as before.
+    legacy ``provider/model`` form keep working exactly as before, and it is
+    this bare-selector branch alone that ``workspace_id`` reaches: an
+    instance-addressed selector never consults organization-scoped keys (see
+    the module docstring).
 
     A selector that names an alias, whether from ``config.yml`` or the
     ``model_aliases`` table, is first substituted with the alias target, then
@@ -188,7 +220,9 @@ def resolve_provider_selector(
     user's target. Omit it only for a selector that is not caller input (the
     operator-configured vision describe model), which is global by definition;
     omitting it for a request selector would silently ignore the caller's own
-    aliases and resolve the global one instead.
+    aliases and resolve the global one instead. ``workspace_id`` is the same
+    kind of omission: pass it for caller input, leave it unset for an
+    operator-configured or otherwise workspace-less resolution.
 
     Raises ``ValueError`` / ``AnyLLMError`` (from any-llm) for a selector that
     names neither a configured instance nor a known provider, mirroring the
@@ -230,7 +264,7 @@ def resolve_provider_selector(
         instance=provider.value,
         provider=provider,
         model=model,
-        kwargs=get_provider_kwargs(config, provider, instance=provider.value),
+        kwargs=get_provider_kwargs(config, provider, instance=provider.value, workspace_id=workspace_id),
         alias=model_selector if alias is not None else None,
     )
 

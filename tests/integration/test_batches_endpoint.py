@@ -993,6 +993,85 @@ def test_unrecorded_batch_results_logs_every_retrieval(
     assert len(results_logs) == 2
 
 
+def test_recorded_batch_foreign_caller_never_reaches_the_provider(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+) -> None:
+    """A foreign caller's request never dispatches to the provider at all.
+
+    Regression for a real ordering bug: `_authorize_record` must run *before*
+    the batch's originating-organization credential is used, not after the
+    provider has already been called with it. Before the fix, `aretrieve_batch`
+    ran first (spending the batch owner's credential) and only then was the
+    caller found unauthorized and refused. Asserting the mock was never
+    awaited is the only way to see that ordering; asserting the 404 alone (as
+    `test_recorded_batch_strict_ownership_ignores_missing_metadata` does)
+    would pass either way.
+    """
+    batch_id = _create_recorded_batch(client, api_key_header)
+
+    other_key_resp = client.post(
+        "/v1/keys",
+        json={"key_name": "foreign-caller", "user_id": "batch-foreign-caller"},
+        headers=master_key_header,
+    )
+    assert other_key_resp.status_code == 200
+    other_header = {API_KEY_HEADER: f"Bearer {other_key_resp.json()['key']}"}
+
+    with patch("gateway.api.routes.batches.aretrieve_batch", new_callable=AsyncMock) as mock_retrieve:
+        resp = client.get(f"/v1/batches/{batch_id}?provider=openai", headers=other_header)
+
+    assert resp.status_code == 404
+    mock_retrieve.assert_not_awaited()
+
+
+def test_recorded_batch_cancel_by_foreign_caller_never_reaches_the_provider(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+) -> None:
+    """Same ordering regression as retrieve, for the cancel endpoint."""
+    batch_id = _create_recorded_batch(client, api_key_header)
+
+    other_key_resp = client.post(
+        "/v1/keys",
+        json={"key_name": "foreign-canceller", "user_id": "batch-foreign-canceller"},
+        headers=master_key_header,
+    )
+    assert other_key_resp.status_code == 200
+    other_header = {API_KEY_HEADER: f"Bearer {other_key_resp.json()['key']}"}
+
+    with patch("gateway.api.routes.batches.aretrieve_batch", new_callable=AsyncMock) as mock_retrieve:
+        resp = client.post(f"/v1/batches/{batch_id}/cancel?provider=openai", headers=other_header)
+
+    assert resp.status_code == 404
+    mock_retrieve.assert_not_awaited()
+
+
+def test_recorded_batch_results_by_foreign_caller_never_reaches_the_provider(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+) -> None:
+    """Same ordering regression as retrieve, for the results endpoint."""
+    batch_id = _create_recorded_batch(client, api_key_header)
+
+    other_key_resp = client.post(
+        "/v1/keys",
+        json={"key_name": "foreign-results", "user_id": "batch-foreign-results"},
+        headers=master_key_header,
+    )
+    assert other_key_resp.status_code == 200
+    other_header = {API_KEY_HEADER: f"Bearer {other_key_resp.json()['key']}"}
+
+    with patch("gateway.api.routes.batches.aretrieve_batch", new_callable=AsyncMock) as mock_retrieve:
+        resp = client.get(f"/v1/batches/{batch_id}/results?provider=openai", headers=other_header)
+
+    assert resp.status_code == 404
+    mock_retrieve.assert_not_awaited()
+
+
 def test_recorded_batch_strict_ownership_ignores_missing_metadata(
     client: TestClient,
     master_key_header: dict[str, str],

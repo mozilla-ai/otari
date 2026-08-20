@@ -24,6 +24,7 @@ silently compiled down to one attempt is the failure mode this exists to prevent
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 
 from any_llm.exceptions import AnyLLMError
@@ -34,6 +35,7 @@ from gateway.models.guardrails import GuardrailConfig
 from gateway.models.routing import MAX_CANDIDATES, PolicySpec, WhenClause
 from gateway.services.model_access import is_model_allowed
 from gateway.services.provider_kwargs import resolve_provider_selector
+from gateway.services.tenancy.org_provider_key_service import cached_org_model_restriction
 from gateway.types.attempt import Attempt
 from gateway.types.budget_state import BudgetState
 
@@ -260,6 +262,7 @@ def compile_policy(
     allowlist: list[str] | None = None,
     budget: BudgetState | None = None,
     router_ordering: RouterOrdering | None = None,
+    workspace_id: uuid.UUID | None = None,
 ) -> CompiledPlan:
     """Turn ``spec`` into an ordered plan for one request.
 
@@ -272,6 +275,12 @@ def compile_policy(
     request; see :class:`RouterOrdering` for why it arrives as an argument. Omit
     it and a policy with a router compiles to its default target, which is what
     every synchronous surface (``explain``, the CLI) shows.
+
+    ``workspace_id`` reaches ``resolve_provider_selector`` unchanged: it is a
+    zero-I/O cache read (see that function), not a database call, so passing it
+    here does not compromise this function's own "no DB and no I/O" contract.
+    ``explain`` and the CLI omit it, which only affects a bare candidate
+    selector with no matching ``config.providers`` instance.
 
     Raises :class:`NoEligibleCandidatesError` when nothing survives. That error
     derives its own status from why the candidates went: 403 when access rules
@@ -297,7 +306,7 @@ def compile_policy(
 
     for selector, selection_reason in ordered:
         try:
-            resolved = resolve_provider_selector(config, selector)
+            resolved = resolve_provider_selector(config, selector, workspace_id=workspace_id)
         except (ValueError, AnyLLMError) as exc:
             # Startup validation rejects an unresolvable selector, so reaching
             # this means the provider set changed under a running gateway.
@@ -315,6 +324,24 @@ def compile_policy(
                 DroppedCandidate(selector, "not_allowed", "is not in allowed_models for this caller")
             )
             continue
+        # Organization-scoped model restriction (otari#643), same disjointness
+        # condition `provider_kwargs.get_provider_kwargs` uses: only a selector
+        # that named no configured instance can have resolved through an
+        # organization key, so only that case is subject to its restriction.
+        # Every candidate is checked here, not only the plan's head, so a
+        # `router`/`on_failure` fallover cannot serve a model the workspace's
+        # organization key excludes just because the head candidate passed.
+        if workspace_id is not None and resolved.instance not in config.providers:
+            org_allowlist = cached_org_model_restriction(workspace_id, resolved.provider.value)
+            if org_allowlist is not None and resolved.model not in org_allowlist:
+                dropped.append(
+                    DroppedCandidate(
+                        selector,
+                        "not_allowed",
+                        "is not in this workspace's organization-key model allow-list",
+                    )
+                )
+                continue
         if len(attempts) >= MAX_CANDIDATES:
             dropped.append(
                 DroppedCandidate(selector, "over_cap", f"exceeds the {MAX_CANDIDATES}-candidate cap")
