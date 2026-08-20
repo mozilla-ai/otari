@@ -34,7 +34,7 @@ from gateway.api.routes._pipeline import (
     run_standalone_non_stream,
     run_streaming_with_fallback,
 )
-from gateway.api.routes._platform import ResolvedAttempt
+from gateway.api.routes._platform import ResolvedAttempt, SettledCost
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
@@ -171,15 +171,43 @@ class _ChatAdapter:
             return None
         return GatewayUsage.from_completion_usage(result.usage)
 
+    def attach_cost(
+        self,
+        value: ChatCompletion | ChatCompletionChunk,
+        settlement: SettledCost,
+    ) -> bool:
+        if value.usage is None:
+            return False
+        value.usage = value.usage.model_copy(
+            update={
+                "cost_usd": settlement.cost_usd,
+                "pricing_source": settlement.pricing_source,
+            }
+        )
+        return True
+
+    def is_stream_cost_carrier(self, chunk: ChatCompletionChunk) -> bool:
+        # OpenAI's include_usage chunk carries usage and no choices. Requiring
+        # the terminal shape prevents usage stamped onto content chunks from
+        # making an early chunk the carrier and buffering the whole stream.
+        return chunk.usage is not None and not chunk.choices
+
     async def call_provider(self, kwargs: dict[str, Any]) -> ChatCompletion:
         return await acompletion(**kwargs)  # type: ignore[return-value]
 
     async def open_provider_stream(self, kwargs: dict[str, Any]) -> AsyncIterator[ChatCompletionChunk]:
         return await acompletion(**kwargs)  # type: ignore[return-value]
 
-    def prepare_stream_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
-        if kwargs.get("stream_options") is None:
-            kwargs["stream_options"] = {"include_usage": True}
+    def prepare_stream_kwargs(
+        self,
+        kwargs: dict[str, Any],
+        *,
+        require_usage: bool = False,
+    ) -> dict[str, Any]:
+        options = dict(kwargs.get("stream_options") or {})
+        if require_usage or "include_usage" not in options:
+            options["include_usage"] = True
+        kwargs["stream_options"] = options
         return kwargs
 
     async def run_tool_loop(

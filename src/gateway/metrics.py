@@ -68,6 +68,13 @@ ABANDONED_ATTEMPTS = Counter(
     registry=REGISTRY,
 )
 
+INLINE_COST_SETTLEMENTS = Counter(
+    "gateway_inline_cost_settlements",
+    "Inline platform cost settlement outcomes on the hybrid response path",
+    ["outcome"],
+    registry=REGISTRY,
+)
+
 RATE_LIMIT_HITS = Counter(
     "gateway_rate_limit_hits",
     "Total number of rate limit hits",
@@ -203,6 +210,11 @@ def record_abandoned_attempt(provider: str, model: str, reason: str, position: i
     plan length.
     """
     ABANDONED_ATTEMPTS.labels(provider=provider, model=model, reason=reason, position=str(position)).inc()
+
+
+def record_inline_cost_settlement(outcome: str) -> None:
+    """Record an attached, unattached, or timed-out inline settlement."""
+    INLINE_COST_SETTLEMENTS.labels(outcome=outcome).inc()
 
 
 def record_rate_limit_hit() -> None:

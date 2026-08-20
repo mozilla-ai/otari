@@ -67,6 +67,7 @@ from gateway.api.routes._platform import (
     _STREAM_FIRST_CHUNK_TIMEOUT_MS_TOOL_LOOP_KEY,
     ResolvedAttempt,
     ResolvedRoute,
+    SettledCost,
     _classify_upstream_error,
     _extract_platform_user_token,
     _report_platform_usage,
@@ -97,7 +98,7 @@ from gateway.core.env import otari_env
 from gateway.core.usage import cache_read_tokens_of, cache_write_1h_tokens_of, cache_write_tokens_of
 from gateway.inflight import track_request
 from gateway.log_config import logger
-from gateway.metrics import record_abandoned_attempt, record_cost, record_tokens
+from gateway.metrics import record_abandoned_attempt, record_cost, record_inline_cost_settlement, record_tokens
 from gateway.model_labeling import relabel_model
 from gateway.models.entities import ModelPricing, UsageLog
 from gateway.models.guardrails import GuardrailConfig
@@ -456,6 +457,14 @@ class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
 
     def extract_usage(self, result: ResultT) -> CompletionUsage | None: ...
 
+    def attach_cost(self, value: ResultT | ChunkT, settlement: SettledCost) -> bool:
+        """Attach settlement to an existing usage carrier; return whether one existed."""
+        ...
+
+    def is_stream_cost_carrier(self, chunk: ChunkT) -> bool:
+        """Whether this chunk is the terminal usage object that should carry cost."""
+        ...
+
     # When True (chat, responses) a successful non-streaming call without
     # provider usage data still writes a usage-log row; messages skips the row.
     log_success_without_usage: bool
@@ -464,7 +473,12 @@ class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
 
     async def open_provider_stream(self, kwargs: dict[str, Any]) -> AsyncIterator[ChunkT]: ...
 
-    def prepare_stream_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+    def prepare_stream_kwargs(
+        self,
+        kwargs: dict[str, Any],
+        *,
+        require_usage: bool = False,
+    ) -> dict[str, Any]:
         """Normalize per-call kwargs for a streaming dispatch (e.g. force
         ``stream=True`` or inject ``stream_options``)."""
         ...
@@ -2316,23 +2330,20 @@ async def open_stream(
 # Streaming settlement (the single copy of the callback bundle)
 # ---------------------------------------------------------------------------
 
-# Strong references to in-flight fire-and-forget usage-report tasks. Without
-# these, asyncio only holds a weak reference and a scheduled report can be
-# garbage collected before it runs; a done-callback discards each task once
-# it finishes.
-_USAGE_REPORT_TASKS: set[asyncio.Task[None]] = set()
+# Strong references to in-flight usage-report tasks. Reports awaited for inline
+# cost remain tracked after a timeout or caller cancellation, so accounting can
+# still complete in the background.
+_USAGE_REPORT_TASKS: set[asyncio.Task[SettledCost | None]] = set()
 
 
-def _schedule_usage_report(coro: Coroutine[Any, Any, None], correlation_id: str) -> None:
-    """Run a platform usage report in the background without losing it.
-
-    Keeps the task strongly referenced until it completes and logs a failed
-    report instead of letting the exception vanish with the task object.
-    """
+def _start_usage_report(
+    coro: Coroutine[Any, Any, SettledCost | None],
+    correlation_id: str,
+) -> asyncio.Task[SettledCost | None]:
     task = asyncio.create_task(coro)
     _USAGE_REPORT_TASKS.add(task)
 
-    def _finalize(finished: asyncio.Task[None]) -> None:
+    def _finalize(finished: asyncio.Task[SettledCost | None]) -> None:
         _USAGE_REPORT_TASKS.discard(finished)
         if finished.cancelled():
             return
@@ -2345,6 +2356,49 @@ def _schedule_usage_report(coro: Coroutine[Any, Any, None], correlation_id: str)
             )
 
     task.add_done_callback(_finalize)
+    return task
+
+
+def _schedule_usage_report(
+    coro: Coroutine[Any, Any, SettledCost | None],
+    correlation_id: str,
+) -> None:
+    """Run a platform usage report in the background without losing it."""
+    _start_usage_report(coro, correlation_id)
+
+
+def _inline_settlement_timeout_seconds(config: GatewayConfig) -> float:
+    return int(config.platform.get("usage_inline_timeout_ms", 1500)) / 1000
+
+
+async def _await_usage_report(
+    coro: Coroutine[Any, Any, SettledCost | None],
+    correlation_id: str,
+    config: GatewayConfig,
+) -> SettledCost | None:
+    """Await one report under the inline budget without cancelling accounting."""
+    task = _start_usage_report(coro, correlation_id)
+    try:
+        settlement = await asyncio.wait_for(
+            asyncio.shield(task),
+            timeout=_inline_settlement_timeout_seconds(config),
+        )
+    except asyncio.CancelledError:
+        raise
+    except (asyncio.TimeoutError, TimeoutError):
+        logger.info(
+            "Inline settlement budget expired; responding without cost correlation_id=%s",
+            correlation_id,
+        )
+        record_inline_cost_settlement("timeout")
+        return None
+    except Exception:
+        # The tracked task finalizer logs the failure without exposing details.
+        record_inline_cost_settlement("unattached")
+        return None
+    if settlement is None:
+        record_inline_cost_settlement("unattached")
+    return settlement
 
 
 def build_streaming_response(
@@ -2390,10 +2444,10 @@ def build_streaming_response(
     """
     platform_active = platform_correlation_id is not None
 
-    async def _on_complete(usage_data: CompletionUsage) -> None:
+    async def _on_complete(usage_data: CompletionUsage) -> SettledCost | None:
         if platform_active:
             assert platform_correlation_id is not None
-            _schedule_usage_report(
+            return await _await_usage_report(
                 _report_platform_usage(
                     config=config,
                     correlation_id=platform_correlation_id,
@@ -2403,10 +2457,10 @@ def build_streaming_response(
                     is_final_attempt=True,
                 ),
                 platform_correlation_id,
+                config,
             )
-            return
         if db is None or log_writer is None:
-            return
+            return None
         actual_cost = await log_usage(
             db=db,
             log_writer=log_writer,
@@ -2423,6 +2477,7 @@ def build_streaming_response(
         )
         if reservation is not None:
             await reconcile_reservation(db, reservation, actual_cost or 0.0)
+        return None
 
     async def _on_no_usage() -> None:
         # Stream completed but the provider sent no usage data. Report the
@@ -2430,7 +2485,7 @@ def build_streaming_response(
         # reservation per stream_missing_usage_policy instead of billing $0.
         if platform_active:
             assert platform_correlation_id is not None
-            _schedule_usage_report(
+            settlement = await _await_usage_report(
                 _report_platform_usage(
                     config=config,
                     correlation_id=platform_correlation_id,
@@ -2440,7 +2495,10 @@ def build_streaming_response(
                     is_final_attempt=True,
                 ),
                 platform_correlation_id,
+                config,
             )
+            if settlement is not None:
+                record_inline_cost_settlement("unattached")
             return
         if db is None or log_writer is None or reservation is None:
             return
@@ -2560,6 +2618,14 @@ def build_streaming_response(
                 return
         await refund_reservation(db, reservation)
 
+    def _attach_inline_cost(value: Any, settlement: SettledCost) -> bool:
+        if value is None:
+            record_inline_cost_settlement("unattached")
+            return False
+        attached = adapter.attach_cost(value, settlement)
+        record_inline_cost_settlement("attached" if attached else "unattached")
+        return attached
+
     # StreamingResponse builds its own response object, so headers we want on
     # the wire have to be passed in here; assigning to the dependency-injected
     # ``Response`` object does not propagate to streaming responses.
@@ -2582,6 +2648,9 @@ def build_streaming_response(
             on_incomplete=_on_incomplete,
             display_model=display_model,
             keepalive_interval_seconds=config.streaming_keepalive_interval_ms / 1000,
+            settle_before_done=platform_active,
+            is_cost_carrier=adapter.is_stream_cost_carrier if platform_active else None,
+            attach_settlement=_attach_inline_cost if platform_active else None,
         ),
         media_type="text/event-stream",
         headers=headers,
@@ -2890,6 +2959,7 @@ async def run_streaming_with_fallback(
     async def _build_for_attempt(attempt: ResolvedAttempt) -> AsyncIterator[ChunkT]:
         completion_kwargs = adapter.prepare_stream_kwargs(
             adapter.attempt_kwargs(attempt, base_request_fields),
+            require_usage=True,
         )
         if pool_for_loop is None:
             return await adapter.open_provider_stream(completion_kwargs)
@@ -3077,6 +3147,7 @@ async def run_platform_non_stream(
     # the success-response path (non-blocking), but also stash the error reports
     # so they can be flushed inline if the request ends in an exception.
     pending_error_reports: list[_PendingUsageReport] = []
+    successful_report: tuple[ResolvedAttempt, Any] | None = None
 
     def _report_attempt_outcome(
         attempt: ResolvedAttempt,
@@ -3085,6 +3156,10 @@ async def run_platform_non_stream(
         error_class: str | None,
         is_final_attempt: bool,
     ) -> None:
+        nonlocal successful_report
+        if outcome == "success":
+            successful_report = (attempt, usage)
+            return
         background_tasks.add_task(
             _report_platform_usage,
             config,
@@ -3095,16 +3170,15 @@ async def run_platform_non_stream(
             session_label,
             is_final_attempt=is_final_attempt,
         )
-        if outcome != "success":
-            pending_error_reports.append(
-                _PendingUsageReport(
-                    attempt_id=attempt.attempt_id,
-                    outcome=outcome,
-                    usage=usage,
-                    error_class=error_class,
-                    is_final_attempt=is_final_attempt,
-                )
+        pending_error_reports.append(
+            _PendingUsageReport(
+                attempt_id=attempt.attempt_id,
+                outcome=outcome,
+                usage=usage,
+                error_class=error_class,
+                is_final_attempt=is_final_attempt,
             )
+        )
 
     def _on_attempt_success(attempt: ResolvedAttempt) -> None:
         response.headers["X-Correlation-ID"] = attempt.attempt_id
@@ -3113,7 +3187,7 @@ async def run_platform_non_stream(
                 response.headers[key] = value
 
     try:
-        return await run_platform_attempts(
+        result = await run_platform_attempts(
             route=route,
             attempts=attempts,
             base_request_fields=base_request_fields,
@@ -3147,6 +3221,35 @@ async def run_platform_non_stream(
         # I/O during teardown.
         await _flush_pending_usage_reports(config, pending_error_reports, route.request_id, session_label)
         raise
+
+    if successful_report is None:
+        return result
+    attempt, usage = successful_report
+    settlement = await _await_usage_report(
+        _report_platform_usage(
+            config=config,
+            correlation_id=attempt.attempt_id,
+            outcome="success",
+            usage=usage,
+            session_label=session_label,
+            is_final_attempt=True,
+        ),
+        attempt.attempt_id,
+        config,
+    )
+    if settlement is not None:
+        try:
+            attached = adapter.attach_cost(result, settlement)
+        except Exception as exc:
+            logger.warning(
+                "Failed to attach inline settlement correlation_id=%s: %s",
+                attempt.attempt_id,
+                exc,
+            )
+            record_inline_cost_settlement("unattached")
+        else:
+            record_inline_cost_settlement("attached" if attached else "unattached")
+    return result
 
 
 def _attribution_for(ctx: RequestContext, attempt: Attempt, *, absorbed: bool = False) -> RoutingAttribution | None:

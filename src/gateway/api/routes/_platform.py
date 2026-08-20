@@ -25,7 +25,7 @@ from any_llm.types.completion import CompletionUsage
 from fastapi import HTTPException, Request, status
 from openai import APIConnectionError as _OpenAIAPIConnectionError
 from openai import APITimeoutError as _OpenAIAPITimeoutError
-from pydantic import BaseModel
+from pydantic import BaseModel, Field, ValidationError
 
 from gateway.core.config import GatewayConfig
 from gateway.core.usage import cache_read_tokens_of, cache_write_tokens_of
@@ -114,6 +114,27 @@ class ResolvedAttempt(BaseModel):
     Bedrock's ``region_name``/``aws_access_key_id``). Sourced only from the
     trusted platform peer, never from the caller's request body. See
     ``default_attempt_kwargs``, which merges these in non-overridably."""
+
+
+class SettledCost(BaseModel):
+    """An attachable platform settlement: a priced cost and the basis for it."""
+
+    cost_usd: str = Field(pattern=r"^-?\d+\.\d{6}$")
+    pricing_source: str
+
+
+class _UsagePricing(BaseModel):
+    source: str | None
+
+
+class _CompletedUsageSettlement(BaseModel):
+    correlation_id: uuid.UUID
+    status: Literal["completed"]
+    outcome: Literal["success"]
+    cost_usd: str = Field(pattern=r"^-?\d+\.\d{6}$")
+    currency: Literal["USD"]
+    usage_status: Literal["reported", "unavailable"]
+    pricing: _UsagePricing
 
 
 class ResolvedRoute(BaseModel):
@@ -956,7 +977,7 @@ async def _report_platform_usage(
     session_label: str | None = None,
     *,
     is_final_attempt: bool,
-) -> None:
+) -> SettledCost | None:
     """POST a usage record back to the platform with bounded retries.
 
     ``is_final_attempt`` tells the platform that no later planned fallback will
@@ -967,7 +988,7 @@ async def _report_platform_usage(
     """
     platform_base_url = config.platform.get("base_url")
     if not platform_base_url:
-        return
+        return None
 
     timeout_ms = int(config.platform.get("usage_timeout_ms", 5000))
     max_retries = int(config.platform.get("usage_max_retries", 3))
@@ -1007,16 +1028,52 @@ async def _report_platform_usage(
                 body=payload,
                 timeout_seconds=timeout_ms / 1000,
             )
-            if response.status_code == 204:
-                return
-            if response.status_code in _USAGE_NON_RETRYABLE_STATUS_CODES:
-                return
+            if response.status_code in {202, 204}:
+                return None
+            if response.status_code == 200:
+                if outcome != "success":
+                    return None
+                try:
+                    completed = _CompletedUsageSettlement.model_validate(response.json())
+                    expected_correlation_id = uuid.UUID(correlation_id)
+                except (ValueError, ValidationError):
+                    logger.warning(
+                        "Platform usage report returned an invalid completed body correlation_id=%s",
+                        correlation_id,
+                    )
+                    return None
+                if completed.correlation_id != expected_correlation_id:
+                    logger.warning(
+                        "Platform usage report correlation mismatch expected=%s received=%s",
+                        correlation_id,
+                        completed.correlation_id,
+                    )
+                    return None
+                if completed.usage_status != "reported" or completed.pricing.source is None:
+                    # Settlement succeeded but no pricing source was applied, so
+                    # ``cost_usd`` is a placeholder zero rather than a priced amount.
+                    # Inlining it would read as "this request was free".
+                    logger.debug(
+                        "Platform settlement is not attachable correlation_id=%s usage_status=%s priced=%s",
+                        correlation_id,
+                        completed.usage_status,
+                        completed.pricing.source is not None,
+                    )
+                    return None
+                return SettledCost(
+                    cost_usd=completed.cost_usd,
+                    pricing_source=completed.pricing.source,
+                )
+            if response.status_code in _USAGE_NON_RETRYABLE_STATUS_CODES or response.status_code == 410:
+                return None
             should_retry = response.status_code >= 500
         except (httpx.TimeoutException, httpx.NetworkError):
             should_retry = True
 
         if not should_retry or attempt == max_retries:
-            return
+            return None
 
         await asyncio.sleep(delay_seconds)
         delay_seconds *= 2
+
+    return None

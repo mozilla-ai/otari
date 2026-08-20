@@ -102,7 +102,18 @@ def test_hybrid_mode_sets_correlation_id_and_reports_usage(
             )
 
         usage_reports.append(body)
-        return httpx.Response(204)
+        return httpx.Response(
+            200,
+            json={
+                "correlation_id": body["correlation_id"],
+                "status": "completed",
+                "outcome": "success",
+                "cost_usd": "0.012345",
+                "currency": "USD",
+                "usage_status": "reported",
+                "pricing": {"source": "managed"},
+            },
+        )
 
     async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
         assert kwargs["model"] == "openai:gpt-4o-mini"
@@ -138,6 +149,8 @@ def test_hybrid_mode_sets_correlation_id_and_reports_usage(
 
     assert response.status_code == 200
     assert response.headers["X-Correlation-ID"] == "7af2c39d-4eb8-4b3f-8242-46a97f7d5e68"
+    assert response.json()["usage"]["cost_usd"] == "0.012345"
+    assert response.json()["usage"]["pricing_source"] == "managed"
     assert usage_reports == [
         {
             "correlation_id": "7af2c39d-4eb8-4b3f-8242-46a97f7d5e68",
@@ -838,6 +851,89 @@ def test_hybrid_mode_forwards_resolve_400_detail(
 # ---------------------------------------------------------------------------
 # Streaming fallback (v1.1)
 # ---------------------------------------------------------------------------
+
+
+def test_hybrid_mode_streaming_returns_inline_cost_and_forces_usage(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from collections.abc import AsyncIterator
+
+    from any_llm.types.completion import ChatCompletionChunk
+
+    attempt_id = "3f1b6a1e-0000-4000-8000-000000000005"
+
+    async def fake_post_platform(
+        url: str,
+        headers: dict[str, str],
+        body: dict[str, Any],
+        timeout_seconds: float,
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return httpx.Response(
+                200,
+                json={
+                    "request_id": "req-stream-inline",
+                    "fallback_enabled": False,
+                    "attempts": [
+                        {
+                            "attempt_id": attempt_id,
+                            "position": 0,
+                            "provider": "openai",
+                            "model": "gpt-4o-mini",
+                            "api_key": "sk-platform-key",
+                            "managed": True,
+                        }
+                    ],
+                },
+            )
+        return httpx.Response(
+            200,
+            json={
+                "correlation_id": body["correlation_id"],
+                "status": "completed",
+                "outcome": "success",
+                "cost_usd": "0.012345",
+                "currency": "USD",
+                "usage_status": "reported",
+                "pricing": {"source": "managed"},
+            },
+        )
+
+    async def fake_acompletion(**kwargs: Any) -> AsyncIterator[ChatCompletionChunk]:
+        assert kwargs["stream_options"]["include_usage"] is True
+
+        async def stream() -> AsyncIterator[ChatCompletionChunk]:
+            yield ChatCompletionChunk(
+                id="chunk-usage",
+                choices=[],
+                created=0,
+                model="gpt-4o-mini",
+                object="chat.completion.chunk",
+                usage=CompletionUsage(prompt_tokens=10, completion_tokens=7, total_tokens=17),
+            )
+
+        return stream()
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes.chat.acompletion", fake_acompletion)
+
+    with platform_client.stream(
+        "POST",
+        "/v1/chat/completions",
+        json={
+            "model": "gpt-4o-mini",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+            "stream_options": {"include_usage": False},
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    ) as response:
+        assert response.status_code == 200, response.read().decode()
+        wire = response.read().decode()
+
+    assert '"cost_usd":"0.012345"' in wire
+    assert '"pricing_source":"managed"' in wire
 
 
 def test_hybrid_mode_streaming_falls_through_on_first_attempt_failure(

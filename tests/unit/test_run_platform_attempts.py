@@ -14,6 +14,7 @@ from unittest.mock import AsyncMock
 
 import httpx
 import pytest
+from any_llm.types.completion import CompletionUsage
 from fastapi import HTTPException
 
 from gateway.api.routes import _platform
@@ -397,6 +398,211 @@ async def test_nonretryable_error_marks_first_attempt_final() -> None:
         )
 
     assert reports == [(attempts[0], "error", None, "http_400", True)]
+
+
+@pytest.mark.asyncio
+def _usage_config() -> GatewayConfig:
+    return cast(
+        GatewayConfig,
+        SimpleNamespace(
+            platform={"base_url": "http://platform", "usage_max_retries": 3},
+            platform_token="gw-test",
+        ),
+    )
+
+
+def _completed_usage_body(
+    *,
+    correlation_id: str = "3f1b6a1e-0000-4000-8000-000000000002",
+    cost_usd: str = "0.012345",
+    usage_status: str = "reported",
+    pricing_source: str | None = "managed",
+) -> dict[str, Any]:
+    return {
+        "request_id": "3f1b6a1e-0000-4000-8000-000000000001",
+        "correlation_id": correlation_id,
+        "status": "completed",
+        "outcome": "success",
+        "provider": "openai",
+        "model": "gpt-4o-mini",
+        "cost_usd": cost_usd,
+        "currency": "USD",
+        "usage_status": usage_status,
+        "usage": None,
+        "pricing": {"source": pricing_source, "reference": "price-1"},
+        "calculated_at": "2026-08-20T10:00:00Z",
+    }
+
+
+@pytest.mark.asyncio
+async def test_report_platform_usage_returns_completed_cost(monkeypatch: pytest.MonkeyPatch) -> None:
+    post_mock = AsyncMock(return_value=httpx.Response(200, json=_completed_usage_body()))
+    monkeypatch.setattr(_platform, "_post_platform", post_mock)
+
+    result = await _platform._report_platform_usage(
+        _usage_config(),
+        "3f1b6a1e-0000-4000-8000-000000000002",
+        "success",
+        CompletionUsage(prompt_tokens=10, completion_tokens=7, total_tokens=17),
+        is_final_attempt=True,
+    )
+
+    assert result == _platform.SettledCost(cost_usd="0.012345", pricing_source="managed")
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("status_code", [202, 204])
+async def test_report_platform_usage_returns_none_without_completed_cost(
+    monkeypatch: pytest.MonkeyPatch,
+    status_code: int,
+) -> None:
+    post_mock = AsyncMock(return_value=httpx.Response(status_code))
+    monkeypatch.setattr(_platform, "_post_platform", post_mock)
+
+    result = await _platform._report_platform_usage(
+        _usage_config(),
+        "3f1b6a1e-0000-4000-8000-000000000002",
+        "success",
+        None,
+        is_final_attempt=True,
+    )
+
+    assert result is None
+    post_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    ("cost_usd", "usage_status", "pricing_source", "expected"),
+    [
+        ("0.000000", "reported", None, None),
+        ("0.000000", "unavailable", None, None),
+        (
+            "0.000000",
+            "reported",
+            "managed",
+            _platform.SettledCost(cost_usd="0.000000", pricing_source="managed"),
+        ),
+    ],
+    ids=["unpriced", "unavailable", "priced-zero"],
+)
+async def test_report_platform_usage_applies_pricing_source_gate(
+    monkeypatch: pytest.MonkeyPatch,
+    cost_usd: str,
+    usage_status: str,
+    pricing_source: str | None,
+    expected: _platform.SettledCost | None,
+) -> None:
+    monkeypatch.setattr(
+        _platform,
+        "_post_platform",
+        AsyncMock(
+            return_value=httpx.Response(
+                200,
+                json=_completed_usage_body(
+                    cost_usd=cost_usd,
+                    usage_status=usage_status,
+                    pricing_source=pricing_source,
+                ),
+            )
+        ),
+    )
+
+    result = await _platform._report_platform_usage(
+        _usage_config(),
+        "3f1b6a1e-0000-4000-8000-000000000002",
+        "success",
+        None,
+        is_final_attempt=True,
+    )
+
+    assert result == expected
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "response",
+    [
+        httpx.Response(200, json={"status": "completed"}),
+        httpx.Response(410),
+        httpx.Response(
+            200,
+            json=_completed_usage_body(correlation_id="3f1b6a1e-0000-4000-8000-000000000003"),
+        ),
+    ],
+    ids=["malformed", "gone", "correlation-mismatch"],
+)
+async def test_report_platform_usage_ignores_non_attachable_responses(
+    monkeypatch: pytest.MonkeyPatch,
+    response: httpx.Response,
+) -> None:
+    post_mock = AsyncMock(return_value=response)
+    monkeypatch.setattr(_platform, "_post_platform", post_mock)
+
+    result = await _platform._report_platform_usage(
+        _usage_config(),
+        "3f1b6a1e-0000-4000-8000-000000000002",
+        "success",
+        None,
+        is_final_attempt=True,
+    )
+
+    assert result is None
+    post_mock.assert_awaited_once()
+
+
+@pytest.mark.asyncio
+async def test_report_platform_usage_ignores_failed_outcome_body(monkeypatch: pytest.MonkeyPatch) -> None:
+    post_mock = AsyncMock(
+        return_value=httpx.Response(
+            200,
+            json={
+                "request_id": "3f1b6a1e-0000-4000-8000-000000000001",
+                "status": "completed",
+                "outcome": "failed",
+                "cost_usd": "0.000000",
+                "currency": "USD",
+            },
+        )
+    )
+    monkeypatch.setattr(_platform, "_post_platform", post_mock)
+
+    result = await _platform._report_platform_usage(
+        _usage_config(),
+        "3f1b6a1e-0000-4000-8000-000000000002",
+        "error",
+        None,
+        is_final_attempt=True,
+    )
+
+    assert result is None
+
+
+@pytest.mark.asyncio
+async def test_report_platform_usage_retries_then_returns_completed_cost(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    post_mock = AsyncMock(
+        side_effect=[
+            httpx.Response(500),
+            httpx.Response(200, json=_completed_usage_body()),
+        ]
+    )
+    sleep_mock = AsyncMock()
+    monkeypatch.setattr(_platform, "_post_platform", post_mock)
+    monkeypatch.setattr(asyncio, "sleep", sleep_mock)
+
+    result = await _platform._report_platform_usage(
+        _usage_config(),
+        "3f1b6a1e-0000-4000-8000-000000000002",
+        "success",
+        None,
+        is_final_attempt=True,
+    )
+
+    assert result == _platform.SettledCost(cost_usd="0.012345", pricing_source="managed")
+    assert post_mock.await_count == 2
+    sleep_mock.assert_awaited_once_with(0.25)
 
 
 @pytest.mark.asyncio

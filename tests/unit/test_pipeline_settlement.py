@@ -26,9 +26,11 @@ from any_llm.types.completion import (
     ChatCompletionChunk,
     ChatCompletionMessage,
     Choice,
+    ChoiceDelta,
+    ChunkChoice,
     CompletionUsage,
 )
-from fastapi import HTTPException, Response
+from fastapi import BackgroundTasks, HTTPException, Response
 
 import gateway.api.routes._pipeline as pipeline
 from gateway.api.routes import chat, messages, responses
@@ -37,10 +39,12 @@ from gateway.api.routes._pipeline import (
     ToolContext,
     build_streaming_response,
     prepare_gateway_tools,
+    run_platform_non_stream,
     run_single_attempt_stream,
     run_standalone_non_stream,
     stream_first_chunk_timeout_seconds,
 )
+from gateway.api.routes._platform import ResolvedAttempt, ResolvedRoute, SettledCost
 from gateway.core.config import GatewayConfig
 from gateway.rate_limit import RateLimitInfo
 from gateway.services.budget_service import ReservationHandle
@@ -503,6 +507,141 @@ async def test_failed_platform_usage_report_logs_warning(
 
     assert warnings, "failed usage report was not logged"
     assert "corr-1" in warnings[0][1]
+
+
+@pytest.mark.asyncio
+async def test_platform_stream_holds_terminal_usage_until_cost_settles(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reporter_started = asyncio.Event()
+    reporter_release = asyncio.Event()
+
+    async def fake_report(**kwargs: Any) -> SettledCost:
+        reporter_started.set()
+        await reporter_release.wait()
+        return SettledCost(cost_usd="0.012345", pricing_source="managed")
+
+    monkeypatch.setattr(pipeline, "_report_platform_usage", fake_report)
+
+    async def stream() -> AsyncIterator[ChatCompletionChunk]:
+        yield ChatCompletionChunk(
+            id="content-1",
+            choices=[
+                ChunkChoice(
+                    delta=ChoiceDelta(content="hello", role="assistant"),
+                    finish_reason=None,
+                    index=0,
+                )
+            ],
+            created=0,
+            model="gpt-4",
+            object="chat.completion.chunk",
+            usage=None,
+        )
+        yield _chunk(CompletionUsage(prompt_tokens=1, completion_tokens=1, total_tokens=2))
+
+    response = build_streaming_response(
+        adapter=chat._ADAPTER,
+        stream=stream(),
+        provider=LLMProvider.OPENAI,
+        model="gpt-4",
+        config=GatewayConfig(platform={"usage_inline_timeout_ms": 1000}),
+        db=None,
+        log_writer=None,
+        api_key_id=None,
+        user_id=None,
+        rate_limit_info=None,
+        reservation=None,
+        platform_correlation_id="corr-1",
+    )
+    iterator = cast(AsyncIterator[Any], response.body_iterator)
+
+    first = await iterator.__anext__()
+    assert "hello" in first
+    pending_terminal: asyncio.Future[Any] = asyncio.ensure_future(iterator.__anext__())
+    await asyncio.wait_for(reporter_started.wait(), timeout=1)
+    assert not pending_terminal.done()
+
+    reporter_release.set()
+    terminal = await asyncio.wait_for(pending_terminal, timeout=1)
+    assert '"cost_usd":"0.012345"' in terminal
+    assert '"pricing_source":"managed"' in terminal
+
+
+@pytest.mark.asyncio
+async def test_inline_settlement_timeout_leaves_accounting_report_running(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    tracked: set[asyncio.Task[SettledCost | None]] = set()
+    monkeypatch.setattr(pipeline, "_USAGE_REPORT_TASKS", tracked)
+    started = asyncio.Event()
+    release = asyncio.Event()
+
+    async def slow_report() -> SettledCost:
+        started.set()
+        await release.wait()
+        return SettledCost(cost_usd="0.012345", pricing_source="managed")
+
+    result = await pipeline._await_usage_report(
+        slow_report(),
+        "corr-timeout",
+        GatewayConfig(platform={"usage_inline_timeout_ms": 10}),
+    )
+
+    assert result is None
+    assert started.is_set()
+    assert len(tracked) == 1
+    task = next(iter(tracked))
+    assert not task.cancelled()
+
+    release.set()
+    assert await asyncio.wait_for(task, timeout=1) == SettledCost(
+        cost_usd="0.012345",
+        pricing_source="managed",
+    )
+
+
+@pytest.mark.asyncio
+async def test_platform_non_stream_awaits_and_attaches_settlement(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    reporter_finished = False
+
+    async def fake_acompletion(**kwargs: Any) -> ChatCompletion:
+        return _completion(usage=_usage())
+
+    async def fake_report(**kwargs: Any) -> SettledCost:
+        nonlocal reporter_finished
+        await asyncio.sleep(0)
+        reporter_finished = True
+        return SettledCost(cost_usd="0.012345", pricing_source="managed")
+
+    monkeypatch.setattr(chat, "acompletion", fake_acompletion)
+    monkeypatch.setattr(pipeline, "_report_platform_usage", fake_report)
+    attempt = ResolvedAttempt(
+        attempt_id="3f1b6a1e-0000-4000-8000-000000000002",
+        position=0,
+        provider="openai",
+        model="gpt-4",
+        api_key="sk-test",
+        managed=True,
+    )
+
+    result = await run_platform_non_stream(
+        adapter=chat._ADAPTER,
+        route=ResolvedRoute(request_id="req-1", fallback_enabled=False, attempts=[attempt]),
+        base_request_fields={"messages": [{"role": "user", "content": "hi"}]},
+        tool_ctx=_tool_ctx(),
+        response=Response(),
+        background_tasks=BackgroundTasks(),
+        config=GatewayConfig(platform={"usage_inline_timeout_ms": 1000}),
+        rate_limit_info=None,
+    )
+
+    assert reporter_finished is True
+    assert result.usage is not None
+    assert getattr(result.usage, "cost_usd", None) == "0.012345"
+    assert getattr(result.usage, "pricing_source", None) == "managed"
 
 
 # ---------------------------------------------------------------------------

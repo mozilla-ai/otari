@@ -21,9 +21,11 @@ from gateway.model_labeling import relabel_model
 
 A = TypeVar("A")  # Attempt-like, opaque to this module
 C = TypeVar("C")  # Chunk type emitted by the upstream stream
+S = TypeVar("S")  # Settlement type, opaque to this module
 
 
 DEFAULT_FIRST_CHUNK_TIMEOUT_SECONDS = 2.0
+_MAX_TERMINAL_BUFFER_CHUNKS = 4
 
 
 @dataclass(frozen=True)
@@ -148,13 +150,16 @@ async def streaming_generator(
     format_chunk: Callable[[Any], str],
     extract_usage: Callable[[Any], CompletionUsage | None],
     fmt: StreamFormat,
-    on_complete: Callable[[CompletionUsage], Awaitable[None]],
+    on_complete: Callable[[CompletionUsage], Awaitable[S | None]],
     on_error: Callable[[BaseException], Awaitable[None]],
     label: str,
     on_no_usage: Callable[[], Awaitable[None]] | None = None,
     on_incomplete: Callable[[], Awaitable[None]] | None = None,
     display_model: str | None = None,
     keepalive_interval_seconds: float = 0.0,
+    settle_before_done: bool = False,
+    is_cost_carrier: Callable[[Any], bool] | None = None,
+    attach_settlement: Callable[[Any, S], bool] | None = None,
 ) -> AsyncGenerator[str, None]:
     """Shared SSE streaming generator with usage tracking and error handling.
 
@@ -180,19 +185,29 @@ async def streaming_generator(
             (e.g. client disconnect mid-stream). Used to release any budget
             reservation so it does not leak.
         keepalive_interval_seconds: Emit ``fmt.keepalive`` whenever the upstream has
-            produced nothing for this long, so an intermediary with a read timeout
-            (Cloudflare's default Proxy Read Timeout is 125s) does not sever a
-            connection that is merely waiting on a slow time-to-first-token.
-            Transport-level only: keepalives never reach usage accounting, and they
-            do not extend any first-chunk or failover deadline, which stay in charge
-            of giving up on a hung upstream. 0 disables.
+            produced nothing for this long, including while terminal settlement is
+            pending. 0 disables.
+        settle_before_done: Buffer the designated terminal suffix and settle usage
+            before emitting it. Standalone callers leave this false.
+        is_cost_carrier: Identifies the terminal provider object that can carry cost.
+        attach_settlement: Mutates that carrier with the opaque settlement value.
 
     """
     usage = CompletionUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
     has_usage = False
     settled = False
+    terminal_buffer: list[Any] = []
+    cost_carrier: Any | None = None
+    buffering_terminal = False
+    buffering_abandoned = False
+    settlement_task: asyncio.Task[S | None] | None = None
 
     keepalive_interval = keepalive_interval_seconds if fmt.keepalive else 0.0
+
+    def _format(chunk: Any) -> str:
+        if display_model is not None:
+            chunk = relabel_model(chunk, display_model)
+        return format_chunk(chunk)
 
     try:
         async with aclosing(_chunks_or_keepalive(stream, keepalive_interval)) as source:
@@ -204,32 +219,105 @@ async def streaming_generator(
                 if chunk_usage:
                     usage = _merge_usage(usage, chunk_usage)
                     has_usage = True
-                if display_model is not None:
-                    chunk = relabel_model(chunk, display_model)
-                yield format_chunk(chunk)
-        yield fmt.done_marker
 
-        # Settle on normal completion. Guard the callbacks so a logging failure
-        # can't be mistaken for an incomplete (disconnected) stream.
-        settled = True
-        try:
-            if has_usage:
-                await on_complete(usage)
-            elif on_no_usage is not None:
-                await on_no_usage()
-        except Exception as log_err:
-            logger.error("Failed to log streaming usage for %s: %s", label, log_err)
+                if buffering_terminal:
+                    terminal_buffer.append(chunk)
+                    if len(terminal_buffer) > _MAX_TERMINAL_BUFFER_CHUNKS:
+                        logger.warning(
+                            "Terminal usage carrier arrived too early for %s; disabling inline cost",
+                            label,
+                        )
+                        for buffered_chunk in terminal_buffer:
+                            yield _format(buffered_chunk)
+                        terminal_buffer.clear()
+                        cost_carrier = None
+                        buffering_terminal = False
+                        buffering_abandoned = True
+                    continue
+
+                if (
+                    settle_before_done
+                    and not buffering_abandoned
+                    and is_cost_carrier is not None
+                    and is_cost_carrier(chunk)
+                ):
+                    cost_carrier = chunk
+                    terminal_buffer.append(chunk)
+                    buffering_terminal = True
+                    continue
+
+                yield _format(chunk)
+
+        # Once the upstream is exhausted, hybrid mode settles before emitting
+        # the buffered terminal suffix. Standalone mode retains the historical
+        # order: chunks, done marker, then reconciliation.
+        if settle_before_done and not buffering_abandoned:
+            settled = True
+            settlement: S | None = None
+            try:
+                if has_usage:
+                    if keepalive_interval > 0:
+                        async def _settle() -> S | None:
+                            return await on_complete(usage)
+
+                        settlement_task = asyncio.create_task(_settle())
+                        while not settlement_task.done():
+                            done, _ = await asyncio.wait(
+                                (settlement_task,),
+                                timeout=keepalive_interval,
+                            )
+                            if not done:
+                                yield fmt.keepalive
+                        settlement = settlement_task.result()
+                    else:
+                        settlement = await on_complete(usage)
+                elif on_no_usage is not None:
+                    await on_no_usage()
+            except Exception as log_err:
+                logger.error("Failed to log streaming usage for %s: %s", label, log_err)
+            if settlement is not None and attach_settlement is not None:
+                try:
+                    attach_settlement(cost_carrier, settlement)
+                except Exception as attach_err:
+                    logger.error("Failed to attach streaming settlement for %s: %s", label, attach_err)
+            for buffered_chunk in terminal_buffer:
+                yield _format(buffered_chunk)
+            terminal_buffer.clear()
+            yield fmt.done_marker
+        else:
+            for buffered_chunk in terminal_buffer:
+                yield _format(buffered_chunk)
+            terminal_buffer.clear()
+            yield fmt.done_marker
+            settled = True
+            try:
+                if has_usage:
+                    settlement = await on_complete(usage)
+                    if settle_before_done and settlement is not None and attach_settlement is not None:
+                        try:
+                            attach_settlement(None, settlement)
+                        except Exception as attach_err:
+                            logger.error("Failed to attach streaming settlement for %s: %s", label, attach_err)
+                elif on_no_usage is not None:
+                    await on_no_usage()
+            except Exception as log_err:
+                logger.error("Failed to log streaming usage for %s: %s", label, log_err)
     except asyncio.CancelledError:
-        # Client disconnect / request cancellation mid-stream. CancelledError is a
-        # BaseException (not caught by `except Exception` below), so handle it
-        # explicitly: settle as incomplete and let cancellation propagate — do not
-        # emit an SSE error payload or call on_error.
+        if settlement_task is not None and not settlement_task.done():
+            settlement_task.cancel()
+            with suppress(BaseException):
+                await settlement_task
         if not settled and on_incomplete is not None:
             with suppress(Exception):
                 await on_incomplete()
         settled = True
         raise
     except Exception as e:
+        # A carrier may have been buffered just before the upstream failed. It
+        # remains an ordinary provider event and must precede the safe error.
+        for buffered_chunk in terminal_buffer:
+            yield _format(buffered_chunk)
+        terminal_buffer.clear()
         yield fmt.error_payload
         if fmt.yield_done_on_error:
             yield fmt.done_marker
@@ -240,9 +328,11 @@ async def streaming_generator(
             logger.error("Failed to log streaming error usage: %s", log_err)
         logger.error("Streaming error for %s: %s", label, e)
     finally:
+        if settlement_task is not None and not settlement_task.done():
+            settlement_task.cancel()
+            with suppress(BaseException):
+                await settlement_task
         if not settled and on_incomplete is not None:
-            # Reached on client disconnect / generator cancellation before the
-            # stream finished — release the reservation so it does not leak.
             try:
                 await on_incomplete()
             except Exception as log_err:

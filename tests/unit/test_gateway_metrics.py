@@ -16,6 +16,7 @@ from gateway.metrics import (
     record_auth_failure,
     record_budget_exceeded,
     record_cost,
+    record_inline_cost_settlement,
     record_rate_limit_hit,
     record_tokens,
 )
@@ -58,6 +59,16 @@ def test_record_cost_observes_histogram() -> None:
 
     assert _sample("gateway_request_cost_dollars_count", labels) - before_count == 1.0
     assert _sample("gateway_request_cost_dollars_sum", labels) >= 1.23
+
+
+@pytest.mark.parametrize("outcome", ["attached", "unattached", "timeout"])
+def test_record_inline_cost_settlement_increments_counter(outcome: str) -> None:
+    labels = {"outcome": outcome}
+    before = _sample("gateway_inline_cost_settlements_total", labels)
+
+    record_inline_cost_settlement(outcome)
+
+    assert _sample("gateway_inline_cost_settlements_total", labels) - before == 1.0
 
 
 def test_record_rate_limit_hit_increments_counter() -> None:

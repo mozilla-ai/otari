@@ -37,6 +37,7 @@ from gateway.api.routes._pipeline import (
 )
 from gateway.api.routes._platform import (
     ResolvedAttempt,
+    SettledCost,
     _extract_platform_user_token,
     _resolve_platform_credentials,
 )
@@ -364,13 +365,45 @@ class _MessagesAdapter:
             return None
         return _billable_messages_usage(result.usage)
 
+    def attach_cost(
+        self,
+        value: MessageResponse | MessageStreamEvent,
+        settlement: SettledCost,
+    ) -> bool:
+        usage: Any
+        if isinstance(value, MessageResponse):
+            usage = value.usage
+        elif isinstance(value, MessageDeltaEvent):
+            usage = value.usage
+        else:
+            return False
+        if usage is None:
+            return False
+        updated = usage.model_copy(
+            update={
+                "cost_usd": settlement.cost_usd,
+                "pricing_source": settlement.pricing_source,
+            }
+        )
+        value.usage = updated
+        return True
+
+    def is_stream_cost_carrier(self, chunk: MessageStreamEvent) -> bool:
+        return isinstance(chunk, MessageDeltaEvent)
+
     async def call_provider(self, kwargs: dict[str, Any]) -> MessageResponse:
         return await amessages(**kwargs)  # type: ignore[return-value]
 
     async def open_provider_stream(self, kwargs: dict[str, Any]) -> AsyncIterator[MessageStreamEvent]:
         return await amessages(**kwargs)  # type: ignore[return-value]
 
-    def prepare_stream_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+    def prepare_stream_kwargs(
+        self,
+        kwargs: dict[str, Any],
+        *,
+        require_usage: bool = False,
+    ) -> dict[str, Any]:
+        del require_usage
         kwargs["stream"] = True
         return kwargs
 

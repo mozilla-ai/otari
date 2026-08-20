@@ -2,6 +2,7 @@
 
 from typing import Any
 
+from gateway.api.routes import chat
 from gateway.api.routes.chat import ChatCompletionRequest
 
 
@@ -77,6 +78,22 @@ def test_no_injection_for_non_streaming() -> None:
         }
     )
     assert "stream_options" not in kwargs
+
+
+def test_hybrid_stream_forces_usage_when_client_disabled_it() -> None:
+    kwargs = chat._ADAPTER.prepare_stream_kwargs(
+        {"stream_options": {"include_usage": False, "custom_field": "value"}},
+        require_usage=True,
+    )
+    assert kwargs["stream_options"] == {"include_usage": True, "custom_field": "value"}
+
+
+def test_standalone_stream_preserves_disabled_usage() -> None:
+    kwargs = chat._ADAPTER.prepare_stream_kwargs(
+        {"stream_options": {"include_usage": False}},
+        require_usage=False,
+    )
+    assert kwargs["stream_options"]["include_usage"] is False
 
 
 def test_preserves_client_stream_options() -> None:

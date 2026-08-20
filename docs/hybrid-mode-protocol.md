@@ -354,6 +354,31 @@ A successful attempt that completes without provider usage data still sends a
 final report, but omits `usage` so the platform can record it as unavailable
 rather than as an explicit zero-token result.
 
+| Platform response | Gateway behavior |
+|---|---|
+| Completed success with `usage_status: "reported"` and non-null `pricing.source` | Validate the correlation id and attach `cost_usd` plus `pricing_source`. |
+| Completed response without a price source, with unavailable usage, or for a failed attempt | Return the provider response without inline cost. An unpriced `0.000000` is a placeholder, not a priced zero. |
+| `202` or legacy `204` | Return the provider response without inline cost. |
+| Terminal 4xx, including `404` and `410` | Do not retry or attach inline cost. |
+| Invalid body, correlation mismatch, reporting failure, or expired inline budget | Preserve the provider response and omit inline cost. |
+
+### Inline response fields
+
+| API format | Non-streaming placement | Streaming placement |
+|---|---|---|
+| Chat Completions | `usage.cost_usd`, `usage.pricing_source` | Terminal usage chunk: `usage.cost_usd`, `usage.pricing_source` |
+| Messages | `usage.cost_usd`, `usage.pricing_source` | `message_delta.usage.cost_usd`, `message_delta.usage.pricing_source` |
+| Responses | `usage.cost_usd`, `usage.pricing_source` | `response.completed.response.usage.cost_usd`, `response.completed.response.usage.pricing_source` |
+
+The fields always appear together, and `pricing_source` is never null. The cost
+is the platform's exact six-decimal string, and its source is `organization`,
+`managed`, or `genai_prices`; Otari never calculates or converts it locally,
+and settlement failure never fails the model response. A priced zero includes
+both fields, while unavailable, pending, legacy, unpriced,
+or carrier-less results include neither. Provider token usage is otherwise
+unchanged, and standalone responses never include these fields. Use
+`GET /request-costs/{request_id}` when a durable value is required.
+
 `session_label` is an optional caller-supplied label for cost attribution (per
 run, experiment, or conversation). A caller sets it on the request body
 (`session_label` on the chat/messages/responses request); Otari strips it before
@@ -436,11 +461,12 @@ SSE channel, where only an error string is available. Treat a missing
 
 ### Retry semantics
 
-The usage endpoint is called as a background task on Otari side. It
-retries on transient failures (timeout, network error, 5xx) up to
-`PLATFORM_USAGE_MAX_RETRIES` times with exponential backoff
-(`0.25s`, `0.5s`, `1s`). It does **not** retry on `401`, `404`, `409`, `422`;
-those are treated as terminal client errors.
+Otari awaits the successful report at the response's terminal boundary for up
+to `PLATFORM_USAGE_INLINE_TIMEOUT_MS`; expiry omits inline cost but leaves the
+report running. Failed-attempt reports remain background work, so they can
+arrive after the success report. Reports retry timeouts, network errors, and
+5xx responses up to `PLATFORM_USAGE_MAX_RETRIES` with exponential backoff, but
+not terminal 4xx responses.
 
 ## Streaming
 
@@ -466,10 +492,16 @@ The mechanism is a per-attempt **first-chunk gate**. For each attempt:
 3. Once a first chunk is in hand, commit. Stitch it back onto the iterator
    and start flushing SSE chunks to the client.
 
-**Latency contract:** zero added latency in the success case: the first
-chunk is held only for the microseconds it takes to call the SSE response
-builder. In the failure case, each abandoned non-final attempt costs at most the
-failover budget; the final attempt costs at most budget + grace.
+**Latency contract:** content streams immediately. In hybrid mode, only the
+terminal usage suffix waits for settlement, bounded by
+`PLATFORM_USAGE_INLINE_TIMEOUT_MS`, with keepalives during the wait. An early
+carrier, timeout, mid-stream failure, or legacy `204` response skips inline cost
+without reshaping the stream. Non-final attempts still cost at most the
+first-chunk failover budget, and the final attempt at most that budget plus its
+grace period.
+
+Hybrid Chat Completions forces `stream_options.include_usage: true` so a
+terminal carrier exists; standalone mode preserves the caller's value.
 
 **What this catches:** auth errors (`401`/`403`), rate-limits (`429`),
 upstream `5xx`, connection failures, hung connections, "stream opens but
@@ -492,6 +524,7 @@ flag.
 | `OTARI_AI_TOKEN` | none | Setting this enables hybrid mode. |
 | `PLATFORM_RESOLVE_TIMEOUT_MS` | `5000` | Per-resolve timeout. |
 | `PLATFORM_USAGE_TIMEOUT_MS` | `5000` | Per-usage-report timeout. |
+| `PLATFORM_USAGE_INLINE_TIMEOUT_MS` | `1500` | Budget for the one usage report the response path waits on to attach inline cost. Expiry ships the response without cost; the report itself continues. |
 | `PLATFORM_USAGE_MAX_RETRIES` | `3` | Max retries for transient usage-report failures. |
 | `STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS` | `2000` | Per-attempt budget for the streaming first-chunk gate. |
 | `STREAMING_FALLBACK_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS` | `0` | Extra first-chunk grace for the sole/final attempt, on top of the budget. `0` = unchanged. |

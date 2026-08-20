@@ -117,6 +117,7 @@ def test_hybrid_mode_sets_correlation_id_and_reports_usage(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     usage_reports: list[dict[str, Any]] = []
+    attempt_id = "3f1b6a1e-0000-4000-8000-000000000002"
 
     async def fake_post_platform(
         url: str,
@@ -127,10 +128,21 @@ def test_hybrid_mode_sets_correlation_id_and_reports_usage(
         if url.endswith("/gateway/provider-keys/resolve"):
             return httpx.Response(
                 200,
-                json=_resolve_payload([_attempt(0, "att-1", "gpt-4o-mini", "sk-platform-key")]),
+                json=_resolve_payload([_attempt(0, attempt_id, "gpt-4o-mini", "sk-platform-key")]),
             )
         usage_reports.append(body)
-        return httpx.Response(204)
+        return httpx.Response(
+            200,
+            json={
+                "correlation_id": body["correlation_id"],
+                "status": "completed",
+                "outcome": "success",
+                "cost_usd": "0.012345",
+                "currency": "USD",
+                "usage_status": "reported",
+                "pricing": {"source": "managed"},
+            },
+        )
 
     async def fake_aresponses(**kwargs: Any) -> Response:
         assert kwargs["api_key"] == "sk-platform-key"
@@ -146,11 +158,13 @@ def test_hybrid_mode_sets_correlation_id_and_reports_usage(
     )
 
     assert response.status_code == 200, response.text
-    assert response.headers["X-Correlation-ID"] == "att-1"
+    assert response.headers["X-Correlation-ID"] == attempt_id
     assert response.headers["X-Otari-Request-ID"] == "req-1"
+    assert response.json()["usage"]["cost_usd"] == "0.012345"
+    assert response.json()["usage"]["pricing_source"] == "managed"
     assert usage_reports == [
         {
-            "correlation_id": "att-1",
+            "correlation_id": attempt_id,
             "status": "success",
             "is_final_attempt": True,
             "usage": {
@@ -668,13 +682,9 @@ def test_hybrid_mode_tool_loop_streaming_sets_correlation_id_and_reports_usage(
     platform_client: TestClient,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """Tool-loop streaming in hybrid mode must honor the platform contract:
-    X-Correlation-ID + X-Otari-Request-ID headers + usage report via
-    _report_platform_usage on complete. Regression test for the issue where
-    ``_stream_responses`` was the standalone helper and silently dropped the
-    platform metadata when invoked for platform + tool_loop.
-    """
+    """Tool-loop streaming returns settled cost on response.completed."""
     usage_reports: list[dict[str, Any]] = []
+    attempt_id = "3f1b6a1e-0000-4000-8000-000000000004"
 
     async def fake_post_platform(
         url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
@@ -682,10 +692,21 @@ def test_hybrid_mode_tool_loop_streaming_sets_correlation_id_and_reports_usage(
         if url.endswith("/gateway/provider-keys/resolve"):
             return httpx.Response(
                 200,
-                json=_resolve_payload([_attempt(0, "stream-att-1", "gpt-4o-mini", "sk-platform")]),
+                json=_resolve_payload([_attempt(0, attempt_id, "gpt-4o-mini", "sk-platform")]),
             )
         usage_reports.append(body)
-        return httpx.Response(204)
+        return httpx.Response(
+            200,
+            json={
+                "correlation_id": body["correlation_id"],
+                "status": "completed",
+                "outcome": "success",
+                "cost_usd": "0.012345",
+                "currency": "USD",
+                "usage_status": "reported",
+                "pricing": {"source": "managed"},
+            },
+        )
 
     monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
 
@@ -722,14 +743,15 @@ def test_hybrid_mode_tool_loop_streaming_sets_correlation_id_and_reports_usage(
             headers={"Authorization": "Bearer user_test_token"},
         ) as response:
             assert response.status_code == 200, response.read().decode()
-            assert response.headers["X-Correlation-ID"] == "stream-att-1"
+            assert response.headers["X-Correlation-ID"] == attempt_id
             assert response.headers["X-Otari-Request-ID"] == "req-1"
-            for _ in response.iter_bytes():
-                pass
+            wire = response.read().decode()
 
+    assert '"cost_usd":"0.012345"' in wire
+    assert '"pricing_source":"managed"' in wire
     success_reports = [r for r in usage_reports if r.get("status") == "success"]
     assert success_reports, "expected a success usage report for the hybrid-mode tool-loop stream"
-    assert success_reports[0]["correlation_id"] == "stream-att-1"
+    assert success_reports[0]["correlation_id"] == attempt_id
     assert success_reports[0]["is_final_attempt"] is True
 
 

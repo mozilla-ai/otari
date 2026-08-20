@@ -34,7 +34,7 @@ from gateway.api.routes._pipeline import (
     run_standalone_non_stream,
     run_streaming_with_fallback,
 )
-from gateway.api.routes._platform import ResolvedAttempt, build_attempt_client_args
+from gateway.api.routes._platform import ResolvedAttempt, SettledCost, build_attempt_client_args
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
@@ -278,13 +278,45 @@ class _ResponsesAdapter:
     def extract_usage(self, result: ResponsesResponse) -> CompletionUsage | None:
         return _usage_to_completion_usage(getattr(result, "usage", None))
 
+    def attach_cost(
+        self,
+        value: ResponsesResponse | ResponseStreamEvent,
+        settlement: SettledCost,
+    ) -> bool:
+        response_obj: Any = getattr(value, "response", None)
+        target: Any = response_obj if getattr(value, "type", None) == "response.completed" else value
+        usage = getattr(target, "usage", None)
+        if usage is None:
+            return False
+        target.usage = usage.model_copy(
+            update={
+                "cost_usd": settlement.cost_usd,
+                "pricing_source": settlement.pricing_source,
+            }
+        )
+        return True
+
+    def is_stream_cost_carrier(self, chunk: ResponseStreamEvent) -> bool:
+        response_obj: Any = getattr(chunk, "response", None)
+        return (
+            chunk.type == "response.completed"
+            and response_obj is not None
+            and getattr(response_obj, "usage", None) is not None
+        )
+
     async def call_provider(self, kwargs: dict[str, Any]) -> ResponsesResponse:
         return await aresponses(**kwargs)  # type: ignore[return-value]
 
     async def open_provider_stream(self, kwargs: dict[str, Any]) -> AsyncIterator[ResponseStreamEvent]:
         return await aresponses(**kwargs)  # type: ignore[return-value]
 
-    def prepare_stream_kwargs(self, kwargs: dict[str, Any]) -> dict[str, Any]:
+    def prepare_stream_kwargs(
+        self,
+        kwargs: dict[str, Any],
+        *,
+        require_usage: bool = False,
+    ) -> dict[str, Any]:
+        del require_usage
         kwargs["stream"] = True
         return kwargs
 
