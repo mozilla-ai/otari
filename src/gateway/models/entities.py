@@ -1210,9 +1210,15 @@ class WorkspaceBudgetDefault(Base):
     name: Mapped[str | None] = mapped_column(default=None)
     max_budget: Mapped[float | None] = mapped_column(default=None)
     budget_duration_sec: Mapped[int | None] = mapped_column(default=None)
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    # ``UtcDateTime``, not ``DateTime(timezone=True)``: these two are serialized with
+    # ``.isoformat()`` (``WorkspaceMemberBudgetPolicyPublic.from_model``) for the
+    # budget-defaults page, and on SQLite (this repo's default ``database_url``)
+    # a plain ``DateTime(timezone=True)`` round-trips naive, so the wire value
+    # would carry no offset and a browser would read it as local time.
+    # ``UtcDateTime.impl`` is ``DateTime(timezone=True)``, so the DDL is unchanged.
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
-        DateTime(timezone=True),
+        UtcDateTime(),
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
