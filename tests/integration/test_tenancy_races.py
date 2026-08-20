@@ -15,14 +15,17 @@ import pytest
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session
 
+from gateway.core.config import GatewayConfig
 from gateway.models.tenancy import (
     ActiveOrganizationMemberCreateRequest,
     ActiveOrganizationMemberUpdateRequest,  # noqa: E402
+    InviteOrganizationMemberRequest,
     Organization,
     User,
     WorkspaceCreate,
 )
 from gateway.repositories.tenancy import (
+    InvitationRepository,
     OrganizationMemberRepository,
     OrganizationRepository,
     UserRepository,
@@ -301,3 +304,56 @@ async def test_concurrent_deletes_cannot_remove_the_last_workspace(
     assert len(refused) == 1
     _, remaining = await WorkspaceRepository(async_db).get_by_organization(organization.id, limit=1)
     assert remaining == 1
+
+
+async def test_concurrent_invites_to_a_suspended_membership_produce_one_pending_invitation(
+    async_db: AsyncSession,
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """A suspended membership has no unique index to lose to either.
+
+    `organization_member_id` on `Invitation` carries no uniqueness (a
+    membership can be invited, revoked, and re-invited more than once over its
+    life), so nothing catches two concurrent invites to the same suspended
+    membership as an `IntegrityError`. Without locking the organization before
+    the status check that decides create/revive/refuse, both racers can read
+    "suspended", both revive it, and both mint their own live pending
+    invitation for the one membership.
+    """
+    organization, owner = await _seed_owner(async_db)
+    owner_row = await UserRepository(async_db).get(owner.id)
+    assert owner_row is not None
+    added = await OrganizationService(async_db).create_active_organization_member_for_user(
+        user=owner_row,
+        request=ActiveOrganizationMemberCreateRequest(email="grace@example.com"),
+    )
+    assert added.organization_member_id is not None
+    assert added.user_id is not None
+    await OrganizationService(async_db).remove_active_organization_member_for_user(
+        user=owner_row,
+        organization_member_id=added.organization_member_id,
+    )
+    config = GatewayConfig()
+
+    async def attempt(session: AsyncSession) -> object:
+        user = await UserRepository(session).get(owner.id)
+        assert user is not None
+        return await OrganizationService(session).invite_active_organization_member_for_user(
+            user=user,
+            request=InviteOrganizationMemberRequest(email="grace@example.com"),
+            config=config,
+        )
+
+    outcomes = await _race(sessions, attempt)
+
+    invited = [outcome for outcome in outcomes if not isinstance(outcome, Exception)]
+    conflicts = [outcome for outcome in outcomes if isinstance(outcome, OrganizationMemberAlreadyExistsError)]
+    assert len(invited) == 1
+    assert len(conflicts) == _RACERS - 1
+
+    membership = await OrganizationMemberRepository(async_db).get_by_organization_and_user(
+        organization.id, added.user_id
+    )
+    assert membership is not None
+    pending = await InvitationRepository(async_db).get_pending_by_organization_members([membership.id])
+    assert len(pending) == 1

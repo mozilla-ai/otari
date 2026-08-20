@@ -24,6 +24,7 @@ from gateway.models.tenancy import (
     AcceptInvitationRequest,
     AcceptInvitationResultPublic,
     InvitationPreviewPublic,
+    ValidateInvitationRequest,
 )
 from gateway.services.tenancy import OrganizationService
 
@@ -44,13 +45,18 @@ def get_organization_service(db: Annotated[AsyncSession, Depends(get_db)]) -> Or
 OrganizationServiceDep = Annotated[OrganizationService, Depends(get_organization_service)]
 
 
-@router.get("/validate/{token}")
+@router.post("/validate")
 async def validate_invitation(
     service: OrganizationServiceDep,
-    token: str,
+    body: ValidateInvitationRequest,
 ) -> InvitationPreviewPublic:
-    """Look up a pending invitation by its token, for the accept page to render before committing."""
-    return await service.get_invitation_preview(token)
+    """Look up a pending invitation by its token, for the accept page to render before committing.
+
+    A ``POST`` with the token in the body, not a ``GET`` with it in the URL:
+    the token is a bearer credential, and a URL path is what an access log or
+    an intermediate proxy routinely retains.
+    """
+    return await service.get_invitation_preview(body.token)
 
 
 @router.post("/accept")

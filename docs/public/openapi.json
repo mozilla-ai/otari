@@ -10035,6 +10035,20 @@
         "title": "UserResponse",
         "type": "object"
       },
+      "ValidateInvitationRequest": {
+        "description": "The preview lookup's body.\n\nA ``POST`` with the token in the body rather than a ``GET`` with it in the\nURL, matching ``AcceptInvitationRequest``: the token is a bearer-style\ncredential (see ``Invitation.token_hash``'s docstring), and a URL is one a\nproxy or an access log routinely retains, which a request body is not.",
+        "properties": {
+          "token": {
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "ValidateInvitationRequest",
+        "type": "object"
+      },
       "ValidationError": {
         "properties": {
           "ctx": {
@@ -12487,35 +12501,26 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
         "summary": "Accept Invitation",
         "tags": [
           "invitations"
         ]
       }
     },
-    "/v1/invitations/validate/{token}": {
-      "get": {
-        "description": "Look up a pending invitation by its token, for the accept page to render before committing.",
-        "operationId": "validate_invitation_v1_invitations_validate__token__get",
-        "parameters": [
-          {
-            "in": "path",
-            "name": "token",
-            "required": true,
-            "schema": {
-              "title": "Token",
-              "type": "string"
+    "/v1/invitations/validate": {
+      "post": {
+        "description": "Look up a pending invitation by its token, for the accept page to render before committing.\n\nA ``POST`` with the token in the body, not a ``GET`` with it in the URL:\nthe token is a bearer credential, and a URL path is what an access log or\nan intermediate proxy routinely retains.",
+        "operationId": "validate_invitation_v1_invitations_validate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ValidateInvitationRequest"
+              }
             }
-          }
-        ],
+          },
+          "required": true
+        },
         "responses": {
           "200": {
             "content": {
@@ -12538,14 +12543,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
         "summary": "Validate Invitation",
         "tags": [
           "invitations"

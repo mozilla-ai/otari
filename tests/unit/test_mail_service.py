@@ -6,6 +6,8 @@ that must never raise (unconfigured, and a send that fails), not for actually
 delivering mail.
 """
 
+from unittest.mock import MagicMock, patch
+
 from gateway.core.config import GatewayConfig
 from gateway.services.mail_service import send_mail
 from gateway.services.tenancy.invitation_email import render_invitation_email
@@ -56,13 +58,34 @@ def test_send_mail_reports_failure_rather_than_raising() -> None:
     assert sent is False
 
 
+def test_send_mail_never_raises_even_on_a_malformed_header() -> None:
+    """Defense in depth: message serialization runs before any socket I/O.
+
+    ``message.as_string()`` is evaluated as a plain argument expression before
+    ``client.sendmail(...)`` is even called, so this raises the same
+    ``HeaderParseError`` it would with a real server, with no network needed
+    to prove ``send_mail`` still reports ``False`` instead of propagating it.
+    """
+    config = GatewayConfig(smtp_host="smtp.example.com", mail_from_email="otari@example.com")
+    with patch("gateway.services.mail_service.smtplib.SMTP") as mock_smtp:
+        mock_smtp.return_value.__enter__.return_value = MagicMock()
+        sent = send_mail(
+            config,
+            to="ada@example.com",
+            subject="Broken\r\nheader: injected",
+            html="<p>Hi</p>",
+            text="Hi",
+        )
+    assert sent is False
+
+
 def test_render_invitation_email_fills_every_placeholder() -> None:
     subject, html, text = render_invitation_email(
         organization_name="Acme",
         inviter_name="Ada",
         role="admin",
         accept_link="https://gw.example.com/#/accept-invitation?token=abc",
-        valid_days=7,
+        expiry_hours=168,
     )
 
     assert "Acme" in subject
@@ -71,9 +94,9 @@ def test_render_invitation_email_fills_every_placeholder() -> None:
         assert "Ada" in rendered
         assert "admin" in rendered
         assert "https://gw.example.com/#/accept-invitation?token=abc" in rendered
-        assert "7" in rendered
-    assert "ORGANIZATION_NAME" not in html
-    assert "ACCEPT_LINK" not in html
+        assert "7 days" in rendered
+    assert "{{ORGANIZATION_NAME}}" not in html
+    assert "{{ACCEPT_LINK}}" not in html
 
 
 def test_render_invitation_email_escapes_operator_set_strings_in_html_only() -> None:
@@ -82,10 +105,74 @@ def test_render_invitation_email_escapes_operator_set_strings_in_html_only() -> 
         inviter_name="Robert</b>",
         role="member",
         accept_link="https://gw.example.com/#/accept-invitation?token=abc",
-        valid_days=7,
+        expiry_hours=168,
     )
 
     assert "<script>" not in html
     assert "&lt;script&gt;" in html
     # The plain-text variant has no markup to break out of, so it is not escaped.
     assert "<script>alert(1)</script>" in text
+
+
+def test_render_invitation_email_does_not_let_one_value_collide_with_another_placeholder() -> None:
+    """A bare-word placeholder scheme would let ``ROLE`` corrupt an org named after it.
+
+    Delimiting placeholders (``{{ROLE}}``) is what stops a later substitution
+    pass from rewriting text an earlier one just inserted.
+    """
+    _, html, text = render_invitation_email(
+        organization_name="Role Corp",
+        inviter_name="Ada",
+        role="member",
+        accept_link="https://gw.example.com/#/accept-invitation?token=abc",
+        expiry_hours=168,
+    )
+
+    assert "Role Corp" in html
+    assert "Role Corp" in text
+
+
+def test_render_invitation_email_rounds_the_expiry_up_and_pluralizes() -> None:
+    """Rounding down would tell a recipient a 12-hour link lasts a full day."""
+    _, half_day_html, half_day_text = render_invitation_email(
+        organization_name="Acme",
+        inviter_name="Ada",
+        role="member",
+        accept_link="https://gw.example.com/#/accept-invitation?token=abc",
+        expiry_hours=12,
+    )
+    assert "12 hours" in half_day_html
+    assert "12 hours" in half_day_text
+
+    _, one_hour_html, _ = render_invitation_email(
+        organization_name="Acme",
+        inviter_name="Ada",
+        role="member",
+        accept_link="https://gw.example.com/#/accept-invitation?token=abc",
+        expiry_hours=1,
+    )
+    assert "1 hour" in one_hour_html
+    assert "1 hours" not in one_hour_html
+
+    _, day_and_a_half_html, _ = render_invitation_email(
+        organization_name="Acme",
+        inviter_name="Ada",
+        role="member",
+        accept_link="https://gw.example.com/#/accept-invitation?token=abc",
+        expiry_hours=36,
+    )
+    assert "2 days" in day_and_a_half_html  # rounded up, not down to "1 days"
+
+
+def test_render_invitation_email_strips_newlines_from_the_subject_line() -> None:
+    """A newline in the subject is either a malformed header or a header-injection vector."""
+    subject, _, _ = render_invitation_email(
+        organization_name="Acme\r\nBcc: attacker@example.com",
+        inviter_name="Ada",
+        role="member",
+        accept_link="https://gw.example.com/#/accept-invitation?token=abc",
+        expiry_hours=168,
+    )
+
+    assert "\r" not in subject
+    assert "\n" not in subject

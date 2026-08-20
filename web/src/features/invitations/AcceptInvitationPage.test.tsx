@@ -20,7 +20,7 @@ function mockApi(opts: {
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input)
     const method = (init?.method ?? "GET").toUpperCase()
-    if (url.includes("/v1/invitations/validate/")) {
+    if (url.includes("/v1/invitations/validate") && method === "POST") {
       if (opts.previewStatus && opts.previewStatus >= 400) {
         return jsonResponse(
           { detail: "This invitation has expired" },

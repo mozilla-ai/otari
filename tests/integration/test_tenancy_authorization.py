@@ -673,6 +673,25 @@ async def test_a_viewer_cannot_revoke_an_invitation(async_db: AsyncSession) -> N
         )
 
 
+async def test_an_admin_cannot_revoke_a_pending_owner_invitation(async_db: AsyncSession) -> None:
+    """Revoke goes through the same "only an owner outranks an owner" guard as every other write."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    admin = await _member(async_db, organization, role="admin", full_name="Admin")
+    service = OrganizationService(async_db)
+    invitation = await service.invite_active_organization_member_for_user(
+        user=owner,
+        request=InviteOrganizationMemberRequest(email="ada@example.com", role="owner"),
+        config=_TEST_CONFIG,
+    )
+
+    with pytest.raises(MembershipUpdateError, match="owners"):
+        await service.revoke_organization_member_invitation_for_user(
+            user=admin,
+            invitation_id=invitation.invitation_id,
+        )
+
+
 async def test_inviting_an_address_with_a_pending_invitation_conflicts(async_db: AsyncSession) -> None:
     organization = await _organization(async_db)
     admin = await _member(async_db, organization, role="admin", full_name="Admin")

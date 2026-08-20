@@ -300,7 +300,7 @@ Tenancy above users and keys; see [Access control](access-control.md#organizatio
 | `POST` | `/v1/organizations/me/member-invitations` | Invite a member by email; emails an accept link if mail is configured. | Master key |
 | `DELETE` | `/v1/organizations/me/member-invitations/{invitation_id}` | Revoke an unaccepted invitation (cancels it, suspends the membership). | Master key |
 
-Accepting an invitation is a separate, unauthenticated pair the recipient's browser calls from the link: `GET /v1/invitations/validate/{token}` to preview it and `POST /v1/invitations/accept` to commit. See [Access control](access-control.md#invitations).
+Accepting an invitation is a separate, unauthenticated pair the recipient's browser calls from the link: `POST /v1/invitations/validate` to preview it and `POST /v1/invitations/accept` to commit, both with the token in the body rather than the URL (a bearer credential, which a URL path is not a safe place for). See [Access control](access-control.md#invitations).
 
 ### Workspaces
 

@@ -66,7 +66,7 @@ def test_validate_shows_the_organization_and_role_without_authenticating(
     token = _token_from(result["accept_link"])
 
     # Deliberately no auth header: the token is the whole credential here.
-    preview = client.get(f"/v1/invitations/validate/{token}")
+    preview = client.post("/v1/invitations/validate", json={"token": token})
 
     assert preview.status_code == 200, preview.text
     body = preview.json()
@@ -101,6 +101,42 @@ def test_accept_activates_the_membership_and_applies_parked_workspace_assignment
     carol = next(m for m in workspace_members["data"] if m["user_id"] == row["user_id"])
     assert carol["role"] == "viewer"
     assert carol["status"] == "active"
+
+
+def test_a_workspace_deleted_after_invite_but_before_accept_is_a_clean_404(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """Acceptance can arrive days later; the parked workspace ids are re-checked, not trusted.
+
+    Without the re-check, applying a parked assignment against a workspace
+    that no longer exists would hit the foreign key directly and this public,
+    unauthenticated endpoint would answer an uncaught 500, with the invitation
+    stuck pending and every retry hitting the same wall.
+    """
+    created = client.post(
+        "/v1/workspaces", json={"name": "Temporary"}, headers=master_key_header
+    ).json()
+
+    result = _invite(
+        client,
+        master_key_header,
+        email="karen@example.com",
+        workspace_assignments=[{"workspace_id": created["id"], "role": "viewer"}],
+    )
+    token = _token_from(result["accept_link"])
+
+    delete = client.delete(f"/v1/workspaces/{created['id']}", headers=master_key_header)
+    assert delete.status_code == 200, delete.text
+
+    accept = client.post("/v1/invitations/accept", json={"token": token})
+    assert accept.status_code == 404, accept.text
+
+    # The invitation is still there to retry, though it can never succeed
+    # against the same (now-missing) workspace id; it is not "used up" by the
+    # refused attempt the way accepting or revoking it would be.
+    row = _roster_row(client, master_key_header, "karen@example.com")
+    assert row["status"] == "invited"
 
 
 def test_accepting_twice_is_refused(client: TestClient, master_key_header: dict[str, str]) -> None:
@@ -200,6 +236,31 @@ def test_patching_an_invited_member_to_suspended_also_cancels_the_invitation(
 
     accept = client.post("/v1/invitations/accept", json={"token": token})
     assert accept.status_code == 400
+
+
+def test_patching_an_invited_member_straight_to_active_also_cancels_the_invitation(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """A different escape from ``invited`` than suspension, with the same stale-token risk.
+
+    ``PATCH`` can activate an invited member directly, bypassing
+    ``accept_invitation`` entirely. If the pending invitation survived that,
+    its token would still resolve; removing the member later (any path) would
+    then leave a token that could silently reactivate them.
+    """
+    result = _invite(client, master_key_header, email="leo@example.com")
+    token = _token_from(result["accept_link"])
+
+    patch = client.patch(
+        f"/v1/organizations/me/members/{result['organization_member_id']}",
+        json={"status": "active"},
+        headers=master_key_header,
+    )
+    assert patch.status_code == 200, patch.text
+
+    accept = client.post("/v1/invitations/accept", json={"token": token})
+    assert accept.status_code == 400, accept.text
 
 
 def test_reinviting_a_revoked_address_revives_the_membership(

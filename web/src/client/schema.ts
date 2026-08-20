@@ -697,20 +697,24 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/invitations/validate/{token}": {
+    "/v1/invitations/validate": {
         parameters: {
             query?: never;
             header?: never;
             path?: never;
             cookie?: never;
         };
+        get?: never;
+        put?: never;
         /**
          * Validate Invitation
          * @description Look up a pending invitation by its token, for the accept page to render before committing.
+         *
+         *     A ``POST`` with the token in the body, not a ``GET`` with it in the URL:
+         *     the token is a bearer credential, and a URL path is what an access log or
+         *     an intermediate proxy routinely retains.
          */
-        get: operations["validate_invitation_v1_invitations_validate__token__get"];
-        put?: never;
-        post?: never;
+        post: operations["validate_invitation_v1_invitations_validate_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -6766,6 +6770,19 @@ export interface components {
             /** User Id */
             user_id: string;
         };
+        /**
+         * ValidateInvitationRequest
+         * @description The preview lookup's body.
+         *
+         *     A ``POST`` with the token in the body rather than a ``GET`` with it in the
+         *     URL, matching ``AcceptInvitationRequest``: the token is a bearer-style
+         *     credential (see ``Invitation.token_hash``'s docstring), and a URL is one a
+         *     proxy or an access log routinely retains, which a request body is not.
+         */
+        ValidateInvitationRequest: {
+            /** Token */
+            token: string;
+        };
         /** ValidationError */
         ValidationError: {
             /** Context */
@@ -8034,16 +8051,18 @@ export interface operations {
             };
         };
     };
-    validate_invitation_v1_invitations_validate__token__get: {
+    validate_invitation_v1_invitations_validate_post: {
         parameters: {
             query?: never;
             header?: never;
-            path: {
-                token: string;
-            };
+            path?: never;
             cookie?: never;
         };
-        requestBody?: never;
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ValidateInvitationRequest"];
+            };
+        };
         responses: {
             /** @description Successful Response */
             200: {

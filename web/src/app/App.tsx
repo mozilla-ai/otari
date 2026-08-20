@@ -87,8 +87,16 @@ function DeploymentRoot() {
   // be checked ahead of it rather than added there. `AcceptInvitationPage`
   // itself changes the hash away from this prefix once it is done, which is
   // what makes this reactive to the URL rather than only to the first paint.
+  //
+  // Keyed on the hash itself, not just gated by it: the page reads its token
+  // from the hash exactly once, in its own initial state, so a second
+  // invitation link opened in the same tab (pasted over the first without a
+  // full reload) would otherwise re-render the *same* component instance and
+  // keep validating and accepting the first token. The key forces React to
+  // tear down and remount on any hash change under this prefix, which is what
+  // makes "once" mean once per link rather than once per tab.
   if (hash.startsWith("#/accept-invitation")) {
-    return <AcceptInvitationPage />
+    return <AcceptInvitationPage key={hash} />
   }
 
   // Any deployment that issues a session needs one before the shell renders.

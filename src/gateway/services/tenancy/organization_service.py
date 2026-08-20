@@ -562,6 +562,16 @@ class OrganizationService:
                     active_organization_id=organization.id,
                 )
 
+            # Locked before the status check that decides create/revive/refuse,
+            # not just inside the revive branch below: two concurrent invites to
+            # the same suspended membership can otherwise both read "suspended"
+            # (nothing has committed yet to see), both fall through to revive
+            # it, and both mint their own live pending invitation for the one
+            # membership, since organization_member_id carries no uniqueness to
+            # catch that as an IntegrityError instead. The second caller through
+            # this lock re-reads the membership fresh, so it sees the first
+            # caller's write.
+            await self.organizations.lock(organization.id)
             membership = await self.members.get_by_organization_and_user(organization.id, target.id)
             if membership is not None and membership.status in {"active", "invited"}:
                 raise OrganizationMemberAlreadyExistsError(email)
@@ -614,7 +624,7 @@ class OrganizationService:
                 inviter_name=user.full_name or "An organization admin",
                 role=membership.role,
                 accept_link=accept_link,
-                valid_days=max(1, config.invitation_expiry_hours // 24),
+                expiry_hours=config.invitation_expiry_hours,
             )
             mail_sent = send_mail(config, to=email, subject=subject, html=html, text=text)
 
@@ -680,6 +690,16 @@ class OrganizationService:
         assignments = [
             WorkspaceAssignmentRequest.model_validate(assignment) for assignment in invitation.workspace_assignments
         ]
+        # Re-checked rather than trusted: these ids were validated against the
+        # organization at invite time, but acceptance can arrive up to
+        # invitation_expiry_hours later (seven days by default), and a
+        # workspace named in them may have been deleted since. Without this,
+        # `_apply_workspace_assignments` would insert a `WorkspaceMember`
+        # against a missing workspace id, the FK would refuse, and this public
+        # endpoint would answer an uncaught 500 with the invitation stuck
+        # `pending` (and every retry hitting the same wall) rather than the
+        # mapped 404 this raises instead.
+        await self._require_workspaces_in_organization(organization, assignments)
         await self._apply_workspace_assignments(user_id=membership.user_id, assignments=assignments)
         await self.invitations.update_status(invitation, {"status": "accepted"})
         await self.db.commit()
@@ -697,10 +717,17 @@ class OrganizationService:
         Cancels the invitation and suspends its paired membership, mirroring
         ``remove_active_organization_member_for_user``'s suspend-not-delete
         reasoning: re-inviting the same address later revives it rather than
-        starting over.
+        starting over. Goes through the same ``_validate_membership_update``
+        guard that path uses, too: without it, an admin (who already passes
+        the organization-management check above) could suspend a pending
+        *owner*-role invitation, which every other membership-status write
+        refuses ("only an owner outranks an owner").
         """
         organization = await self.get_active_organization_for_user(user)
-        await self.require_active_organization_management_access(user=user, organization=organization)
+        actor_membership = await self.require_active_organization_management_access(
+            user=user,
+            organization=organization,
+        )
 
         invitation = await self.invitations.get(invitation_id)
         if invitation is None or invitation.organization_id != organization.id:
@@ -710,6 +737,12 @@ class OrganizationService:
 
         membership = await self.members.get_by_id_and_organization(invitation.organization_member_id, organization.id)
         if membership is not None:
+            await self._validate_membership_update(
+                actor_membership=actor_membership,
+                target_membership=membership,
+                update_data={"status": "suspended"},
+                organization_id=organization.id,
+            )
             await self.members.update_membership(membership, {"status": "suspended"})
         await self.invitations.update_status(invitation, {"status": "cancelled"})
         await self.db.commit()
@@ -760,15 +793,17 @@ class OrganizationService:
 
         # Snapshotted before the write: `update_membership` mutates `target` in
         # place (SQLModel `sqlmodel_update` + `refresh`), so `target.status`
-        # itself would already read "suspended" afterwards.
+        # itself would already read the new value afterwards.
         was_invited = target.status == "invited"
         updated = await self.members.update_membership(target, update_data)
-        # Same reasoning as remove_active_organization_member_for_user: a
-        # caller may reach the same suspension through this generic update
-        # rather than through Revoke, and an `invited` row's pending
-        # invitation must not survive it (see
-        # _cancel_pending_invitation_for_membership).
-        if was_invited and updated.status == "suspended":
+        # Any transition away from `invited` through this generic path, not
+        # only to `suspended`: `OrganizationMemberSettableStatus` also lets a
+        # caller PATCH straight to `active`, bypassing accept_invitation
+        # entirely. Left uncancelled, the invitation stays `pending` and its
+        # token still resolves; if the membership is later removed by any
+        # path, accepting it would silently reactivate the membership and
+        # re-apply the parked workspace grants nobody re-confirmed.
+        if was_invited and updated.status != "invited":
             await self._cancel_pending_invitation_for_membership(updated.id)
         target_user = await self.users.get(updated.user_id)
         if target_user is None:

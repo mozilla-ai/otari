@@ -195,5 +195,5 @@ POST /v1/organizations/me/member-invitations                # dashboard-only
 DELETE /v1/organizations/me/member-invitations/{invitation_id} # dashboard-only
 # The invitation accept flow is reached by a browser following an emailed
 # link, not by an SDK caller acting as a key-holder inside a workspace.
-GET /v1/invitations/validate/{token}                        # accept-flow, not an SDK surface
+POST /v1/invitations/validate                               # accept-flow, not an SDK surface
 POST /v1/invitations/accept                                 # accept-flow, not an SDK surface

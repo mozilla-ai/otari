@@ -16,6 +16,7 @@ the recipient redacted, and reported back as ``False``.
 """
 
 import smtplib
+from email.errors import MessageError
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 
@@ -61,8 +62,15 @@ def send_mail(config: GatewayConfig, *, to: str, subject: str, html: str, text: 
                 client.starttls()
             if config.smtp_user and config.smtp_password:
                 client.login(config.smtp_user, config.smtp_password)
+            # ``as_string()`` is where a malformed header would raise (message
+            # construction above only stages the values), and callers already
+            # sanitize what they put in a header (see
+            # invitation_email._sanitize_header_value); ``MessageError`` is
+            # caught here too as defense in depth, so this function keeps its
+            # "never raises" promise even for a header this codebase does not
+            # currently produce.
             client.sendmail(config.mail_from_email, [to], message.as_string())
-    except (OSError, smtplib.SMTPException):
+    except (OSError, smtplib.SMTPException, MessageError, UnicodeError):
         logger.warning("Failed to send mail to %s", _redact_email(to), exc_info=True)
         return False
     return True

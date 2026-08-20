@@ -1191,9 +1191,23 @@
         {
           "name": "Validate Invitation",
           "request": {
-            "description": "Look up a pending invitation by its token, for the accept page to render before committing.",
-            "header": [],
-            "method": "GET",
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"token\": \"string\"\n}"
+            },
+            "description": "Look up a pending invitation by its token, for the accept page to render before committing.\n\nA ``POST`` with the token in the body, not a ``GET`` with it in the URL:\nthe token is a bearer credential, and a URL path is what an access log or\nan intermediate proxy routinely retains.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
             "url": {
               "host": [
                 "{{baseUrl}}"
@@ -1201,17 +1215,9 @@
               "path": [
                 "v1",
                 "invitations",
-                "validate",
-                ":token"
+                "validate"
               ],
-              "raw": "{{baseUrl}}/v1/invitations/validate/:token",
-              "variable": [
-                {
-                  "description": "path parameter",
-                  "key": "token",
-                  "value": ""
-                }
-              ]
+              "raw": "{{baseUrl}}/v1/invitations/validate"
             }
           }
         }

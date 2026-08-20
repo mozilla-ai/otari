@@ -1548,10 +1548,14 @@ export function useRevokeOrganizationMemberInvitation() {
 export function useValidateInvitation(token: string) {
   return useQuery({
     queryKey: ["invitation-preview", token],
+    // POST with the token in the body, not a GET with it in the URL: the
+    // token is a bearer credential, and a URL is what an access log or an
+    // intermediate proxy routinely retains.
     queryFn: () =>
-      apiFetch<InvitationPreview>(
-        `/v1/invitations/validate/${encodeURIComponent(token)}`,
-      ),
+      apiFetch<InvitationPreview>("/v1/invitations/validate", {
+        method: "POST",
+        body: JSON.stringify({ token }),
+      }),
     // An empty token (a malformed link) is never worth a round trip: the
     // server would only answer "not found" for what the client can already
     // see is missing.

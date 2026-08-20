@@ -735,6 +735,18 @@ class InviteOrganizationMemberResultPublic(SQLModel):
     created_at: datetime
 
 
+class ValidateInvitationRequest(SQLModel):
+    """The preview lookup's body.
+
+    A ``POST`` with the token in the body rather than a ``GET`` with it in the
+    URL, matching ``AcceptInvitationRequest``: the token is a bearer-style
+    credential (see ``Invitation.token_hash``'s docstring), and a URL is one a
+    proxy or an access log routinely retains, which a request body is not.
+    """
+
+    token: str
+
+
 class AcceptInvitationRequest(SQLModel):
     token: str
 
@@ -848,6 +860,7 @@ __all__ = [
     "OrganizationsPublic",
     "User",
     "UserCreate",
+    "ValidateInvitationRequest",
     "Workspace",
     "WorkspaceActivationClassification",
     "WorkspaceAssignmentRequest",

@@ -27,8 +27,12 @@ function tokenFromHash(hash: string): string | null {
 }
 
 export function AcceptInvitationPage() {
-  // Read once: this page is reached by a fresh navigation (an emailed link),
-  // never by an in-app hash change, so there is nothing to react to.
+  // Read once, safely: App.tsx renders this keyed on the hash
+  // (`<AcceptInvitationPage key={hash} />`), so a *different* invitation link
+  // opened in the same tab remounts a fresh instance of this component rather
+  // than re-rendering this one with a stale token frozen in its initial
+  // state. Without that key, a same-type re-render on hashchange would keep
+  // this state (and its token) exactly as it was.
   const [token] = useState(() => tokenFromHash(window.location.hash))
   const preview = useValidateInvitation(token ?? "")
   const accept = useAcceptInvitation()

@@ -100,4 +100,64 @@ describe("App", () => {
       screen.queryByRole("heading", { name: "Otari Dashboard" }),
     ).toBeNull()
   })
+
+  it("renders the accept-invitation page ahead of the sign-in screen", async () => {
+    vi.mocked(apiFetch).mockImplementation(async (path) => {
+      if (
+        typeof path === "string" &&
+        path.startsWith("/v1/invitations/validate")
+      ) {
+        return {
+          email: "ada@example.com",
+          organization_name: "Acme",
+          role: "member",
+          expires_at: "2026-01-08T00:00:00+00:00",
+        } as never
+      }
+      return [] as never
+    })
+    window.location.hash = "#/accept-invitation?token=first-token"
+
+    renderApp(bootstrap())
+
+    // Not the sign-in screen, even though no session marker is stored: the
+    // token in the link is this visitor's whole credential, not a session.
+    expect(await screen.findByText("Acme")).toBeInTheDocument()
+    expect(
+      screen.queryByRole("heading", { name: "Otari Dashboard" }),
+    ).toBeNull()
+  })
+
+  it("remounts with a fresh token when a different invitation link opens in the same tab", async () => {
+    // App.tsx keys the accept-invitation branch on the hash for exactly this:
+    // without it, a same-type re-render on hashchange would keep the first
+    // link's token frozen in the page's own initial state, and a second link
+    // pasted into the address bar would silently validate/accept the first.
+    vi.mocked(apiFetch).mockImplementation(async (path, init) => {
+      if (
+        typeof path === "string" &&
+        path.startsWith("/v1/invitations/validate")
+      ) {
+        const body = init?.body ? JSON.parse(String(init.body)) : {}
+        return {
+          email:
+            body.token === "first-token"
+              ? "ada@example.com"
+              : "bob@example.com",
+          organization_name: "Acme",
+          role: "member",
+          expires_at: "2026-01-08T00:00:00+00:00",
+        } as never
+      }
+      return [] as never
+    })
+    window.location.hash = "#/accept-invitation?token=first-token"
+    renderApp(bootstrap())
+    expect(await screen.findByText("ada@example.com")).toBeInTheDocument()
+
+    window.location.hash = "#/accept-invitation?token=second-token"
+
+    expect(await screen.findByText("bob@example.com")).toBeInTheDocument()
+    expect(screen.queryByText("ada@example.com")).toBeNull()
+  })
 })
