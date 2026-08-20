@@ -463,6 +463,13 @@ of the `cost` column on a usage row. That is the only rounding in the cost path:
 a charge below half a micro-dollar settles at zero, and one at or above it
 settles at one micro-dollar.
 
+Upgrading an existing deployment converts the stored values in place. Rates
+convert exactly. Costs are rounded to the micro-dollar as they convert, so a
+historical row that recorded a fraction of a micro-dollar (a few tokens of a
+cheap embedding model) settles to `0.000000` and a deployment's lifetime spend
+total can move very slightly downward. The conversion is one way: downgrading
+restores the column type, not the discarded digits.
+
 Exactness at rest needs PostgreSQL. SQLite, the default for a single-node
 deployment, has no decimal storage type and keeps the value as a float; the
 gateway still computes and rounds identically on both, and a rounded amount

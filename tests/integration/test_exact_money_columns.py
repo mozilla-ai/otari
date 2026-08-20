@@ -43,7 +43,7 @@ _TS = datetime(2026, 7, 1, 12, 0, tzinfo=UTC)
 
 _ALEMBIC_DIR = Path(__file__).resolve().parents[2] / "alembic"
 _MONEY_REVISION = "a7c3e5d9b1f4"
-_BEFORE_MONEY = "b6d8f0a2c4e7"
+_BEFORE_MONEY = "f7a2c4e6b8d1"
 
 
 def _alembic_config(database_url: str) -> Config:

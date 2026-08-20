@@ -1,7 +1,7 @@
 """store rates and settled costs as exact numerics
 
 Revision ID: a7c3e5d9b1f4
-Revises: b6d8f0a2c4e7
+Revises: f7a2c4e6b8d1
 Create Date: 2026-08-20 10:00:00.000000
 
 The rate columns on ``model_pricing`` and ``organization_model_pricing``, and
@@ -18,6 +18,22 @@ and comes back as exactly ``0.075``. A rate would only shift if it had been
 written with more than 8 significant decimals after the point, which no
 published rate has.
 
+**A settled cost does move, and the move is one-way.** ``usage_logs.cost``
+keeps six decimals, so an existing amount is rounded to the micro-dollar as it
+converts: ``0.1234567`` becomes ``0.123457``, and anything below half a
+micro-dollar (a handful of embedding or moderation tokens on a cheap model)
+becomes ``0.000000``. The downgrade restores the column type and cannot restore
+those digits, so a deployment's historical spend total can shift very slightly
+downward on upgrade. That is the scale mozilla-ai/otari-ai#1751 chose for the
+accounting truth; it is recorded here because nothing else would tell an
+operator why last month's total changed.
+
+**On PostgreSQL this rewrites ``usage_logs``.** ``double precision`` to
+``numeric`` is not binary-coercible, so the ALTER copies the whole table under
+an ACCESS EXCLUSIVE lock and needs transient space for a second copy. On a
+large usage table that is real downtime, and it runs at startup when
+``auto_migrate`` is set. Schedule it rather than discovering it.
+
 SQLite gets the same DDL through a table rebuild, though there the change is
 declarative: SQLite has no numeric storage class, so the values stay REAL and
 exactness at rest needs PostgreSQL. What the rebuild buys is that a SQLite
@@ -32,7 +48,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "a7c3e5d9b1f4"
-down_revision: str | Sequence[str] | None = "b6d8f0a2c4e7"
+down_revision: str | Sequence[str] | None = "f7a2c4e6b8d1"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

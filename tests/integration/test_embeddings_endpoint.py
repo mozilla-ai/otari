@@ -235,6 +235,44 @@ def test_embeddings_cost_tracked_with_pricing(
     assert embedding_logs[0]["cost"] > 0
 
 
+def test_embeddings_charge_below_half_a_micro_dollar_settles_at_zero(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+) -> None:
+    """The floor of the settlement scale, pinned rather than avoided.
+
+    Ten tokens at $0.02 per million is two ten-millionths of a dollar. The cost
+    column holds six decimals, so the row settles at zero; the charge line keeps
+    the unrounded amount, so the work is still visible in the audit trail even
+    though it was billed at nothing.
+    """
+    client.post(
+        "/v1/pricing",
+        json={
+            "model_key": "openai:text-embedding-3-small",
+            "input_price_per_million": 0.02,
+            "output_price_per_million": 0.0,
+        },
+        headers=master_key_header,
+    )
+
+    mock_resp = _mock_embedding_response(prompt_tokens=10)
+    with patch("gateway.api.routes.embeddings.aembedding", new_callable=AsyncMock, return_value=mock_resp):
+        resp = client.post(
+            "/v1/embeddings",
+            json={"model": "openai:text-embedding-3-small", "input": "hello"},
+            headers=api_key_header,
+        )
+    assert resp.status_code == 200
+
+    logs = client.get("/v1/usage", params={"endpoint": "/v1/embeddings"}, headers=master_key_header).json()
+    assert logs[0]["cost"] == 0.0
+    assert logs[0]["pricing_breakdown"] == [
+        {"meter": "input", "units": 10, "rate_per_million": 0.02, "cost": pytest.approx(2e-7)}
+    ]
+
+
 def test_embeddings_billing_meters_tracked_with_pricing(
     client: TestClient,
     master_key_header: dict[str, str],
