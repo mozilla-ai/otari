@@ -15,7 +15,7 @@ key: a template belongs to exactly one workspace and nothing else names it, so
 it rides the workspace's own delete rather than needing separate cleanup.
 
 Revision ID: f7a2c4e6b8d1
-Revises: 7ff4e082eb0c
+Revises: b6d8f0a2c4e7
 Create Date: 2026-08-20
 """
 
@@ -25,7 +25,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "f7a2c4e6b8d1"
-down_revision: str | Sequence[str] | None = "7ff4e082eb0c"
+down_revision: str | Sequence[str] | None = "b6d8f0a2c4e7"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
