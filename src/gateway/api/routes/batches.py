@@ -601,11 +601,20 @@ async def retrieve_batch_results(
 
     cost: float | None = None
     if total_tokens:
+        # Rates follow the key that CREATED the batch, for the same reason the
+        # budget exemption above does and the owner attribution before it: the
+        # cost is billed to that key's owner, so it has to be priced at that
+        # key's organization. Pricing on the retriever would let a master-key
+        # retrieval, or a second key of the same user in another organization,
+        # settle the batch at rates its owner never negotiated. A record with no
+        # originating key (it was deleted) falls back to the retriever, which is
+        # the only organization still knowable.
+        pricing_key_id = record.api_key_id if record is not None and record.api_key_id is not None else api_key_id
         pricing = await find_model_pricing(
             db,
             provider_enum.value,
             batch_model,
-            organization_id=await organization_for_key_id(db, api_key_id),
+            organization_id=await organization_for_key_id(db, pricing_key_id),
         )
         if pricing:
             cost = (prompt_tokens / 1_000_000) * pricing.input_price_per_million + (

@@ -199,6 +199,7 @@ class OrganizationPricingService:
         effective_from = normalize_effective_at(override.effective_from)
         effective_to = normalize_effective_at(override.effective_to) if override.effective_to else None
         validate_period(effective_from, effective_to)
+        validate_rates(override)
 
         await self.raise_if_overlapping(
             organization_id=organization_id,
@@ -261,6 +262,7 @@ class OrganizationPricingService:
         effective_from = normalize_effective_at(override.effective_from)
         effective_to = normalize_effective_at(override.effective_to) if override.effective_to else None
         validate_period(effective_from, effective_to)
+        validate_rates(override)
 
         await self.raise_if_overlapping(
             organization_id=organization_id,
@@ -294,6 +296,29 @@ class OrganizationPricingService:
         await self.db.flush()
 
 
+def validate_rates(override: PricingOverrideInput) -> None:
+    """Refuse a negative rate before it reaches the table's CHECK.
+
+    The route already bounds all five with ``Field(ge=0)``, so nothing over HTTP
+    arrives here negative. This exists for the other callers: the service is the
+    boundary the entity contract is stated at, and a direct call (a test, a future
+    importer, an overlay) would otherwise surface a negative rate as an
+    ``IntegrityError`` at flush, which reads as an internal fault rather than as
+    the refusal it is. Names the field, because "a rate is negative" is not
+    actionable when there are five of them.
+    """
+    rates = {
+        "input_price_per_million": override.input_price_per_million,
+        "output_price_per_million": override.output_price_per_million,
+        "cache_read_price_per_million": override.cache_read_price_per_million,
+        "cache_write_price_per_million": override.cache_write_price_per_million,
+        "cache_write_1h_price_per_million": override.cache_write_1h_price_per_million,
+    }
+    for field, value in rates.items():
+        if value is not None and value < 0:
+            raise TenancyValidationError(f"{field} must be non-negative; got {value}")
+
+
 def validate_period(effective_from: datetime, effective_to: datetime | None) -> None:
     """Refuse a period that could never apply to any instant.
 
@@ -310,4 +335,5 @@ __all__ = [
     "OrganizationPricingService",
     "PricingOverrideInput",
     "validate_period",
+    "validate_rates",
 ]

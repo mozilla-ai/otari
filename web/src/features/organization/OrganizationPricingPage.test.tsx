@@ -1,11 +1,12 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, waitFor } from "@testing-library/react"
+import { screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { OrganizationContext, OrganizationPricingOverride } from "@/client"
 import { OrganizationPricingPage } from "@/features/organization/OrganizationPricingPage"
 import { organizationContext } from "@/tests/fixtures"
+import { renderWithRouter } from "@/tests/router"
 
 interface Request {
   url: string
@@ -75,11 +76,15 @@ function mockApi({
   return requests
 }
 
+// The real router, per the frontend standards: the harness mounts what the app
+// mounts, so a page that later grows a <Link> or URL state is already covered.
+// Awaited, because the router resolves its first location asynchronously and a
+// synchronous DOM read would race it.
 function renderPage() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  return render(
+  return renderWithRouter(
     <QueryClientProvider client={client}>
       <OrganizationPricingPage />
     </QueryClientProvider>,
@@ -94,7 +99,7 @@ describe("OrganizationPricingPage", () => {
   it("lists the organization's overrides with their rates and period", async () => {
     mockApi({ overrides: [pricingOverride()] })
 
-    renderPage()
+    await renderPage()
 
     expect(
       await screen.findByRole("heading", { name: /rate overrides/i }),
@@ -110,7 +115,7 @@ describe("OrganizationPricingPage", () => {
   it("shows an unset cache rate as absent rather than as zero", async () => {
     mockApi({ overrides: [pricingOverride()] })
 
-    renderPage()
+    await renderPage()
 
     await screen.findByText("openai:gpt-4o")
     expect(screen.queryByText("$0.0000")).not.toBeInTheDocument()
@@ -119,18 +124,40 @@ describe("OrganizationPricingPage", () => {
   it("explains itself when the organization has no overrides", async () => {
     mockApi({ overrides: [] })
 
-    renderPage()
+    await renderPage()
 
     expect(
       await screen.findByRole("heading", { name: /no rate overrides/i }),
     ).toBeInTheDocument()
   })
 
+  // A failed list also leaves `rows` empty, and the empty state asserts that
+  // every model is priced by the deployment list, which the page cannot know
+  // when the list never arrived.
+  it("shows the error rather than the empty state when the list fails", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input)
+      if (url.includes("/v1/organizations/me/pricing")) {
+        return jsonResponse({ detail: "pricing is unavailable" }, 503)
+      }
+      return jsonResponse(organizationContext())
+    })
+
+    await renderPage()
+
+    expect(
+      await screen.findByText(/pricing is unavailable/i),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole("heading", { name: /no rate overrides/i }),
+    ).not.toBeInTheDocument()
+  })
+
   it("sends a create when an override is added", async () => {
     const requests = mockApi({ overrides: [] })
     const user = userEvent.setup()
 
-    renderPage()
+    await renderPage()
 
     await user.click(
       await screen.findByRole("button", { name: /add override/i }),
@@ -161,7 +188,7 @@ describe("OrganizationPricingPage", () => {
     const requests = mockApi({ overrides: [] })
     const user = userEvent.setup()
 
-    renderPage()
+    await renderPage()
 
     await user.click(
       await screen.findByRole("button", { name: /add override/i }),
@@ -190,7 +217,7 @@ describe("OrganizationPricingPage", () => {
     })
     const user = userEvent.setup()
 
-    renderPage()
+    await renderPage()
 
     await user.click(
       await screen.findByRole("button", { name: /add override/i }),
@@ -214,7 +241,7 @@ describe("OrganizationPricingPage", () => {
     })
     const user = userEvent.setup()
 
-    renderPage()
+    await renderPage()
 
     await user.click(await screen.findByRole("button", { name: /edit/i }))
     const input = await screen.findByLabelText(/input, per 1m tokens/i)
@@ -233,6 +260,27 @@ describe("OrganizationPricingPage", () => {
     })
   })
 
+  // The endpoint requires a start on a replacement, so a cleared field would be
+  // a 422 rather than a silent period move. Blocked here instead.
+  it("blocks an edit whose start has been cleared", async () => {
+    const requests = mockApi({
+      overrides: [pricingOverride()],
+      writeStatus: 200,
+    })
+    const user = userEvent.setup()
+
+    await renderPage()
+
+    await user.click(await screen.findByRole("button", { name: /edit/i }))
+    await user.clear(await screen.findByLabelText(/applies from/i))
+
+    expect(screen.getByText(/an edit needs a start/i)).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: /save override/i }),
+    ).toBeDisabled()
+    expect(requests.some((request) => request.method === "PUT")).toBe(false)
+  })
+
   it("deletes an override after a confirmation", async () => {
     const requests = mockApi({
       overrides: [pricingOverride()],
@@ -241,7 +289,7 @@ describe("OrganizationPricingPage", () => {
     })
     const user = userEvent.setup()
 
-    renderPage()
+    await renderPage()
 
     await user.click(await screen.findByRole("button", { name: /delete/i }))
     await user.click(
@@ -267,7 +315,7 @@ describe("OrganizationPricingPage", () => {
       overrides: [pricingOverride()],
     })
 
-    renderPage()
+    await renderPage()
 
     expect(
       await screen.findByRole("button", { name: /add override/i }),
@@ -291,7 +339,7 @@ describe("OrganizationPricingPage", () => {
     })
     const user = userEvent.setup()
 
-    renderPage()
+    await renderPage()
 
     await user.click(
       await screen.findByRole("button", { name: /add override/i }),

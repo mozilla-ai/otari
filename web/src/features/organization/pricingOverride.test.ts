@@ -102,6 +102,21 @@ describe("periodBlockedReason", () => {
     expect(periodBlockedReason("", "")).toBeUndefined()
   })
 
+  // CodeRabbit caught this on #674, the other half of the blank-field gap: the
+  // dialog submits a blank start as "now", so skipping the check left Save
+  // enabled for an end already in the past and earned a 400 from the server.
+  it("refuses a blank start with an end in the past", () => {
+    const now = Date.parse("2026-08-20T12:00:00.000Z")
+    expect(periodBlockedReason("", "2026-08-19T12:00", now)).toMatch(
+      /blank start means now/i,
+    )
+  })
+
+  it("accepts a blank start with an end in the future", () => {
+    const now = Date.parse("2026-08-20T12:00:00.000Z")
+    expect(periodBlockedReason("", "2026-08-21T12:00", now)).toBeUndefined()
+  })
+
   it("refuses an inverted period", () => {
     expect(periodBlockedReason("2026-08-21T12:00", "2026-08-20T12:00")).toMatch(
       /must be after/i,

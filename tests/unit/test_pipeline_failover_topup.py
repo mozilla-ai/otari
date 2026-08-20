@@ -91,11 +91,11 @@ def increases(monkeypatch: pytest.MonkeyPatch) -> list[float]:
     """Record every top-up delta, with pricing stubbed from ``_PRICES``."""
     recorded: list[float] = []
 
-    async def fake_find_pricing(
-        _db: Any, instance: str, model: str, *, organization_id: Any = None, **_kwargs: Any
-    ) -> Any:
-        # ``organization_id`` is named rather than swallowed by ``**_kwargs`` so
-        # this fake keeps failing if the real signature stops passing it.
+    async def fake_find_pricing(_db: Any, instance: str, model: str, *, organization_id: Any, **_kwargs: Any) -> Any:
+        # ``organization_id`` is named, and deliberately has no default, so this
+        # fake stops binding if the real call site drops the keyword. With a
+        # default it would bind cleanly and the regression would pass silently,
+        # which is the opposite of what naming it here is for.
         price = _PRICES.get((instance, model))
         return None if price is None else SimpleNamespace(price=price)
 

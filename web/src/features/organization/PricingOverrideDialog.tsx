@@ -154,16 +154,23 @@ export function PricingOverrideDialog({
     Number.isNaN(cacheWriteRate ?? 0) ||
     Number.isNaN(cacheWrite1hRate ?? 0)
 
+  // A replacement states the whole row, so the endpoint requires a start: an
+  // omitted one would otherwise be defaulted to now and move a stored period.
+  const startRequired = editing !== undefined && from.trim() === ""
+
   const blockedReason = keyInvalid
     ? modelKey.trim() === ""
       ? undefined
       : "A rate is stored under a 'provider:model' key, so it needs the provider prefix."
-    : (periodReason ??
-      (clash
-        ? `This period overlaps an override already stored for ${clash.model_key}. Change the period, or edit that one instead.`
-        : undefined))
+    : startRequired
+      ? "An edit needs a start. Leaving it blank would move this override's period to now."
+      : (periodReason ??
+        (clash
+          ? `This period overlaps an override already stored for ${clash.model_key}. Change the period, or edit that one instead.`
+          : undefined))
 
-  const invalid = keyInvalid || ratesInvalid || blockedReason !== undefined
+  const invalid =
+    keyInvalid || ratesInvalid || startRequired || blockedReason !== undefined
 
   const submit = () => {
     if (invalid || inputRate === undefined || outputRate === undefined) return
@@ -264,6 +271,7 @@ export function PricingOverrideDialog({
                   <TextField
                     value={from}
                     onChange={setFrom}
+                    isRequired={editing !== undefined}
                     className="flex flex-col gap-1"
                   >
                     <Label className="text-sm font-medium text-foreground">
@@ -271,7 +279,9 @@ export function PricingOverrideDialog({
                     </Label>
                     <Input type="datetime-local" />
                     <span className="text-xs text-muted">
-                      Blank starts it now.
+                      {editing
+                        ? "Required when editing: a replacement states the whole period."
+                        : "Blank starts it now."}
                     </span>
                   </TextField>
                   <TextField

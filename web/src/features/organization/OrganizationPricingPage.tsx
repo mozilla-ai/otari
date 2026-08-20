@@ -92,8 +92,19 @@ export function OrganizationPricingPage() {
     if (editing) {
       // model_key is absent from the update body: the endpoint refuses to
       // repoint an override at another model.
-      const { model_key: _unused, ...body } = draft
-      replace.mutate({ id: editing.id, body }, onDone)
+      const { model_key: _unused, ...rest } = draft
+      // The endpoint requires a start on a replacement, so that an omitted one
+      // cannot silently move a stored period to the present. The dialog blocks a
+      // blank start while editing; this narrows the type and is the belt to that
+      // brace.
+      if (rest.effective_from === null) return
+      replace.mutate(
+        {
+          id: editing.id,
+          body: { ...rest, effective_from: rest.effective_from },
+        },
+        onDone,
+      )
       return
     }
     create.mutate(draft, onDone)
@@ -196,7 +207,11 @@ export function OrganizationPricingPage() {
 
       <ErrorBanner error={overrides.error} />
 
-      {!overrides.isPending && rows.length === 0 ? (
+      {/* Gated on the error too: a failed request also leaves `rows` empty, and
+          the empty state's copy asserts that every model is priced by the
+          deployment list, which the page cannot know when the list never
+          arrived. */}
+      {!overrides.isPending && !overrides.error && rows.length === 0 ? (
         <EmptyState
           title="No rate overrides"
           description="Every model is priced by the deployment price list. Add an override to bill this organization at its own negotiated rate for a model."

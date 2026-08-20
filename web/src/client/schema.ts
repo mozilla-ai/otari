@@ -4708,6 +4708,13 @@ export interface components {
          * OrganizationModelPricingUpdate
          * @description Replace an override's rates and period.
          *
+         *     ``effective_from`` is required here, where a create defaults it to now. A
+         *     replacement states the whole row, so defaulting an omitted start would move a
+         *     stored period to the present: an operator editing next quarter's rate through
+         *     a client that does not send the field would silently bring it into effect
+         *     today, or collide with the period that currently applies. Stating it is the
+         *     only reading that cannot surprise.
+         *
          *     A full replacement rather than a patch: every rate field is present in the
          *     body and an omitted optional rate is cleared, so the stored row is exactly
          *     what was sent. That is the opposite of ``POST /v1/pricing``, which inherits an
@@ -4737,9 +4744,10 @@ export interface components {
             cache_write_price_per_million?: number | null;
             /**
              * Effective From
-             * @description ISO 8601 datetime from which this rate applies, inclusive. Defaults to now.
+             * Format: date-time
+             * @description ISO 8601 datetime from which this rate applies, inclusive. Required on a replacement, so an omitted value cannot silently move a stored period to the present.
              */
-            effective_from?: string | null;
+            effective_from: string;
             /**
              * Effective To
              * @description ISO 8601 datetime at which this rate stops applying, exclusive. Null leaves it open ended. Because the end is exclusive, the next period may begin at exactly this instant without overlapping.

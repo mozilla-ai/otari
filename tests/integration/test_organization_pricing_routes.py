@@ -35,6 +35,7 @@ from gateway.services.tenancy.errors import (
     NotAuthorizedError,
     OrganizationPricingNotFoundError,
     OrganizationPricingOverlapError,
+    TenancyValidationError,
 )
 from gateway.services.workspace_scope import (
     organization_for_key_id,
@@ -79,10 +80,18 @@ def test_an_override_is_created_listed_replaced_and_deleted(
 
     replaced = client.put(
         f"{_ENDPOINT}/{override['id']}",
-        json={"input_price_per_million": 1.0, "output_price_per_million": 2.0},
+        json={
+            "input_price_per_million": 1.0,
+            "output_price_per_million": 2.0,
+            # Required on a replacement, so an omitted start cannot silently move
+            # the stored period to the present.
+            "effective_from": override["effective_from"],
+        },
         headers=master_key_header,
     )
     assert replaced.status_code == status.HTTP_200_OK, replaced.text
+    # The period is the one that was sent, not "now".
+    assert replaced.json()["effective_from"] == override["effective_from"]
     assert replaced.json()["input_price_per_million"] == 1.0
     # The key is immutable, so a replacement keeps it.
     assert replaced.json()["model_key"] == _MODEL_KEY
@@ -176,6 +185,47 @@ def test_a_negative_rate_is_refused(
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT, response.text
 
 
+def test_a_model_key_with_no_provider_prefix_is_refused(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """A bare model name would store a rate resolution could never match."""
+    response = client.post(_ENDPOINT, json=_body(model_key="gpt-4o"), headers=master_key_header)
+
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT, response.text
+    # And the prefixed form is accepted, so the rule is not just refusing everything.
+    accepted = client.post(_ENDPOINT, json=_body(model_key="openai:gpt-4o"), headers=master_key_header)
+    assert accepted.status_code == status.HTTP_201_CREATED, accepted.text
+
+
+def test_a_replacement_without_a_start_is_refused(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """A replacement states the whole period, so the start is not defaulted.
+
+    Without this the omitted field became ``now``, quietly moving a scheduled
+    override into effect today.
+    """
+    created = client.post(
+        _ENDPOINT,
+        json=_body(effective_from=(datetime.now(UTC) + timedelta(days=30)).isoformat()),
+        headers=master_key_header,
+    )
+    assert created.status_code == status.HTTP_201_CREATED, created.text
+
+    response = client.put(
+        f"{_ENDPOINT}/{created.json()['id']}",
+        json={"input_price_per_million": 1.0, "output_price_per_million": 2.0},
+        headers=master_key_header,
+    )
+
+    assert response.status_code == status.HTTP_422_UNPROCESSABLE_CONTENT, response.text
+    # The stored period did not move.
+    listed = client.get(_ENDPOINT, headers=master_key_header).json()["data"]
+    assert listed[0]["effective_from"] == created.json()["effective_from"]
+
+
 def test_an_unknown_override_id_is_a_404(
     client: TestClient,
     master_key_header: dict[str, str],
@@ -184,7 +234,11 @@ def test_an_unknown_override_id_is_a_404(
 
     replaced = client.put(
         f"{_ENDPOINT}/{missing}",
-        json={"input_price_per_million": 1.0, "output_price_per_million": 2.0},
+        json={
+            "input_price_per_million": 1.0,
+            "output_price_per_million": 2.0,
+            "effective_from": datetime.now(UTC).isoformat(),
+        },
         headers=master_key_header,
     )
     removed = client.delete(f"{_ENDPOINT}/{missing}", headers=master_key_header)
@@ -350,6 +404,36 @@ async def test_any_member_may_read_the_overrides(async_db: AsyncSession, role: s
 
     assert [row.model_key for row in visible] == [_MODEL_KEY]
     assert total == 1
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize(
+    "field",
+    [
+        "input_price_per_million",
+        "output_price_per_million",
+        "cache_read_price_per_million",
+        "cache_write_price_per_million",
+        "cache_write_1h_price_per_million",
+    ],
+)
+async def test_a_negative_rate_is_refused_at_the_service_boundary(async_db: AsyncSession, field: str) -> None:
+    """Named, and a 400, rather than an IntegrityError at flush.
+
+    The route bounds all five with ``Field(ge=0)``, so nothing over HTTP arrives
+    negative; this is the boundary a direct caller crosses.
+    """
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Acme", slug=f"acme-negative-{field}", created_by_user_id=None
+    )
+    owner = await _identity(async_db, organization, role="owner", name="owner person")
+    service = OrganizationPricingService(async_db)
+
+    with pytest.raises(TenancyValidationError) as caught:
+        await service.create_for_caller(owner, _MODEL_KEY, _rates(**{field: -1.0}))
+
+    assert field in caught.value.message
+    assert caught.value.status_code == 400
 
 
 @pytest.mark.asyncio

@@ -4916,6 +4916,7 @@
             "description": "Model identifier in 'provider:model' form, matching the key the deployment price list uses. A provider instance name is valid here ('home_lab:llama-3'), because pricing keys on the instance a request resolves to.",
             "maxLength": 255,
             "minLength": 1,
+            "pattern": "^[^\\s:/]+[:/][^\\s]+$",
             "title": "Model Key",
             "type": "string"
           },
@@ -5061,7 +5062,7 @@
         "type": "object"
       },
       "OrganizationModelPricingUpdate": {
-        "description": "Replace an override's rates and period.\n\nA full replacement rather than a patch: every rate field is present in the\nbody and an omitted optional rate is cleared, so the stored row is exactly\nwhat was sent. That is the opposite of ``POST /v1/pricing``, which inherits an\nomitted cache rate from the model's previous version, and deliberately so:\nthat surface versions a catalog where each write adds a row, while this one\nedits a single row in place and an inheriting patch would make the result\ndepend on what happened to be stored before.\n\n``model_key`` is absent because it is immutable. Repointing an override at\nanother model is retiring one and creating another, which is two requests.",
+        "description": "Replace an override's rates and period.\n\n``effective_from`` is required here, where a create defaults it to now. A\nreplacement states the whole row, so defaulting an omitted start would move a\nstored period to the present: an operator editing next quarter's rate through\na client that does not send the field would silently bring it into effect\ntoday, or collide with the period that currently applies. Stating it is the\nonly reading that cannot surprise.\n\nA full replacement rather than a patch: every rate field is present in the\nbody and an omitted optional rate is cleared, so the stored row is exactly\nwhat was sent. That is the opposite of ``POST /v1/pricing``, which inherits an\nomitted cache rate from the model's previous version, and deliberately so:\nthat surface versions a catalog where each write adds a row, while this one\nedits a single row in place and an inheriting patch would make the result\ndepend on what happened to be stored before.\n\n``model_key`` is absent because it is immutable. Repointing an override at\nanother model is retiring one and creating another, which is two requests.",
         "properties": {
           "cache_read_price_per_million": {
             "anyOf": [
@@ -5103,17 +5104,10 @@
             "title": "Cache Write Price Per Million"
           },
           "effective_from": {
-            "anyOf": [
-              {
-                "format": "date-time",
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "ISO 8601 datetime from which this rate applies, inclusive. Defaults to now.",
-            "title": "Effective From"
+            "description": "ISO 8601 datetime from which this rate applies, inclusive. Required on a replacement, so an omitted value cannot silently move a stored period to the present.",
+            "format": "date-time",
+            "title": "Effective From",
+            "type": "string"
           },
           "effective_to": {
             "anyOf": [
@@ -5158,7 +5152,8 @@
         },
         "required": [
           "input_price_per_million",
-          "output_price_per_million"
+          "output_price_per_million",
+          "effective_from"
         ],
         "title": "OrganizationModelPricingUpdate",
         "type": "object"

@@ -64,10 +64,16 @@ export function isValidModelKey(value: string): boolean {
  * half-typed date enable Save, store a period the operator did not ask for, and
  * skip the overlap check on the way (`Date.parse` yields `NaN`, and every
  * comparison against `NaN` is false, so nothing looks like it overlaps).
+ *
+ * A blank start is compared against *now* rather than skipped, because that is
+ * what the dialog submits for it: leaving the start blank and setting an end in
+ * the past would otherwise keep Save enabled and earn a 400, which is the one
+ * outcome this module exists to prevent. `now` is injectable so a test can pin it.
  */
 export function periodBlockedReason(
   effectiveFrom: string,
   effectiveTo: string,
+  now = Date.now(),
 ): string | undefined {
   const from = effectiveFrom.trim()
   const to = effectiveTo.trim()
@@ -77,9 +83,13 @@ export function periodBlockedReason(
   if (to !== "" && Number.isNaN(Date.parse(to))) {
     return "The end is not a date this browser recognizes."
   }
-  if (from === "" || to === "") return undefined
-  if (Date.parse(to) <= Date.parse(from)) {
-    return "The end must be after the start. An end equal to the start covers no time at all."
+  // No end is open ended, which nothing can conflict with.
+  if (to === "") return undefined
+  const start = from === "" ? now : Date.parse(from)
+  if (Date.parse(to) <= start) {
+    return from === ""
+      ? "The end is in the past, and a blank start means now. Set a start, or an end in the future."
+      : "The end must be after the start. An end equal to the start covers no time at all."
   }
   return undefined
 }

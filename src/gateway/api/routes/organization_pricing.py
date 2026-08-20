@@ -54,7 +54,18 @@ _MODEL_KEY_DESCRIPTION = (
     "A provider instance name is valid here ('home_lab:llama-3'), because pricing keys on the "
     "instance a request resolves to."
 )
+# A pricing row is only ever read back under a prefixed selector, so a bare model
+# name would store a rate nothing bills against: resolution builds
+# ``provider:model`` from the request and would never match it. Enforced as a
+# pattern rather than only in the dashboard, so the rule holds for every client
+# and is published in the schema. The legacy slash form is accepted because the
+# resolution chain still looks for it.
+_MODEL_KEY_PATTERN = r"^[^\s:/]+[:/][^\s]+$"
 _EFFECTIVE_FROM_DESCRIPTION = "ISO 8601 datetime from which this rate applies, inclusive. Defaults to now."
+_EFFECTIVE_FROM_REQUIRED_DESCRIPTION = (
+    "ISO 8601 datetime from which this rate applies, inclusive. Required on a replacement, "
+    "so an omitted value cannot silently move a stored period to the present."
+)
 _EFFECTIVE_TO_DESCRIPTION = (
     "ISO 8601 datetime at which this rate stops applying, exclusive. Null leaves it open ended. "
     "Because the end is exclusive, the next period may begin at exactly this instant without overlapping."
@@ -86,11 +97,23 @@ class OrganizationModelPricingRates(BaseModel):
 class OrganizationModelPricingCreate(OrganizationModelPricingRates):
     """Create one rate override for a model, for a period."""
 
-    model_key: str = Field(min_length=1, max_length=255, description=_MODEL_KEY_DESCRIPTION)
+    model_key: str = Field(
+        min_length=1,
+        max_length=255,
+        pattern=_MODEL_KEY_PATTERN,
+        description=_MODEL_KEY_DESCRIPTION,
+    )
 
 
 class OrganizationModelPricingUpdate(OrganizationModelPricingRates):
     """Replace an override's rates and period.
+
+    ``effective_from`` is required here, where a create defaults it to now. A
+    replacement states the whole row, so defaulting an omitted start would move a
+    stored period to the present: an operator editing next quarter's rate through
+    a client that does not send the field would silently bring it into effect
+    today, or collide with the period that currently applies. Stating it is the
+    only reading that cannot surprise.
 
     A full replacement rather than a patch: every rate field is present in the
     body and an omitted optional rate is cleared, so the stored row is exactly
@@ -103,6 +126,8 @@ class OrganizationModelPricingUpdate(OrganizationModelPricingRates):
     ``model_key`` is absent because it is immutable. Repointing an override at
     another model is retiring one and creating another, which is two requests.
     """
+
+    effective_from: datetime = Field(description=_EFFECTIVE_FROM_REQUIRED_DESCRIPTION)
 
 
 class OrganizationModelPricingPublic(BaseModel):
