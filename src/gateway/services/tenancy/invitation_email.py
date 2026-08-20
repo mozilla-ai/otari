@@ -24,6 +24,8 @@ to break out of.
 from html import escape
 from importlib import resources
 
+from gateway.services.mail_service import sanitize_header_value
+
 
 def _load(name: str) -> str:
     return resources.files("gateway").joinpath(f"templates/email/{name}").read_text(encoding="utf-8")
@@ -31,16 +33,6 @@ def _load(name: str) -> str:
 
 _HTML_TEMPLATE = _load("invitation.html")
 _TEXT_TEMPLATE = _load("invitation.txt")
-
-
-def _sanitize_header_value(value: str) -> str:
-    """Strip CR/LF so a value cannot inject or malform an email header.
-
-    Otari never delivers a literal newline in a name or a role, so this is a
-    hardening measure against unexpected input, not a feature: it changes
-    nothing for the values this codebase actually produces.
-    """
-    return value.replace("\r", " ").replace("\n", " ")
 
 
 def _format_expiry(hours: int) -> str:
@@ -73,7 +65,7 @@ def render_invitation_email(
     expiry_hours: int,
 ) -> tuple[str, str, str]:
     """Return ``(subject, html, text)`` for one invitation email."""
-    subject_organization_name = _sanitize_header_value(organization_name)
+    subject_organization_name = sanitize_header_value(organization_name)
     subject = f"You're invited to join {subject_organization_name} on Otari"
 
     valid_for = _format_expiry(expiry_hours)

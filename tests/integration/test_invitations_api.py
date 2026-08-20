@@ -2,8 +2,9 @@
 
 The API test client can only ever act as the one operator identity a
 standalone deployment has (owner and superuser), so what a non-manager may not
-do is covered at the service layer instead (test_invitation_authorization.py),
-the same split test_tenancy_authorization.py's own docstring explains.
+do is covered at the service layer instead, alongside the rest of tenancy's
+authorization matrix (test_tenancy_authorization.py), whose own docstring
+explains the same split.
 """
 
 import uuid
@@ -132,26 +133,36 @@ def test_accepting_mints_the_attribution_user_so_the_member_can_own_a_key(
     assert key.json()["user_id"] == row["attribution_user_id"]
 
 
-def test_a_workspace_deleted_after_invite_but_before_accept_is_a_clean_404(
+def test_a_workspace_deleted_after_invite_but_before_accept_still_lets_the_invitee_in(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
     """Acceptance can arrive days later; the parked workspace ids are re-checked, not trusted.
 
-    Without the re-check, applying a parked assignment against a workspace
-    that no longer exists would hit the foreign key directly and this public,
-    unauthenticated endpoint would answer an uncaught 500, with the invitation
-    stuck pending and every retry hitting the same wall.
+    Refusing the whole accept over one vanished assignment would be worse than
+    the bug it would be guarding against: this is a public, unauthenticated
+    endpoint the recipient has no way to retry differently, so the invitation
+    would be stuck `pending` forever, and the 404's body would name a
+    workspace id to a caller who has only ever held a token. Dropping the
+    vanished assignment and applying the rest lets the invitee become an
+    active member missing just that one grant, which an operator can restore
+    from the workspace roster once they notice.
     """
     created = client.post(
         "/v1/workspaces", json={"name": "Temporary"}, headers=master_key_header
+    ).json()
+    kept = client.post(
+        "/v1/workspaces", json={"name": "Kept"}, headers=master_key_header
     ).json()
 
     result = _invite(
         client,
         master_key_header,
         email="karen@example.com",
-        workspace_assignments=[{"workspace_id": created["id"], "role": "viewer"}],
+        workspace_assignments=[
+            {"workspace_id": created["id"], "role": "viewer"},
+            {"workspace_id": kept["id"], "role": "viewer"},
+        ],
     )
     token = _token_from(result["accept_link"])
 
@@ -159,13 +170,13 @@ def test_a_workspace_deleted_after_invite_but_before_accept_is_a_clean_404(
     assert delete.status_code == 200, delete.text
 
     accept = client.post("/v1/invitations/accept", json={"token": token})
-    assert accept.status_code == 404, accept.text
+    assert accept.status_code == 200, accept.text
 
-    # The invitation is still there to retry, though it can never succeed
-    # against the same (now-missing) workspace id; it is not "used up" by the
-    # refused attempt the way accepting or revoking it would be.
     row = _roster_row(client, master_key_header, "karen@example.com")
-    assert row["status"] == "invited"
+    assert row["status"] == "active"
+
+    members = client.get(f"/v1/workspaces/{kept['id']}/members", headers=master_key_header).json()
+    assert any(member["user_id"] == row["user_id"] for member in members["data"])
 
 
 def test_accepting_twice_is_refused(client: TestClient, master_key_header: dict[str, str]) -> None:
@@ -314,10 +325,67 @@ def test_inviting_an_address_with_a_live_membership_conflicts(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
+    """The message has to say "pending invitation", not "active member": it isn't one yet."""
     _invite(client, master_key_header, email="hank@example.com")
 
     conflict = _invite_raw(client, master_key_header, email="hank@example.com")
     assert conflict.status_code == 409
+    assert "pending invitation" in conflict.text
+    assert "active member" not in conflict.text
+
+
+def test_inviting_an_address_who_is_already_an_active_member_conflicts(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    add = client.post(
+        "/v1/organizations/me/members",
+        json={"email": "iris@example.com", "role": "member"},
+        headers=master_key_header,
+    )
+    assert add.status_code == 201, add.text
+
+    conflict = _invite_raw(client, master_key_header, email="iris@example.com")
+    assert conflict.status_code == 409
+    assert "active member" in conflict.text
+
+
+def test_reinviting_after_the_previous_invitation_expired_supersedes_it(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    """Expiry is lazy: a link nobody ever opened must not dead-end every future invite.
+
+    `_resolve_pending_invitation` only flips a `pending` row to `expired` when
+    someone presents its token, so an unopened link's own `expires_at` can be
+    long past while its stored status still reads `pending`. Without a
+    time-based re-check on the invite path (rather than trusting the stored
+    status), re-inviting the same address would answer 409 forever, with only
+    a revoke-then-invite as the way through.
+    """
+    first = _invite(client, master_key_header, email="jill@example.com", role="viewer")
+    first_token = _token_from(first["accept_link"])
+
+    invitation = db_session.get(Invitation, uuid.UUID(first["invitation_id"]))
+    assert invitation is not None
+    invitation.expires_at = datetime.now(UTC) - timedelta(hours=1)
+    db_session.add(invitation)
+    db_session.commit()
+
+    second = _invite(client, master_key_header, email="jill@example.com", role="admin")
+    assert second["organization_member_id"] == first["organization_member_id"]
+    assert second["role"] == "admin"
+
+    db_session.refresh(invitation)
+    assert invitation.status == "expired"
+
+    # The superseded link is dead, not merely redundant.
+    stale_accept = client.post("/v1/invitations/accept", json={"token": first_token})
+    assert stale_accept.status_code == 400, stale_accept.text
+
+    accept = client.post("/v1/invitations/accept", json={"token": _token_from(second["accept_link"])})
+    assert accept.status_code == 200, accept.text
 
 
 def _invite_raw(client: TestClient, headers: dict[str, str], *, email: str) -> Any:

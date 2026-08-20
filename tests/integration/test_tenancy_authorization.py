@@ -35,9 +35,9 @@ from gateway.repositories.tenancy import (
 )
 from gateway.services.tenancy import OrganizationService, WorkspaceService
 from gateway.services.tenancy.errors import (
+    InvitationAlreadyPendingError,
     MembershipUpdateError,
     NotAuthorizedError,
-    OrganizationMemberAlreadyExistsError,
     OrganizationNameRequiredError,
     OrganizationNotFoundError,
     WorkspaceNotFoundError,
@@ -702,7 +702,7 @@ async def test_inviting_an_address_with_a_pending_invitation_conflicts(async_db:
         config=_TEST_CONFIG,
     )
 
-    with pytest.raises(OrganizationMemberAlreadyExistsError):
+    with pytest.raises(InvitationAlreadyPendingError):
         await service.invite_active_organization_member_for_user(
             user=admin,
             request=InviteOrganizationMemberRequest(email="ada@example.com"),

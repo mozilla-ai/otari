@@ -36,6 +36,7 @@ from gateway.repositories.tenancy import (
 from gateway.services.tenancy import OrganizationService, WorkspaceService
 from gateway.services.tenancy.errors import (
     ForeignTenancyError,
+    InvitationAlreadyPendingError,
     InvitationAlreadyUsedError,
     LastWorkspaceError,
     MembershipUpdateError,
@@ -350,7 +351,12 @@ async def test_concurrent_invites_to_a_suspended_membership_produce_one_pending_
     outcomes = await _race(sessions, attempt)
 
     invited = [outcome for outcome in outcomes if not isinstance(outcome, Exception)]
-    conflicts = [outcome for outcome in outcomes if isinstance(outcome, OrganizationMemberAlreadyExistsError)]
+    # Whichever racer wins the lock leaves the membership `invited` with a
+    # fresh, unexpired invitation, so every loser re-reads that and raises
+    # InvitationAlreadyPendingError, not OrganizationMemberAlreadyExistsError
+    # (that one is for an *active* membership, which none of the racers here
+    # ever produce: the starting status is `suspended`).
+    conflicts = [outcome for outcome in outcomes if isinstance(outcome, InvitationAlreadyPendingError)]
     assert len(invited) == 1
     assert len(conflicts) == _RACERS - 1
 

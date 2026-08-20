@@ -71,6 +71,7 @@ from gateway.repositories.users_repository import (
 from gateway.services.mail_service import send_mail
 from gateway.services.tenancy.errors import (
     InvalidEmailError,
+    InvitationAlreadyPendingError,
     InvitationAlreadyUsedError,
     InvitationExpiredError,
     InvitationNotFoundError,
@@ -485,6 +486,38 @@ class OrganizationService:
         if missing:
             raise WorkspaceNotFoundError(next(iter(sorted(missing, key=str))))
 
+    async def _drop_vanished_workspace_assignments(
+        self,
+        organization: Organization,
+        assignments: list[WorkspaceAssignmentRequest],
+    ) -> list[WorkspaceAssignmentRequest]:
+        """Keep only the assignments whose workspace still exists in this organization.
+
+        The accept counterpart to `_require_workspaces_in_organization`, and
+        deliberately not the same behavior: an assignment parked on an
+        invitation can be up to `invitation_expiry_hours` stale (a week by
+        default) by the time the recipient follows the link, on a public
+        endpoint with no operator present to correct anything. Raising there
+        would leave the invitation permanently un-acceptable (nothing retries
+        with a smaller set) and would name the missing workspace's id in the
+        4xx body `_tenancy_error_handler` passes through verbatim, to a caller
+        who has only ever held a token. Dropping the vanished assignment and
+        applying the rest instead lands the invitee as a member with one
+        grant missing, which an operator can restore from the workspace
+        roster once they notice. Invite-time keeps the strict check: that
+        caller is present in the same request to fix a bad workspace id.
+        """
+        if not assignments:
+            return assignments
+        found = {
+            workspace.id
+            for workspace in await WorkspaceRepository(self.db).get_by_ids(
+                {assignment.workspace_id for assignment in assignments}
+            )
+            if workspace.organization_id == organization.id
+        }
+        return [assignment for assignment in assignments if assignment.workspace_id in found]
+
     async def _apply_workspace_assignments(
         self,
         *,
@@ -538,11 +571,15 @@ class OrganizationService:
         rather than applied now, for the same reason there is nothing yet to
         grant them to.
 
-        Refuses an address that already holds an active *or* invited
-        membership, rather than refreshing the existing invitation: resending
-        is revoke (which suspends the membership) followed by a fresh invite,
-        the same "revive a suspended membership" branch below that re-adding a
-        removed address already goes through.
+        Refuses an address that already holds an active membership, or one
+        with a still-unexpired invitation pending: resending on purpose is
+        revoke (which cancels the pending invitation and suspends the
+        membership) followed by a fresh invite. An address whose invitation
+        has expired unaccepted is not refused, though: this supersedes it
+        directly through the same "revive a suspended membership" branch
+        below that re-adding a removed address already goes through, since
+        without that a link nobody ever opened would dead-end every future
+        invite to the same address with no way through but revoke-then-invite.
         """
         organization = await self.get_active_organization_for_user(user)
         actor_membership = await self.require_active_organization_management_access(
@@ -577,8 +614,27 @@ class OrganizationService:
             # caller's write.
             await self.organizations.lock(organization.id)
             membership = await self.members.get_by_organization_and_user(organization.id, target.id)
-            if membership is not None and membership.status in {"active", "invited"}:
+            if membership is not None and membership.status == "active":
                 raise OrganizationMemberAlreadyExistsError(email)
+            if membership is not None and membership.status == "invited":
+                # Expiry is lazy: `_resolve_pending_invitation` only flips a
+                # `pending` row to `expired` when someone presents its token,
+                # so a link nobody ever opened can sit `pending` in the
+                # database indefinitely with its `expires_at` already in the
+                # past. Re-checking the timestamp here, not the stored status,
+                # is what keeps re-inviting from dead-ending on an
+                # unaccepted, unopened, long-expired link forever.
+                pending = await self.invitations.get_pending_by_organization_members([membership.id])
+                now = datetime.now(UTC)
+                if any(invitation.expires_at >= now for invitation in pending):
+                    raise InvitationAlreadyPendingError(email)
+                # Every row here is stale; expire them explicitly so this
+                # fresh invite is the only `pending` one for the membership,
+                # rather than leaving one whose own timestamp has already
+                # passed to fight the new one over which invitation_id the
+                # roster shows.
+                for stale in pending:
+                    await self.invitations.update_status(stale, {"status": "expired"})
 
             if membership is None:
                 membership = await self.members.create_membership(
@@ -615,8 +671,13 @@ class OrganizationService:
             await self.db.commit()
         except IntegrityError:
             # Two admins inviting the same address at once: the unique index on
-            # (organization, user) or on the membership's invitation decides,
-            # and the loser reports the conflict rather than a 500.
+            # (organization, user) decides which racer's insert wins, and the
+            # loser reports the conflict rather than a 500. The row lock taken
+            # above is what actually decides the invited-vs-suspended-vs-active
+            # question this branch answers; `Invitation.organization_member_id`
+            # itself carries no uniqueness (see its own comment on the model),
+            # since a membership can be invited, revoked, and re-invited more
+            # than once over its life.
             await self.db.rollback()
             raise OrganizationMemberAlreadyExistsError(email) from None
 
@@ -715,13 +776,12 @@ class OrganizationService:
         # Re-checked rather than trusted: these ids were validated against the
         # organization at invite time, but acceptance can arrive up to
         # invitation_expiry_hours later (seven days by default), and a
-        # workspace named in them may have been deleted since. Without this,
-        # `_apply_workspace_assignments` would insert a `WorkspaceMember`
-        # against a missing workspace id, the FK would refuse, and this public
-        # endpoint would answer an uncaught 500 with the invitation stuck
-        # `pending` (and every retry hitting the same wall) rather than the
-        # mapped 404 this raises instead.
-        await self._require_workspaces_in_organization(organization, assignments)
+        # workspace named in them may have been deleted since. Dropped rather
+        # than refused: see _drop_vanished_workspace_assignments for why a
+        # 404 here would be both wrong (it would leak a workspace id to an
+        # unauthenticated caller) and worse than useless (it would leave the
+        # invitation permanently stuck pending).
+        assignments = await self._drop_vanished_workspace_assignments(organization, assignments)
         await self._apply_workspace_assignments(user_id=membership.user_id, assignments=assignments)
         # Same as the immediate-add path: keyed on the identity's UUID, so an
         # address invited and later re-invited (revoke, then re-add) finds the

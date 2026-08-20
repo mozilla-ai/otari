@@ -109,6 +109,21 @@ class OrganizationMemberAlreadyExistsError(TenancyConflictError):
         super().__init__(f"{identifier} is already an active member of this organization")
 
 
+class InvitationAlreadyPendingError(TenancyConflictError):
+    """The address already has a live, unexpired invitation, so a fresh one is refused rather than piled on.
+
+    Distinct from ``OrganizationMemberAlreadyExistsError``: that message says
+    "already an active member", which is false for an address that is only
+    ``invited``. Resending is revoke (which cancels the pending invitation and
+    suspends the membership) followed by a fresh invite; once the existing
+    invitation's own expiry has passed, a fresh invite supersedes it directly
+    instead of raising this.
+    """
+
+    def __init__(self, identifier: object):
+        super().__init__(f"{identifier} already has a pending invitation")
+
+
 class InvalidEmailError(TenancyValidationError):
     """An address that could not be a claim handle.
 
@@ -247,6 +262,7 @@ __all__ = [
     "ForeignTenancyError",
     "InvalidEmailError",
     "InvalidRoleError",
+    "InvitationAlreadyPendingError",
     "InvitationAlreadyUsedError",
     "InvitationExpiredError",
     "InvitationNotFoundError",

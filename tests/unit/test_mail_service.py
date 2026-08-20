@@ -79,6 +79,25 @@ def test_send_mail_never_raises_even_on_a_malformed_header() -> None:
     assert sent is False
 
 
+def test_send_mail_survives_a_crlf_in_the_configured_from_name() -> None:
+    """mail_from_name is operator config, not caller input the subject path already sanitizes.
+
+    Without stripping it here too, a stray CR/LF in it reaches
+    ``message.as_string()`` unescaped and raises ``HeaderParseError`` on
+    every send, which the except clause below turns into a silent
+    ``mail_sent=False`` with nothing pointing at the From name as the cause.
+    """
+    config = GatewayConfig(
+        smtp_host="smtp.example.com",
+        mail_from_email="otari@example.com",
+        mail_from_name="Otari\r\nBcc: attacker@example.com",
+    )
+    with patch("gateway.services.mail_service.smtplib.SMTP") as mock_smtp:
+        mock_smtp.return_value.__enter__.return_value = MagicMock()
+        sent = send_mail(config, to="ada@example.com", subject="Hi", html="<p>Hi</p>", text="Hi")
+    assert sent is True
+
+
 def test_render_invitation_email_fills_every_placeholder() -> None:
     subject, html, text = render_invitation_email(
         organization_name="Acme",

@@ -339,10 +339,12 @@ class GatewayConfig(BaseSettings):
         default=10,
         ge=1,
         description=(
-            "Maximum failed POST /v1/auth/session attempts per client IP per minute "
-            "(None disables this limit). Only failed attempts count, so a correct "
-            "master key is never throttled. Separate from rate_limit_rpm, which is "
-            "keyed to authenticated users and does not cover this pre-auth path."
+            "Maximum calls per client IP per minute to the app's unauthenticated "
+            "surfaces (None disables this limit): failed POST /v1/auth/session "
+            "attempts (a correct master key is never throttled there), and every "
+            "call to the two public invitation-accept routes, counted whether they "
+            "succeed or fail. Separate from rate_limit_rpm, which is keyed to "
+            "authenticated users and does not cover any of these pre-auth paths."
         ),
     )
     cors_allow_origins: list[str] = Field(
