@@ -740,7 +740,9 @@ def test_a_ceiling_can_be_switched_between_the_two_kinds_of_period(
     assert switched.status_code == 200, switched.text
     assert switched.json()["budget_duration_sec"] is None
     assert switched.json()["reset_alignment"] == "calendar_day"
-    assert datetime.fromisoformat(switched.json()["period_start"]) in {_midnight(before), _midnight(after)}
+    period_start = datetime.fromisoformat(switched.json()["period_start"])
+    assert period_start in {_midnight(before), _midnight(after)}
+    assert datetime.fromisoformat(switched.json()["period_end"]) == period_start + timedelta(days=1)
 
     # And back, which is the same rule read the other way round.
     reverted = client.patch(
