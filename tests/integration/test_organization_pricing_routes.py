@@ -8,6 +8,7 @@ request actually bills at the override rate.
 """
 
 import uuid
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -45,6 +46,20 @@ from gateway.services.workspace_scope import (
 
 _ENDPOINT = "/v1/organizations/me/pricing"
 _MODEL_KEY = "openai:gpt-4o"
+
+
+@pytest.fixture(autouse=True)
+def _isolate_the_workspace_cache() -> Iterator[None]:
+    """The key-to-workspace memo is process-global, so clear it either side.
+
+    Structural rather than remembered: several tests here delete or re-mint the
+    rows the memo caches, and one deliberately deletes a workspace out from under
+    it to prove the cache is real. Leaving that entry behind made the next test's
+    correctness depend on it calling the reset itself.
+    """
+    reset_key_workspace_cache()
+    yield
+    reset_key_workspace_cache()
 
 
 def _body(**overrides: Any) -> dict[str, Any]:
@@ -330,14 +345,21 @@ def test_an_unknown_override_id_is_a_404(
 
 
 def test_the_endpoints_require_the_master_key(client: TestClient) -> None:
-    assert client.get(_ENDPOINT).status_code in {
-        status.HTTP_401_UNAUTHORIZED,
-        status.HTTP_403_FORBIDDEN,
-    }
-    assert client.post(_ENDPOINT, json=_body()).status_code in {
-        status.HTTP_401_UNAUTHORIZED,
-        status.HTTP_403_FORBIDDEN,
-    }
+    """Every verb, not only the reads.
+
+    The writes are what an unauthenticated caller most wants, so a regression that
+    dropped the dependency from just the PUT or DELETE route would pass a test
+    that only exercised GET and POST.
+    """
+    unauthenticated = {status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN}
+    # Any id: auth is refused before the route looks for the row, so this must not
+    # be a 404.
+    absent = f"{_ENDPOINT}/{uuid.uuid4()}"
+
+    assert client.get(_ENDPOINT).status_code in unauthenticated
+    assert client.post(_ENDPOINT, json=_body()).status_code in unauthenticated
+    assert client.put(absent, json=_body()).status_code in unauthenticated
+    assert client.delete(absent).status_code in unauthenticated
 
 
 def test_the_list_is_paged_and_counts_the_whole_set(
@@ -584,7 +606,6 @@ async def test_a_keys_request_resolves_its_organizations_override(async_db: Asyn
     workspace, the workspace names the organization, and the organization's rate
     is what prices the request. Nothing here reads a header.
     """
-    reset_key_workspace_cache()
     organization = await OrganizationRepository(async_db).create_organization(
         name="Acme", slug="acme-settles", created_by_user_id=None
     )
@@ -621,7 +642,6 @@ async def test_a_keys_request_resolves_its_organizations_override(async_db: Asyn
     assert pricing.input_price_per_million == 2.5, "the request must price at the organization's rate"
 
     # And a key in another organization's workspace is unaffected.
-    reset_key_workspace_cache()
     other = await OrganizationRepository(async_db).create_organization(
         name="Other", slug="other-settles", created_by_user_id=None
     )
@@ -720,7 +740,6 @@ async def test_a_workspace_resolves_to_its_organization_once_and_stays_cached(
     async_db: AsyncSession,
 ) -> None:
     """The memo is what keeps the per-lookup cost off the request path."""
-    reset_key_workspace_cache()
     organization = await OrganizationRepository(async_db).create_organization(
         name="Acme", slug="acme-cache", created_by_user_id=None
     )
@@ -743,6 +762,39 @@ async def test_a_workspace_resolves_to_its_organization_once_and_stays_cached(
 @pytest.mark.asyncio
 async def test_an_unknown_workspace_resolves_to_no_organization(async_db: AsyncSession) -> None:
     """None rather than raising: a missing workspace must not fail a priced request."""
-    reset_key_workspace_cache()
-
     assert await organization_for_workspace_id(async_db, uuid.uuid4()) is None
+
+
+@pytest.mark.asyncio
+async def test_a_racing_duplicate_period_is_a_conflict_not_an_integrity_error(
+    async_db: AsyncSession,
+) -> None:
+    """The unique index refuses the second writer, and that is a 409's business.
+
+    The service's overlap check is enough single-threaded, so this simulates the
+    race by disabling it: two writers that both passed the check reach ``flush``,
+    where the index refuses the second. That refusal arrives before the route's
+    ``commit``, so without mapping it at the flush boundary it escaped as a 500
+    and told the caller to retry what was really a conflict.
+    """
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Acme", slug="acme-race", created_by_user_id=None
+    )
+    owner = await _identity(async_db, organization, role="owner", name="owner person")
+    service = OrganizationPricingService(async_db)
+    rates = _rates()
+
+    await service.create_for_caller(owner, _MODEL_KEY, rates)
+    await async_db.commit()
+
+    async def _no_overlap_check(**_kwargs: object) -> None:
+        return None
+
+    # Stand in for a second writer whose check passed concurrently with the first.
+    service.raise_if_overlapping = _no_overlap_check  # type: ignore[method-assign]
+
+    with pytest.raises(OrganizationPricingOverlapError) as caught:
+        await service.create_for_caller(owner, _MODEL_KEY, rates)
+
+    assert caught.value.status_code == 409
+    assert _MODEL_KEY in caught.value.message

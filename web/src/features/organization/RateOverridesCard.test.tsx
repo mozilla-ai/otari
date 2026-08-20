@@ -8,7 +8,7 @@ import { RateOverridesCard } from "@/features/organization/RateOverridesCard"
 import { organizationContext } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
 
-interface Request {
+interface RecordedRequest {
   url: string
   method: string
   body: unknown
@@ -56,7 +56,7 @@ function mockApi({
   writeStatus?: number
   writeBody?: unknown
 } = {}) {
-  const requests: Request[] = []
+  const requests: RecordedRequest[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input)
     const method = (init?.method ?? "GET").toUpperCase()
@@ -105,7 +105,7 @@ describe("RateOverridesCard", () => {
       await screen.findByRole("heading", { name: /rate overrides/i }),
     ).toBeInTheDocument()
     expect(await screen.findByText("openai:gpt-4o")).toBeInTheDocument()
-    expect(await screen.findByText("$2.5000")).toBeInTheDocument()
+    expect(await screen.findByText("$2.50")).toBeInTheDocument()
     expect(await screen.findByText(/^From /)).toBeInTheDocument()
     expect(await screen.findByText("Active")).toBeInTheDocument()
   })
@@ -118,7 +118,11 @@ describe("RateOverridesCard", () => {
     await renderPage()
 
     await screen.findByText("openai:gpt-4o")
-    expect(screen.queryByText("$0.0000")).not.toBeInTheDocument()
+    // `formatCost` renders null as "$0.00", so the absent check has to sit in
+    // front of it; an unset cache rate must read as "no rate stored", not as a
+    // negotiated zero.
+    expect(screen.queryByText("$0.00")).not.toBeInTheDocument()
+    expect(await screen.findAllByText("—")).not.toHaveLength(0)
   })
 
   it("explains itself when the organization has no overrides", async () => {

@@ -12,7 +12,7 @@ import {
 import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import { ErrorBanner, InfoBanner } from "@/shared/components/ui"
-import { formatDateTime } from "@/shared/helpers/format"
+import { formatCost, formatDateTime } from "@/shared/helpers/format"
 import {
   PricingOverrideDialog,
   type PricingOverrideDraft,
@@ -44,11 +44,15 @@ const STATUS_LABEL: Record<
 }
 
 function rate(value: number | null | undefined): string {
-  // A blank optional rate is not zero: it means the tokens are priced as fresh
-  // input, so a dash reads truer than "$0.00", which would claim the
-  // organization negotiated a free cache read.
-  if (value === null || value === undefined) return "–"
-  return `$${value.toFixed(4)}`
+  // `formatCost` is the page's one money formatter, shared with the catalog
+  // table above so the same quantity cannot render two ways on one page. The
+  // absent check stays in front of it rather than being folded into it: a blank
+  // optional rate means the tokens are priced as fresh input, and `formatCost`
+  // renders null as "$0.00", which would claim the organization negotiated a
+  // free cache read. The em dash is the glyph the catalog column already uses
+  // for the same "no rate stored" state.
+  if (value === null || value === undefined) return "—"
+  return formatCost(value)
 }
 
 function period(override: OrganizationPricingOverride): string {

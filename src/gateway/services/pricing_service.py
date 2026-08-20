@@ -627,6 +627,7 @@ async def _tool_rates(
     # ``normalize_pricing_key`` returns a key unchanged when its prefix is an
     # unconfigured instance, so the read side closes the gap rather than trusting
     # that it never happens.
+    canonical_keys = {f"{GATEWAY_TOOL_PRICING_PROVIDER}:{tool}" for tool in tools}
     keys = {
         key: tool
         for tool in tools
@@ -662,9 +663,20 @@ async def _tool_rates(
                     OrganizationModelPricing.effective_to > lookup_time,
                 ),
             )
-            # Oldest first, so the newest applicable period wins the assignment,
-            # matching the rule the statement above uses for deployment rows.
-            .order_by(OrganizationModelPricing.effective_from)
+            # Least-preferred key first, then oldest period first, so the last
+            # write into ``found`` is the canonical spelling's newest applicable
+            # row. Without the key term the winner would be whichever spelling
+            # happened to have the later period, and the same tool could resolve
+            # to a different rate here than through ``find_model_pricing``, which
+            # applies this preference one key at a time.
+            .order_by(
+                # Legacy spelling first, canonical last, so the canonical row is
+                # the one that survives the dict assignment below. Expressed as a
+                # membership test rather than a rank map so it does not depend on
+                # the insertion order of ``keys``.
+                case((OrganizationModelPricing.model_key.in_(canonical_keys), 1), else_=0),
+                OrganizationModelPricing.effective_from,
+            )
         )
         for override in (await db.execute(override_stmt)).scalars():
             found[keys[override.model_key]] = _override_as_model_pricing(override)

@@ -552,3 +552,48 @@ def test_the_tool_gate_and_the_settlement_agree_on_both_key_spellings() -> None:
         assert lines[0]["cost"] == 1.0
 
     _run(scenario)
+
+
+def test_both_lookup_paths_pick_the_canonical_row_when_both_spellings_exist() -> None:
+    """The tool path and the model path must not disagree about which row wins.
+
+    ``find_model_pricing`` prefers the canonical ``otari:tool`` over the legacy
+    ``otari/tool`` one key at a time. The batched tool lookup assigns into a dict
+    keyed on the tool, so without the same preference in its ORDER BY the winner
+    was whichever spelling happened to carry the later period, and the same tool
+    could be gated on one rate and settled at another.
+    """
+
+    async def scenario(session: AsyncSession) -> None:
+        organization_id = await _organization(session)
+        # The legacy row is deliberately the *newer* period, so an ordering that
+        # only considers time would pick it.
+        await _override(
+            session,
+            organization_id,
+            rate=9_000_000.0,
+            model_key="otari/web_search",
+            effective_from=_NOW - timedelta(hours=1),
+        )
+        await _override(
+            session,
+            organization_id,
+            rate=1_000_000.0,
+            model_key="otari:web_search",
+            effective_from=_NOW - timedelta(days=1),
+        )
+
+        via_model_path = await find_model_pricing(
+            session, "otari", "web_search", as_of=_NOW, use_defaults=False, organization_id=organization_id
+        )
+        total, _lines, unpriced = await price_tool_calls(
+            session, {"web_search": 1}, as_of=_NOW, organization_id=organization_id
+        )
+
+        assert via_model_path is not None
+        assert unpriced == []
+        # Both resolve the canonical row: 1_000_000 / 1e6 == $1.00 per call.
+        assert via_model_path.input_price_per_million == 1_000_000.0
+        assert total == 1.0
+
+    _run(scenario)
