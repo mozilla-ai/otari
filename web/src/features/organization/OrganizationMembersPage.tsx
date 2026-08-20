@@ -272,9 +272,12 @@ function InviteMemberForm({ onClose }: { onClose: () => void }) {
             </InfoBanner>
           ) : (
             <InfoBanner>
-              No mail transport is configured, so nothing was emailed. Share
-              this link with <strong>{result.email}</strong> yourself; it works
-              the same either way.
+              {/* Not "mail isn't configured": mail_sent is also false when a
+                  configured transport's send failed, and that copy would send
+                  an operator to debug a configuration that may be fine. */}
+              Otari did not send the email. Share this link with{" "}
+              <strong>{result.email}</strong> yourself; it works the same either
+              way.
               <div className="mt-2">
                 <CopyableValue value={result.accept_link} label="Accept link">
                   <span className="break-all text-xs">

@@ -16,6 +16,7 @@ the recipient redacted, and reported back as ``False``.
 """
 
 import smtplib
+import ssl
 from email.errors import MessageError
 from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
@@ -59,7 +60,13 @@ def send_mail(config: GatewayConfig, *, to: str, subject: str, html: str, text: 
     try:
         with smtplib.SMTP(config.smtp_host, config.smtp_port, timeout=10) as client:
             if config.smtp_tls:
-                client.starttls()
+                # smtplib.starttls() with no context builds one that skips
+                # both certificate and hostname verification (CPython's
+                # documented default, not a bug there), which makes STARTTLS
+                # insecure against a network-level MITM unless the caller
+                # passes its own context. ssl.create_default_context() is
+                # that context: it verifies against the system trust store.
+                client.starttls(context=ssl.create_default_context())
             if config.smtp_user and config.smtp_password:
                 client.login(config.smtp_user, config.smtp_password)
             # ``as_string()`` is where a malformed header would raise (message

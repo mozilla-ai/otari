@@ -21,6 +21,7 @@ with several people in it. The scoping below is written as if there could be
 many, because the hosted edition has many and the schema is edition-invariant.
 """
 
+import asyncio
 import hashlib
 import re
 import secrets
@@ -626,7 +627,13 @@ class OrganizationService:
                 accept_link=accept_link,
                 expiry_hours=config.invitation_expiry_hours,
             )
-            mail_sent = send_mail(config, to=email, subject=subject, html=html, text=text)
+            # send_mail is synchronous socket I/O (smtplib), and each of
+            # connect/starttls/login/sendmail carries its own 10s timeout, so
+            # calling it directly here could block this request's whole event
+            # loop thread for tens of seconds against a slow or unreachable
+            # SMTP host, stalling every other request the same worker is
+            # serving. Off-loaded to a thread so only this coroutine waits.
+            mail_sent = await asyncio.to_thread(send_mail, config, to=email, subject=subject, html=html, text=text)
 
         return InviteOrganizationMemberResultPublic(
             invitation_id=invitation.id,
@@ -701,6 +708,13 @@ class OrganizationService:
         # mapped 404 this raises instead.
         await self._require_workspaces_in_organization(organization, assignments)
         await self._apply_workspace_assignments(user_id=membership.user_id, assignments=assignments)
+        # Same as the immediate-add path: keyed on the identity's UUID, so an
+        # address invited and later re-invited (revoke, then re-add) finds the
+        # row it minted the first time rather than a second one. Without this,
+        # an accepted invitee's roster row would carry no attribution_user_id
+        # and could never be offered as a key owner, unlike a member added
+        # directly through POST /me/members.
+        await get_or_create_attribution_user(self.db, user_id=str(membership.user_id), alias=invitation.email)
         await self.invitations.update_status(invitation, {"status": "accepted"})
         await self.db.commit()
 

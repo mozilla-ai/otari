@@ -103,6 +103,35 @@ def test_accept_activates_the_membership_and_applies_parked_workspace_assignment
     assert carol["status"] == "active"
 
 
+def test_accepting_mints_the_attribution_user_so_the_member_can_own_a_key(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """An accepted invitee must be offerable as a key owner, the same as a member added directly.
+
+    ``create_active_organization_member_for_user`` calls
+    ``get_or_create_attribution_user`` before it commits; ``accept_invitation``
+    did not, which would have left an accepted invitee's roster row with no
+    ``attribution_user_id`` and no key of their own possible.
+    """
+    result = _invite(client, master_key_header, email="nadia@example.com")
+    accept = client.post(
+        "/v1/invitations/accept", json={"token": _token_from(result["accept_link"])}
+    )
+    assert accept.status_code == 200, accept.text
+
+    row = _roster_row(client, master_key_header, "nadia@example.com")
+    assert row["attribution_user_id"] is not None
+
+    key = client.post(
+        "/v1/keys",
+        json={"key_name": "nadia's key", "user_id": row["attribution_user_id"]},
+        headers=master_key_header,
+    )
+    assert key.status_code == 200, key.text
+    assert key.json()["user_id"] == row["attribution_user_id"]
+
+
 def test_a_workspace_deleted_after_invite_but_before_accept_is_a_clean_404(
     client: TestClient,
     master_key_header: dict[str, str],
