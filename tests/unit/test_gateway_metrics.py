@@ -9,6 +9,10 @@ from prometheus_client import generate_latest
 
 from gateway.core.config import GatewayConfig
 from gateway.metrics import (
+    OBSERVATION_BATCH_SIZE,
+    OBSERVATION_FLUSH_DURATION,
+    OBSERVATION_QUEUE_DEPTH,
+    OBSERVATION_RECORDS,
     REGISTRY,
     MetricsMiddleware,
     metrics_endpoint,
@@ -107,6 +111,71 @@ def test_record_abandoned_attempt_labels_by_reason_and_position() -> None:
 
     assert _sample("gateway_abandoned_attempts_total", build_labels) - before_build == 1.0
     assert _sample("gateway_abandoned_attempts_total", upstream_labels) - before_upstream == 1.0
+
+
+def test_observation_queue_depth_is_exposed_like_the_usage_log_gauge() -> None:
+    """The observation queue is bounded and lossy, so its depth has to be readable.
+
+    Sits next to ``gateway_usage_log_queue_depth`` deliberately: an operator
+    reading one queue's saturation reads the other the same way.
+    """
+    body = generate_latest(REGISTRY).decode()
+
+    assert "gateway_observation_queue_depth" in body
+    assert "gateway_usage_log_queue_depth" in body
+
+
+def test_observation_queue_depth_tracks_the_set_value() -> None:
+    OBSERVATION_QUEUE_DEPTH.set(7)
+
+    assert _sample("gateway_observation_queue_depth") == 7.0
+
+    OBSERVATION_QUEUE_DEPTH.set(0)
+
+
+@pytest.mark.parametrize(
+    "result",
+    ["queued", "shipped", "dropped_queue_full", "dropped_flush_failed", "dropped_shutdown"],
+)
+def test_observation_records_counts_each_outcome_separately(result: str) -> None:
+    """A lossy stream whose loss rate is unknown cannot support a conclusion.
+
+    Each outcome is its own series so overflow (a capacity problem), a failed
+    flush (a platform problem), and a backlog abandoned at shutdown stay
+    distinguishable, and ``result=~"dropped.*"`` still totals the loss.
+    """
+    labels = {"result": result}
+    before = _sample("gateway_observation_records_total", labels)
+
+    OBSERVATION_RECORDS.labels(result=result).inc()
+
+    assert _sample("gateway_observation_records_total", labels) - before == 1.0
+
+
+def test_observation_batch_size_buckets_span_a_full_batch() -> None:
+    """The histogram counts records, not seconds.
+
+    With prometheus_client's default latency buckets (largest finite bound 10),
+    every batch above 10 records lands in +Inf, so a quantile could not tell a
+    batch of 15 from one pinned at max_batch, which is the saturation signal.
+    """
+    before = _sample("gateway_observation_batch_size_bucket", {"le": "500.0"})
+
+    OBSERVATION_BATCH_SIZE.observe(500)
+
+    assert _sample("gateway_observation_batch_size_bucket", {"le": "500.0"}) - before == 1.0
+
+
+def test_observation_flush_metrics_record_size_and_duration() -> None:
+    before_batches = _sample("gateway_observation_batch_size_count")
+    before_flushes = _sample("gateway_observation_flush_duration_seconds_count", {"result": "ok"})
+
+    OBSERVATION_BATCH_SIZE.observe(12)
+    OBSERVATION_FLUSH_DURATION.labels(result="ok").observe(0.25)
+
+    assert _sample("gateway_observation_batch_size_count") - before_batches == 1.0
+    assert _sample("gateway_observation_batch_size_sum") >= 12.0
+    assert _sample("gateway_observation_flush_duration_seconds_count", {"result": "ok"}) - before_flushes == 1.0
 
 
 def test_config_enable_metrics_defaults_to_false() -> None:

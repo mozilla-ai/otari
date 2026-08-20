@@ -34,6 +34,7 @@ from gateway.services.model_discovery_service import (
     reset_discovery_cache,
     run_discovery_refresher,
 )
+from gateway.services.observation_shipper import create_observation_shipper
 from gateway.services.policy_store import (
     load_policies_at_startup,
     reset_policy_cache,
@@ -325,13 +326,23 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
             # Same shape for the models.dev catalog, whose fetch is bounded at 15s.
             catalog_refresher = asyncio.create_task(run_catalog_refresher(config))
 
-        # Start the writer inside the try so a failure here still runs the cleanup
-        # below; the refresher tasks are already created and would otherwise leak.
+        # Hybrid mode reports observation records to the platform; standalone has
+        # nowhere to ship them, and gets a null shipper so producers can emit
+        # unconditionally. Building one contacts nothing.
+        observation_shipper = create_observation_shipper(config)
+
+        # Start the writer and the shipper inside the try so a failure in either
+        # still runs the cleanup below; the refresher tasks are already created
+        # and would otherwise leak.
         log_writer_started = False
+        observation_shipper_started = False
         try:
             await log_writer.start()
             log_writer_started = True
             app.state.log_writer = log_writer
+            await observation_shipper.start()
+            observation_shipper_started = True
+            app.state.observation_shipper = observation_shipper
             yield
         finally:
             refreshers = [
@@ -360,6 +371,11 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
             # nothing to stop, but the refreshers above still needed cancelling.
             if log_writer_started:
                 await log_writer.stop()
+            # The shipper holds queued observation records in memory, so stopping
+            # it is what flushes the tail. Bounded on its own side, so a hung
+            # platform cannot hold the lifespan open here.
+            if observation_shipper_started:
+                await observation_shipper.stop()
             # POST /v1/search dispatches on one pooled client for the process, so
             # shutdown owns closing it. A no-op when no search was ever served.
             await close_search_client()

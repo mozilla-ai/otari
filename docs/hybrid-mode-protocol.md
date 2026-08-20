@@ -18,6 +18,7 @@ Otari calls these endpoints, all rooted at the configured platform base URL:
 | `POST {base}/gateway/usage`                 | Report the outcome of an attempt back to the platform |
 | `POST {base}/gateway/mcp-servers/resolve`   | Swap workspace-scoped MCP server ids for inline server configs (called only when a request references MCP server ids) |
 | `POST {base}/gateway/web-search/resolve`    | Resolve the workspace's web-search policy (called only when a request uses the `otari_web_search` tool) |
+| `POST {base}/gateway/loop-observations`     | Report a batch of observation records (optional for a peer; see [Observation ingest](#observation-ingest)) |
 
 `{base}` means Otari platform `base_url` setting. Otari concatenates literally. The peer service is responsible for including any API-version prefix it exposes its own routes under. For the reference otari deployment that prefix is `/api/v1`, so the base URL is `http://backend:8000/api/v1` and Otari ends up POSTing to `http://backend:8000/api/v1/gateway/provider-keys/resolve`.
 
@@ -27,8 +28,11 @@ Every endpoint requires `X-Gateway-Token: <gw_...>` in the request headers. This
 proves the caller is an Otari instance configured against this platform
 deployment. The three resolve endpoints additionally require `X-User-Token:
 <tk_...>`, which is the workspace API token forwarded opaquely from the end
-user's `Authorization: Bearer ...` header. The usage endpoint sends only the
-gateway token.
+user's `Authorization: Bearer ...` header. The usage and observation endpoints
+send only the gateway token. Usage reports carry a `correlation_id` the platform
+issued at resolve time, which already identifies the caller, and an observation
+batch is not sent on behalf of any one caller: it mixes records from every
+request that was in flight when the flush timer fired.
 
 ## Extension policy
 
@@ -442,6 +446,73 @@ retries on transient failures (timeout, network error, 5xx) up to
 (`0.25s`, `0.5s`, `1s`). It does **not** retry on `401`, `404`, `409`, `422`;
 those are treated as terminal client errors.
 
+## Observation ingest
+
+Otari can report *observation records*, a measurement stream describing what
+its tool loop did, so the peer can count how often a request recurs and how
+predictable a loop's rounds are. A hybrid-mode gateway has no local database, so
+there is nowhere on the box to keep them.
+
+```http
+POST /gateway/loop-observations
+X-Gateway-Token: gw_...
+Content-Type: application/json
+
+{
+  "records": [
+    { "kind": "loop_round", ... },
+    { "kind": "request_counter", ... }
+  ]
+}
+```
+
+`records` is whatever a flush timer had collected, so it is an arbitrary
+grouping rather than a unit of meaning: one batch mixes both record kinds,
+discriminated by `kind`, and carries records from many concurrent requests.
+A peer should therefore treat a malformed record as a per-record problem and
+write the rest of the batch, rather than rejecting the batch.
+
+The record shapes themselves are **not** part of this contract yet. Otari does
+not inspect a record beyond queueing it, and the peer is the only side that
+reads the fields.
+
+Any `2xx` means the batch was accepted. A response body, if any, is ignored.
+
+### Fail-open contract
+
+This endpoint is **optional for a peer**. Every failure mode ends the same way,
+with records lost and the request completing exactly as it would have:
+
+| What happens | What Otari does |
+|---|---|
+| Timeout, connection error, unreachable peer | Drops the batch, counts it |
+| `5xx` | Drops the batch, counts it |
+| `404` (peer does not implement this endpoint) | Drops the batch, counts it |
+| `401` (peer rejects the gateway token) | Drops the batch, counts it |
+
+Nothing is retried. Observation records are disposable, unlike usage reports,
+and a retry would compete for the connection pool with the very traffic being
+measured. This is also why the records do not travel on the usage report, which
+already fires once per request and would carry them happily: coupling them would
+mean either retrying billing data because measurement data failed, or dropping
+billing data because the payload grew.
+
+Records queue in memory, bounded, and are flushed by a background task. Emitting
+a record is an in-memory put and nothing more, so nothing on the request path
+waits for a flush. When the queue is full the arriving record is dropped rather
+than the producer being made to wait, and the process's final flush ships what
+is queued within a bounded budget.
+
+The loss is counted, because a lossy stream whose loss rate is unknown cannot
+support a measurement conclusion. On Otari's `/metrics`:
+
+| Metric | Meaning |
+|---|---|
+| `gateway_observation_queue_depth` | Records waiting to be shipped |
+| `gateway_observation_records_total{result="queued"}` | Accepted into the queue |
+| `gateway_observation_records_total{result="shipped"}` | Accepted by the peer |
+| `gateway_observation_records_total{result=~"dropped.*"}` | Lost, split by cause: `dropped_queue_full`, `dropped_flush_failed`, `dropped_shutdown` |
+
 ## Streaming
 
 Streaming requests (`stream: true`) iterate `attempts` just like non-streaming
@@ -495,3 +566,7 @@ flag.
 | `PLATFORM_USAGE_MAX_RETRIES` | `3` | Max retries for transient usage-report failures. |
 | `STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS` | `2000` | Per-attempt budget for the streaming first-chunk gate. |
 | `STREAMING_FALLBACK_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS` | `0` | Extra first-chunk grace for the sole/final attempt, on top of the budget. `0` = unchanged. |
+| `PLATFORM_OBSERVATION_MAX_QUEUE` | `10000` | Bound on queued observation records. A full queue drops the arriving record. |
+| `PLATFORM_OBSERVATION_MAX_BATCH` | `500` | Max records in one observation batch. |
+| `PLATFORM_OBSERVATION_FLUSH_INTERVAL_MS` | `5000` | How often the observation queue is flushed. |
+| `PLATFORM_OBSERVATION_TIMEOUT_MS` | `5000` | Per-batch timeout for observation ingest. |

@@ -409,6 +409,25 @@ def test_load_config_platform_env_overrides(tmp_path: Path, monkeypatch: pytest.
     assert config.platform["usage_max_retries"] == 7
 
 
+def test_load_config_platform_observation_env_overrides(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """The observation queue's bound is a capacity decision, so it is tunable per deployment."""
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text("mode: hybrid\n", encoding="utf-8")
+
+    monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
+    monkeypatch.setenv("PLATFORM_OBSERVATION_MAX_QUEUE", "25000")
+    monkeypatch.setenv("PLATFORM_OBSERVATION_MAX_BATCH", "750")
+    monkeypatch.setenv("PLATFORM_OBSERVATION_FLUSH_INTERVAL_MS", "3000")
+    monkeypatch.setenv("PLATFORM_OBSERVATION_TIMEOUT_MS", "4000")
+
+    config = load_config(str(config_file))
+
+    assert config.platform["observation_max_queue"] == 25000
+    assert config.platform["observation_max_batch"] == 750
+    assert config.platform["observation_flush_interval_ms"] == 3000
+    assert config.platform["observation_timeout_ms"] == 4000
+
+
 def test_load_config_sets_default_platform_base_url_when_token_is_set(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

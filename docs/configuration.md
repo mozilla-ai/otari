@@ -248,6 +248,10 @@ These are only relevant when running connected to [otari.ai](https://otari.ai). 
 | `PLATFORM_USAGE_MAX_RETRIES` | `3` | Max retries for transient usage reporting failures |
 | `STREAMING_FALLBACK_FIRST_CHUNK_TIMEOUT_MS` | `2000` | Per-attempt timeout waiting for first streamed chunk |
 | `STREAMING_FALLBACK_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS` | `0` | Extra first-chunk grace for the sole/final attempt, added on top of the per-attempt budget. `0` = no grace (unchanged) |
+| `PLATFORM_OBSERVATION_MAX_QUEUE` | `10000` | Bound on queued observation records; a full queue drops the arriving record rather than slowing the request |
+| `PLATFORM_OBSERVATION_MAX_BATCH` | `500` | Max observation records shipped in one batch |
+| `PLATFORM_OBSERVATION_FLUSH_INTERVAL_MS` | `5000` | How often queued observation records are shipped |
+| `PLATFORM_OBSERVATION_TIMEOUT_MS` | `5000` | Timeout for one observation batch |
 
 ## Provider configuration
 

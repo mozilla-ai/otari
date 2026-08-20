@@ -114,6 +114,43 @@ LOG_WRITER_ROWS = Counter(
     registry=REGISTRY,
 )
 
+OBSERVATION_QUEUE_DEPTH = Gauge(
+    "gateway_observation_queue_depth",
+    "Number of observation records waiting to be shipped to the platform",
+    registry=REGISTRY,
+)
+
+# Record counts, not seconds, so the default latency buckets do not apply: their
+# largest finite bound is 10, and a batch runs to max_batch (500 by default), so
+# every real batch would land in +Inf and the distribution would be unreadable.
+# Batches pinned at the cap are the signal that the flusher is falling behind.
+OBSERVATION_BATCH_SIZE = Histogram(
+    "gateway_observation_batch_size",
+    "Number of observation records per flush batch",
+    buckets=(1, 5, 10, 25, 50, 100, 250, 500, 1000),
+    registry=REGISTRY,
+)
+
+OBSERVATION_FLUSH_DURATION = Histogram(
+    "gateway_observation_flush_duration_seconds",
+    "Time spent flushing observation batches to the platform",
+    ["result"],
+    registry=REGISTRY,
+)
+
+# The observation queue is bounded and drops on overflow, so the loss rate is
+# part of the signal rather than an incident: a measurement drawn from a lossy
+# stream is only as trustworthy as the known loss. ``result`` separates the
+# causes, since they call for different responses: dropped_queue_full is
+# capacity, dropped_flush_failed is the platform, dropped_shutdown is a backlog
+# abandoned when the process stopped. ``result=~"dropped.*"`` totals them.
+OBSERVATION_RECORDS = Counter(
+    "gateway_observation_records",
+    "Total observation records by outcome",
+    ["result"],
+    registry=REGISTRY,
+)
+
 
 _PROMETHEUS_CONTENT_TYPE = "text/plain; version=0.0.4; charset=utf-8"
 

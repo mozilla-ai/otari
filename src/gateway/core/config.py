@@ -169,6 +169,21 @@ def _get_platform_token_from_env() -> str | None:
     return token or None
 
 
+def _as_platform_number(key: str, value: Any) -> float:
+    """Read a numeric `platform:` setting, naming the key when it is not a number.
+
+    `platform` is an untyped dict, so a value arrives however YAML parsed it. A
+    bare `float(value)` raises TypeError on the None that an empty YAML value
+    (`observation_timeout_ms:` with nothing after the colon) parses to, and
+    pydantic converts only ValueError and AssertionError into a ValidationError,
+    so that TypeError would escape config load as a traceback naming no field.
+    """
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        raise ValueError(f"{key} must be a number, got {value!r}") from None
+
+
 def provider_credential_env_names(provider_type: str) -> tuple[str, ...] | None:
     """Environment variables any-llm reads for a provider's credential.
 
@@ -1244,22 +1259,44 @@ class GatewayConfig(BaseSettings):
 
     @field_validator("platform")
     @classmethod
-    def _validate_platform_streaming_timeouts(cls, platform: dict[str, Any]) -> dict[str, Any]:
-        """Reject non-sensical streaming first-chunk timeout settings at load time.
+    def _validate_platform_numeric_settings(cls, platform: dict[str, Any]) -> dict[str, Any]:
+        """Reject non-sensical streaming and observation settings at load time.
 
-        The per-attempt first-chunk budgets must be positive: a zero or negative
-        wait would treat every attempt as instantly hung. The terminal-attempt
-        extra grace must be non-negative, since it is added on top of the budget.
+        The streaming per-attempt first-chunk budgets must be positive: a zero or
+        negative wait would treat every attempt as instantly hung. The
+        terminal-attempt extra grace must be non-negative, since it is added on
+        top of the budget.
+
+        The observation settings size the bounded queue the observation shipper
+        flushes from, and every one of them has to be positive too: a zero bound
+        rejects every record, a zero batch flushes nothing, and a non-positive
+        interval or timeout either spins or abandons each flush. All four failure
+        modes leave the stream silently empty, which reads downstream as "nothing
+        was observable" rather than as a misconfiguration.
+
+        The two record counts are additionally required to be whole numbers,
+        because the shipper sizes a queue and a batch with them: a fraction below
+        1 truncates to 0, and ``asyncio.Queue(maxsize=0)`` is *unbounded*, so the
+        bound the setting exists to impose would silently disappear.
         """
-        positive_ms_keys = (
+        whole_positive_keys = ("observation_max_queue", "observation_max_batch")
+        positive_keys = (
             "streaming_first_chunk_timeout_ms",
             "streaming_first_chunk_timeout_ms_tool_loop",
+            "observation_flush_interval_ms",
+            "observation_timeout_ms",
+            *whole_positive_keys,
         )
-        for key in positive_ms_keys:
-            if key in platform and float(platform[key]) <= 0:
+        for key in positive_keys:
+            if key not in platform:
+                continue
+            value = _as_platform_number(key, platform[key])
+            if value <= 0:
                 raise ValueError(f"{key} must be > 0, got {platform[key]}")
+            if key in whole_positive_keys and value != int(value):
+                raise ValueError(f"{key} must be a whole number of records, got {platform[key]}")
         extra_key = "streaming_final_attempt_extra_first_chunk_timeout_ms"
-        if extra_key in platform and float(platform[extra_key]) < 0:
+        if extra_key in platform and _as_platform_number(extra_key, platform[extra_key]) < 0:
             raise ValueError(f"{extra_key} must be >= 0, got {platform[extra_key]}")
         return platform
 
@@ -1484,6 +1521,15 @@ def _apply_platform_env_overrides(config: dict[str, Any]) -> None:
             "streaming_final_attempt_extra_first_chunk_timeout_ms",
             int,
         ),
+        # Observation transport (hybrid mode). The queue bound is a capacity
+        # decision rather than a correctness one: records are fixed-size, so a
+        # deployment can trade memory for how large a production burst it absorbs
+        # between two flushes. It buys nothing during a platform outage, where a
+        # failed batch is dropped rather than requeued.
+        "PLATFORM_OBSERVATION_MAX_QUEUE": ("observation_max_queue", int),
+        "PLATFORM_OBSERVATION_MAX_BATCH": ("observation_max_batch", int),
+        "PLATFORM_OBSERVATION_FLUSH_INTERVAL_MS": ("observation_flush_interval_ms", int),
+        "PLATFORM_OBSERVATION_TIMEOUT_MS": ("observation_timeout_ms", int),
     }
 
     for env_name, (field_name, caster) in env_mappings.items():
