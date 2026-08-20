@@ -173,6 +173,10 @@ def test_config(postgres_url: str) -> GatewayConfig:
         # fail-closed require_pricing=True behavior is covered by dedicated tests
         # that build their own config (see test_require_pricing.py).
         require_pricing=False,
+        # Off by default (untrusted callers can otherwise set the trace id/sampling
+        # flag your collector ingests); enabled here so the shared client fixture
+        # still exercises test_context_propagation.py's trusted-caller scenario.
+        accept_incoming_trace_context=True,
     )
 
 

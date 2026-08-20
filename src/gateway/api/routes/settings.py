@@ -129,6 +129,7 @@ _CONFIG_VIEW: tuple[tuple[str, tuple[str, ...]], ...] = (
         "General",
         (
             "enable_metrics",
+            "accept_incoming_trace_context",
             "enable_docs",
             "bootstrap_api_key",
             "log_writer_strategy",

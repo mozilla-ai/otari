@@ -13,6 +13,7 @@ from typing_extensions import override
 
 from gateway.api.deps import set_config
 from gateway.api.main import register_routers
+from gateway.context_propagation import TraceContextPropagationMiddleware
 from gateway.core.config import API_KEY_HEADER, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import create_session, init_db
 from gateway.dashboard import DASHBOARD_PACKAGE_PATH, get_dashboard_build_id, get_dashboard_dir
@@ -533,7 +534,10 @@ def create_app(config: GatewayConfig) -> FastAPI:
         async def root_index() -> str:
             return ROOT_TUTORIAL_HTML
 
+    # Middleware stack is registered in reverse order (last-added runs first)
     app.add_middleware(SecurityHeadersMiddleware)
+    if config.accept_incoming_trace_context:
+        app.add_middleware(TraceContextPropagationMiddleware)
 
     if config.cors_allow_origins:
         allow_credentials = "*" not in config.cors_allow_origins

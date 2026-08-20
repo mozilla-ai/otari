@@ -121,6 +121,51 @@ pricing:
 | `mode` | string | none | Operating mode (`"standalone"` or `"hybrid"`; the legacy value `"platform"` means hybrid): when unset, the mode is derived from the presence of `OTARI_AI_TOKEN`; when set explicitly it is enforced at startup, so `"hybrid"` without a token and `"standalone"` with a token both fail as conflicting configuration. |
 | `platform` | dict | `{}` | otari.ai integration settings (`base_url`, timeouts, retries) |
 
+### HTTP trace context propagation
+
+Otari can accept incoming context propagation headers in both standalone and
+hybrid mode. By default, this feature is disabled because the headers are
+unauthenticated. Set `accept_incoming_trace_context: true` to enable it for
+trusted backend and service-to-service callers. The middleware runs before route
+authentication, so an untrusted caller can choose the incoming trace context and
+any sampling decisions supported by the configured propagator. Prefer enabling
+it behind a proxy that strips propagation headers from untrusted edges.
+
+When enabled, Otari uses OpenTelemetry's configured propagator set to extract
+incoming context. The default is W3C Trace Context plus baggage
+(`tracecontext,baggage`). In this setting, `tracecontext` maps to the W3C
+`traceparent` and `tracestate` headers:
+
+- `traceparent` identifies the caller's trace ID, parent span ID, and trace flags.
+- `tracestate` carries vendor-specific state alongside the trace context.
+- `baggage` carries application-defined key-value metadata across service boundaries.
+
+Set `OTEL_PROPAGATORS` before starting Otari to select the propagators installed
+in your environment. When the W3C propagator is configured, these headers are
+the standard carriers; another propagator may use different headers or carriers.
+A valid incoming context becomes the current context for the request, so spans
+created by the request handler join the caller's trace. Any extracted propagator
+state is retained on spans created in the gateway; Otari does not automatically
+inject propagation headers into provider or platform requests.
+
+Missing or invalid context does not reject the request. Otari continues normally,
+allowing OpenTelemetry to create a new root trace when instrumentation creates a
+span. Context is detached when the request finishes, so separate HTTP requests
+do not share trace state.
+
+Malformed propagation headers can still affect observability noise. In particular,
+malformed `tracestate` values may cause OpenTelemetry's internal logger
+(`opentelemetry.trace.span`) to emit warnings before Otari resumes with a new root
+trace. If Otari is exposed to untrusted callers, treat this as client-controlled
+log-volume input: keep propagation disabled unless needed, strip propagation
+headers at the edge, and tune the `opentelemetry.trace.span` log level or filters
+for your deployment.
+
+Cross-origin browser propagation is not enabled: propagation headers, including
+the default W3C `traceparent` and `tracestate` headers, are not in the CORS
+allow-list. This applies to arbitrary propagators as well; their carriers are
+not allowed by the gateway's CORS configuration.
+
 ## Environment variables
 
 The following `OTARI_` variables override config file values for their matching fields. For example, `OTARI_PORT=9000` overrides `port: 8000` in the YAML.

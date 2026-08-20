@@ -19,6 +19,13 @@ master_key: YOUR_MASTER_KEY_HERE
 # Prometheus metrics endpoint at /metrics. Set to true to enable.
 # enable_metrics: true
 
+# Honor incoming OpenTelemetry context propagation headers. The default
+# propagator uses W3C Trace Context (traceparent/tracestate); OTEL_PROPAGATORS
+# controls the configured propagator set. Off by default because these headers
+# are unauthenticated (checked before route auth) and let a caller choose the
+# context your collector ingests. Enable only for trusted service callers.
+# accept_incoming_trace_context: true
+
 # --- File uploads & document understanding ---------------------------------
 # The /v1/files endpoints accept uploads; the gateway then resolves file/image
 # content blocks in chat requests. For models that natively understand
