@@ -928,17 +928,27 @@ class GatewayConfig(BaseSettings):
     def effective_mail_transport(self) -> str:
         """Which transport a send would actually use: ``smtp``, ``console`` or ``none``.
 
-        Resolves the ``auto`` default, which is the state a deployment that has
-        never heard of mail is in: SMTP when both ``smtp_host`` and
-        ``mail_from_email`` are set, and no transport at all otherwise. An
-        explicit ``smtp`` is validated at load (:meth:`validate_mail_transport`)
-        rather than resolved here, so a half-configured deployment that asked
-        for SMTP is refused at startup instead of at send time.
+        Answers what a send *would use*, never what was asked for, and it stays
+        the same answer whether or not :meth:`validate_mail_transport` was ever
+        called. That is deliberate: a readiness answer that is only truthful
+        because a check ran somewhere else is the shape of bug this whole design
+        exists to rule out. An explicitly-configured ``smtp`` missing the
+        settings SMTP needs is still refused at startup, but it also reports
+        ``none`` here, so a caller that somehow reached this config cannot be
+        told mail works when :func:`~gateway.services.mail.select_transport`
+        would hand it nothing.
+
+        ``auto`` is the state a deployment that never heard of mail is in: SMTP
+        when both ``smtp_host`` and ``mail_from_email`` are set, and no
+        transport at all otherwise.
         """
         configured = self.mail_transport.strip().lower()
-        if configured == "auto":
-            return "smtp" if self.smtp_host and self.mail_from_email else "none"
-        return configured
+        if configured in {"console", "none"}:
+            return configured
+        # 'auto' and an explicit 'smtp' resolve identically, because what SMTP
+        # needs to exist does not depend on how it was asked for. They differ
+        # only in whether the absence is an error, which is validation's job.
+        return "smtp" if self.smtp_host and self.mail_from_email else "none"
 
     @property
     def mail_enabled(self) -> bool:
@@ -973,19 +983,20 @@ class GatewayConfig(BaseSettings):
         rather than leaving them to guess, which is the whole difference between
         an honest no-transport mode and an opaque one.
         """
+        configured = self.mail_transport.strip().lower()
+        # An explicit 'none' turned mail off deliberately, so nothing else is
+        # "missing": mail_transport itself is the one setting standing in the
+        # way, and naming the SMTP fields beside it would describe a deployment
+        # the operator did not ask for.
+        if configured == "none":
+            return ("mail_transport",)
+
         missing: list[str] = []
-        if self.effective_mail_transport == "none":
-            # Under 'auto' the two SMTP settings are what would turn mail on.
-            # Under an explicit 'none' they would not: the operator turned mail
-            # off deliberately, so mail_transport itself is the one setting
-            # standing in the way, and it is the only one worth naming.
-            if self.mail_transport.strip().lower() == "auto":
-                if not self.smtp_host:
-                    missing.append("smtp_host")
-                if not self.mail_from_email:
-                    missing.append("mail_from_email")
-            else:
-                return ("mail_transport",)
+        if configured in {"auto", "smtp"}:
+            if not self.smtp_host:
+                missing.append("smtp_host")
+            if not self.mail_from_email:
+                missing.append("mail_from_email")
         if not self.public_base_url:
             missing.append("public_base_url")
         return tuple(missing)
@@ -1415,7 +1426,8 @@ class GatewayConfig(BaseSettings):
         mail: there, nothing is wrong and nothing is refused. Either way the
         failure never waits until someone presses Invite.
         """
-        if self.effective_mail_transport == "console":
+        configured = self.mail_transport.strip().lower()
+        if configured == "console":
             # Once, at load, rather than per send: an operator who selected this
             # deliberately does not need it repeated, but one who inherited it
             # from a copied config needs to see it at least once, because the
@@ -1425,7 +1437,11 @@ class GatewayConfig(BaseSettings):
                 "links included, and delivered to nobody. Use 'smtp' to actually send."
             )
             return
-        if self.effective_mail_transport != "smtp":
+        # The *configured* value, not the effective one: an explicit 'smtp' that
+        # cannot be built now resolves to 'none', which is precisely the state
+        # this refuses. Keying on the effective value would make the check
+        # silently vacuous.
+        if configured != "smtp":
             return
         required = (("smtp_host", self.smtp_host), ("mail_from_email", self.mail_from_email))
         missing = [name for name, value in required if not value]

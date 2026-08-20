@@ -6,14 +6,17 @@ and a deployment discovering at send time that it has no mail), and the console
 transport is what proves a *templated message actually sends* without one.
 """
 
+import ast
 import logging
 from collections.abc import Iterator
+from pathlib import Path
 from unittest.mock import MagicMock, patch
 
 import pytest
 
-from gateway.core.config import GatewayConfig
+from gateway.core.config import MAIL_TRANSPORT_SETTINGS, GatewayConfig
 from gateway.log_config import logger as gateway_logger
+from gateway.services import mail as mail_package
 from gateway.services.mail import (
     ConsoleTransport,
     Mailer,
@@ -89,6 +92,54 @@ def test_missing_settings_name_what_would_turn_mail_on() -> None:
     )
     assert GatewayConfig(**SMTP_CONFIGURED).missing_mail_settings == ("public_base_url",)  # type: ignore[arg-type]
     assert _ready().missing_mail_settings == ()
+
+
+def test_readiness_never_depends_on_a_validator_having_run() -> None:
+    """A config that was never validated must still answer truthfully.
+
+    An explicit ``smtp`` with nothing behind it is refused at startup, but the
+    refusal is not what makes the answer here correct: ``effective_mail_transport``
+    reports what a send would actually use, so it agrees with
+    ``select_transport`` in every state, validated or not. A readiness answer
+    that is only truthful because a check ran somewhere else is the shape of bug
+    this design exists to rule out.
+    """
+    half_configured = GatewayConfig(mail_transport="smtp", smtp_host="smtp.example.com")
+
+    assert half_configured.effective_mail_transport == "none"
+    assert half_configured.mail_enabled is False
+    assert half_configured.mail_ready is False
+    assert select_transport(half_configured) is None
+    assert Mailer(half_configured).can_send_links is False
+    # And it still names what is missing rather than reporting nothing to fix.
+    assert half_configured.missing_mail_settings == ("mail_from_email", "public_base_url")
+
+
+def test_config_and_transport_never_disagree_about_whether_mail_exists() -> None:
+    """The two readers of "is mail configured" must not be able to drift apart.
+
+    ``/v1/bootstrap`` reads the config property and the invitation path asks the
+    mailer; if those could differ, the dashboard would offer an affordance the
+    request path refuses. Exhaustive over the settings that decide it, because
+    the states that broke this before were the ones nobody thinks to write a
+    case for.
+    """
+    for transport in MAIL_TRANSPORT_SETTINGS:
+        for host in (None, "smtp.example.com"):
+            for sender in (None, "otari@example.com"):
+                for url in (None, "https://otari.example.com"):
+                    config = GatewayConfig(
+                        mail_transport=transport,
+                        smtp_host=host,
+                        mail_from_email=sender,
+                        public_base_url=url,
+                    )
+                    state = (transport, host, sender, url)
+                    assert config.mail_enabled == (select_transport(config) is not None), state
+                    assert config.mail_ready == Mailer(config).can_send_links, state
+                    # "Empty exactly when ready" is the contract GET /v1/settings/mail
+                    # publishes, so it holds for every state and not just the tidy ones.
+                    assert (config.missing_mail_settings == ()) == config.mail_ready, state
 
 
 def test_an_unknown_transport_is_refused_at_load() -> None:
@@ -310,6 +361,34 @@ def test_the_subject_is_stripped_of_newlines_but_the_body_is_not() -> None:
     )
     assert "\r" not in message.subject
     assert "\n" not in message.subject
+
+
+# --- The shape of the guard -------------------------------------------------
+
+
+def test_the_mail_package_gates_nothing_behind_an_assert() -> None:
+    """No availability check here may be an ``assert``, at any depth.
+
+    ``python -O`` strips assertions, so one guarding a send has two different
+    wrong behaviors depending on how the process was started: a crash at send
+    time unoptimized, and a silent no-op optimized. Those are precisely the two
+    answers #648 rules out, from one line. otari.ai's ``send_email`` is the live
+    example (``assert settings.emails_enabled``), which is why this is asserted
+    structurally rather than trusted to review: the mail package's guarantees
+    are ``return``s and typed exceptions, and a future edit must not quietly
+    swap one for an assertion.
+    """
+    package = Path(mail_package.__file__).parent
+    modules = sorted(package.glob("*.py"))
+    assert modules, "no mail modules found; this test would pass vacuously"
+
+    offenders = [
+        f"{path.name}:{node.lineno}"
+        for path in modules
+        for node in ast.walk(ast.parse(path.read_text(encoding="utf-8")))
+        if isinstance(node, ast.Assert)
+    ]
+    assert offenders == []
 
 
 # --- Address handling -------------------------------------------------------
