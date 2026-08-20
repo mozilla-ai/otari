@@ -66,10 +66,13 @@ Their pages are in [../../web/AGENTS.md](../../web/AGENTS.md).
 
 Neither store becomes workspace-keyed. Per-workspace tool configuration (guardrails, web
 search, code execution, MCP servers) is resolved at admission in `prepare_gateway_tools`
-off `RequestContext.workspace_id`, and a lower layer may only narrow what the deployment
-offers. The decision, with the reasoning and the per-surface rules, is in
-[../../docs/architecture/tool-configuration-layers.md](../../docs/architecture/tool-configuration-layers.md);
-read it before building any of the four.
+off `RequestContext.workspace_id`, never from a header, and lands on `ToolContext` for the
+tool loop to read. A lower layer may only narrow what the layer above it permits, so a
+workspace row is a veto and a refinement and never a grant, and no row means no narrowing
+(MCP, which has no deployment-level server list to narrow, is the stated exception). The
+reasoning and the per-surface rules are on
+[mozilla-ai/otari#655](https://github.com/mozilla-ai/otari/issues/655); read it before
+building any of #654, #656, #657 or #658.
 
 ## Data, sessions, migrations
 ORM entities are in `src/gateway/models/entities.py` (User, APIKey, Budget, ScopedBudget, UsageLog, ModelPricing, BudgetResetLog). The async engine/session factory and `init_db` live in `src/gateway/core/database.py`; routes get a session via the `get_db` dependency, non-request code uses `create_session()`. Alembic migrations are in `alembic/versions/` and run on startup when `auto_migrate` is set.
