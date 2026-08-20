@@ -7,7 +7,7 @@ from decimal import Decimal
 
 from genai_prices import Usage, calc_price
 from genai_prices.types import PriceCalculation, TieredPrices
-from sqlalchemy import or_, select
+from sqlalchemy import case, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.log_config import logger
@@ -369,9 +369,16 @@ async def _find_organization_override(
 ) -> ModelPricing | None:
     """An organization's rate for the first of ``model_keys`` that has one.
 
-    The keys are tried in the caller's order (canonical ``provider:model`` before
-    the legacy ``provider/model``) so an override matches on the same key the
-    deployment row would, rather than on whichever form happened to be stored.
+    One statement over every candidate key, not one per key. This runs on the
+    request path ahead of the deployment lookup, so an organization with no
+    override at all pays for it on every request and it has to be a single index
+    probe rather than a probe per key form.
+
+    Preference, not just a filter: ``model_keys`` is ordered (canonical
+    ``provider:model`` before the legacy ``provider/model``), and the ``CASE``
+    below carries that order into SQL so an override matches on the same key the
+    deployment row would rather than on whichever form happened to be stored.
+    A per-key loop expressed the same preference by asking twice.
 
     The period test is half-open: ``effective_from`` is inclusive and
     ``effective_to`` exclusive, so two adjacent periods that share an instant
@@ -379,29 +386,31 @@ async def _find_organization_override(
     not an overlap. The service applies the same rule when it refuses one, so
     what is storable and what is resolvable agree.
     """
-    for model_key in model_keys:
-        stmt = (
-            select(OrganizationModelPricing)
-            .where(
-                OrganizationModelPricing.organization_id == organization_id,
-                OrganizationModelPricing.model_key == model_key,
-                OrganizationModelPricing.effective_from <= as_of,
-                or_(
-                    OrganizationModelPricing.effective_to.is_(None),
-                    OrganizationModelPricing.effective_to > as_of,
-                ),
-            )
-            # At most one row can match once the overlap rule holds. The ordering
-            # is what makes the read deterministic anyway, so a row that predates
-            # the rule, or slipped through the write race the model documents,
-            # resolves to the newest applicable period instead of an arbitrary one.
-            .order_by(OrganizationModelPricing.effective_from.desc())
-            .limit(1)
+    key_preference = case(
+        {model_key: rank for rank, model_key in enumerate(model_keys)},
+        value=OrganizationModelPricing.model_key,
+        else_=len(model_keys),
+    )
+    stmt = (
+        select(OrganizationModelPricing)
+        .where(
+            OrganizationModelPricing.organization_id == organization_id,
+            OrganizationModelPricing.model_key.in_(model_keys),
+            OrganizationModelPricing.effective_from <= as_of,
+            or_(
+                OrganizationModelPricing.effective_to.is_(None),
+                OrganizationModelPricing.effective_to > as_of,
+            ),
         )
-        override = (await db.execute(stmt)).scalar_one_or_none()
-        if override is not None:
-            return _override_as_model_pricing(override)
-    return None
+        # At most one row per key can match once the overlap rule holds, so the
+        # second ordering term only decides between a row that predates the rule
+        # and one that slipped through the write race the model documents; it
+        # resolves to the newest applicable period rather than an arbitrary one.
+        .order_by(key_preference, OrganizationModelPricing.effective_from.desc())
+        .limit(1)
+    )
+    override = (await db.execute(stmt)).scalar_one_or_none()
+    return _override_as_model_pricing(override) if override is not None else None
 
 
 async def _find_by_model_key(db: AsyncSession, model_key: str, as_of: datetime) -> ModelPricing | None:
