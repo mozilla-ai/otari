@@ -635,6 +635,8 @@ async def price_tool_calls(
         unit_rate = flat_request_cost(pricing)
         cost = units * unit_rate
         total += cost
+        # ``float`` for the JSON charge line, as above; the returned total that
+        # settles the row stays Decimal.
         lines.append({"meter": f"{tool}_calls", "units": units, "unit_rate": float(unit_rate), "cost": float(cost)})
     return quantize_cost(total), lines, unpriced
 

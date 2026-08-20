@@ -453,7 +453,7 @@ pricing:
 
 Config pricing sets initial values. Pricing set via the `/v1/pricing` API takes precedence.
 
-#### How amounts are stored and rounded
+### How amounts are stored and rounded
 
 Rates and settled costs are exact decimals, not binary floating point. A rate is
 stored to 8 decimal places, far finer than any published price, so a rate you
@@ -479,7 +479,7 @@ PostgreSQL.
 
 A pricing entry whose provider is not listed in the `providers` section is skipped at startup with a warning, not treated as a fatal error: the provider may still be reachable through environment credentials (any-llm reads keys like `OPENAI_API_KEY`), so a pricing/provider mismatch should not abort the gateway. To have such an entry take effect, add the provider to the `providers` section.
 
-#### Cache token pricing
+### Cache token pricing
 
 Providers that support prompt caching (OpenAI, Gemini, Anthropic) report cached-token counts that are captured in `cache_read_tokens` and `cache_write_tokens` on the usage log. Without a configured cache rate these tokens are still billed, at `input_price_per_million` (they are ordinary input tokens), just not at a discounted cache rate. To bill them at the provider's cache price instead, add the optional `cache_read_price_per_million` and `cache_write_price_per_million` rates (USD per million tokens):
 
@@ -504,7 +504,7 @@ Every physical input token is charged once. The input/prompt count is treated as
 
 When a cache rate is left unset (null), those cache tokens are not dropped or billed at $0: they remain part of the input total and are billed at `input_price_per_million`, since they are still real input tokens. Set the cache rate to bill them at the provider's discounted cache price. The same fields are available on the `/v1/pricing` API (`SetPricingRequest` and `PricingResponse`).
 
-#### Long-context pricing tiers
+### Long-context pricing tiers
 
 Some models charge a different rate once a request reaches a context threshold. Set `pricing_tiers` when that rate applies to the whole request, as it does for the tiered catalog entries Otari imports from `genai-prices`:
 

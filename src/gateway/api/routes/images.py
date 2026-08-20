@@ -69,6 +69,8 @@ async def create_image(
         if pricing is None:
             return None
         n_images = len(result.data) if result.data else requested_images
+        # ``float`` because the breakdown is a JSON column and JSON has no exact
+        # decimal; the settled amount is ``UsageLog.cost``, which stays Decimal.
         breakdown = [
             {
                 "meter": "images",

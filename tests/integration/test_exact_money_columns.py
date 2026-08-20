@@ -169,12 +169,24 @@ def test_summing_settled_costs_is_exact(test_db: Session) -> None:
         (Decimal("0.0000005"), Decimal("0.000001")),
         (Decimal("0.0000004"), Decimal("0.000000")),
         (Decimal("1.9999995"), Decimal("2.000000")),
+        # A tie where half-up and Python's default half-even disagree: half-even
+        # would settle this at 0.000002.
+        (Decimal("0.0000025"), Decimal("0.000003")),
     ],
 )
-def test_a_cost_below_the_column_scale_rounds_half_up_on_write(
+def test_a_cost_below_the_column_scale_settles_half_up(
     test_db: Session, written: Decimal, stored: Decimal
 ) -> None:
-    """The rounding is the gateway's, not the engine's, so it is the same everywhere."""
+    """What lands in the column when an amount has more precision than it holds.
+
+    This pins the rule, not who applies it. PostgreSQL rounds a numeric tie away
+    from zero, which is the same answer ``ROUND_HALF_UP`` gives for every value
+    including negative ones, so on this engine no amount can distinguish the
+    gateway rounding from the engine rounding: the two agree by construction.
+    That the *gateway* is the one rounding is shown where the engine does no
+    rounding at all, by ``tests/unit/test_money_columns.py`` against the bind
+    processor with no database in the path.
+    """
     test_db.add(
         UsageLog(
             id=f"rounded-{written}",

@@ -471,11 +471,15 @@ def estimate_metered_cost(
 
     Every estimated prompt token is billed as exactly one of fresh input, a
     cache read, or a cache write, so the upper bound for the input side is the
-    token count times the dearest rate it could attract. When a cache write is
-    requested that worst case is the cache-write rate; otherwise it is the input
-    rate, since a cache read is never dearer than fresh input. Threshold rates
-    are selected from the estimated input, which approximates the request's
-    billable total. The estimate is reconciled to actual usage on completion.
+    token count times the dearest of those three rates. Every one of them is
+    considered, including the cache-read rate: it is normally a discount, but
+    nothing in the schema requires that, and assuming it made the estimate an
+    under-bound for a rate card that priced a cache read above fresh input. An
+    under-bound is a budget hole rather than a rounding difference, because the
+    ceiling admits a request against the estimate and the settlement can then
+    exceed it. Threshold rates are selected from the estimated input, which
+    approximates the request's billable total. The estimate is reconciled to
+    actual usage on completion.
     """
     input_tokens = max(estimated_input_tokens, 0)
     output_tokens = max(estimated_output_tokens, 0)
@@ -490,11 +494,15 @@ def estimate_metered_cost(
     else:
         cache_write_rate = None
 
-    # An unpriced cache write bills at the input rate (it stays in the fresh
-    # bucket), so the input rate is the floor either way.
-    per_input_token_rate = rates.input_price_per_million
+    # An unpriced meter bills at the input rate (its tokens stay in the fresh
+    # bucket), so the input rate is the floor and every configured rate a prompt
+    # token could attract raises it.
+    candidate_rates = [rates.input_price_per_million]
+    if rates.cache_read_price_per_million is not None:
+        candidate_rates.append(rates.cache_read_price_per_million)
     if cache_write_rate is not None:
-        per_input_token_rate = max(per_input_token_rate, cache_write_rate)
+        candidate_rates.append(cache_write_rate)
+    per_input_token_rate = max(candidate_rates)
 
     estimate = meter_cost(input_tokens, per_input_token_rate) + meter_cost(
         output_tokens, rates.output_price_per_million

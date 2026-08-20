@@ -34,8 +34,13 @@ def test_none_stays_none() -> None:
 
 
 def test_a_cost_is_rounded_half_up_to_the_micro_dollar_on_the_way_in() -> None:
+    """No engine in the path, so this is the gateway's rule and nothing else's."""
     assert _bind(UsdCost(), Decimal("0.1234565")) == Decimal("0.123457")
     assert _bind(UsdCost(), Decimal("0.1234564")) == Decimal("0.123456")
+    # A tie Python's default rounding would settle the other way: half-even
+    # gives 0.000002 here, and half-away-from-zero gives -0.000003 below.
+    assert _bind(UsdCost(), Decimal("0.0000025")) == Decimal("0.000003")
+    assert _bind(UsdCost(), Decimal("-0.0000025")) == Decimal("-0.000003")
 
 
 def test_a_rate_is_rounded_half_up_to_its_own_scale() -> None:

@@ -8,7 +8,7 @@ from unittest.mock import AsyncMock, MagicMock, patch
 import pytest
 from any_llm.exceptions import BatchNotCompleteError
 from any_llm.types.batch import BatchResult, BatchResultError, BatchResultItem
-from any_llm.types.completion import CompletionUsage
+from any_llm.types.completion import CompletionUsage, PromptTokensDetails
 from fastapi.testclient import TestClient
 from openai.types.batch import Batch
 from openai.types.batch_request_counts import BatchRequestCounts
@@ -962,6 +962,54 @@ def test_batch_lines_are_priced_one_request_at_a_time(
     # Base rates, three times over: 100k input at $1/M plus 1k output at $2/M.
     expected_cost = 3 * (100_000 / 1_000_000 * 1.0 + 1_000 / 1_000_000 * 2.0)
     assert results_logs[0]["cost"] == pytest.approx(expected_cost)
+
+
+def test_batch_lines_keep_their_cached_token_discount(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    api_key_header: dict[str, str],
+    api_key_obj: dict[str, Any],
+) -> None:
+    """A batch line reports cached tokens the OpenAI way, and must be billed that way.
+
+    Dropping ``prompt_tokens_details.cached_tokens`` would bill the cached slice
+    at the full input rate, so an identical request would cost more as part of a
+    batch than it does on the live path. 9,000 of 10,000 prompt tokens cached at
+    $2.50 / $0.25 per million is $0.0025 of fresh input plus $0.00225 of cache
+    read, not $0.025 of fresh input.
+    """
+    user_id = api_key_obj["user_id"]
+    client.post(
+        "/v1/pricing",
+        json={
+            "model_key": "openai:gpt-4o-mini",
+            "input_price_per_million": 2.5,
+            "output_price_per_million": 10.0,
+            "cache_read_price_per_million": 0.25,
+        },
+        headers=master_key_header,
+    )
+
+    batch_id = _create_recorded_batch(client, api_key_header, batch_id="batch_cached")
+    line = CompletionUsage(
+        prompt_tokens=10_000,
+        completion_tokens=500,
+        total_tokens=10_500,
+        prompt_tokens_details=PromptTokensDetails(cached_tokens=9_000),
+    )
+    retrieve_patch, results_patch = _completed_results_patches(line, count=1)
+    with retrieve_patch, results_patch:
+        resp = client.get(f"/v1/batches/{batch_id}/results?provider=openai", headers=api_key_header)
+    assert resp.status_code == 200
+
+    logs = client.get(f"/v1/users/{user_id}/usage", headers=master_key_header).json()
+    row = next(log for log in logs if log["endpoint"] == "/v1/batches/results")
+    # 1000 fresh at 2.5/M + 9000 cached at 0.25/M + 500 output at 10/M.
+    assert row["cost"] == pytest.approx(0.0025 + 0.00225 + 0.005)
+    # The row shows the cached count its cost already reflects. Read through
+    # /v1/usage rather than the per-user view, which does not carry the column.
+    entries = client.get("/v1/usage", params={"endpoint": "/v1/batches/results"}, headers=master_key_header).json()
+    assert entries[0]["cache_read_tokens"] == 9_000
 
 
 def test_a_batch_is_rounded_once_not_once_per_line(

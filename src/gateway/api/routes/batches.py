@@ -22,6 +22,7 @@ from gateway.api.routes._pipeline import _raise_for_unresolvable_model, failure_
 from gateway.api.routes.chat import rate_limit_headers
 from gateway.core.config import GatewayConfig
 from gateway.core.metered_pricing import calculate_token_cost, quantize_cost
+from gateway.core.usage import cache_read_tokens_of
 from gateway.log_config import logger
 from gateway.models.entities import APIKey, BatchRecord, UsageLog
 from gateway.rate_limit import check_rate_limit
@@ -93,6 +94,9 @@ async def log_batch_usage(
     prompt_tokens: int | None = None,
     completion_tokens: int | None = None,
     total_tokens: int | None = None,
+    # The cached slice of ``prompt_tokens``, so the row shows the discount its
+    # cost already reflects rather than leaving it unexplained.
+    cache_read_tokens: int | None = None,
     cost: Decimal | None = None,
     counts_toward_budget: bool = True,
     workspace_id: uuid.UUID | None = None,
@@ -122,6 +126,7 @@ async def log_batch_usage(
         prompt_tokens=prompt_tokens,
         completion_tokens=completion_tokens,
         total_tokens=total_tokens,
+        cache_read_tokens=cache_read_tokens,
         cost=cost,
         status="success" if error is None else "error",
         error_message=error,
@@ -701,19 +706,28 @@ async def retrieve_batch_results(
     # Sum per-request token usage so batch spend is visible in usage reporting.
     # The per-line counts are kept as well as summed: the row reports the batch's
     # totals, but pricing has to happen a line at a time (see below).
+    #
+    # A line's cached prompt tokens are carried too. A batch result is a
+    # ``ChatCompletion``, so it reports them the OpenAI way, inside
+    # ``prompt_tokens_details``; dropping them would bill cached input at the
+    # full input rate and settle a batch above what the identical request costs
+    # on the live path.
     prompt_tokens = 0
     completion_tokens = 0
     total_tokens = 0
-    line_tokens: list[tuple[int, int]] = []
+    cache_read_tokens = 0
+    line_tokens: list[tuple[int, int, int]] = []
     for item in result.results:
         usage = item.result.usage if item.result is not None else None
         if usage is not None:
             line_prompt = usage.prompt_tokens or 0
             line_completion = usage.completion_tokens or 0
+            line_cache_read = cache_read_tokens_of(usage)
             prompt_tokens += line_prompt
             completion_tokens += line_completion
+            cache_read_tokens += line_cache_read
             total_tokens += usage.total_tokens or 0
-            line_tokens.append((line_prompt, line_completion))
+            line_tokens.append((line_prompt, line_completion, line_cache_read))
 
     cost: Decimal | None = None
     if total_tokens:
@@ -752,10 +766,11 @@ async def retrieve_batch_results(
                             pricing,
                             input_tokens=line_prompt,
                             output_tokens=line_completion,
+                            cache_read_tokens=line_cache_read,
                             cache_tokens_included=True,
                             quantize=False,
                         )
-                        for line_prompt, line_completion in line_tokens
+                        for line_prompt, line_completion, line_cache_read in line_tokens
                     ),
                     Decimal(0),
                 )
@@ -795,6 +810,7 @@ async def retrieve_batch_results(
             prompt_tokens=prompt_tokens,
             completion_tokens=completion_tokens,
             total_tokens=total_tokens,
+            cache_read_tokens=cache_read_tokens,
             cost=cost,
             counts_toward_budget=not batch_exempt,
             # The creator's workspace, matching the user and the rates this row

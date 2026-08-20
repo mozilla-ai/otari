@@ -174,6 +174,8 @@ class OrganizationModelPricingPublic(BaseModel):
             id=override.id,
             organization_id=override.organization_id,
             model_key=override.model_key,
+            # Narrowed for the wire only: the response contract is float and the
+            # stored rates stay exact. See ``models/money.as_float``.
             input_price_per_million=float(override.input_price_per_million),
             output_price_per_million=float(override.output_price_per_million),
             cache_read_price_per_million=as_float(override.cache_read_price_per_million),
