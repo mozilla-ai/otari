@@ -3795,10 +3795,10 @@ export interface components {
              */
             deployment_type: "standalone" | "hosted" | "hybrid";
             /**
-             * Mail Enabled
-             * @description Whether this deployment can actually deliver mail (an invitation's accept link), not merely whether an SMTP host is set: it also needs to know its own public URL to put in one. Lets the dashboard hide or disable a mail-dependent affordance instead of offering one that would fail at send time. False for a hybrid gateway, which holds no tenancy state to invite anyone into.
+             * Invitation Mail Ready
+             * @description Whether this deployment can actually deliver mail (an invitation's accept link), not merely whether an SMTP host is set: it also needs to know its own public URL to put in one. Named for the specific thing it gates rather than 'mail_enabled', since a deployment could one day have mail configured for something else while this is still false. Lets the dashboard hide or disable the invite affordance instead of offering one that would fail at send time. False for a hybrid gateway, which holds no tenancy state to invite anyone into.
              */
-            mail_enabled: boolean;
+            invitation_mail_ready: boolean;
             /**
              * Management Url
              * @description Where the authoritative control plane lives when it is not this deployment. Set for a hybrid gateway so its landing page can link to otari.ai; null otherwise.

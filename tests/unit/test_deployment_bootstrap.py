@@ -47,7 +47,7 @@ def test_standalone_reports_a_local_operator_and_the_full_surface_set(tmp_path: 
         "session_type": "local_operator",
         "surfaces": sorted(STANDALONE_SURFACES),
         "management_url": None,
-        "mail_enabled": False,
+        "invitation_mail_ready": False,
     }
 
 
@@ -96,7 +96,7 @@ def test_hybrid_reports_no_session_no_surfaces_and_the_hosted_url(monkeypatch: p
         "session_type": "none",
         "surfaces": [],
         "management_url": "https://otari.ai",
-        "mail_enabled": False,
+        "invitation_mail_ready": False,
     }
 
     reset_config()

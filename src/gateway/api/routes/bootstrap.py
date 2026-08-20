@@ -97,13 +97,15 @@ class DeploymentBootstrap(BaseModel):
             "Set for a hybrid gateway so its landing page can link to otari.ai; null otherwise."
         )
     )
-    mail_enabled: bool = Field(
+    invitation_mail_ready: bool = Field(
         description=(
             "Whether this deployment can actually deliver mail (an invitation's accept "
             "link), not merely whether an SMTP host is set: it also needs to know its own "
-            "public URL to put in one. Lets the dashboard hide or disable a mail-dependent "
-            "affordance instead of offering one that would fail at send time. False for a "
-            "hybrid gateway, which holds no tenancy state to invite anyone into."
+            "public URL to put in one. Named for the specific thing it gates rather than "
+            "'mail_enabled', since a deployment could one day have mail configured for "
+            "something else while this is still false. Lets the dashboard hide or disable "
+            "the invite affordance instead of offering one that would fail at send time. "
+            "False for a hybrid gateway, which holds no tenancy state to invite anyone into."
         )
     )
 
@@ -120,12 +122,12 @@ async def get_bootstrap(config: GatewayConfig = Depends(get_config)) -> Deployme
             session_type="none",
             surfaces=[],
             management_url=config.platform_management_url,
-            mail_enabled=False,
+            invitation_mail_ready=False,
         )
     return DeploymentBootstrap(
         deployment_type="standalone",
         session_type="local_operator",
         surfaces=sorted(STANDALONE_SURFACES),
         management_url=None,
-        mail_enabled=config.invitation_mail_ready,
+        invitation_mail_ready=config.invitation_mail_ready,
     )

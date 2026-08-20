@@ -2750,9 +2750,9 @@
             "title": "Deployment Type",
             "type": "string"
           },
-          "mail_enabled": {
-            "description": "Whether this deployment can actually deliver mail (an invitation's accept link), not merely whether an SMTP host is set: it also needs to know its own public URL to put in one. Lets the dashboard hide or disable a mail-dependent affordance instead of offering one that would fail at send time. False for a hybrid gateway, which holds no tenancy state to invite anyone into.",
-            "title": "Mail Enabled",
+          "invitation_mail_ready": {
+            "description": "Whether this deployment can actually deliver mail (an invitation's accept link), not merely whether an SMTP host is set: it also needs to know its own public URL to put in one. Named for the specific thing it gates rather than 'mail_enabled', since a deployment could one day have mail configured for something else while this is still false. Lets the dashboard hide or disable the invite affordance instead of offering one that would fail at send time. False for a hybrid gateway, which holds no tenancy state to invite anyone into.",
+            "title": "Invitation Mail Ready",
             "type": "boolean"
           },
           "management_url": {
@@ -2791,7 +2791,7 @@
           "session_type",
           "surfaces",
           "management_url",
-          "mail_enabled"
+          "invitation_mail_ready"
         ],
         "title": "DeploymentBootstrap",
         "type": "object"

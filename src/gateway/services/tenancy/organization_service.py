@@ -691,6 +691,18 @@ class OrganizationService:
         workspace assignments, the same way immediate ones are applied on
         ``POST /me/members``.
         """
+        _, _, organization = await self._resolve_pending_invitation(token)
+        # Locked, then re-resolved, before any write: two concurrent accepts of
+        # the same token could otherwise both pass the pending check above
+        # (nothing has committed yet to see), both flip the membership, and
+        # both reach _apply_workspace_assignments, whose existing-then-create
+        # shape lets the second racer's insert violate
+        # uq_workspace_member_workspace_user as an uncaught IntegrityError on
+        # this public, unauthenticated endpoint. Same pattern as the
+        # organization lock in invite_active_organization_member_for_user; the
+        # second caller through the lock re-resolves and finds the invitation
+        # no longer pending, so it raises InvitationAlreadyUsedError instead.
+        await self.organizations.lock(organization.id)
         invitation, membership, organization = await self._resolve_pending_invitation(token)
 
         membership = await self.members.update_membership(membership, {"status": "active"})

@@ -132,8 +132,8 @@ def test_render_invitation_email_does_not_let_one_value_collide_with_another_pla
     assert "Role Corp" in text
 
 
-def test_render_invitation_email_rounds_the_expiry_up_and_pluralizes() -> None:
-    """Rounding down would tell a recipient a 12-hour link lasts a full day."""
+def test_render_invitation_email_never_overstates_the_expiry() -> None:
+    """Neither rounding direction may claim more time than the link actually has."""
     _, half_day_html, half_day_text = render_invitation_email(
         organization_name="Acme",
         inviter_name="Ada",
@@ -141,6 +141,7 @@ def test_render_invitation_email_rounds_the_expiry_up_and_pluralizes() -> None:
         accept_link="https://gw.example.com/#/accept-invitation?token=abc",
         expiry_hours=12,
     )
+    # Rounding down ("1 day") would overstate a 12-hour link.
     assert "12 hours" in half_day_html
     assert "12 hours" in half_day_text
 
@@ -161,7 +162,20 @@ def test_render_invitation_email_rounds_the_expiry_up_and_pluralizes() -> None:
         accept_link="https://gw.example.com/#/accept-invitation?token=abc",
         expiry_hours=36,
     )
-    assert "2 days" in day_and_a_half_html  # rounded up, not down to "1 days"
+    # Rounding up ("2 days") would overstate a 36-hour link just as much;
+    # staying in hours for anything that isn't an exact day count is what
+    # avoids overstating in either direction.
+    assert "36 hours" in day_and_a_half_html
+    assert "2 days" not in day_and_a_half_html
+
+    _, exact_two_days_html, _ = render_invitation_email(
+        organization_name="Acme",
+        inviter_name="Ada",
+        role="member",
+        accept_link="https://gw.example.com/#/accept-invitation?token=abc",
+        expiry_hours=48,
+    )
+    assert "2 days" in exact_two_days_html
 
 
 def test_render_invitation_email_strips_newlines_from_the_subject_line() -> None:

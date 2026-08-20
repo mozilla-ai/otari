@@ -75,14 +75,18 @@ _PUBLIC_PREFIXES = ("/health",)
 _COOKIE_AUTH_PREFIXES = ("/v1/auth/session",)
 # Paths that carry no credential at all. The deployment bootstrap is what tells a
 # browser whether signing in is even possible here, so requiring a credential to
-# read it would be circular; the invitation accept flow is unauthenticated for a
-# different reason (the emailed token is the caller's whole credential, and it is
-# not one of the header/cookie schemes this stamps everything else with). Listed
-# separately from _PUBLIC_PREFIXES because these still get the no-store cache
-# headers: an invitation's answer is specific to the token in the URL, and
-# bootstrap's changes with the deployment's configuration, so a shared cache must
-# not serve either to a different caller/gateway.
-_UNAUTHENTICATED_PREFIXES = ("/v1/bootstrap", "/v1/invitations")
+# read it would be circular; the two invitation routes are unauthenticated for a
+# different reason (the token in the request body is the caller's whole
+# credential, and it is not one of the header/cookie schemes this stamps
+# everything else with). Named as full leaf paths rather than the shared
+# `/v1/invitations` prefix on purpose: a prefix would exempt any future route
+# mounted under it too, by inheritance rather than by decision (an operator-only
+# resend or list-pending endpoint, say). Listed separately from
+# _PUBLIC_PREFIXES because these still get the no-store cache headers: an
+# invitation's answer is specific to the caller, and bootstrap's changes with
+# the deployment's configuration, so a shared cache must not serve either to a
+# different caller/gateway.
+_UNAUTHENTICATED_PREFIXES = ("/v1/bootstrap", "/v1/invitations/validate", "/v1/invitations/accept")
 # Public, unauthenticated static assets that shared caches may keep. Paths here
 # set their own Cache-Control at the route (favicon.svg), so the middleware only
 # fills one in when it is missing.

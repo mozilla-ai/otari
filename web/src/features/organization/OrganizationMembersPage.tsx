@@ -214,7 +214,7 @@ function AddMemberForm({ onClose }: { onClose: () => void }) {
 function InviteMemberForm({ onClose }: { onClose: () => void }) {
   const invite = useInviteOrganizationMember()
   const workspaces = useWorkspaces()
-  const { mail_enabled } = useDeployment()
+  const { invitation_mail_ready } = useDeployment()
   const { selected } = useSelectedWorkspace()
   const [email, setEmail] = useState("")
   const [role, setRole] = useState<MembershipRole>("member")
@@ -313,7 +313,7 @@ function InviteMemberForm({ onClose }: { onClose: () => void }) {
             isRequired
             autoFocus
             description={
-              mail_enabled
+              invitation_mail_ready
                 ? "An email with an accept link is sent here; the membership becomes active once they follow it."
                 : "No mail is configured, so nothing is emailed: you'll get a link to share with them yourself."
             }

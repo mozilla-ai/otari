@@ -22,6 +22,7 @@ from gateway.models.tenancy import (
     InviteOrganizationMemberRequest,
     Organization,
     User,
+    WorkspaceAssignmentRequest,
     WorkspaceCreate,
 )
 from gateway.repositories.tenancy import (
@@ -29,11 +30,13 @@ from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
     OrganizationRepository,
     UserRepository,
+    WorkspaceMemberRepository,
     WorkspaceRepository,
 )
 from gateway.services.tenancy import OrganizationService, WorkspaceService
 from gateway.services.tenancy.errors import (
     ForeignTenancyError,
+    InvitationAlreadyUsedError,
     LastWorkspaceError,
     MembershipUpdateError,
     OrganizationMemberAlreadyExistsError,
@@ -357,3 +360,56 @@ async def test_concurrent_invites_to_a_suspended_membership_produce_one_pending_
     assert membership is not None
     pending = await InvitationRepository(async_db).get_pending_by_organization_members([membership.id])
     assert len(pending) == 1
+
+
+async def test_concurrent_accepts_of_one_invitation_produce_one_active_membership(
+    async_db: AsyncSession,
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """accept_invitation's pending check is check-then-act too, with a worse failure mode.
+
+    Without locking before the re-check, two concurrent accepts of the same
+    token both see `pending`, both flip the membership, and both reach
+    `_apply_workspace_assignments`, whose existing-then-create shape lets the
+    second racer's insert violate `uq_workspace_member_workspace_user` as an
+    uncaught `IntegrityError` on a public, unauthenticated endpoint, rather
+    than the mapped `InvitationAlreadyUsedError` every other double-use path
+    already answers with.
+    """
+    organization, owner = await _seed_owner(async_db)
+    owner_row = await UserRepository(async_db).get(owner.id)
+    assert owner_row is not None
+    workspace = await WorkspaceService(async_db).create_workspace(
+        user=owner_row,
+        workspace_create=WorkspaceCreate(name="Research"),
+    )
+    config = GatewayConfig()
+    invited = await OrganizationService(async_db).invite_active_organization_member_for_user(
+        user=owner_row,
+        request=InviteOrganizationMemberRequest(
+            email="hank@example.com",
+            workspace_assignments=[WorkspaceAssignmentRequest(workspace_id=workspace.id, role="viewer")],
+        ),
+        config=config,
+    )
+    token = invited.accept_link.split("token=")[1]
+
+    async def attempt(session: AsyncSession) -> object:
+        return await OrganizationService(session).accept_invitation(token)
+
+    outcomes = await _race(sessions, attempt)
+
+    accepted = [outcome for outcome in outcomes if not isinstance(outcome, Exception)]
+    already_used = [outcome for outcome in outcomes if isinstance(outcome, InvitationAlreadyUsedError)]
+    assert len(accepted) == 1
+    assert len(already_used) == _RACERS - 1
+
+    membership = await OrganizationMemberRepository(async_db).get(invited.organization_member_id)
+    assert membership is not None
+    assert membership.status == "active"
+    # Exactly one workspace_member row, not one per racer that reached
+    # _apply_workspace_assignments before the lock closed this off.
+    workspace_members = await WorkspaceMemberRepository(async_db).get_by_workspaces_and_user(
+        {workspace.id: "viewer"}, membership.user_id
+    )
+    assert len(workspace_members) == 1

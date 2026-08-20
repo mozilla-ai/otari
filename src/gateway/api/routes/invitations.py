@@ -16,7 +16,7 @@ added to an organization today.
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Request
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_db
@@ -45,8 +45,33 @@ def get_organization_service(db: Annotated[AsyncSession, Depends(get_db)]) -> Or
 OrganizationServiceDep = Annotated[OrganizationService, Depends(get_organization_service)]
 
 
+def _throttle(request: Request) -> None:
+    """Throttle calls to these routes per client IP.
+
+    ``POST /v1/auth/session`` is the only other unauthenticated route that
+    takes a credential, and it is IP-limited (``auth_session._check_login_rate_limit``,
+    via ``app.state.login_rate_limiter``); these two were not, and ``accept``
+    writes. The token's entropy (``secrets.token_urlsafe(32)``) already rules
+    out guessing, so this isn't about brute-forcing a token: it's that these
+    are the app's only unauthenticated write surface, reachable at whatever
+    rate a client can manage, each call costing a handful of reads (``accept``
+    several writes). Reuses the sign-in route's limiter/budget rather than a
+    separate one, unconditionally (not just on failure, unlike sign-in): there
+    is no legitimate caller here to avoid locking out, only a client with an
+    address it can retry from.
+    """
+    limiter = getattr(request.app.state, "login_rate_limiter", None)
+    if limiter is None:
+        return
+    client_ip = request.client.host if request.client else None
+    if client_ip is None:
+        return
+    limiter.check(client_ip)
+
+
 @router.post("/validate")
 async def validate_invitation(
+    request: Request,
     service: OrganizationServiceDep,
     body: ValidateInvitationRequest,
 ) -> InvitationPreviewPublic:
@@ -56,13 +81,16 @@ async def validate_invitation(
     the token is a bearer credential, and a URL path is what an access log or
     an intermediate proxy routinely retains.
     """
+    _throttle(request)
     return await service.get_invitation_preview(body.token)
 
 
 @router.post("/accept")
 async def accept_invitation(
+    request: Request,
     service: OrganizationServiceDep,
     body: AcceptInvitationRequest,
 ) -> AcceptInvitationResultPublic:
     """Accept a pending invitation, resolving it to an active membership."""
+    _throttle(request)
     return await service.accept_invitation(body.token)
