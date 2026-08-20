@@ -387,7 +387,10 @@ class GatewayConfig(BaseSettings):
     smtp_tls: bool = Field(default=True, description="Use STARTTLS when connecting to the SMTP server.")
     mail_from_email: str | None = Field(
         default=None,
-        description="The 'From' address on outgoing mail. Required, alongside smtp_host, for mail_enabled.",
+        description=(
+            "The 'From' address on outgoing mail. Required, alongside smtp_host, before the "
+            "default 'auto' transport sends anything over SMTP."
+        ),
     )
     mail_from_name: str = Field(default="Otari", description="The 'From' display name on outgoing mail.")
     invitation_expiry_hours: int = Field(
@@ -972,9 +975,10 @@ class GatewayConfig(BaseSettings):
         """
         missing: list[str] = []
         if self.effective_mail_transport == "none":
-            # Under 'none' the operator turned mail off deliberately, so there
-            # is no missing setting to report; under 'auto' the two SMTP
-            # settings are what would turn it on.
+            # Under 'auto' the two SMTP settings are what would turn mail on.
+            # Under an explicit 'none' they would not: the operator turned mail
+            # off deliberately, so mail_transport itself is the one setting
+            # standing in the way, and it is the only one worth naming.
             if self.mail_transport.strip().lower() == "auto":
                 if not self.smtp_host:
                     missing.append("smtp_host")

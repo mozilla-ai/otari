@@ -127,8 +127,9 @@ _CONFIG_VIEW: tuple[tuple[str, tuple[str, ...]], ...] = (
     ),
     (
         # smtp_user/smtp_password are deliberately absent: they are credentials,
-        # and this view carries no secret. The mail page (/v1/settings/mail)
-        # reports whether they are in use without echoing either.
+        # and this view carries no secret. Whether the login they configure
+        # works is answered by a real send (POST /v1/settings/mail/test), which
+        # returns the transport's own error, rather than by echoing either here.
         "Email delivery",
         (
             "mail_transport",

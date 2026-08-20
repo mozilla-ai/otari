@@ -95,9 +95,9 @@ export function MailDeliveryCard() {
 
           <div className="flex flex-col gap-4 py-4">
             <div className="min-w-0">
-              <code className="text-sm font-medium text-foreground">
+              <p className="text-sm font-medium text-foreground">
                 Send a test email
-              </code>
+              </p>
               <p className="mt-1 max-w-3xl text-sm text-muted">
                 {loading
                   ? "Checking whether this deployment can send mail…"
