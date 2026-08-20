@@ -16,6 +16,7 @@ from dotenv import load_dotenv
 from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
+from gateway.core.addresses import normalized_address
 from gateway.log_config import logger
 from gateway.models.routing import RoutingConfig
 
@@ -1450,6 +1451,20 @@ class GatewayConfig(BaseSettings):
                 f"mail_transport 'smtp' requires {' and '.join(missing)} to be set. "
                 "Set them, or leave mail_transport at its 'auto' default to run without mail."
             )
+            raise ValueError(msg)
+        # Shape-checked here for the same reason the transport is: a typo in the
+        # from-address is a misconfiguration, and letting it through means the
+        # first anyone hears of it is a recipient's server rejecting the
+        # envelope, which is the send-time failure this design exists to avoid.
+        # Every recipient address already goes through the same check.
+        #
+        # Only under an explicit 'smtp', never under 'auto'. That asymmetry is
+        # deliberate and costs nothing: mail_transport is new here, so no
+        # existing deployment can be holding the value this refuses, while a
+        # deployment that has had a working odd-looking address under the
+        # implicit path keeps booting.
+        if self.mail_from_email and normalized_address(self.mail_from_email) is None:
+            msg = f"mail_from_email is not a valid email address: {self.mail_from_email!r}"
             raise ValueError(msg)
 
     def validate_mode_selection(self) -> None:

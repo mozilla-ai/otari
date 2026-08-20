@@ -14,7 +14,6 @@ a templating engine to render either (see ``mail.templates``), and this edition'
 dependency footprint stays as it is.
 """
 
-import re
 import smtplib
 import ssl
 from email.errors import MessageError
@@ -22,6 +21,7 @@ from email.mime.multipart import MIMEMultipart
 from email.mime.text import MIMEText
 from typing import Protocol
 
+from gateway.core.addresses import normalized_address
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.services.mail.message import MailDeliveryError, MailEnvelope
@@ -42,21 +42,6 @@ def sanitize_header_value(value: str) -> str:
     same for any header, not specific to one caller.
     """
     return value.replace("\r", " ").replace("\n", " ")
-
-
-# What this codebase treats as an address it could deliver to. Deliberately
-# permissive (there is no useful regex for RFC 5322, and the SMTP server is the
-# real authority): it rejects the shapes that are certainly not addresses, which
-# is what an operator typing into a form needs, and nothing more. Shared with
-# tenancy's member/invitation addresses rather than kept per caller, so "an
-# address Otari will accept" has one answer.
-_ADDRESS_PATTERN = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
-
-
-def normalized_address(value: str) -> str | None:
-    """Lower-case and trim an address, or return ``None`` if it cannot be one."""
-    candidate = value.strip().lower()
-    return candidate if _ADDRESS_PATTERN.match(candidate) else None
 
 
 def redact_email(email: str) -> str:
@@ -157,29 +142,14 @@ class SmtpTransport:
 class ConsoleTransport:
     """Logs each message instead of delivering it, for local development.
 
-    A real transport rather than a mock: an operator who sets
-    ``mail_transport: console`` gets a deployment where every mail-dependent
-    surface is *available* and every message is inspectable, which is what makes
-    a template reviewable without standing up an SMTP server. It is deliberately
-    not the default, because a deployment that silently logged the mail it was
-    asked to send would be the accepting-and-dropping this design rules out.
+    A real transport rather than a mock, so every mail-dependent surface is
+    available and every message is inspectable without standing up an SMTP
+    server. Logs the plain-text alternative only: it is the variant a human
+    reads in a terminal, and both are rendered from the same values.
 
-    Logs the rendered plain-text alternative and not the HTML one: the text
-    variant is the one a human reads in a terminal, and the pair is rendered
-    from the same values, so a truncated HTML dump would add noise without
-    adding a check. The recipient is redacted for the same reason it is
-    everywhere else here, since these lines end up in the same log stream.
-
-    **It writes the message body, and a control-plane message body carries a
-    bearer credential**: an invitation's accept token today, a password-reset
-    token once #650 lands. That is the point (a developer needs to follow the
-    link) and it is also why this is a development transport and not one to
-    select on a deployment whose logs are shipped or shared. Redacting the link
-    would make the transport useless for the one job it has, so the trade is
-    stated instead: the config field says it, the docs say it, and
-    ``validate_mail_transport`` warns once at startup when it is selected. It is
-    the one sanctioned exception to the never-log-a-token rule, and it is opt-in
-    per deployment rather than reachable by default.
+    **The logged body carries a bearer credential** (an invitation's accept
+    token), which is why this is a development transport. That trade, and why
+    it is not redacted, is in ``src/gateway/AGENTS.md``.
     """
 
     name = "console"

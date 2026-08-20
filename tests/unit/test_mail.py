@@ -198,6 +198,24 @@ def test_a_real_transport_warns_about_nothing(gateway_logs: pytest.LogCaptureFix
     assert gateway_logs.text == ""
 
 
+def test_an_explicit_smtp_transport_refuses_a_from_address_that_is_not_one() -> None:
+    """A typo would otherwise surface as a recipient server rejecting the envelope."""
+    config = GatewayConfig(mail_transport="smtp", smtp_host="smtp.example.com", mail_from_email="not-an-address")
+
+    with pytest.raises(ValueError, match="not a valid email address"):
+        config.validate_mail_transport()
+
+
+def test_the_auto_default_does_not_refuse_an_odd_from_address() -> None:
+    """The check rides on the new explicit opt-in, so it cannot break a running deployment.
+
+    ``mail_transport`` is introduced by this change, so nothing out there is
+    already set to ``smtp``; a deployment that has been sending under the
+    implicit path with an unusual address keeps booting.
+    """
+    GatewayConfig(smtp_host="smtp.example.com", mail_from_email="otari@localhost").validate_mail_transport()
+
+
 def test_the_auto_default_validates_clean_with_nothing_configured() -> None:
     """No mail is the ordinary state of a self-hosted deployment, not a misconfiguration."""
     GatewayConfig().validate_mail_transport()

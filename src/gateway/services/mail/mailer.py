@@ -2,15 +2,8 @@
 
 A caller asks two questions and never a third: *can this deployment send mail
 that links back to itself* (:attr:`Mailer.can_send_links`), and *did this
-message go out* (:meth:`Mailer.send`). It never learns which transport answered,
-never wraps a send in a ``try``, and never off-loads its own blocking I/O.
-
-The no-transport case is answered by the first question, not by the second.
-That is the whole shape this module exists to impose: a surface with no
-non-mail fallback (a password reset) checks readiness and is absent or refuses
-with :class:`MailNotConfiguredError`, while a surface that has one (an
-invitation, whose accept link the operator can share by hand) sends anyway and
-branches on ``delivered``. Neither one discovers the answer from a socket error.
+message go out* (:meth:`Mailer.send`). Which shape a given surface takes, and
+why, is in ``src/gateway/AGENTS.md``.
 """
 
 import asyncio
@@ -52,8 +45,16 @@ class Mailer:
 
     @property
     def is_configured(self) -> bool:
-        """Whether a transport exists at all."""
-        return self._transport is not None
+        """Whether a transport exists at all.
+
+        Delegated rather than recomputed from ``self._transport``. The dashboard
+        reads the config property through ``/v1/bootstrap`` while the invitation
+        path asks the mailer, and two readers deriving one answer separately can
+        drift; one delegating to the other cannot. ``select_transport`` is still
+        held to the same answer by a test, since it is the third place the
+        question could be decided.
+        """
+        return self._config.mail_enabled
 
     @property
     def can_send_links(self) -> bool:
@@ -63,7 +64,7 @@ class Mailer:
         an absolute URL into someone's inbox, and a relative link there means
         nothing. This is what a mail-dependent surface gates on.
         """
-        return self.is_configured and bool(self._config.public_base_url)
+        return self._config.mail_ready
 
     @property
     def missing_settings(self) -> tuple[str, ...]:
