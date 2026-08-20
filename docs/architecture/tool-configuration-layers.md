@@ -197,6 +197,37 @@ composition rule. What it means concretely:
 - No new query on a request that uses none of these tools. The read happens on the branch that
   handles the tool, not in the preamble unconditionally.
 
+## How this reads against the M4 decision
+
+`otari-ai`'s [`docs/architecture/m4-reconciliation.md`](https://github.com/mozilla-ai/otari-ai/blob/main/docs/architecture/m4-reconciliation.md)
+settles that guardrails, web search, MCP and code execution converge on **one workspace
+configuration plane** ([otari-ai#1597](https://github.com/mozilla-ai/otari-ai/issues/1597)), that
+the gateway keeps execution while the control plane keeps configuration, and that the
+`runtime_settings` tool keys migrate into that plane. This page is the request-path half of that
+row: the plane is where configuration lives, and what follows is how a request reads it and what it
+means when two tiers of it disagree.
+
+Two things that row does not settle, decided here.
+
+**The plane has two tiers, and the `runtime_settings` tool keys split across them.** "Tool keys
+migrate in" means they stop living in a generic deployment key/value table, not that a workspace may
+set any of them. `guardrails_url`, `web_search_url` and `sandbox_url` are endpoints, and the operator
+owns egress: `services/tool_settings_service.py` validates them structurally rather than against an
+SSRF deny-list precisely because the operator is already fully trusted, and the SSRF gates themselves
+(`mcp_allow_*`, `web_search_allow_private_hosts`) stay display-only and are not widened from the
+dashboard. A workspace admin does not inherit that trust, so those three migrate in as the plane's
+deployment tier. The web-search knobs (`web_search_engines`, `web_search_max_results`,
+`web_search_extract`, `web_search_purpose_hint`) are policy, and they do become per-workspace under
+the default-or-bound classification above.
+
+**A capability the deployment cannot execute is not offered per workspace.** otari-ai#1597's
+contract, that a capability shown as available must be resolvable and executable by the current
+deployment, is this page's ceiling expressed on the dashboard instead of the request path. A
+workspace toggle for a tool with no configured backend reads as unavailable with a reason, not as an
+enabled switch that produces a runtime failure. The request-path refusal is unchanged (the existing
+400 for an unconfigured backend), and the two surfaces must agree, which is the whole point of
+#1597.
+
 ## Relationship to the provider-key decision
 
 [mozilla-ai/otari-ai#1748](https://github.com/mozilla-ai/otari-ai/issues/1748), implemented in
