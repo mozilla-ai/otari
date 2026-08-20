@@ -204,10 +204,11 @@ class _ChatAdapter:
         *,
         require_usage: bool = False,
     ) -> dict[str, Any]:
-        options = dict(kwargs.get("stream_options") or {})
-        if require_usage or "include_usage" not in options:
-            options["include_usage"] = True
-        kwargs["stream_options"] = options
+        options = kwargs.get("stream_options")
+        if options is None:
+            kwargs["stream_options"] = {"include_usage": True}
+        elif require_usage:
+            kwargs["stream_options"] = {**options, "include_usage": True}
         return kwargs
 
     async def run_tool_loop(

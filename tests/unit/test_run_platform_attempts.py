@@ -400,7 +400,6 @@ async def test_nonretryable_error_marks_first_attempt_final() -> None:
     assert reports == [(attempts[0], "error", None, "http_400", True)]
 
 
-@pytest.mark.asyncio
 def _usage_config() -> GatewayConfig:
     return cast(
         GatewayConfig,

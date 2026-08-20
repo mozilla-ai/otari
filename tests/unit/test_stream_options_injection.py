@@ -96,6 +96,22 @@ def test_standalone_stream_preserves_disabled_usage() -> None:
     assert kwargs["stream_options"]["include_usage"] is False
 
 
+def test_standalone_stream_preserves_empty_options() -> None:
+    kwargs = chat._ADAPTER.prepare_stream_kwargs(
+        {"stream_options": {}},
+        require_usage=False,
+    )
+    assert kwargs["stream_options"] == {}
+
+
+def test_standalone_stream_preserves_custom_options_without_usage() -> None:
+    kwargs = chat._ADAPTER.prepare_stream_kwargs(
+        {"stream_options": {"custom_field": "value"}},
+        require_usage=False,
+    )
+    assert kwargs["stream_options"] == {"custom_field": "value"}
+
+
 def test_preserves_client_stream_options() -> None:
     custom = {"include_usage": False, "custom_field": "value"}
     kwargs = _build_completion_kwargs(

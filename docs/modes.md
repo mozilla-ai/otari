@@ -138,9 +138,9 @@ After each attempt (success or failure), Otari reports usage:
 POST {base_url}/gateway/usage
 ```
 
-Reports include token counts, status, and error information. When supported,
-priced successful requests also include the platform-settled cost in their usage
-object. See the [hybrid-mode protocol](hybrid-mode-protocol.md#inline-response-fields)
+Reports include token counts, status, and error information. For priced successful
+requests, the gateway attaches the platform-settled cost to the caller response
+usage object. See the [hybrid-mode protocol](hybrid-mode-protocol.md#inline-response-fields)
 for field placement and compatibility details.
 
 ### MCP server resolution
