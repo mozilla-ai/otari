@@ -135,7 +135,7 @@ Nothing schedules the switch and nothing expires. A deployment that never claims
 
 #### Claiming the deployment
 
-First boot provisions the operator identity as a label with no address and no password, so claiming supplies both, in one call authenticated by the master key:
+First boot provisions the operator identity as a label with no address and no password, so claiming supplies both. The dashboard offers it at **Account settings**, reached from the account control at the foot of the sidebar, which is one call authenticated by the session the master key already minted. The same call over HTTP, authenticated by the master key itself:
 
 ```bash
 curl -X PUT http://localhost:8000/v1/auth/password \
@@ -146,7 +146,7 @@ curl -X PUT http://localhost:8000/v1/auth/password \
 
 - A password is at least 8 characters and at most 72 bytes, which is bcrypt's own ceiling; accented and non-Latin characters count for more than one byte each. There are no composition rules.
 - The address is stored lower-cased and matched case-insensitively at sign-in. It is not delivered to and not verified by anyone: this edition has no verification flow yet, and the master key is what proved the claim.
-- The same endpoint changes a password later. From a session it needs `current_password`; sent with the master key in a header it does not, which is the recovery path (see below). Changing the address afterwards is refused rather than half-supported.
+- The same endpoint changes a password later, and the same **Account settings** page is where the dashboard does it. From a session it needs `current_password`; sent with the master key in a header it does not, which is the recovery path (see below) and the one form of this call the dashboard cannot make, since reaching the page needs a session. Changing the address afterwards is refused rather than half-supported.
 - Every other session that identity holds is revoked, so a cookie minted under the old password does not outlive it. The caller's own session is spared when the change came from the browser, and is not when it came from the master key, since a header caller has no session to keep.
 - **Claiming is one-way.** No endpoint clears a password, so a deployment that has been claimed cannot be returned to master-key sign-in. The sign-in screen follows `sign_in_methods` and asks for the address and password from then on, and the master key still authenticates the whole management API, so the step costs you nothing you cannot reach; it is simply not reversible. See the [Admin dashboard guide](dashboard.md).
 

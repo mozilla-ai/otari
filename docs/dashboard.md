@@ -118,7 +118,15 @@ The master key signs you in because nobody here has a password yet. Giving the
 operator identity an address and a password makes that pair the sign-in from then
 on, which is what you want as soon as more than one person needs the dashboard,
 or as soon as you would rather not paste a deployment-wide credential into a
-browser:
+browser.
+
+In the dashboard, open the account control at the foot of the sidebar and select
+**Account settings**. While the deployment is unclaimed that page asks for an
+address and a password and nothing else, because there is no current password to
+prove. Saving it claims the deployment; you stay signed in, and the page becomes
+the ordinary change-password form.
+
+The same call over HTTP, if you would rather claim from a terminal:
 
 ```bash
 curl -X PUT http://localhost:8000/v1/auth/password \
@@ -140,7 +148,9 @@ Three more things to know before you do it:
   these docs are unaffected.
 - **You cannot lock yourself out of the API.** If you forget the password, run
   the same command again with the master key and a new one; no
-  `current_password` is needed when the master key is in the header.
+  `current_password` is needed when the master key is in the header. This is the
+  one part with no dashboard equivalent, because reaching **Account settings**
+  needs the session you have lost.
 - **It signs out every browser holding a session for that identity**, including
   the one you claimed from if you claimed with `curl`.
 
@@ -203,9 +213,10 @@ workspace. It is reached from the **Organization** entry at the foot of the
 workspace rail, and left by the link at its top. Users, budgets, and settings
 live there.
 
-At the very bottom sits the account control, which holds account settings, an
-**Appearance** row that cycles through system, light, and dark, the hosted legal
-pages where there are any, and **Log out**. The bundled user guide is
+At the very bottom sits the account control, which holds **Account settings**
+(the password you sign in with), an **Appearance** row that cycles through
+system, light, and dark, the hosted legal pages where there are any, and **Log
+out**. The bundled user guide is
 **Documentation**, in the top bar; on a narrow screen, where the top bar has room
 for the trail and nothing else, the account control carries it instead.
 

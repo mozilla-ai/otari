@@ -31,6 +31,10 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
   { route: "/activity", name: "activity", heading: /activity/i },
   { route: "/tools", name: "tools", heading: /tools/i },
   { route: "/settings", name: "settings", heading: /settings/i },
+  // Reached from the account menu rather than the rail, and covered here all
+  // the same: what this matrix is for is how a page renders on a phone and in
+  // the dark, which does not depend on which control opens it.
+  { route: "/account", name: "account", heading: /account settings/i },
   { route: "/docs", name: "docs", heading: /./ },
 ]
 

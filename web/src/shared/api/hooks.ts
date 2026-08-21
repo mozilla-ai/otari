@@ -40,6 +40,7 @@ import type {
   OrganizationContext,
   OrganizationMember,
   OrganizationPricingOverride,
+  PasswordResponse,
   PricingRefreshPreview,
   PricingResponse,
   ProviderHealthResponse,
@@ -54,6 +55,7 @@ import type {
   SearchToolsResponse,
   SendTestMailRequest,
   SendTestMailResponse,
+  SetPasswordRequest,
   SetPricingRequest,
   SetRoutingPolicyRequest,
   StoredProvider,
@@ -603,6 +605,31 @@ export function useRotateMasterKey() {
     mutationFn: () =>
       apiFetch<RotateMasterKeyResponse>("/v1/settings/master-key/rotate", {
         method: "POST",
+      }),
+  })
+}
+
+/**
+ * Set or change the password the signed-in identity uses to reach this
+ * dashboard (`PUT /v1/auth/password`).
+ *
+ * Always the caller's own identity: the endpoint takes no id, and there is
+ * deliberately no way for an operator to set somebody else's password. The
+ * first call on a deployment supplies an address as well, which is the act that
+ * claims it and retires master-key sign-in (otari-ai#1716).
+ *
+ * Nothing is invalidated on success. The one thing this changes that the app
+ * has cached is the bootstrap's `sign_in_methods`, which is a context read once
+ * per load rather than a query, so the caller reads the response instead. Every
+ * *other* session this identity holds is revoked server-side; this one is kept,
+ * so no 401 follows.
+ */
+export function useSetPassword() {
+  return useMutation({
+    mutationFn: (body: SetPasswordRequest) =>
+      apiFetch<PasswordResponse>("/v1/auth/password", {
+        method: "PUT",
+        body: JSON.stringify(body),
       }),
   })
 }

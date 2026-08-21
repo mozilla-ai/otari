@@ -53,6 +53,17 @@ export type GatewayHealth =
   operations["health_check_health_get"]["responses"][200]["content"]["application/json"]
 
 // ---------------------------------------------------------------------------
+// Dashboard sign-in credentials
+//
+// `PUT /v1/auth/password` always acts on the caller's own identity, so there is
+// no id in either shape. The session exchange itself is not here: it predates
+// the generated client and stays hand-written in `shared/api/client.ts` with
+// the 401 bounce it shares a file with.
+// ---------------------------------------------------------------------------
+export type SetPasswordRequest = Schemas["SetPasswordRequest"]
+export type PasswordResponse = Schemas["PasswordResponse"]
+
+// ---------------------------------------------------------------------------
 // Usage and analytics
 // ---------------------------------------------------------------------------
 export type UsageEntry = Schemas["UsageEntry"]
