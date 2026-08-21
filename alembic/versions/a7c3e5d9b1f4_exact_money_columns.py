@@ -32,9 +32,19 @@ changed.
 
 **On PostgreSQL this rewrites ``usage_logs``.** ``double precision`` to
 ``numeric`` is not binary-coercible, so the ALTER copies the whole table under
-an ACCESS EXCLUSIVE lock and needs transient space for a second copy. On a
-large usage table that is real downtime, and it runs at startup when
-``auto_migrate`` is set. Schedule it rather than discovering it.
+an ACCESS EXCLUSIVE lock, which blocks reads as well as writes, and needs
+transient room for a second copy of the table while it runs.
+
+Measured rather than guessed at, on a migrated schema with the real indexes in
+place: one million ``usage_logs`` rows (369 MB including indexes) take about
+2.3 seconds for that ALTER and about 2.9 seconds for the whole revision. So ten
+million rows is tens of seconds and a hundred million is a few minutes, on
+local disk with nothing else running; network-attached storage or a table under
+load will be slower. It is a pause, not an outage, but it is a pause that
+happens at startup when ``auto_migrate`` is set, which is the part worth
+knowing: a deployment with real usage history should run ``otari migrate``
+deliberately rather than let the next restart do it while requests are
+arriving.
 
 SQLite gets the same DDL through a table rebuild, though there the change is
 declarative: SQLite has no numeric storage class, so the values stay REAL and
