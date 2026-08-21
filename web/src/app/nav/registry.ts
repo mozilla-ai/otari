@@ -10,6 +10,7 @@ import {
   FiHome,
   FiKey,
   FiLayers,
+  FiPieChart,
   FiRepeat,
   FiServer,
   FiShield,
@@ -264,11 +265,16 @@ const ORGANIZATION_NAV_SECTIONS = [
       // who belongs to the organization. Both rows survive only until otari's
       // two identity tables converge (otari-ai#1727), at which point one page
       // answers both.
+      //
+      // Not `FiUsers`, which the two rosters share because they are the same
+      // concept on two rails. This is a spend bucket that happens to be named
+      // after a person, so it wears a money-group mark instead: the icon is the
+      // part of a rail read before the label is.
       {
         to: "/users",
         label: "Spend identities",
         surface: "users",
-        icon: FiUsers,
+        icon: FiPieChart,
       },
       {
         to: "/organization/billing",
