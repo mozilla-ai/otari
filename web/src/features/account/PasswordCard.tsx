@@ -10,7 +10,10 @@ import { useState } from "react"
 
 import { useSetPassword } from "@/shared/api/hooks"
 import { ErrorBanner } from "@/shared/components/ui"
-import { useDeployment } from "@/shared/hooks/useDeployment"
+import {
+  useDeployment,
+  useRetireMasterKeySignIn,
+} from "@/shared/hooks/useDeployment"
 
 // The client half of the server's password policy
 // (`gateway.services.password_service`), not a second authority: it disables a
@@ -20,6 +23,14 @@ import { useDeployment } from "@/shared/hooks/useDeployment"
 // the refusal this exists to pre-empt.
 const MIN_PASSWORD_LENGTH = 8
 const MAX_PASSWORD_BYTES = 72
+
+// Both counts are the server's, and neither is `String.length`. Python's `len`
+// counts code points where JavaScript counts UTF-16 units, so seven emoji are
+// 14 to `.length` and 7 to the gateway: the minimum would pass here and be
+// refused there. bcrypt's ceiling is bytes, which is a third number again.
+function passwordLength(password: string): number {
+  return [...password].length
+}
 
 function passwordByteLength(password: string): number {
   return new TextEncoder().encode(password).length
@@ -36,7 +47,7 @@ function newPasswordProblem(password: string, confirm: string): string | null {
   if (password === "") {
     return null
   }
-  if (password.length < MIN_PASSWORD_LENGTH) {
+  if (passwordLength(password) < MIN_PASSWORD_LENGTH) {
     return `At least ${MIN_PASSWORD_LENGTH} characters.`
   }
   if (passwordByteLength(password) > MAX_PASSWORD_BYTES) {
@@ -53,7 +64,6 @@ interface PasswordFieldProps {
   value: string
   onChange: (next: string) => void
   autoComplete: "current-password" | "new-password"
-  autoFocus?: boolean
   description?: string
 }
 
@@ -62,7 +72,6 @@ function PasswordField({
   value,
   onChange,
   autoComplete,
-  autoFocus,
   description,
 }: PasswordFieldProps) {
   return (
@@ -74,7 +83,7 @@ function PasswordField({
       className="flex max-w-md flex-col gap-1"
     >
       <Label className="text-sm font-medium text-foreground">{label}</Label>
-      <Input autoComplete={autoComplete} autoFocus={autoFocus} />
+      <Input autoComplete={autoComplete} />
       {description ? (
         // HeroUI's Description renders through the TextField's "description"
         // slot, so it reaches the input as aria-describedby; a raw span does
@@ -113,13 +122,15 @@ function PasswordField({
  */
 export function PasswordCard() {
   const { sign_in_methods } = useDeployment()
+  const retireMasterKeySignIn = useRetireMasterKeySignIn()
   const setPassword = useSetPassword()
 
-  // Seeded once, then owned locally: claiming in this tab flips it without a
-  // reload, and re-reading the bootstrap would flip it back.
-  const [isClaimed, setClaimed] = useState(
-    () => !sign_in_methods.includes("master_key"),
-  )
+  // Read from the context on every render rather than seeded into local state.
+  // A claim corrects the context (see `useRetireMasterKeySignIn`), so this card
+  // switching forms, the account menu's session line, and the sign-in screen a
+  // later sign-out lands on all move at once, and navigating away and back does
+  // not return to a claim form for a deployment already claimed.
+  const isClaimed = !sign_in_methods.includes("master_key")
   const [email, setEmail] = useState("")
   const [currentPassword, setCurrentPassword] = useState("")
   const [newPassword, setNewPassword] = useState("")
@@ -149,7 +160,15 @@ export function PasswordCard() {
 
   // A refusal and the line reporting the last success both describe a call that
   // is no longer the one being made, so typing clears them together.
+  //
+  // Never while one is in flight. `reset()` returns the observer to idle
+  // without cancelling the request, so resetting mid-call would clear the
+  // `isPending` that `submit` guards on and let a keystroke reopen the form to
+  // a second, concurrent password change.
   const clearResult = () => {
+    if (setPassword.isPending) {
+      return
+    }
     setOutcome(null)
     setPassword.reset()
   }
@@ -165,7 +184,12 @@ export function PasswordCard() {
       {
         onSuccess: (result) => {
           setOutcome({ email: result.email, claimed: !isClaimed })
-          setClaimed(true)
+          // The server's own assertion, not an inference from which form was
+          // submitted: it answers this on a change as well, and it is the fact
+          // the rest of the tab has to act on.
+          if (result.master_key_sign_in_retired) {
+            retireMasterKeySignIn()
+          }
           setEmail("")
           setCurrentPassword("")
           setNewPassword("")
@@ -234,11 +258,11 @@ export function PasswordCard() {
                 {/* autoComplete="username" and not "email": this is the handle
                     the sign-in form will ask for, so a password manager should
                     file it against the credential it is being set beside. */}
-                <Input
-                  placeholder="you@example.com"
-                  autoComplete="username"
-                  autoFocus
-                />
+                {/* No autoFocus: this is a page, not a dialog, and focusing
+                    a field on mount raises the soft keyboard over the
+                    explanation above it before the operator has asked to
+                    type. */}
+                <Input placeholder="you@example.com" autoComplete="username" />
                 <Description className="text-xs text-muted">
                   Changing this address later is not supported yet, so pick the
                   one you will keep.

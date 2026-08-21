@@ -11,14 +11,32 @@
  * feature may not import the composition root. It is a context rather than a
  * query because it describes the server that served this page: it cannot change
  * without a reload, and it must survive the cache clear a sign-out performs.
+ *
+ * One field is the exception, and it is the reason this provider holds state at
+ * all. Claiming a deployment retires master-key sign-in
+ * (`PUT /v1/auth/password`, otari#649), which is the app changing the server's
+ * answer rather than the server changing it underneath: `sign_in_methods` goes
+ * from `["master_key"]` to `["password"]` the moment that call succeeds, and
+ * the response says so. Every consumer of that fact has to move together, or
+ * the tab that claimed keeps a sign-in screen offering the credential the
+ * gateway now refuses, an account menu naming a session kind that ended, and a
+ * password page that asks to claim a deployment already claimed. So the claim
+ * reports itself through `useRetireMasterKeySignIn` and this provider serves
+ * the corrected bootstrap from then on.
  */
 
 import type { ReactNode } from "react"
-import { createContext, useContext, useMemo } from "react"
+import { createContext, useContext, useMemo, useState } from "react"
 
 import type { DeploymentBootstrap } from "@/client"
 
 const DeploymentContext = createContext<DeploymentBootstrap | null>(null)
+const RetireMasterKeySignInContext = createContext<(() => void) | null>(null)
+
+// What `_sign_in_methods` answers once any identity holds a password
+// (`api/routes/bootstrap.py`). Named rather than inlined so the override is
+// visibly the server's own value and not a shape invented here.
+const PASSWORD_ONLY: DeploymentBootstrap["sign_in_methods"] = ["password"]
 
 export function DeploymentProvider({
   value,
@@ -27,11 +45,42 @@ export function DeploymentProvider({
   value: DeploymentBootstrap
   children: ReactNode
 }) {
+  const [masterKeyRetired, setMasterKeyRetired] = useState(false)
+
+  // Identity-stable in the case that always holds before a claim and forever
+  // after a reload: `effective` *is* `value` unless this tab did the claiming,
+  // so the context does not hand every consumer a new object on each render.
+  const effective = masterKeyRetired
+    ? { ...value, sign_in_methods: PASSWORD_ONLY }
+    : value
+
   return (
-    <DeploymentContext.Provider value={value}>
-      {children}
+    <DeploymentContext.Provider value={effective}>
+      <RetireMasterKeySignInContext.Provider
+        value={() => setMasterKeyRetired(true)}
+      >
+        {children}
+      </RetireMasterKeySignInContext.Provider>
     </DeploymentContext.Provider>
   )
+}
+
+/**
+ * Report that this deployment has been claimed, so the rest of the tab stops
+ * offering the master key as a sign-in.
+ *
+ * Only `PUT /v1/auth/password` may call this, and only on a response that says
+ * `master_key_sign_in_retired`. It is one-way, like the act it describes: no
+ * endpoint clears a password, so nothing puts the master key back.
+ */
+export function useRetireMasterKeySignIn(): () => void {
+  const retire = useContext(RetireMasterKeySignInContext)
+  if (!retire) {
+    throw new Error(
+      "useRetireMasterKeySignIn must be used within a DeploymentProvider",
+    )
+  }
+  return retire
 }
 
 /** The bootstrap this page was served with. Throws outside the provider. */

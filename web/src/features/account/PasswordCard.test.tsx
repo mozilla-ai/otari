@@ -242,6 +242,26 @@ describe("PasswordCard policy checks", () => {
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
+  it("counts the minimum in code points, as the gateway does", async () => {
+    const fetchMock = mockPut(CLAIMED)
+    const user = userEvent.setup()
+    renderCard(["master_key"])
+
+    // Seven emoji: 14 to JavaScript's `String.length` and 7 to Python's `len`,
+    // so a UTF-16 count would enable Save and hand the gateway a password its
+    // own eight-character minimum refuses.
+    const emoji = "🔒".repeat(7)
+    await user.type(screen.getByLabelText("Email"), "operator@example.com")
+    await user.type(screen.getByLabelText("New password"), emoji)
+    await user.type(screen.getByLabelText("Confirm new password"), emoji)
+
+    expect(screen.getByRole("alert")).toHaveTextContent(
+      "At least 8 characters.",
+    )
+    expect(screen.getByRole("button", { name: "Set password" })).toBeDisabled()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
   it("holds back a confirmation that does not match", async () => {
     const fetchMock = mockPut(CLAIMED)
     const user = userEvent.setup()
