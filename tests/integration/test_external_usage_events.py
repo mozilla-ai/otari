@@ -5,6 +5,7 @@ budget isolation, and the read-surface (source filter, by_source, CSV).
 """
 
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -242,6 +243,78 @@ def test_no_pricing_lands_with_null_cost(
     # The summary reports the unpriced row so a $0 cost is not read as free.
     summary = client.get("/v1/usage/summary", headers=master_key_header).json()
     assert summary["totals"]["unpriced_requests"] == 1
+
+
+def test_unpriced_inclusive_import_reprices_under_the_convention_it_arrived_with(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """An OpenAI-shaped import with no rate at ingest must still reprice inclusively.
+
+    The row lands unpriced (no rate row for its model), so it has no billing
+    meters, and the meter-based recovery in ``usage_admin_service`` cannot say
+    which convention it arrived under. The stored ``cache_tokens_in_prompt`` is
+    what answers: without it the repricing would add the cached tokens to a
+    prompt that already contained them and settle 1500 input tokens for a row
+    that reported 1000. mozilla-ai/otari#690.
+    """
+    _seed_user(client, master_key_header)
+    # Deliberately no pricing for this model, so the row is ingested unpriced.
+    resp = _post(
+        client,
+        master_key_header,
+        [
+            _event(
+                "inclusive-unpriced",
+                provider="openai",
+                model="brand-new-model",
+                input_tokens=1000,
+                output_tokens=200,
+                cache_read_tokens=500,
+                cache_write_tokens=0,
+                cache_tokens_in_prompt=True,
+            )
+        ],
+    )
+    assert resp.status_code == 200, resp.text
+
+    row = db_session.query(UsageLog).filter(UsageLog.source_event_id == "inclusive-unpriced").one()
+    assert row.cost is None
+    assert row.billing_meters is None
+    assert row.cache_tokens_in_prompt is True
+
+    priced = client.post(
+        "/v1/usage/set-price",
+        json={
+            "ids": [row.id],
+            "input_price_per_million": 3.0,
+            "output_price_per_million": 15.0,
+            "cache_read_price_per_million": 0.3,
+        },
+        headers=master_key_header,
+    )
+    assert priced.status_code == 200, priced.text
+    assert priced.json()["updated"] == 1
+
+    db_session.expire_all()
+    row = db_session.query(UsageLog).filter(UsageLog.source_event_id == "inclusive-unpriced").one()
+    # Inclusive: 500 fresh input * 3/1M + 200 output * 15/1M + 500 cached * 0.3/1M.
+    # The additive reading of the same numbers would be 0.00615, a 32% overcharge.
+    assert row.cost == Decimal("0.00465")
+    assert row.billing_meters is not None
+    assert row.billing_meters["total_input_tokens"] == 1000
+
+
+def test_ingest_records_the_additive_default(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """An event that states no convention is recorded as additive, not as unrecorded."""
+    _seed_user(client, master_key_header)
+    _seed_pricing(client, master_key_header)
+    resp = _post(client, master_key_header, [_event("default-shape")])
+    assert resp.status_code == 200, resp.text
+
+    row = db_session.query(UsageLog).filter(UsageLog.source_event_id == "default-shape").one()
+    assert row.cache_tokens_in_prompt is False
 
 
 def test_idempotent_resubmit(

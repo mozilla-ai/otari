@@ -43,6 +43,9 @@ def _make_log(
     completion_tokens: int | None = 500,
     cache_read_tokens: int | None = None,
     cache_write_tokens: int | None = None,
+    # Which cached-token convention the counts were reported under, or None for a
+    # row written before the column existed.
+    cache_tokens_in_prompt: bool | None = None,
     billing_meters: dict[str, int] | None = None,
     cost: float | None = None,
     status: str = "success",
@@ -67,6 +70,7 @@ def _make_log(
         total_tokens=(prompt_tokens or 0) + (completion_tokens or 0),
         cache_read_tokens=cache_read_tokens,
         cache_write_tokens=cache_write_tokens,
+        cache_tokens_in_prompt=cache_tokens_in_prompt,
         billing_meters=billing_meters,
         cost=cost,
         status=status,
@@ -467,10 +471,11 @@ def test_set_price_recovers_the_inclusive_shape_from_the_stored_meters(
 ) -> None:
     """An OpenAI-shaped import must not have its cached tokens added to the prompt again.
 
-    The convention is not a column, so repricing recovers it from the meters
-    settlement wrote: ``total_input_tokens`` equal to ``prompt_tokens`` means the
-    cached slice was already inside the prompt. Assuming the additive shape here
-    would bill 1500 input tokens for a row that reported 1000.
+    This row predates ``cache_tokens_in_prompt`` (NULL: not recorded), so repricing
+    recovers the convention from the meters settlement wrote: ``total_input_tokens``
+    equal to ``prompt_tokens`` means the cached slice was already inside the prompt.
+    Assuming the additive shape here would bill 1500 input tokens for a row that
+    reported 1000.
     """
     _make_log(
         db_session,
@@ -480,6 +485,7 @@ def test_set_price_recovers_the_inclusive_shape_from_the_stored_meters(
         prompt_tokens=1000,
         completion_tokens=200,
         cache_read_tokens=500,
+        cache_tokens_in_prompt=None,
         billing_meters={"total_input_tokens": 1000, "fresh_input_tokens": 500},
         cost=None,
     )
@@ -505,6 +511,50 @@ def test_set_price_recovers_the_inclusive_shape_from_the_stored_meters(
     assert row.billing_meters is not None
     assert row.billing_meters["total_input_tokens"] == 1000
     assert row.billing_meters["fresh_input_tokens"] == 500
+
+
+def test_set_price_reads_the_recorded_convention_when_there_are_no_meters(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """A row that was never priced has no meters, so the recorded column is what answers.
+
+    The meter recovery covers rows the gateway priced; a row imported while its
+    model had no rate has neither a cost nor meters. Without the stored convention
+    it would fall back to the additive shape and bill 1500 input tokens for an
+    OpenAI-shaped import that reported 1000.
+    """
+    _make_log(
+        db_session,
+        log_id="imp-recorded",
+        counts_toward_budget=False,
+        source="codex",
+        prompt_tokens=1000,
+        completion_tokens=200,
+        cache_read_tokens=500,
+        cache_tokens_in_prompt=True,
+        billing_meters=None,
+        cost=None,
+    )
+    db_session.commit()
+
+    resp = client.post(
+        SET_PRICE_PATH,
+        json={
+            "ids": ["imp-recorded"],
+            "input_price_per_million": 3.0,
+            "output_price_per_million": 15.0,
+            "cache_read_price_per_million": 0.3,
+        },
+        headers=master_key_header,
+    )
+    assert resp.status_code == 200
+    db_session.expire_all()
+    row = _get(db_session, "imp-recorded")
+    assert row is not None
+    # Inclusive shape: 500 fresh input * 3/1M + 200 output * 15/1M + 500 cached * 0.3/1M.
+    assert row.cost == Decimal("0.00465")
+    assert row.billing_meters is not None
+    assert row.billing_meters["total_input_tokens"] == 1000
 
 
 def test_set_price_only_touches_imported(

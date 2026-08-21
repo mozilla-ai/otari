@@ -626,6 +626,21 @@ class UsageLog(Base):
     cache_read_tokens: Mapped[int | None] = mapped_column()
     cache_write_tokens: Mapped[int | None] = mapped_column()
     cache_write_1h_tokens: Mapped[int | None] = mapped_column()
+    # Which cached-token convention the counts above were reported under: True
+    # when the cache buckets are already inside ``prompt_tokens`` (OpenAI shape),
+    # False when they are additive to it (Anthropic / Claude Code shape). Written
+    # by settlement from ``GatewayUsage.cache_tokens_in_prompt`` and by the
+    # external-usage ingest from the value the submitter sent, so a row can be
+    # repriced under the convention it was recorded with rather than one inferred
+    # from the numbers, which cannot tell the two apart.
+    #
+    # Nullable, and deliberately not defaulted: "not recorded" and "inclusive" are
+    # different answers. Rows written before this column existed are NULL, and
+    # repricing falls back to recovering the convention from ``billing_meters``
+    # for exactly those (see ``usage_admin_service._row_cache_tokens_included``).
+    # A default would make every historical row claim a convention nothing
+    # checked, and mis-price the half that were the other one.
+    cache_tokens_in_prompt: Mapped[bool | None] = mapped_column()
     billing_meters: Mapped[dict[str, Any] | None] = mapped_column(JSON)
     pricing_breakdown: Mapped[list[dict[str, Any]] | None] = mapped_column(JSON)
     # The settled amount, and the accounting truth for this row
@@ -695,6 +710,7 @@ class UsageLog(Base):
             "cache_read_tokens": self.cache_read_tokens,
             "cache_write_tokens": self.cache_write_tokens,
             "cache_write_1h_tokens": self.cache_write_1h_tokens,
+            "cache_tokens_in_prompt": self.cache_tokens_in_prompt,
             "billing_meters": self.billing_meters,
             "pricing_breakdown": self.pricing_breakdown,
             "cost": self.cost,

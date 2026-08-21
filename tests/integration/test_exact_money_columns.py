@@ -273,14 +273,28 @@ def test_the_migration_round_trips_on_postgresql_with_rows_in_the_table(
     test_db.close()
 
     config = _alembic_config(postgres_url)
-    command.downgrade(config, _BEFORE_MONEY)
-    command.upgrade(config, _MONEY_REVISION)
+    try:
+        command.downgrade(config, _BEFORE_MONEY)
+        command.upgrade(config, _MONEY_REVISION)
 
-    stored = test_db.execute(select(ModelPricing)).scalars().one()
-    settled = test_db.get(UsageLog, "round-trip")
+        stored = test_db.execute(select(ModelPricing)).scalars().one()
+        # One column rather than the whole entity: the mapped class tracks the
+        # current schema and this database is pinned to an older revision, so
+        # loading every mapped column would fail on whichever column was added
+        # after this one. The typed ``cost`` column is what the assertion is about.
+        settled_cost = test_db.execute(select(UsageLog.cost).where(UsageLog.id == "round-trip")).scalar_one()
 
-    assert stored.input_price_per_million == Decimal("3")
-    assert stored.cache_read_price_per_million == Decimal("0.3")
-    assert stored.cache_write_price_per_million == Decimal("3.75")
-    assert settled is not None
-    assert settled.cost == Decimal("0.123457")
+        assert stored.input_price_per_million == Decimal("3")
+        assert stored.cache_read_price_per_million == Decimal("0.3")
+        assert stored.cache_write_price_per_million == Decimal("3.75")
+        assert settled_cost == Decimal("0.123457")
+    finally:
+        # Put the database back at head, on the failure path as much as the happy
+        # one. The integration fixtures migrate once per session and share the
+        # database, so leaving it a revision behind would hand every test after
+        # this one a schema its models no longer match, turning one real failure
+        # here into a suite-wide cascade that buries it. Released first for the
+        # same reason the downgrade is: the reads reopened a transaction, and an
+        # idle one blocks the ALTER.
+        test_db.close()
+        command.upgrade(config, "head")

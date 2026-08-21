@@ -225,20 +225,28 @@ async def delete_usage(db: AsyncSession, request: UsageDeleteRequest) -> UsageDe
 
 
 def _row_cache_tokens_included(row: UsageLog) -> bool:
-    """Which cached-token convention a stored row was priced under.
+    """Which cached-token convention a stored row's token counts were reported under.
 
-    The convention is not a column, so it is recovered from the meters the
-    pricing wrote: ``total_input_tokens`` equals ``prompt_tokens`` under the
-    inclusive shape and exceeds it by the cache buckets under the additive one.
-    That is a fact recorded at settlement, not a guess, so a row imported either
-    way reprices the way it was priced.
+    ``cache_tokens_in_prompt`` answers it directly when the row has it: ingest
+    writes the convention the submitter stated and settlement writes the one the
+    provider reported, so a row repriced later is priced the way it arrived.
+    That covers the case the recovery below cannot, a row that was never priced
+    at all (no rate row for its model at ingest) and so has no meters to read.
 
-    A row with no meters (never priced, or priced before the meters existed)
-    falls back to the additive shape, which is the ingest default and the
-    convention every Claude Code import carries. A row with no cache tokens
-    prices identically under either shape, so the fallback only decides rows
-    that were both unpriced and cached.
+    The column is nullable, so a row written before it existed reads NULL, and
+    "not recorded" is answered the way it always was: recovered from the meters
+    the pricing wrote, where ``total_input_tokens`` equals ``prompt_tokens``
+    under the inclusive shape and exceeds it by the cache buckets under the
+    additive one. That is a fact recorded at settlement, not a guess.
+
+    A row with neither (never priced and written before the column) falls back
+    to the additive shape, which is the ingest default and the convention every
+    Claude Code import carries. A row with no cache tokens prices identically
+    under either shape, so the fallback only decides rows that were both
+    unpriced and cached.
     """
+    if row.cache_tokens_in_prompt is not None:
+        return row.cache_tokens_in_prompt
     meters = row.billing_meters or {}
     total_input = meters.get("total_input_tokens")
     if not isinstance(total_input, int):

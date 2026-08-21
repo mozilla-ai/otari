@@ -318,6 +318,11 @@ def _build_row(
         cache_read_tokens=event.cache_read_tokens,
         cache_write_tokens=event.cache_write_tokens,
         cache_write_1h_tokens=event.cache_write_1h_tokens,
+        # Persist the convention the submitter stated, so a row repriced later
+        # (POST /v1/usage/set-price) is priced the way it was reported rather than
+        # the way its numbers happen to look. A row that arrives with no rate to
+        # price it against has no billing meters for the recovery to read.
+        cache_tokens_in_prompt=event.cache_tokens_in_prompt,
         billing_meters=meters,
         pricing_breakdown=breakdown,
         cost=cost,

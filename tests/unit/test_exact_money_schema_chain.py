@@ -274,9 +274,12 @@ def test_a_settled_cost_survives_the_conversion_rounded_to_the_micro_dollar(
     command.upgrade(config, _MONEY_REVISION)
 
     with Session(engine) as session:
-        row = session.get(UsageLog, "row-1")
-    assert row is not None
-    assert row.cost == Decimal("0.123457")
+        # One column, not the whole entity: the mapped class tracks the *current*
+        # schema, and this database is deliberately pinned to an older revision, so
+        # loading every mapped column would fail on whichever column was added
+        # after this one. The typed `cost` column is what the assertion is about.
+        cost = session.execute(select(UsageLog.cost).where(UsageLog.id == "row-1")).scalar_one()
+    assert cost == Decimal("0.123457")
 
 
 def test_the_organization_rate_checks_survive_the_rebuild(sqlite_before_money: tuple[Config, Engine]) -> None:

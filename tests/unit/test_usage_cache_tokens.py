@@ -1,4 +1,9 @@
-"""Unit tests for cache-token capture in the usage carrier and parse sites."""
+"""Unit tests for cache-token capture in the usage carrier and parse sites.
+
+Also covers which cached-token convention a *stored* row is repriced under
+(mozilla-ai/otari#690): the recorded column when it has one, the meters the
+pricing wrote when it does not.
+"""
 
 from any_llm.types.completion import (
     ChatCompletion,
@@ -11,6 +16,8 @@ from gateway.api.routes.chat import _ChatAdapter
 from gateway.api.routes.messages import _messages_stream_usage, _MessagesAdapter, _requested_cache_write_ttl
 from gateway.api.routes.responses import _usage_to_completion_usage
 from gateway.core.usage import GatewayUsage, cache_read_tokens_of, cache_write_1h_tokens_of, cache_write_tokens_of
+from gateway.models.entities import UsageLog
+from gateway.services.usage_admin_service import _row_cache_tokens_included
 
 
 def test_gateway_usage_defaults_to_zero() -> None:
@@ -289,3 +296,45 @@ def test_responses_captures_cached_tokens() -> None:
     assert isinstance(usage, GatewayUsage)
     assert usage.cache_read_tokens == 33
     assert usage.cache_write_tokens == 0
+
+
+def _row(**overrides: object) -> UsageLog:
+    """A stored usage row carrying 1000 prompt tokens with 500 of them cached."""
+    fields: dict[str, object] = {
+        "id": "row",
+        "model": "gpt-4",
+        "endpoint": "external",
+        "status": "success",
+        "prompt_tokens": 1000,
+        "completion_tokens": 200,
+        "cache_read_tokens": 500,
+    }
+    fields.update(overrides)
+    return UsageLog(**fields)
+
+
+def test_recorded_convention_answers_without_the_meters() -> None:
+    """The column is the direct record, so it decides even with no meters to recover from.
+
+    This is the case the recovery cannot reach: a row imported without pricing
+    (no rate row for its model) has no billing meters at all.
+    """
+    assert _row_cache_tokens_included(_row(cache_tokens_in_prompt=True)) is True
+    assert _row_cache_tokens_included(_row(cache_tokens_in_prompt=False)) is False
+
+
+def test_recorded_convention_outranks_the_meter_recovery() -> None:
+    """A recorded convention is read, not re-derived from numbers that only imply it."""
+    inclusive_meters = {"total_input_tokens": 1000, "fresh_input_tokens": 500}
+    additive_meters = {"total_input_tokens": 1500, "fresh_input_tokens": 1000}
+    assert _row_cache_tokens_included(_row(cache_tokens_in_prompt=True, billing_meters=additive_meters)) is True
+    assert _row_cache_tokens_included(_row(cache_tokens_in_prompt=False, billing_meters=inclusive_meters)) is False
+
+
+def test_unrecorded_convention_falls_back_to_the_meters() -> None:
+    """NULL means "not recorded", which is what keeps rows written before the column working."""
+    assert _row_cache_tokens_included(_row(billing_meters={"total_input_tokens": 1000})) is True
+    assert _row_cache_tokens_included(_row(billing_meters={"total_input_tokens": 1500})) is False
+    # Neither a flag nor meters: nothing recorded the convention, so the ingest
+    # default (the additive Claude Code shape) is the only answer left.
+    assert _row_cache_tokens_included(_row()) is False
