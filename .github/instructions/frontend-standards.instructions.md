@@ -18,11 +18,20 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
    `<Link to>`; HeroUI's `<Link href>` is a full page reload.
    See [components.md](../skills/frontend-standards/components.md).
 
-2. **Props over `className`.** Use a component's prop (`variant`, `size`, `isDisabled`,
-   `isPending`, `fullWidth`, `isInvalid`) before a `className`; reserve `className` for
-   layout/position. Space siblings with `gap-*` on the parent, not `m-*` on children, and
-   write arbitrary values in `rem` (`h-[20rem]`, not `h-[320px]`; a `1px` border is the
-   exception).
+2. **Variables and props over hand-written CSS.** Start from a HeroUI component or a shared
+   primitive rather than a native element, which arrives with the tokens and its states
+   (pointer, focus ring, disabled dimming) already wired. Then four ways to change how it
+   looks, in order: a variable (ours as a token, or one of HeroUI's own aliased onto ours;
+   `--radius` drives its whole radius ramp, and `--cursor-interactive`, `--disabled-opacity`
+   and the rest are in `@heroui/styles/dist/themes/`, none of them aliased in `globals.css`
+   yet), a shared utility once the look repeats, the component's own prop (`variant`, `size`,
+   `isDisabled`, `isPending`, `fullWidth`, `isInvalid`), and only then a rule reaching into
+   HeroUI's DOM under the `.otari-*` namespace. A rule against an internal class
+   (`.table__cell`, `.table__body tr:first-child td:first-child`) is a finding when a prop or
+   a variable would do the same job, and so is a `className` re-skinning something the
+   component already styles; reserve `className` for layout/position. Space siblings with
+   `gap-*` on the parent, not `m-*` on children, and write arbitrary values in `rem`
+   (`h-[20rem]`, not `h-[320px]`; a `1px` border is the exception).
 
 3. **Color and type come from the semantic tokens** in `web/src/styles/globals.css`. The
    tokens are the design system; HeroUI and Tailwind consume it, so a utility that does not

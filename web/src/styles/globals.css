@@ -822,9 +822,20 @@ h6 {
  * consumes the tokens above; a color in this section is always a
  * `var(--color-*)`.
  *
- * They sit after the `@heroui/styles` import, so they win the
- * cascade on their own specificity and almost nothing here needs
- * `!important`.
+ * A rule here is the last resort, not the first tool: a variable
+ * (ours, or one of HeroUI's aliased onto ours), a shared utility,
+ * and the component's own props all come first, and the
+ * frontend-standards skill has them in order. HeroUI computes more
+ * than color from its own variables, so check
+ * `@heroui/styles/dist` for one behind the value before writing a
+ * selector against the rule that reads it.
+ *
+ * These rules are unlayered, while `@heroui/styles` imports its
+ * component CSS into `@layer components`, so they win the cascade
+ * whatever their specificity and almost nothing here needs
+ * `!important`. Specificity only decides between two rules in this
+ * file. A comment explaining an override by its specificity is
+ * describing the wrong mechanism.
  *
  * The `otari-` prefix on these class names is a namespace, not a
  * leftover: it keeps an app-owned hook from colliding with a

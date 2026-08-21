@@ -34,12 +34,68 @@ import { Button, Card } from "@heroui/react";
 `secondary` and the other HeroUI v3 variants are available if a new need arises; stick to the
 in-use set unless you're deliberately adding one.
 
-## Props over `className`
+## Customizing: which layer to reach for
 
-If a component exposes a prop for what you want (`variant`, `size`, `isDisabled`, `isPending`,
-`fullWidth`, `isInvalid`), use the prop. Reserve `className` for layout and positioning
-(`flex`, `gap-*`, `min-w-[…]`, responsive prefixes), not for re-skinning something HeroUI
-already styles.
+**Start from a component, not from an element.** A HeroUI component (or one of the shared
+primitives below) already resolves through the tokens and already carries its states: the
+pointer, the focus ring, the disabled dimming and the press animation arrive with it and cost
+nothing at the call site. A hand-rolled `<button>` or `<div>` starts from Tailwind's reset,
+which is to say from nothing, so every one of those states becomes a class somebody has to
+remember on every copy of that markup. The dashboard's own nav rail is the worked example: its
+rows are a mix of router `Link`s, plain `<button>`s and HeroUI `Button`s, and the plain ones
+answer the pointer with the default arrow, so the shared row string has to name
+`cursor-pointer` itself, where a HeroUI `Button` takes it from `--cursor-interactive` and a
+bare `<button>` takes it from no one. Reaching for a native element is sometimes right
+(`FilterSelect` is a deliberately token-styled native `<select>`, and a nav row has to be the
+router's `Link`), but it is a decision that buys styling work, not a neutral default.
+
+Once you know what you are styling, there are four ways to change how it looks, in the order to
+try them. The first three are reusable, they follow a retheme, and they survive a HeroUI
+upgrade. The fourth is a rule written against another project's private DOM, which is why it is
+the last resort and not the default.
+
+**1. A variable: ours, or the library's aliased onto ours.** If the value is one of the design
+system's roles, it is a token, and if the role is missing, add it rather than writing the value
+down somewhere. If it is a value the library computes from a variable of its own, alias that
+variable instead of overriding the rules that read it. Color already works this way here: each
+theme block maps `--surface`, `--accent`, `--focus` and the rest onto our `--color-*` tokens,
+which is what makes a bare `<Card>` wear the palette. The same handle exists for geometry and
+interaction, and this repo has not claimed it yet. HeroUI declares `--radius`, `--field-radius`,
+`--spacing`, `--border-width`, `--disabled-opacity`, `--cursor-interactive` /
+`--cursor-disabled` and the `--scrollbar-*` family in
+`@heroui/styles/dist/themes/default/variables.css`, and derives its whole radius ramp from
+`--radius` in `dist/themes/shared/theme.css` (`--radius-2xl` is `calc(var(--radius) * 2)`, so a
+16px arc a component draws is one alias away from being ours), and `globals.css` sets none of
+them. Read the value out of `@heroui/styles/dist` before concluding that a rule is the only way
+to reach it. See [design-tokens.md](./design-tokens.md).
+
+**2. A shared utility, once the look repeats.** The second call site that wants the same look
+gets a utility or a shared class string, not the same class list typed again: the
+`@utility text-heading` family in `globals.css` carries the type roles, and `navRowClass` and
+`NAV_TRANSITION` in `app/nav/rowStyles.ts` carry a chrome row. Two copies of a class list are
+two surfaces that are meant to match and will stop matching one fix at a time, and the copy
+that missed the fix is the one somebody notices.
+
+**3. The component's own API.** `variant`, `size`, `isDisabled`, `isPending`, `fullWidth`,
+`isInvalid`, and on a compound component the `className` of the subcomponent that owns the part
+you mean. Read the variants before assuming there is no prop for what you want: `Table.Root`
+takes one, and its `secondary` is documented as no background, padding, or rounding on the
+root, which is a prop for something `.otari-table` currently neutralizes by hand. Reserve
+`className` for layout and positioning (`flex`, `gap-*`, `min-w-[…]`, responsive prefixes), not
+for re-skinning something HeroUI already styles.
+
+**4. Last resort: a rule that reaches into the library's DOM.** `.otari-*` in `globals.css` is
+the sanctioned namespace for it (see [design-tokens.md](./design-tokens.md)), and some cases
+genuinely land here: a keyframe, something that has to outrank an inline style, or a value the
+library paints somewhere it gives you no name for. It carries a standing cost, so it is worth
+being sure none of the three above reach it. `.table__cell` and
+`.table__body tr:first-child td:first-child` are internal names that can change in a patch
+release with nothing in this repo failing; the rule is invisible from the call site, so the
+next reader checks the component's props, believes them, and is wrong; and the rule wins the
+cascade by being unlayered against `@heroui/styles`'s `@layer components`, not by its
+specificity, which is a distinction worth stating correctly in the comment rather than
+restating as folklore. When you write one, name in that comment which of the three rungs above
+does not reach the value, so a reader can tell a deliberate last resort from a shortcut.
 
 ## Check the shared primitives before hand-rolling
 

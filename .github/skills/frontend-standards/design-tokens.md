@@ -117,6 +117,31 @@ background at all rather than with `--color-surface`. Copying one of those class
 would carry the bug across, silently, because a class that does not exist fails at no stage of
 the build.
 
+### The alias surface is not only color
+
+The mapping above is color because color is what has needed it so far, not because that is as
+far as it goes. HeroUI computes geometry and interaction from variables of its own too:
+`--radius` in `@heroui/styles/dist/themes/default/variables.css`, with `--radius-lg` /
+`--radius-xl` / `--radius-2xl` derived from it at 1x, 1.5x and 2x in
+`dist/themes/shared/theme.css`, alongside `--field-radius`, `--spacing`, `--border-width`,
+`--ring-offset-width`, `--disabled-opacity`, `--cursor-interactive` / `--cursor-disabled` and
+the `--scrollbar-*` family. This repo aliases none of them, so a component's corner radius, its
+disabled dimming and its pointer all come from HeroUI's defaults rather than from anything we
+name.
+
+That is a gap rather than a decision, and it decides how much work a visual fix is. A value
+computed from a variable is one alias away from being ours; the same value chased through the
+rules that read it is a selector to keep in sync with somebody else's internals, forever. A
+table whose body corners are drawn at `min(32px, var(--radius-2xl))`, which is 16px, inside a
+12px container is the case that made this concrete: flattening them through
+`.table__body tr:first-child td:first-child` works, and setting the variable on the table root
+does the same job to every rule that reads it, including the ones nobody has hit yet. So when
+something looks wrong, search `node_modules/@heroui/styles/dist/` for the property before
+writing a rule against it. If a variable is behind it, alias it in both theme blocks the way
+the color tokens are, or scope it to the component that needs it, and add a role to the
+families above when what you are naming is a system-wide decision rather than a local one.
+[components.md](./components.md) has the full order to work through.
+
 ## Type scale
 
 Seven roles, each an `@utility` in the same file. Pick the one whose **meaning** matches the
@@ -210,3 +235,9 @@ The `otari-` prefix that survives on a handful of **class** names (`.otari-table
 `.otari-markdown`, `.otari-detail-row`, `.otari-bulk-bar`) is unrelated: it is the app's
 namespace for a hook that has to reach inside a HeroUI component's DOM, and those rules
 consume `--color-*` like everything else.
+
+The namespace being sanctioned is not the same as the approach being recommended. A rule that
+reaches inside another project's DOM is the last of four ways to change how something looks,
+after a variable, a shared utility, and the component's own props, and
+[components.md](./components.md) has them in order. Reach for those first, and when a rule
+really is the only way, name in its comment which of the three does not reach the value.

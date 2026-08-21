@@ -38,9 +38,14 @@ can link Vite's esbuild binary at all.
 
 **Always:**
 
-- Reach for a HeroUI component prop (`variant`, `size`, `isDisabled`, `isPending`,
-  `fullWidth`, `isInvalid`) before a `className`. `className` is for layout/position, not for
-  restyling a component HeroUI already styles. See [components.md](./components.md).
+- Reach for a HeroUI component or a shared primitive before a native element: it arrives with
+  the tokens and its states (pointer, focus ring, disabled dimming) already wired, where a
+  hand-rolled `<button>` starts from Tailwind's reset and every state becomes a class somebody
+  has to remember. Then change how it looks in this order: a variable (ours as a token, or one
+  of HeroUI's own aliased onto ours), a shared utility once the look repeats, the component's
+  own prop (`variant`, `size`, `isDisabled`, `isPending`, `fullWidth`, `isInvalid`), and only
+  as a last resort a rule reaching into HeroUI's DOM. `className` is for layout/position, not
+  for restyling a component HeroUI already styles. See [components.md](./components.md).
 - Style from the semantic tokens in `web/src/styles/globals.css`, through the utilities they
   back (`text-muted`, `bg-surface`, `border-border`, `text-danger`, `text-heading`). The
   tokens are the design system and HeroUI is a consumer of it: a utility that does not resolve
@@ -121,7 +126,7 @@ AA for the small text a pill uses. **Brand text on the brand tint does not follo
 ## Topic guides
 
 - [design-tokens.md](./design-tokens.md): the semantic tokens, the HeroUI mapping, the type scale, the chart palettes, and how to translate otari-ai's utility names.
-- [components.md](./components.md): HeroUI v3 patterns, props over `className`, internal links, the shared UI primitives in `shared/components/`.
+- [components.md](./components.md): HeroUI v3 patterns, the order to reach for when customizing (variable, shared utility, prop, then a rule into the library's DOM), internal links, the shared UI primitives in `shared/components/`.
 - [component-architecture.md](./component-architecture.md): what a page composes, what gets its own file, route files, no duplicated markup.
 - [data-fetching.md](./data-fetching.md): TanStack Query conventions: query keys, `staleTime`, guards, invalidation, bounded pagination.
 - [typescript-and-react.md](./typescript-and-react.md): strict TS, `undefined` over `null`, discriminated unions, hook and effect hygiene.
