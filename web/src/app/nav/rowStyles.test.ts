@@ -73,21 +73,6 @@ describe("navRowClass", () => {
     }
   })
 
-  it("hands every row the pointer cursor, whatever element it is", () => {
-    // Only the `Link` rows get the hand from the user agent. The group triggers
-    // and the account control are `<button>`s, which Tailwind's reset leaves on
-    // the default arrow, so half the rail answered the pointer differently from
-    // the other half until this was named on the shared row.
-    for (const row of [
-      resting,
-      selected,
-      navRowClass({ nested: true }),
-      navRowClass({ collapsed: true }),
-    ]) {
-      expect(row).toContain("cursor-pointer")
-    }
-  })
-
   it("keeps the 44px floor and the shared shape on every variant", () => {
     for (const row of [
       resting,

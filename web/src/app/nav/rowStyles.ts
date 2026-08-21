@@ -105,12 +105,15 @@ const ROW_FOCUS =
  * wherever a row is rendered, rather than patching the one heading that has a
  * control inside it.
  *
- * `cursor-pointer` is here for the same reason. The `Link`s get the hand from
- * the user agent, while the expand triggers and the account control are
- * `<button>`s, which Tailwind's reset leaves on the default arrow, so the rail
- * answered the pointer two different ways depending on the row.
+ * Deliberately no `cursor-pointer`: every element this dresses already resolves
+ * to `pointer` on its own. The leaves and both footer rows are `Link`s, so the
+ * `<a href>` takes it from the user agent, and the expand triggers and the
+ * account control carry HeroUI's `.disclosure__trigger` or `.button`, which set
+ * `cursor: var(--cursor-interactive)`. Naming it here would be a no-op on all
+ * five call sites and would also outrank `status-disabled`'s `--cursor-disabled`
+ * on the account control, so a disabled row would promise a click.
  */
-const ROW_BASE = `flex min-h-11 w-full cursor-pointer items-center gap-3 rounded-lg px-3 font-sans text-sm font-medium leading-[1.375rem] ${NAV_TRANSITION} ${ROW_FOCUS}`
+const ROW_BASE = `flex min-h-11 w-full items-center gap-3 rounded-lg px-3 font-sans text-sm font-medium leading-[1.375rem] ${NAV_TRANSITION} ${ROW_FOCUS}`
 
 /**
  * `data-pressed` alongside `active` because a rail row is three different

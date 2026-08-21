@@ -55,9 +55,10 @@ const THEME_LABELS: Record<ThemePreference, string> = {
 // where these rows are tapped, so below `md` they take the 44px touch floor and
 // the menu's own scale resumes at the breakpoint.
 const MENU_ROW = `flex min-h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-chrome-row font-medium md:min-h-9 ${NAV_TRANSITION}`
-// `cursor-pointer` because these rows are `<button>`s and Tailwind's reset
-// leaves a button on the default arrow, which reads as inert next to the
-// anchors in the same menu that get the hand for free.
+// `cursor-pointer` because these rows are bare `<button>`s, which the user agent
+// leaves on the default arrow, unlike an `<a href>` or a HeroUI `.button`. On the
+// row states rather than on `MENU_ROW`, so `MENU_ROW_DISABLED` keeps
+// `cursor-not-allowed`.
 const MENU_ROW_RESTING = "cursor-pointer text-foreground hover:bg-surface-alt"
 const MENU_ROW_DISABLED = "cursor-not-allowed text-muted opacity-60"
 // No vertical margin: the dialog's own 6px gap is the menu's rhythm, and a

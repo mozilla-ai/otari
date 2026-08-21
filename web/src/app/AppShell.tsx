@@ -656,7 +656,7 @@ export function AppShell() {
                 }
                 aria-expanded={mobileNavOpen}
                 aria-controls="app-sidebar"
-                className="-ml-1 flex h-11 w-11 shrink-0 items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-alt hover:text-foreground md:hidden"
+                className="-ml-1 flex h-11 w-11 shrink-0 cursor-pointer items-center justify-center rounded-lg text-muted transition-colors hover:bg-surface-alt hover:text-foreground md:hidden"
               >
                 {mobileNavOpen ? (
                   <FiX aria-hidden="true" className="size-5" />
@@ -676,7 +676,7 @@ export function AppShell() {
                 aria-label={collapsed ? "Expand sidebar" : "Collapse sidebar"}
                 aria-pressed={collapsed}
                 title={collapsed ? "Expand sidebar" : "Collapse sidebar"}
-                className="-ml-1 hidden h-8 w-8 shrink-0 items-center justify-center rounded-md text-muted transition-colors hover:bg-surface-alt hover:text-foreground md:flex"
+                className="-ml-1 hidden h-8 w-8 shrink-0 cursor-pointer items-center justify-center rounded-md text-muted transition-colors hover:bg-surface-alt hover:text-foreground md:flex"
               >
                 <FiSidebar aria-hidden="true" className="size-4" />
               </button>
