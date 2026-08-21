@@ -184,6 +184,10 @@ export function DataTable<Row extends object>({
       // Its content stays in the accessibility tree as ordinary elements.
       row.setAttribute("role", "presentation")
       const cell = document.createElement("td")
+      // Named so globals.css can style it at a specificity that outranks
+      // HeroUI's rounding of the body's corner cells: a panel expanded under the
+      // bottom row makes this cell one of those corners.
+      cell.className = "otari-detail-cell"
       row.appendChild(cell)
       hostRef.current = { row, cell }
     }
