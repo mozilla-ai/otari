@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_asyn
 from sqlalchemy.orm import Session
 from sqlmodel import col
 
+from gateway.auth.models import hash_key
 from gateway.core.config import GatewayConfig
 from gateway.models.entities import APIKey, WorkspaceActivationState
 from gateway.models.tenancy import (
@@ -621,8 +622,11 @@ async def test_concurrent_first_issuance_leaves_one_setup_key(
     workspace_id = workspace.id
     outcomes = await _race(sessions, attempt)
 
+    # Every racer, not merely one: a losing call has to come back with a key
+    # rather than with the integrity error it hit on the way, which is the half
+    # of this a "one row survived" assertion cannot see.
     issued = [outcome for outcome in outcomes if not isinstance(outcome, Exception)]
-    assert issued, f"every racer failed: {outcomes}"
+    assert len(issued) == _RACERS, f"some racers failed: {outcomes}"
 
     # Expired first, and every value read out into a local before the next
     # await: this session predates the racers' commits, and a lazily refreshed
@@ -632,6 +636,7 @@ async def test_concurrent_first_issuance_leaves_one_setup_key(
     keys = (await async_db.execute(select(APIKey).where(col(APIKey.workspace_id) == workspace_id))).scalars().all()
     key_ids = [key.id for key in keys]
     key_names = [key.key_name for key in keys]
+    key_hash = keys[0].key_hash
     state = await async_db.get(WorkspaceActivationState, workspace_id)
     assert state is not None
     named_key = state.api_key_id
@@ -641,3 +646,12 @@ async def test_concurrent_first_issuance_leaves_one_setup_key(
     assert key_names == [ACTIVATION_KEY_NAME]
     assert {issue.key_id for issue in issued} == set(key_ids)  # type: ignore[attr-defined]
     assert named_key == key_ids[0]
+
+    # Exactly one of the plaintexts authenticates, and that is the design rather
+    # than a gap in it: each call rotates the row, so the last writer's key is
+    # the live one and the earlier ones are invalidated exactly as a page reload
+    # invalidates the key before it. Asserting it here keeps that a stated
+    # property, so a future change that quietly handed out several live keys for
+    # one row would fail rather than look like an improvement.
+    live = [issue for issue in issued if hash_key(issue.key) == key_hash]  # type: ignore[attr-defined]
+    assert len(live) == 1

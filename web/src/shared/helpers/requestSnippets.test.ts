@@ -12,6 +12,15 @@ const INPUT = {
   model: "openai:gpt-4o-mini",
 }
 
+/**
+ * The `-d` argument as the shell would hand it to cURL: outer single quotes
+ * dropped, and each `'\''` sequence back to one apostrophe.
+ */
+function shellPayload(snippet: string): string {
+  const quoted = snippet.slice(snippet.indexOf("-d '") + 3)
+  return quoted.slice(1, quoted.lastIndexOf("'")).replaceAll(`'\\''`, "'")
+}
+
 describe("buildCurlSnippet", () => {
   it("posts to the completions path on the origin the dashboard was served from", () => {
     expect(buildCurlSnippet(INPUT)).toContain(
@@ -38,15 +47,29 @@ describe("buildCurlSnippet", () => {
     // guide advertises as runnable unable to parse.
     const hostile = 'weird"model\\name\nv2'
     const snippet = buildCurlSnippet({ ...INPUT, model: hostile })
-    const payload = snippet.slice(
-      snippet.indexOf("{"),
-      snippet.lastIndexOf("}") + 1,
-    )
 
-    expect(JSON.parse(payload)).toEqual({
+    expect(JSON.parse(shellPayload(snippet))).toEqual({
       model: hostile,
       messages: [{ role: "user", content: "Hello" }],
     })
+  })
+
+  it("survives an apostrophe, which would otherwise close the shell quote", () => {
+    const snippet = buildCurlSnippet({ ...INPUT, model: "someone's-model" })
+
+    expect(snippet).toContain(`someone'\\''s-model`)
+    expect(JSON.parse(shellPayload(snippet))).toEqual({
+      model: "someone's-model",
+      messages: [{ role: "user", content: "Hello" }],
+    })
+  })
+
+  it("leaves an ordinary payload unquoted beyond its own single quotes", () => {
+    // The escaping is invisible for every value anyone will actually see, which
+    // is what keeps the snippet readable.
+    expect(buildCurlSnippet(INPUT)).toContain(
+      `-d '{"model": "openai:gpt-4o-mini", "messages": [{"role": "user", "content": "Hello"}]}'`,
+    )
   })
 })
 

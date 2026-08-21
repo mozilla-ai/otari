@@ -26,12 +26,21 @@ const DEFAULT_MESSAGE = "Hello"
  * string literal is also a valid Python one (same quoting, same escapes), so one
  * helper covers both.
  *
- * What it does not cover is the shell: cURL's payload sits inside single quotes,
- * so a value containing one would still need shell escaping. No provider's model
- * id does, and treating the snippet as a shell script to be generated safely
- * would cost more than it buys.
+ * The shell is a second layer and is handled by ``shellSingleQuoted`` below.
  */
 const literal = (value: string): string => JSON.stringify(value)
+
+/**
+ * A payload as one single-quoted shell argument.
+ *
+ * cURL's body is a shell string, so JSON escaping alone is not enough: an
+ * apostrophe in a model id would close the quote and leave the rest of the
+ * payload as shell words. `'\''` is the portable way through that (close the
+ * quote, emit an escaped one, reopen), and it leaves a payload without
+ * apostrophes byte-identical, which is every payload anyone will actually see.
+ */
+const shellSingleQuoted = (payload: string): string =>
+  `'${payload.replaceAll("'", `'\\''`)}'`
 
 export interface RequestSnippetInput {
   /** Origin the dashboard was served from, with no trailing slash. */
@@ -55,11 +64,12 @@ export function buildCurlSnippet({
   model = SNIPPET_MODEL_PLACEHOLDER,
   message = DEFAULT_MESSAGE,
 }: RequestSnippetInput): string {
+  const body = `{"model": ${literal(model)}, "messages": [{"role": "user", "content": ${literal(message)}}]}`
   return [
     `curl ${origin}/v1/chat/completions \\`,
     `  -H "Otari-Key: ${apiKey}" \\`,
     `  -H "Content-Type: application/json" \\`,
-    `  -d '{"model": ${literal(model)}, "messages": [{"role": "user", "content": ${literal(message)}}]}'`,
+    `  -d ${shellSingleQuoted(body)}`,
   ].join("\n")
 }
 
