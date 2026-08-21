@@ -13,8 +13,8 @@ things follow from being a bootstrap step rather than a login, and both are
 deliberate:
 
 - The operator identity has no email. It is an operator label, not a sign-in
-  address, exactly like the gateway users M4 re-parents onto this table, and the
-  claim flow that gives such an identity an address is a separate track.
+  address, like the gateway's own spend identities, and the claim flow that gives
+  such an identity an address is a separate track.
 - It is a superuser. The master key already carries deployment-wide authority,
   so scoping the identity it maps to more narrowly would be theater.
 

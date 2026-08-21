@@ -37,9 +37,9 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         """Return the identity with this email address, or None.
 
         Matched case-insensitively. The unique index is not, and rows written
-        outside this service (the M4 re-parenting backfill, an operator's own
-        SQL) can carry any casing, so an exact match would answer "no identity
-        holds this address" for one that does and mint a second identity for it.
+        outside this service (a convergence backfill, an operator's own SQL) can
+        carry any casing, so an exact match would answer "no identity holds this
+        address" for one that does and mint a second identity for it.
         An address is the handle a claim flow matches on, so it has to resolve
         to one identity however it was typed.
 
@@ -65,11 +65,11 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
     ) -> User:
         """Stage a local identity, claimable later.
 
-        A standalone operator (and, after M4's backfill, every re-parented
-        gateway user) is an operator-defined label rather than a sign-in
-        address, so the row is stored with no email by default; the nullable
-        column tolerates that where a create schema requiring an address would
-        not. An identity an admin adds by address carries it from the start, as
+        A standalone operator is an operator-defined label rather than a
+        sign-in address, so the row is stored with no email by default; the
+        nullable column tolerates that where a create schema requiring an address
+        would not. Any gateway users a future convergence brings onto this table
+        (otari-ai#1727) are the same shape. An identity an admin adds by address carries it from the start, as
         the handle the claim flow will match on, but it is unverified and grants
         nothing until that flow exists.
 

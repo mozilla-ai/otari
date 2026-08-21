@@ -14,6 +14,7 @@ import {
   NO_BREAKDOWNS,
   useBudgets,
   useKeys,
+  useOrganizationMembers,
   useProviderHealth,
   useProviders,
   useUsageLogs,
@@ -181,6 +182,7 @@ export function OverviewPage({
   // table behind it cannot disagree.
   const keys = useKeys(scope)
   const users = useUsers()
+  const members = useOrganizationMembers()
   const recent = useUsageLogs(recentFilters, 0, 5)
 
   const todayTotals = today.data?.totals
@@ -203,7 +205,9 @@ export function OverviewPage({
   const providerHealth = providerHealthStatus(health.data)
 
   const activeKeys = (keys.data ?? []).filter((k) => k.is_active).length
-  const activeUsers = (users.data ?? []).filter((u) => !u.blocked).length
+  const activeMembers = (members.data ?? []).filter(
+    (member) => member.status === "active",
+  ).length
 
   // The getting-started banner is an onboarding empty state: show it only when the
   // gateway has no providers AND no recorded usage. Imported OTLP usage lands in
@@ -227,7 +231,8 @@ export function OverviewPage({
     health.error ??
     budgets.error ??
     keys.error ??
-    users.error
+    users.error ??
+    members.error
 
   // Manual refresh for the whole page; the windows already advance across
   // midnight on focus, but the numbers within a day are only as fresh as the
@@ -241,6 +246,7 @@ export function OverviewPage({
     void budgets.refetch()
     void keys.refetch()
     void users.refetch()
+    void members.refetch()
     void recent.refetch()
   }
   const isRefreshing =
@@ -252,6 +258,7 @@ export function OverviewPage({
     budgets.isFetching ||
     keys.isFetching ||
     users.isFetching ||
+    members.isFetching ||
     recent.isFetching
 
   return (
@@ -379,7 +386,7 @@ export function OverviewPage({
         />
         <StatCard
           label="Active members"
-          value={users.data ? formatNumber(activeUsers) : "—"}
+          value={members.data ? formatNumber(activeMembers) : "—"}
           to="/organization/members"
         />
       </div>

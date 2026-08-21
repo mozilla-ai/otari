@@ -402,11 +402,20 @@ class WorkspaceBudgetDefaultService:
             .scalars()
             .all()
         }
+        # Every default resolves or the read fails, rather than quietly returning
+        # fewer rows than `count` promises: a short page with no explanation is
+        # the failure mode `_budget_for` refuses for the same reason, and it also
+        # makes pagination inconsistent, since the dropped row still consumes a
+        # slot. Unreachable while `budget_id` is NOT NULL with a RESTRICT foreign
+        # key; raised anyway because a database restored without them would
+        # otherwise hide it here.
+        missing = next((default for default in defaults if default.budget_id not in budgets), None)
+        if missing is not None:
+            raise WorkspaceBudgetDefaultBudgetNotFoundError(missing.budget_id)
         return WorkspaceMemberBudgetPoliciesPublic(
             data=[
                 WorkspaceMemberBudgetPolicyPublic.from_model(default, budgets[default.budget_id])
                 for default in defaults
-                if default.budget_id in budgets
             ],
             count=count,
         )

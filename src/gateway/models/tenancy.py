@@ -31,8 +31,8 @@ Three deliberate departures from the platform's models, applied on arrival:
   rather than a behavior. ``tests/unit/test_tenancy_timestamps.py`` is what
   keeps it one.
 - **``email`` is a plain nullable string, not ``EmailStr``.** A standalone
-  operator identity is a label, not a sign-in address (M4: "local identities
-  have no email"), and every reader here must already tolerate its absence, so
+  operator identity is a label, not a sign-in address ("local identities have no
+  email"), and every reader here must already tolerate its absence, so
   the annotation says so rather than being widened at each call site.
 - **Hosted-only columns are not carried, with one exception.** The reconciled
   schema is edition-invariant (the overlay contributes adapters and routers,
@@ -87,8 +87,9 @@ WorkspaceMemberRole = Literal["owner", "admin", "member", "viewer"]
 # hold. "invited" stays a valid stored status because the invitation flow
 # produces it and will rehome, but nothing in this edition can create or accept
 # an invitation, so offering it here would advertise a state with no producer
-# and no exit. (The M4 re-parenting backfill does not produce it either: it maps
-# a blocked gateway user to "suspended" and every other one to "active".)
+# and no exit. (A convergence backfill would not produce it either: the mapping
+# it describes sends a blocked gateway user to "suspended" and every other one
+# to "active".)
 # Widening this back when invitations rehome is additive; narrowing later would
 # not be.
 OrganizationMemberSettableStatus = Literal["active", "suspended"]

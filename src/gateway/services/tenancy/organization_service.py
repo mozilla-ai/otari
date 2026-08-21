@@ -354,8 +354,8 @@ class OrganizationService:
         accepted: a known address gets an ``invited`` membership, an unknown one
         gets an emailed invitation. Neither half exists here, and a membership
         nobody can accept is a dead state, so both branches land ``active``
-        instead and an unknown address creates a local identity carrying it (M4's
-        claimable identity). That identity cannot authenticate until the sign-in
+        instead and an unknown address creates a local identity carrying it, the
+        claimable kind. That identity cannot authenticate until the sign-in
         flow lands; until then it is a roster and attribution entry, which is
         what the gateway's own ``users`` are today.
 

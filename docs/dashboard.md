@@ -558,9 +558,16 @@ are added by is the handle signup matches them on.
   The create and edit forms carry a **Default member budget**, and the list has
   a column naming it: pick a budget and every member of that workspace is held
   to it, each with an allowance of their own rather than a shared pool. Someone
-  in two workspaces therefore holds two, one per workspace. Changing it applies
-  to members who join afterwards; members already there keep what they were
-  given.
+  in two workspaces therefore holds two, one per workspace. A budget is optional
+  here and everywhere, and a key can be marked exempt from budget enforcement
+  entirely, so neither a workspace default nor a person's own budget is a
+  guarantee that every request is capped.
+
+  Changing the default applies to members who join afterwards; members already
+  there keep the budget they were given. Editing that *budget* is the retroactive
+  act, and it moves everyone held to it. The edit form also manages defaults
+  narrowed to one provider, which apply on that provider instead of the one
+  above.
 - **Members & roles**: who belongs to the organization, their role
   (owner, admin, member, viewer), and their status. Adding someone directly
   takes an email address and optionally the workspaces to put them in straight
@@ -572,13 +579,18 @@ are added by is the handle signup matches them on.
   before it is accepted.
 
   The roster also carries what a person may spend and what their keys may call.
-  **Model access** is the default every key issued to them inherits, which a key
+  **Model access** is the default a key issued to them inherits, which that key
   can narrow but never exceed; **Workspaces** names the ones they are in and the
-  budget they hold in each; **Spend** is what they have spent, plus anything held
-  in flight by a request whose cost is not settled yet; and **Block** stops their
-  keys making requests without removing them from the organization or touching
-  their history. A member added by address before any key was issued to them has
-  no spend row yet, and those cells read as empty rather than zero.
+  budget, if any, they hold in each; **Spend** is what they have spent, plus
+  anything held in flight by a request whose cost is not settled yet; and
+  **Block** stops their keys making requests without removing them from the
+  organization or touching their history.
+
+  All of that lives on a gateway identity the member is linked to, and the link
+  is optional: a member added by address before any key was issued to them has
+  none yet, and one whose identity was deleted has none any more. Those rows show
+  a role and a status, empty access and spend cells rather than zeros, and cannot
+  own a key until an identity exists for them.
 
   **Edit** opens all of it at once: model access, which workspaces they are in
   and at what role, and the budget they hold in each. A budget is picked, never

@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from gateway.api.deps import get_db, verify_master_key
 from gateway.models.entities import Budget, BudgetResetLog, ScopedBudget, User, WorkspaceBudgetDefault
@@ -306,8 +307,8 @@ async def delete_budget(
     holders = (
         (
             await db.execute(
-                select(Workspace.name)
-                .join(WorkspaceBudgetDefault, WorkspaceBudgetDefault.workspace_id == Workspace.id)
+                select(col(Workspace.name))
+                .join(WorkspaceBudgetDefault, WorkspaceBudgetDefault.workspace_id == col(Workspace.id))
                 .where(WorkspaceBudgetDefault.budget_id == budget_id)
                 .order_by(Workspace.name)
             )

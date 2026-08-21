@@ -1908,6 +1908,12 @@ export function useAllWorkspaceMembers(workspaceIds: string[]) {
         })),
       ),
       isLoading: results.some((result) => result.isLoading),
+      // The first failure, surfaced rather than swallowed: a rejected read
+      // contributes nothing to `data`, so without this the caller cannot tell a
+      // workspace with no rows from one whose read failed, and a lost membership
+      // or a lost ceiling looks exactly like a deliberate absence.
+      error: results.find((result) => result.error)?.error ?? null,
+      isSuccess: results.every((result) => result.isSuccess),
     }),
   })
 }
@@ -1944,6 +1950,12 @@ export function useAllWorkspaceBudgetDefaults(workspaceIds: string[]) {
         })),
       ),
       isLoading: results.some((result) => result.isLoading),
+      // The first failure, surfaced rather than swallowed: a rejected read
+      // contributes nothing to `data`, so without this the caller cannot tell a
+      // workspace with no rows from one whose read failed, and a lost membership
+      // or a lost ceiling looks exactly like a deliberate absence.
+      error: results.find((result) => result.error)?.error ?? null,
+      isSuccess: results.every((result) => result.isSuccess),
     }),
   })
 }

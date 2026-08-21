@@ -513,7 +513,13 @@ export function BudgetsPage() {
   // resolves. Opening Edit against an empty roster would therefore start the
   // multiselect empty and read as "detach everyone" on save, so the table waits
   // for both reads rather than only for the budgets one.
+  //
+  // Success, not merely "not loading": `isLoading` goes false on a rejection
+  // too, and a failed roster would then open a form claiming nobody holds this
+  // budget. The assignment controls are withheld instead, and the banner above
+  // says why.
   const loading = budgets.isLoading || users.isLoading
+  const rosterReady = users.isSuccess
 
   // Which workspaces hand out each budget. A budget may be the default for
   // several, and a workspace may narrow one to a provider, which is named here
@@ -606,7 +612,7 @@ export function BudgetsPage() {
       },
       {
         id: "users",
-        header: "Identities",
+        header: "People",
         cell: (b) => <span className="text-muted">{b.user_count}</span>,
       },
       {
@@ -773,7 +779,12 @@ export function BudgetsPage() {
           createBudget.error ??
           updateBudget.error ??
           deleteBudget.error ??
-          updateUser.error
+          updateUser.error ??
+          // Without this a failed roster silently withholds the assignment
+          // control and the "Default for" column, with nothing saying why.
+          users.error ??
+          workspaces.error ??
+          workspaceDefaults.error
         }
       />
 
@@ -829,7 +840,7 @@ export function BudgetsPage() {
           }}
           error={updateBudget.error ?? assignmentError}
           isPending={updateBudget.isPending || assigningUsers}
-          assignUsers={users.data ?? []}
+          assignUsers={rosterReady ? (users.data ?? []) : undefined}
           assignedUserIds={(users.data ?? [])
             .filter((u) => u.budget_id === editingBudget.budget_id)
             .map((u) => u.user_id)}

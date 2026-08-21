@@ -72,10 +72,11 @@ import {
 
 // What a member spends and what their keys may call live on the gateway's own
 // `users` row, not on the membership: `organization_member` has no such columns.
-// `attribution_user_id` is the join, minted when the member is created, so a
-// member without one has no spend row and those cells stay empty rather than
-// reading as zero. The two tables converge in otari-ai#1727, at which point this
-// join is the identity and can go.
+// `attribution_user_id` is the join, and it is nullable: null when no usable
+// gateway row exists, whether because none was ever minted for this member or
+// because it was soft-deleted afterwards. Those cells stay empty rather than
+// reading as zero, which would claim the person is on the gateway and has spent
+// nothing. otari-ai#1727 decides how the two tables converge.
 const usd = new Intl.NumberFormat(undefined, {
   style: "currency",
   currency: "USD",
@@ -86,6 +87,11 @@ const usd = new Intl.NumberFormat(undefined, {
 interface WorkspacePlacement {
   workspaceId: string
   workspaceName: string
+  // The `workspace_member` row's id. Carried explicitly rather than read back
+  // off the ceiling: a ceiling names a membership, so deriving the membership
+  // from the ceiling is null exactly when there is no ceiling yet, which is the
+  // case where one is about to be created.
+  membershipId: string
   role: string
   ceiling: ScopedBudget | null
 }
@@ -528,8 +534,13 @@ function MemberEditor({
 
       // Pass one: memberships. The id of anything created here is kept, since
       // a ceiling names the membership and nothing else can resolve it yet.
-      const membershipIds = new Map(
-        placements.map((p) => [p.workspaceId, p.ceiling?.scope_id ?? null]),
+      // From the membership row, not from the ceiling: reading it off the
+      // ceiling was null for anyone already in a workspace who held no ceiling
+      // yet, so the create branch below never ran and the form closed reporting
+      // success. That is the ordinary path through this page: the member is
+      // already in the workspace and is being given a budget for the first time.
+      const membershipIds = new Map<string, string | null>(
+        placements.map((p) => [p.workspaceId, p.membershipId]),
       )
       const wasMember = new Set(placements.map((p) => p.workspaceId))
       const roleWas = new Map(placements.map((p) => [p.workspaceId, p.role]))
@@ -621,63 +632,65 @@ function MemberEditor({
           <span className="text-sm font-medium text-foreground">
             Workspace access
           </span>
-          <table className="w-full max-w-3xl text-sm">
-            <thead>
-              <tr className="text-left text-xs text-muted">
-                <th className="py-1 font-medium">Workspace</th>
-                <th className="py-1 font-medium">Role</th>
-                <th className="py-1 font-medium">Budget</th>
-              </tr>
-            </thead>
-            <tbody>
-              {workspaces.map((workspace) => {
-                const row = rows.get(workspace.id)
-                if (!row) return null
-                return (
-                  <tr key={workspace.id} className="border-t border-border">
-                    <td className="py-1.5">
-                      <label className="flex items-center gap-2 text-foreground">
-                        <input
-                          type="checkbox"
-                          checked={row.member}
-                          onChange={(event) =>
-                            setRow(workspace.id, {
-                              member: event.target.checked,
-                            })
+          <div className="max-w-3xl overflow-x-auto">
+            <table className="w-full min-w-lg text-sm">
+              <thead>
+                <tr className="text-left text-xs text-muted">
+                  <th className="py-1 font-medium">Workspace</th>
+                  <th className="py-1 font-medium">Role</th>
+                  <th className="py-1 font-medium">Budget</th>
+                </tr>
+              </thead>
+              <tbody>
+                {workspaces.map((workspace) => {
+                  const row = rows.get(workspace.id)
+                  if (!row) return null
+                  return (
+                    <tr key={workspace.id} className="border-t border-border">
+                      <td className="py-1.5">
+                        <label className="flex items-center gap-2 text-foreground">
+                          <input
+                            type="checkbox"
+                            checked={row.member}
+                            onChange={(event) =>
+                              setRow(workspace.id, {
+                                member: event.target.checked,
+                              })
+                            }
+                          />
+                          {workspace.name}
+                        </label>
+                      </td>
+                      <td className="py-1.5">
+                        <FilterSelect
+                          ariaLabel={`Role in ${workspace.name}`}
+                          value={row.role}
+                          onChange={(next) =>
+                            setRow(workspace.id, { role: next })
                           }
+                          options={ROLE_OPTIONS}
+                          disabled={!row.member}
                         />
-                        {workspace.name}
-                      </label>
-                    </td>
-                    <td className="py-1.5">
-                      <FilterSelect
-                        ariaLabel={`Role in ${workspace.name}`}
-                        value={row.role}
-                        onChange={(next) =>
-                          setRow(workspace.id, { role: next })
-                        }
-                        options={ROLE_OPTIONS}
-                        disabled={!row.member}
-                      />
-                    </td>
-                    <td className="py-1.5">
-                      <FilterSelect
-                        ariaLabel={`Budget in ${workspace.name}`}
-                        value={row.budgetId}
-                        onChange={(next) =>
-                          setRow(workspace.id, { budgetId: next })
-                        }
-                        options={budgetOptions(
-                          defaultByWorkspace.get(workspace.id),
-                        )}
-                        disabled={!row.member}
-                      />
-                    </td>
-                  </tr>
-                )
-              })}
-            </tbody>
-          </table>
+                      </td>
+                      <td className="py-1.5">
+                        <FilterSelect
+                          ariaLabel={`Budget in ${workspace.name}`}
+                          value={row.budgetId}
+                          onChange={(next) =>
+                            setRow(workspace.id, { budgetId: next })
+                          }
+                          options={budgetOptions(
+                            defaultByWorkspace.get(workspace.id),
+                          )}
+                          disabled={!row.member}
+                        />
+                      </td>
+                    </tr>
+                  )
+                })}
+              </tbody>
+            </table>
+          </div>
           <span className="max-w-2xl text-xs text-muted">
             Each workspace holds its own allowance, so someone in two workspaces
             has two. The amount and the reset period belong to the budget, so
@@ -752,6 +765,7 @@ export function OrganizationMembersPage() {
       const placement: WorkspacePlacement = {
         workspaceId,
         workspaceName: names.get(workspaceId) ?? workspaceId.slice(0, 8),
+        membershipId: member.id,
         role: member.role,
         ceiling: ceilingByMembership.get(member.id) ?? null,
       }
@@ -1041,7 +1055,7 @@ export function OrganizationMembersPage() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Members"
-        description="Who belongs to this organization and what each of them may do. Roles are fixed: owners and admins manage the organization, members use it, viewers only read. Budgets and API keys do not attach to this list; they attach to a spend identity under Cost & billing, and a member is linked to one so a key can be issued to them by name."
+        description="Who belongs to this organization and what each of them may do. Roles are fixed: owners and admins manage the organization, members use it, viewers only read. Budgets and API keys do not attach to this list; they attach to the gateway identity a member is linked to, which is what lets a key be issued to them by name. A member with no such link yet shows no access or spend, and cannot own a key until one exists."
         action={
           manages && !adding && !inviting ? (
             <div className="flex gap-2">
@@ -1059,7 +1073,20 @@ export function OrganizationMembersPage() {
       {/* `remove.error`/`revoke.error` are deliberately absent: their confirm
           dialogs render each mutation's error themselves, and listing it here
           too paints the same message twice, once behind the open dialog. */}
-      <ErrorBanner error={context.error ?? members.error ?? update.error} />
+      <ErrorBanner
+        error={
+          context.error ??
+          members.error ??
+          update.error ??
+          // The reads and the write the row's own controls use. Without these a
+          // failed roster renders the access, workspace and spend cells empty as
+          // though the member simply had none, and a refused Block says nothing.
+          users.error ??
+          updateUser.error ??
+          workspaces.error ??
+          scopedBudgets.error
+        }
+      />
 
       {/* Withheld until the context answers. Rendering the refusal first shows
           an owner "you cannot change memberships" for one paint and then takes

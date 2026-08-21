@@ -132,17 +132,24 @@ test.describe("dashboard core flows", () => {
     await nav(page).getByRole("link", { name: "Spend & budgets" }).click()
     const budgetRow = page.getByRole("row", { name: /e2e-budget/ })
     await budgetRow.getByRole("button", { name: "Edit" }).click()
-    // Same shape as `addFilterValue`: the popover aria-hides the rest of the
-    // page, so it has to be put away before the submit button is reachable.
-    const owners = page.getByRole("combobox", { name: /Assign to people/ })
+    // "Add a person" is the input's own accessible name; "Assign to people" is
+    // the section heading beside it and labels nothing. Same shape as
+    // `addFilterValue` otherwise: the popover aria-hides the rest of the page, so
+    // it has to be put away before the submit button is reachable.
+    const owners = page.getByRole("combobox", { name: "Add a person" })
     await owners.fill("alice@example.com")
     await page.getByRole("option", { name: /alice@example\.com/ }).click()
     await dismissComboBox(owners)
     await page.getByRole("button", { name: "Save changes" }).click()
 
-    // The budget now reports one holder, which is the assignment landing.
+    // The budget now reports one holder in its People column, which is the
+    // assignment landing.
+    // Exact: the row also holds "$100.00" and a "Select row ..." checkbox, both
+    // of which substring-match a bare "1".
     await expect(
-      page.getByRole("row", { name: /e2e-budget/ }).getByText("1"),
+      page
+        .getByRole("row", { name: /e2e-budget/ })
+        .getByRole("gridcell", { name: "1", exact: true }),
     ).toBeVisible()
   })
 
