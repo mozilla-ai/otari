@@ -1990,9 +1990,11 @@ const ACTIVATION_POLL_MS = 4_000
 /**
  * Where the selected workspace stands on its first successful request.
  *
- * Polls while `enabled` and while the workspace has not activated, then stops of
- * its own accord: at that point the answer cannot change again, and what the
- * card shows next is the payoff screen rather than another reading.
+ * Polls only while the guide is actually being offered, which is also the only
+ * state whose answer can still change on its own. A workspace that activated
+ * cannot go back, and one whose guide was dismissed (or turned off for the
+ * deployment) has nothing to wait for, so both stop the interval rather than
+ * asking every few seconds for the life of the page.
  */
 export function useWorkspaceActivation(
   workspaceId: string | null,
@@ -2006,9 +2008,7 @@ export function useWorkspaceActivation(
       ),
     enabled: enabled && workspaceId !== null,
     refetchInterval: (query) =>
-      query.state.data && query.state.data.status !== "activated"
-        ? ACTIVATION_POLL_MS
-        : false,
+      query.state.data?.experience_eligible ? ACTIVATION_POLL_MS : false,
     // A failed check is reported on the card, which offers "Check now": retrying
     // twice behind the operator's back would only delay that by a poll interval.
     ...NO_RETRY,
