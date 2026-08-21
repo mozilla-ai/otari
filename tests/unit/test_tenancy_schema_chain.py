@@ -61,7 +61,7 @@ _CREDENTIAL_COLUMNS = {
 _TOKEN_INDEX = "ix_user_email_verification_token"
 
 _TOKEN_REVISION = "db8fbf901ee0"
-_BEFORE_TOKENS = "a7c3e5d9b1f4"
+_BEFORE_TOKENS = "c8e2a4f6b0d3"
 _TOKEN_COLUMNS = {
     "email_verification_token_hash",
     "email_verification_token_expires_at",

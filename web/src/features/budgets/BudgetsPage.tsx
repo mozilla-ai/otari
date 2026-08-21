@@ -353,7 +353,8 @@ function ResetHistory({ budgetId }: { budgetId: string }) {
   if (logs.isLoading) {
     return (
       <div className="flex items-center gap-2 px-4 py-4 text-sm text-muted">
-        <Spinner size="sm" /> Loading reset history…
+        {/* Decorative: the text beside it is the more specific announcement. */}
+        <Spinner size="sm" aria-hidden="true" /> Loading reset history…
       </div>
     )
   }

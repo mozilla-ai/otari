@@ -55,6 +55,20 @@ status `-subtle` fills, `bg-primary-subtle`, `text-primary-subtle-foreground`, t
 family, `shadow-elevation-sm/md/lg`, `shadow-modal`, and `font-sans` / `font-mono` /
 `font-display`.
 
+That is Tailwind v4's own model rather than a local invention: a variable in `@theme` generates
+the utilities for its namespace (`--color-*` the color utilities, `--radius-*` the `rounded-*`
+family, `--font-*` the font ones), which is why a token is consumed as a utility and not by
+name. One mechanic is worth knowing before you add a token that is an alias of another. Tailwind
+asks for `@theme inline` when a theme variable references a second variable, because a
+non-`inline` entry is substituted where it is declared, at `:root`, rather than at the element
+using it. This file's `@theme` block is not `inline`, and the reason it still follows a theme
+switch is the convention that every theme block declares the complete set: `--color-attention`
+and friends are self-referential registrations whose real values live in the light and dark
+blocks, and an alias like `--color-background-alt` is re-declared in each block rather than only
+in `@theme`. So when you add one, put it in both theme blocks (which `foundation.test.ts`
+enforces) or make the registration `inline`; a lone `@theme` alias resolves once, at the root,
+and stops tracking the theme.
+
 Two of those name a pairing rather than a color, and are the ones easiest to get wrong.
 **Text on a `-subtle` fill is not the fill's own color**: `text-primary-subtle-foreground` is
 what goes on `bg-primary-subtle` (the brand teal on the brand tint is 3.8:1, under AA), while
@@ -117,6 +131,46 @@ background at all rather than with `--color-surface`. Copying one of those class
 would carry the bug across, silently, because a class that does not exist fails at no stage of
 the build.
 
+### The alias surface is not only color
+
+The mapping above is color because color is what has needed it so far, not because that is as
+far as it goes. HeroUI's own theming guide documents a wider surface, and `@heroui/styles`'s
+README lists it under "CSS Variables": alongside the colors sit `--radius` (with `--radius-xs`
+through `--radius-4xl` calculated from it in `dist/themes/shared/theme.css`, so `--radius-2xl`
+is `calc(var(--radius) * 2)`), `--field-radius`, `--spacing`, `--border-width`,
+`--field-border-width`, `--ring-offset-width`, `--disabled-opacity`, `--cursor-interactive` /
+`--cursor-disabled` and the `--scrollbar-*` family, all declared in
+`dist/themes/default/variables.css`. This repo aliases none of them, so a component's corner
+radius, its disabled dimming and its pointer all come from HeroUI's defaults rather than from
+anything we name.
+
+**Only the color half belongs in both theme blocks.** A color token is declared twice because
+its whole job is to hold a light value and a dark one, which is what lets a component adapt
+without a `dark:` at the call site, and HeroUI says the same thing about its own ("define in
+both light and dark themes"). A radius, a cursor, or a disabled opacity does not change between
+themes, so it is one declaration, not a pair kept in sync for no reason. What the two halves
+share is the rule that matters: the value lives in one named place, and a component reads it.
+Never a hex, never a numbered Tailwind palette class, never `bg-white`, because those three do
+not adapt and nothing downstream can make them.
+
+That is a gap rather than a decision, and it decides how much work a visual fix is. A value
+computed from a variable is one alias away from being ours; the same value chased through the
+rules that read it is a selector to keep in sync with somebody else's internals, forever. A
+table whose body corners are drawn at `min(32px, var(--radius-2xl))`, which is 16px, inside a
+12px container is the case that made this concrete: flattening them through
+`.table__body tr:first-child td:first-child` works, and setting the variable on the table root
+does the same job to every rule that reads it, including the ones nobody has hit yet. So when
+something looks wrong, search `node_modules/@heroui/styles/dist/` for the property before
+writing a rule against it. If a variable is behind it, set it where its scope actually is: with
+the theme when the decision is system-wide (adding a role to the families above if it is one of
+ours), or on the component's own root when it is local. Scoping a variable to a subtree is our
+extension rather than something HeroUI's guide demonstrates, and it inherits, so check what else
+inside that subtree reads it, and scope **the variable the rule reads**: a derived custom
+property is substituted where it is declared, so `--radius-2xl` computed at `:root` keeps the
+root's value inside a subtree that redefines `--radius`.
+[components.md](./components.md) has the full order to work
+through.
+
 ## Type scale
 
 Seven roles, each an `@utility` in the same file. Pick the one whose **meaning** matches the
@@ -149,7 +203,12 @@ covers them.
 ## What stayed in otari-ai
 
 Its marketing type roles, pre-login gradient, activation-modal and border-beam tokens, and
-HubSpot patch dress a public site and a hosted signup that do not exist here.
+HubSpot patch dress a public site and a hosted signup that do not exist here. The
+first-request setup guide *is* ported (`features/onboarding/SetupGuideCard.tsx`), and it
+deliberately dresses itself in the status and surface families rather than bringing that
+bespoke `activation-*` set with it: a panel on the Overview page is a card with a status
+row, so the roles the foundation already names are the right ones, and a family with one
+consumer is a second palette to keep in step for no reader benefit.
 
 Its `shared/components/ui/adapters/` layer stayed too, and that one is worth knowing about,
 because it is the obvious thing to reach for and it should not be reached for. It is a HeroUI
@@ -210,3 +269,12 @@ The `otari-` prefix that survives on a handful of **class** names (`.otari-table
 `.otari-markdown`, `.otari-detail-row`, `.otari-bulk-bar`) is unrelated: it is the app's
 namespace for a hook that has to reach inside a HeroUI component's DOM, and those rules
 consume `--color-*` like everything else.
+
+The namespace existing is not the same as the approach being recommended. HeroUI supports a
+rule against its own classes, so the reason this one is last of the four ways to change how
+something looks, after a variable, a wrapper or utility, and the component's own props, is not
+permission: a rule fixes one selector where a variable fixes every rule that reads it, it is
+invisible from the call site, and because these rules are unlayered they outrank a Tailwind
+class at the call site too, so they take away the ability to restyle from the place that would
+most naturally do it. [components.md](./components.md) has the order and the reasoning. When a
+rule really is the only way, name in its comment which of the three does not reach the value.

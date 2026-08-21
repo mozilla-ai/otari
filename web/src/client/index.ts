@@ -53,6 +53,17 @@ export type GatewayHealth =
   operations["health_check_health_get"]["responses"][200]["content"]["application/json"]
 
 // ---------------------------------------------------------------------------
+// Dashboard sign-in credentials
+//
+// `PUT /v1/auth/password` always acts on the caller's own identity, so there is
+// no id in either shape. The session exchange itself is not here: it predates
+// the generated client and stays hand-written in `shared/api/client.ts` with
+// the 401 bounce it shares a file with.
+// ---------------------------------------------------------------------------
+export type SetPasswordRequest = Schemas["SetPasswordRequest"]
+export type PasswordResponse = Schemas["PasswordResponse"]
+
+// ---------------------------------------------------------------------------
 // Usage and analytics
 // ---------------------------------------------------------------------------
 export type UsageEntry = Schemas["UsageEntry"]
@@ -360,5 +371,17 @@ export type CreateWorkspaceBudgetDefaultRequest =
   Schemas["WorkspaceMemberBudgetPolicyCreate"]
 export type UpdateWorkspaceBudgetDefaultRequest =
   Schemas["WorkspaceMemberBudgetPolicyUpdate"]
+
+// The first-request setup guide's state, and the API key it issues. The wire
+// names carry the platform's "activation" vocabulary (see
+// `src/gateway/services/tenancy/workspace_activation_service.py`); the
+// dashboard calls the thing an operator sees the setup guide.
+export type WorkspaceActivation = Schemas["WorkspaceActivationPublic"]
+export type ActivationAttempt = Schemas["ActivationAttemptPublic"]
+export type ActivationApiKey = Schemas["ActivationApiKeyPublic"]
+/** The failure classes the guide's copy is written for. */
+export type ActivationErrorCategory = NonNullable<
+  ActivationAttempt["error_category"]
+>
 
 export type * from "./local"

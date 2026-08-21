@@ -94,6 +94,11 @@ the PR that answered it,
 [#678](https://github.com/mozilla-ai/otari/pull/678). Read both before building any of
 #654, #656, #657 or #658, each of which settles its own surface under the rule above.
 
+## The first-request setup guide
+`services/tenancy/workspace_activation_service.py` is the state behind the dashboard's setup guide (`routes/workspace_activation.py`, `/v1/workspaces/{id}/activation`): whether to offer it, the API key it hands out, what the workspace's traffic says about the attempt, and the dismissal that retires it. Ported from the platform's `WorkspaceActivationService`, and the one departure to know is that **activation is derived, not recorded**: the first successful `source="gateway"` row in `usage_logs` for the workspace *is* the evidence, read through `ix_usage_logs_workspace_source_status_timestamp`. The platform stores that telemetry in columns because its usage pipeline is asynchronous and crosses services; here the row is written by this process into this database, so a second copy could only drift. `workspace_activation_state` therefore holds one row per workspace carrying what cannot be observed elsewhere (the dismissal, when a key was last issued, and which key it was).
+
+Two consequences worth keeping. Imported usage (`POST /v1/usage/external-events`) is excluded, so a workspace whose only rows came from an import has still never called this gateway; and `absorbed` rows are excluded from the latest-attempt read, because a failed attempt a routing policy recovered from is not the request's outcome. Issuing the key is a workspace management action (`authorization.require_workspace_management_access`) and rotates one `api_keys` row in place rather than minting a second, while `GET` is readable by any member and answers `experience_eligible: false` for one who may not act. `config.activation_guide` turns the whole flow off without unmounting the endpoints.
+
 ## Data, sessions, migrations
 ORM entities are in `src/gateway/models/entities.py` (User, APIKey, Budget, ScopedBudget, UsageLog, ModelPricing, BudgetResetLog). The async engine/session factory and `init_db` live in `src/gateway/core/database.py`; routes get a session via the `get_db` dependency, non-request code uses `create_session()`. Alembic migrations are in `alembic/versions/` and run on startup when `auto_migrate` is set.
 

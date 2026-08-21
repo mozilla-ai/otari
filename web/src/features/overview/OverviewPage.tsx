@@ -3,6 +3,7 @@ import type { LinkProps } from "@tanstack/react-router"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { useEffect, useMemo, useState } from "react"
 import type { UsageEntry } from "@/client"
+import { SetupGuideCard } from "@/features/onboarding/SetupGuideCard"
 import {
   budgetHealth,
   errorRateHealth,
@@ -113,6 +114,7 @@ export function OverviewIndex() {
   return (
     <OverviewPage
       needsSetup={providers.isSuccess && providers.data.providers.length === 0}
+      hasProviders={providers.isSuccess && providers.data.providers.length > 0}
       setupError={providers.error}
       refreshSetup={providers.refetch}
       setupFetching={providers.isFetching}
@@ -122,11 +124,20 @@ export function OverviewIndex() {
 
 export function OverviewPage({
   needsSetup = false,
+  hasProviders = false,
   setupError,
   refreshSetup,
   setupFetching = false,
 }: {
   needsSetup?: boolean
+  /**
+   * Whether a provider is configured, which is the *other* answer the same
+   * query gives: `needsSetup` is only true once it has succeeded and found
+   * none, so its negation would also cover a failed query. The setup guide
+   * needs the positive form, and takes it from here rather than asking again
+   * (see `SetupGuideCard`).
+   */
+  hasProviders?: boolean
   setupError?: unknown
   refreshSetup?: () => void
   setupFetching?: boolean
@@ -258,6 +269,11 @@ export function OverviewPage({
       />
 
       {showGettingStarted ? <GettingStartedPanel /> : null}
+      {/* The step after that one: a provider exists, so the guide can hand out a
+          key and watch for the first request. It decides for itself whether to
+          render, including holding back while there is no provider, which is
+          when the panel above is the right guide instead. */}
+      <SetupGuideCard hasProviders={hasProviders} />
 
       <ErrorBanner error={loadError} />
 

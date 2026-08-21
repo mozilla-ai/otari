@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { screen, waitFor } from "@testing-library/react"
+import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
@@ -8,7 +8,7 @@ import { RateOverridesCard } from "@/features/organization/RateOverridesCard"
 import { organizationContext } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
 
-interface Request {
+interface RecordedRequest {
   url: string
   method: string
   body: unknown
@@ -56,7 +56,7 @@ function mockApi({
   writeStatus?: number
   writeBody?: unknown
 } = {}) {
-  const requests: Request[] = []
+  const requests: RecordedRequest[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
     const url = String(input)
     const method = (init?.method ?? "GET").toUpperCase()
@@ -105,20 +105,30 @@ describe("RateOverridesCard", () => {
       await screen.findByRole("heading", { name: /rate overrides/i }),
     ).toBeInTheDocument()
     expect(await screen.findByText("openai:gpt-4o")).toBeInTheDocument()
-    expect(await screen.findByText("$2.5000")).toBeInTheDocument()
+    expect(await screen.findByText("$2.50")).toBeInTheDocument()
     expect(await screen.findByText(/^From /)).toBeInTheDocument()
     expect(await screen.findByText("Active")).toBeInTheDocument()
   })
 
-  // A blank optional rate means the tokens are priced as fresh input. Rendering
-  // it as "$0.0000" would claim the organization negotiated a free cache read.
   it("shows an unset cache rate as absent rather than as zero", async () => {
     mockApi({ overrides: [pricingOverride()] })
 
     await renderPage()
 
-    await screen.findByText("openai:gpt-4o")
-    expect(screen.queryByText("$0.0000")).not.toBeInTheDocument()
+    const row = (await screen.findByText("openai:gpt-4o")).closest(
+      '[role="row"]',
+    )
+    expect(row).not.toBeNull()
+    const cells = within(row as HTMLElement)
+
+    // `formatCost` renders null as "$0.00", so the absent check has to sit in
+    // front of it; an unset cache rate must read as "no rate stored", not as a
+    // negotiated zero.
+    expect(cells.queryByText("$0.00")).not.toBeInTheDocument()
+    // Scoped to this row, and counted: page-scoped it would pass on the right
+    // total while proving nothing about which cells are absent, since an
+    // unrelated cell could supply or remove a match. Two is both cache columns.
+    expect(cells.getAllByText("—")).toHaveLength(2)
   })
 
   it("explains itself when the organization has no overrides", async () => {

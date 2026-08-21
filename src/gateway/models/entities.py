@@ -545,6 +545,21 @@ class UsageLog(Base):
         # query. status is low-cardinality; model is high-cardinality and left
         # unindexed on purpose.
         Index("ix_usage_logs_status_timestamp", "status", "timestamp"),
+        # Supports the setup guide's two questions about one workspace: has any
+        # request in it ever succeeded (oldest first), and what did the last one
+        # do (newest first). Both filter a workspace, a source and a status and
+        # then order by time, which the workspace-only and status-first indexes
+        # above can each answer only halfway: on a deployment with real traffic
+        # the guide would otherwise scan the workspace's rows on every dashboard
+        # load, and where usage is imported as well most of those rows are the
+        # wrong source anyway. Equality columns first, the ordering column last.
+        Index(
+            "ix_usage_logs_workspace_source_status_timestamp",
+            "workspace_id",
+            "source",
+            "status",
+            "timestamp",
+        ),
         # Idempotency for imported usage: re-submitting the same (source,
         # source_event_id) must not create a second row. Gateway-originated rows
         # keep source_event_id NULL, and SQL treats NULLs as distinct on both
@@ -1235,6 +1250,62 @@ class WorkspaceBudgetDefault(Base):
     # a plain ``DateTime(timezone=True)`` round-trips naive, so the wire value
     # would carry no offset and a browser would read it as local time.
     # ``UtcDateTime.impl`` is ``DateTime(timezone=True)``, so the DDL is unchanged.
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+
+class WorkspaceActivationState(Base):
+    """What the dashboard's first-request setup guide remembers about a workspace.
+
+    The guide walks a workspace from "no traffic" to its first successful
+    request (`services/tenancy/workspace_activation_service.py`). Only what
+    cannot be observed elsewhere is stored here: whether someone dismissed it,
+    when it last handed out a key, and which key that was. Whether the workspace
+    has *activated* is deliberately not a column, because ``usage_logs`` already
+    records it: the first successful gateway request in the workspace is the
+    evidence, so there is no second copy of it to backfill or to disagree with
+    the Activity page.
+
+    Ported from the platform's ``workspace_activation_state`` /
+    ``workspace_activation_experience_state`` pair
+    (`otari-ai` `backend/app/models/workspace_activation.py`), which does carry
+    the attempt telemetry as columns, because its usage pipeline is asynchronous
+    and crosses services. Here the usage row is written by this process into this
+    database, so the derivation is exact.
+
+    One row per workspace, not per workspace and viewer: the guide is about a
+    workspace's first request, so dismissing it says "this workspace is set up,
+    stop offering the guide" for everyone who can manage it.
+    """
+
+    __tablename__ = "workspace_activation_state"
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), primary_key=True
+    )
+    # When the guide first and last minted an API key for this workspace. The
+    # first is what an operator reads as "when was this offered"; the last is
+    # what makes a rotation visible next to the key it rotated.
+    first_presented_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
+    last_presented_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
+    # Set by Skip, and permanent: the guide is a first-run offer, so a workspace
+    # that turned it down is not asked again on the next page load.
+    dismissed_at: Mapped[datetime | None] = mapped_column(UtcDateTime(), default=None)
+    # The key the guide issued, rotated in place on each presentation so a
+    # workspace collects one "Setup guide" key rather than one per page load.
+    # ``SET NULL`` because deleting that key from the Keys page is a legitimate
+    # thing to do, and it must not take this row (or the dismissal on it) with it.
+    api_key_id: Mapped[str | None] = mapped_column(
+        ForeignKey("api_keys.id", ondelete="SET NULL"), default=None, index=True
+    )
+    # ``UtcDateTime`` rather than ``DateTime(timezone=True)`` for the same reason
+    # ``WorkspaceBudgetDefault`` above uses it: on SQLite, which this edition
+    # ships by default, the plain type round-trips naive and a browser would read
+    # the value as local time.
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
         UtcDateTime(),

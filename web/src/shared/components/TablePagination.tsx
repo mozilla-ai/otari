@@ -101,7 +101,10 @@ export function TablePagination({
             label: String(size),
           }))}
         />
-        {isFetching ? <Spinner size="sm" /> : null}
+        {/* A background refetch is not worth announcing on every page change,
+            so this stays out of the a11y tree rather than being HeroUI's own
+            role="status" region. The row summary beside it is the live text. */}
+        {isFetching ? <Spinner size="sm" aria-hidden="true" /> : null}
       </div>
 
       <div className="flex items-center gap-3">

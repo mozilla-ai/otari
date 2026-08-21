@@ -6,6 +6,7 @@ import {
 } from "@tanstack/react-query"
 import type {
   AcceptInvitationResult,
+  ActivationApiKey,
   AliasResponse,
   ApiKey,
   Budget,
@@ -40,6 +41,7 @@ import type {
   OrganizationContext,
   OrganizationMember,
   OrganizationPricingOverride,
+  PasswordResponse,
   PricingRefreshPreview,
   PricingResponse,
   ProviderHealthResponse,
@@ -54,6 +56,7 @@ import type {
   SearchToolsResponse,
   SendTestMailRequest,
   SendTestMailResponse,
+  SetPasswordRequest,
   SetPricingRequest,
   SetRoutingPolicyRequest,
   StoredProvider,
@@ -88,6 +91,7 @@ import type {
   UsageSummary,
   User,
   Workspace,
+  WorkspaceActivation,
   WorkspaceBudgetDefault,
   WorkspaceMember,
   WorkspaceMemberRole,
@@ -130,6 +134,11 @@ const ORGANIZATION_MEMBERS = "organization-members"
 // edit should not make all of them refetch.
 const ORGANIZATION_PRICING = "organization-pricing"
 const WORKSPACES = "workspaces"
+// The first-request setup guide's state. Its own key rather than a child of
+// WORKSPACES: the guide polls while it is on screen, and nesting it would make
+// every one of those ticks invalidate (or be invalidated by) the workspace list
+// and its rosters.
+const ACTIVATION = "workspace-activation"
 
 // How often an open tab asks whether the app it is running is still the one the
 // gateway serves. Cheap (a hash of one small file) and only while the tab is
@@ -604,6 +613,40 @@ export function useRotateMasterKey() {
       apiFetch<RotateMasterKeyResponse>("/v1/settings/master-key/rotate", {
         method: "POST",
       }),
+  })
+}
+
+/**
+ * Set or change the password the signed-in identity uses to reach this
+ * dashboard (`PUT /v1/auth/password`).
+ *
+ * Always the caller's own identity: the endpoint takes no id, and there is
+ * deliberately no way for an operator to set somebody else's password. The
+ * first call on a deployment supplies an address as well, which is the act that
+ * claims it and retires master-key sign-in (otari-ai#1716).
+ *
+ * Two things this changes are cached elsewhere, and they are cached
+ * differently. The bootstrap's `sign_in_methods` is a context read once per
+ * load rather than a query, so no invalidation could reach it: the caller
+ * reports the claim through `useRetireMasterKeySignIn` instead. The roster is
+ * an ordinary query, and a claim writes `user.email` from null to the address,
+ * so the Members page would otherwise show the row it fetched before the claim
+ * for the rest of its `staleTime`. That one is invalidated here.
+ *
+ * Every *other* session this identity holds is revoked server-side; this one is
+ * kept, so no 401 follows.
+ */
+export function useSetPassword() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: SetPasswordRequest) =>
+      apiFetch<PasswordResponse>("/v1/auth/password", {
+        method: "PUT",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_MEMBERS] })
+    },
   })
 }
 
@@ -1930,5 +1973,80 @@ export function useDeleteOrganizationPricing() {
         method: "DELETE",
       }),
     onSuccess: () => invalidateOrganizationPricing(queryClient),
+  })
+}
+
+// ---------------------------------------------------------------------------
+// The first-request setup guide
+// ---------------------------------------------------------------------------
+
+// How often the guide asks whether the workspace's first request has landed.
+// Only while it is on screen and still waiting (the card passes `enabled`), and
+// the answer is one or two indexed reads server-side, so this is the interval
+// that makes "send the request, watch it arrive" feel live without polling for a
+// dashboard nobody is looking at.
+const ACTIVATION_POLL_MS = 4_000
+
+/**
+ * Where the selected workspace stands on its first successful request.
+ *
+ * Polls only while the guide is actually being offered, which is also the only
+ * state whose answer can still change on its own. A workspace that activated
+ * cannot go back, and one whose guide was dismissed (or turned off for the
+ * deployment) has nothing to wait for, so both stop the interval rather than
+ * asking every few seconds for the life of the page.
+ */
+export function useWorkspaceActivation(
+  workspaceId: string | null,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: [ACTIVATION, workspaceId],
+    queryFn: () =>
+      apiFetch<WorkspaceActivation>(
+        `/v1/workspaces/${encodeURIComponent(workspaceId as string)}/activation`,
+      ),
+    enabled: enabled && workspaceId !== null,
+    refetchInterval: (query) =>
+      query.state.data?.experience_eligible ? ACTIVATION_POLL_MS : false,
+    // A failed check is reported on the card, which offers "Check now": retrying
+    // twice behind the operator's back would only delay that by a poll interval.
+    ...NO_RETRY,
+  })
+}
+
+// Issues the workspace's setup key and returns its plaintext exactly once, like
+// `useCreateKey`: the caller shows it and must never write the response into the
+// query cache. KEYS is invalidated because the key it rotates is an ordinary row
+// on the Keys page, and ACTIVATION because the guide's state now records it.
+export function useCreateActivationKey() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (workspaceId: string) =>
+      apiFetch<ActivationApiKey>(
+        `/v1/workspaces/${encodeURIComponent(workspaceId)}/activation/key`,
+        { method: "POST" },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [KEYS] })
+      void queryClient.invalidateQueries({ queryKey: [ACTIVATION] })
+    },
+  })
+}
+
+// Permanent, and idempotent server-side. Only ACTIVATION is invalidated:
+// dismissing retires the card and leaves the key it issued alone, so nothing on
+// the Keys page changed.
+export function useDismissActivation() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (workspaceId: string) =>
+      apiFetch<{ message: string }>(
+        `/v1/workspaces/${encodeURIComponent(workspaceId)}/activation/dismiss`,
+        { method: "POST" },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [ACTIVATION] })
+    },
   })
 }

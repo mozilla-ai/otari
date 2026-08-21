@@ -8,6 +8,7 @@ request actually bills at the override rate.
 """
 
 import uuid
+from collections.abc import Iterator
 from datetime import UTC, datetime, timedelta
 from typing import Any
 
@@ -15,6 +16,7 @@ import pytest
 from fastapi import status
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -45,6 +47,20 @@ from gateway.services.workspace_scope import (
 
 _ENDPOINT = "/v1/organizations/me/pricing"
 _MODEL_KEY = "openai:gpt-4o"
+
+
+@pytest.fixture(autouse=True)
+def _isolate_the_workspace_cache() -> Iterator[None]:
+    """The key-to-workspace memo is process-global, so clear it either side.
+
+    Structural rather than remembered: several tests here delete or re-mint the
+    rows the memo caches, and one deliberately deletes a workspace out from under
+    it to prove the cache is real. Leaving that entry behind made the next test's
+    correctness depend on it calling the reset itself.
+    """
+    reset_key_workspace_cache()
+    yield
+    reset_key_workspace_cache()
 
 
 def _body(**overrides: Any) -> dict[str, Any]:
@@ -330,14 +346,21 @@ def test_an_unknown_override_id_is_a_404(
 
 
 def test_the_endpoints_require_the_master_key(client: TestClient) -> None:
-    assert client.get(_ENDPOINT).status_code in {
-        status.HTTP_401_UNAUTHORIZED,
-        status.HTTP_403_FORBIDDEN,
-    }
-    assert client.post(_ENDPOINT, json=_body()).status_code in {
-        status.HTTP_401_UNAUTHORIZED,
-        status.HTTP_403_FORBIDDEN,
-    }
+    """Every verb, not only the reads.
+
+    The writes are what an unauthenticated caller most wants, so a regression that
+    dropped the dependency from just the PUT or DELETE route would pass a test
+    that only exercised GET and POST.
+    """
+    unauthenticated = {status.HTTP_401_UNAUTHORIZED, status.HTTP_403_FORBIDDEN}
+    # Any id: auth is refused before the route looks for the row, so this must not
+    # be a 404.
+    absent = f"{_ENDPOINT}/{uuid.uuid4()}"
+
+    assert client.get(_ENDPOINT).status_code in unauthenticated
+    assert client.post(_ENDPOINT, json=_body()).status_code in unauthenticated
+    assert client.put(absent, json=_body()).status_code in unauthenticated
+    assert client.delete(absent).status_code in unauthenticated
 
 
 def test_the_list_is_paged_and_counts_the_whole_set(
@@ -584,7 +607,6 @@ async def test_a_keys_request_resolves_its_organizations_override(async_db: Asyn
     workspace, the workspace names the organization, and the organization's rate
     is what prices the request. Nothing here reads a header.
     """
-    reset_key_workspace_cache()
     organization = await OrganizationRepository(async_db).create_organization(
         name="Acme", slug="acme-settles", created_by_user_id=None
     )
@@ -621,7 +643,6 @@ async def test_a_keys_request_resolves_its_organizations_override(async_db: Asyn
     assert pricing.input_price_per_million == 2.5, "the request must price at the organization's rate"
 
     # And a key in another organization's workspace is unaffected.
-    reset_key_workspace_cache()
     other = await OrganizationRepository(async_db).create_organization(
         name="Other", slug="other-settles", created_by_user_id=None
     )
@@ -720,7 +741,6 @@ async def test_a_workspace_resolves_to_its_organization_once_and_stays_cached(
     async_db: AsyncSession,
 ) -> None:
     """The memo is what keeps the per-lookup cost off the request path."""
-    reset_key_workspace_cache()
     organization = await OrganizationRepository(async_db).create_organization(
         name="Acme", slug="acme-cache", created_by_user_id=None
     )
@@ -743,6 +763,148 @@ async def test_a_workspace_resolves_to_its_organization_once_and_stays_cached(
 @pytest.mark.asyncio
 async def test_an_unknown_workspace_resolves_to_no_organization(async_db: AsyncSession) -> None:
     """None rather than raising: a missing workspace must not fail a priced request."""
-    reset_key_workspace_cache()
-
     assert await organization_for_workspace_id(async_db, uuid.uuid4()) is None
+
+
+@pytest.mark.asyncio
+async def test_a_racing_duplicate_period_is_a_conflict_not_an_integrity_error(
+    async_db: AsyncSession,
+) -> None:
+    """The unique index refuses the second writer, and that is a 409's business.
+
+    The service's overlap check is enough single-threaded, so this simulates the
+    race by disabling it: two writers that both passed the check reach ``flush``,
+    where the index refuses the second. That refusal arrives before the route's
+    ``commit``, so without mapping it at the flush boundary it escaped as a 500
+    and told the caller to retry what was really a conflict.
+    """
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Acme", slug="acme-race", created_by_user_id=None
+    )
+    owner = await _identity(async_db, organization, role="owner", name="owner person")
+    service = OrganizationPricingService(async_db)
+    rates = _rates()
+
+    await service.create_for_caller(owner, _MODEL_KEY, rates)
+    await async_db.commit()
+
+    async def _no_overlap_check(**_kwargs: object) -> None:
+        return None
+
+    # Stand in for a second writer whose check passed concurrently with the first.
+    service.raise_if_overlapping = _no_overlap_check  # type: ignore[method-assign]
+
+    with pytest.raises(OrganizationPricingOverlapError) as caught:
+        await service.create_for_caller(owner, _MODEL_KEY, rates)
+
+    assert caught.value.status_code == 409
+    assert _MODEL_KEY in caught.value.message
+
+
+@pytest.mark.asyncio
+async def test_the_race_conflict_names_the_period_it_actually_hit(
+    async_db: AsyncSession,
+) -> None:
+    """The 409 describes the stored row's period, not the candidate's start.
+
+    The first version fabricated an open end from the candidate's own start and
+    passed it as ``existing_period``, so the message told the operator about a
+    period that was not the one in the way.
+    """
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Acme", slug="acme-race-message", created_by_user_id=None
+    )
+    owner = await _identity(async_db, organization, role="owner", name="owner person")
+    service = OrganizationPricingService(async_db)
+    start = datetime.now(UTC)
+    bounded = _rates(effective_from=start, effective_to=start + timedelta(days=1))
+
+    await service.create_for_caller(owner, _MODEL_KEY, bounded)
+    await async_db.commit()
+
+    async def _no_overlap_check(**_kwargs: object) -> None:
+        return None
+
+    service.raise_if_overlapping = _no_overlap_check  # type: ignore[method-assign]
+
+    with pytest.raises(OrganizationPricingOverlapError) as caught:
+        await service.create_for_caller(owner, _MODEL_KEY, bounded)
+
+    # The stored row is bounded, so the message must not claim "onwards".
+    assert "onwards" not in caught.value.message
+    assert bounded.effective_to is not None
+    assert bounded.effective_to.isoformat() in caught.value.message
+
+
+@pytest.mark.asyncio
+async def test_a_check_violation_is_not_reported_as_a_conflict(
+    async_db: AsyncSession,
+) -> None:
+    """Only the unique-index race is a conflict; other integrity failures are not.
+
+    A broad ``except IntegrityError`` that always mapped to 409 told the caller
+    another writer had taken the period when nothing of the kind had happened.
+    The row is read back to prove which failure it was.
+    """
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Acme", slug="acme-check", created_by_user_id=None
+    )
+    owner = await _identity(async_db, organization, role="owner", name="owner person")
+    service = OrganizationPricingService(async_db)
+
+    # The service's own rate validation would refuse this first, so bypass it to
+    # reach the table's CHECK, which is the constraint under test.
+    def _no_rate_check(_override: PricingOverrideInput) -> None:
+        return None
+
+    import gateway.services.organization_pricing_service as module
+
+    original = module.validate_rates
+    module.validate_rates = _no_rate_check  # type: ignore[assignment]
+    try:
+        with pytest.raises(IntegrityError):
+            await service.create_for_caller(owner, _MODEL_KEY, _rates(input_price_per_million=-1.0))
+    finally:
+        module.validate_rates = original
+
+
+@pytest.mark.asyncio
+async def test_an_update_that_fails_for_another_reason_is_not_reported_as_a_conflict(
+    async_db: AsyncSession,
+) -> None:
+    """The replace path must not find itself in the post-rollback read-back.
+
+    The rollback restores the row being rewritten to its stored period, so an
+    update that keeps that period and fails the flush for some other reason (here
+    the table's rate CHECK) matched itself and returned a 409 naming the caller's
+    own override. Same reachability as the create-path case above; the difference
+    is that on this path a row legitimately occupies the period already.
+    """
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Acme", slug="acme-update-check", created_by_user_id=None
+    )
+    owner = await _identity(async_db, organization, role="owner", name="owner person")
+    service = OrganizationPricingService(async_db)
+    period = _rates()
+    stored = await service.create_for_caller(owner, _MODEL_KEY, period)
+    await async_db.commit()
+    stored_id = stored.id
+
+    def _no_rate_check(_override: PricingOverrideInput) -> None:
+        return None
+
+    import gateway.services.organization_pricing_service as module
+
+    original = module.validate_rates
+    module.validate_rates = _no_rate_check  # type: ignore[assignment]
+    try:
+        # Same period, so the read-back would match the row being rewritten; the
+        # negative rate is what actually fails the flush.
+        with pytest.raises(IntegrityError):
+            await service.replace_for_caller(
+                owner,
+                stored_id,
+                _rates(input_price_per_million=-1.0, effective_from=period.effective_from),
+            )
+    finally:
+        module.validate_rates = original

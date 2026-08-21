@@ -868,7 +868,14 @@ describe("UsagePage", () => {
     expect(
       screen.queryByRole("img", { name: /over time/ }),
     ).not.toBeInTheDocument()
-    expect(container.querySelector('svg[viewBox="0 0 720 224"]')).toBeNull()
+    // Presence selector plus a value check: jsdom does not match a camelCase
+    // SVG attribute by value, so `svg[viewBox="0 0 720 224"]` would pass here
+    // whether or not the retired chart was still rendered.
+    expect(
+      [...container.querySelectorAll("svg[viewBox]")].map((svg) =>
+        svg.getAttribute("viewBox"),
+      ),
+    ).not.toContain("0 0 720 224")
   })
 
   it("switches the chart metric via the segmented toggle", async () => {

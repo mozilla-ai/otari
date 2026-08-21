@@ -33,6 +33,7 @@ from dataclasses import dataclass
 from datetime import datetime
 
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.models.entities import OrganizationModelPricing
@@ -198,7 +199,7 @@ class OrganizationPricingService:
         """Store a new override, refusing one that overlaps an existing period."""
         organization_id = await self._writable_organization_id(user)
         effective_from = normalize_effective_at(override.effective_from)
-        effective_to = normalize_effective_at(override.effective_to) if override.effective_to else None
+        effective_to = None if override.effective_to is None else normalize_effective_at(override.effective_to)
         validate_period(effective_from, effective_to)
         validate_rates(override)
 
@@ -222,8 +223,64 @@ class OrganizationPricingService:
             effective_to=effective_to,
         )
         self.db.add(row)
-        await self.db.flush()
+        await self._flush_or_conflict(organization_id, model_key, effective_from)
         return row
+
+    async def _flush_or_conflict(
+        self,
+        organization_id: uuid.UUID,
+        model_key: str,
+        effective_from: datetime,
+        *,
+        exclude_id: uuid.UUID | None = None,
+    ) -> None:
+        """Flush, mapping the unique-index race onto the overlap conflict.
+
+        The overlap check above is what refuses an overlapping period, and it is
+        enough single-threaded. Two writers racing on the same period both pass it,
+        and the unique index on ``(organization_id, model_key, effective_from)``
+        refuses the second. That refusal arrives here, at ``flush``, not at the
+        route's ``commit``, so without this it escapes as a 500 and the caller is
+        told to retry something that was really a conflict.
+
+        Which ``IntegrityError`` it was decides the answer, so the row is read
+        back rather than assumed. A row already occupying this period start is the
+        race, and its *own* period is what the message names; anything else (a
+        CHECK violation, a foreign key) is not a conflict anybody caused and
+        propagates unchanged. The ``except`` stays broad because the error's
+        constraint name is dialect-specific, which is how
+        ``OrganizationService.create_active_organization_member_for_user`` handles
+        the same problem.
+
+        ``exclude_id`` is what keeps that read-back honest on the update path. The
+        rollback restores the row being rewritten to its stored period, so an
+        update that keeps its period and fails the flush for some *other* reason
+        would find itself and report a 409 naming the caller's own override.
+        Excluding it mirrors ``raise_if_overlapping``'s parameter of the same name,
+        and for the same reason.
+
+        The rollback is required rather than tidy: a failed flush leaves the
+        session unusable, so anything the caller did next would raise
+        ``PendingRollbackError`` and mask this.
+        """
+        try:
+            await self.db.flush()
+        except IntegrityError:
+            await self.db.rollback()
+            occupant = select(OrganizationModelPricing).where(
+                OrganizationModelPricing.organization_id == organization_id,
+                OrganizationModelPricing.model_key == model_key,
+                OrganizationModelPricing.effective_from == effective_from,
+            )
+            if exclude_id is not None:
+                occupant = occupant.where(OrganizationModelPricing.id != exclude_id)
+            clash = (await self.db.execute(occupant)).scalar_one_or_none()
+            if clash is None:
+                raise
+            raise OrganizationPricingOverlapError(
+                model_key,
+                _describe_period(clash.effective_from, clash.effective_to),
+            ) from None
 
     async def _owned_row(self, organization_id: uuid.UUID, pricing_id: uuid.UUID) -> OrganizationModelPricing:
         """One override, scoped to the organization so another tenant's is a 404."""
@@ -261,7 +318,7 @@ class OrganizationPricingService:
         row = await self._owned_row(organization_id, pricing_id)
 
         effective_from = normalize_effective_at(override.effective_from)
-        effective_to = normalize_effective_at(override.effective_to) if override.effective_to else None
+        effective_to = None if override.effective_to is None else normalize_effective_at(override.effective_to)
         validate_period(effective_from, effective_to)
         validate_rates(override)
 
@@ -281,7 +338,7 @@ class OrganizationPricingService:
         row.pricing_tiers = override.pricing_tiers
         row.effective_from = effective_from
         row.effective_to = effective_to
-        await self.db.flush()
+        await self._flush_or_conflict(organization_id, row.model_key, effective_from, exclude_id=row.id)
         return row
 
     async def delete_for_caller(self, user: TenancyUser, pricing_id: uuid.UUID) -> None:

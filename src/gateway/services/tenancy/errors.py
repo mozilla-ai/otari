@@ -529,6 +529,27 @@ class WorkspaceBudgetDefaultAlreadyExistsError(TenancyConflictError):
         super().__init__(f"Workspace {workspace_id} already has a budget default for {scope}")
 
 
+class WorkspaceActivationUnavailableError(TenancyConflictError):
+    """The first-request setup guide is not on offer for this workspace.
+
+    The deployment turned it off, the workspace is classified out of it, or
+    someone dismissed it. A conflict rather than a 403: the caller is allowed to
+    manage this workspace, the flow they are asking to act on is simply retired,
+    and the message says which of the three it was.
+    """
+
+
+class WorkspaceAlreadyActivatedError(TenancyConflictError):
+    """A request in this workspace has already succeeded, so the guide is finished.
+
+    Reached by a browser tab left open across the first successful request, which
+    is the one caller likely to ask a retired guide for a credential.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("This workspace has already served a successful request")
+
+
 __all__ = [
     "CurrentPasswordIncorrectError",
     "CurrentPasswordRequiredError",
@@ -575,6 +596,8 @@ __all__ = [
     "UnmodifiedPasswordError",
     "VerificationTokenInvalidError",
     "WorkspaceAlreadyExistsError",
+    "WorkspaceActivationUnavailableError",
+    "WorkspaceAlreadyActivatedError",
     "WorkspaceBudgetDefaultAlreadyExistsError",
     "WorkspaceBudgetDefaultNotFoundError",
     "WorkspaceInUseError",

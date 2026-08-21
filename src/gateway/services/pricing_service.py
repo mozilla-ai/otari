@@ -652,10 +652,14 @@ async def _tool_rates(
 
     One statement rather than a lookup per tool: an MCP pool can put up to
     ``MAX_TOOL_NAMES`` distinct names on a single request, and this runs on the
-    settlement path. Rows come back oldest-first so the newest effective row for a key
-    wins the dict assignment, the same "latest as of" rule :func:`find_model_pricing`
-    applies one key at a time. The genai-prices fallback is deliberately not consulted
-    (see the note in :func:`price_tool_calls`).
+    settlement path. Results are assigned into a dict keyed on the tool, so the
+    last row for a tool is the one that wins, and each ``ORDER BY`` below is
+    arranged to make that the right row: least-preferred key spelling first where
+    both are in play, then oldest period first, so the survivor is the canonical
+    spelling's newest applicable row. That is the same precedence
+    :func:`find_model_pricing` applies one key at a time. The genai-prices
+    fallback is deliberately not consulted (see the note in
+    :func:`price_tool_calls`).
     """
     lookup_time = normalize_effective_at(as_of)
     # Both spellings, mapped back to the tool, because the gate that admits the
@@ -667,6 +671,7 @@ async def _tool_rates(
     # ``normalize_pricing_key`` returns a key unchanged when its prefix is an
     # unconfigured instance, so the read side closes the gap rather than trusting
     # that it never happens.
+    canonical_keys = {f"{GATEWAY_TOOL_PRICING_PROVIDER}:{tool}" for tool in tools}
     keys = {
         key: tool
         for tool in tools
@@ -678,7 +683,17 @@ async def _tool_rates(
     stmt = (
         select(ModelPricing)
         .where(ModelPricing.model_key.in_(keys), ModelPricing.effective_at <= lookup_time)
-        .order_by(ModelPricing.effective_at)
+        # Same last-write-wins dict assignment as the override statement below, so
+        # it needs the same key preference. Ordering on time alone let the legacy
+        # spelling win whenever it carried the later ``effective_at``, while
+        # ``find_model_pricing`` gated on the canonical row: the tool was admitted
+        # at one rate and settled at another. This is the likelier half of the two,
+        # because ``model_pricing`` is the table an operator re-imports and it
+        # predates key normalization.
+        .order_by(
+            case((ModelPricing.model_key.in_(canonical_keys), 1), else_=0),
+            ModelPricing.effective_at,
+        )
     )
     found: dict[str, ModelPricing] = {}
     for row in (await db.execute(stmt)).scalars():
@@ -702,9 +717,20 @@ async def _tool_rates(
                     OrganizationModelPricing.effective_to > lookup_time,
                 ),
             )
-            # Oldest first, so the newest applicable period wins the assignment,
-            # matching the rule the statement above uses for deployment rows.
-            .order_by(OrganizationModelPricing.effective_from)
+            # Least-preferred key first, then oldest period first, so the last
+            # write into ``found`` is the canonical spelling's newest applicable
+            # row. Without the key term the winner would be whichever spelling
+            # happened to have the later period, and the same tool could resolve
+            # to a different rate here than through ``find_model_pricing``, which
+            # applies this preference one key at a time.
+            .order_by(
+                # Legacy spelling first, canonical last, so the canonical row is
+                # the one that survives the dict assignment below. Expressed as a
+                # membership test rather than a rank map so it does not depend on
+                # the insertion order of ``keys``.
+                case((OrganizationModelPricing.model_key.in_(canonical_keys), 1), else_=0),
+                OrganizationModelPricing.effective_from,
+            )
         )
         for override in (await db.execute(override_stmt)).scalars():
             found[keys[override.model_key]] = _override_as_model_pricing(override)

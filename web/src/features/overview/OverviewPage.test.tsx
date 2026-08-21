@@ -11,7 +11,8 @@ import {
   OverviewIndex,
   OverviewPage,
 } from "@/features/overview/OverviewPage"
-import { usageTotals } from "@/tests/fixtures"
+import { DeploymentProvider } from "@/shared/hooks/useDeployment"
+import { bootstrap, usageTotals } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -103,7 +104,13 @@ function renderPage(ui: ReactElement, initial = "/overview") {
     defaultOptions: { queries: { retry: false } },
   })
   return render(
-    <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
+    // The page composes the setup guide, which is gated on the deployment's
+    // surfaces, so the bootstrap has to be in the tree even for the tests that
+    // are about a tile. The guide itself renders nothing here: with no
+    // workspace selected there is nothing for it to be about.
+    <QueryClientProvider client={client}>
+      <DeploymentProvider value={bootstrap()}>{ui}</DeploymentProvider>
+    </QueryClientProvider>,
     {
       wrapper: withRouter({
         url: initial,

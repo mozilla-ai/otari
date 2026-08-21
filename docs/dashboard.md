@@ -118,7 +118,15 @@ The master key signs you in because nobody here has a password yet. Giving the
 operator identity an address and a password makes that pair the sign-in from then
 on, which is what you want as soon as more than one person needs the dashboard,
 or as soon as you would rather not paste a deployment-wide credential into a
-browser:
+browser.
+
+In the dashboard, open the account control at the foot of the sidebar and select
+**Account settings**. While the deployment is unclaimed that page asks for an
+address and a password and nothing else, because there is no current password to
+prove. Saving it claims the deployment; you stay signed in, and the page becomes
+the ordinary change-password form.
+
+The same call over HTTP, if you would rather claim from a terminal:
 
 ```bash
 curl -X PUT http://localhost:8000/v1/auth/password \
@@ -140,7 +148,9 @@ Three more things to know before you do it:
   these docs are unaffected.
 - **You cannot lock yourself out of the API.** If you forget the password, run
   the same command again with the master key and a new one; no
-  `current_password` is needed when the master key is in the header.
+  `current_password` is needed when the master key is in the header. This is the
+  one part with no dashboard equivalent, because reaching **Account settings**
+  needs the session you have lost.
 - **It signs out every browser holding a session for that identity**, including
   the one you claimed from if you claimed with `curl`.
 
@@ -176,11 +186,19 @@ finds nothing.
 
 ### 8. Send your first request
 
-The Providers page includes a "Send your first request" snippet you can copy.
-Point any OpenAI-compatible client at the gateway using an Otari API key or the
-master key, and select a model in `provider:model` form (for example
-`openai:gpt-4o`). See the [Quickstart](quickstart.md) for a full end-to-end
-example.
+Go back to **Overview**. Now that a provider exists, the page offers a setup
+guide: press **Create a setup key** and it issues an API key for the selected
+workspace and shows the two calls that use it, with the base URL and a model
+filled in, ready to paste. Leave the page open and it watches the workspace's
+traffic; when your request lands it says so, and if the request fails it names
+the cause and the page that fixes it.
+
+Nothing depends on the guide. Any OpenAI-compatible client pointed at this
+gateway with an Otari API key (or the master key) and a model in
+`provider:model` form does the same thing, and the
+[Quickstart](quickstart.md) is the full end-to-end example. See
+[The setup guide](#the-setup-guide) for what it records and how to turn it
+off.
 
 ### 9. (Optional) Set up keys, users, and budgets
 
@@ -203,9 +221,10 @@ workspace. It is reached from the **Organization** entry at the foot of the
 workspace rail, and left by the link at its top. Users, budgets, and settings
 live there.
 
-At the very bottom sits the account control, which holds account settings, an
-**Appearance** row that cycles through system, light, and dark, the hosted legal
-pages where there are any, and **Log out**. The bundled user guide is
+At the very bottom sits the account control, which holds **Account settings**
+(the password you sign in with), an **Appearance** row that cycles through
+system, light, and dark, the hosted legal pages where there are any, and **Log
+out**. The bundled user guide is
 **Documentation**, in the top bar; on a narrow screen, where the top bar has room
 for the trail and nothing else, the account control carries it instead.
 
@@ -215,6 +234,41 @@ The groups below match the current dashboard, rail by rail.
 
 The landing page. An at-a-glance view of spend, traffic, and health across the
 gateway.
+
+#### The setup guide
+
+Until a workspace has served a successful request, the Overview also carries the
+guide from step 8 above. It is the second half of a pair: with no provider
+configured, this page and the Providers page both say to add one, and once one
+exists the guide takes over and offers the key and the call.
+
+Four things are worth knowing about it:
+
+- **The key it issues is an ordinary API key**, scoped to the selected
+  workspace and listed on the API keys page as **Setup guide**. It is shown
+  once, like every key this gateway mints, so opening the guide again issues a
+  new one and retires the previous one. Issuing it is a workspace management
+  action: an owner or admin of the workspace (or of the organization) sees the
+  offer, and a member who only has read access does not.
+- **"Skip this guide" is permanent, per workspace**, and it retires the card and
+  nothing else. The offer does not come back on the next page load, for you or
+  for a colleague, and the key stays exactly as it is: you asked for it, you may
+  well have pasted it somewhere already, and revoking one is the API keys page's
+  job.
+- **Whether the workspace has activated is read from its own traffic**, not
+  recorded separately: the first successful gateway request in the workspace is
+  what closes the guide. Usage imported through
+  `POST /v1/usage/external-events` deliberately does not count, since it was
+  served by something else.
+- **A deployment can turn the flow off** with `activation_guide: false` (or
+  `OTARI_ACTIVATION_GUIDE=false`). The endpoints stay mounted and report every
+  workspace ineligible, so a dashboard that is already open stops offering it
+  too.
+
+One consequence worth knowing if you are upgrading rather than starting fresh: a
+workspace whose usage arrived only through `POST /v1/usage/external-events` has
+never actually called this gateway, so the guide appears for it after the
+upgrade. Skip retires it, or turn the flow off with the setting above.
 
 ### Observe
 
@@ -588,7 +642,9 @@ put it behind HTTPS, as the security notes below describe.
   minted for, which is what the Organization pages scope themselves to; see
   [Access control](access-control.md#dashboard-sessions-and-identity). Deleting
   or deactivating that identity signs its browsers out immediately rather than
-  when the cookie expires.
+  when the cookie expires. A deactivated identity's sessions are also discarded
+  rather than held, on the next request that presents one, so re-activating it
+  does not hand a cookie that was refused in the meantime its access back.
 - **Log out on a machine you share.** A session runs for its full
   `dashboard_session_ttl_hours` with no idle timeout, so an unattended browser
   stays signed in until the cookie expires. Use **Log out** when you are done on

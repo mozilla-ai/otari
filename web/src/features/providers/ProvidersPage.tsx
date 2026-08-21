@@ -802,7 +802,9 @@ function TestOutcome({ state }: { state: TestState | undefined }) {
   if (state.status === "pending") {
     return (
       <span className="inline-flex items-center gap-1.5 text-xs text-muted">
-        <Spinner size="sm" /> Testing…
+        {/* Hidden rather than left as HeroUI's own role="status": its
+            "Loading" name would contradict the "Testing…" beside it. */}
+        <Spinner size="sm" aria-hidden="true" /> Testing…
       </span>
     )
   }
@@ -988,8 +990,11 @@ function OnboardingPanel({
             works and see how many models it serves.
           </Step>
           <Step n={3} title="Send your first request">
-            Point your app at <code>/v1</code> on this gateway with the API key
-            printed in the server logs (<code>gw-…</code>). See the{" "}
+            Once a provider exists, the <strong>Overview</strong> page usually
+            offers a setup guide that hands you an API key and the call to make.
+            Either way, point your app at <code>/v1</code> on this gateway with
+            an API key (the one printed in the server logs starts{" "}
+            <code>gw-…</code>). See the{" "}
             {/* /welcome is served by the gateway itself, not by a client route, so this
                 stays a plain path anchor: a router Link would resolve to /#/welcome, which
                 the catch-all route sends back to the overview. It leaves the SPA, so open a

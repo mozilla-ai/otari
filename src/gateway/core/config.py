@@ -337,6 +337,15 @@ class GatewayConfig(BaseSettings):
             "lifetime; the master key itself never expires."
         ),
     )
+    activation_guide: bool = Field(
+        default=True,
+        description=(
+            "Offer the dashboard's first-request setup guide in a workspace that has not served "
+            "a successful request yet. False turns the flow off for the whole deployment: the "
+            "endpoints stay mounted and report every workspace ineligible, so a dashboard that "
+            "is already open stops offering it too."
+        ),
+    )
     rate_limit_rpm: int | None = Field(
         default=None, ge=1, description="Maximum requests per minute per user (None disables rate limiting)"
     )

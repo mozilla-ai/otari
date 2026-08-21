@@ -1,7 +1,8 @@
 import { fileURLToPath } from "node:url"
+import babel from "@rolldown/plugin-babel"
 import tailwindcss from "@tailwindcss/vite"
 import { tanstackRouter } from "@tanstack/router-plugin/vite"
-import react from "@vitejs/plugin-react"
+import react, { reactCompilerPreset } from "@vitejs/plugin-react"
 import { defineConfig } from "vitest/config"
 
 // The dashboard is served by the gateway at "/", so we build straight into the
@@ -56,15 +57,21 @@ export default defineConfig({
     // file may export nothing but `Route`. Must precede the React plugin: it
     // rewrites the route modules that plugin then compiles.
     tanstackRouter({ target: "react", autoCodeSplitting: true }),
+    react(),
     // The React Compiler memoizes components and derived values at build time,
     // which is why the frontend standards say not to sprinkle useMemo/useCallback
-    // by hand. It is a Babel pass, so it runs through this plugin's babel hook
-    // rather than as a plugin of its own, and it applies to the app's own source
-    // only (node_modules is excluded by @vitejs/plugin-react's default include).
-    // otari-ai/frontend runs the same pass; keep the two configured alike.
-    react({
-      babel: { plugins: [["babel-plugin-react-compiler", { target: "19" }]] },
-    }),
+    // by hand. It is a Babel pass, and as of @vitejs/plugin-react 6 that plugin no
+    // longer hosts one: the pass runs as its own plugin here, configured by the
+    // `reactCompilerPreset` helper that plugin still exports (a preset over
+    // babel-plugin-react-compiler with the include/exclude filter already set, so
+    // node_modules stays out of it, as the old `include` default did).
+    //
+    // Deliberately Babel and not `react({ compiler: true })`, the plugin's other
+    // route: that one swaps in oxc-transform-react, a Rust reimplementation the
+    // plugin still labels experimental, so it would change which compiler decides
+    // what to memoize. otari-ai/frontend runs the Babel pass; keep the two
+    // configured alike. React 19 is the preset's default target.
+    babel({ presets: [reactCompilerPreset()] }),
     tailwindcss(),
     announceApiTarget,
   ],
@@ -93,24 +100,41 @@ export default defineConfig({
     emptyOutDir: true,
     rollupOptions: {
       output: {
-        manualChunks: {
-          heroui: ["@heroui/react"],
-          react: [
-            "react",
-            "react-dom",
-            "react-dom/client",
-            "react/jsx-runtime",
+        // Vite 8 bundles with Rolldown, which takes the same five vendor chunks as
+        // `codeSplitting.groups` matched on module id rather than as the map of
+        // chunk name to entry module Rollup's `manualChunks` accepted (an object
+        // there is a type error here, and `manualChunks` itself is deprecated).
+        // Each group still pulls its own dependency graph in with it
+        // (includeDependenciesRecursively defaults to true), which is what the
+        // entry-module form used to express.
+        codeSplitting: {
+          groups: [
+            // First, because a tie in `priority` is broken by array order and
+            // React must not be absorbed into whichever vendor group happens to
+            // reach it first. The trailing separator keeps this off react-icons,
+            // react-markdown and react-aria-components.
+            {
+              name: "react",
+              test: /[\\/]node_modules[\\/](react|react-dom|scheduler)[\\/]/,
+            },
+            { name: "heroui", test: /[\\/]node_modules[\\/]@heroui[\\/]/ },
+            {
+              name: "tanstack-query",
+              test: /[\\/]node_modules[\\/]@tanstack[\\/]react-query[\\/]/,
+            },
+            // Its own chunk rather than folded in with React. The router pulls in
+            // @tanstack/router-core, history and store, and putting that graph in
+            // the react chunk reorders the entry's imports enough that HeroUI
+            // evaluates before React's exports exist ("Cannot read properties of
+            // undefined (reading 'createContext')" at first paint).
+            {
+              name: "tanstack-router",
+              test: /[\\/]node_modules[\\/]@tanstack[\\/]react-router[\\/]/,
+            },
+            // recharts (and its d3 deps) is a large, self-contained vendor lib. Split
+            // it out so it loads with the chart-bearing route bundles, not the shell.
+            { name: "recharts", test: /[\\/]node_modules[\\/]recharts[\\/]/ },
           ],
-          "tanstack-query": ["@tanstack/react-query"],
-          // Its own chunk rather than folded in with React. The router pulls in
-          // @tanstack/router-core, history and store, and putting that graph in
-          // the react chunk reorders the entry's imports enough that HeroUI
-          // evaluates before React's exports exist ("Cannot read properties of
-          // undefined (reading 'createContext')" at first paint).
-          "tanstack-router": ["@tanstack/react-router"],
-          // recharts (and its d3 deps) is a large, self-contained vendor lib. Split
-          // it out so it loads with the chart-bearing route bundles, not the shell.
-          recharts: ["recharts"],
         },
       },
     },

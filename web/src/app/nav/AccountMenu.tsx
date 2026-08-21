@@ -1,5 +1,5 @@
 import { Button, Popover } from "@heroui/react"
-import { Link } from "@tanstack/react-router"
+import { Link, type LinkProps } from "@tanstack/react-router"
 import { useState } from "react"
 import type { IconType } from "react-icons"
 import {
@@ -31,15 +31,16 @@ import {
 // appearance, the legal pages, who you are signed in as, and the way out. The
 // design's "Menu member · Linear order" artboard is the order and the geometry.
 //
-// Two of these are real in a standalone gateway. Appearance drives the dark
+// Three of these are real in a standalone gateway. Appearance drives the dark
 // token block globals.css has carried since the design foundation was rehomed,
-// and logging out ends the master-key session. The rest describe a per-user
-// account, and this deployment has one session shared by whoever holds the
-// master key: Account settings and Data & Privacy are disabled with the reason
-// rather than omitted, because they are coming (otari-ai#1716) and a menu that
-// silently lacks them reads as a menu that will never have them. Terms of
-// service is different again, and gated: it is a hosted document, so it appears
-// only for a deployment that has one to point at.
+// logging out ends the session, and Account settings opens the page that owns
+// the credential it was minted from (otari#653): a session is per-identity
+// since otari#647, and the identity holds a password of its own since otari#649,
+// so the row this menu carried disabled from the start now has a destination.
+// Data & Privacy is still disabled with the reason rather than omitted, because
+// it is coming and a menu that silently lacks it reads as a menu that never
+// will. Terms of service is different again, and gated: it is a hosted
+// document, so it appears only for a deployment that has one to point at.
 
 const THEME_LABELS: Record<ThemePreference, string> = {
   system: "System",
@@ -65,11 +66,20 @@ const MENU_ICON_CLASS = `${NAV_ICON_CLASS} text-muted`
 const MENU_DIVIDER = "h-px shrink-0 bg-border"
 
 // Whose session this is. A standalone gateway issues one, for the operator
-// identity it provisioned itself, and the membership context does not carry the
-// caller's own name, so the session kind is the most this can honestly say. The
-// design's identity block shows a name over an email; there is no email here, so
-// the second line names the credential instead of inventing an address.
-function sessionIdentity(sessionType: string): {
+// identity it provisioned itself, and no management route reports the caller's
+// own name or address, so the credential it was minted from is the most this
+// can honestly say. The design's identity block shows a name over an email;
+// there is no email to read here, so the second line names that credential
+// instead of inventing an address.
+//
+// Which credential that is comes from the bootstrap, not from an assumption:
+// a deployment publishes `master_key` in `sign_in_methods` exactly while no
+// identity holds a password, so a claimed one (otari#649) signs in with an
+// address and would be mislabeled by "Master-key session".
+function sessionIdentity(
+  sessionType: string,
+  signInMethods: readonly string[],
+): {
   name: string
   initials: string
   detail: string
@@ -78,7 +88,9 @@ function sessionIdentity(sessionType: string): {
     return {
       name: "Operator",
       initials: "OP",
-      detail: "Master-key session",
+      detail: signInMethods.includes("master_key")
+        ? "Master-key session"
+        : "Password sign-in",
     }
   }
   return { name: "Signed in", initials: "··", detail: "This gateway" }
@@ -133,25 +145,34 @@ function MenuItem({
 }
 
 /**
- * Documentation, which the top bar owns above `md` and this menu carries below
- * it: that cluster is `hidden md:flex`, and this menu is the one surface that
- * renders inside the mobile drawer, so without this row the guide bundled with
- * the gateway has no control pointing at it on a phone. Hidden from `md` up
- * rather than shown everywhere, because the design's menu draws no such row and
- * above the breakpoint the top bar already answers.
+ * A row that goes to a route in this app.
  *
- * A router `Link`, not `MenuExternalLink`: `/docs` is a route in this app, and
- * an `<a href>` to it would reload the whole shell.
+ * A router `Link`, not `MenuExternalLink`: an `<a href>` to a route would
+ * reload the whole shell. It closes the menu on the way, since the popover
+ * outlives a client-side navigation that leaves it open over the new page.
  */
-function MenuDocumentationLink({ onNavigate }: { onNavigate: () => void }) {
+function MenuLink({
+  label,
+  icon: Icon,
+  to,
+  onNavigate,
+  className = "",
+}: {
+  label: string
+  icon: IconType
+  /** Typed off `Link` itself, so the route tree is what validates it. */
+  to: LinkProps["to"]
+  onNavigate: () => void
+  className?: string
+}) {
   return (
     <Link
-      to="/docs"
+      to={to}
       onClick={onNavigate}
-      className={`${MENU_ROW} ${MENU_ROW_RESTING} md:hidden`}
+      className={`${MENU_ROW} ${MENU_ROW_RESTING} ${className}`}
     >
-      <FiBookOpen aria-hidden="true" className={MENU_ICON_CLASS} />
-      <span className="min-w-0 flex-1 truncate">Documentation</span>
+      <Icon aria-hidden="true" className={MENU_ICON_CLASS} />
+      <span className="min-w-0 flex-1 truncate">{label}</span>
       <span aria-hidden="true" className="h-0 w-11 shrink-0" />
     </Link>
   )
@@ -219,9 +240,9 @@ function AppearanceControl() {
 
 export function AccountMenu({ collapsed }: { collapsed: boolean }) {
   const { logout } = useAuth()
-  const { session_type, management_url } = useDeployment()
+  const { session_type, sign_in_methods, management_url } = useDeployment()
   const [open, setOpen] = useState(false)
-  const identity = sessionIdentity(session_type)
+  const identity = sessionIdentity(session_type, sign_in_methods)
 
   return (
     <Popover isOpen={open} onOpenChange={setOpen}>
@@ -258,15 +279,26 @@ export function AccountMenu({ collapsed }: { collapsed: boolean }) {
           aria-label="Account"
           className="flex w-[17rem] flex-col gap-1.5"
         >
-          <MenuItem
+          <MenuLink
             label="Account settings"
             icon={FiSettings}
-            title="A standalone gateway has one shared session, so there is no per-user account yet."
-            isDisabled
+            to="/account"
+            onNavigate={() => setOpen(false)}
           />
           <AppearanceControl />
           <div className={MENU_DIVIDER} />
-          <MenuDocumentationLink onNavigate={() => setOpen(false)} />
+          {/* The top bar owns Documentation above `md` (that cluster is
+              `hidden md:flex`), and this menu is the one surface that renders
+              inside the mobile drawer, so this row is what keeps the bundled
+              guide reachable on a phone. Hidden from `md` up rather than shown
+              everywhere, because the design's menu draws no such row. */}
+          <MenuLink
+            label="Documentation"
+            icon={FiBookOpen}
+            to="/docs"
+            onNavigate={() => setOpen(false)}
+            className="md:hidden"
+          />
           {/* Hosted-only, and gated twice over: the entitlement says the
               deployment has terms to show, and `management_url` is where they
               are. A self-hosted gateway is neither, so the row is absent rather

@@ -135,7 +135,7 @@ Nothing schedules the switch and nothing expires. A deployment that never claims
 
 #### Claiming the deployment
 
-First boot provisions the operator identity as a label with no address and no password, so claiming supplies both, in one call authenticated by the master key:
+First boot provisions the operator identity as a label with no address and no password, so claiming supplies both. The dashboard offers it at **Account settings**, reached from the account control at the foot of the sidebar, which is one call authenticated by the session the master key already minted. The same call over HTTP, authenticated by the master key itself:
 
 ```bash
 curl -X PUT http://localhost:8000/v1/auth/password \
@@ -146,7 +146,7 @@ curl -X PUT http://localhost:8000/v1/auth/password \
 
 - A password is at least 8 characters and at most 72 bytes, which is bcrypt's own ceiling; accented and non-Latin characters count for more than one byte each. There are no composition rules.
 - The address is stored lower-cased and matched case-insensitively at sign-in. Claiming through the master key does not deliver to it or verify it: the master key is what proves the claim, and `email_verified_at` is stamped as a consequence rather than checked. A roster member proves their own address by [signing up](#signup-claiming-a-roster-identity) instead, which does send and check a verification link.
-- The same endpoint changes a password later. From a session it needs `current_password`; sent with the master key in a header it does not, which is the recovery path (see below). Changing the address afterwards is refused rather than half-supported.
+- The same endpoint changes a password later, and the same **Account settings** page is where the dashboard does it. From a session it needs `current_password`; sent with the master key in a header it does not, which is the recovery path (see below) and the one form of this call the dashboard cannot make, since reaching the page needs a session. Changing the address afterwards is refused rather than half-supported.
 - Every other session that identity holds is revoked, so a cookie minted under the old password does not outlive it. The caller's own session is spared when the change came from the browser, and is not when it came from the master key, since a header caller has no session to keep.
 - **Claiming is one-way.** No endpoint clears a password, so a deployment that has been claimed cannot be returned to master-key sign-in. The sign-in screen follows `sign_in_methods` and asks for the address and password from then on, and the master key still authenticates the whole management API, so the step costs you nothing you cannot reach; it is simply not reversible. See the [Admin dashboard guide](dashboard.md).
 
@@ -210,7 +210,7 @@ The request answers the same message whether or not the address holds a password
 
 An identity with a password can sign in once it has verified its address: the operator gets one by claiming the deployment (verified automatically, since the master key proved it), and a roster member gets one by signing up (verified by the link). There is still no way for an admin to set a password on somebody else's identity; a member added or invited by address holds a role and can be placed in workspaces, but only that address's own signup or reset gives it a way in. OAuth and passkey sign-in are the rest of the identity track.
 
-A session is revoked on sign-out, on a password change as described above, on master-key rotation (every session, with the rotating tab's own re-minted for the same identity), when the master key changes across a restart, and when the identity it names is deleted or deactivated. A deactivated identity also stops being able to sign in, rather than keeping access until its cookie expires.
+A session is revoked on sign-out, on a password change as described above, on master-key rotation (every session, with the rotating tab's own re-minted for the same identity), when the master key changes across a restart, and when the identity it names is deleted or deactivated. A deactivated identity also stops being able to sign in, rather than keeping access until its cookie expires. Deactivation is enforced when the session is read, and the identity's sessions are deleted at that point rather than only refused, so re-activating it later does not hand back the access of any cookie that was presented while it was off. Nothing sweeps the rest: a cookie that is never presented in that window survives to its TTL, because no flow here deactivates an identity and none therefore revokes ahead of the read.
 
 An opaque session token is the settled shape here, not a stopgap: it is revocable, which a bearer JWT is not, and [mozilla-ai/otari-ai#1716](https://github.com/mozilla-ai/otari-ai/issues/1716) settled that sessions are the steady-state dashboard login. **The platform's JWT `Token` therefore does not survive the rehome.** Anything on the platform frontend that reads or stores a bearer token changes when its pages arrive: the credential is an HttpOnly cookie the page's own script cannot read, sent automatically and same-origin only, so there is no token to attach to a header and no expiry to decode out of a payload. Sign-in state comes from the session endpoint's response and from a 401 bounce, not from inspecting a token.
 

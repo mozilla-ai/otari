@@ -24,7 +24,7 @@ both indexes before their columns because SQLite refuses ``DROP COLUMN``
 while one covers it.
 
 Revision ID: db8fbf901ee0
-Revises: a7c3e5d9b1f4
+Revises: c8e2a4f6b0d3
 Create Date: 2026-08-21
 """
 
@@ -34,7 +34,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "db8fbf901ee0"
-down_revision: str | Sequence[str] | None = "a7c3e5d9b1f4"
+down_revision: str | Sequence[str] | None = "c8e2a4f6b0d3"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

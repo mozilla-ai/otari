@@ -215,6 +215,13 @@ GET /v1/workspaces/{workspace_id}/member-budget-policies                 # dashb
 POST /v1/workspaces/{workspace_id}/member-budget-policies                # dashboard-only
 PATCH /v1/workspaces/{workspace_id}/member-budget-policies/{default_id}  # dashboard-only
 DELETE /v1/workspaces/{workspace_id}/member-budget-policies/{default_id} # dashboard-only
+# The dashboard's first-request setup guide (otari#660). It exists to walk a
+# browser from an empty workspace to a working call, and the credential it
+# issues is the thing an SDK caller already holds, so there is nothing here for
+# a shell to wrap.
+GET /v1/workspaces/{workspace_id}/activation                # dashboard-only
+POST /v1/workspaces/{workspace_id}/activation/key           # dashboard-only
+POST /v1/workspaces/{workspace_id}/activation/dismiss       # dashboard-only
 # Organization-scoped provider keys (otari-ai#1748, otari#643): the same
 # tenancy-admin surface as the organization/workspace rows just above, and
 # excluded for the same reason. An SDK caller acts inside one workspace with a

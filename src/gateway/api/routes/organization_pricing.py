@@ -237,14 +237,12 @@ async def _commit(db: AsyncSession) -> None:
     The services flush rather than commit (the house contract), so the route owns
     the transaction boundary.
 
-    An ``IntegrityError`` here is not an internal fault, and this is the one place
-    that can tell. The service checks the overlap rule before writing, but two
-    writers racing on the same period both pass that check and the unique index on
-    ``(organization_id, model_key, effective_from)`` refuses the second (see
-    `models.entities.OrganizationModelPricing`, which explains why the rest of the
-    rule cannot be a constraint). That is the same conflict the service reports as
-    a 409, so it is reported as one here rather than as a 500 the caller would
-    read as "retry, this is our fault".
+    The write race is *not* handled here, and that is the point worth knowing: the
+    services flush before this runs, so the unique index refuses a racing duplicate
+    there and ``OrganizationPricingService._flush_or_conflict`` maps it, having read
+    back the row to prove which ``IntegrityError`` it was. What is left for this
+    handler is an integrity failure the flush did not already see, which is why it
+    answers with a generic conflict rather than naming a period it has not read.
     """
     try:
         await db.commit()
@@ -306,10 +304,9 @@ async def create_organization_pricing(
     call ``POST /v1/pricing`` makes, and that is what makes one model one row
     rather than one per spelling. Stored verbatim, ``openai:gpt-4o`` and
     ``openai/gpt-4o`` are two keys: the overlap rule would not see them as
-    colliding, resolution prefers the canonical one so the other sits dormant
-    until the first is deleted, and the batched tool-rate lookup matches only the
-    canonical form, so a tool priced under the slash spelling would pass the
-    require-pricing gate and then settle at zero.
+    colliding, and both would resolve, with the canonical one preferred, leaving
+    the other dormant until the first is deleted. Normalizing on the way in is
+    what stops that pair existing at all.
     """
     model_key = normalize_pricing_key(config, body.model_key)
     override = await service.create_for_caller(identity, model_key, _to_input(body))

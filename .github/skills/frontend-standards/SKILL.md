@@ -38,9 +38,19 @@ can link Vite's esbuild binary at all.
 
 **Always:**
 
-- Reach for a HeroUI component prop (`variant`, `size`, `isDisabled`, `isPending`,
-  `fullWidth`, `isInvalid`) before a `className`. `className` is for layout/position, not for
-  restyling a component HeroUI already styles. See [components.md](./components.md).
+- Reach for a HeroUI component or a shared primitive before a native element: it arrives with
+  the tokens and its states (pointer, focus ring, disabled dimming) already wired, where a
+  hand-rolled `<button>` starts from Tailwind's reset and every state becomes a class somebody
+  has to remember. Then change how it looks in this order: a variable (ours as a token, or one
+  of HeroUI's own aliased onto ours; its documented knobs include `--radius`,
+  `--cursor-interactive` and `--disabled-opacity`, not just color), a wrapper or utility once
+  the look repeats, the component's own prop (`variant`, `size`, `isDisabled`, `isPending`,
+  `fullWidth`, `isInvalid`), and last a rule against HeroUI's own classes. HeroUI supports that
+  last one and it stays discouraged: a selector fixes one case where a variable fixes every rule
+  that reads it, it is invisible from the call site, and because the rules in `globals.css` are
+  unlayered they outrank a Tailwind class at the call site too. Write one only when nothing above
+  reaches the value, and say so in its comment. `className` is for layout/position, not for restyling a component HeroUI
+  already styles. See [components.md](./components.md).
 - Style from the semantic tokens in `web/src/styles/globals.css`, through the utilities they
   back (`text-muted`, `bg-surface`, `border-border`, `text-danger`, `text-heading`). The
   tokens are the design system and HeroUI is a consumer of it: a utility that does not resolve
@@ -64,11 +74,15 @@ can link Vite's esbuild binary at all.
 - Gate a deployment-dependent surface through `useDeployment()` / `useSurfaces()`, the one place
   that knows which deployment served the page. Mind the vocabulary: a *surface* is the
   deployment axis, a *capability* is the entitlement axis.
-- Declare a new destination in the nav registry (`web/src/app/nav/registry.ts`), never as a
-  hand-written link, with whichever of the three gates it needs (`surface`, `capability`,
+- Declare a new **rail** destination in the nav registry (`web/src/app/nav/registry.ts`), never
+  as a hand-written link, with whichever of the three gates it needs (`surface`, `capability`,
   `flag`). `EntitlementGate` is the component form for wrapping a page. See
   [web/AGENTS.md](../../../web/AGENTS.md) for how the gates compose and where a capability
-  the base build ships has to be declared.
+  the base build ships has to be declared. A route the *chrome* reaches is the exception and
+  is a hand-written `Link` on purpose: `/docs` from the top bar and the account menu, and
+  `/account` from that menu's first row. The registry is what the rails render, so an entry
+  there would duplicate into the sidebar a row the design draws once. Adding to the sidebar
+  has no exception.
 - Add a Vitest test for any component, hook, or helper whose behavior you change (`Foo.tsx` →
   `Foo.test.tsx`, colocated), and a screenshot entry for any new page. The screenshot suite
   runs on demand rather than as a PR gate while the migration lands, so the entry is owed
@@ -121,7 +135,7 @@ AA for the small text a pill uses. **Brand text on the brand tint does not follo
 ## Topic guides
 
 - [design-tokens.md](./design-tokens.md): the semantic tokens, the HeroUI mapping, the type scale, the chart palettes, and how to translate otari-ai's utility names.
-- [components.md](./components.md): HeroUI v3 patterns, props over `className`, internal links, the shared UI primitives in `shared/components/`.
+- [components.md](./components.md): HeroUI v3 patterns, the order to reach for when customizing (variable, shared utility, prop, then a rule into the library's DOM), internal links, the shared UI primitives in `shared/components/`.
 - [component-architecture.md](./component-architecture.md): what a page composes, what gets its own file, route files, no duplicated markup.
 - [data-fetching.md](./data-fetching.md): TanStack Query conventions: query keys, `staleTime`, guards, invalidation, bounded pagination.
 - [typescript-and-react.md](./typescript-and-react.md): strict TS, `undefined` over `null`, discriminated unions, hook and effect hygiene.
