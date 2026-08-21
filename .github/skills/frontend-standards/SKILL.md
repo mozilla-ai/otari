@@ -42,10 +42,14 @@ can link Vite's esbuild binary at all.
   the tokens and its states (pointer, focus ring, disabled dimming) already wired, where a
   hand-rolled `<button>` starts from Tailwind's reset and every state becomes a class somebody
   has to remember. Then change how it looks in this order: a variable (ours as a token, or one
-  of HeroUI's own aliased onto ours), a shared utility once the look repeats, the component's
-  own prop (`variant`, `size`, `isDisabled`, `isPending`, `fullWidth`, `isInvalid`), and only
-  as a last resort a rule reaching into HeroUI's DOM. `className` is for layout/position, not
-  for restyling a component HeroUI already styles. See [components.md](./components.md).
+  of HeroUI's own aliased onto ours; its documented knobs include `--radius`,
+  `--cursor-interactive` and `--disabled-opacity`, not just color), a wrapper or utility once
+  the look repeats, the component's own prop (`variant`, `size`, `isDisabled`, `isPending`,
+  `fullWidth`, `isInvalid`), and last a rule against HeroUI's own classes. HeroUI supports that
+  last one; it is last because a selector fixes one case where a variable fixes every rule that
+  reads it, and because the rules in `globals.css` are unlayered and so outrank a Tailwind class
+  at the call site. `className` is for layout/position, not for restyling a component HeroUI
+  already styles. See [components.md](./components.md).
 - Style from the semantic tokens in `web/src/styles/globals.css`, through the utilities they
   back (`text-muted`, `bg-surface`, `border-border`, `text-danger`, `text-heading`). The
   tokens are the design system and HeroUI is a consumer of it: a utility that does not resolve

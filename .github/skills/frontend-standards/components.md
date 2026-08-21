@@ -50,27 +50,38 @@ bare `<button>` takes it from no one. Reaching for a native element is sometimes
 router's `Link`), but it is a decision that buys styling work, not a neutral default.
 
 Once you know what you are styling, there are four ways to change how it looks, in the order to
-try them. The first three are reusable, they follow a retheme, and they survive a HeroUI
-upgrade. The fourth is a rule written against another project's private DOM, which is why it is
-the last resort and not the default.
+try them. HeroUI v3 supports all four (its styling guide lists `className`, data attributes,
+render props, wrapper components built with `tailwind-variants`, and overriding its own BEM
+classes inside `@layer components`), so this order is not about what is allowed. It is about
+which one adapts: a variable follows a retheme and a theme switch, a wrapper or a utility
+carries one decision to every call site, a prop is visible to the person reading the JSX, and a
+stylesheet rule against a component's internals does none of those and has to be maintained
+against a structure HeroUI never promised to keep.
 
 **1. A variable: ours, or the library's aliased onto ours.** If the value is one of the design
 system's roles, it is a token, and if the role is missing, add it rather than writing the value
 down somewhere. If it is a value the library computes from a variable of its own, alias that
-variable instead of overriding the rules that read it. Color already works this way here: each
-theme block maps `--surface`, `--accent`, `--focus` and the rest onto our `--color-*` tokens,
-which is what makes a bare `<Card>` wear the palette. The same handle exists for geometry and
-interaction, and this repo has not claimed it yet. HeroUI declares `--radius`, `--field-radius`,
-`--spacing`, `--border-width`, `--disabled-opacity`, `--cursor-interactive` /
-`--cursor-disabled` and the `--scrollbar-*` family in
-`@heroui/styles/dist/themes/default/variables.css`, and derives its whole radius ramp from
-`--radius` in `dist/themes/shared/theme.css` (`--radius-2xl` is `calc(var(--radius) * 2)`, so a
-16px arc a component draws is one alias away from being ours), and `globals.css` sets none of
-them. Read the value out of `@heroui/styles/dist` before concluding that a rule is the only way
-to reach it. See [design-tokens.md](./design-tokens.md).
+variable instead of overriding the rules that read it. This is HeroUI's own theming API, not a
+trick played on it: its theming guide and `@heroui/styles`'s README both document the knobs, and
+they are not only colors. `--radius` (with `--radius-xs` through `--radius-4xl` calculated from
+it), `--field-radius`, `--spacing`, `--border-width`, `--field-border-width`,
+`--ring-offset-width`, `--disabled-opacity`, `--cursor-interactive` / `--cursor-disabled` and
+the `--scrollbar-*` family are all declared in `@heroui/styles/dist/themes/default/variables.css`
+and `dist/themes/shared/theme.css`. Color already works this way here, because each theme block
+maps `--surface`, `--accent`, `--focus` and the rest onto our `--color-*` tokens, which is what
+makes a bare `<Card>` wear the palette. Geometry and interaction are the half nobody has
+claimed: `globals.css` sets none of those, so a component's corner radius, its disabled dimming
+and its pointer are all HeroUI's defaults. `--radius-2xl` is `calc(var(--radius) * 2)`, so a
+16px arc a component draws is one alias away from being ours. Read the value out of
+`@heroui/styles/dist` before concluding a rule is the only way to reach it, and note that
+scoping one of these to a subtree rather than to a theme is our extension of the documented
+pattern, so keep an eye on what else inherits it. See [design-tokens.md](./design-tokens.md).
 
-**2. A shared utility, once the look repeats.** The second call site that wants the same look
-gets a utility or a shared class string, not the same class list typed again: the
+**2. A wrapper or a utility, once the look repeats.** The second call site that wants the same
+look gets one owner, not the same class list typed again. A component-shaped decision belongs in
+a wrapper that takes props (`DataTable` is exactly that: pages declare columns and rows and
+never style a table), which is also what HeroUI's styling guide points at for reusable
+extensions. A value-shaped one belongs in a utility or a shared class string: the
 `@utility text-heading` family in `globals.css` carries the type roles, and `navRowClass` and
 `NAV_TRANSITION` in `app/nav/rowStyles.ts` carry a chrome row. Two copies of a class list are
 two surfaces that are meant to match and will stop matching one fix at a time, and the copy
@@ -84,18 +95,31 @@ root, which is a prop for something `.otari-table` currently neutralizes by hand
 `className` for layout and positioning (`flex`, `gap-*`, `min-w-[…]`, responsive prefixes), not
 for re-skinning something HeroUI already styles.
 
-**4. Last resort: a rule that reaches into the library's DOM.** `.otari-*` in `globals.css` is
-the sanctioned namespace for it (see [design-tokens.md](./design-tokens.md)), and some cases
-genuinely land here: a keyframe, something that has to outrank an inline style, or a value the
-library paints somewhere it gives you no name for. It carries a standing cost, so it is worth
-being sure none of the three above reach it. `.table__cell` and
-`.table__body tr:first-child td:first-child` are internal names that can change in a patch
-release with nothing in this repo failing; the rule is invisible from the call site, so the
-next reader checks the component's props, believes them, and is wrong; and the rule wins the
-cascade by being unlayered against `@heroui/styles`'s `@layer components`, not by its
-specificity, which is a distinction worth stating correctly in the comment rather than
-restating as folklore. When you write one, name in that comment which of the three rungs above
-does not reach the value, so a reader can tell a deliberate last resort from a shortcut.
+**4. Last: a rule against the component's own classes.** `.otari-*` in `globals.css` is the
+namespace for it (see [design-tokens.md](./design-tokens.md)), and some cases genuinely land
+here: a keyframe, something that has to outrank an inline style, or a value the library paints
+in a place it gives you no other name for. HeroUI documents this route rather than forbidding
+it, so the question is never whether it is allowed but what it costs.
+
+Three costs. A rule is per-selector rather than per-value, so it fixes the case in front of you
+and leaves every other rule reading the same variable untouched. It is invisible from the call
+site, so the next reader checks the component's props, believes them, and is wrong. And it
+depends on structure the class names alone do not promise: HeroUI's slot classes are documented,
+but which element paints a border, which cell is `:first-child`, and whether the body is
+virtualized are not, and `.table__body tr:first-child td:first-child` is a selector written
+against all three.
+
+Two things about the cascade here, because both are easy to get backwards. HeroUI's styling
+guide puts a global override inside `@layer components`; the rules in `globals.css` are
+**unlayered**, which is what makes them win, and it is not their specificity that does it, so a
+comment explaining an override by its specificity is describing the wrong mechanism. The other
+half of being unlayered is that these rules also outrank `@layer utilities`, so a Tailwind class
+at the call site cannot override one of them. That is worth knowing before you put a rule here
+rather than in a wrapper: it does not just style the component, it takes the call site's ability
+to restyle it away.
+
+When you do write one, name in its comment which of the three rungs above does not reach the
+value, so a reader can tell a deliberate last resort from a shortcut.
 
 ## Check the shared primitives before hand-rolling
 

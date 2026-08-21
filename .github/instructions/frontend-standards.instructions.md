@@ -25,11 +25,14 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
    `--radius` drives its whole radius ramp, and `--cursor-interactive`, `--disabled-opacity`
    and the rest are in `@heroui/styles/dist/themes/`, none of them aliased in `globals.css`
    yet), a shared utility once the look repeats, the component's own prop (`variant`, `size`,
-   `isDisabled`, `isPending`, `fullWidth`, `isInvalid`), and only then a rule reaching into
-   HeroUI's DOM under the `.otari-*` namespace. A rule against an internal class
-   (`.table__cell`, `.table__body tr:first-child td:first-child`) is a finding when a prop or
-   a variable would do the same job, and so is a `className` re-skinning something the
-   component already styles; reserve `className` for layout/position. Space siblings with
+   `isDisabled`, `isPending`, `fullWidth`, `isInvalid`), and only then a rule against HeroUI's
+   own classes under the `.otari-*` namespace. HeroUI supports that last one, so the finding is
+   never that it is forbidden: a rule like `.otari-table .table__cell` or
+   `.table__body tr:first-child td:first-child` is a finding when a prop or a variable would do
+   the same job, because it fixes one selector instead of every rule reading the value, and
+   because these rules are unlayered and so outrank a Tailwind class at the call site. A
+   `className` re-skinning something the component already styles is a finding too; reserve
+   `className` for layout/position. Space siblings with
    `gap-*` on the parent, not `m-*` on children, and write arbitrary values in `rem`
    (`h-[20rem]`, not `h-[320px]`; a `1px` border is the exception).
 
