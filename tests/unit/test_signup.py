@@ -14,6 +14,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from httpx2 import Response
 from sqlalchemy import create_engine, text
 
 from gateway.core.config import GatewayConfig
@@ -50,7 +51,7 @@ def _add_member(client: TestClient, *, email: str, role: str = "member") -> None
     assert response.status_code == 201, response.text
 
 
-def _signup(client: TestClient, *, email: str, password: str = PASSWORD, **extra: object):  # noqa: ANN202
+def _signup(client: TestClient, *, email: str, password: str = PASSWORD, **extra: object) -> Response:
     return client.post("/v1/auth/signup", json={"email": email, "password": password, **extra})
 
 
@@ -59,7 +60,7 @@ def _captured_verification_link(caplog: pytest.LogCaptureFixture, client: TestCl
     gateway_logger.addHandler(caplog.handler)
     caplog.set_level(logging.INFO, logger="gateway")
     try:
-        response = _signup(client, **kwargs)
+        response = _signup(client, **kwargs)  # type: ignore[arg-type]
     finally:
         gateway_logger.removeHandler(caplog.handler)
     assert response.status_code == 200, response.text

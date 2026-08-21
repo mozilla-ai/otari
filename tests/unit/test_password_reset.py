@@ -7,11 +7,13 @@ of the log, the same pattern ``test_invitations_api.py`` uses.
 
 import logging
 import re
+from collections.abc import Callable
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from httpx2 import Response
 from sqlalchemy import create_engine, select, text
 from sqlalchemy.orm import sessionmaker
 
@@ -36,14 +38,14 @@ def _config(tmp_path: Path, **overrides: object) -> GatewayConfig:
         "public_base_url": "https://gw.example.com",
     }
     fields.update(overrides)
-    return GatewayConfig(**fields)
+    return GatewayConfig(**fields)  # type: ignore[arg-type]
 
 
 def _client(tmp_path: Path, **overrides: object) -> TestClient:
     return TestClient(create_app(_config(tmp_path, **overrides)))
 
 
-def _with_logs(client: TestClient, caplog: pytest.LogCaptureFixture, call):  # noqa: ANN001, ANN202
+def _with_logs(client: TestClient, caplog: pytest.LogCaptureFixture, call: Callable[[], Response]) -> Response:
     gateway_logger.addHandler(caplog.handler)
     caplog.set_level(logging.INFO, logger="gateway")
     caplog.clear()
@@ -51,6 +53,13 @@ def _with_logs(client: TestClient, caplog: pytest.LogCaptureFixture, call):  # n
         return call()
     finally:
         gateway_logger.removeHandler(caplog.handler)
+
+
+def _extract_token(text: str) -> str:
+    """Pull the token out of a link the console transport logged, asserting it is there."""
+    match = _TOKEN_IN_LINK.search(text)
+    assert match, text
+    return match.group(1)
 
 
 def _claimed_and_verified(client: TestClient, caplog: pytest.LogCaptureFixture, *, email: str) -> None:
@@ -65,7 +74,7 @@ def _claimed_and_verified(client: TestClient, caplog: pytest.LogCaptureFixture, 
         client, caplog, lambda: client.post("/v1/auth/signup", json={"email": email, "password": PASSWORD})
     )
     assert signup.status_code == 200, signup.text
-    token = _TOKEN_IN_LINK.search(caplog.text).group(1)
+    token = _extract_token(caplog.text)
     assert client.post("/v1/auth/verify-email", json={"token": token}).status_code == 200
 
 
@@ -86,7 +95,7 @@ def test_reset_round_trips_end_to_end(tmp_path: Path, caplog: pytest.LogCaptureF
 
         status_code, log_text = _request_reset(client, caplog, email="ada@example.com")
         assert status_code == 200
-        token = _TOKEN_IN_LINK.search(log_text).group(1)
+        token = _extract_token(log_text)
 
         confirmed = client.post(
             "/v1/auth/password/reset/confirm", json={"token": token, "new_password": NEW_PASSWORD}
@@ -118,7 +127,7 @@ def test_reset_works_before_the_address_is_verified(tmp_path: Path, caplog: pyte
 
         status_code, log_text = _request_reset(client, caplog, email="ada@example.com")
         assert status_code == 200
-        token = _TOKEN_IN_LINK.search(log_text).group(1)
+        token = _extract_token(log_text)
 
         confirmed = client.post(
             "/v1/auth/password/reset/confirm", json={"token": token, "new_password": NEW_PASSWORD}
@@ -135,7 +144,7 @@ def test_reset_revokes_the_identity_s_other_sessions(tmp_path: Path, caplog: pyt
 
         status_code, log_text = _request_reset(client, caplog, email="ada@example.com")
         assert status_code == 200
-        token = _TOKEN_IN_LINK.search(log_text).group(1)
+        token = _extract_token(log_text)
         client.post("/v1/auth/password/reset/confirm", json={"token": token, "new_password": NEW_PASSWORD})
 
     assert _sessions(tmp_path, "reset-test.db") == []
@@ -146,7 +155,7 @@ def test_a_reused_reset_token_is_refused(tmp_path: Path, caplog: pytest.LogCaptu
     with _client(tmp_path) as client:
         _claimed_and_verified(client, caplog, email="ada@example.com")
         _, log_text = _request_reset(client, caplog, email="ada@example.com")
-        token = _TOKEN_IN_LINK.search(log_text).group(1)
+        token = _extract_token(log_text)
 
         first = client.post("/v1/auth/password/reset/confirm", json={"token": token, "new_password": NEW_PASSWORD})
         assert first.status_code == 204
@@ -169,7 +178,7 @@ def test_an_expired_reset_token_is_refused(tmp_path: Path, caplog: pytest.LogCap
     with _client(tmp_path) as client:
         _claimed_and_verified(client, caplog, email="ada@example.com")
         _, log_text = _request_reset(client, caplog, email="ada@example.com")
-        token = _TOKEN_IN_LINK.search(log_text).group(1)
+        token = _extract_token(log_text)
 
     engine = create_engine(f"sqlite:///{tmp_path / 'reset-test.db'}")
     with engine.begin() as connection:
@@ -196,7 +205,7 @@ def test_a_reset_token_is_refused_once_the_identity_is_deactivated(
     with _client(tmp_path) as client:
         _claimed_and_verified(client, caplog, email="ada@example.com")
         _, log_text = _request_reset(client, caplog, email="ada@example.com")
-        token = _TOKEN_IN_LINK.search(log_text).group(1)
+        token = _extract_token(log_text)
 
     engine = create_engine(f"sqlite:///{tmp_path / 'reset-test.db'}")
     with engine.begin() as connection:
@@ -222,7 +231,7 @@ def test_a_password_change_elsewhere_invalidates_an_outstanding_reset_token(
     with _client(tmp_path) as client:
         _claimed_and_verified(client, caplog, email="ada@example.com")
         _, log_text = _request_reset(client, caplog, email="ada@example.com")
-        token = _TOKEN_IN_LINK.search(log_text).group(1)
+        token = _extract_token(log_text)
 
         # The account owner changes their password through the ordinary,
         # session-authenticated channel while the reset link is still live.

@@ -335,6 +335,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/auth/password/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request Reset
+         * @description Mail a password-reset link, or do nothing: the response never says which.
+         */
+        post: operations["request_reset_v1_auth_password_reset_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/password/reset/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm Reset
+         * @description Complete a password reset. Single-use: the token stops working after this.
+         */
+        post: operations["confirm_reset_v1_auth_password_reset_confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/resend-verification": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resend Verification
+         * @description Mail a fresh verification link, or do nothing: the response never says which.
+         */
+        post: operations["resend_verification_v1_auth_resend_verification_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/auth/session": {
         parameters: {
             query?: never;
@@ -377,6 +437,49 @@ export interface paths {
          *     forged call could do is sign the operator out.
          */
         delete: operations["delete_session_v1_auth_session_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/signup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Signup
+         * @description Claim a roster identity, or do nothing: the response never says which.
+         *
+         *     No session is minted. A newly claimed identity is hard-blocked from
+         *     signing in until it verifies, so there is nothing yet to sign it into.
+         */
+        post: operations["signup_v1_auth_signup_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/verify-email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Verify Email Route
+         * @description Confirm an address from its verification link, lifting the sign-in gate.
+         */
+        post: operations["verify_email_route_v1_auth_verify_email_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -5902,6 +6005,22 @@ export interface components {
              */
             unreadable: number;
         };
+        /** RequestPasswordResetRequest */
+        RequestPasswordResetRequest: {
+            /**
+             * Email
+             * @description The address to send a reset link to.
+             */
+            email: string;
+        };
+        /** RequestPasswordResetResponse */
+        RequestPasswordResetResponse: {
+            /**
+             * Message
+             * @description The same message whether or not the address has a password to reset.
+             */
+            message: string;
+        };
         /**
          * RerankRequest
          * @description Rerank request.
@@ -5937,6 +6056,35 @@ export interface components {
              * @description User ID for usage attribution
              */
             user?: string | null;
+        };
+        /** ResendVerificationRequest */
+        ResendVerificationRequest: {
+            /**
+             * Email
+             * @description The address to resend a verification link to.
+             */
+            email: string;
+        };
+        /** ResendVerificationResponse */
+        ResendVerificationResponse: {
+            /**
+             * Message
+             * @description The same message whether or not the address has anything to verify.
+             */
+            message: string;
+        };
+        /** ResetPasswordRequest */
+        ResetPasswordRequest: {
+            /**
+             * New Password
+             * @description The password to sign in with from now on. At least 8 characters, at most 72 bytes.
+             */
+            new_password: string;
+            /**
+             * Token
+             * @description The token from the reset link.
+             */
+            token: string;
         };
         /**
          * ResponsesRequest
@@ -6403,6 +6551,44 @@ export interface components {
              * @description Whole-request context thresholds. Fields omitted by a tier inherit the base rate.
              */
             pricing_tiers?: components["schemas"]["PricingTier"][] | null;
+        };
+        /**
+         * SignupRequest
+         * @description Claim an identity already on the roster by setting its password.
+         */
+        SignupRequest: {
+            /**
+             * Email
+             * @description The address an admin added or invited.
+             */
+            email: string;
+            /**
+             * Full Name
+             * @description Filled in only if not already set.
+             */
+            full_name?: string | null;
+            /**
+             * Password
+             * @description The password to sign in with once verified. At least 8 characters, at most 72 bytes.
+             */
+            password: string;
+            /**
+             * Terms Accepted
+             * @description Whether the caller accepted this deployment's terms.
+             * @default false
+             */
+            terms_accepted: boolean;
+        };
+        /**
+         * SignupResponse
+         * @description The same message whether or not the address had anything to claim.
+         */
+        SignupResponse: {
+            /**
+             * Message
+             * @description What the caller should do next.
+             */
+            message: string;
         };
         /**
          * StoredProviderResponse
@@ -7391,6 +7577,22 @@ export interface components {
             /** Error Type */
             type: string;
         };
+        /** VerifyEmailRequest */
+        VerifyEmailRequest: {
+            /**
+             * Token
+             * @description The token from the verification link.
+             */
+            token: string;
+        };
+        /** VerifyEmailResponse */
+        VerifyEmailResponse: {
+            /**
+             * Email
+             * @description The address that is now verified.
+             */
+            email: string;
+        };
         /**
          * WorkspaceAssignmentRequest
          * @description A workspace and the role to grant in it, applied when a member is added.
@@ -8061,6 +8263,103 @@ export interface operations {
             };
         };
     };
+    request_reset_v1_auth_password_reset_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RequestPasswordResetRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestPasswordResetResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_reset_v1_auth_password_reset_confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResetPasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resend_verification_v1_auth_resend_verification_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResendVerificationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResendVerificationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     create_session_v1_auth_session_post: {
         parameters: {
             query?: never;
@@ -8109,6 +8408,72 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    signup_v1_auth_signup_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SignupRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignupResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    verify_email_route_v1_auth_verify_email_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VerifyEmailRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VerifyEmailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };

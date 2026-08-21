@@ -33,7 +33,7 @@ def _config(tmp_path: Path, **overrides: object) -> GatewayConfig:
         "public_base_url": "https://gw.example.com",
     }
     fields.update(overrides)
-    return GatewayConfig(**fields)
+    return GatewayConfig(**fields)  # type: ignore[arg-type]
 
 
 def _client(tmp_path: Path, **overrides: object) -> TestClient:
