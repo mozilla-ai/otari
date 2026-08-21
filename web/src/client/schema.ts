@@ -2968,6 +2968,68 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{workspace_id}/mcp-servers": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Workspace Mcp Servers
+         * @description List the MCP servers configured for a workspace.
+         *
+         *     Organization owners/admins or this workspace's owners/admins. Reads are
+         *     gated like writes because these rows name the endpoints the gateway
+         *     connects to on the workspace's behalf. Authorization tokens are never
+         *     included; each server reports only whether it has one.
+         */
+        get: operations["list_workspace_mcp_servers_v1_workspaces__workspace_id__mcp_servers_get"];
+        put?: never;
+        /**
+         * Create Workspace Mcp Server
+         * @description Register an MCP server for a workspace. Organization owners/admins or this workspace's owners/admins.
+         *
+         *     The authorization token is encrypted at rest and never returned. The URL
+         *     is checked for SSRF safety here as well as on the request path, and must
+         *     use https when a token is set. A name already used in this workspace is
+         *     refused with a 409.
+         */
+        post: operations["create_workspace_mcp_server_v1_workspaces__workspace_id__mcp_servers_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspace_id}/mcp-servers/{server_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Workspace Mcp Server
+         * @description Delete a server and the token stored with it. Organization owners/admins or this workspace's owners/admins.
+         */
+        delete: operations["delete_workspace_mcp_server_v1_workspaces__workspace_id__mcp_servers__server_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Workspace Mcp Server
+         * @description Update a server. Organization owners/admins or this workspace's owners/admins.
+         *
+         *     Only the fields sent are applied. Omit `authorization_token` to leave the
+         *     stored token alone, send an empty string to clear it, or send a value to
+         *     rotate it.
+         */
+        patch: operations["update_workspace_mcp_server_v1_workspaces__workspace_id__mcp_servers__server_id__patch"];
+        trace?: never;
+    };
     "/v1/workspaces/{workspace_id}/member-budget-policies": {
         parameters: {
             query?: never;
@@ -7787,6 +7849,116 @@ export interface components {
             description?: string | null;
             /** Name */
             name: string;
+        };
+        /**
+         * WorkspaceMcpServerCreate
+         * @description Request body for registering a server.
+         *
+         *     ``authorization_token`` is never stored as sent: it is encrypted with
+         *     ``OTARI_SECRET_KEY`` and only the ciphertext is kept, the same convention
+         *     `entities.ProviderCredential` and `OrgProviderKey` already use.
+         */
+        WorkspaceMcpServerCreate: {
+            /**
+             * Allowed Tools
+             * @description Allow-list of tool names; null exposes every tool the server offers
+             */
+            allowed_tools?: string[] | null;
+            /**
+             * Authorization Token
+             * @description Bearer token for the server; requires an https URL. Encrypted at rest, never returned
+             */
+            authorization_token?: string | null;
+            /**
+             * Enabled
+             * @description Whether a request naming this server actually reaches it
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Name
+             * @description Label for the server, unique within the workspace
+             */
+            name: string;
+            /**
+             * Purpose Hint
+             * @description Hint prepended to the system message to help the model choose
+             */
+            purpose_hint?: string | null;
+            /**
+             * Url
+             * @description Streamable HTTP MCP endpoint
+             */
+            url: string;
+        };
+        /**
+         * WorkspaceMcpServerPublic
+         * @description The API-facing shape. Never carries the token, only whether one is set.
+         *
+         *     No ``last4``-style prefix either, unlike `OrgProviderKeyPublic`: a provider
+         *     key's last four digits let an operator match a stored key against the one
+         *     in their provider's console, and there is no equivalent workflow for an MCP
+         *     bearer token.
+         */
+        WorkspaceMcpServerPublic: {
+            /** Allowed Tools */
+            allowed_tools: string[] | null;
+            /** Created At */
+            created_at: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Has Token */
+            has_token: boolean;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Name */
+            name: string;
+            /** Purpose Hint */
+            purpose_hint: string | null;
+            /** Updated At */
+            updated_at: string;
+            /** Url */
+            url: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+        };
+        /**
+         * WorkspaceMcpServerUpdate
+         * @description Partial update. Only the fields the caller sets are applied.
+         *
+         *     ``authorization_token`` has three states rather than two, which is what a
+         *     write-only field needs: omit it to leave the stored token alone, send
+         *     ``""`` to clear it, send a value to rotate it. An explicit ``null`` also
+         *     leaves it alone, matching the platform: a client that serializes its whole
+         *     form back, with an empty token box it never filled in, must not destroy a
+         *     token it was never shown.
+         */
+        WorkspaceMcpServerUpdate: {
+            /** Allowed Tools */
+            allowed_tools?: string[] | null;
+            /** Authorization Token */
+            authorization_token?: string | null;
+            /** Enabled */
+            enabled?: boolean;
+            /** Name */
+            name?: string;
+            /** Purpose Hint */
+            purpose_hint?: string | null;
+            /** Url */
+            url?: string;
+        };
+        /** WorkspaceMcpServersPublic */
+        WorkspaceMcpServersPublic: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["WorkspaceMcpServerPublic"][];
         };
         /** WorkspaceMemberBudgetPoliciesPublic */
         WorkspaceMemberBudgetPoliciesPublic: {
@@ -12722,6 +12894,145 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ActivationApiKeyPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_workspace_mcp_servers_v1_workspaces__workspace_id__mcp_servers_get: {
+        parameters: {
+            query?: {
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMcpServersPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_workspace_mcp_server_v1_workspaces__workspace_id__mcp_servers_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceMcpServerCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMcpServerPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_workspace_mcp_server_v1_workspaces__workspace_id__mcp_servers__server_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Message"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_workspace_mcp_server_v1_workspaces__workspace_id__mcp_servers__server_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+                server_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceMcpServerUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceMcpServerPublic"];
                 };
             };
             /** @description Validation Error */

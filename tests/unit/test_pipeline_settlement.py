@@ -21,6 +21,7 @@ import uuid
 from collections.abc import AsyncIterator
 from decimal import Decimal
 from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
 from any_llm import LLMProvider
@@ -34,6 +35,7 @@ from any_llm.types.completion import (
     CompletionUsage,
 )
 from fastapi import BackgroundTasks, HTTPException, Response
+from sqlalchemy.exc import SQLAlchemyError
 
 import gateway.api.routes._pipeline as pipeline
 import gateway.streaming as streaming
@@ -53,6 +55,7 @@ from gateway.api.routes._platform import ResolvedAttempt, ResolvedRoute, Settled
 from gateway.core.config import GatewayConfig
 from gateway.rate_limit import RateLimitInfo
 from gateway.services.budget_service import ReservationHandle
+from gateway.services.tenancy.errors import WorkspaceMcpServerNotFoundError
 
 ADAPTERS = [
     pytest.param(chat._ADAPTER, id="chat"),
@@ -1064,7 +1067,8 @@ async def test_tool_misconfiguration_400_releases_reservation(monkeypatch: pytes
 
 
 @pytest.mark.asyncio
-async def test_mcp_server_ids_in_standalone_releases_reservation(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_mcp_server_ids_without_a_workspace_releases_reservation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Standalone resolution needs a workspace; with none, the ids are refused rather than dropped."""
     settlement = _Settlement()
     settlement.install(monkeypatch)
 
@@ -1076,6 +1080,78 @@ async def test_mcp_server_ids_in_standalone_releases_reservation(monkeypatch: py
 
     assert exc_info.value.status_code == 400
     assert settlement.refunded == 1
+
+
+@pytest.mark.asyncio
+async def test_unknown_mcp_server_id_releases_reservation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An id naming no server in the request's workspace is a 404, the same answer hybrid mode gives."""
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    async def missing(*args: Any, **kwargs: Any) -> list[Any]:
+        raise WorkspaceMcpServerNotFoundError("11111111-1111-1111-1111-111111111111")
+
+    monkeypatch.setattr(pipeline, "resolve_workspace_mcp_servers", missing)
+
+    ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation(), workspace_id=uuid.uuid4())
+    with pytest.raises(HTTPException) as exc_info:
+        await _call_prepare_gateway_tools(
+            ctx, mcp_server_ids=[cast(Any, "11111111-1111-1111-1111-111111111111")]
+        )
+
+    assert exc_info.value.status_code == 404
+    assert settlement.refunded == 1
+
+
+@pytest.mark.asyncio
+async def test_a_database_failure_releases_the_reservation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A `SQLAlchemyError` is not an `HTTPException`, and must still not leave the hold behind.
+
+    Two reads in `prepare_gateway_tools` touch the database, so a failure in
+    either would otherwise escape the release and hold the estimate against
+    `users.reserved` until the budget's next reset.
+    """
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    async def failing(*args: Any, **kwargs: Any) -> list[Any]:
+        raise SQLAlchemyError("connection reset")
+
+    monkeypatch.setattr(pipeline, "resolve_workspace_mcp_servers", failing)
+
+    db = AsyncMock()
+    ctx = _ctx(GatewayConfig(), db=cast(Any, db), reservation=_reservation(), workspace_id=uuid.uuid4())
+    with pytest.raises(SQLAlchemyError):
+        await _call_prepare_gateway_tools(
+            ctx, mcp_server_ids=[cast(Any, "11111111-1111-1111-1111-111111111111")]
+        )
+
+    assert settlement.refunded == 1
+    assert db.rollback.await_count == 1, "the session is rolled back first, or the release cannot run"
+
+
+@pytest.mark.asyncio
+async def test_a_release_that_also_fails_reraises_the_original(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A database still refusing work must surface the first failure, not a second one."""
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    async def failing(*args: Any, **kwargs: Any) -> list[Any]:
+        raise SQLAlchemyError("connection reset")
+
+    async def failing_release(*args: Any, **kwargs: Any) -> None:
+        raise SQLAlchemyError("still down")
+
+    monkeypatch.setattr(pipeline, "resolve_workspace_mcp_servers", failing)
+    monkeypatch.setattr(pipeline, "release_reservation", failing_release)
+
+    db = AsyncMock()
+    db.rollback.side_effect = SQLAlchemyError("still down")
+    ctx = _ctx(GatewayConfig(), db=cast(Any, db), reservation=_reservation(), workspace_id=uuid.uuid4())
+    with pytest.raises(SQLAlchemyError, match="connection reset"):
+        await _call_prepare_gateway_tools(
+            ctx, mcp_server_ids=[cast(Any, "11111111-1111-1111-1111-111111111111")]
+        )
 
 
 @pytest.mark.asyncio

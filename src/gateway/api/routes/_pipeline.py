@@ -33,6 +33,7 @@ Settlement invariants owned here:
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
@@ -156,7 +157,10 @@ from gateway.services.sandbox_backend import (
     SandboxNotReachableError,
 )
 from gateway.services.scoped_budget_service import BudgetScopeRequest
+from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError
+from gateway.services.tenancy.errors import WorkspaceMcpServerNotFoundError
 from gateway.services.tenancy.org_provider_key_service import cached_org_model_restriction
+from gateway.services.tenancy.workspace_mcp_server_service import resolve_workspace_mcp_servers
 from gateway.services.tool_usage import (
     MAX_TOOL_NAMES,
     OVERFLOW_TOOL_NAME,
@@ -188,7 +192,8 @@ ChunkT = TypeVar("ChunkT")
 DB_UNAVAILABLE_DETAIL = "Database session unavailable"
 API_KEY_VALIDATION_FAILED_DETAIL = "API key validation failed"
 API_KEY_NO_USER_DETAIL = "API key has no associated user"
-MCP_SERVER_IDS_HYBRID_ONLY_DETAIL = "mcp_server_ids is only available in hybrid mode"
+MCP_SERVER_IDS_UNAVAILABLE_DETAIL = "mcp_server_ids is unavailable for this request"
+MCP_SERVER_TOKEN_UNREADABLE_DETAIL = "A configured MCP server's authorization token could not be read"
 NO_RESOLVABLE_PROVIDER_DETAIL = "Authorization service returned no resolvable provider"
 PROVIDER_ERROR_DETAIL = "LLM provider error"
 PROVIDER_TIMEOUT_DETAIL = "LLM provider timeout"
@@ -1624,6 +1629,47 @@ def merge_policy_guardrails(
     return list(merged.values())
 
 
+async def _resolve_mcp_server_ids(
+    adapter: FormatAdapter[Any, Any],
+    ctx: RequestContext,
+    mcp_server_ids: list[uuid.UUID],
+) -> list[McpServerConfig]:
+    """Swap a request's ``mcp_server_ids`` for the configs they name.
+
+    One field, two sources, chosen by mode: hybrid asks the platform, which
+    owns the workspace's stored servers there, and standalone reads
+    ``workspace_mcp_servers`` for the workspace the request's key belongs to
+    (otari#658). The workspace is `RequestContext.workspace_id`, resolved at
+    auth off the key and never from a header, which is the seam otari#655
+    settled; MCP is the exception that decision names, since there is no
+    deployment-wide server list for a workspace row to narrow.
+
+    Both modes refuse an unknown id with a 404, so a caller moving between them
+    sees one contract. A standalone request with no database session or no
+    resolved workspace cannot resolve anything, and is refused rather than
+    served with the ids silently dropped.
+    """
+    if ctx.hybrid_mode:
+        assert ctx.user_token is not None  # guaranteed by the hybrid-mode preamble
+        return await _resolve_platform_mcp_servers(
+            config=ctx.config,
+            user_token=ctx.user_token,
+            mcp_server_ids=mcp_server_ids,
+        )
+
+    if ctx.db is None or ctx.workspace_id is None:
+        raise adapter.error(400, MCP_SERVER_IDS_UNAVAILABLE_DETAIL, ErrorKind.INVALID_REQUEST)
+    try:
+        return await resolve_workspace_mcp_servers(ctx.db, workspace_id=ctx.workspace_id, server_ids=mcp_server_ids)
+    except WorkspaceMcpServerNotFoundError as exc:
+        raise adapter.error(404, exc.message, ErrorKind.INVALID_REQUEST) from exc
+    except (SecretBoxUnavailableError, SecretDecryptionError) as exc:
+        # The operator's problem, not the caller's, and the underlying message
+        # names the environment variable, so it stays in the log.
+        logger.error("MCP server token could not be decrypted for workspace %s: %s", ctx.workspace_id, exc)
+        raise adapter.error(500, MCP_SERVER_TOKEN_UNREADABLE_DETAIL, ErrorKind.API) from exc
+
+
 async def prepare_gateway_tools(
     *,
     adapter: FormatAdapter[Any, Any],
@@ -1643,9 +1689,9 @@ async def prepare_gateway_tools(
     ``block``-mode flags raise 403 here (provider never called);
     ``monitor``-mode flags annotate the response header and fall through.
 
-    ``mcp_server_ids`` is hybrid-only: standalone mode has no platform to
-    resolve the ids against, so the field is rejected with a 400 rather than
-    silently ignored. The sandbox and web_search opt-ins follow the wire shape
+    ``mcp_server_ids`` resolves against the platform in hybrid mode and against
+    the request's own workspace in standalone; see
+    :func:`_resolve_mcp_server_ids`. The sandbox and web_search opt-ins follow the wire shape
     of Anthropic / OpenAI tool entries; their backend URLs are operator
     controlled (no per-request URL override, which would be an SSRF surface).
     The three backends are mutually exclusive for now.
@@ -1662,16 +1708,8 @@ async def prepare_gateway_tools(
             merge_policy_guardrails(ctx, guardrails), guardrail_text, response=response, config=ctx.config
         )
 
-        if mcp_server_ids and not ctx.hybrid_mode:
-            raise adapter.error(400, MCP_SERVER_IDS_HYBRID_ONLY_DETAIL, ErrorKind.INVALID_REQUEST)
-        if ctx.hybrid_mode and mcp_server_ids:
-            assert ctx.user_token is not None  # guaranteed by the hybrid-mode preamble
-            resolved_mcp_servers = await _resolve_platform_mcp_servers(
-                config=ctx.config,
-                user_token=ctx.user_token,
-                mcp_server_ids=mcp_server_ids,
-            )
-            mcp_servers = (mcp_servers or []) + resolved_mcp_servers
+        if mcp_server_ids:
+            mcp_servers = (mcp_servers or []) + await _resolve_mcp_server_ids(adapter, ctx, mcp_server_ids)
 
         if mcp_servers:
             await _validate_mcp_server_urls(adapter, mcp_servers)
@@ -1792,6 +1830,23 @@ async def prepare_gateway_tools(
         await _require_tool_pricing(adapter, ctx, use_sandbox=use_sandbox, use_web_search=use_web_search)
     except HTTPException:
         await release_reservation(ctx)
+        raise
+    except SQLAlchemyError:
+        # Two reads in this block touch the database (the workspace MCP servers
+        # above, and `_require_tool_pricing`), and a failure in either is not an
+        # `HTTPException`, so without this arm it would leave `users.reserved`
+        # holding the estimate until the budget's next reset, or forever for a
+        # budget with no reset period. The rollback comes first because a failed
+        # statement leaves the session unusable and `release_reservation` writes:
+        # releasing on a poisoned session raises `PendingRollbackError` and the
+        # hold survives anyway. Both calls are best-effort so a database that is
+        # still refusing work re-raises the original failure rather than a
+        # confusing second one.
+        if ctx.db is not None:
+            with contextlib.suppress(SQLAlchemyError):
+                await ctx.db.rollback()
+        with contextlib.suppress(SQLAlchemyError):
+            await release_reservation(ctx)
         raise
 
     return ToolContext(

@@ -8,10 +8,12 @@ Add MCP as a top-level request field, not a `tools` entry.
 Use either or both of:
 
 - `mcp_servers`: inline MCP server configs the gateway should connect to directly
-- `mcp_server_ids`: workspace-scoped MCP server ids resolved through otari.ai (hybrid mode only)
+- `mcp_server_ids`: ids of MCP servers your workspace has configured
 
-In hybrid mode, Otari resolves `mcp_server_ids` first and appends the resulting
-server configs to any inline `mcp_servers`.
+Otari resolves `mcp_server_ids` first and appends the resulting server configs
+to any inline `mcp_servers`. Where it resolves them depends on the mode:
+standalone reads the servers the workspace configured on this gateway, hybrid
+resolves them through otari.ai.
 
 When the model emits an MCP tool call, Otari:
 
@@ -46,10 +48,10 @@ The loop stops when the model returns a normal assistant response or hits
 - `purpose_hint`: optional hint Otari prepends to the system message to help the model choose the tool
 - `allowed_tools`: optional allow-list; only these tools are exposed from that server
 
-## Workspace-scoped servers (hybrid only)
+## Workspace-scoped servers
 
-In hybrid mode, you can reference servers stored in otari.ai by id instead of
-inlining their configs:
+Reference servers your workspace has configured by id, instead of inlining
+their configs:
 
 ```json
 {
@@ -59,13 +61,52 @@ inlining their configs:
 }
 ```
 
-Otari resolves those ids through the platform before the request runs. In
-standalone mode, `mcp_server_ids` returns `400`.
+The workspace is the one your API key belongs to; it is never read from a
+header. An id that names no server in that workspace returns `404`, and a
+server that is configured but disabled is skipped rather than refusing the
+request.
+
+### Configuring them (standalone)
+
+Manage a workspace's servers with the master key, under
+`/v1/workspaces/{workspace_id}/mcp-servers`:
+
+```bash
+curl -X POST http://localhost:8000/v1/workspaces/$WORKSPACE_ID/mcp-servers \
+  -H "Otari-Key: $OTARI_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+        "name": "github",
+        "url": "https://mcp.example.com/github",
+        "authorization_token": "ghp_...",
+        "purpose_hint": "Use for repository and issue lookups",
+        "allowed_tools": ["list_issues", "get_issue"]
+      }'
+```
+
+`GET` lists them, `PATCH /{server_id}` updates one, and `DELETE /{server_id}`
+removes it. Every operation, including the list, needs an organization
+owner/admin or an owner/admin of that workspace.
+
+- The `authorization_token` is encrypted at rest with `OTARI_SECRET_KEY` and is
+  never returned. Responses carry `has_token` instead. On a `PATCH`, omit the
+  field to leave the stored token alone, send `""` to clear it, or send a value
+  to rotate it.
+- `name` is unique within a workspace; a duplicate is refused with `409`.
+- `enabled: false` keeps the row and its token but takes the server out of
+  every request that names it.
+- The URL is checked for SSRF safety when it is stored as well as when a
+  request uses it, and must be `https://` when a token is set.
+- A workspace may configure up to 50 servers.
+
+In hybrid mode these routes are not mounted: the servers live in otari.ai and
+are managed there.
 
 ## Limits and safety
 
 - `mcp_servers` and `mcp_server_ids` cannot be combined with `otari_code_execution` or `otari_web_search` in the same request yet
 - `max_tool_iterations` optionally caps the loop; default is `10`, max is `25`
+- `mcp_server_ids` accepts at most 50 ids, which is also the most servers a workspace can have
 - MCP URLs are validated to reduce SSRF risk; by default, private and reserved addresses are blocked, loopback is allowed, and `http://` is rejected when `authorization_token` is present
 - `OTARI_MCP_ALLOW_LOOPBACK=false` disables loopback; `OTARI_MCP_ALLOW_PRIVATE_HOSTS=true` relaxes the private-host restriction
 

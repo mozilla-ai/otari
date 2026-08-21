@@ -11,7 +11,8 @@ import pytest
 
 from gateway.api.routes import _platform as platform_module
 from gateway.api.routes._platform import _resolve_platform_mcp_servers
-from gateway.models.mcp import McpServerConfig
+from gateway.models.mcp import MAX_MCP_SERVER_IDS, McpServerConfig
+from gateway.services.tenancy.workspace_mcp_server_service import MAX_MCP_SERVERS_PER_WORKSPACE
 
 
 def _config(*, base_url: str | None = "https://platform.local") -> Any:
@@ -180,3 +181,15 @@ async def test_resolve_422_collapses_to_502(monkeypatch: pytest.MonkeyPatch) -> 
     with pytest.raises(HTTPException) as ei:
         await _resolve_platform_mcp_servers(_config(), "tk", [uuid.uuid4()])
     assert ei.value.status_code == 502
+
+
+def test_the_request_bound_admits_every_server_a_workspace_can_hold() -> None:
+    """`MAX_MCP_SERVER_IDS` justifies itself by matching the per-workspace cap, so pin that.
+
+    They are declared separately on purpose (a wire bound has to be checkable at
+    parse time, with no database and no mode to consult), which is exactly what
+    lets them drift. Raising the service cap alone would leave a workspace able
+    to store more servers than one request may name, surfacing as a 422 with
+    nothing pointing at the cause.
+    """
+    assert MAX_MCP_SERVER_IDS >= MAX_MCP_SERVERS_PER_WORKSPACE

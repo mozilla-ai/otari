@@ -240,3 +240,11 @@ DELETE /v1/workspaces/{workspace_id}/provider-keys/{key_id}               # dash
 GET /v1/workspaces/{workspace_id}/provider-keys/{key_id}/models           # dashboard-only
 POST /v1/workspaces/{workspace_id}/provider-keys/{key_id}/models          # dashboard-only
 DELETE /v1/workspaces/{workspace_id}/provider-keys/{key_id}/models/{model} # dashboard-only
+# Workspace-scoped MCP servers (otari#658): a master-key operator surface for
+# registering the endpoints a workspace's requests may reach, alongside the
+# tenancy admin rows above. An SDK caller does not manage these; it names them
+# by id in `mcp_server_ids` on a completion request, which is already covered.
+GET /v1/workspaces/{workspace_id}/mcp-servers                             # operator surface
+POST /v1/workspaces/{workspace_id}/mcp-servers                            # operator surface
+PATCH /v1/workspaces/{workspace_id}/mcp-servers/{server_id}               # operator surface
+DELETE /v1/workspaces/{workspace_id}/mcp-servers/{server_id}              # operator surface

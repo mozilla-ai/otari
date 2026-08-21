@@ -1364,3 +1364,62 @@ class WorkspaceActivationState(Base):
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
+
+
+class WorkspaceMcpServer(Base):
+    """One MCP server a workspace has configured, referenced by id from a request.
+
+    Ported from otari-ai's ``mcp_server`` table (otari#658). A request names
+    stored servers with ``mcp_server_ids``; hybrid mode resolves those ids
+    through the platform and standalone mode resolves them here, against the
+    workspace the request's key belongs to. There is no deployment-wide MCP
+    server list for these rows to narrow, which is why MCP is the stated
+    exception to the "a workspace row never grants" rule in
+    ``src/gateway/AGENTS.md``.
+
+    ``encrypted_token`` holds the server's bearer token, Fernet-encrypted with
+    ``OTARI_SECRET_KEY`` (``services/secret_box.py``), the same treatment
+    ``ProviderCredential.encrypted_api_key`` gets. Nothing serializes it: the
+    public shape carries ``has_token`` and no prefix or suffix of the value,
+    because unlike a provider key's ``last4`` there is no operator workflow
+    here that needs to tell two tokens apart at a glance.
+
+    ``enabled`` is a workspace-level off switch that keeps the row and its
+    token: a disabled server is skipped at resolve rather than refusing the
+    request, so a caller whose stored id list outlives one server's
+    decommissioning still gets the rest.
+
+    CASCADE, not the ``RESTRICT`` the request-plane tables above use: this is a
+    workspace-owned configuration row, like ``workspace_budget_defaults``, with
+    no meaning once its workspace is gone.
+    """
+
+    __tablename__ = "workspace_mcp_servers"
+    __table_args__ = (
+        # Duplicate names within one workspace are rejected at the database, not
+        # only in the service layer, so two concurrent creates cannot both land
+        # (otari#658's third Definition-of-Done item). The name is what an
+        # operator recognizes a server by and what the tool loop labels its
+        # tools with, so collapsing two onto one name would silently hide a
+        # server.
+        UniqueConstraint("workspace_id", "name", name="uq_workspace_mcp_servers_workspace_name"),
+    )
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    name: Mapped[str] = mapped_column(nullable=False)
+    url: Mapped[str] = mapped_column(nullable=False)
+    encrypted_token: Mapped[str | None] = mapped_column(Text, default=None)
+    purpose_hint: Mapped[str | None] = mapped_column(Text, default=None)
+    allowed_tools: Mapped[list[str] | None] = mapped_column(JSON, default=None)
+    enabled: Mapped[bool] = mapped_column(default=True, nullable=False)
+    # ``UtcDateTime`` for the same reason ``WorkspaceBudgetDefault``'s are: these
+    # go over the wire and a naive SQLite round-trip would drop the offset.
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )

@@ -4,6 +4,18 @@ from __future__ import annotations
 
 from pydantic import BaseModel, Field
 
+# Ceiling on ``mcp_server_ids`` in one request. A workspace can hold at most 50
+# configured servers, in standalone (``MAX_MCP_SERVERS_PER_WORKSPACE`` in
+# ``services/tenancy/workspace_mcp_server_service.py``) and on the platform,
+# which uses the same value, so no reachable request loses anything. It is
+# declared separately from that constant rather than imported: a wire bound has
+# to be enforceable at parse time, with no database and no mode to consult, and
+# a models module reaching into a service to learn its own limits would be the
+# wrong direction. Without it a single request could hand the resolver an
+# unbounded ``IN`` list, which is why the usage filters carry the same kind of
+# ceiling (``core/sql.MAX_FILTER_VALUES``).
+MAX_MCP_SERVER_IDS = 50
+
 
 class McpServerConfig(BaseModel):
     """Inline MCP server configuration accepted on the chat completions request.

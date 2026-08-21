@@ -38,6 +38,10 @@ _MODULES = [
     # here for the same reason as the two above them.
     "gateway.services.tenancy.workspace_budget_default_service",
     "gateway.services.tenancy.authorization",
+    # workspace_mcp_server_service reaches authorization and organization_service
+    # the same way, and is additionally imported from the request pipeline, which
+    # is a second entry point into the graph.
+    "gateway.services.tenancy.workspace_mcp_server_service",
 ]
 
 

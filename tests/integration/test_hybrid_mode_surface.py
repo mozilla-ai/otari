@@ -99,6 +99,11 @@ def test_hybrid_mode_disables_dashboard_management_endpoints(monkeypatch: pytest
             "/v1/pricing",
             "/v1/organizations/me",
             "/v1/workspaces",
+            # A workspace's MCP servers are stored with a bearer token, and in
+            # hybrid mode they live on the platform. Listed explicitly rather
+            # than left to the `/v1/workspaces` entry above: this is a distinct
+            # router, so re-mounting it would not show up in that check.
+            "/v1/workspaces/11111111-1111-1111-1111-111111111111/mcp-servers",
         ):
             response = client.get(path)
             assert response.status_code == 404, path
