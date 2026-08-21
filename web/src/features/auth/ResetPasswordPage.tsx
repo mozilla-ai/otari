@@ -3,6 +3,7 @@ import { useState } from "react"
 
 import { useResetPassword } from "@/shared/api/hooks"
 import { ErrorBanner } from "@/shared/components/ui"
+import { tokenFromHash } from "@/shared/helpers/hashParams"
 import {
   MAX_PASSWORD_BYTES,
   MIN_PASSWORD_LENGTH,
@@ -11,7 +12,6 @@ import {
 
 import { AuthPasswordField } from "./AuthFields"
 import { PublicAuthLayout, PublicAuthLink } from "./PublicAuthLayout"
-import { tokenFromHash } from "./publicAuthPaths"
 
 /**
  * `#/reset-password?token=…`: the page the mailed reset link lands on.
@@ -35,6 +35,17 @@ export function ResetPasswordPage({ hash }: { hash: string }) {
   const problem = newPasswordProblem(password, confirmPassword)
   const complete = password !== "" && confirmPassword !== ""
   const canSubmit = token !== null && complete && problem === null
+
+  // A refusal describes a call that is no longer the one being made, so typing
+  // clears it. Never while one is in flight: `reset()` returns the observer to
+  // idle without cancelling the request, so clearing mid-call would drop the
+  // `isPending` that `submit` guards on and let a keystroke start a second one.
+  const clearError = () => {
+    if (reset.isPending) {
+      return
+    }
+    reset.reset()
+  }
 
   const submit = () => {
     if (!canSubmit || reset.isPending) {
@@ -104,15 +115,20 @@ export function ResetPasswordPage({ hash }: { hash: string }) {
         <AuthPasswordField
           label="New password"
           value={password}
-          onChange={setPassword}
+          onChange={(next) => {
+            setPassword(next)
+            clearError()
+          }}
           autoComplete="new-password"
-          autoFocus
           description={`At least ${MIN_PASSWORD_LENGTH} characters, and at most ${MAX_PASSWORD_BYTES} bytes.`}
         />
         <AuthPasswordField
           label="Confirm new password"
           value={confirmPassword}
-          onChange={setConfirmPassword}
+          onChange={(next) => {
+            setConfirmPassword(next)
+            clearError()
+          }}
           autoComplete="new-password"
         />
         {problem ? (

@@ -52,6 +52,17 @@ export function SignupPage() {
     email.trim() !== "" && password !== "" && confirmPassword !== ""
   const canSubmit = complete && problem === null
 
+  // A refusal describes a call that is no longer the one being made, so typing
+  // clears it. Never while one is in flight: `reset()` returns the observer to
+  // idle without cancelling the request, so clearing mid-call would drop the
+  // `isPending` that `submit` guards on and let a keystroke start a second one.
+  const clearError = () => {
+    if (signup.isPending) {
+      return
+    }
+    signup.reset()
+  }
+
   const submit = () => {
     if (!canSubmit || signup.isPending) {
       return
@@ -90,8 +101,10 @@ export function SignupPage() {
       >
         <AuthEmailField
           value={email}
-          onChange={setEmail}
-          autoFocus
+          onChange={(next) => {
+            setEmail(next)
+            clearError()
+          }}
           description="The address your administrator added or invited. Another address has nothing to claim."
         />
         {/* Optional, and the server treats it as such: it fills the name in
@@ -100,20 +113,29 @@ export function SignupPage() {
         <AuthTextField
           label="Full name (optional)"
           value={fullName}
-          onChange={setFullName}
+          onChange={(next) => {
+            setFullName(next)
+            clearError()
+          }}
           autoComplete="name"
         />
         <AuthPasswordField
           label="Password"
           value={password}
-          onChange={setPassword}
+          onChange={(next) => {
+            setPassword(next)
+            clearError()
+          }}
           autoComplete="new-password"
           description={`At least ${MIN_PASSWORD_LENGTH} characters, and at most ${MAX_PASSWORD_BYTES} bytes.`}
         />
         <AuthPasswordField
           label="Confirm password"
           value={confirmPassword}
-          onChange={setConfirmPassword}
+          onChange={(next) => {
+            setConfirmPassword(next)
+            clearError()
+          }}
           autoComplete="new-password"
         />
 

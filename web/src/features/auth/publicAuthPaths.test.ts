@@ -3,7 +3,6 @@ import { describe, expect, it } from "vitest"
 import {
   isPublicAuthPageAvailable,
   publicAuthPath,
-  tokenFromHash,
 } from "@/features/auth/publicAuthPaths"
 
 describe("publicAuthPath", () => {
@@ -27,6 +26,12 @@ describe("publicAuthPath", () => {
     expect(publicAuthPath("")).toBeNull()
     // A prefix match would swallow this one; the table is exact.
     expect(publicAuthPath("#/signup-something-else")).toBeNull()
+    // `in` would answer these, because it walks the prototype chain, and the
+    // exhaustive switch that renders a page would fall off the end into a
+    // blank screen. `Object.hasOwn` is what keeps them out.
+    expect(publicAuthPath("#toString")).toBeNull()
+    expect(publicAuthPath("#constructor")).toBeNull()
+    expect(publicAuthPath("#__proto__")).toBeNull()
   })
 })
 
@@ -46,16 +51,5 @@ describe("isPublicAuthPageAvailable", () => {
   it("keeps the two token-landing pages open, since their message was already sent", () => {
     expect(isPublicAuthPageAvailable("/verify-email", false)).toBe(true)
     expect(isPublicAuthPageAvailable("/reset-password", false)).toBe(true)
-  })
-})
-
-describe("tokenFromHash", () => {
-  it("reads the token out of a link", () => {
-    expect(tokenFromHash("#/verify-email?token=abc123")).toBe("abc123")
-  })
-
-  it("answers null for a link that carries none", () => {
-    expect(tokenFromHash("#/verify-email")).toBeNull()
-    expect(tokenFromHash("#/verify-email?other=1")).toBeNull()
   })
 })

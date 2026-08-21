@@ -1671,7 +1671,7 @@ export function useAcceptInvitation() {
 // sign-in limiter fires, and 503 when this deployment cannot send mail, so
 // apiFetch's session-bounce on 401/403 never triggers on any of them.
 //
-// None of the five invalidates a query. They write to an identity this
+// None of them invalidates anything. They write to an identity this
 // unauthenticated caller cannot read back, and the cache they would touch
 // belongs to a session that does not exist yet.
 
@@ -1688,17 +1688,37 @@ export function useSignup() {
   })
 }
 
+// A query rather than a mutation, the same shape `useValidateInvitation` takes
+// and for a reason that outranks the fact that this one does write: the page
+// verifies on arrival rather than behind a button, so *whatever* fires it has
+// to fire exactly once per token, and a query keyed on the token is the only
+// one of the two that the cache makes idempotent for free. A mutation fired
+// from an effect is not: `main.tsx` runs under StrictMode, whose
+// mount/unmount/mount would spend a single-use token twice and land the second
+// call's `400` over the first call's success.
+//
+// The knobs are what keep it a one-shot. Never stale and never collected, so a
+// remount reads the answer back instead of asking again; no retry, because a
+// spent token's `400` is the final answer and not a blip; and the provider
+// already turns refetch-on-focus off for every query.
+//
 // POST with the token in the body rather than a GET with it in the URL, the
 // same reasoning `useValidateInvitation` gives: the token is a bearer
 // credential and a URL is what an access log or an intermediate proxy
 // routinely retains.
-export function useVerifyEmail() {
-  return useMutation({
-    mutationFn: (token: string) =>
+export function useVerifyEmail(token: string) {
+  return useQuery({
+    queryKey: ["verify-email", token],
+    queryFn: () =>
       apiFetch<VerifyEmailResponse>("/v1/auth/verify-email", {
         method: "POST",
         body: JSON.stringify({ token }),
       }),
+    // A malformed link is never worth a round trip; the page says so itself.
+    enabled: token.length > 0,
+    retry: false,
+    staleTime: Number.POSITIVE_INFINITY,
+    gcTime: Number.POSITIVE_INFINITY,
   })
 }
 

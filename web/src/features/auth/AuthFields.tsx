@@ -1,7 +1,7 @@
 import { Description, Input, Label, TextField } from "@heroui/react"
 
 /**
- * The two fields the pages in front of a session are built from.
+ * The three fields the pages in front of a session are built from.
  *
  * `shared/components/Field` is the general one and does not fit here: it caps
  * itself at `max-w-md` for a settings page and offers no `type="password"` or
@@ -15,13 +15,11 @@ export function AuthEmailField({
   value,
   onChange,
   description,
-  autoFocus,
 }: {
   label?: string
   value: string
   onChange: (next: string) => void
   description?: string
-  autoFocus?: boolean
 }) {
   return (
     <TextField
@@ -35,11 +33,11 @@ export function AuthEmailField({
       {/* autoComplete="username" and not "email": this is the handle the
           sign-in form asks for, so a password manager should file it against
           the credential it is being set beside. */}
-      <Input
-        placeholder="you@example.com"
-        autoComplete="username"
-        autoFocus={autoFocus}
-      />
+      {/* No autoFocus. These are pages, not dialogs, and focusing a field on
+          mount raises the soft keyboard over the explanation above it before
+          the visitor has asked to type (frontend-standards/responsiveness.md,
+          and the same call `features/account/PasswordCard` makes). */}
+      <Input placeholder="you@example.com" autoComplete="username" />
       {description ? (
         // HeroUI's Description reaches the input as aria-describedby through
         // the TextField's "description" slot, which a raw span does not.
@@ -55,14 +53,12 @@ export function AuthPasswordField({
   onChange,
   autoComplete,
   description,
-  autoFocus,
 }: {
   label: string
   value: string
   onChange: (next: string) => void
   autoComplete: "current-password" | "new-password"
   description?: string
-  autoFocus?: boolean
 }) {
   return (
     <TextField
@@ -73,7 +69,7 @@ export function AuthPasswordField({
       className="flex flex-col gap-1"
     >
       <Label className="text-sm font-medium text-foreground">{label}</Label>
-      <Input autoComplete={autoComplete} autoFocus={autoFocus} />
+      <Input autoComplete={autoComplete} />
       {description ? (
         <Description className="text-xs text-muted">{description}</Description>
       ) : null}

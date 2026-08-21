@@ -19,12 +19,7 @@ import { useState } from "react"
 
 import { useAcceptInvitation, useValidateInvitation } from "@/shared/api/hooks"
 import { ErrorBanner } from "@/shared/components/ui"
-
-/** The token in `#/accept-invitation?token=...`, or null if the link is malformed. */
-function tokenFromHash(hash: string): string | null {
-  const query = hash.split("?")[1] ?? ""
-  return new URLSearchParams(query).get("token")
-}
+import { tokenFromHash } from "@/shared/helpers/hashParams"
 
 export function AcceptInvitationPage() {
   // Read once, safely: App.tsx renders this keyed on the hash

@@ -43,7 +43,7 @@ export function PublicAuthLayout({
           {children}
 
           {footer ? (
-            <div className="flex flex-col items-center gap-2 border-t border-border pt-4 text-center">
+            <div className="flex flex-col items-center border-t border-border pt-2 text-center">
               {footer}
             </div>
           ) : null}
@@ -61,9 +61,13 @@ export function PublicAuthLayout({
  * rendered by `DeploymentRoot` *ahead* of `RouterProvider` (see `App.tsx`), so
  * there is no router context to link through; and a hash change is not the
  * full page reload that rule exists to prevent, because `App`'s `useHashPath`
- * picks it up and swaps the page in place. `Login` and `AcceptInvitationPage`
- * already reach for this component for their own out-of-router link to
- * `/welcome`.
+ * picks it up and swaps the page in place. The `/welcome` links on `Login` and
+ * `AcceptInvitationPage` are a HeroUI `Link` of their own rather than this,
+ * and stay that way: `/welcome` is a real path the gateway serves, so it is
+ * the one link down here that *is* a page load.
+ *
+ * Sized to the 44px touch target the phone viewport asks for, which `text-sm`
+ * alone is about half of, and these stack several deep in a card's footer.
  */
 export function PublicAuthLink({
   to,
@@ -75,7 +79,7 @@ export function PublicAuthLink({
   return (
     <Link
       href={to}
-      className="text-sm font-medium text-link hover:text-link-hover"
+      className="inline-flex min-h-11 items-center text-sm font-medium text-link hover:text-link-hover"
     >
       {children}
     </Link>

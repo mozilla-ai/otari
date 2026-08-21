@@ -50,7 +50,12 @@ export type PublicAuthPath = keyof typeof PUBLIC_AUTH_PAGES
  */
 export function publicAuthPath(hash: string): PublicAuthPath | null {
   const path = hash.replace(/^#/, "").split("?")[0] ?? ""
-  return path in PUBLIC_AUTH_PAGES ? (path as PublicAuthPath) : null
+  // `Object.hasOwn`, not `in`: `in` walks the prototype chain, so `#toString`
+  // would be answered as a page this table does not hold and the exhaustive
+  // switch that renders one would fall off the end into a blank screen.
+  return Object.hasOwn(PUBLIC_AUTH_PAGES, path)
+    ? (path as PublicAuthPath)
+    : null
 }
 
 /** Whether a page's flow can start on a deployment with mail in this state. */
@@ -59,9 +64,4 @@ export function isPublicAuthPageAvailable(
   mailReady: boolean,
 ): boolean {
   return PUBLIC_AUTH_PAGES[path] === "none" || mailReady
-}
-
-/** The `token` in `#/verify-email?token=…`, or null if the link is malformed. */
-export function tokenFromHash(hash: string): string | null {
-  return new URLSearchParams(hash.split("?")[1] ?? "").get("token")
 }

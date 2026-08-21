@@ -1,10 +1,8 @@
-import { useEffect } from "react"
-
 import { useVerifyEmail } from "@/shared/api/hooks"
 import { ErrorBanner } from "@/shared/components/ui"
+import { tokenFromHash } from "@/shared/helpers/hashParams"
 
 import { PublicAuthLayout, PublicAuthLink } from "./PublicAuthLayout"
-import { tokenFromHash } from "./publicAuthPaths"
 
 /**
  * `#/verify-email?token=…`: the page the mailed verification link lands on.
@@ -15,23 +13,15 @@ import { tokenFromHash } from "./publicAuthPaths"
  * and this does not: accepting joins an organization, while this only confirms
  * an address the recipient's own mailbox already proved they hold.
  *
- * Fired once per token. The effect depends on the token alone (`mutate` is
- * stable across renders, and including the mutation object would loop), and
- * `App.tsx` keys this page on the hash, so a second link pasted over the first
- * in an open tab remounts instead of rendering a fresh verification on top of
- * the previous one's success or failure.
+ * Verifying on arrival is what makes `useVerifyEmail` a query rather than a
+ * mutation: the token is single-use, so the call has to happen exactly once
+ * per token, and the query cache is what guarantees that through StrictMode's
+ * development-only remount. See the hook for the rest. There is deliberately
+ * no effect here at all.
  */
 export function VerifyEmailPage({ hash }: { hash: string }) {
   const token = tokenFromHash(hash)
-  const verify = useVerifyEmail()
-  const { mutate } = verify
-
-  // biome-ignore lint/correctness/useExhaustiveDependencies: the token is the only input; `mutate` is stable and adding it would only invite the mutation object back into the list, which is not
-  useEffect(() => {
-    if (token) {
-      mutate(token)
-    }
-  }, [token])
+  const verify = useVerifyEmail(token ?? "")
 
   if (token === null) {
     return (
@@ -50,7 +40,7 @@ export function VerifyEmailPage({ hash }: { hash: string }) {
     )
   }
 
-  if (verify.isSuccess) {
+  if (verify.data) {
     return (
       <PublicAuthLayout
         title="Email verified"
@@ -64,7 +54,7 @@ export function VerifyEmailPage({ hash }: { hash: string }) {
     )
   }
 
-  if (verify.isError) {
+  if (verify.error) {
     return (
       <PublicAuthLayout
         title="Verification failed"

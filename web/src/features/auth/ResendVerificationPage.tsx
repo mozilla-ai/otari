@@ -27,6 +27,17 @@ export function ResendVerificationPage() {
   const resend = useResendVerification()
   const [email, setEmail] = useState("")
 
+  // A refusal describes a call that is no longer the one being made, so typing
+  // clears it. Never while one is in flight: `reset()` returns the observer to
+  // idle without cancelling the request, so clearing mid-call would drop the
+  // `isPending` that `submit` guards on and let a keystroke start a second one.
+  const clearError = () => {
+    if (resend.isPending) {
+      return
+    }
+    resend.reset()
+  }
+
   const submit = () => {
     if (email.trim() === "" || resend.isPending) {
       return
@@ -49,7 +60,13 @@ export function ResendVerificationPage() {
           submit()
         }}
       >
-        <AuthEmailField value={email} onChange={setEmail} autoFocus />
+        <AuthEmailField
+          value={email}
+          onChange={(next) => {
+            setEmail(next)
+            clearError()
+          }}
+        />
         <ErrorBanner error={resend.error} />
         <Button
           type="submit"

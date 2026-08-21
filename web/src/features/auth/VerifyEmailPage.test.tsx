@@ -1,5 +1,6 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
 import { render, screen } from "@testing-library/react"
+import { StrictMode } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { VerifyEmailPage } from "@/features/auth/VerifyEmailPage"
@@ -12,7 +13,7 @@ vi.mock("@/shared/api/client", async (importOriginal) => {
 
 function renderPage(hash: string) {
   const client = new QueryClient({
-    defaultOptions: { mutations: { retry: false } },
+    defaultOptions: { queries: { retry: false } },
   })
   return render(
     <QueryClientProvider client={client}>
@@ -46,7 +47,32 @@ describe("VerifyEmailPage", () => {
     expect(JSON.parse(String(init?.body))).toEqual({ token: "abc123" })
   })
 
-  it("verifies exactly once for one link", async () => {
+  it("spends a single-use token once, even under StrictMode", async () => {
+    // `main.tsx` wraps the app in StrictMode, which in development mounts,
+    // unmounts and mounts again. Without the page's own guard that is two
+    // POSTs of one single-use token: the first consumes it, the second 400s,
+    // and the observer ends on the failure, so a verification that worked
+    // renders "Verification failed".
+    vi.mocked(apiFetch).mockResolvedValue({ email: "ada@example.com" } as never)
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+
+    render(
+      <StrictMode>
+        <QueryClientProvider client={client}>
+          <VerifyEmailPage hash="#/verify-email?token=abc123" />
+        </QueryClientProvider>
+      </StrictMode>,
+    )
+
+    expect(
+      await screen.findByRole("heading", { name: "Email verified" }),
+    ).toBeInTheDocument()
+    expect(apiFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("re-renders without re-verifying", async () => {
     vi.mocked(apiFetch).mockResolvedValue({ email: "ada@example.com" } as never)
 
     const { rerender } = renderPage("#/verify-email?token=abc123")

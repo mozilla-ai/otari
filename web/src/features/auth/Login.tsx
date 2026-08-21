@@ -247,7 +247,7 @@ export function Login() {
               : "The key is sent once to this gateway and exchanged for a session cookie. It is never written to browser storage, and the cookie that replaces it cannot be read by this page."}
           </p>
 
-          <div className="flex flex-col items-center gap-2 border-t border-border pt-4 text-center">
+          <div className="flex flex-col items-center border-t border-border pt-2 text-center">
             {offersSignup ? (
               <PublicAuthLink to="#/signup">
                 Added to this gateway? Claim your account
@@ -263,9 +263,12 @@ export function Login() {
                 Need a new verification link?
               </PublicAuthLink>
             ) : null}
+            {/* Not a `PublicAuthLink`: `/welcome` is a page the gateway
+                serves, so this one really is a navigation and not a hash
+                change. Sized to match the links above it. */}
             <Link
               href="/welcome"
-              className="text-sm font-medium text-link hover:text-link-hover"
+              className="inline-flex min-h-11 items-center text-sm font-medium text-link hover:text-link-hover"
             >
               New to Otari? Open the welcome guide
             </Link>

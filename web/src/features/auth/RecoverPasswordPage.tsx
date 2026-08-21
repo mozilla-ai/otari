@@ -23,6 +23,17 @@ export function RecoverPasswordPage() {
   const request = useRequestPasswordReset()
   const [email, setEmail] = useState("")
 
+  // A refusal describes a call that is no longer the one being made, so typing
+  // clears it. Never while one is in flight: `reset()` returns the observer to
+  // idle without cancelling the request, so clearing mid-call would drop the
+  // `isPending` that `submit` guards on and let a keystroke start a second one.
+  const clearError = () => {
+    if (request.isPending) {
+      return
+    }
+    request.reset()
+  }
+
   const submit = () => {
     if (email.trim() === "" || request.isPending) {
       return
@@ -58,7 +69,13 @@ export function RecoverPasswordPage() {
           submit()
         }}
       >
-        <AuthEmailField value={email} onChange={setEmail} autoFocus />
+        <AuthEmailField
+          value={email}
+          onChange={(next) => {
+            setEmail(next)
+            clearError()
+          }}
+        />
         <ErrorBanner error={request.error} />
         <Button
           type="submit"
