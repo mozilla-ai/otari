@@ -333,7 +333,17 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
     # names the unsupported feature.
     if _is_unsupported_feature_error(exc):
         return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, _caller_fault_detail(exc, PROVIDER_BAD_REQUEST_DETAIL))
+    # Heuristic for image-related provider rejections that arrive without a status
+    # code (e.g., any-llm 1.17.x wrapping an Anthropic image error as a generic
+    # "LLM provider error"). When the error message mentions image/vision/media,
+    # treat it as a caller-fault 400 rather than masking it as a generic 502.
     if status_code is None:
+        msg = upstream_error_message(exc).lower()
+        if any(k in msg for k in ("image", "vision", "media", "invalid_request_error")):
+            return ProviderErrorMapping(
+                status.HTTP_400_BAD_REQUEST,
+                _caller_fault_detail(exc, PROVIDER_BAD_REQUEST_DETAIL)
+            )
         return None
     # Account billing exhaustion, which several providers report as a 400/422
     # rather than the 402 the condition deserves (and DeepSeek does report as a
