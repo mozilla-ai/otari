@@ -38,6 +38,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.core.config import GatewayConfig
+from gateway.core.database import create_session
 from gateway.log_config import logger
 from gateway.models.entities import DashboardSession, RuntimeSetting
 from gateway.models.tenancy import User
@@ -103,14 +104,8 @@ async def resolve_dashboard_session(db: AsyncSession, token: str) -> User | None
     trusted from the session row: deactivating an operator has to end their
     dashboard access, not wait out the TTL.
 
-    A deactivated identity's sessions are *deleted* here, not merely refused.
-    Refusing alone leaves the rows alive, so re-activating an identity hands
-    every cookie it held before back its access, which is the opposite of what
-    deactivating it for a lost laptop was for. Nothing in this tree deactivates
-    a tenancy identity yet (``is_active`` is only set at creation), so this read
-    path is the one place the revocation can hang; a flow that does deactivate
-    should call ``revoke_user_dashboard_sessions`` directly rather than rely on
-    the cookie coming back.
+    A deactivated identity's sessions are also deleted rather than only refused;
+    see ``_revoke_deactivated_identity_sessions`` below for why.
 
     Expiry is compared in Python, as the rest of this module does: SQLite hands
     the stored timestamp back naive, so the check goes through ``_as_utc``.
@@ -131,37 +126,41 @@ async def resolve_dashboard_session(db: AsyncSession, token: str) -> User | None
     if _as_utc(session.expires_at) < datetime.now(UTC):
         return None
     if not identity.is_active:
-        await _revoke_deactivated_identity_sessions(db, identity.id)
+        await _revoke_deactivated_identity_sessions(identity.id)
         return None
     return identity
 
 
-async def _revoke_deactivated_identity_sessions(db: AsyncSession, user_id: uuid.UUID) -> None:
-    """Delete a deactivated identity's sessions, committing on its own.
+async def _revoke_deactivated_identity_sessions(user_id: uuid.UUID) -> None:
+    """Delete a deactivated identity's sessions, on a session of its own.
 
-    Commits rather than leaving the DELETE staged for the caller: this runs
-    inside an auth dependency, and the request it is refusing never reaches a
-    handler that would commit. It is a self-contained revocation, so nothing
-    else is in flight to interfere with.
+    Refusing a session without deleting it leaves the row alive, so
+    re-activating an identity hands back the access of every cookie it held,
+    which is the opposite of what deactivating it for a lost laptop was for.
+    Nothing in this tree deactivates a tenancy identity yet (``is_active`` is
+    only ever set at creation), so this read path is the one place the
+    revocation can hang; a flow that does deactivate should call
+    ``revoke_user_dashboard_sessions`` on its own transaction instead of
+    waiting for the cookie to come back.
 
-    A failure here is swallowed, the rollback's included. The caller's answer is
-    "not authenticated" either way, and turning a 401 into a 503 because the
-    cleanup could not be written would be a worse outcome than the rows
-    surviving to their TTL. The rollback needs its own guard rather than
-    riding on the outer one: the case that reaches it is a dead connection,
-    which is exactly the case where the rollback raises too, and that exception
-    would escape into ``get_session_identity``'s handler and become the 503
-    this is written to avoid.
+    A short-lived session rather than the request's, following
+    ``deps._bump_last_used_at``, which is the other best-effort write on the
+    auth path: this one runs inside an auth dependency, so committing the
+    caller's session would commit whatever else that request had staged. Today
+    nothing is staged by the time this runs, but that is a property of every
+    current call site rather than of this function, and a structure that does
+    not depend on it cannot be broken by a later one.
+
+    A failure is logged and swallowed. The caller's answer is "not
+    authenticated" either way, and turning a 401 into a 503 because the cleanup
+    could not be written would be the worse outcome; the rows die on their TTL.
     """
     try:
-        await revoke_user_dashboard_sessions(db, user_id)
-        await db.commit()
+        async with create_session() as session:
+            await revoke_user_dashboard_sessions(session, user_id)
+            await session.commit()
     except SQLAlchemyError:
         logger.warning("Could not revoke the sessions of deactivated identity %s", user_id, exc_info=True)
-        try:
-            await db.rollback()
-        except SQLAlchemyError:
-            logger.warning("Could not roll back after that failed revocation", exc_info=True)
 
 
 async def revoke_dashboard_session(db: AsyncSession, token: str) -> None:

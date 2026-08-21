@@ -19,9 +19,9 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text, update
 from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import sessionmaker
 
+from gateway.api import deps
 from gateway.api.routes import auth_session as auth_session_route
 from gateway.core.config import GatewayConfig
 from gateway.main import create_app
@@ -513,15 +513,16 @@ def test_reactivating_the_identity_does_not_restore_its_old_sessions(tmp_path: P
 def test_a_failed_revocation_still_answers_401_rather_than_503(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """The cleanup is best-effort, and its rollback is too.
+    """The cleanup is best-effort, and a failed one must not change the answer.
 
     A deactivated identity's sessions are deleted on the read that refuses
     them, and that write can fail. The caller's answer is "not authenticated"
-    either way, so neither the failed DELETE nor a rollback that fails after it
-    may escape into ``get_session_identity``, which maps a ``SQLAlchemyError``
-    to a 503. The dead connection that makes the commit fail is exactly the one
-    that makes the rollback fail, so the rollback is raised here too rather
-    than trusted to succeed.
+    either way, so the failure must not escape into ``get_session_identity``,
+    which maps a ``SQLAlchemyError`` to a 503.
+
+    The revocation runs on its own session, so the request's transaction is not
+    what is being protected here; what is, is that the dependency keeps
+    answering 401 when the cleanup cannot be written at all.
     """
 
     async def _boom(db: object, user_id: object, **kwargs: object) -> None:
@@ -538,11 +539,52 @@ def test_a_failed_revocation_still_answers_401_rather_than_503(
         engine = create_engine(config.database_url)
         with engine.begin() as connection:
             connection.execute(text('UPDATE "user" SET is_active = 0 WHERE id = :id'), {"id": identity})
-
-        async def _rollback_boom() -> None:
-            raise SQLAlchemyError("connection gone")
-
-        monkeypatch.setattr(AsyncSession, "rollback", lambda self: _rollback_boom())
+        engine.dispose()
 
         assert client.get("/v1/settings").status_code == 401
+
+
+def test_a_failed_revocation_leaves_the_request_session_alone(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The revocation writes on its own session, not the caller's.
+
+    ``_bump_last_used_at`` is the precedent: a best-effort write on the auth
+    path takes a short-lived session so it can never commit, or dirty, the one
+    the request is using. Asserting the structure rather than trusting the
+    comment, since the failure it prevents would be a stray commit of whatever
+    a future call site had staged, which no status code would reveal.
+    """
+    used: list[str] = []
+    real_revoke = dashboard_session_service.revoke_user_dashboard_sessions
+
+    async def _record(db: object, user_id: object, **kwargs: object) -> None:
+        used.append(f"{id(db):x}")
+        await real_revoke(db, user_id, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(dashboard_session_service, "revoke_user_dashboard_sessions", _record)
+
+    config = _config(tmp_path)
+    with TestClient(create_app(config)) as client:
+        signed_in = client.post("/v1/auth/session", json={"master_key": MASTER_KEY})
+        assert signed_in.status_code == 200, signed_in.text
+        identity = signed_in.json()["user_id"].replace("-", "")
+
+        engine = create_engine(config.database_url)
+        with engine.begin() as connection:
+            connection.execute(text('UPDATE "user" SET is_active = 0 WHERE id = :id'), {"id": identity})
         engine.dispose()
+
+        seen: list[str] = []
+        real_resolve = dashboard_session_service.resolve_dashboard_session
+
+        async def _capture(db: object, token: str) -> object:
+            seen.append(f"{id(db):x}")
+            return await real_resolve(db, token)  # type: ignore[arg-type]
+
+        monkeypatch.setattr(deps, "resolve_dashboard_session", _capture)
+
+        assert client.get("/v1/settings").status_code == 401
+        assert used and seen, (used, seen)
+        assert used[-1] != seen[-1], "the revocation reused the request's session"
+        assert _sessions(config) == []

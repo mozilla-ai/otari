@@ -663,3 +663,37 @@ def test_an_address_stored_with_other_casing_is_still_the_identity_s_own(tmp_pat
 
         assert response.status_code == 200, response.text
         assert client.post("/v1/auth/session", json={"email": EMAIL, "password": NEW_PASSWORD}).status_code == 200
+
+
+def test_a_malformed_stored_address_is_not_reported_as_the_caller_s_mistake(tmp_path: Path) -> None:
+    """The stored side is normalized, not shape-checked.
+
+    Running ``validated_email`` over a column value raises ``InvalidEmailError``
+    for a stored address that cannot pass the shape check, so a caller who
+    submitted a perfectly good address would be told theirs is invalid, with
+    the stored one quoted back at them. Both refusals are 400, so the message
+    is what separates them. ``get_by_email`` normalizes with ``.strip().lower()``
+    and this comparison matches it.
+    """
+    with _client(tmp_path) as client:
+        _claim(client)
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'password-test.db'}")
+    with engine.begin() as connection:
+        connection.execute(
+            text('UPDATE "user" SET email = :stored WHERE email = :claimed'),
+            {"stored": "legacy operator", "claimed": EMAIL},
+        )
+    engine.dispose()
+
+    with _client(tmp_path) as client:
+        response = client.put(
+            "/v1/auth/password",
+            json={"email": EMAIL, "new_password": NEW_PASSWORD},
+            headers={"Otari-Key": MASTER_KEY},
+        )
+
+        assert response.status_code == 400, response.text
+        detail = response.json()["detail"]
+        assert "changing it is not supported" in detail, detail
+        assert "legacy operator" not in detail, detail

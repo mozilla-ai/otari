@@ -172,8 +172,16 @@ async def set_dashboard_password(
     # which ``UserRepository.get_by_email`` already accounts for, and comparing
     # a normalized candidate against a raw column would refuse an identity its
     # own address.
+    #
+    # The stored side gets ``.strip().lower()`` and not ``validated_email``,
+    # matching how ``get_by_email`` normalizes its argument. Running the shape
+    # check over a column value would raise ``InvalidEmailError`` for a stored
+    # address that is malformed or over-width once normalized, which tells a
+    # caller who submitted a perfectly good address that theirs is invalid, and
+    # quotes the stored one back at them. Those rows are exactly the ones this
+    # comparison exists for, so it must not be the thing that refuses them.
     if body.email is not None and identity.email is not None:
-        if validated_email(body.email) != validated_email(identity.email):
+        if validated_email(body.email) != identity.email.strip().lower():
             raise EmailChangeNotSupportedError
         body = body.model_copy(update={"email": None})
     if identity.hashed_password is not None and not by_master_key:
