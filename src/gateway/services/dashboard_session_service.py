@@ -144,16 +144,24 @@ async def _revoke_deactivated_identity_sessions(db: AsyncSession, user_id: uuid.
     handler that would commit. It is a self-contained revocation, so nothing
     else is in flight to interfere with.
 
-    A failure here is swallowed. The caller's answer is "not authenticated"
-    either way, and turning a 401 into a 503 because the cleanup could not be
-    written would be a worse outcome than the rows surviving to their TTL.
+    A failure here is swallowed, the rollback's included. The caller's answer is
+    "not authenticated" either way, and turning a 401 into a 503 because the
+    cleanup could not be written would be a worse outcome than the rows
+    surviving to their TTL. The rollback needs its own guard rather than
+    riding on the outer one: the case that reaches it is a dead connection,
+    which is exactly the case where the rollback raises too, and that exception
+    would escape into ``get_session_identity``'s handler and become the 503
+    this is written to avoid.
     """
     try:
         await revoke_user_dashboard_sessions(db, user_id)
         await db.commit()
     except SQLAlchemyError:
-        await db.rollback()
-        logger.warning("Could not revoke the sessions of a deactivated identity", exc_info=True)
+        logger.warning("Could not revoke the sessions of deactivated identity %s", user_id, exc_info=True)
+        try:
+            await db.rollback()
+        except SQLAlchemyError:
+            logger.warning("Could not roll back after that failed revocation", exc_info=True)
 
 
 async def revoke_dashboard_session(db: AsyncSession, token: str) -> None:

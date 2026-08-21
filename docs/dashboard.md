@@ -584,8 +584,9 @@ put it behind HTTPS, as the security notes below describe.
   minted for, which is what the Organization pages scope themselves to; see
   [Access control](access-control.md#dashboard-sessions-and-identity). Deleting
   or deactivating that identity signs its browsers out immediately rather than
-  when the cookie expires, and a deactivated identity's sessions are discarded
-  rather than held, so re-activating it does not restore them.
+  when the cookie expires. A deactivated identity's sessions are also discarded
+  rather than held, on the next request that presents one, so re-activating it
+  does not hand a cookie that was refused in the meantime its access back.
 - **Log out on a machine you share.** A session runs for its full
   `dashboard_session_ttl_hours` with no idle timeout, so an unattended browser
   stays signed in until the cookie expires. Use **Log out** when you are done on

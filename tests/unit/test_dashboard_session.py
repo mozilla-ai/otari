@@ -19,13 +19,14 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text, update
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.orm import sessionmaker
 
 from gateway.api.routes import auth_session as auth_session_route
 from gateway.core.config import GatewayConfig
 from gateway.main import create_app
 from gateway.models.entities import DashboardSession
-from gateway.services import master_key_service
+from gateway.services import dashboard_session_service, master_key_service
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
 from gateway.services.tenancy.provisioning_service import BOOTSTRAP_IDENTITY_KEY
 
@@ -486,19 +487,62 @@ def test_reactivating_the_identity_does_not_restore_its_old_sessions(tmp_path: P
     """
     config = _config(tmp_path)
     with TestClient(create_app(config)) as client:
-        _sign_in(client)
+        signed_in = client.post("/v1/auth/session", json={"master_key": MASTER_KEY})
+        assert signed_in.status_code == 200, signed_in.text
         assert client.get("/v1/settings").status_code == 200
+        # Addressed by id rather than with a bare ``UPDATE "user"``: a fixture
+        # that grows a second identity would otherwise deactivate it too, and
+        # the assertion below would pass on sessions this test never minted.
+        identity = signed_in.json()["user_id"].replace("-", "")
 
         engine = create_engine(config.database_url)
         with engine.begin() as connection:
-            connection.execute(text('UPDATE "user" SET is_active = 0'))
+            connection.execute(text('UPDATE "user" SET is_active = 0 WHERE id = :id'), {"id": identity})
 
         # The refusal is what triggers the revocation, so present the cookie once.
         assert client.get("/v1/settings").status_code == 401
-        assert _sessions(config) == []
+        assert [user_id for _, user_id in _sessions(config) if user_id == identity] == []
 
         with engine.begin() as connection:
-            connection.execute(text('UPDATE "user" SET is_active = 1'))
+            connection.execute(text('UPDATE "user" SET is_active = 1 WHERE id = :id'), {"id": identity})
         engine.dispose()
 
         assert client.get("/v1/settings").status_code == 401
+
+
+def test_a_failed_revocation_still_answers_401_rather_than_503(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The cleanup is best-effort, and its rollback is too.
+
+    A deactivated identity's sessions are deleted on the read that refuses
+    them, and that write can fail. The caller's answer is "not authenticated"
+    either way, so neither the failed DELETE nor a rollback that fails after it
+    may escape into ``get_session_identity``, which maps a ``SQLAlchemyError``
+    to a 503. The dead connection that makes the commit fail is exactly the one
+    that makes the rollback fail, so the rollback is raised here too rather
+    than trusted to succeed.
+    """
+
+    async def _boom(db: object, user_id: object, **kwargs: object) -> None:
+        raise SQLAlchemyError("db down")
+
+    monkeypatch.setattr(dashboard_session_service, "revoke_user_dashboard_sessions", _boom)
+
+    config = _config(tmp_path)
+    with TestClient(create_app(config)) as client:
+        signed_in = client.post("/v1/auth/session", json={"master_key": MASTER_KEY})
+        assert signed_in.status_code == 200, signed_in.text
+        identity = signed_in.json()["user_id"].replace("-", "")
+
+        engine = create_engine(config.database_url)
+        with engine.begin() as connection:
+            connection.execute(text('UPDATE "user" SET is_active = 0 WHERE id = :id'), {"id": identity})
+
+        async def _rollback_boom() -> None:
+            raise SQLAlchemyError("connection gone")
+
+        monkeypatch.setattr(AsyncSession, "rollback", lambda self: _rollback_boom())
+
+        assert client.get("/v1/settings").status_code == 401
+        engine.dispose()

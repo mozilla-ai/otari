@@ -642,9 +642,16 @@ def test_an_address_stored_with_other_casing_is_still_the_identity_s_own(tmp_pat
     with _client(tmp_path) as client:
         _claim(client)
 
+    # Rewritten by address rather than with a bare ``UPDATE "user"``: a fixture
+    # that grows a second identity would otherwise have its address clobbered
+    # too, and the unique index would fail the statement rather than the
+    # assertion.
     engine = create_engine(f"sqlite:///{tmp_path / 'password-test.db'}")
     with engine.begin() as connection:
-        connection.execute(text('UPDATE "user" SET email = :stored'), {"stored": "Operator@Example.COM"})
+        connection.execute(
+            text('UPDATE "user" SET email = :stored WHERE email = :claimed'),
+            {"stored": "Operator@Example.COM", "claimed": EMAIL},
+        )
     engine.dispose()
 
     with _client(tmp_path) as client:
