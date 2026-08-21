@@ -31,6 +31,23 @@ describe("buildCurlSnippet", () => {
     const snippet = buildCurlSnippet({ ...INPUT, model: undefined })
     expect(snippet).toContain(`"model": "${SNIPPET_MODEL_PLACEHOLDER}"`)
   })
+
+  it("escapes a model id that would otherwise break the JSON body", () => {
+    // A model id is whatever the provider's catalog says it is. Quotes,
+    // backslashes and newlines are the three that would leave a snippet the
+    // guide advertises as runnable unable to parse.
+    const hostile = 'weird"model\\name\nv2'
+    const snippet = buildCurlSnippet({ ...INPUT, model: hostile })
+    const payload = snippet.slice(
+      snippet.indexOf("{"),
+      snippet.lastIndexOf("}") + 1,
+    )
+
+    expect(JSON.parse(payload)).toEqual({
+      model: hostile,
+      messages: [{ role: "user", content: "Hello" }],
+    })
+  })
 })
 
 describe("buildPythonSnippet", () => {
@@ -47,5 +64,13 @@ describe("buildPythonSnippet", () => {
     })
     expect(snippet).toContain('model="openai:gpt-4o-mini"')
     expect(snippet).toContain('"content": "Hello from Otari"')
+  })
+
+  it("escapes a model id that would otherwise break the Python literal", () => {
+    // A JSON string literal is a valid Python one, which is what lets one
+    // escaping helper serve both snippets.
+    const snippet = buildPythonSnippet({ ...INPUT, model: 'weird"model\\name' })
+
+    expect(snippet).toContain('model="weird\\"model\\\\name"')
   })
 })

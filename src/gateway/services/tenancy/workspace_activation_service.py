@@ -278,6 +278,17 @@ class WorkspaceActivationService:
         if await self._first_successful_request(workspace.id) is not None:
             raise WorkspaceAlreadyActivatedError
 
+        # The row exists before a key is minted, never after, and that ordering is
+        # what makes "one setup key per workspace" hold under concurrency. Two
+        # first-time calls both start with no row to lock, so the serialization
+        # point has to be the insert: the winner holds the row, the loser blocks
+        # on the primary key, adopts the committed row, and finds the key already
+        # named on it, so it rotates that one instead of minting a second.
+        if state is None:
+            state = await self._create_state(workspace.id)
+            # The row it adopted may have been dismissed by whoever created it.
+            self._require_offerable(workspace=workspace, state=state)
+
         plaintext = generate_api_key()
         record = await self._existing_key(state)
         if record is None:
@@ -313,7 +324,6 @@ class WorkspaceActivationService:
             record.is_active = True
 
         now = datetime.now(UTC)
-        state = state or await self._create_state(workspace.id)
         if state.first_presented_at is None:
             state.first_presented_at = now
         state.last_presented_at = now

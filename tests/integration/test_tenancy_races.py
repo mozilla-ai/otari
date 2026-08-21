@@ -19,6 +19,7 @@ from sqlalchemy.orm import Session
 from sqlmodel import col
 
 from gateway.core.config import GatewayConfig
+from gateway.models.entities import APIKey, WorkspaceActivationState
 from gateway.models.tenancy import (
     ActiveOrganizationMemberCreateRequest,
     ActiveOrganizationMemberUpdateRequest,  # noqa: E402
@@ -53,6 +54,10 @@ from gateway.services.tenancy.provisioning_service import (
     ensure_bootstrap_identity,
 )
 from gateway.services.tenancy.user_service import set_password
+from gateway.services.tenancy.workspace_activation_service import (
+    ACTIVATION_KEY_NAME,
+    WorkspaceActivationService,
+)
 
 pytestmark = pytest.mark.asyncio
 
@@ -577,3 +582,62 @@ async def test_concurrent_accept_and_revoke_of_one_invitation_produce_one_consis
         ("accepted", "active"),
         ("cancelled", "suspended"),
     }
+
+
+async def test_concurrent_first_issuance_leaves_one_setup_key(
+    async_db: AsyncSession,
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """Every racer asking a fresh workspace for its setup key gets the same one.
+
+    The guide's promise is one "Setup guide" key per workspace, rotated in place,
+    and on a first call there is no state row to lock, so the serialization point
+    is the insert of that row rather than a pre-check. Minting the key before
+    creating it (which is what this used to do) let each racer commit a key of
+    its own, leaving a workspace with several live credentials nobody asked for
+    and a state row naming whichever committed last.
+    """
+    organization, owner = await _seed_owner(async_db)
+    workspace = await WorkspaceRepository(async_db).create_workspace(
+        name="Engineering",
+        organization_id=organization.id,
+        created_by_user_id=owner.id,
+    )
+    await WorkspaceMemberRepository(async_db).create(
+        workspace_id=workspace.id,
+        user_id=owner.id,
+        role="owner",
+    )
+    await async_db.commit()
+
+    async def attempt(session: AsyncSession) -> object:
+        user = await UserRepository(session).get(owner.id)
+        assert user is not None
+        return await WorkspaceActivationService(session, GatewayConfig()).issue_api_key(
+            user=user,
+            workspace_id=workspace.id,
+        )
+
+    workspace_id = workspace.id
+    outcomes = await _race(sessions, attempt)
+
+    issued = [outcome for outcome in outcomes if not isinstance(outcome, Exception)]
+    assert issued, f"every racer failed: {outcomes}"
+
+    # Expired first, and every value read out into a local before the next
+    # await: this session predates the racers' commits, and a lazily refreshed
+    # attribute on an ``AsyncSession`` raises ``MissingGreenlet`` rather than
+    # reloading.
+    async_db.expire_all()
+    keys = (await async_db.execute(select(APIKey).where(col(APIKey.workspace_id) == workspace_id))).scalars().all()
+    key_ids = [key.id for key in keys]
+    key_names = [key.key_name for key in keys]
+    state = await async_db.get(WorkspaceActivationState, workspace_id)
+    assert state is not None
+    named_key = state.api_key_id
+
+    # One row, and every racer that got a key got that row's, so no plaintext was
+    # handed out for a credential the workspace does not carry.
+    assert key_names == [ACTIVATION_KEY_NAME]
+    assert {issue.key_id for issue in issued} == set(key_ids)  # type: ignore[attr-defined]
+    assert named_key == key_ids[0]

@@ -471,6 +471,14 @@ export function CopyField({
   const fieldId = useId()
   const [copied, setCopied] = useState(false)
   const [selectHint, setSelectHint] = useState(false)
+  // Same shape as CopyButton's below: the acknowledgement clears itself on a
+  // timer, so the timer has to die with the component (and be replaced rather
+  // than stacked when a second copy lands inside the window).
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  )
+
+  useEffect(() => () => clearTimeout(resetTimer.current), [])
 
   const copy = async () => {
     ref.current?.focus()
@@ -480,7 +488,8 @@ export function CopyField({
         await navigator.clipboard.writeText(value)
         setCopied(true)
         setSelectHint(false)
-        window.setTimeout(() => setCopied(false), 2_000)
+        clearTimeout(resetTimer.current)
+        resetTimer.current = setTimeout(() => setCopied(false), 2_000)
         return
       }
     } catch {

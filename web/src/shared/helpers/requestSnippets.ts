@@ -17,6 +17,22 @@ export const SNIPPET_MODEL_PLACEHOLDER = "your-model"
 
 const DEFAULT_MESSAGE = "Hello"
 
+/**
+ * A string as a quoted literal, escaped.
+ *
+ * The values here are interpolated into a JSON body and into Python source, and
+ * a model id is whatever the provider's catalog says it is, so a quote or a
+ * backslash in one would otherwise produce a snippet that does not run. A JSON
+ * string literal is also a valid Python one (same quoting, same escapes), so one
+ * helper covers both.
+ *
+ * What it does not cover is the shell: cURL's payload sits inside single quotes,
+ * so a value containing one would still need shell escaping. No provider's model
+ * id does, and treating the snippet as a shell script to be generated safely
+ * would cost more than it buys.
+ */
+const literal = (value: string): string => JSON.stringify(value)
+
 export interface RequestSnippetInput {
   /** Origin the dashboard was served from, with no trailing slash. */
   origin: string
@@ -43,7 +59,7 @@ export function buildCurlSnippet({
     `curl ${origin}/v1/chat/completions \\`,
     `  -H "Otari-Key: ${apiKey}" \\`,
     `  -H "Content-Type: application/json" \\`,
-    `  -d '{"model": "${model}", "messages": [{"role": "user", "content": "${message}"}]}'`,
+    `  -d '{"model": ${literal(model)}, "messages": [{"role": "user", "content": ${literal(message)}}]}'`,
   ].join("\n")
 }
 
@@ -59,8 +75,8 @@ export function buildPythonSnippet({
     "",
     `client = OpenAI(base_url="${origin}/v1", api_key="${apiKey}")`,
     "resp = client.chat.completions.create(",
-    `    model="${model}",`,
-    `    messages=[{"role": "user", "content": "${message}"}],`,
+    `    model=${literal(model)},`,
+    `    messages=[{"role": "user", "content": ${literal(message)}}],`,
     ")",
     "print(resp.choices[0].message.content)",
   ].join("\n")
