@@ -848,7 +848,7 @@
         {
           "name": "Delete Budget",
           "request": {
-            "description": "Delete a budget.",
+            "description": "Delete a budget.\n\nRefused with 409 while a workspace hands this budget to its members. The\nforeign key is ``RESTRICT``, so the database would refuse it anyway, but as\nan ``IntegrityError`` reported as \"Database error\" with nothing naming the\nworkspace to go and detach it from. Checked here so the refusal can say\nwhich ones, and because SQLite only enforces the constraint when\n``PRAGMA foreign_keys`` is on, which would make the same request succeed on\none engine and fail on the other.",
             "header": [],
             "method": "DELETE",
             "url": {
@@ -5314,7 +5314,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"provider_key_id\": \"string\"\n}"
+              "raw": "{\n  \"budget_id\": \"string\"\n}"
             },
             "description": "Create a budget default.\n\nMaterializes it into a per-member ``scoped_budgets`` row for every\nexisting active member of the workspace; a member who joins afterwards is\nmaterialized when they join.",
             "header": [
@@ -5355,7 +5355,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\"\n}"
+              "raw": "{\n  \"budget_id\": \"string\"\n}"
             },
             "description": "Update a budget default's label or limit.\n\nNot retroactive: members already materialized from this default keep\ntheir existing ceiling; only a member materialized afterwards sees the\nnew one.",
             "header": [

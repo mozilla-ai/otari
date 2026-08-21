@@ -178,6 +178,24 @@ export type CreateBudgetRequest = Schemas["CreateBudgetRequest"]
 export type UpdateBudgetRequest = Schemas["UpdateBudgetRequest"]
 export type BudgetResetLog = Schemas["BudgetResetLogResponse"]
 
+// The second, newer spend mechanism, and not a variant of the one above. A
+// `Budget` is a limit template with no counters of its own, enforced against the
+// spend identity that points at it, so N identities on one row each get the full
+// amount. A `ScopedBudget` carries its own counters, so one row is a single
+// pooled ceiling over whatever its scope names. Both are enforced, side by side.
+//
+// `provider_key_id` is the odd name here and it is the wire's, not ours: the
+// column holds a provider *instance* name (`openai`, or a configured instance),
+// which is what `scoped_budget_service` matches a request's resolved provider
+// against. Anything picking a value for it wants `ProviderInfo["instance"]`.
+export type ScopedBudget = Schemas["ScopedBudgetResponse"]
+export type CreateScopedBudgetRequest = Schemas["CreateScopedBudgetRequest"]
+export type UpdateScopedBudgetRequest = Schemas["UpdateScopedBudgetRequest"]
+export type BudgetScopeType = CreateScopedBudgetRequest["scope_type"]
+export type BudgetResetAlignment = NonNullable<
+  CreateScopedBudgetRequest["reset_alignment"]
+>
+
 // ---------------------------------------------------------------------------
 // Models, pricing and providers
 // ---------------------------------------------------------------------------

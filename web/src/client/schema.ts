@@ -546,6 +546,14 @@ export interface paths {
         /**
          * Delete Budget
          * @description Delete a budget.
+         *
+         *     Refused with 409 while a workspace hands this budget to its members. The
+         *     foreign key is ``RESTRICT``, so the database would refuse it anyway, but as
+         *     an ``IntegrityError`` reported as "Database error" with nothing naming the
+         *     workspace to go and detach it from. Checked here so the refusal can say
+         *     which ones, and because SQLite only enforces the constraint when
+         *     ``PRAGMA foreign_keys`` is on, which would make the same request succeed on
+         *     one engine and fail on the other.
          */
         delete: operations["delete_budget_v1_budgets__budget_id__delete"];
         options?: never;
@@ -7427,20 +7435,10 @@ export interface components {
          */
         WorkspaceMemberBudgetPolicyCreate: {
             /**
-             * Budget Duration Sec
-             * @description Period length in seconds; null never resets
+             * Budget Id
+             * @description The budget this workspace hands to every member
              */
-            budget_duration_sec?: number | null;
-            /**
-             * Max Budget
-             * @description Maximum USD spend per member in the period
-             */
-            max_budget?: number | null;
-            /**
-             * Name
-             * @description Admin-facing label
-             */
-            name?: string | null;
+            budget_id: string;
             /**
              * Provider Key Id
              * @description Narrow the default to one provider instance; null applies to every provider
@@ -7454,6 +7452,8 @@ export interface components {
         WorkspaceMemberBudgetPolicyPublic: {
             /** Budget Duration Sec */
             budget_duration_sec: number | null;
+            /** Budget Id */
+            budget_id: string;
             /** Created At */
             created_at: string;
             /** Id */
@@ -7481,12 +7481,8 @@ export interface components {
          *     materialized after this update sees the new one.
          */
         WorkspaceMemberBudgetPolicyUpdate: {
-            /** Budget Duration Sec */
-            budget_duration_sec?: number | null;
-            /** Max Budget */
-            max_budget?: number | null;
-            /** Name */
-            name?: string | null;
+            /** Budget Id */
+            budget_id: string;
         };
         /** WorkspaceMemberPublic */
         WorkspaceMemberPublic: {

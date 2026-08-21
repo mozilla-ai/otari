@@ -1226,9 +1226,19 @@ class WorkspaceBudgetDefault(Base):
         Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), nullable=False, index=True
     )
     provider_key_id: Mapped[str | None] = mapped_column(default=None)
-    name: Mapped[str | None] = mapped_column(default=None)
-    max_budget: Mapped[float | None] = mapped_column(default=None)
-    budget_duration_sec: Mapped[int | None] = mapped_column(default=None)
+    # The budget this workspace hands to every member. NOT NULL: a default that
+    # names no budget is a template for nothing. ``RESTRICT`` because deleting a
+    # budget a workspace hands out should be refused and explained rather than
+    # silently withdraw the limit from every ceiling it materialized.
+    #
+    # The limit and the period live on the budget, not here, which is what lets
+    # the Budgets page say that a row is a workspace's default. ``provider_key_id``
+    # stays on this side: which provider a workspace applies the budget to is a
+    # property of the assignment, and two workspaces may narrow one budget
+    # differently.
+    budget_id: Mapped[str] = mapped_column(
+        ForeignKey("budgets.budget_id", ondelete="RESTRICT"), nullable=False, index=True
+    )
     # ``UtcDateTime``, not ``DateTime(timezone=True)``: these two are serialized with
     # ``.isoformat()`` (``WorkspaceMemberBudgetPolicyPublic.from_model``) for the
     # budget-defaults page, and on SQLite (this repo's default ``database_url``)

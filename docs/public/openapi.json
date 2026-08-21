@@ -10641,45 +10641,12 @@
       "WorkspaceMemberBudgetPolicyCreate": {
         "description": "Request body for creating a default.",
         "properties": {
-          "budget_duration_sec": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "maximum": 315360000.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Period length in seconds; null never resets",
-            "title": "Budget Duration Sec"
-          },
-          "max_budget": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Maximum USD spend per member in the period",
-            "title": "Max Budget"
-          },
-          "name": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Admin-facing label",
-            "title": "Name"
+          "budget_id": {
+            "description": "The budget this workspace hands to every member",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Budget Id",
+            "type": "string"
           },
           "provider_key_id": {
             "anyOf": [
@@ -10695,6 +10662,9 @@
             "title": "Provider Key Id"
           }
         },
+        "required": [
+          "budget_id"
+        ],
         "title": "WorkspaceMemberBudgetPolicyCreate",
         "type": "object"
       },
@@ -10711,6 +10681,10 @@
               }
             ],
             "title": "Budget Duration Sec"
+          },
+          "budget_id": {
+            "title": "Budget Id",
+            "type": "string"
           },
           "created_at": {
             "title": "Created At",
@@ -10766,6 +10740,7 @@
         "required": [
           "id",
           "workspace_id",
+          "budget_id",
           "provider_key_id",
           "name",
           "max_budget",
@@ -10779,44 +10754,16 @@
       "WorkspaceMemberBudgetPolicyUpdate": {
         "description": "Request body for updating a default.\n\nNot retroactive: a member already materialized from this default keeps\nthe value that was in effect when they were materialized. Only a member\nmaterialized after this update sees the new one.",
         "properties": {
-          "budget_duration_sec": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "maximum": 315360000.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Budget Duration Sec"
-          },
-          "max_budget": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Max Budget"
-          },
-          "name": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
+          "budget_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Budget Id",
+            "type": "string"
           }
         },
+        "required": [
+          "budget_id"
+        ],
         "title": "WorkspaceMemberBudgetPolicyUpdate",
         "type": "object"
       },
@@ -12611,7 +12558,7 @@
     },
     "/v1/budgets/{budget_id}": {
       "delete": {
-        "description": "Delete a budget.",
+        "description": "Delete a budget.\n\nRefused with 409 while a workspace hands this budget to its members. The\nforeign key is ``RESTRICT``, so the database would refuse it anyway, but as\nan ``IntegrityError`` reported as \"Database error\" with nothing naming the\nworkspace to go and detach it from. Checked here so the refusal can say\nwhich ones, and because SQLite only enforces the constraint when\n``PRAGMA foreign_keys`` is on, which would make the same request succeed on\none engine and fail on the other.",
         "operationId": "delete_budget_v1_budgets__budget_id__delete",
         "parameters": [
           {

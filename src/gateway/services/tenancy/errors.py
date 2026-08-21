@@ -486,6 +486,18 @@ class WorkspaceBudgetDefaultNotFoundError(TenancyNotFoundError):
         super().__init__(f"Workspace budget default {default_id} not found")
 
 
+class WorkspaceBudgetDefaultBudgetNotFoundError(TenancyNotFoundError):
+    """The default names a budget that does not exist.
+
+    Only reachable on the way in, when a caller assigns a budget by id. A stored
+    default cannot reach it: ``budget_id`` is NOT NULL and the foreign key is
+    ``RESTRICT``, so the budget it names cannot be deleted out from under it.
+    """
+
+    def __init__(self, budget_id: object):
+        super().__init__(f"Budget {budget_id} not found")
+
+
 class WorkspaceBudgetDefaultAlreadyExistsError(TenancyConflictError):
     def __init__(self, workspace_id: object, provider_key_id: object):
         scope = "every provider" if provider_key_id is None else f"provider '{provider_key_id}'"
@@ -536,6 +548,7 @@ __all__ = [
     "UnmodifiedPasswordError",
     "WorkspaceAlreadyExistsError",
     "WorkspaceBudgetDefaultAlreadyExistsError",
+    "WorkspaceBudgetDefaultBudgetNotFoundError",
     "WorkspaceBudgetDefaultNotFoundError",
     "WorkspaceInUseError",
     "WorkspaceMemberAlreadyExistsError",

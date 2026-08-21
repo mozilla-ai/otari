@@ -17,6 +17,7 @@ import type {
   CreateOrganizationMemberRequest,
   CreateOrganizationMemberResult,
   CreateOrganizationPricingOverride,
+  CreateScopedBudgetRequest,
   CreateSearchToolRequest,
   CreateStoredProviderRequest,
   CreateUserRequest,
@@ -51,6 +52,7 @@ import type {
   RotateMasterKeyResponse,
   RouterStatus,
   RoutingPolicyResponse,
+  ScopedBudget,
   SearchProviderInfo,
   SearchToolsResponse,
   SendTestMailRequest,
@@ -70,6 +72,7 @@ import type {
   UpdateOrganizationMemberRequest,
   UpdateOrganizationPricingOverride,
   UpdateOrganizationRequest,
+  UpdateScopedBudgetRequest,
   UpdateSearchToolRequest,
   UpdateSettingsRequest,
   UpdateStoredProviderRequest,
@@ -120,6 +123,7 @@ const BUILD = "build"
 const HEALTH = "health"
 const KEYS = "keys"
 const BUDGETS = "budgets"
+const SCOPED_BUDGETS = "scoped-budgets"
 const USERS = "users"
 const USAGE = "usage"
 const ORGANIZATIONS = "organizations"
@@ -1050,6 +1054,82 @@ export function useDeleteBudget() {
       }),
     onSuccess: () =>
       void queryClient.invalidateQueries({ queryKey: [BUDGETS] }),
+  })
+}
+
+// The tenancy-scoped ceilings, which are a different mechanism from the budgets
+// above rather than a view over them: each row carries its own counters, so one
+// row is a pooled cap over whatever its scope names. See `client/index.ts`.
+//
+// The list route returns a bare array (not the `Paged` envelope the tenancy
+// routes use) and caps `limit` at 1000 server-side, so it pages like budgets and
+// keys do, with the same guard against a backend that ignores `skip`.
+const SCOPED_BUDGETS_PAGE_SIZE = 1000
+const SCOPED_BUDGETS_MAX_PAGES = 100
+
+async function fetchAllScopedBudgets(): Promise<ScopedBudget[]> {
+  const all: ScopedBudget[] = []
+  for (let page = 0; page < SCOPED_BUDGETS_MAX_PAGES; page += 1) {
+    const rows = await apiFetch<ScopedBudget[]>(
+      `/v1/scoped-budgets?skip=${page * SCOPED_BUDGETS_PAGE_SIZE}&limit=${SCOPED_BUDGETS_PAGE_SIZE}`,
+    )
+    all.push(...rows)
+    if (rows.length < SCOPED_BUDGETS_PAGE_SIZE) {
+      break
+    }
+  }
+  return all
+}
+
+export function useScopedBudgets() {
+  return useQuery({
+    queryKey: [SCOPED_BUDGETS],
+    queryFn: fetchAllScopedBudgets,
+    staleTime: 60_000,
+  })
+}
+
+export function useCreateScopedBudget() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: CreateScopedBudgetRequest) =>
+      apiFetch<ScopedBudget>("/v1/scoped-budgets", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () =>
+      void queryClient.invalidateQueries({ queryKey: [SCOPED_BUDGETS] }),
+  })
+}
+
+export function useUpdateScopedBudget() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      id,
+      body,
+    }: {
+      id: string
+      body: UpdateScopedBudgetRequest
+    }) =>
+      apiFetch<ScopedBudget>(`/v1/scoped-budgets/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () =>
+      void queryClient.invalidateQueries({ queryKey: [SCOPED_BUDGETS] }),
+  })
+}
+
+export function useDeleteScopedBudget() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<void>(`/v1/scoped-budgets/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      }),
+    onSuccess: () =>
+      void queryClient.invalidateQueries({ queryKey: [SCOPED_BUDGETS] }),
   })
 }
 

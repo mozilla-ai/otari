@@ -7,7 +7,8 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_db, verify_master_key
-from gateway.models.entities import Budget, BudgetResetLog, User
+from gateway.models.entities import Budget, BudgetResetLog, User, WorkspaceBudgetDefault
+from gateway.models.tenancy import Workspace
 
 router = APIRouter(prefix="/v1/budgets", tags=["budgets"])
 
@@ -243,7 +244,16 @@ async def delete_budget(
     budget_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
-    """Delete a budget."""
+    """Delete a budget.
+
+    Refused with 409 while a workspace hands this budget to its members. The
+    foreign key is ``RESTRICT``, so the database would refuse it anyway, but as
+    an ``IntegrityError`` reported as "Database error" with nothing naming the
+    workspace to go and detach it from. Checked here so the refusal can say
+    which ones, and because SQLite only enforces the constraint when
+    ``PRAGMA foreign_keys`` is on, which would make the same request succeed on
+    one engine and fail on the other.
+    """
     result = await db.execute(select(Budget).where(Budget.budget_id == budget_id))
     budget = result.scalar_one_or_none()
 
@@ -251,6 +261,27 @@ async def delete_budget(
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Budget with id '{budget_id}' not found",
+        )
+
+    holders = (
+        (
+            await db.execute(
+                select(Workspace.name)
+                .join(WorkspaceBudgetDefault, WorkspaceBudgetDefault.workspace_id == Workspace.id)
+                .where(WorkspaceBudgetDefault.budget_id == budget_id)
+                .order_by(Workspace.name)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if holders:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                "This budget is the member default for "
+                f"{', '.join(holders)}. Change or remove that default before deleting it."
+            ),
         )
 
     await db.delete(budget)
