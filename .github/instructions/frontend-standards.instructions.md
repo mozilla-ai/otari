@@ -96,9 +96,8 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
    account menu below `md`) and `/account` (that menu's first row). The registry is what the
    rails render, so registering either would duplicate into the sidebar a row the design draws
    once. An entry gates on `surface` (the deployment axis, from `GET /v1/bootstrap`
-   via `useDeployment`), `capability` (the entitlement axis, via `useEntitlements`), and
-   `flag` (the operational axis, valid only alongside a capability), composed as AND by
-   `useNavVisibility`. Do not fold one into another, and do not reach past them: a page
+   via `useDeployment`) and `capability` (the entitlement axis, via `useEntitlements`),
+   composed as AND by `useNavVisibility`. Do not fold one into another, and do not reach past them: a page
    component that reads the gateway's mode itself, or infers it from an endpoint's 404, is
    the scattered mode check this replaced. A new base capability belongs in
    `BASE_CAPABILITIES`; an overlay's belongs in neither. Hiding a surface client-side is a

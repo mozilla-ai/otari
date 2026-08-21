@@ -61,7 +61,6 @@ function renderShell(
 ) {
   const entitlements: Entitlements = {
     capabilities: BASE_CAPABILITIES,
-    flags: {},
     isLoading: false,
     ...options.entitlements,
   }
@@ -492,7 +491,7 @@ describe("AppShell surface gating", () => {
   })
 })
 
-describe("AppShell entitlement and flag gating", () => {
+describe("AppShell entitlement gating", () => {
   afterEach(() => {
     vi.restoreAllMocks()
     vi.unstubAllGlobals()

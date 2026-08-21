@@ -294,7 +294,7 @@ function NavGroup({
 
 export function AppShell() {
   // Navigation is data: the shell renders whatever the registry declares and
-  // decides visibility from the deployment, the entitlements, and the flags,
+  // decides visibility from the deployment and the entitlements,
   // rather than each page asking what it is running against.
   const isVisible = useNavVisibility()
   const { pathname } = useLocation()

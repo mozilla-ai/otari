@@ -7,13 +7,12 @@ import {
   EntitlementProvider,
   useEntitlement,
   useEntitlements,
-  useFeatureFlag,
 } from "@/shared/hooks/useEntitlements"
 
 const withProvider =
-  (capabilities: string[], flags: Record<string, boolean> = {}) =>
+  (capabilities: string[]) =>
   ({ children }: { children: ReactNode }) => (
-    <EntitlementProvider value={{ capabilities, flags, isLoading: false }}>
+    <EntitlementProvider value={{ capabilities, isLoading: false }}>
       {children}
     </EntitlementProvider>
   )
@@ -26,7 +25,6 @@ describe("useEntitlements without a provider", () => {
     // capability, instead of turning into the test that has to be edited.
     const { result } = renderHook(() => useEntitlements())
     expect(result.current.capabilities).toEqual(BASE_CAPABILITIES)
-    expect(result.current.flags).toEqual({})
     // Never pending: the base answer is a constant, so a gate resolves on the
     // first render rather than flashing a loading state.
     expect(result.current.isLoading).toBe(false)
@@ -35,11 +33,6 @@ describe("useEntitlements without a provider", () => {
   it("denies a capability the base build does not ship", () => {
     const { result } = renderHook(() => useEntitlement("billing"))
     expect(result.current.entitled).toBe(false)
-  })
-
-  it("reports every flag off", () => {
-    const { result } = renderHook(() => useFeatureFlag("anything"))
-    expect(result.current.enabled).toBe(false)
   })
 })
 
@@ -61,19 +54,5 @@ describe("useEntitlements with a provider", () => {
       wrapper: withProvider(["billing"]),
     })
     expect(result.current.capabilities).toEqual(["billing"])
-  })
-
-  it("reads a flag the provider evaluated", () => {
-    const { result } = renderHook(() => useFeatureFlag("rollout"), {
-      wrapper: withProvider([], { rollout: true }),
-    })
-    expect(result.current.enabled).toBe(true)
-  })
-
-  it("treats a flag the provider did not evaluate as off", () => {
-    const { result } = renderHook(() => useFeatureFlag("unknown"), {
-      wrapper: withProvider([], { rollout: true }),
-    })
-    expect(result.current.enabled).toBe(false)
   })
 })

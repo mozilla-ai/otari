@@ -75,8 +75,8 @@ can link Vite's esbuild binary at all.
   that knows which deployment served the page. Mind the vocabulary: a *surface* is the
   deployment axis, a *capability* is the entitlement axis.
 - Declare a new **rail** destination in the nav registry (`web/src/app/nav/registry.ts`), never
-  as a hand-written link, with whichever of the three gates it needs (`surface`, `capability`,
-  `flag`). `EntitlementGate` is the component form for wrapping a page. See
+  as a hand-written link, with whichever of the two gates it needs (`surface`, `capability`).
+  `EntitlementGate` is the component form for wrapping a page. See
   [web/AGENTS.md](../../../web/AGENTS.md) for how the gates compose and where a capability
   the base build ships has to be declared. A route the *chrome* reaches is the exception and
   is a hand-written `Link` on purpose: `/docs` from the top bar and the account menu, and

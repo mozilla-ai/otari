@@ -19,12 +19,7 @@ function renderGate(
   }
   return render(
     <EntitlementProvider
-      value={{
-        capabilities: [],
-        flags: {},
-        isLoading: false,
-        ...entitlements,
-      }}
+      value={{ capabilities: [], isLoading: false, ...entitlements }}
     >
       {gate}
     </EntitlementProvider>,
@@ -63,48 +58,6 @@ describe("EntitlementGate", () => {
       { capabilities: [] },
     )
     expect(screen.getByText("NOT AVAILABLE")).toBeInTheDocument()
-    expect(screen.queryByText("GATED")).toBeNull()
-  })
-
-  it("requires the flag as well as the entitlement", () => {
-    // The two axes compose as AND and are never merged: holding the capability
-    // is not the same as having its rollout turned on.
-    renderGate(
-      <EntitlementGate capability="routing" flag="smart-selection">
-        <p>GATED</p>
-      </EntitlementGate>,
-      { capabilities: ["routing"], flags: { "smart-selection": false } },
-    )
-    expect(screen.queryByText("GATED")).toBeNull()
-  })
-
-  it("renders once both the entitlement and the flag are satisfied", () => {
-    renderGate(
-      <EntitlementGate capability="routing" flag="smart-selection">
-        <p>GATED</p>
-      </EntitlementGate>,
-      { capabilities: ["routing"], flags: { "smart-selection": true } },
-    )
-    expect(screen.getByText("GATED")).toBeInTheDocument()
-  })
-
-  it("keeps a flag from standing in for an entitlement", () => {
-    renderGate(
-      <EntitlementGate capability="billing" flag="smart-selection">
-        <p>GATED</p>
-      </EntitlementGate>,
-      { capabilities: [], flags: { "smart-selection": true } },
-    )
-    expect(screen.queryByText("GATED")).toBeNull()
-  })
-
-  it("treats an unknown flag as off", () => {
-    renderGate(
-      <EntitlementGate capability="routing" flag="never-declared">
-        <p>GATED</p>
-      </EntitlementGate>,
-      { capabilities: ["routing"] },
-    )
     expect(screen.queryByText("GATED")).toBeNull()
   })
 
