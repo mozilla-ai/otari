@@ -282,6 +282,10 @@ async def test_issuing_the_key_twice_rotates_one_row_rather_than_collecting_two(
     assert [key.key_name for key in keys] == [ACTIVATION_KEY_NAME]
     # The previous plaintext no longer authenticates: the row carries the new hash.
     assert keys[0].is_active is True
+    # Owned by the caller's own request-plane row, so the request the guide walks
+    # them through bills through their per-member ceilings rather than sitting
+    # outside every budget on the shared "default" owner.
+    assert keys[0].user_id == str(owner.id)
 
     state = await async_db.get(WorkspaceActivationState, workspace.id)
     assert state is not None

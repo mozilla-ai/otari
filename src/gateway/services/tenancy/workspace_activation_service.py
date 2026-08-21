@@ -51,7 +51,7 @@ from gateway.core.config import GatewayConfig
 from gateway.models.entities import APIKey, UsageLog, WorkspaceActivationState
 from gateway.models.money import as_float
 from gateway.models.tenancy import User, Workspace
-from gateway.repositories.users_repository import get_or_create_default_user
+from gateway.repositories.users_repository import get_or_create_attribution_user
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.errors import (
     WorkspaceActivationUnavailableError,
@@ -281,7 +281,21 @@ class WorkspaceActivationService:
         plaintext = generate_api_key()
         record = await self._existing_key(state)
         if record is None:
-            owner = await get_or_create_default_user(self.db)
+            # Owned by the caller's own request-plane row, not the shared
+            # ``default`` user that ``POST /v1/keys`` falls back to. Two reasons:
+            # the dashboard's own key form requires an owner, so a key minted
+            # from a dashboard flow should have a real one; and a key owned by an
+            # identity's attribution row is what makes the request bill through
+            # that member's scoped ceilings (`services/scoped_budget_service.py`
+            # resolves the identity back out of ``users.user_id``), where one
+            # owned by ``default`` would sit outside every per-member budget.
+            # The row normally exists already: first-boot provisioning mints the
+            # operator's, and adding a member mints theirs.
+            owner = await get_or_create_attribution_user(
+                self.db,
+                user_id=str(user.id),
+                alias=user.full_name or user.email,
+            )
             record = APIKey(
                 id=str(uuid.uuid4()),
                 workspace_id=workspace.id,
