@@ -107,18 +107,38 @@ async def _counters(db: AsyncSession, budget_id: str) -> tuple[float, float]:
     return float(row[0]), float(row[1])
 
 
-def _scoped(
+async def _scoped(
+    db: AsyncSession,
     *,
     scope_type: str,
     scope_id: str,
     max_budget: float | None,
     provider_key_id: str | None = None,
+    budget_duration_sec: int | None = None,
+    reset_alignment: str | None = None,
+    period_start: datetime | None = None,
+    period_end: datetime | None = None,
 ) -> ScopedBudget:
+    """A ceiling, and the budget it enforces.
+
+    A ceiling carries no limit of its own any more: it names a budget, which is
+    the only row that maps a cap to an amount. Tests still say "a $10 ceiling",
+    so this mints the budget behind it rather than making every case do so.
+    """
+    budget = Budget(
+        max_budget=max_budget,
+        budget_duration_sec=budget_duration_sec,
+        reset_alignment=reset_alignment,
+    )
+    db.add(budget)
+    await db.flush()
     return ScopedBudget(
         scope_type=scope_type,
         scope_id=scope_id,
-        max_budget=max_budget,
         provider_key_id=provider_key_id,
+        budget_id=budget.budget_id,
+        period_start=period_start,
+        period_end=period_end,
     )
 
 
@@ -130,9 +150,11 @@ async def tenancy(async_db: AsyncSession) -> Fixture:
 @pytest.mark.asyncio
 async def test_request_passing_two_ceilings_holds_on_both(async_db: AsyncSession, tenancy: Fixture) -> None:
     """An organization cap and a member cap both admit the estimate and both hold it."""
-    org_cap = _scoped(scope_type="organization", scope_id=str(tenancy.organization_id), max_budget=100.0)
-    member_cap = _scoped(
-        scope_type="workspace_member", scope_id=str(tenancy.workspace_member_id), max_budget=10.0
+    org_cap = await _scoped(
+        async_db, scope_type="organization", scope_id=str(tenancy.organization_id), max_budget=100.0
+    )
+    member_cap = await _scoped(
+        async_db, scope_type="workspace_member", scope_id=str(tenancy.workspace_member_id), max_budget=10.0
     )
     async_db.add(org_cap)
     async_db.add(member_cap)
@@ -151,13 +173,15 @@ async def test_request_passing_two_ceilings_holds_on_both(async_db: AsyncSession
 
 
 @pytest.mark.asyncio
-async def test_tighter_ceiling_rejects_and_compensates_the_looser_one(
-    async_db: AsyncSession, tenancy: Fixture
-) -> None:
+async def test_tighter_ceiling_rejects_and_compensates_the_looser_one(async_db: AsyncSession, tenancy: Fixture) -> None:
     """The organization cap admits the estimate, the member cap refuses, and the
     hold already taken on the organization is given back."""
-    org_cap = _scoped(scope_type="organization", scope_id=str(tenancy.organization_id), max_budget=100.0)
-    member_cap = _scoped(scope_type="workspace_member", scope_id=str(tenancy.workspace_member_id), max_budget=1.0)
+    org_cap = await _scoped(
+        async_db, scope_type="organization", scope_id=str(tenancy.organization_id), max_budget=100.0
+    )
+    member_cap = await _scoped(
+        async_db, scope_type="workspace_member", scope_id=str(tenancy.workspace_member_id), max_budget=1.0
+    )
     async_db.add(org_cap)
     async_db.add(member_cap)
     await async_db.commit()
@@ -177,7 +201,9 @@ async def test_tighter_ceiling_rejects_and_compensates_the_looser_one(
 async def test_per_user_refusal_compensates_the_scoped_holds(async_db: AsyncSession, tenancy: Fixture) -> None:
     """The scoped ceilings admit the request, the legacy per-user cap refuses,
     and the scoped holds are released before the 403."""
-    org_cap = _scoped(scope_type="organization", scope_id=str(tenancy.organization_id), max_budget=100.0)
+    org_cap = await _scoped(
+        async_db, scope_type="organization", scope_id=str(tenancy.organization_id), max_budget=100.0
+    )
     async_db.add(org_cap)
     async_db.add(Budget(budget_id="tiny", max_budget=1.0))
     await async_db.commit()
@@ -197,7 +223,8 @@ async def test_per_user_refusal_compensates_the_scoped_holds(async_db: AsyncSess
 @pytest.mark.asyncio
 async def test_provider_narrowed_cap_binds_only_that_provider(async_db: AsyncSession, tenancy: Fixture) -> None:
     """A cap narrowed to one provider is invisible to a request on another."""
-    narrowed = _scoped(
+    narrowed = await _scoped(
+        async_db,
         scope_type="workspace",
         scope_id=str(tenancy.workspace_id),
         max_budget=1.0,
@@ -222,8 +249,9 @@ async def test_provider_narrowed_cap_binds_only_that_provider(async_db: AsyncSes
 async def test_narrowed_and_aggregate_caps_both_apply(async_db: AsyncSession, tenancy: Fixture) -> None:
     """A provider-narrowed cap and the workspace's aggregate cap are independent
     ceilings, and a request on that provider holds against both."""
-    aggregate = _scoped(scope_type="workspace", scope_id=str(tenancy.workspace_id), max_budget=50.0)
-    narrowed = _scoped(
+    aggregate = await _scoped(async_db, scope_type="workspace", scope_id=str(tenancy.workspace_id), max_budget=50.0)
+    narrowed = await _scoped(
+        async_db,
         scope_type="workspace",
         scope_id=str(tenancy.workspace_id),
         max_budget=5.0,
@@ -248,15 +276,16 @@ async def test_expired_period_rolls_before_the_gate(async_db: AsyncSession, tena
     """A ceiling whose window has run out starts a fresh one, so a request that
     would not fit the old period's spend is admitted."""
     now = datetime.now(UTC)
-    cap = ScopedBudget(
+    cap = await _scoped(
+        async_db,
         scope_type="workspace",
         scope_id=str(tenancy.workspace_id),
         max_budget=10.0,
-        current_spend=9.5,
         budget_duration_sec=3600,
         period_start=now - timedelta(seconds=7200),
         period_end=now - timedelta(seconds=3600),
     )
+    cap.current_spend = 9.5
     async_db.add(cap)
     await async_db.commit()
 
@@ -304,15 +333,16 @@ async def test_an_aligned_period_rolls_onto_the_boundary_not_onto_the_request(
     """
     now = datetime.now(UTC)
     midnight = _midnight(now)
-    cap = ScopedBudget(
+    cap = await _scoped(
+        async_db,
         scope_type="workspace",
         scope_id=str(tenancy.workspace_id),
         max_budget=10.0,
-        current_spend=9.5,
         reset_alignment="calendar_day",
         period_start=midnight - timedelta(days=4),
         period_end=midnight - timedelta(days=3),
     )
+    cap.current_spend = 9.5
     async_db.add(cap)
     await async_db.commit()
 
@@ -338,15 +368,16 @@ async def test_a_monthly_ceiling_asleep_for_two_months_lands_in_the_current_one(
     """No backfill: the window containing ``now``, with fresh counters, not one
     window per month it slept through."""
     first_of_month = _first_of_month(datetime.now(UTC))
-    cap = ScopedBudget(
+    cap = await _scoped(
+        async_db,
         scope_type="workspace",
         scope_id=str(tenancy.workspace_id),
         max_budget=10.0,
-        current_spend=10.0,
         reset_alignment="calendar_month",
         period_start=first_of_month - timedelta(days=90),
         period_end=first_of_month - timedelta(days=60),
     )
+    cap.current_spend = 10.0
     async_db.add(cap)
     await async_db.commit()
 
@@ -370,15 +401,16 @@ async def test_an_unrecognized_alignment_leaves_the_exhausted_window_in_place(
     safe direction is refusing requests, not guessing a cadence and admitting
     them, so the window stays where it is and the cap stays exhausted."""
     now = datetime.now(UTC)
-    cap = ScopedBudget(
+    cap = await _scoped(
+        async_db,
         scope_type="workspace",
         scope_id=str(tenancy.workspace_id),
         max_budget=10.0,
-        current_spend=10.0,
         reset_alignment="calendar_quarter",
         period_start=now - timedelta(days=2),
         period_end=now - timedelta(days=1),
     )
+    cap.current_spend = 10.0
     async_db.add(cap)
     await async_db.commit()
 
@@ -393,18 +425,14 @@ async def test_an_unrecognized_alignment_leaves_the_exhausted_window_in_place(
 
 
 @pytest.mark.asyncio
-async def test_a_ceiling_cannot_carry_both_kinds_of_period(async_db: AsyncSession, tenancy: Fixture) -> None:
+async def test_a_budget_cannot_carry_both_kinds_of_period(async_db: AsyncSession, tenancy: Fixture) -> None:
     """The fourth state is not storable, so the pair never needs an "ignored
-    when" rule to be read."""
-    async_db.add(
-        ScopedBudget(
-            scope_type="workspace",
-            scope_id=str(tenancy.workspace_id),
-            max_budget=10.0,
-            budget_duration_sec=86400,
-            reset_alignment="calendar_month",
-        )
-    )
+    when" rule to be read.
+
+    The constraint moved onto ``budgets`` with the cadence itself: a ceiling has
+    no period of its own to contradict any more.
+    """
+    async_db.add(Budget(max_budget=10.0, budget_duration_sec=86400, reset_alignment="calendar_month"))
     with pytest.raises(IntegrityError):
         await async_db.commit()
     await async_db.rollback()
@@ -416,7 +444,7 @@ async def test_concurrent_reservers_cannot_overspend_a_shared_ceiling(
 ) -> None:
     """Eight simultaneous reservations against a ceiling with room for four all
     contend on the same conditional UPDATE; exactly four are admitted."""
-    cap = _scoped(scope_type="organization", scope_id=str(tenancy.organization_id), max_budget=4.0)
+    cap = await _scoped(async_db, scope_type="organization", scope_id=str(tenancy.organization_id), max_budget=4.0)
     async_db.add(cap)
     await async_db.commit()
 
@@ -448,7 +476,7 @@ async def test_legacy_per_user_path_is_unchanged(async_db: AsyncSession, tenancy
     the estimate lands on ``users.reserved`` and settles into ``users.spend``,
     and nothing on the scoped row changes either of them."""
     async_db.add(Budget(budget_id="legacy", max_budget=20.0))
-    cap = _scoped(scope_type="organization", scope_id=str(tenancy.organization_id), max_budget=100.0)
+    cap = await _scoped(async_db, scope_type="organization", scope_id=str(tenancy.organization_id), max_budget=100.0)
     async_db.add(cap)
     await async_db.commit()
 
@@ -477,7 +505,7 @@ async def test_legacy_per_user_path_is_unchanged(async_db: AsyncSession, tenancy
 async def test_no_scope_leaves_scoped_ceilings_untouched(async_db: AsyncSession, tenancy: Fixture) -> None:
     """A caller that passes no scope is on the pre-existing path exactly: the
     scoped rows are neither resolved nor charged."""
-    cap = _scoped(scope_type="organization", scope_id=str(tenancy.organization_id), max_budget=1.0)
+    cap = await _scoped(async_db, scope_type="organization", scope_id=str(tenancy.organization_id), max_budget=1.0)
     async_db.add(cap)
     await async_db.commit()
 
@@ -490,7 +518,7 @@ async def test_no_scope_leaves_scoped_ceilings_untouched(async_db: AsyncSession,
 async def test_budget_exempt_key_skips_scoped_ceilings(async_db: AsyncSession, tenancy: Fixture) -> None:
     """A key flagged ``exclude_from_budget`` is exempt from the scoped ceilings
     too, matching what the flag already means for the per-user cap."""
-    cap = _scoped(scope_type="organization", scope_id=str(tenancy.organization_id), max_budget=1.0)
+    cap = await _scoped(async_db, scope_type="organization", scope_id=str(tenancy.organization_id), max_budget=1.0)
     async_db.add(cap)
     await async_db.commit()
 
@@ -529,10 +557,10 @@ async def test_aggregate_uniqueness_survives_postgres_null_semantics(async_db: A
     over the identity alone is what makes this fail.
     """
     scope_id = str(uuid.uuid4())
-    async_db.add(_scoped(scope_type="workspace", scope_id=scope_id, max_budget=1.0))
+    async_db.add(await _scoped(async_db, scope_type="workspace", scope_id=scope_id, max_budget=1.0))
     await async_db.commit()
 
-    async_db.add(_scoped(scope_type="workspace", scope_id=scope_id, max_budget=2.0))
+    async_db.add(await _scoped(async_db, scope_type="workspace", scope_id=scope_id, max_budget=2.0))
     with pytest.raises(IntegrityError):
         await async_db.commit()
     await async_db.rollback()
@@ -550,17 +578,43 @@ def _a_workspace_id(client: Any, headers: dict[str, str]) -> str:
     return str(listed.json()["data"][0]["id"])
 
 
+def _a_budget_id(
+    client: Any,
+    headers: dict[str, str],
+    *,
+    max_budget: float | None = None,
+    budget_duration_sec: int | None = None,
+    reset_alignment: str | None = None,
+) -> str:
+    """A budget for a ceiling to enforce, returned by id.
+
+    A ceiling carries no limit of its own, so every case that used to say
+    ``max_budget`` in a scoped-budget body now names one of these.
+    """
+    made = client.post(
+        "/v1/budgets",
+        json={
+            "max_budget": max_budget,
+            "budget_duration_sec": budget_duration_sec,
+            "reset_alignment": reset_alignment,
+        },
+        headers=headers,
+    )
+    assert made.status_code == 200, made.text
+    return str(made.json()["budget_id"])
+
+
 def test_management_surface_round_trip(client: Any, master_key_header: dict[str, str]) -> None:
     """Create, read, list, update and delete one scoped budget over the API."""
     workspace_id = _a_workspace_id(client, master_key_header)
+    daily = _a_budget_id(client, master_key_header, max_budget=25.0, budget_duration_sec=86400)
     created = client.post(
         "/v1/scoped-budgets",
         json={
             "scope_type": "workspace",
             "scope_id": workspace_id,
             "name": "Workspace cap",
-            "max_budget": 25.0,
-            "budget_duration_sec": 86400,
+            "budget_id": daily,
         },
         headers=master_key_header,
     )
@@ -573,14 +627,19 @@ def test_management_surface_round_trip(client: Any, master_key_header: dict[str,
 
     duplicate = client.post(
         "/v1/scoped-budgets",
-        json={"scope_type": "workspace", "scope_id": workspace_id, "max_budget": 5.0},
+        json={"scope_type": "workspace", "scope_id": workspace_id, "budget_id": daily},
         headers=master_key_header,
     )
     assert duplicate.status_code == 409
 
     narrowed = client.post(
         "/v1/scoped-budgets",
-        json={"scope_type": "workspace", "scope_id": workspace_id, "provider_key_id": "openai", "max_budget": 5.0},
+        json={
+            "scope_type": "workspace",
+            "scope_id": workspace_id,
+            "provider_key_id": "openai",
+            "budget_id": _a_budget_id(client, master_key_header, max_budget=5.0),
+        },
         headers=master_key_header,
     )
     assert narrowed.status_code == 200
@@ -589,64 +648,77 @@ def test_management_surface_round_trip(client: Any, master_key_header: dict[str,
     assert listed.status_code == 200
     assert len(listed.json()) == 2
 
+    # Changing what a ceiling allows is naming a different budget, since the
+    # figure is the budget's and not the ceiling's.
+    bigger = _a_budget_id(client, master_key_header, max_budget=40.0, budget_duration_sec=86400)
     updated = client.patch(
         f"/v1/scoped-budgets/{budget_id}",
-        json={"max_budget": 40.0, "name": None},
+        json={"budget_id": bigger, "name": None},
         headers=master_key_header,
     )
     assert updated.status_code == 200
     assert updated.json()["max_budget"] == 40.0
+    assert updated.json()["budget_id"] == bigger
     assert updated.json()["name"] is None
 
     assert client.delete(f"/v1/scoped-budgets/{budget_id}", headers=master_key_header).status_code == 204
     assert client.get(f"/v1/scoped-budgets/{budget_id}", headers=master_key_header).status_code == 404
 
 
-def test_a_ceiling_can_be_relaxed_back_to_the_states_creation_allows(
+def test_a_budget_can_be_relaxed_back_to_the_states_creation_allows(
     client: Any,
     master_key_header: dict[str, str],
 ) -> None:
     """Null is a state ``POST`` can write, so ``PATCH`` has to be able to reach it.
 
-    A null ``max_budget`` is a ceiling that meters and admits everything; a null
+    A null ``max_budget`` is a budget that meters and admits everything; a null
     ``budget_duration_sec`` is one that never resets. Both are creatable, so
-    testing the value rather than whether the field was sent made a limit
-    tightenable and never relaxable, and a cadence addable and never removable.
+    testing the value rather than whether the field was sent would make a cadence
+    addable and never removable. On ``/v1/budgets`` now, with the cadence.
+
+    ``max_budget`` is the exception and stays value-tested, which is pre-existing
+    behavior this change does not touch: clearing a limit is still done by
+    creating a budget without one.
     """
-    workspace_id = _a_workspace_id(client, master_key_header)
     created = client.post(
-        "/v1/scoped-budgets",
-        json={
-            "scope_type": "workspace",
-            "scope_id": workspace_id,
-            "max_budget": 10.0,
-            "budget_duration_sec": 86400,
-        },
+        "/v1/budgets",
+        json={"max_budget": 10.0, "budget_duration_sec": 86400},
         headers=master_key_header,
     ).json()
 
     cleared = client.patch(
-        f"/v1/scoped-budgets/{created['id']}",
-        json={"max_budget": None, "budget_duration_sec": None},
+        f"/v1/budgets/{created['budget_id']}",
+        json={"budget_duration_sec": None},
         headers=master_key_header,
     )
-
     assert cleared.status_code == 200, cleared.text
-    assert cleared.json()["max_budget"] is None
-    # The window goes with the cadence, matching what POST writes for a budget
-    # created without one; a window left behind would name a period nothing rolls.
     assert cleared.json()["budget_duration_sec"] is None
-    assert cleared.json()["period_end"] is None
+    assert cleared.json()["reset_alignment"] is None
+
+    # Naming only the alignment is refused rather than silently clearing a
+    # duration the caller did not mention.
+    half_switched = client.patch(
+        f"/v1/budgets/{created['budget_id']}",
+        json={"budget_duration_sec": 3600},
+        headers=master_key_header,
+    )
+    assert half_switched.status_code == 200
+    conflicting = client.patch(
+        f"/v1/budgets/{created['budget_id']}",
+        json={"reset_alignment": "calendar_day"},
+        headers=master_key_header,
+    )
+    assert conflicting.status_code == 400, conflicting.text
 
     # An omitted field is still "leave it alone", which is the half that already
     # worked and must keep working.
     renamed = client.patch(
-        f"/v1/scoped-budgets/{created['id']}",
+        f"/v1/budgets/{created['budget_id']}",
         json={"name": "Metering only"},
         headers=master_key_header,
     )
     assert renamed.status_code == 200
-    assert renamed.json()["max_budget"] is None
+    assert renamed.json()["budget_duration_sec"] == 3600
 
 
 def test_a_ceiling_on_a_scope_that_does_not_exist_is_refused(
@@ -663,7 +735,11 @@ def test_a_ceiling_on_a_scope_that_does_not_exist_is_refused(
     """
     missing = client.post(
         "/v1/scoped-budgets",
-        json={"scope_type": "workspace", "scope_id": str(uuid.uuid4()), "max_budget": 5.0},
+        json={
+            "scope_type": "workspace",
+            "scope_id": str(uuid.uuid4()),
+            "budget_id": _a_budget_id(client, master_key_header, max_budget=5.0),
+        },
         headers=master_key_header,
     )
 
@@ -673,7 +749,11 @@ def test_a_ceiling_on_a_scope_that_does_not_exist_is_refused(
     # Not a UUID at all is the same answer, not a 500 and not a stored row.
     malformed = client.post(
         "/v1/scoped-budgets",
-        json={"scope_type": "organization", "scope_id": "not-a-uuid-at-all", "max_budget": 5.0},
+        json={
+            "scope_type": "organization",
+            "scope_id": "not-a-uuid-at-all",
+            "budget_id": _a_budget_id(client, master_key_header, max_budget=5.0),
+        },
         headers=master_key_header,
     )
 
@@ -688,15 +768,11 @@ def test_a_calendar_aligned_ceiling_opens_on_its_boundary(
     """Create writes the window rather than waiting for first spend, and for an
     aligned ceiling that window is the calendar one it was created in."""
     workspace_id = _a_workspace_id(client, master_key_header)
+    monthly = _a_budget_id(client, master_key_header, max_budget=500.0, reset_alignment="calendar_month")
     before = datetime.now(UTC)
     created = client.post(
         "/v1/scoped-budgets",
-        json={
-            "scope_type": "workspace",
-            "scope_id": workspace_id,
-            "max_budget": 500.0,
-            "reset_alignment": "calendar_month",
-        },
+        json={"scope_type": "workspace", "scope_id": workspace_id, "budget_id": monthly},
         headers=master_key_header,
     )
     after = datetime.now(UTC)
@@ -710,30 +786,30 @@ def test_a_calendar_aligned_ceiling_opens_on_its_boundary(
     assert datetime.fromisoformat(body["period_end"]) == _first_of_next_month(period_start)
 
 
-def test_a_ceiling_can_be_switched_between_the_two_kinds_of_period(
+def test_pointing_a_ceiling_at_another_budget_retimes_it(
     client: Any,
     master_key_header: dict[str, str],
 ) -> None:
-    """One request nulls the duration and names the alignment. Naming only the
-    alignment is refused rather than silently dropping the duration."""
+    """Changing what a ceiling allows is naming a different budget.
+
+    The window restarts from now rather than re-deriving an end from a
+    ``period_start`` belonging to the old budget's cadence, which is what the
+    ceiling used to do when it carried the cadence itself.
+    """
     workspace_id = _a_workspace_id(client, master_key_header)
+    rolling = _a_budget_id(client, master_key_header, max_budget=10.0, budget_duration_sec=86400)
     created = client.post(
         "/v1/scoped-budgets",
-        json={"scope_type": "workspace", "scope_id": workspace_id, "budget_duration_sec": 86400},
+        json={"scope_type": "workspace", "scope_id": workspace_id, "budget_id": rolling},
         headers=master_key_header,
     ).json()
+    assert created["budget_duration_sec"] == 86400
 
-    half_switched = client.patch(
-        f"/v1/scoped-budgets/{created['id']}",
-        json={"reset_alignment": "calendar_day"},
-        headers=master_key_header,
-    )
-    assert half_switched.status_code == 400, half_switched.text
-
+    aligned = _a_budget_id(client, master_key_header, max_budget=10.0, reset_alignment="calendar_day")
     before = datetime.now(UTC)
     switched = client.patch(
         f"/v1/scoped-budgets/{created['id']}",
-        json={"budget_duration_sec": None, "reset_alignment": "calendar_day"},
+        json={"budget_id": aligned},
         headers=master_key_header,
     )
     after = datetime.now(UTC)
@@ -744,32 +820,28 @@ def test_a_ceiling_can_be_switched_between_the_two_kinds_of_period(
     assert period_start in {_midnight(before), _midnight(after)}
     assert datetime.fromisoformat(switched.json()["period_end"]) == period_start + timedelta(days=1)
 
-    # And back, which is the same rule read the other way round.
-    reverted = client.patch(
+    # A budget that does not exist is refused rather than leaving the ceiling
+    # naming nothing.
+    missing = client.patch(
         f"/v1/scoped-budgets/{created['id']}",
-        json={"budget_duration_sec": 3600, "reset_alignment": None},
+        json={"budget_id": str(uuid.uuid4())},
         headers=master_key_header,
     )
-    assert reverted.status_code == 200, reverted.text
-    assert reverted.json()["reset_alignment"] is None
-    assert reverted.json()["budget_duration_sec"] == 3600
+    assert missing.status_code == 404, missing.text
 
 
-def test_a_ceiling_cannot_be_created_with_both_kinds_of_period(
+def test_a_budget_cannot_be_created_with_both_kinds_of_period(
     client: Any,
     master_key_header: dict[str, str],
 ) -> None:
     """The state the table's CHECK refuses is answered as a request error, not a
-    database error."""
-    workspace_id = _a_workspace_id(client, master_key_header)
+    database error.
+
+    On ``/v1/budgets`` now, because that is where a period lives.
+    """
     response = client.post(
-        "/v1/scoped-budgets",
-        json={
-            "scope_type": "workspace",
-            "scope_id": workspace_id,
-            "budget_duration_sec": 86400,
-            "reset_alignment": "calendar_month",
-        },
+        "/v1/budgets",
+        json={"max_budget": 10.0, "budget_duration_sec": 86400, "reset_alignment": "calendar_month"},
         headers=master_key_header,
     )
 
@@ -806,7 +878,11 @@ def test_unknown_scope_type_is_refused(client: Any, master_key_header: dict[str,
     """The scope vocabulary is published in the schema, so an unknown one is a 422."""
     response = client.post(
         "/v1/scoped-budgets",
-        json={"scope_type": "team", "scope_id": "ws-1", "max_budget": 1.0},
+        json={
+            "scope_type": "team",
+            "scope_id": "ws-1",
+            "budget_id": _a_budget_id(client, master_key_header, max_budget=1.0),
+        },
         headers=master_key_header,
     )
     assert response.status_code == 422

@@ -200,6 +200,29 @@ export type CreateBudgetRequest = Schemas["CreateBudgetRequest"]
 export type UpdateBudgetRequest = Schemas["UpdateBudgetRequest"]
 export type BudgetResetLog = Schemas["BudgetResetLogResponse"]
 
+// A ceiling names a `Budget` and holds the counters for spending it. It is not a
+// variant of a budget: a budget is the only shape that maps a cap to an amount,
+// and the two differ in what they enforce against. A budget reached through
+// `User.budget_id` is checked against that person's own spend, so N people on one
+// budget each get the full amount. A budget reached through a ceiling is checked
+// against the ceiling's counters, so everyone the scope names shares one
+// allowance. `max_budget` and the cadence travel on a ceiling's wire shape but
+// are read off the budget, never stored on it.
+//
+// `provider_key_id` is the odd name here and it is the wire's, not ours: the
+// column holds a provider *instance* name (`openai`, or a configured instance),
+// which is what `scoped_budget_service` matches a request's resolved provider
+// against. Anything picking a value for it wants `ProviderInfo["instance"]`.
+export type ScopedBudget = Schemas["ScopedBudgetResponse"]
+export type CreateScopedBudgetRequest = Schemas["CreateScopedBudgetRequest"]
+export type UpdateScopedBudgetRequest = Schemas["UpdateScopedBudgetRequest"]
+export type BudgetScopeType = CreateScopedBudgetRequest["scope_type"]
+// The cadence moved onto the budget with the limit, so it is derived from the
+// budget request now rather than from the ceiling's.
+export type BudgetResetAlignment = NonNullable<
+  CreateBudgetRequest["reset_alignment"]
+>
+
 // ---------------------------------------------------------------------------
 // Models, pricing and providers
 // ---------------------------------------------------------------------------

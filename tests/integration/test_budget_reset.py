@@ -5,25 +5,36 @@ from unittest.mock import patch
 import pytest
 from fastapi.testclient import TestClient
 
-from gateway.services.budget_service import calculate_next_reset
+from gateway.services.budget_periods import period_window
 
 from .conftest import MODEL_NAME
 
 _HAS_GEMINI_KEY = bool(os.getenv("GEMINI_API_KEY") or os.getenv("GOOGLE_API_KEY"))
 
 
-def test_calculate_next_reset() -> None:
-    """Test calculating next reset date with seconds."""
+def test_a_rolling_period_ends_a_duration_after_it_starts() -> None:
+    """The rolling half of the one derivation both planes now share.
+
+    ``calculate_next_reset`` used to own this and read only a duration, which is
+    why a calendar-aligned budget never reset: every caller of it was blind to
+    the other cadence. `period_window` answers for both.
+    """
     start = datetime(2025, 10, 1, 0, 0, 0, tzinfo=UTC)
 
-    next_reset = calculate_next_reset(start, 86400)
-    assert next_reset == datetime(2025, 10, 2, 0, 0, 0, tzinfo=UTC)
-
-    next_reset = calculate_next_reset(start, 604800)
-    assert next_reset == datetime(2025, 10, 8, 0, 0, 0, tzinfo=UTC)
-
-    next_reset = calculate_next_reset(start, 60)
-    assert next_reset == datetime(2025, 10, 1, 0, 1, 0, tzinfo=UTC)
+    assert period_window(start, duration=86400, alignment=None) == (
+        start,
+        datetime(2025, 10, 2, 0, 0, 0, tzinfo=UTC),
+    )
+    assert period_window(start, duration=604800, alignment=None) == (
+        start,
+        datetime(2025, 10, 8, 0, 0, 0, tzinfo=UTC),
+    )
+    assert period_window(start, duration=60, alignment=None) == (
+        start,
+        datetime(2025, 10, 1, 0, 1, 0, tzinfo=UTC),
+    )
+    # No cadence at all is a budget that never refills, not a zero-length window.
+    assert period_window(start, duration=None, alignment=None) is None
 
 
 def test_create_budget_with_duration_sec(client: TestClient, master_key_header: dict[str, str]) -> None:

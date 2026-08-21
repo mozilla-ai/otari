@@ -1,6 +1,7 @@
 import { expect, test } from "@playwright/test"
 
 import {
+  dismissComboBox,
   login,
   MASTER_KEY,
   nav,
@@ -89,7 +90,6 @@ test.describe("dashboard core flows", () => {
 
     await openOrganization(page)
     for (const [link, heading] of [
-      ["Users", "Users"],
       ["Spend & budgets", "Budgets"],
       ["Model pricing", "Model pricing"],
       // Exact, because this rail also carries "Org settings" and the default
@@ -116,27 +116,41 @@ test.describe("dashboard core flows", () => {
     await expect(page.getByText("No budgets yet")).toBeHidden()
   })
 
-  test("create a user and assign the budget", async ({ page }) => {
+  test("assign the budget to a person", async ({ page }) => {
     await login(page)
-    await openOrganization(page)
-    await nav(page).getByRole("link", { name: "Users" }).click()
-    // A bootstrap virtual user already exists (from the first-run key), so use the
-    // header action, not the empty-state button. It is removed when the form opens,
-    // leaving the form's own "Create user" as the only match.
-    await page.getByRole("button", { name: "Create user" }).click()
-    // Role-scoped: the rows behind this form carry "Copy user id" controls, whose
-    // accessible names also contain "user id".
-    await page
-      .getByRole("textbox", { name: /User ID/ })
-      .fill("alice@example.com")
-    // The budget created by the prior test is the only non-default option.
-    await page.getByLabel("Budget").selectOption({ index: 1 })
-    await page.getByRole("button", { name: "Create user" }).click()
+    // There is no page that creates a spend identity any more: one is minted
+    // when a member is added or when a key is issued. Seeded over the API here
+    // so this spec stays about the assignment, which is the part that moved onto
+    // the budget form when the users page went away.
+    const created = await page.request.post("/v1/users", {
+      headers: { "Otari-Key": MASTER_KEY },
+      data: { user_id: "alice@example.com" },
+    })
+    expect(created.ok() || created.status() === 409).toBeTruthy()
 
-    const row = page.getByRole("row", { name: /alice@example\.com/ })
-    await expect(row).toBeVisible()
-    // The assigned budget's name renders in the user's Budget cell.
-    await expect(row.getByText("e2e-budget")).toBeVisible()
+    await openOrganization(page)
+    await nav(page).getByRole("link", { name: "Spend & budgets" }).click()
+    const budgetRow = page.getByRole("row", { name: /e2e-budget/ })
+    await budgetRow.getByRole("button", { name: "Edit" }).click()
+    // "Add a person" is the input's own accessible name; "Assign to people" is
+    // the section heading beside it and labels nothing. Same shape as
+    // `addFilterValue` otherwise: the popover aria-hides the rest of the page, so
+    // it has to be put away before the submit button is reachable.
+    const owners = page.getByRole("combobox", { name: "Add a person" })
+    await owners.fill("alice@example.com")
+    await page.getByRole("option", { name: /alice@example\.com/ }).click()
+    await dismissComboBox(owners)
+    await page.getByRole("button", { name: "Save changes" }).click()
+
+    // The budget now reports one holder in its People column, which is the
+    // assignment landing.
+    // Exact: the row also holds "$100.00" and a "Select row ..." checkbox, both
+    // of which substring-match a bare "1".
+    await expect(
+      page
+        .getByRole("row", { name: /e2e-budget/ })
+        .getByRole("gridcell", { name: "1", exact: true }),
+    ).toBeVisible()
   })
 
   test("create an API key owned by a chosen user", async ({ page }) => {

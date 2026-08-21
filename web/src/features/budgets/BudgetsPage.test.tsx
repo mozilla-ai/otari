@@ -6,6 +6,8 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { Budget, BudgetResetLog, User } from "@/client"
 import { BudgetsPage } from "@/features/budgets/BudgetsPage"
+import { DeploymentProvider } from "@/shared/hooks/useDeployment"
+import { bootstrap } from "@/tests/fixtures"
 
 function testUser(user_id: string): User {
   return {
@@ -29,6 +31,7 @@ function budget(overrides: Partial<Budget> = {}): Budget {
     budget_id: "11111111-2222-3333-4444-555555555555",
     name: null,
     max_budget: 100,
+    reset_alignment: null,
     budget_duration_sec: 86_400,
     created_at: "2026-01-01T00:00:00+00:00",
     updated_at: "2026-01-01T00:00:00+00:00",
@@ -115,7 +118,14 @@ function renderPage(ui: ReactElement) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  return render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>)
+  // The assignment picker asks the organization roster what to call each person,
+  // and that read is gated on the `organizations` surface, so the page needs the
+  // deployment context the shell always gives it.
+  return render(
+    <DeploymentProvider value={bootstrap()}>
+      <QueryClientProvider client={client}>{ui}</QueryClientProvider>
+    </DeploymentProvider>,
+  )
 }
 
 describe("BudgetsPage", () => {
@@ -241,7 +251,7 @@ describe("BudgetsPage", () => {
     )
     await user.type(screen.getByLabelText("Spending limit (USD)"), "100")
     // Pick a user from the assignment combobox, then submit.
-    await user.type(screen.getByLabelText("Add a user"), "alice")
+    await user.type(screen.getByLabelText("Add a person"), "alice")
     await user.click(await screen.findByRole("option", { name: /alice/ }))
     await user.keyboard("{Escape}")
     await user.click(screen.getByRole("button", { name: "Create budget" }))
@@ -273,13 +283,13 @@ describe("BudgetsPage", () => {
     await user.click(
       await screen.findByRole("button", { name: "Create your first budget" }),
     )
-    await user.type(screen.getByLabelText("Add a user"), "alice")
+    await user.type(screen.getByLabelText("Add a person"), "alice")
     await user.click(await screen.findByRole("option", { name: /alice/ }))
     await user.keyboard("{Escape}")
     await user.click(screen.getByRole("button", { name: "Create budget" }))
 
     expect(
-      await screen.findByText(/could not assign it to: alice/),
+      await screen.findByText(/these people were not updated: alice/),
     ).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Retry assignments" }))
     await vi.waitFor(() => {
@@ -314,7 +324,7 @@ describe("BudgetsPage", () => {
     await user.click(
       await screen.findByRole("button", { name: "Create your first budget" }),
     )
-    await user.type(screen.getByLabelText("Add a user"), "alice")
+    await user.type(screen.getByLabelText("Add a person"), "alice")
     await user.click(await screen.findByRole("option", { name: /alice/ }))
     await user.keyboard("{Escape}")
     await user.click(screen.getByRole("button", { name: "Create budget" }))

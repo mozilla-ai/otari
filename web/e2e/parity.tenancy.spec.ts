@@ -137,9 +137,7 @@ test.describe("standalone tenancy", () => {
     await expect(memberRow(page, MEMBER_EMAIL)).toHaveCount(0)
   })
 
-  test("creates a workspace, renames it, reads its roster, and removes it", async ({
-    page,
-  }) => {
+  test("creates a workspace, renames it, and removes it", async ({ page }) => {
     await login(page)
     await openOrganization(page)
     await openPage(page, "Workspaces", "Workspaces")
@@ -162,18 +160,24 @@ test.describe("standalone tenancy", () => {
     const renamed = workspaceRow(page, RENAMED_WORKSPACE)
     await expect(renamed).toBeVisible()
 
-    // A workspace's members are a subset of the organization's, and a
-    // standalone deployment has exactly one identity, which created this
-    // workspace and therefore already owns it.
-    await renamed.getByRole("button", { name: "Members" }).click()
-    await expect(
-      page.getByText(`Members of ${RENAMED_WORKSPACE}`),
-    ).toBeVisible()
-    await expect(page.getByText(/already in this workspace/)).toBeVisible()
-
     await renamed.getByRole("button", { name: "Delete" }).click()
     await page.getByRole("button", { name: "Delete workspace" }).click()
     await expect(workspaceRow(page, RENAMED_WORKSPACE)).toHaveCount(0)
+  })
+
+  test("reads the selected workspace's roster on its own page", async ({
+    page,
+  }) => {
+    // The roster used to be reachable from a row on Workspaces as well as here,
+    // the same component on two rails. That copy is gone, so this is the only
+    // place it renders and the only place it can be covered.
+    await login(page)
+    await nav(page).getByRole("link", { name: "Members", exact: true }).click()
+
+    // A workspace's members are a subset of the organization's, and a standalone
+    // deployment has exactly one identity, which owns every workspace it made.
+    await expect(page.getByText(/Members of /)).toBeVisible()
+    await expect(page.getByText(/already in this workspace/)).toBeVisible()
   })
 
   test("offers nothing that would make the deployment multi-tenant", async ({

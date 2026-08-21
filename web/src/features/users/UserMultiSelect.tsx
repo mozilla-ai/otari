@@ -2,6 +2,7 @@ import { ComboBox, Input, ListBox, ListBoxItem } from "@heroui/react"
 import { type ReactNode, useMemo, useState } from "react"
 
 import type { User } from "@/client"
+import { useMemberAttributionLabels } from "@/features/organization/attribution"
 
 interface Option {
   id: string
@@ -10,9 +11,15 @@ interface Option {
 
 const MAX_VISIBLE = 50
 
-// A chip picker of existing users, for assigning a budget to several at once. Only
-// lists named users (virtual apikey-* shadows are excluded); it never creates a
-// user, matching the user-first model where users exist before they are assigned.
+// A chip picker of people, for assigning a budget to several at once. Only lists
+// named rows (virtual apikey-* shadows are excluded); it never creates one,
+// matching the model where a person exists before they are assigned a budget.
+//
+// The rows are keyed by the id the request plane bills to, which for anyone added
+// through the roster is a bare UUID. Showing that is useless to a human, so the
+// organization roster is asked what to call them (`attribution_user_id` is the
+// join). An id with no member behind it, such as one an operator named directly
+// over the API, keeps the id, since that *is* its name.
 export function UserMultiSelect({
   value,
   onChange,
@@ -27,16 +34,28 @@ export function UserMultiSelect({
   description?: ReactNode
 }) {
   const [query, setQuery] = useState("")
+  const memberLabels = useMemberAttributionLabels()
+
+  const labelFor = useMemo(
+    () =>
+      (user: User): string => {
+        const member = memberLabels.get(user.user_id)
+        if (member) return member
+        return user.alias ? `${user.user_id} (${user.alias})` : user.user_id
+      },
+    [memberLabels],
+  )
 
   const options = useMemo<Option[]>(
     () =>
       users
         .filter((u) => !u.user_id.startsWith("apikey-"))
-        .map((u) => ({
-          id: u.user_id,
-          label: u.alias ? `${u.user_id} (${u.alias})` : u.user_id,
-        })),
-    [users],
+        .map((u) => ({ id: u.user_id, label: labelFor(u) })),
+    [users, labelFor],
+  )
+  const labelById = useMemo(
+    () => new Map(options.map((option) => [option.id, option.label])),
+    [options],
   )
 
   const visible = useMemo(() => {
@@ -71,12 +90,12 @@ export function UserMultiSelect({
           {value.map((id) => (
             <span
               key={id}
-              className="inline-flex items-center gap-1 rounded-full bg-primary-subtle px-2.5 py-1 font-mono text-xs text-primary-subtle-foreground"
+              className="inline-flex items-center gap-1 rounded-full bg-primary-subtle px-2.5 py-1 text-xs text-primary-subtle-foreground"
             >
-              {id}
+              {labelById.get(id) ?? id}
               <button
                 type="button"
-                aria-label={`Remove ${id}`}
+                aria-label={`Remove ${labelById.get(id) ?? id}`}
                 onClick={() => remove(id)}
                 className="text-primary-subtle-foreground hover:text-danger"
               >
@@ -88,8 +107,8 @@ export function UserMultiSelect({
       ) : null}
       {options.length === 0 ? (
         <span className="text-xs text-muted">
-          No users yet. Create users first, then assign them here or from the
-          Users page.
+          Nobody to assign yet. Add people under Members &amp; roles, or issue a
+          key, and they can be assigned here.
         </span>
       ) : (
         <ComboBox.Root
@@ -105,8 +124,8 @@ export function UserMultiSelect({
         >
           <ComboBox.InputGroup>
             <Input
-              aria-label="Add a user"
-              placeholder="Search users…"
+              aria-label="Add a person"
+              placeholder="Search people…"
               autoComplete="off"
             />
             <ComboBox.Trigger />

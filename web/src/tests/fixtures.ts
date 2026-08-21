@@ -8,13 +8,16 @@
 
 import type {
   ActivationAttempt,
+  Budget,
   DeploymentBootstrap,
   Organization,
   OrganizationContext,
   OrganizationMember,
   PricingResponse,
+  ScopedBudget,
   UsageSeriesPoint,
   UsageTotals,
+  User,
   Workspace,
   WorkspaceActivation,
   WorkspaceBudgetDefault,
@@ -198,12 +201,92 @@ export function workspaceMember(
   }
 }
 
+/**
+ * A ceiling on one tenancy scope, with its own counters.
+ *
+ * Not a variant of `budget`: a budget is a limit template with no counters,
+ * replicated per person, while this pools over whatever its scope names. The
+ * workspace_member ones are what a workspace's default materializes.
+ */
+export function scopedBudget(
+  overrides: Partial<ScopedBudget> = {},
+): ScopedBudget {
+  return {
+    id: "88888888-8888-8888-8888-888888888888",
+    scope_type: "workspace_member",
+    scope_id: "99999999-9999-9999-9999-999999999999",
+    provider_key_id: null,
+    name: null,
+    // The budget this ceiling enforces. `max_budget` and the cadence below are
+    // read off it and travel on the wire; they are not stored on the ceiling.
+    budget_id: "77777777-7777-7777-7777-777777777777",
+    max_budget: 50,
+    current_spend: 0,
+    reserved_spend: 0,
+    budget_duration_sec: null,
+    reset_alignment: null,
+    period_start: null,
+    period_end: null,
+    created_at: "2026-01-01T00:00:00+00:00",
+    updated_at: "2026-01-01T00:00:00+00:00",
+    ...overrides,
+  }
+}
+
+/** A spending limit and its reset period, as the budgets list reports one. */
+export function budget(overrides: Partial<Budget> = {}): Budget {
+  return {
+    budget_id: "77777777-7777-7777-7777-777777777777",
+    name: "Team standard",
+    max_budget: 100,
+    budget_duration_sec: 2_592_000,
+    // The calendar cadence, which lives here rather than on the rows enforcing
+    // this budget: a limit and the period it is spent over are one decision.
+    reset_alignment: null,
+    user_count: 0,
+    total_spend: 0,
+    total_reserved: 0,
+    created_at: "2026-01-01T00:00:00+00:00",
+    updated_at: "2026-01-01T00:00:00+00:00",
+    ...overrides,
+  }
+}
+
+/**
+ * A gateway spend row: what a key charges against.
+ *
+ * Shared rather than per-file because the organization roster now joins these
+ * onto its members (`attribution_user_id`) to show model access and spend, so
+ * more than one suite needs the shape.
+ */
+export function user(overrides: Partial<User> = {}): User {
+  return {
+    user_id: "33333333-3333-3333-3333-333333333333",
+    alias: null,
+    spend: 0,
+    reserved: 0,
+    budget_id: null,
+    allowed_models: null,
+    budget_started_at: null,
+    next_budget_reset_at: null,
+    blocked: false,
+    created_at: "2026-01-01T00:00:00+00:00",
+    updated_at: "2026-01-01T00:00:00+00:00",
+    metadata: {},
+    ...overrides,
+  }
+}
+
 export function workspaceBudgetDefault(
   overrides: Partial<WorkspaceBudgetDefault> = {},
 ): WorkspaceBudgetDefault {
   return {
     id: "66666666-6666-6666-6666-666666666666",
     workspace_id: "44444444-4444-4444-4444-444444444444",
+    // The budget the default hands out. Name, limit and period are read off it
+    // rather than stored on the default, and travel on the wire so a caller can
+    // render one without fetching every budget to resolve an id.
+    budget_id: "77777777-7777-7777-7777-777777777777",
     provider_key_id: null,
     name: "Default member budget",
     max_budget: 50.0,

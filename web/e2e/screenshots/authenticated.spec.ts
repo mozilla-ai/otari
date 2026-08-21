@@ -21,12 +21,14 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
   { route: "/providers", name: "providers", heading: /provider/i },
   { route: "/keys", name: "keys", heading: /keys/i },
   { route: "/budgets", name: "budgets", heading: /budgets/i },
+  // The member roster now carries what the users page used to: model access,
+  // blocking, and per-person spend. It is on the organization rail, which this
+  // matrix reaches by URL like every other route here.
   {
-    route: "/budget-defaults",
-    name: "budget-defaults",
-    heading: /budget defaults/i,
+    route: "/organization/members",
+    name: "organization-members",
+    heading: /members/i,
   },
-  { route: "/users", name: "users", heading: /users/i },
   { route: "/usage", name: "usage", heading: /usage/i },
   { route: "/activity", name: "activity", heading: /activity/i },
   { route: "/tools", name: "tools", heading: /tools/i },

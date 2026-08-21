@@ -315,7 +315,7 @@ function BudgetExemptToggle({
 
 // Access-control adjacent: a three-way override of the deployment-wide
 // reject_user_mismatch, so it is a picker rather than a checkbox. Same shape as
-// the budget picker on the Users page.
+// the budget picker on the budgets page.
 function UserMismatchPicker({
   value,
   onChange,
@@ -928,10 +928,10 @@ export function KeysPage() {
       <p className="text-sm text-muted">
         A key spends against its owner's budget. Owners live under{" "}
         <Link
-          to="/users"
+          to="/organization/members"
           className="font-medium text-link hover:text-link-hover"
         >
-          Organization → Users
+          Organization → Members &amp; roles
         </Link>
         , and their limits under{" "}
         <Link

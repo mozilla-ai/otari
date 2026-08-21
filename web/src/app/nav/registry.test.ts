@@ -58,10 +58,8 @@ describe("nav registry", () => {
       "API keys",
       "Providers",
       "Members",
-      "Budget defaults",
       "Workspaces",
       "Members & roles",
-      "Users",
       "Providers",
       "Spend & budgets",
       "Billing",
@@ -102,12 +100,19 @@ describe("nav registry", () => {
     expect(tenancy?.items.map((item) => [item.label, item.surface])).toEqual([
       ["Workspaces", "workspaces"],
       ["Members & roles", "organizations"],
-      // Grouped with the tenancy rows but gated on its own surface: Users reads
-      // the pre-tenancy `users` table, so a deployment serving one identity
-      // without the other hides exactly the row it cannot answer for.
-      ["Users", "users"],
       ["Providers", "organization_providers"],
     ])
+    const money = ORG_NAV_SECTIONS.find((section) => section.id === "org-money")
+    expect(money?.items.map((item) => [item.label, item.surface])).toEqual([
+      ["Spend & budgets", "budgets"],
+      ["Billing", "billing"],
+      ["Model pricing", "pricing"],
+    ])
+    // No row gates on `users` any more. The gateway still serves that surface
+    // (budgets, keys and the roster all read `/v1/users`), but a person is a
+    // member now: what they may spend and what their keys may call are columns
+    // on Members & roles rather than a second people-shaped destination.
+    expect(NAV_ITEMS.map((item) => item.surface)).not.toContain("users")
   })
 
   it("resolves a child route to its own entry, not to its parent's", () => {

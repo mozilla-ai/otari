@@ -24,7 +24,7 @@ on success.
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -32,12 +32,14 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from gateway.models.entities import ScopedBudget, WorkspaceBudgetDefault
+from gateway.models.entities import Budget, ScopedBudget, WorkspaceBudgetDefault
 from gateway.models.tenancy import User, Workspace, WorkspaceMember
 from gateway.repositories.tenancy import WorkspaceMemberRepository, WorkspaceRepository
+from gateway.services.budget_periods import period_window
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.errors import (
     WorkspaceBudgetDefaultAlreadyExistsError,
+    WorkspaceBudgetDefaultBudgetNotFoundError,
     WorkspaceBudgetDefaultNotFoundError,
 )
 from gateway.services.tenancy.organization_service import OrganizationService
@@ -49,6 +51,11 @@ from gateway.services.tenancy.organization_service import OrganizationService
 # `WorkspaceService`'s own docstring on `_delete_scoped_budgets_for` for the
 # same avoidance. `tests/unit/test_service_module_imports.py` pins the graph
 # staying acyclic.
+#
+# The *period derivation* used to be duplicated for the same reason, and that
+# copy only understood durations, so a calendar-aligned budget materialized a
+# ceiling with no window and never reset. It lives in
+# `gateway.services.budget_periods` now, a leaf both sides import.
 _SCOPE_WORKSPACE_MEMBER = "workspace_member"
 
 # Page size for fanning a new default out across a workspace's active members,
@@ -56,60 +63,33 @@ _SCOPE_WORKSPACE_MEMBER = "workspace_member"
 _MATERIALIZE_PAGE_SIZE = 500
 _MAX_LIST_LIMIT = 1000
 
-# An upper bound on a period length, in seconds (roughly ten years). Without
-# one, `_period_window`'s `datetime + timedelta(seconds=...)` overflows on an
-# arbitrarily large value: `timedelta` itself refuses more than
-# `timedelta.max`, so a request near that raises `OverflowError` (a 500)
-# instead of the 422 an out-of-range period should be.
-_MAX_BUDGET_DURATION_SEC = 10 * 365 * 24 * 3600
-
-
-def _period_window(budget_duration_sec: int | None) -> tuple[datetime | None, datetime | None]:
-    """The ``(period_start, period_end)`` a freshly materialized ``ScopedBudget`` opens with.
-
-    A private, local duplicate of the same arithmetic
-    ``routes/scoped_budgets.create_scoped_budget`` does, for the same reason
-    ``_SCOPE_WORKSPACE_MEMBER`` above is a literal rather than an import
-    (importing ``scoped_budget_service`` closes a cycle). Centralized to one
-    definition *here* at least, so the module carries one derivation instead
-    of two; worth reconciling further, into one definition shared with
-    ``scoped_budgets.py`` itself, wherever that shared home ends up landing.
-    """
-    if budget_duration_sec is None:
-        return None, None
-    now = datetime.now(UTC)
-    return now, now + timedelta(seconds=budget_duration_sec)
 
 
 class WorkspaceMemberBudgetPolicyCreate(BaseModel):
     """Request body for creating a default."""
 
+    budget_id: str = Field(
+        min_length=1,
+        max_length=255,
+        description="The budget this workspace hands to every member",
+    )
     provider_key_id: str | None = Field(
         default=None,
         max_length=255,
         description="Narrow the default to one provider instance; null applies to every provider",
     )
-    name: str | None = Field(default=None, max_length=200, description="Admin-facing label")
-    max_budget: float | None = Field(default=None, ge=0, description="Maximum USD spend per member in the period")
-    budget_duration_sec: int | None = Field(
-        default=None,
-        gt=0,
-        le=_MAX_BUDGET_DURATION_SEC,
-        description="Period length in seconds; null never resets",
-    )
 
 
 class WorkspaceMemberBudgetPolicyUpdate(BaseModel):
-    """Request body for updating a default.
+    """Request body for pointing a default at a different budget.
 
-    Not retroactive: a member already materialized from this default keeps
-    the value that was in effect when they were materialized. Only a member
-    materialized after this update sees the new one.
+    Members already materialized from this default keep the budget they were
+    given: their ceiling names it directly, and this only changes what a member
+    joining afterwards is handed. Editing the *budget* is the retroactive act,
+    and it moves everyone naming it, in this workspace and outside it.
     """
 
-    name: str | None = Field(default=None, max_length=200)
-    max_budget: float | None = Field(default=None, ge=0)
-    budget_duration_sec: int | None = Field(default=None, gt=0, le=_MAX_BUDGET_DURATION_SEC)
+    budget_id: str = Field(min_length=1, max_length=255)
 
 
 class WorkspaceMemberBudgetPolicyPublic(BaseModel):
@@ -117,7 +97,11 @@ class WorkspaceMemberBudgetPolicyPublic(BaseModel):
 
     id: str
     workspace_id: uuid.UUID
+    budget_id: str
     provider_key_id: str | None
+    # Read off the budget, not stored here. Carried on the wire so the dashboard
+    # can render a default without fetching every budget to resolve one id, and
+    # so this shape stays what it was before the limit moved onto the budget.
     name: str | None
     max_budget: float | None
     budget_duration_sec: int | None
@@ -125,14 +109,15 @@ class WorkspaceMemberBudgetPolicyPublic(BaseModel):
     updated_at: str
 
     @classmethod
-    def from_model(cls, default: WorkspaceBudgetDefault) -> WorkspaceMemberBudgetPolicyPublic:
+    def from_model(cls, default: WorkspaceBudgetDefault, budget: Budget) -> WorkspaceMemberBudgetPolicyPublic:
         return cls(
             id=default.id,
             workspace_id=default.workspace_id,
+            budget_id=default.budget_id,
             provider_key_id=default.provider_key_id,
-            name=default.name,
-            max_budget=default.max_budget,
-            budget_duration_sec=default.budget_duration_sec,
+            name=budget.name,
+            max_budget=budget.max_budget,
+            budget_duration_sec=budget.budget_duration_sec,
             created_at=default.created_at.isoformat(),
             updated_at=default.updated_at.isoformat(),
         )
@@ -185,10 +170,12 @@ class WorkspaceBudgetDefaultService:
         for default in defaults:
             if await self._existing_member_budget(member.id, default.provider_key_id) is not None:
                 continue
-            created.extend(await self._insert_member_budgets([member.id], default))
+            created.extend(await self._insert_member_budgets([member.id], default, await self._budget_for(default)))
         return created
 
-    async def materialize_for_default(self, default: WorkspaceBudgetDefault) -> list[ScopedBudget]:
+    async def materialize_for_default(
+        self, default: WorkspaceBudgetDefault, budget: Budget | None = None
+    ) -> list[ScopedBudget]:
         """Create a per-member ``ScopedBudget`` for every active member of the default's workspace.
 
         Members who already have a ceiling for this ``provider_key_id`` are
@@ -201,6 +188,10 @@ class WorkspaceBudgetDefaultService:
         a workspace with hundreds of members is the difference between one
         query pair and hundreds of them.
         """
+        # Resolved once for the whole fan-out rather than per page: every member
+        # of this workspace is handed the same budget, and it cannot change under
+        # us inside the transaction.
+        template = budget if budget is not None else await self._budget_for(default)
         created: list[ScopedBudget] = []
         skip = 0
         while True:
@@ -211,14 +202,14 @@ class WorkspaceBudgetDefaultService:
                 break
             active_ids = [member.id for member in members if member.status == "active"]
             if active_ids:
-                created.extend(await self._materialize_batch(active_ids, default))
+                created.extend(await self._materialize_batch(active_ids, default, template))
             skip += len(members)
             if skip >= total:
                 break
         return created
 
     async def _materialize_batch(
-        self, member_ids: list[uuid.UUID], default: WorkspaceBudgetDefault
+        self, member_ids: list[uuid.UUID], default: WorkspaceBudgetDefault, budget: Budget
     ) -> list[ScopedBudget]:
         """Materialize ``default`` onto every id in ``member_ids`` that does not already have one.
 
@@ -239,10 +230,10 @@ class WorkspaceBudgetDefaultService:
         candidates = [member_id for member_id in member_ids if str(member_id) not in already_covered]
         if not candidates:
             return []
-        return await self._insert_member_budgets(candidates, default)
+        return await self._insert_member_budgets(candidates, default, budget)
 
     async def _insert_member_budgets(
-        self, member_ids: list[uuid.UUID], default: WorkspaceBudgetDefault
+        self, member_ids: list[uuid.UUID], default: WorkspaceBudgetDefault, budget: Budget
     ) -> list[ScopedBudget]:
         """Insert a ``ScopedBudget`` for each id in ``member_ids``, tolerating a uniqueness collision on any one.
 
@@ -269,10 +260,10 @@ class WorkspaceBudgetDefaultService:
         """
         try:
             async with self.db.begin_nested():
-                budgets = [self._build_member_budget(member_id, default) for member_id in member_ids]
-                self.db.add_all(budgets)
+                ceilings = [self._build_member_budget(member_id, default, budget) for member_id in member_ids]
+                self.db.add_all(ceilings)
                 await self.db.flush()
-            return budgets
+            return ceilings
         except IntegrityError:
             pass  # fall back below; the savepoint already rolled the batch back
 
@@ -280,26 +271,66 @@ class WorkspaceBudgetDefaultService:
         for member_id in member_ids:
             try:
                 async with self.db.begin_nested():
-                    budget = self._build_member_budget(member_id, default)
-                    self.db.add(budget)
+                    ceiling = self._build_member_budget(member_id, default, budget)
+                    self.db.add(ceiling)
                     await self.db.flush()
-                created.append(budget)
+                created.append(ceiling)
             except IntegrityError:
                 pass  # this id's savepoint rolled back and expunged it; move on
         return created
 
     @staticmethod
-    def _build_member_budget(member_id: uuid.UUID, default: WorkspaceBudgetDefault) -> ScopedBudget:
-        period_start, period_end = _period_window(default.budget_duration_sec)
+    def _build_member_budget(
+        member_id: uuid.UUID, default: WorkspaceBudgetDefault, budget: Budget
+    ) -> ScopedBudget:
+        """One member's ceiling, naming the budget the default hands out.
+
+        Named rather than copied: the limit and the period are read through the
+        budget on every request, so editing that budget moves everyone already
+        holding a ceiling from it. That is the point of a budget being a named
+        thing rather than a figure duplicated per member.
+
+        Only the period *window* is stamped here, because a window is this
+        member's own: two people materialized a week apart from one rolling
+        monthly budget are each a month from their own start. A calendar-aligned
+        budget lands them both on the same boundary, which is what the shared
+        derivation is for.
+        """
+        window = period_window(
+            datetime.now(UTC),
+            duration=budget.budget_duration_sec,
+            alignment=budget.reset_alignment,
+        )
+        period_start, period_end = window if window is not None else (None, None)
         return ScopedBudget(
             scope_type=_SCOPE_WORKSPACE_MEMBER,
             scope_id=str(member_id),
             provider_key_id=default.provider_key_id,
-            max_budget=default.max_budget,
-            budget_duration_sec=default.budget_duration_sec,
+            budget_id=budget.budget_id,
             period_start=period_start,
             period_end=period_end,
         )
+
+    async def _budget_for(self, default: WorkspaceBudgetDefault) -> Budget:
+        """The budget a stored default hands out.
+
+        Always present: ``budget_id`` is NOT NULL and its foreign key is
+        ``RESTRICT``, so the row cannot be deleted while a default names it. The
+        miss is still raised rather than asserted, because a database restored
+        without foreign keys enforced would otherwise materialize a ceiling with
+        a null limit, which admits everything.
+        """
+        budget = await self.db.get(Budget, default.budget_id)
+        if budget is None:
+            raise WorkspaceBudgetDefaultBudgetNotFoundError(default.budget_id)
+        return budget
+
+    async def _require_budget(self, budget_id: str) -> Budget:
+        """The budget a caller named, refused as 404 when it does not exist."""
+        budget = await self.db.get(Budget, budget_id)
+        if budget is None:
+            raise WorkspaceBudgetDefaultBudgetNotFoundError(budget_id)
+        return budget
 
     async def _existing_member_budget(self, member_id: uuid.UUID, provider_key_id: str | None) -> ScopedBudget | None:
         stmt = select(ScopedBudget).where(
@@ -358,8 +389,34 @@ class WorkspaceBudgetDefaultService:
             .scalars()
             .all()
         )
+        # One query for the page's budgets rather than one per row: a workspace
+        # has few defaults, but the N+1 is free to avoid and this is the read the
+        # dashboard makes on every workspace switch.
+        budgets = {
+            budget.budget_id: budget
+            for budget in (
+                await self.db.execute(
+                    select(Budget).where(col(Budget.budget_id).in_([default.budget_id for default in defaults]))
+                )
+            )
+            .scalars()
+            .all()
+        }
+        # Every default resolves or the read fails, rather than quietly returning
+        # fewer rows than `count` promises: a short page with no explanation is
+        # the failure mode `_budget_for` refuses for the same reason, and it also
+        # makes pagination inconsistent, since the dropped row still consumes a
+        # slot. Unreachable while `budget_id` is NOT NULL with a RESTRICT foreign
+        # key; raised anyway because a database restored without them would
+        # otherwise hide it here.
+        missing = next((default for default in defaults if default.budget_id not in budgets), None)
+        if missing is not None:
+            raise WorkspaceBudgetDefaultBudgetNotFoundError(missing.budget_id)
         return WorkspaceMemberBudgetPoliciesPublic(
-            data=[WorkspaceMemberBudgetPolicyPublic.from_model(default) for default in defaults],
+            data=[
+                WorkspaceMemberBudgetPolicyPublic.from_model(default, budgets[default.budget_id])
+                for default in defaults
+            ],
             count=count,
         )
 
@@ -385,12 +442,13 @@ class WorkspaceBudgetDefaultService:
         # ceiling even though both transactions commit successfully.
         await self.workspaces.lock(workspace.id)
 
+        # Before the lock's write, so an unknown budget is a 404 rather than a
+        # foreign-key violation reported as "this default already exists".
+        budget = await self._require_budget(request.budget_id)
         default = WorkspaceBudgetDefault(
             workspace_id=workspace.id,
+            budget_id=budget.budget_id,
             provider_key_id=request.provider_key_id,
-            name=request.name,
-            max_budget=request.max_budget,
-            budget_duration_sec=request.budget_duration_sec,
         )
         self.db.add(default)
         # Narrowed to the default row's own flush on purpose: this is the only
@@ -406,10 +464,10 @@ class WorkspaceBudgetDefaultService:
             await self.db.rollback()
             raise WorkspaceBudgetDefaultAlreadyExistsError(workspace_id, request.provider_key_id) from None
 
-        await self.materialize_for_default(default)
+        await self.materialize_for_default(default, budget)
         await self.db.commit()
         await self.db.refresh(default)
-        return WorkspaceMemberBudgetPolicyPublic.from_model(default)
+        return WorkspaceMemberBudgetPolicyPublic.from_model(default, budget)
 
     async def update_default(
         self,
@@ -419,15 +477,14 @@ class WorkspaceBudgetDefaultService:
         default_id: str,
         request: WorkspaceMemberBudgetPolicyUpdate,
     ) -> WorkspaceMemberBudgetPolicyPublic:
-        """Update a default's label or limit.
+        """Point a default at a different budget.
 
-        Not retroactive (see :class:`WorkspaceMemberBudgetPolicyUpdate`):
-        members already materialized from this default keep their existing
-        ``ScopedBudget`` row untouched. The scope (``provider_key_id``) is not
-        editable, matching ``routes/scoped_budgets.py``'s own rule for the
-        concrete ceilings this produces: changing it would move the template
-        to a different identity, which is a delete and a create, not an
-        update.
+        Members already materialized keep the budget they were handed (see
+        :class:`WorkspaceMemberBudgetPolicyUpdate`); this changes what someone
+        joining afterwards gets. The scope (``provider_key_id``) is not editable,
+        matching ``routes/scoped_budgets.py``'s own rule for the concrete
+        ceilings this produces: changing it would move the template to a
+        different identity, which is a delete and a create, not an update.
         """
         workspace = await authorization.resolve_visible_workspace(
             self.db, user=user, workspace_id=workspace_id, organizations=self.organizations
@@ -437,16 +494,12 @@ class WorkspaceBudgetDefaultService:
         )
         default = await self._get_or_404(workspace, default_id)
 
-        if "name" in request.model_fields_set:
-            default.name = request.name
-        if "max_budget" in request.model_fields_set:
-            default.max_budget = request.max_budget
-        if "budget_duration_sec" in request.model_fields_set:
-            default.budget_duration_sec = request.budget_duration_sec
+        budget = await self._require_budget(request.budget_id)
+        default.budget_id = budget.budget_id
 
         await self.db.commit()
         await self.db.refresh(default)
-        return WorkspaceMemberBudgetPolicyPublic.from_model(default)
+        return WorkspaceMemberBudgetPolicyPublic.from_model(default, budget)
 
     async def delete_default(self, *, user: User, workspace_id: uuid.UUID, default_id: str) -> None:
         """Delete a default.

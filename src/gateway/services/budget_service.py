@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Literal
 
@@ -18,6 +18,7 @@ from gateway.log_config import logger
 from gateway.metrics import record_budget_exceeded
 from gateway.models.entities import Budget, BudgetResetLog, ModelPricing, User
 from gateway.repositories.users_repository import get_active_user
+from gateway.services.budget_periods import budget_window
 from gateway.services.pricing_service import find_model_pricing
 from gateway.services.provider_kwargs import provider_key
 from gateway.services.scoped_budget_service import (
@@ -31,22 +32,12 @@ from gateway.services.scoped_budget_service import settle as settle_scoped
 from gateway.types.budget_state import BudgetState
 
 
-def calculate_next_reset(start: datetime, duration_sec: int) -> datetime:
-    """Calculate next budget reset datetime.
-
-    Args:
-        start: Starting datetime for the budget period
-        duration_sec: Duration in seconds
-
-    Returns:
-        datetime when the budget should next reset
-
-    """
-    return start + timedelta(seconds=duration_sec)
-
-
 async def _cas_reset_user_budget(db: AsyncSession, user: User, budget: Budget, now: datetime) -> User:
-    next_reset_at = calculate_next_reset(now, budget.budget_duration_sec) if budget.budget_duration_sec else None
+    # Both cadences, through the one derivation. Reading only
+    # ``budget_duration_sec`` here left a calendar-aligned budget with a null
+    # next reset, and a null next reset never fires, so the row never refilled.
+    window = budget_window(now, budget)
+    started_at, next_reset_at = window if window is not None else (now, None)
 
     result = await db.execute(
         update(User)
@@ -58,7 +49,9 @@ async def _cas_reset_user_budget(db: AsyncSession, user: User, budget: Budget, n
         )
         .values(
             spend=0.0,
-            budget_started_at=now,
+            # The window's start, not ``now``: an aligned budget rolled late
+            # belongs to the period it is in, not to the moment it was noticed.
+            budget_started_at=started_at,
             next_budget_reset_at=next_reset_at,
         )
         .execution_options(synchronize_session=False)

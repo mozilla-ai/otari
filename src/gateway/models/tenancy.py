@@ -31,8 +31,8 @@ Three deliberate departures from the platform's models, applied on arrival:
   rather than a behavior. ``tests/unit/test_tenancy_timestamps.py`` is what
   keeps it one.
 - **``email`` is a plain nullable string, not ``EmailStr``.** A standalone
-  operator identity is a label, not a sign-in address (M4: "local identities
-  have no email"), and every reader here must already tolerate its absence, so
+  operator identity is a label, not a sign-in address ("local identities have no
+  email"), and every reader here must already tolerate its absence, so
   the annotation says so rather than being widened at each call site.
 - **Hosted-only columns are not carried, with one exception.** The reconciled
   schema is edition-invariant (the overlay contributes adapters and routers,
@@ -87,8 +87,9 @@ WorkspaceMemberRole = Literal["owner", "admin", "member", "viewer"]
 # hold. "invited" stays a valid stored status because the invitation flow
 # produces it and will rehome, but nothing in this edition can create or accept
 # an invitation, so offering it here would advertise a state with no producer
-# and no exit. (The M4 re-parenting backfill does not produce it either: it maps
-# a blocked gateway user to "suspended" and every other one to "active".)
+# and no exit. (A convergence backfill would not produce it either: the mapping
+# it describes sends a blocked gateway user to "suspended" and every other one
+# to "active".)
 # Widening this back when invitations rehome is additive; narrowing later would
 # not be.
 OrganizationMemberSettableStatus = Literal["active", "suspended"]
@@ -234,10 +235,14 @@ class User(UserBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
     """An identity in the reconciled control plane.
 
     Not to be confused with `entities.User`, the gateway's own string-keyed
-    per-request spend identity. Both exist during the strangle: M4 re-parents
-    the gateway's rows onto this table through the identity bridge, and the
-    legacy table contracts away one milestone after parity, at which point this
-    is the only ``User``.
+    per-request spend identity, which is what keys, budgets, and usage attach to.
+    Both exist, and how they converge is no longer settled: otari-ai#1719 made
+    otari's schema the survivor, which retired the pre-flip plan of re-parenting
+    the request plane onto this table through the identity bridge. otari-ai#1727
+    holds the open decision and names two candidates, re-pointing the
+    request-plane foreign keys here or keeping both with one authoritative. Until
+    it lands, ``ActiveOrganizationMemberPublic.attribution_user_id`` is the join
+    between the two.
 
     ``email`` is nullable and unique. PostgreSQL and SQLite both allow repeated
     NULLs in a unique index, so email-less local identities coexist without
@@ -478,9 +483,9 @@ class ActiveOrganizationMemberPublic(SQLModel):
     ``POST /v1/keys`` to give this member a key. It is null when no usable row
     exists (nobody minted one, or it was soft-deleted through
     ``DELETE /v1/users``), which is the signal not to offer this member as a key
-    owner: key creation would refuse. The two ids converge when the request plane
-    re-parents onto tenancy (M4), and this field is what lets that happen without
-    the dashboard changing.
+    owner: key creation would refuse. How the two ids converge is the open
+    question in otari-ai#1727; this field is the join until it is answered, and
+    is what lets either answer land without the dashboard changing.
     """
 
     organization_member_id: uuid.UUID | None = None

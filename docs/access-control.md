@@ -2,7 +2,7 @@
 
 Standalone Otari decides three things about every request: who is calling (the **user**), what credential they presented (the **API key**), and whether they have room to spend (the **budget**). This guide is a task-oriented tour of those three, with the management endpoints that drive them. Everything here is standalone-only; hybrid mode delegates identity and spend to otari.ai.
 
-The user, key, and budget endpoints in this guide all require the master key (some other management endpoints, such as read-only pricing lookups, also accept a regular API key; see the [API reference](api-reference.md)). Send the master key as `Otari-Key: <master-key>` or `Authorization: Bearer <master-key>`. The same actions are available in the dashboard's **Access** section; see the [Admin dashboard guide](dashboard.md).
+The user, key, and budget endpoints in this guide all require the master key (some other management endpoints, such as read-only pricing lookups, also accept a regular API key; see the [API reference](api-reference.md)). Send the master key as `Otari-Key: <master-key>` or `Authorization: Bearer <master-key>`. Most of these actions have a dashboard equivalent; see the [Admin dashboard guide](dashboard.md). Creating and deleting a user is the exception: the dashboard mints one when a member is added or a key is issued, and has no page for it, so the endpoints below are the way to do it directly.
 
 **The master key authenticates this API. It is not, for long, how you sign in to the dashboard.** It bootstraps a new deployment and stays the deployment-wide API credential, which is what every script, CI job, and `curl` example here uses. The browser sign-in moves to an email address and a password once an operator claims the deployment, and [Dashboard sessions and identity](#dashboard-sessions-and-identity) below is where that happens. Retiring a login is not retiring a credential: nothing in this guide stops working when it does.
 
@@ -72,7 +72,9 @@ Either way spend stays bound to the key's own user and the client value is forwa
 
 ## Budgets
 
-A budget is a spending cap with an optional reset period. `max_budget` is the limit **per user**, so a budget shared by several users caps each of them at that amount rather than in aggregate.
+A budget is a spending cap with an optional reset period, and the only place in Otari that maps a cap to an amount. Everything that enforces a limit names a budget rather than restating the figure, so editing one moves every place it applies.
+
+How it is enforced depends on what names it. Assigned to a user (`users.budget_id`), `max_budget` is the limit **per user**, so a budget shared by several users caps each of them at that amount rather than in aggregate. Named by a scoped ceiling ([Organizations and workspaces](#organizations-and-workspaces)), it is a single allowance everyone under that scope draws on together.
 
 ```bash
 curl -X POST http://localhost:8000/v1/budgets \
@@ -86,9 +88,11 @@ curl -X POST http://localhost:8000/v1/budgets \
 ```
 
 - `max_budget` is the per-user ceiling in your pricing currency. Otari reserves an estimated cost before each call and reconciles it after, so a request that would exceed the cap is rejected before it runs.
-- `budget_duration_sec` is the reset period in seconds (for example `86400` for daily, `604800` for weekly). Omit it for a cap that never resets. On each period boundary the user's spend rolls back to zero and a reset is recorded.
+- `budget_duration_sec` is a rolling reset period in seconds (for example `86400` for daily, `604800` for weekly), counted from the last reset. On each period boundary the user's spend rolls back to zero and a reset is recorded.
+- `reset_alignment` is the other way to say a period, snapping the window to a UTC calendar boundary: `calendar_day`, `calendar_week`, or `calendar_month`. It is the only way to express a calendar month, since 2592000 seconds is a different and slightly more generous product. Mutually exclusive with `budget_duration_sec`; sending both is refused with a 400.
+- Omit both for a cap that never resets.
 
-Assign a budget to a user by setting `budget_id` on the user (at create time or via `PATCH /v1/users/{user_id}`). Manage budgets with `GET /v1/budgets`, `GET /v1/budgets/{budget_id}`, `PATCH /v1/budgets/{budget_id}`, and `DELETE /v1/budgets/{budget_id}`. A budget's response rolls up the users assigned to it: `user_count`, `total_spend`, and `total_reserved`. `GET /v1/budgets/{budget_id}/reset-logs` returns the per-user reset history.
+Assign a budget to a user by setting `budget_id` on the user (at create time or via `PATCH /v1/users/{user_id}`); sending an explicit `null` detaches it. Manage budgets with `GET /v1/budgets`, `GET /v1/budgets/{budget_id}`, `PATCH /v1/budgets/{budget_id}`, and `DELETE /v1/budgets/{budget_id}`. A delete is refused with a 409 while a workspace hands the budget to its members or a scoped ceiling enforces it; the message names which, and where to change it. A budget's response rolls up the users assigned to it: `user_count`, `total_spend`, and `total_reserved`. `GET /v1/budgets/{budget_id}/reset-logs` returns the per-user reset history.
 
 The enforcement strategy is configurable with `OTARI_BUDGET_STRATEGY` (`for_update` row-lock, `cas` compare-and-swap, or `disabled`); see [Configuration](configuration.md).
 
@@ -276,6 +280,6 @@ Identities and the request plane are still two tables (`user` for tenancy, `user
 
 ## See also
 
-- [Admin dashboard](dashboard.md): the same users, keys, and budgets in the browser UI.
+- [Admin dashboard](dashboard.md): the same keys and budgets in the browser UI, with a user shown as a member of the organization.
 - [Configuration](configuration.md): `reject_user_mismatch`, `budget_strategy`, and related settings.
 - [API reference](api-reference.md): the full endpoint and schema listing.

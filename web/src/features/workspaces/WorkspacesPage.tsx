@@ -1,15 +1,20 @@
-import { Button, Card } from "@heroui/react"
-import { useCallback, useMemo, useState } from "react"
+import { Button, Card, Chip } from "@heroui/react"
+import { useMemo, useState } from "react"
 
-import type { Workspace } from "@/client"
+import type { Budget, Workspace, WorkspaceBudgetDefault } from "@/client"
 import { canManage } from "@/features/organization/roles"
-import { WorkspaceMembersPanel } from "@/features/workspaces/WorkspaceMembersPanel"
 import {
+  useAllWorkspaceBudgetDefaults,
+  useBudgets,
   useCreateWorkspace,
+  useCreateWorkspaceBudgetDefault,
   useDeleteWorkspace,
+  useDeleteWorkspaceBudgetDefault,
   useOrganizationContext,
-  useOrganizationMembers,
+  useProviders,
   useUpdateWorkspace,
+  useUpdateWorkspaceBudgetDefault,
+  useWorkspaceBudgetDefaults,
   useWorkspaces,
 } from "@/shared/api/hooks"
 import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
@@ -18,6 +23,7 @@ import { Field } from "@/shared/components/Field"
 import {
   EmptyState,
   ErrorBanner,
+  FilterSelect,
   InfoBanner,
   PageHeader,
 } from "@/shared/components/ui"
@@ -36,6 +42,181 @@ const getWorkspaceRowKey = (workspace: Workspace): string => workspace.id
 const LAST_WORKSPACE_REASON =
   "An organization keeps at least one workspace; create another first"
 
+// The budget every member of a workspace is given. It is not a field on the
+// workspace: it is a default row that materializes a real per-member ceiling
+// when someone joins, so a person in two workspaces holds two ceilings, one from
+// each.
+//
+// A workspace may also narrow a default to one provider, which the field below
+// does not cover. Those are managed in the section under it rather than left
+// unreachable: an upgraded deployment can already have them, they show on the
+// budgets list under "Default for", and deleting the budget one names is refused
+// with a message telling the operator to come and change it.
+const NO_DEFAULT = ""
+
+function budgetLabel(budget: Budget): string {
+  return budget.name ?? budget.budget_id.split("-")[0]
+}
+
+function budgetChoices(budgets: Budget[]): { value: string; label: string }[] {
+  return budgets.map((budget) => ({
+    value: budget.budget_id,
+    label: budgetLabel(budget),
+  }))
+}
+
+function DefaultBudgetPicker({
+  budgets,
+  value,
+  onChange,
+}: {
+  budgets: Budget[]
+  value: string
+  onChange: (budgetId: string) => void
+}) {
+  return (
+    <FilterSelect
+      label="Default member budget"
+      value={value}
+      onChange={onChange}
+      options={[
+        { value: NO_DEFAULT, label: "No default" },
+        ...budgetChoices(budgets),
+      ]}
+    />
+  )
+}
+
+/**
+ * The defaults a workspace narrows to one provider.
+ *
+ * Separate from the field above because they are a different question: that one
+ * is "what does everyone here get", these are "and what do they get on this
+ * provider specifically". Writes go straight through rather than waiting for the
+ * form's Save, since each is its own row and batching them would mean holding a
+ * pending create, a pending retarget and a pending delete for an arbitrary number
+ * of providers to no benefit.
+ */
+function NarrowedDefaults({
+  workspaceId,
+  budgets,
+  narrowed,
+  providers,
+}: {
+  workspaceId: string
+  budgets: Budget[]
+  narrowed: WorkspaceBudgetDefault[]
+  providers: string[]
+}) {
+  const createDefault = useCreateWorkspaceBudgetDefault()
+  const updateDefault = useUpdateWorkspaceBudgetDefault()
+  const deleteDefault = useDeleteWorkspaceBudgetDefault()
+  const [provider, setProvider] = useState("")
+  const [budgetId, setBudgetId] = useState("")
+
+  const taken = new Set(narrowed.map((row) => row.provider_key_id))
+  const available = providers.filter((instance) => !taken.has(instance))
+  const pending =
+    createDefault.isPending ||
+    updateDefault.isPending ||
+    deleteDefault.isPending
+
+  return (
+    <div className="flex flex-col gap-2">
+      <span className="text-sm font-medium text-foreground">
+        Per-provider defaults
+      </span>
+      <ErrorBanner
+        error={
+          createDefault.error ?? updateDefault.error ?? deleteDefault.error
+        }
+      />
+      {narrowed.length === 0 ? (
+        <span className="text-xs text-muted">
+          None. The budget above applies on every provider.
+        </span>
+      ) : (
+        <ul className="flex flex-col gap-1.5">
+          {narrowed.map((row) => (
+            <li key={row.id} className="flex items-center gap-2">
+              <Chip size="sm">{row.provider_key_id}</Chip>
+              <FilterSelect
+                ariaLabel={`Budget for ${row.provider_key_id}`}
+                value={row.budget_id}
+                onChange={(next) =>
+                  updateDefault.mutate({
+                    workspaceId,
+                    defaultId: row.id,
+                    body: { budget_id: next },
+                  })
+                }
+                options={budgetChoices(budgets)}
+                disabled={pending}
+              />
+              <Button
+                size="sm"
+                variant="danger-soft"
+                isDisabled={pending}
+                onPress={() =>
+                  deleteDefault.mutate({ workspaceId, defaultId: row.id })
+                }
+              >
+                Remove
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {available.length > 0 && budgets.length > 0 ? (
+        <div className="flex items-end gap-2">
+          <FilterSelect
+            label="Provider"
+            value={provider}
+            onChange={setProvider}
+            options={[
+              { value: "", label: "Select a provider…" },
+              ...available.map((instance) => ({
+                value: instance,
+                label: instance,
+              })),
+            ]}
+          />
+          <FilterSelect
+            label="Budget"
+            value={budgetId}
+            onChange={setBudgetId}
+            options={[
+              { value: "", label: "Select a budget…" },
+              ...budgetChoices(budgets),
+            ]}
+          />
+          <Button
+            size="sm"
+            variant="ghost"
+            isDisabled={pending || provider === "" || budgetId === ""}
+            onPress={() =>
+              createDefault.mutate(
+                {
+                  workspaceId,
+                  body: { budget_id: budgetId, provider_key_id: provider },
+                },
+                {
+                  onSuccess: () => {
+                    setProvider("")
+                    setBudgetId("")
+                  },
+                },
+              )
+            }
+          >
+            Add
+          </Button>
+        </div>
+      ) : null}
+    </div>
+  )
+}
+
 /**
  * The one form that creates a workspace, wherever it is offered from.
  *
@@ -46,8 +227,11 @@ const LAST_WORKSPACE_REASON =
  */
 export function CreateWorkspaceForm({ onClose }: { onClose: () => void }) {
   const create = useCreateWorkspace()
+  const createDefault = useCreateWorkspaceBudgetDefault()
+  const budgets = useBudgets()
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
+  const [budgetId, setBudgetId] = useState(NO_DEFAULT)
   const trimmed = name.trim()
   return (
     <Card>
@@ -55,7 +239,7 @@ export function CreateWorkspaceForm({ onClose }: { onClose: () => void }) {
         <div className="text-sm font-semibold text-foreground">
           Create workspace
         </div>
-        <ErrorBanner error={create.error} />
+        <ErrorBanner error={create.error ?? createDefault.error} />
         <Field
           label="Name"
           value={name}
@@ -70,15 +254,38 @@ export function CreateWorkspaceForm({ onClose }: { onClose: () => void }) {
           value={description}
           onChange={setDescription}
         />
+        <DefaultBudgetPicker
+          budgets={budgets.data ?? []}
+          value={budgetId}
+          onChange={setBudgetId}
+        />
         <div className="flex gap-2">
           <Button
             variant="primary"
             isDisabled={trimmed === ""}
-            isPending={create.isPending}
+            isPending={create.isPending || createDefault.isPending}
             onPress={() =>
               create.mutate(
                 { name: trimmed, description: description.trim() || null },
-                { onSuccess: onClose },
+                {
+                  // The default is a second call: the workspace has to exist
+                  // before anything can be defaulted onto its members. A failure
+                  // here leaves the workspace created and undefaulted, which the
+                  // banner reports and the edit form can finish.
+                  onSuccess: (workspace) => {
+                    if (budgetId === NO_DEFAULT) {
+                      onClose()
+                      return
+                    }
+                    createDefault.mutate(
+                      {
+                        workspaceId: workspace.id,
+                        body: { budget_id: budgetId },
+                      },
+                      { onSuccess: onClose },
+                    )
+                  },
+                },
               )
             }
           >
@@ -101,8 +308,59 @@ function EditWorkspaceForm({
   onClose: () => void
 }) {
   const update = useUpdateWorkspace()
+  const budgets = useBudgets()
+  const defaults = useWorkspaceBudgetDefaults(workspace.id)
+  const createDefault = useCreateWorkspaceBudgetDefault()
+  const updateDefault = useUpdateWorkspaceBudgetDefault()
+  const deleteDefault = useDeleteWorkspaceBudgetDefault()
+  // The aggregate default: the one narrowed to no provider. A workspace has at
+  // most one, enforced by a partial unique index.
+  const aggregate = (defaults.data ?? []).find(
+    (row) => row.provider_key_id === null,
+  )
+  const narrowed = (defaults.data ?? []).filter(
+    (row) => row.provider_key_id !== null,
+  )
+  const providers = useProviders()
   const [name, setName] = useState(workspace.name)
   const [description, setDescription] = useState(workspace.description ?? "")
+  const [budgetId, setBudgetId] = useState<string | null>(null)
+  // Null until the operator touches the picker, so a default that arrives after
+  // the form mounted is still what the picker shows.
+  const selectedBudget = budgetId ?? aggregate?.budget_id ?? NO_DEFAULT
+  const savingDefault =
+    createDefault.isPending ||
+    updateDefault.isPending ||
+    deleteDefault.isPending
+
+  // Three outcomes rather than one call: the default is its own row, so moving
+  // between "none" and a budget is a create or a delete, not a field write.
+  const saveDefault = async (): Promise<void> => {
+    if (selectedBudget === NO_DEFAULT) {
+      if (aggregate) {
+        await deleteDefault.mutateAsync({
+          workspaceId: workspace.id,
+          defaultId: aggregate.id,
+        })
+      }
+      return
+    }
+    if (!aggregate) {
+      await createDefault.mutateAsync({
+        workspaceId: workspace.id,
+        body: { budget_id: selectedBudget },
+      })
+      return
+    }
+    if (aggregate.budget_id !== selectedBudget) {
+      await updateDefault.mutateAsync({
+        workspaceId: workspace.id,
+        defaultId: aggregate.id,
+        body: { budget_id: selectedBudget },
+      })
+    }
+  }
+
   const trimmed = name.trim()
   return (
     <Card>
@@ -110,18 +368,44 @@ function EditWorkspaceForm({
         <div className="text-sm font-semibold text-foreground">
           Edit <code>{workspace.name}</code>
         </div>
-        <ErrorBanner error={update.error} />
+        <ErrorBanner
+          error={
+            update.error ??
+            createDefault.error ??
+            updateDefault.error ??
+            deleteDefault.error
+          }
+        />
         <Field label="Name" value={name} onChange={setName} isRequired />
         <Field
           label="Description"
           value={description}
           onChange={setDescription}
         />
+        <DefaultBudgetPicker
+          budgets={budgets.data ?? []}
+          value={selectedBudget}
+          onChange={setBudgetId}
+        />
+        <span className="max-w-md text-xs text-muted">
+          Every member of this workspace is held to this budget, each with their
+          own allowance. Changing it applies to members who join afterwards;
+          members already here keep the budget they were given, though editing
+          that budget still moves them.
+        </span>
+        <NarrowedDefaults
+          workspaceId={workspace.id}
+          budgets={budgets.data ?? []}
+          narrowed={narrowed}
+          providers={(providers.data?.providers ?? []).map(
+            (provider) => provider.instance,
+          )}
+        />
         <div className="flex gap-2">
           <Button
             variant="primary"
             isDisabled={trimmed === ""}
-            isPending={update.isPending}
+            isPending={update.isPending || savingDefault}
             onPress={() =>
               update.mutate(
                 {
@@ -131,7 +415,12 @@ function EditWorkspaceForm({
                     description: description.trim() || null,
                   },
                 },
-                { onSuccess: onClose },
+                {
+                  onSuccess: async () => {
+                    await saveDefault()
+                    onClose()
+                  },
+                },
               )
             }
           >
@@ -149,15 +438,38 @@ function EditWorkspaceForm({
 export function WorkspacesPage() {
   const context = useOrganizationContext()
   const workspaces = useWorkspaces()
-  const orgMembers = useOrganizationMembers()
+  const budgets = useBudgets()
   const remove = useDeleteWorkspace()
 
   const [creating, setCreating] = useState(false)
   const [editing, setEditing] = useState<string | null>(null)
-  const [expanded, setExpanded] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<Workspace | null>(null)
 
   const rows = workspaces.data ?? []
+  const workspaceIds = useMemo(() => rows.map((row) => row.id), [rows])
+  const workspaceDefaults = useAllWorkspaceBudgetDefaults(workspaceIds)
+  // The budget each workspace hands to its members, by workspace. Only the
+  // aggregate default (no provider narrowing) is named: that is the one the
+  // edit form sets, and a narrowed one is the budget's business, where it shows
+  // under "Default for".
+  const defaultBudgetName = useMemo(() => {
+    const names = new Map(
+      (budgets.data ?? []).map((budget) => [
+        budget.budget_id,
+        budget.name ?? budget.budget_id.split("-")[0],
+      ]),
+    )
+    const byWorkspace = new Map<string, string>()
+    for (const { workspaceId, default: row } of workspaceDefaults.data) {
+      if (row.provider_key_id === null) {
+        byWorkspace.set(
+          workspaceId,
+          names.get(row.budget_id) ?? row.budget_id.split("-")[0],
+        )
+      }
+    }
+    return byWorkspace
+  }, [budgets.data, workspaceDefaults.data])
   // Only once the list has actually answered: an empty list while loading is
   // not one workspace, and disabling on it would flicker.
   const isOnlyWorkspace = workspaces.isSuccess && rows.length === 1
@@ -192,22 +504,23 @@ export function WorkspacesPage() {
         ),
       },
       {
+        id: "default-budget",
+        header: "Default member budget",
+        cell: (workspace) => {
+          const name = defaultBudgetName.get(workspace.id)
+          return name ? (
+            <Chip size="sm">{name}</Chip>
+          ) : (
+            <span className="text-xs text-muted">None</span>
+          )
+        },
+      },
+      {
         id: "actions",
         header: "Actions",
         align: "end",
         cell: (workspace) => (
           <div className="flex items-center justify-end gap-1.5">
-            <Button
-              size="sm"
-              variant="outline"
-              onPress={() =>
-                setExpanded((current) =>
-                  current === workspace.id ? null : workspace.id,
-                )
-              }
-            >
-              {expanded === workspace.id ? "Hide members" : "Members"}
-            </Button>
             <Button
               size="sm"
               variant="ghost"
@@ -245,20 +558,7 @@ export function WorkspacesPage() {
         ),
       },
     ],
-    [expanded, manages, isOnlyWorkspace],
-  )
-
-  const renderDetail = useCallback(
-    (workspace: Workspace) => (
-      <WorkspaceMembersPanel
-        workspaceId={workspace.id}
-        workspaceName={workspace.name}
-        orgMembers={orgMembers.data ?? []}
-        rosterResolved={orgMembers.isSuccess}
-        canManageWorkspace={manages}
-      />
-    ),
-    [orgMembers.data, orgMembers.isSuccess, manages],
+    [manages, isOnlyWorkspace, defaultBudgetName],
   )
 
   return (
@@ -284,9 +584,7 @@ export function WorkspacesPage() {
       {/* `remove.error` is deliberately absent: the confirm dialog renders that
           mutation's error itself, and listing it here too paints the same
           message twice, once behind the open dialog. */}
-      <ErrorBanner
-        error={context.error ?? workspaces.error ?? orgMembers.error}
-      />
+      <ErrorBanner error={context.error ?? workspaces.error} />
 
       {/* Withheld until the context answers, so an owner is not told for one
           paint that they may not manage their own workspaces. */}
@@ -326,8 +624,6 @@ export function WorkspacesPage() {
           getRowKey={getWorkspaceRowKey}
           isLoading={workspaces.isLoading}
           emptyContent="No workspaces yet."
-          detailKey={expanded}
-          renderDetail={renderDetail}
         />
       )}
 
@@ -350,7 +646,6 @@ export function WorkspacesPage() {
           if (deleting) {
             remove.mutate(deleting.id, {
               onSuccess: () => {
-                if (expanded === deleting.id) setExpanded(null)
                 if (editing === deleting.id) setEditing(null)
                 setDeleting(null)
               },

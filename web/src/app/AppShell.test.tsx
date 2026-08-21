@@ -418,7 +418,6 @@ describe("AppShell surface gating", () => {
       "API keys",
       "Providers",
       "Members",
-      "Budget defaults",
     ])
     // Routing and Tools nest destinations, so they expand rather than
     // navigate; their children are links once the group is open.
@@ -442,7 +441,6 @@ describe("AppShell surface gating", () => {
     ).toEqual([
       "Workspaces",
       "Members & roles",
-      "Users",
       "Spend & budgets",
       "Model pricing",
       "Org settings",

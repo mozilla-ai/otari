@@ -167,8 +167,8 @@ async def set_dashboard_password(
     # Resubmitting the address the identity already holds is not a change, and
     # refusing it would break any client that keeps one form for both claiming
     # and changing a password. Normalized on both sides, because the stored
-    # value is only lower-cased when this tree wrote it: a row from the M4
-    # re-parenting backfill or from an operator's own SQL can carry any casing,
+    # value is only lower-cased when this tree wrote it: a row from a
+    # convergence backfill or from an operator's own SQL can carry any casing,
     # which ``UserRepository.get_by_email`` already accounts for, and comparing
     # a normalized candidate against a raw column would refuse an identity its
     # own address.

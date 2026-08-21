@@ -6,17 +6,17 @@ import { useSurfaces } from "@/shared/hooks/useDeployment"
 
 import { memberLabel } from "./roles"
 
-// Members and users are two tables that have not merged yet. Keys, budgets, and
-// usage attach to the gateway's string-keyed `users` row; a member is a UUID
-// identity. `attribution_user_id` is the join between them, minted when the
-// member is created, and it is what lets a key be issued to a person rather than
-// to an opaque id. M4 collapses the two, at which point this map becomes the
-// identity function and can go.
+// Members and spend identities are two tables that have not merged yet. Keys,
+// budgets, and usage attach to the gateway's string-keyed `users` row; a member
+// is a UUID identity. `attribution_user_id` is the join between them, minted
+// when the member is created, and it is what lets a key be issued to a person
+// rather than to an opaque id. otari-ai#1727 decides how the two converge, and
+// this map becomes the identity function and can go when they do.
 //
 // A member whose `attribution_user_id` is null has no usable row (nobody minted
-// one, or it was soft-deleted through the users page), and key creation would
-// refuse them. Those are left out rather than mapped, so nothing offers an owner
-// the server will reject.
+// one, or it was soft-deleted through `DELETE /v1/users`), and key
+// creation would refuse them. Those are left out rather than mapped, so nothing
+// offers an owner the server will reject.
 export function memberLabelsByAttributionId(
   members: OrganizationMember[] | undefined,
 ): ReadonlyMap<string, string> {

@@ -198,6 +198,7 @@ def test_budget_response_from_model() -> None:
     budget.name = "team-free"
     budget.max_budget = 100.0
     budget.budget_duration_sec = 86400
+    budget.reset_alignment = None
     budget.created_at = datetime(2025, 1, 1, tzinfo=UTC)
     budget.updated_at = datetime(2025, 1, 2, tzinfo=UTC)
 
@@ -219,6 +220,7 @@ def test_budget_response_from_model_nullable_fields() -> None:
     budget.name = None
     budget.max_budget = None
     budget.budget_duration_sec = None
+    budget.reset_alignment = None
     budget.created_at = datetime(2025, 6, 15, tzinfo=UTC)
     budget.updated_at = datetime(2025, 6, 15, tzinfo=UTC)
 

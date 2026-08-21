@@ -1,6 +1,7 @@
 import {
   keepPreviousData,
   useMutation,
+  useQueries,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query"
@@ -18,6 +19,7 @@ import type {
   CreateOrganizationMemberRequest,
   CreateOrganizationMemberResult,
   CreateOrganizationPricingOverride,
+  CreateScopedBudgetRequest,
   CreateSearchToolRequest,
   CreateStoredProviderRequest,
   CreateUserRequest,
@@ -55,6 +57,7 @@ import type {
   RotateMasterKeyResponse,
   RouterStatus,
   RoutingPolicyResponse,
+  ScopedBudget,
   SearchProviderInfo,
   SearchToolsResponse,
   SendTestMailRequest,
@@ -76,6 +79,7 @@ import type {
   UpdateOrganizationMemberRequest,
   UpdateOrganizationPricingOverride,
   UpdateOrganizationRequest,
+  UpdateScopedBudgetRequest,
   UpdateSearchToolRequest,
   UpdateSettingsRequest,
   UpdateStoredProviderRequest,
@@ -128,6 +132,7 @@ const BUILD = "build"
 const HEALTH = "health"
 const KEYS = "keys"
 const BUDGETS = "budgets"
+const SCOPED_BUDGETS = "scoped-budgets"
 const USERS = "users"
 const USAGE = "usage"
 const ORGANIZATIONS = "organizations"
@@ -1066,6 +1071,82 @@ export function useDeleteBudget() {
   })
 }
 
+// The tenancy-scoped ceilings, which are a different mechanism from the budgets
+// above rather than a view over them: each row carries its own counters, so one
+// row is a pooled cap over whatever its scope names. See `client/index.ts`.
+//
+// The list route returns a bare array (not the `Paged` envelope the tenancy
+// routes use) and caps `limit` at 1000 server-side, so it pages like budgets and
+// keys do, with the same guard against a backend that ignores `skip`.
+const SCOPED_BUDGETS_PAGE_SIZE = 1000
+const SCOPED_BUDGETS_MAX_PAGES = 100
+
+async function fetchAllScopedBudgets(): Promise<ScopedBudget[]> {
+  const all: ScopedBudget[] = []
+  for (let page = 0; page < SCOPED_BUDGETS_MAX_PAGES; page += 1) {
+    const rows = await apiFetch<ScopedBudget[]>(
+      `/v1/scoped-budgets?skip=${page * SCOPED_BUDGETS_PAGE_SIZE}&limit=${SCOPED_BUDGETS_PAGE_SIZE}`,
+    )
+    all.push(...rows)
+    if (rows.length < SCOPED_BUDGETS_PAGE_SIZE) {
+      break
+    }
+  }
+  return all
+}
+
+export function useScopedBudgets() {
+  return useQuery({
+    queryKey: [SCOPED_BUDGETS],
+    queryFn: fetchAllScopedBudgets,
+    staleTime: 60_000,
+  })
+}
+
+export function useCreateScopedBudget() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: CreateScopedBudgetRequest) =>
+      apiFetch<ScopedBudget>("/v1/scoped-budgets", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () =>
+      void queryClient.invalidateQueries({ queryKey: [SCOPED_BUDGETS] }),
+  })
+}
+
+export function useUpdateScopedBudget() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      id,
+      body,
+    }: {
+      id: string
+      body: UpdateScopedBudgetRequest
+    }) =>
+      apiFetch<ScopedBudget>(`/v1/scoped-budgets/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () =>
+      void queryClient.invalidateQueries({ queryKey: [SCOPED_BUDGETS] }),
+  })
+}
+
+export function useDeleteScopedBudget() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<void>(`/v1/scoped-budgets/${encodeURIComponent(id)}`, {
+        method: "DELETE",
+      }),
+    onSuccess: () =>
+      void queryClient.invalidateQueries({ queryKey: [SCOPED_BUDGETS] }),
+  })
+}
+
 // The users endpoint caps `limit` at 1000 server-side; page through it (capped
 // like keys/budgets) so a gateway with many users can't have rows silently
 // vanish, and a backend that ignores `skip` can't spin an unbounded loop.
@@ -1903,6 +1984,84 @@ export function useWorkspaceBudgetDefaults(workspaceId: string | null) {
       ),
     enabled: workspaceId !== null,
     staleTime: 60_000,
+  })
+}
+
+/**
+ * Every workspace's roster, as one list, each row paired with its workspace.
+ *
+ * Same fan-out as `useAllWorkspaceBudgetDefaults` and for the same reason: a
+ * roster is only served per workspace, and a standalone deployment has few. It
+ * is what lets the organization roster answer "which workspaces is this person
+ * in", which is otherwise only answerable one workspace at a time.
+ */
+export function useAllWorkspaceMembers(workspaceIds: string[]) {
+  return useQueries({
+    queries: workspaceIds.map((workspaceId) => ({
+      queryKey: [WORKSPACES, workspaceId, "members"],
+      queryFn: () =>
+        fetchAllPaged<WorkspaceMember>(
+          `/v1/workspaces/${encodeURIComponent(workspaceId)}/members`,
+        ),
+      staleTime: 60_000,
+    })),
+    combine: (results) => ({
+      data: results.flatMap((result, index) =>
+        (result.data ?? []).map((row) => ({
+          workspaceId: workspaceIds[index],
+          member: row,
+        })),
+      ),
+      isLoading: results.some((result) => result.isLoading),
+      // The first failure, surfaced rather than swallowed: a rejected read
+      // contributes nothing to `data`, so without this the caller cannot tell a
+      // workspace with no rows from one whose read failed, and a lost membership
+      // or a lost ceiling looks exactly like a deliberate absence.
+      error: results.find((result) => result.error)?.error ?? null,
+      isSuccess: results.every((result) => result.isSuccess),
+    }),
+  })
+}
+
+/**
+ * Every workspace's budget defaults, as one list.
+ *
+ * A fan-out rather than one call: defaults are only served per workspace
+ * (`/v1/workspaces/{id}/member-budget-policies`), and a standalone deployment
+ * has few workspaces, so N small cached reads beat adding a route. Each shares
+ * the cache entry `useWorkspaceBudgetDefaults` uses, so opening a workspace
+ * afterwards costs nothing.
+ *
+ * This is what lets the budgets list say a budget is a workspace's default:
+ * without it the page would know the budget and not the assignment.
+ */
+export function useAllWorkspaceBudgetDefaults(workspaceIds: string[]) {
+  return useQueries({
+    queries: workspaceIds.map((workspaceId) => ({
+      queryKey: [WORKSPACES, workspaceId, "budget-defaults"],
+      queryFn: () =>
+        fetchAllPaged<WorkspaceBudgetDefault>(
+          `/v1/workspaces/${encodeURIComponent(workspaceId)}/member-budget-policies`,
+        ),
+      staleTime: 60_000,
+    })),
+    combine: (results) => ({
+      // Paired with its workspace on the way out: a default names a workspace by
+      // id, and the caller wants the name.
+      data: results.flatMap((result, index) =>
+        (result.data ?? []).map((row) => ({
+          workspaceId: workspaceIds[index],
+          default: row,
+        })),
+      ),
+      isLoading: results.some((result) => result.isLoading),
+      // The first failure, surfaced rather than swallowed: a rejected read
+      // contributes nothing to `data`, so without this the caller cannot tell a
+      // workspace with no rows from one whose read failed, and a lost membership
+      // or a lost ceiling looks exactly like a deliberate absence.
+      error: results.find((result) => result.error)?.error ?? null,
+      isSuccess: results.every((result) => result.isSuccess),
+    }),
   })
 }
 

@@ -2,7 +2,7 @@
 
 Otari ships with a web admin dashboard for operators. It browses the model
 catalog, sets model pricing, manages routing policies, adds and edits provider API
-keys, manages users, keys, and budgets, and toggles runtime settings, all
+keys, manages members, keys, and budgets, and toggles runtime settings, all
 against the local management API.
 
 The management pages are a **standalone-mode** feature. In standalone mode Otari
@@ -200,12 +200,13 @@ gateway with an Otari API key (or the master key) and a model in
 [The setup guide](#the-setup-guide) for what it records and how to turn it
 off.
 
-### 9. (Optional) Set up keys, users, and budgets
+### 9. (Optional) Set up keys, people, and budgets
 
 For multi-user or multi-app deployments, hand out scoped API keys from
-**Access** on the workspace rail, then define users and attach budgets on the
-organization rail, so spend is enforced before each call. These are optional: a
-single-operator setup can run on the master key alone.
+**Access** on the workspace rail, then define budgets on the organization rail
+and attach them to people or to a whole workspace, so spend is enforced before
+each call. These are optional: a single-operator setup can run on the master key
+alone.
 
 ## Page-by-page reference
 
@@ -218,7 +219,7 @@ the switcher's own popover says which is which.
 
 The **organization rail** holds what belongs to the tenant rather than to one
 workspace. It is reached from the **Organization** entry at the foot of the
-workspace rail, and left by the link at its top. Users, budgets, and settings
+workspace rail, and left by the link at its top. Members, budgets, and settings
 live there.
 
 At the very bottom sits the account control, which holds **Account settings**
@@ -482,9 +483,11 @@ hand.
   A workspace's members are always a subset of the organization's, so someone
   joins the organization first, on the organization rail.
 
-Users and budgets moved to the organization rail; see below. For how users,
-keys, and budgets fit together and the management endpoints behind these pages,
-see [Access control](access-control.md).
+Budgets moved to the organization rail; see below. For how people, keys, and
+budgets fit together and the management endpoints behind these pages, see
+[Access control](access-control.md). The API still calls a person a `user`,
+which is the field name a caller sends and the one those endpoints use; the
+dashboard shows that person as a member of the organization.
 
 ### Tools
 
@@ -551,8 +554,25 @@ password. Configure mail before you expect members to sign in.
 
 ### People & access
 
-- **Workspaces**: create, rename, and delete workspaces, and manage each
-  roster. The last workspace cannot be deleted.
+- **Workspaces**: create, rename, and delete workspaces. The last workspace
+  cannot be deleted. Rosters are not managed here: a workspace's members are
+  **Members** on the workspace rail, for whichever workspace the switcher has
+  selected, and the organization's are **Members & roles**. Two roster pages,
+  one per scope, and each picks the roles for its own.
+
+  The create and edit forms carry a **Default member budget**, and the list has
+  a column naming it: pick a budget and every member of that workspace is held
+  to it, each with an allowance of their own rather than a shared pool. Someone
+  in two workspaces therefore holds two, one per workspace. A budget is optional
+  here and everywhere, and a key can be marked exempt from budget enforcement
+  entirely, so neither a workspace default nor a person's own budget is a
+  guarantee that every request is capped.
+
+  Changing the default applies to members who join afterwards; members already
+  there keep the budget they were given. Editing that *budget* is the retroactive
+  act, and it moves everyone held to it. The edit form also manages defaults
+  narrowed to one provider, which apply on that provider instead of the one
+  above.
 - **Members & roles**: who belongs to the organization, their role
   (owner, admin, member, viewer), and their status. Adding someone directly
   takes an email address and optionally the workspaces to put them in straight
@@ -562,15 +582,44 @@ password. Configure mail before you expect members to sign in.
   send); with none configured, the invite is still created and the dashboard
   hands you the link to share yourself. A pending invitation can be revoked
   before it is accepted.
-- **Users**: the principals that keys and budgets attach to, including the
-  default model access for a user's keys. Distinct from members: a member is a
-  person who signs in, a user is what spend is attributed to, and the two merge
-  once the request plane is re-parented onto tenancy.
+
+  The roster also carries what a person may spend and what their keys may call.
+  **Model access** is the default a key issued to them inherits, which that key
+  can narrow but never exceed; **Workspaces** names the ones they are in and the
+  budget, if any, they hold in each; **Spend** is what they have spent, plus
+  anything held in flight by a request whose cost is not settled yet; and
+  **Block** stops their keys making requests without removing them from the
+  organization or touching their history.
+
+  All of that lives on a gateway identity the member is linked to, and the link
+  is optional: a member added by address before any key was issued to them has
+  none yet, and one whose identity was deleted has none any more. Those rows show
+  a role and a status, empty access and spend cells rather than zeros, and cannot
+  own a key until an identity exists for them.
+
+  **Edit** opens all of it at once: model access, which workspaces they are in
+  and at what role, and the budget they hold in each. A budget is picked, never
+  an amount: what a cap is worth and how often it resets are properties of the
+  budget, so editing one moves everyone held to it, and giving one person a
+  different limit means giving them a different budget. Those are three tables
+  underneath, so saving is several writes, and they are ordered: a workspace
+  budget is attached to the membership, so joining a workspace happens before the
+  budget for it can be set. Adding someone to a workspace that has a default
+  member budget gives them that budget unless another is chosen.
 
 ### Cost & billing
 
-- **Spend & budgets**: spending limits callers are held to, with per-period
-  resets.
+- **Spend & budgets**: the only page that says what a limit is worth. A budget
+  is an amount and a reset period, and everything that enforces one names it
+  rather than restating the figure, so editing a budget moves every place it
+  applies.
+
+  How it is enforced depends on what it is attached to. Assigned to people from
+  this page, everyone on it is held to the full amount separately, so five people
+  on one budget hold five allowances. Attached to a workspace or to one person's
+  membership of one, it is a single allowance everyone under that scope draws on
+  together. **Default for** names any workspace that hands this budget to its
+  members, which is set on the workspace rather than here.
 - **Model pricing**: what the gateway meters a request at, which is one rate per
   model for the whole deployment. The page opens with what an *unpriced* model
   costs, because that decides what the table under it means: with default pricing

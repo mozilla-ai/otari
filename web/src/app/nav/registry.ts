@@ -163,15 +163,6 @@ const BASE_NAV_SECTIONS = [
         surface: "workspaces",
         icon: FiUsers,
       },
-      // Per-member spend templates for the selected workspace. Gated on the
-      // same surface as Members: a default names members of this workspace and
-      // materializes onto the same `workspace_member` rows the roster reads.
-      {
-        to: "/budget-defaults",
-        label: "Budget defaults",
-        surface: "workspaces",
-        icon: FiDollarSign,
-      },
     ],
   },
 ] as const satisfies readonly NavSection[]
@@ -230,13 +221,6 @@ const ORGANIZATION_NAV_SECTIONS = [
         surface: "organizations",
         icon: FiUsers,
       },
-      // Absent from the design, which folds per-user spend into "Spend &
-      // budgets". Kept because a budget names a `users` row, so this is the only
-      // place a budget is attached to anything. It sits beside the members
-      // rather than beside the budgets it feeds, because what the page edits is
-      // an identity: the two identity tables have not merged yet (M4), and this
-      // row stops being a destination when they do.
-      { to: "/users", label: "Users", surface: "users", icon: FiUsers },
       // The organization's own upstream credentials, which is a different table
       // from the workspace rail's `/providers`: over there a credential belongs
       // to the process, here it would belong to the tenant. This gateway has only

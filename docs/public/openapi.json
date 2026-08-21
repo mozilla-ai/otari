@@ -337,7 +337,7 @@
         "type": "object"
       },
       "ActiveOrganizationMemberPublic": {
-        "description": "A member row joined to the identity behind it, as the roster shows it.\n\nField-for-field the platform's shape, so the ported roster page is not\nrewritten around a new contract, with two consequences of the OSS line:\n``email`` is nullable here (a local operator identity has no sign-in\naddress), and ``invitation_id`` is always null until the invitation flow\nrehomes, which is what fills it.\n\n``attribution_user_id`` is the addition the platform has no counterpart for.\nKeys, budgets, and usage attach to the gateway's string-keyed ``users`` row,\nnot to this UUID identity, so this carries the ``user_id`` a caller passes to\n``POST /v1/keys`` to give this member a key. It is null when no usable row\nexists (nobody minted one, or it was soft-deleted through\n``DELETE /v1/users``), which is the signal not to offer this member as a key\nowner: key creation would refuse. The two ids converge when the request plane\nre-parents onto tenancy (M4), and this field is what lets that happen without\nthe dashboard changing.",
+        "description": "A member row joined to the identity behind it, as the roster shows it.\n\nField-for-field the platform's shape, so the ported roster page is not\nrewritten around a new contract, with two consequences of the OSS line:\n``email`` is nullable here (a local operator identity has no sign-in\naddress), and ``invitation_id`` is always null until the invitation flow\nrehomes, which is what fills it.\n\n``attribution_user_id`` is the addition the platform has no counterpart for.\nKeys, budgets, and usage attach to the gateway's string-keyed ``users`` row,\nnot to this UUID identity, so this carries the ``user_id`` a caller passes to\n``POST /v1/keys`` to give this member a key. It is null when no usable row\nexists (nobody minted one, or it was soft-deleted through\n``DELETE /v1/users``), which is the signal not to offer this member as a key\nowner: key creation would refuse. How the two ids converge is the open\nquestion in otari-ai#1727; this field is the join until it is answered, and\nis what lets either answer land without the dashboard changing.",
         "properties": {
           "attribution_user_id": {
             "anyOf": [
@@ -1469,6 +1469,17 @@
             ],
             "title": "Name"
           },
+          "reset_alignment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Alignment"
+          },
           "total_reserved": {
             "default": 0.0,
             "title": "Total Reserved",
@@ -1494,6 +1505,7 @@
           "name",
           "max_budget",
           "budget_duration_sec",
+          "reset_alignment",
           "created_at",
           "updated_at"
         ],
@@ -2316,6 +2328,23 @@
             ],
             "description": "Admin-facing label for the budget",
             "title": "Name"
+          },
+          "reset_alignment": {
+            "anyOf": [
+              {
+                "enum": [
+                  "calendar_day",
+                  "calendar_week",
+                  "calendar_month"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Reset on a UTC calendar boundary instead of a fixed number of seconds, which is the only way to express a calendar month. Mutually exclusive with budget_duration_sec",
+            "title": "Reset Alignment"
           }
         },
         "title": "CreateBudgetRequest",
@@ -2559,31 +2588,12 @@
       "CreateScopedBudgetRequest": {
         "description": "Request model for creating a scoped budget.",
         "properties": {
-          "budget_duration_sec": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Period length in seconds (e.g. 86400 for daily); null never resets",
-            "title": "Budget Duration Sec"
-          },
-          "max_budget": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Maximum USD spend in the period",
-            "title": "Max Budget"
+          "budget_id": {
+            "description": "The budget this ceiling enforces; its limit and period are read through it",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Budget Id",
+            "type": "string"
           },
           "name": {
             "anyOf": [
@@ -2595,7 +2605,7 @@
                 "type": "null"
               }
             ],
-            "description": "Admin-facing label for the budget",
+            "description": "Admin-facing label for this ceiling",
             "title": "Name"
           },
           "provider_key_id": {
@@ -2610,23 +2620,6 @@
             ],
             "description": "Narrow the cap to one provider instance; null caps spend across every provider",
             "title": "Provider Key Id"
-          },
-          "reset_alignment": {
-            "anyOf": [
-              {
-                "enum": [
-                  "calendar_day",
-                  "calendar_week",
-                  "calendar_month"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Reset on a UTC calendar boundary instead of a fixed number of seconds, which is the only way to express a calendar month. Mutually exclusive with budget_duration_sec",
-            "title": "Reset Alignment"
           },
           "scope_id": {
             "description": "Id of the capped identity: an organization, workspace, membership row, or API key",
@@ -2650,7 +2643,8 @@
         },
         "required": [
           "scope_type",
-          "scope_id"
+          "scope_id",
+          "budget_id"
         ],
         "title": "CreateScopedBudgetRequest",
         "type": "object"
@@ -7324,7 +7318,7 @@
         "type": "object"
       },
       "ScopedBudgetResponse": {
-        "description": "One scoped ceiling and its live counters.\n\nUnlike ``/v1/budgets``, the counters are the row's own: a scoped ceiling is\nenforced against ``current_spend + reserved_spend``, so there is no rollup\nover users to compute.",
+        "description": "One scoped ceiling and its live counters.\n\nUnlike ``/v1/budgets``, the counters are the row's own: a scoped ceiling is\nenforced against ``current_spend + reserved_spend``, so there is no rollup\nover users to compute.\n\n``max_budget``, ``budget_duration_sec`` and ``reset_alignment`` are read off\nthe budget rather than stored here, and are carried on the wire so a caller\ncan render a ceiling without fetching every budget to resolve one id.",
         "properties": {
           "budget_duration_sec": {
             "anyOf": [
@@ -7336,6 +7330,10 @@
               }
             ],
             "title": "Budget Duration Sec"
+          },
+          "budget_id": {
+            "title": "Budget Id",
+            "type": "string"
           },
           "created_at": {
             "title": "Created At",
@@ -7437,6 +7435,7 @@
           "scope_type",
           "scope_id",
           "provider_key_id",
+          "budget_id",
           "name",
           "max_budget",
           "current_spend",
@@ -8590,6 +8589,22 @@
               }
             ],
             "title": "Name"
+          },
+          "reset_alignment": {
+            "anyOf": [
+              {
+                "enum": [
+                  "calendar_day",
+                  "calendar_week",
+                  "calendar_month"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Alignment"
           }
         },
         "title": "UpdateBudgetRequest",
@@ -8698,29 +8713,18 @@
       "UpdateScopedBudgetRequest": {
         "description": "Request model for updating a scoped budget.",
         "properties": {
-          "budget_duration_sec": {
+          "budget_id": {
             "anyOf": [
               {
-                "exclusiveMinimum": 0.0,
-                "type": "integer"
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Budget Duration Sec"
-          },
-          "max_budget": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Max Budget"
+            "title": "Budget Id"
           },
           "name": {
             "anyOf": [
@@ -8733,22 +8737,6 @@
               }
             ],
             "title": "Name"
-          },
-          "reset_alignment": {
-            "anyOf": [
-              {
-                "enum": [
-                  "calendar_day",
-                  "calendar_week",
-                  "calendar_month"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reset Alignment"
           }
         },
         "title": "UpdateScopedBudgetRequest",
@@ -11002,45 +10990,12 @@
       "WorkspaceMemberBudgetPolicyCreate": {
         "description": "Request body for creating a default.",
         "properties": {
-          "budget_duration_sec": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "maximum": 315360000.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Period length in seconds; null never resets",
-            "title": "Budget Duration Sec"
-          },
-          "max_budget": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Maximum USD spend per member in the period",
-            "title": "Max Budget"
-          },
-          "name": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Admin-facing label",
-            "title": "Name"
+          "budget_id": {
+            "description": "The budget this workspace hands to every member",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Budget Id",
+            "type": "string"
           },
           "provider_key_id": {
             "anyOf": [
@@ -11056,6 +11011,9 @@
             "title": "Provider Key Id"
           }
         },
+        "required": [
+          "budget_id"
+        ],
         "title": "WorkspaceMemberBudgetPolicyCreate",
         "type": "object"
       },
@@ -11072,6 +11030,10 @@
               }
             ],
             "title": "Budget Duration Sec"
+          },
+          "budget_id": {
+            "title": "Budget Id",
+            "type": "string"
           },
           "created_at": {
             "title": "Created At",
@@ -11127,6 +11089,7 @@
         "required": [
           "id",
           "workspace_id",
+          "budget_id",
           "provider_key_id",
           "name",
           "max_budget",
@@ -11138,46 +11101,18 @@
         "type": "object"
       },
       "WorkspaceMemberBudgetPolicyUpdate": {
-        "description": "Request body for updating a default.\n\nNot retroactive: a member already materialized from this default keeps\nthe value that was in effect when they were materialized. Only a member\nmaterialized after this update sees the new one.",
+        "description": "Request body for pointing a default at a different budget.\n\nMembers already materialized from this default keep the budget they were\ngiven: their ceiling names it directly, and this only changes what a member\njoining afterwards is handed. Editing the *budget* is the retroactive act,\nand it moves everyone naming it, in this workspace and outside it.",
         "properties": {
-          "budget_duration_sec": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "maximum": 315360000.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Budget Duration Sec"
-          },
-          "max_budget": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Max Budget"
-          },
-          "name": {
-            "anyOf": [
-              {
-                "maxLength": 200,
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Name"
+          "budget_id": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Budget Id",
+            "type": "string"
           }
         },
+        "required": [
+          "budget_id"
+        ],
         "title": "WorkspaceMemberBudgetPolicyUpdate",
         "type": "object"
       },
@@ -13175,7 +13110,7 @@
     },
     "/v1/budgets/{budget_id}": {
       "delete": {
-        "description": "Delete a budget.",
+        "description": "Delete a budget.\n\nRefused with 409 while anything still names this budget: a workspace handing\nit to its members, or a scoped ceiling enforcing it. Both foreign keys are\n``RESTRICT``, so the database would refuse either anyway, but as an\n``IntegrityError`` reported as \"Database error\" with nothing naming what to\ngo and change. Checked here so the refusal can say which, and where.",
         "operationId": "delete_budget_v1_budgets__budget_id__delete",
         "parameters": [
           {
@@ -17279,7 +17214,7 @@
         ]
       },
       "patch": {
-        "description": "Update a scoped budget's label, limit, or period.\n\nThe scope and the provider narrowing are not editable: changing either would\nmove the ceiling to a different identity while carrying its spend, which is\na delete and a create, not an update.",
+        "description": "Relabel a ceiling, or point it at a different budget.\n\nThe scope and the provider narrowing are not editable: changing either would\nmove the ceiling to a different identity while carrying its spend, which is\na delete and a create, not an update.\n\nThere is no limit or period to set here any more. Both are properties of the\nbudget, so changing what a ceiling allows is either editing that budget,\nwhich moves every ceiling naming it, or naming a different one.",
         "operationId": "update_scoped_budget_v1_scoped_budgets__budget_id__patch",
         "parameters": [
           {

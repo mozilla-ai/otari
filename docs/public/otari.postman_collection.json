@@ -925,7 +925,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\"\n}"
+              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"reset_alignment\": \"calendar_day\"\n}"
             },
             "description": "Create a new budget.",
             "header": [
@@ -983,7 +983,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\"\n}"
+              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"reset_alignment\": \"calendar_day\"\n}"
             },
             "description": "Update a budget.",
             "header": [
@@ -1016,7 +1016,7 @@
         {
           "name": "Delete Budget",
           "request": {
-            "description": "Delete a budget.",
+            "description": "Delete a budget.\n\nRefused with 409 while anything still names this budget: a workspace handing\nit to its members, or a scoped ceiling enforcing it. Both foreign keys are\n``RESTRICT``, so the database would refuse either anyway, but as an\n``IntegrityError`` reported as \"Database error\" with nothing naming what to\ngo and change. Checked here so the refusal can say which, and where.",
             "header": [],
             "method": "DELETE",
             "url": {
@@ -3600,7 +3600,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"scope_type\": \"organization\",\n  \"scope_id\": \"string\"\n}"
+              "raw": "{\n  \"scope_type\": \"organization\",\n  \"scope_id\": \"string\",\n  \"budget_id\": \"string\"\n}"
             },
             "description": "Create a scoped budget.\n\nAnswers 404 when the scope names nothing, rather than creating a ceiling\nthat can never bind.",
             "header": [
@@ -3658,9 +3658,9 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"reset_alignment\": \"calendar_day\"\n}"
+              "raw": "{\n  \"budget_id\": \"string\",\n  \"name\": \"string\"\n}"
             },
-            "description": "Update a scoped budget's label, limit, or period.\n\nThe scope and the provider narrowing are not editable: changing either would\nmove the ceiling to a different identity while carrying its spend, which is\na delete and a create, not an update.",
+            "description": "Relabel a ceiling, or point it at a different budget.\n\nThe scope and the provider narrowing are not editable: changing either would\nmove the ceiling to a different identity while carrying its spend, which is\na delete and a create, not an update.\n\nThere is no limit or period to set here any more. Both are properties of the\nbudget, so changing what a ceiling allows is either editing that budget,\nwhich moves every ceiling naming it, or naming a different one.",
             "header": [
               {
                 "key": "Content-Type",
@@ -5570,7 +5570,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"provider_key_id\": \"string\"\n}"
+              "raw": "{\n  \"budget_id\": \"string\"\n}"
             },
             "description": "Create a budget default.\n\nMaterializes it into a per-member ``scoped_budgets`` row for every\nexisting active member of the workspace; a member who joins afterwards is\nmaterialized when they join.",
             "header": [
@@ -5611,7 +5611,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\"\n}"
+              "raw": "{\n  \"budget_id\": \"string\"\n}"
             },
             "description": "Update a budget default's label or limit.\n\nNot retroactive: members already materialized from this default keep\ntheir existing ceiling; only a member materialized afterwards sees the\nnew one.",
             "header": [
