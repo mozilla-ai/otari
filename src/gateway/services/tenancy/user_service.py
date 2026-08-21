@@ -251,10 +251,15 @@ async def create_user_for_signup(
     added or invited by address (password-less, per that service's own
     docstrings): it never creates one from nothing. Enumeration-safe the same
     way ``resend_verification_email`` and ``request_password_reset`` are: an
-    address nobody has touched and one that already has a password both return
-    with nothing written and nothing mailed, and only a genuinely pending
-    identity is claimed. An earlier version of this call answered the three
-    cases with distinguishable 404/409/200 statuses, which let an
+    address nobody has touched, one that already has a password, and one whose
+    identity has been deactivated all return with nothing written and nothing
+    mailed, and only a genuinely pending identity is claimed. Deactivation is
+    checked here for the reason ``verify_email`` and ``reset_password`` already
+    check it: it has to close every road in, and without this an identity
+    deactivated before it ever signed up could still have a password set and a
+    live verification token minted on it, waiting to become usable the moment
+    an operator reactivated it. An earlier version of this call answered the
+    three cases with distinguishable 404/409/200 statuses, which let an
     unauthenticated caller enumerate an organization's roster and signup
     progress, exactly what the sibling functions were already written to
     avoid; this closes that gap. ``password`` is still validated and reported
@@ -277,7 +282,7 @@ async def create_user_for_signup(
 
     address = validated_email(email)
     identity = await UserRepository(db).get_by_email(address)
-    if identity is None or identity.hashed_password is not None:
+    if identity is None or identity.hashed_password is not None or not identity.is_active:
         # Pays the same bcrypt cost the claim path pays hashing a fresh
         # password, so the two cases are closer in wall-clock time than a bare
         # early return would be. Not a full equalization (the claim path also
@@ -341,10 +346,10 @@ async def resend_verification_email(db: AsyncSession, config: GatewayConfig, *, 
 
     Enumeration-safe by construction rather than by a caller-side generic
     response: an unknown address, one with no password yet (never claimed),
-    and one already verified all return with nothing sent, and only the
-    genuinely-unverified case mints a token and mails it. A fresh token
-    replaces any prior one outright, so an old, unopened link stops working
-    the moment a new one is requested.
+    one already verified, and one whose identity has been deactivated all
+    return with nothing sent, and only the genuinely-unverified case mints a
+    token and mails it. A fresh token replaces any prior one outright, so an
+    old, unopened link stops working the moment a new one is requested.
 
     The early return still pays a bcrypt-equivalent cost first
     (``verify_absent_password_async``), the same reason ``authenticate`` pays
@@ -358,7 +363,12 @@ async def resend_verification_email(db: AsyncSession, config: GatewayConfig, *, 
 
     address = validated_email(email)
     identity = await UserRepository(db).get_by_email(address)
-    if identity is None or identity.hashed_password is None or identity.email_verified_at is not None:
+    if (
+        identity is None
+        or identity.hashed_password is None
+        or identity.email_verified_at is not None
+        or not identity.is_active
+    ):
         await verify_absent_password_async(_TIMING_EQUALIZER)
         return
 
@@ -383,17 +393,18 @@ async def request_password_reset(db: AsyncSession, config: GatewayConfig, *, ema
     """Mail a password-reset link, or do nothing: the caller cannot tell which.
 
     Enumeration-safe the same way ``resend_verification_email`` is, including
-    paying the same timing-equalizing cost on the early return. Works on an
-    unverified identity too, deliberately: forgetting a password predates ever
-    verifying it, so gating this on ``email_verified_at`` would strand exactly
-    the caller it exists to help.
+    paying the same timing-equalizing cost on the early return, and refusing a
+    deactivated identity for the same reason. Works on an unverified identity
+    too, deliberately: forgetting a password predates ever verifying it, so
+    gating this on ``email_verified_at`` would strand exactly the caller it
+    exists to help.
     """
     mailer = Mailer(config)
     mailer.require_ready()
 
     address = validated_email(email)
     identity = await UserRepository(db).get_by_email(address)
-    if identity is None or identity.hashed_password is None:
+    if identity is None or identity.hashed_password is None or not identity.is_active:
         await verify_absent_password_async(_TIMING_EQUALIZER)
         return
 

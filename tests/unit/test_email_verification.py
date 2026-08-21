@@ -173,6 +173,26 @@ def test_resend_for_an_already_verified_address_sends_nothing(
         assert "mail:console" not in text_seen
 
 
+def test_resend_for_a_deactivated_identity_sends_nothing(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Deactivation closes this road too, the same as the redemption it would lead to."""
+    with _client(tmp_path) as client:
+        _signed_up(client, caplog, email="ada@example.com")
+
+        engine = create_engine(f"sqlite:///{tmp_path / 'verification-test.db'}")
+        with engine.begin() as connection:
+            connection.execute(
+                text('UPDATE "user" SET is_active = 0 WHERE email = :email'), {"email": "ada@example.com"}
+            )
+        engine.dispose()
+
+        status_code, text_seen = _resend(client, caplog, email="ada@example.com")
+
+        assert status_code == 200
+        assert "mail:console" not in text_seen
+
+
 def test_resend_sends_a_fresh_link_for_a_genuinely_unverified_identity(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:

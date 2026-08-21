@@ -55,6 +55,26 @@ def _signup(client: TestClient, *, email: str, password: str = PASSWORD, **extra
     return client.post("/v1/auth/signup", json={"email": email, "password": password, **extra})
 
 
+def _deactivate(tmp_path: Path, *, email: str) -> None:
+    """Flip an identity inactive, as the M5 backfill does for a soft-deleted gateway user."""
+    engine = create_engine(f"sqlite:///{tmp_path / 'signup-test.db'}")
+    with engine.begin() as connection:
+        connection.execute(text('UPDATE "user" SET is_active = 0 WHERE email = :email'), {"email": email})
+    engine.dispose()
+
+
+def _credentials(tmp_path: Path, *, email: str) -> tuple[str | None, str | None]:
+    """The identity's stored password hash and verification token hash."""
+    engine = create_engine(f"sqlite:///{tmp_path / 'signup-test.db'}")
+    with engine.begin() as connection:
+        row = connection.execute(
+            text('SELECT hashed_password, email_verification_token_hash FROM "user" WHERE email = :email'),
+            {"email": email},
+        ).one()
+    engine.dispose()
+    return (row[0], row[1])
+
+
 def _captured_verification_link(caplog: pytest.LogCaptureFixture, client: TestClient, **kwargs: object) -> str:
     """Sign up, expecting success, and pull the emailed link's token out of the console log."""
     gateway_logger.addHandler(caplog.handler)
@@ -144,6 +164,33 @@ def test_signup_on_an_already_completed_address_is_enumeration_safe(
         assert client.post(
             "/v1/auth/session", json={"email": "ada@example.com", "password": "a-different-password"}
         ).status_code == 401
+
+
+def test_signup_on_a_deactivated_identity_writes_nothing(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
+    """A deactivated identity is not claimable, the same way its token is not redeemable.
+
+    ``verify_email`` and ``reset_password`` both refuse a deactivated identity,
+    and ``authenticate`` refuses to sign one in. Without the same check here, an
+    address deactivated before it ever signed up could still have a password set
+    and a live verification token minted on it, both waiting to become usable
+    the moment an operator reactivated the identity.
+    """
+    with _client(tmp_path) as client:
+        _add_member(client, email="ada@example.com")
+        _deactivate(tmp_path, email="ada@example.com")
+
+        gateway_logger.addHandler(caplog.handler)
+        caplog.set_level(logging.INFO, logger="gateway")
+        try:
+            response = _signup(client, email="ada@example.com")
+        finally:
+            gateway_logger.removeHandler(caplog.handler)
+
+        assert response.status_code == 200
+        assert response.json() == _signup(client, email="nobody@example.com").json()
+        assert "mail:console" not in caplog.text
+
+    assert _credentials(tmp_path, email="ada@example.com") == (None, None)
 
 
 def test_signup_password_policy_is_enforced_before_any_enumeration_check(tmp_path: Path) -> None:

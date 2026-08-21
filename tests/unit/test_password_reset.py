@@ -261,6 +261,26 @@ def test_request_reset_is_enumeration_safe(tmp_path: Path, caplog: pytest.LogCap
         assert "mail:console" not in unknown_text
 
 
+def test_request_reset_for_a_deactivated_identity_sends_nothing(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Deactivation closes this road too, matching the refusal ``reset_password`` already makes."""
+    with _client(tmp_path) as client:
+        _claimed_and_verified(client, caplog, email="ada@example.com")
+
+        engine = create_engine(f"sqlite:///{tmp_path / 'reset-test.db'}")
+        with engine.begin() as connection:
+            connection.execute(
+                text('UPDATE "user" SET is_active = 0 WHERE email = :email'), {"email": "ada@example.com"}
+            )
+        engine.dispose()
+
+        status_code, log_text = _request_reset(client, caplog, email="ada@example.com")
+
+        assert status_code == 200
+        assert "mail:console" not in log_text
+
+
 def test_request_reset_without_mail_configured_is_refused(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     with _client(tmp_path) as client:
         _claimed_and_verified(client, caplog, email="ada@example.com")

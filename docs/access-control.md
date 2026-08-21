@@ -168,7 +168,7 @@ It also stays the way back in. An operator who forgets the password sets a new o
 
 #### Signup: claiming a roster identity
 
-An identity an admin added or invited by address carries no password until it signs up. `POST /v1/auth/signup` claims it: it sets a password on the identity that address already names and sends a verification link. It never creates an identity from nothing (self-service registration for a wholly new address is not part of this edition), and it is enumeration-safe about that: an address nobody has touched and one that already completed signup both answer with the same generic message and nothing written or mailed, the same shape resending and requesting a reset already take below. Only the password itself is judged and reported on its own terms (too short, too long), since that says nothing about whether the address exists.
+An identity an admin added or invited by address carries no password until it signs up. `POST /v1/auth/signup` claims it: it sets a password on the identity that address already names and sends a verification link. It never creates an identity from nothing (self-service registration for a wholly new address is not part of this edition), and it is enumeration-safe about that: an address nobody has touched, one that already completed signup, and one whose identity has been deactivated all answer with the same generic message and nothing written or mailed, the same shape resending and requesting a reset already take below. Only the password itself is judged and reported on its own terms (too short, too long), since that says nothing about whether the address exists.
 
 ```bash
 curl -X POST http://localhost:8000/v1/auth/signup \
