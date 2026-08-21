@@ -2,9 +2,14 @@
 
 ## The React Compiler is enabled
 
-`web/vite.config.ts` runs `babel-plugin-react-compiler` through `@vitejs/plugin-react`, so
-components and derived values are memoized at build time. otari-ai/frontend runs the same
-pass; keeping both configured alike is deliberate, because components move between the trees.
+`web/vite.config.ts` runs `babel-plugin-react-compiler` as a Babel pass of its own
+(`@rolldown/plugin-babel`, configured by the `reactCompilerPreset` helper `@vitejs/plugin-react`
+exports), so components and derived values are memoized at build time. It sits beside the React
+plugin rather than inside it, which is where that plugin hosted it before its version 6.
+otari-ai/frontend runs the same pass; keeping both configured alike is deliberate, because
+components move between the trees. The plugin's other route, `react({ compiler: true })`, swaps
+in oxc-transform-react, a Rust reimplementation still labeled experimental, and would change
+which compiler decides what to memoize; the config says so at the site.
 
 What follows from that:
 
@@ -29,10 +34,12 @@ exports nothing but `Route`** (see
 keeps it true.
 
 `vite.config.ts` additionally pins five vendor chunks by hand (`heroui`, `react`,
-`tanstack-query`, `tanstack-router`, `recharts`). The comments there explain why the router is
-separate from React (an evaluation-order bug at first paint) and why recharts is on its own
-(it is 379 kB raw, and only the chart-bearing routes should pay for it). Read them before
-changing the map.
+`tanstack-query`, `tanstack-router`, `recharts`), as `output.codeSplitting.groups` matched on
+module id: Vite 8 bundles with Rolldown, which takes groups rather than Rollup's map of chunk
+name to entry module. The comments there explain why the router is separate from React (an
+evaluation-order bug at first paint), why recharts is on its own (it is ~368 kB raw, and only
+the chart-bearing routes should pay for it), and why React's group is listed first. Read them
+before changing the groups.
 
 For anything heavy that is not a route, lazy-load it:
 

@@ -1192,7 +1192,8 @@ export function UsagePage() {
                 ) : null}
                 {summary.isFetching ||
                 (effectiveGroupBy && grouped.isFetching) ? (
-                  <Spinner size="sm" />
+                  // Decorative refetch indicator; not announced (see TablePagination).
+                  <Spinner size="sm" aria-hidden="true" />
                 ) : null}
                 <FilterSelect
                   ariaLabel="Group by"

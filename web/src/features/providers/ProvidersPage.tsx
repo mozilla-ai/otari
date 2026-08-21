@@ -802,7 +802,9 @@ function TestOutcome({ state }: { state: TestState | undefined }) {
   if (state.status === "pending") {
     return (
       <span className="inline-flex items-center gap-1.5 text-xs text-muted">
-        <Spinner size="sm" /> Testing…
+        {/* Hidden rather than left as HeroUI's own role="status": its
+            "Loading" name would contradict the "Testing…" beside it. */}
+        <Spinner size="sm" aria-hidden="true" /> Testing…
       </span>
     )
   }

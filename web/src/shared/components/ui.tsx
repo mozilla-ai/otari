@@ -567,7 +567,11 @@ export function PageLoading({ label = "Loading…" }: { label?: string }) {
       role="status"
       className="flex items-center justify-center gap-2 px-4 py-10 text-sm text-muted"
     >
-      <Spinner size="sm" />
+      {/* The spinner is its own role="status" live region as of HeroUI 3.2.4,
+          which would nest one status inside another and announce a bare
+          "Loading" alongside this label. Hide it; the label below carries the
+          announcement for the region. */}
+      <Spinner size="sm" aria-hidden="true" />
       <span>{label}</span>
     </div>
   )

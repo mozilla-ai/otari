@@ -17,8 +17,15 @@
     "noUnusedParameters": true,
     "noFallthroughCasesInSwitch": true,
     "noUncheckedSideEffectImports": true,
-    "types": ["vitest/globals", "@testing-library/jest-dom"],
-    "baseUrl": ".",
+    // "node" because a handful of tests under src/ read the tree they assert on
+    // (src/styles/foundation.test.ts, src/routes.test.ts) and so import node:fs
+    // and node:path. Vitest 4's "vitest/globals" no longer pulls @types/node in
+    // transitively the way v3 did, so the entry that used to be implicit is
+    // spelled out here.
+    "types": ["vitest/globals", "@testing-library/jest-dom", "node"],
+    // No "baseUrl": the mapping below is already written relative to this file,
+    // which is how "paths" resolves without one. Kept off deliberately rather
+    // than as an omission, since TypeScript 7 removes the option outright.
     "paths": {
       "@/*": ["./src/*"]
     }

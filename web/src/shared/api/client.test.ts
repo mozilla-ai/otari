@@ -13,6 +13,22 @@ describe("apiFetch", () => {
     // reads as the click doing nothing. The deadline is ours, not the server's.
     vi.useFakeTimers()
     try {
+      // AbortSignal.timeout's clock is the runtime's, not the one vi.useFakeTimers
+      // installs, so advancing time does not fire it and the deadline would take a
+      // real 30 seconds to arrive. Stand in a controller driven by setTimeout,
+      // which the fake clock does own, and assert the delay the client asked for:
+      // that is the claim this test makes about the deadline.
+      const timeout = vi
+        .spyOn(AbortSignal, "timeout")
+        .mockImplementation((delay) => {
+          const controller = new AbortController()
+          setTimeout(
+            () =>
+              controller.abort(new DOMException("timed out", "TimeoutError")),
+            delay,
+          )
+          return controller.signal
+        })
       vi.spyOn(globalThis, "fetch").mockImplementation(
         (_input, init) =>
           new Promise((_resolve, reject) => {
@@ -27,6 +43,7 @@ describe("apiFetch", () => {
         status: 0,
         message: expect.stringContaining("did not respond within 30s"),
       })
+      expect(timeout).toHaveBeenCalledWith(30_000)
       await vi.advanceTimersByTimeAsync(30_000)
       await assertion
     } finally {
