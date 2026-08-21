@@ -327,11 +327,16 @@ function SetupComplete({
           <Button variant="ghost" onPress={onDone}>
             Dismiss
           </Button>
+          {/* Scoped to gateway traffic, like the pricing alarm's link: imported
+              usage is somebody else's requests, and the one that just landed is
+              the newest row of what is left. */}
           <Button
             variant="primary"
-            onPress={() => navigate({ to: "/activity" })}
+            onPress={() =>
+              navigate({ to: "/activity", search: { source: "gateway" } })
+            }
           >
-            View the request
+            Open the activity log
           </Button>
         </div>
       </Card.Content>
