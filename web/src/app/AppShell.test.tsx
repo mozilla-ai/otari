@@ -195,14 +195,17 @@ describe("AppShell responsive layout", () => {
     expect(container.querySelector("aside")?.className).toContain("w-[4.5rem]")
   })
 
-  it("closes the drawer when the viewport grows past the mobile breakpoint", async () => {
+  it("resets the submenu and preserves focus across the mobile breakpoint", async () => {
     const { listeners } = mockMatchMedia(true)
     const user = userEvent.setup()
-    await renderShell()
+    const { container } = await renderShell()
 
     await user.click(screen.getByRole("button", { name: "Open navigation" }))
+    await user.click(
+      await screen.findByRole("button", { name: "Organization" }),
+    )
     expect(
-      screen.getByRole("button", { name: "Close navigation" }),
+      await screen.findByRole("link", { name: "Members & roles" }),
     ).toBeInTheDocument()
 
     // Simulate crossing to a desktop viewport.
@@ -215,6 +218,23 @@ describe("AppShell responsive layout", () => {
     expect(
       screen.getByRole("button", { name: "Open navigation" }),
     ).toHaveAttribute("aria-expanded", "false")
+    // The focused submenu control unmounted, but focus stays on the navigation
+    // landmark rather than falling back to the document body.
+    expect(container.querySelector("aside")).toHaveFocus()
+
+    // Returning to mobile and reopening starts at the workspace level. The
+    // submenu belongs to the drawer that framed it and cannot survive the
+    // breakpoint transition.
+    act(() => {
+      listeners.forEach((cb) => {
+        cb({ matches: true } as MediaQueryListEvent)
+      })
+    })
+    await user.click(screen.getByRole("button", { name: "Open navigation" }))
+    expect(
+      await screen.findByRole("link", { name: "API keys" }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Members & roles" })).toBeNull()
   })
 
   it("closes the drawer on Escape and restores focus to the toggle", async () => {

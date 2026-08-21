@@ -349,6 +349,7 @@ export function AppShell() {
   const toggleRef = useRef<HTMLButtonElement>(null)
   const orgNavTriggerRef = useRef<HTMLButtonElement>(null)
   const orgNavBackRef = useRef<HTMLButtonElement>(null)
+  const restoreSidebarFocusRef = useRef(false)
   const [collapsed, setCollapsed] = useState<boolean>(readStoredCollapsed)
   const [isMobile, setIsMobile] = useState<boolean>(readIsMobile)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
@@ -393,8 +394,12 @@ export function AppShell() {
       return
     const query = window.matchMedia(MOBILE_QUERY)
     const onChange = (event: MediaQueryListEvent) => {
+      if (!event.matches) {
+        restoreSidebarFocusRef.current =
+          asideRef.current?.contains(document.activeElement) ?? false
+        closeMobileNav()
+      }
       setIsMobile(event.matches)
-      if (!event.matches) closeMobileNav()
     }
     // Safari < 14 (and some older engines) only expose the deprecated
     // addListener/removeListener; fall back to it so the shell doesn't throw.
@@ -424,11 +429,17 @@ export function AppShell() {
   // Focus management for the mobile drawer, which is a modal overlay: move focus
   // into it when it opens and restore focus to the toggle when it closes, so
   // keyboard and screen-reader users are neither stranded inside a hidden panel
-  // nor dropped back to the top of the document. The isMobile guard means a
-  // breakpoint change to desktop (which also closes the drawer) never yanks focus
-  // to the now-hidden toggle.
+  // nor dropped back to the top of the document. A breakpoint change to desktop
+  // keeps focus on the sidebar when it came from the drawer, rather than moving
+  // it to the now-hidden toggle or losing it when the submenu unmounts.
   useEffect(() => {
-    if (!isMobile) return
+    if (!isMobile) {
+      if (restoreSidebarFocusRef.current) {
+        restoreSidebarFocusRef.current = false
+        asideRef.current?.focus()
+      }
+      return
+    }
     if (mobileNavOpen) {
       asideRef.current?.focus()
     } else if (asideRef.current?.contains(document.activeElement)) {
@@ -524,7 +535,10 @@ export function AppShell() {
           // lives in that bar. While closed it is off-canvas, so inert takes its
           // links out of the tab order and the accessibility tree until opened.
           aria-label={isMobile ? "Navigation" : undefined}
-          tabIndex={isMobile ? -1 : undefined}
+          // Programmatically focusable on both layouts so a breakpoint change
+          // can preserve focus on the navigation landmark without adding it to
+          // the natural tab order.
+          tabIndex={-1}
           inert={isMobile && !mobileNavOpen ? true : undefined}
           className={clsx(
             "flex flex-col gap-4 border-r border-border bg-background-alt p-3 focus:outline-none",

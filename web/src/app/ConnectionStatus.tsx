@@ -1,5 +1,5 @@
 import { useQueryClient } from "@tanstack/react-query"
-import { useSyncExternalStore } from "react"
+import { useEffect, useState } from "react"
 
 import { ApiError } from "@/shared/api/client"
 
@@ -16,27 +16,23 @@ function isUnreachable(error: unknown): boolean {
 // same wherever the operator is standing, and it clears itself the moment a
 // request succeeds again.
 function useGatewayUnreachable(): boolean {
-  const cache = useQueryClient().getQueryCache()
+  const queryClient = useQueryClient()
+  const [unreachable, setUnreachable] = useState(false)
 
-  // Read through `useSyncExternalStore` rather than by writing a subscription
-  // into state, and that is load-bearing rather than tidying: mounting a
-  // component that holds a query builds that query into this cache *during
-  // render*, and the cache notifies its subscribers synchronously. A `setState`
-  // in that callback is therefore an update to this component while a different
-  // one is rendering, which React warns about. Swapping the sidebar's head
-  // (leaving the mobile drawer's organization submenu remounts the workspace
-  // switcher, which holds two queries) is one way to reach it. This is the API
-  // for an external store that can change mid-render.
-  return useSyncExternalStore(
-    (onStoreChange) => cache.subscribe(onStoreChange),
-    () =>
+  useEffect(() => {
+    const cache = queryClient.getQueryCache()
+    const compute = () =>
       cache
         .getAll()
         .some(
           (query) =>
             query.state.status === "error" && isUnreachable(query.state.error),
-        ),
-  )
+        )
+    setUnreachable(compute())
+    return cache.subscribe(() => setUnreachable(compute()))
+  }, [queryClient])
+
+  return unreachable
 }
 
 // A bottom-right toast that surfaces a lost backend connection at the app level,
