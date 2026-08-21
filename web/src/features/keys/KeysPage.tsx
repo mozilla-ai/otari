@@ -34,12 +34,18 @@ import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import { Field } from "@/shared/components/Field"
 import {
+  CopyField,
   EmptyState,
   ErrorBanner,
   InfoBanner,
   PageHeader,
 } from "@/shared/components/ui"
 import { formatDate } from "@/shared/helpers/format"
+import {
+  buildCurlSnippet,
+  buildPythonSnippet,
+  SNIPPET_MODEL_PLACEHOLDER,
+} from "@/shared/helpers/requestSnippets"
 import {
   resolveSelectedIds,
   useTableSelection,
@@ -89,91 +95,6 @@ const label = (k: ApiKey): string => k.key_name ?? k.id
 // Stable row-key getter so DataTable's per-row cache holds across re-renders.
 const getKeyRowKey = (k: ApiKey): string => k.id
 
-// ---------- copy field (graceful on non-HTTPS origins) ----------
-
-// A readonly, always-selectable field with a copy button. The Clipboard API is
-// undefined on the non-secure origins this dashboard is routinely served from, so
-// the text is selected on click and Ctrl/Cmd-C always works even when the button
-// cannot copy programmatically. "Copied" is only claimed when it truly copied.
-function CopyField({
-  label,
-  value,
-  multiline = false,
-  fieldRef,
-}: {
-  label: string
-  value: string
-  multiline?: boolean
-  fieldRef?: React.RefObject<HTMLInputElement | HTMLTextAreaElement | null>
-}) {
-  const internalRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(
-    null,
-  )
-  const ref = fieldRef ?? internalRef
-  const [copied, setCopied] = useState(false)
-  const [selectHint, setSelectHint] = useState(false)
-
-  const copy = async () => {
-    ref.current?.focus()
-    ref.current?.select()
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(value)
-        setCopied(true)
-        setSelectHint(false)
-        window.setTimeout(() => setCopied(false), 2_000)
-        return
-      }
-    } catch {
-      // fall through to the manual path
-    }
-    // No Clipboard API (or it threw): the text is selected, so the operator can
-    // press Ctrl/Cmd-C. Never claim it was copied.
-    setSelectHint(true)
-  }
-
-  const shared =
-    "w-full rounded-lg border border-border bg-surface-alt px-3 py-2 font-mono text-xs text-foreground"
-
-  return (
-    <div className="flex flex-col gap-1">
-      <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-muted">{label}</span>
-        <Button size="sm" variant="outline" onPress={copy}>
-          {copied ? "Copied" : "Copy"}
-        </Button>
-      </div>
-      {multiline ? (
-        <textarea
-          ref={ref as React.RefObject<HTMLTextAreaElement>}
-          readOnly
-          rows={value.split("\n").length}
-          value={value}
-          onFocus={(e) => e.currentTarget.select()}
-          className={`${shared} resize-none whitespace-pre`}
-        />
-      ) : (
-        <input
-          ref={ref as React.RefObject<HTMLInputElement>}
-          readOnly
-          value={value}
-          onFocus={(e) => e.currentTarget.select()}
-          className={shared}
-        />
-      )}
-      {/* Announce only the "Copied" event, never the secret itself. */}
-      <span aria-live="polite" className="text-xs text-success">
-        {copied ? "Copied to clipboard." : ""}
-      </span>
-      {selectHint ? (
-        <span className="text-xs text-muted">
-          Selected. Press Ctrl/Cmd-C to copy.
-        </span>
-      ) : null}
-    </div>
-  )
-}
-
 // ---------- one-time reveal ----------
 
 // The highest-stakes moment: the plaintext key is shown once. A focus-trapped
@@ -218,23 +139,10 @@ function RevealSecretModal({
     }
   }
 
-  const curl = [
-    `curl ${origin}/v1/chat/completions \\`,
-    `  -H "Otari-Key: ${secret}" \\`,
-    `  -H "Content-Type: application/json" \\`,
-    `  -d '{"model": "your-model", "messages": [{"role": "user", "content": "Hello"}]}'`,
-  ].join("\n")
-
-  const python = [
-    "from openai import OpenAI",
-    "",
-    `client = OpenAI(base_url="${origin}/v1", api_key="${secret}")`,
-    "resp = client.chat.completions.create(",
-    '    model="your-model",',
-    '    messages=[{"role": "user", "content": "Hello"}],',
-    ")",
-    "print(resp.choices[0].message.content)",
-  ].join("\n")
+  // The same two calls the setup guide hands out with its own key; the builders
+  // are shared so an operator cannot be shown two dialects of one request.
+  const curl = buildCurlSnippet({ origin, apiKey: secret })
+  const python = buildPythonSnippet({ origin, apiKey: secret })
 
   return (
     <div
@@ -266,7 +174,8 @@ function RevealSecretModal({
               Make your first call
             </div>
             <p className="text-xs text-muted">
-              Replace <code>your-model</code> with a model from the Models page.
+              Replace <code>{SNIPPET_MODEL_PLACEHOLDER}</code> with a model from
+              the Models page.
             </p>
           </div>
           <CopyField label="curl" value={curl} multiline />

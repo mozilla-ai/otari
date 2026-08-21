@@ -2779,6 +2779,81 @@ export interface paths {
         patch: operations["update_workspace_v1_workspaces__workspace_id__patch"];
         trace?: never;
     };
+    "/v1/workspaces/{workspace_id}/activation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Workspace Activation
+         * @description Where a workspace stands on its first successful request.
+         *
+         *     Readable by any member who can see the workspace. Whether the guide should
+         *     actually be offered to this caller is ``experience_eligible``, which also
+         *     answers false when the deployment has the flow turned off
+         *     (``activation_guide``), so a dashboard left open stops offering it without
+         *     needing to be reloaded.
+         */
+        get: operations["get_workspace_activation_v1_workspaces__workspace_id__activation_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspace_id}/activation/dismiss": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dismiss Workspace Activation
+         * @description Retire the guide for this workspace. Permanent, and idempotent.
+         *
+         *     Workspace owners and admins only. The key the guide issued is deactivated on
+         *     the way out unless it has already served a request, in which case it is
+         *     somebody's working integration and is left alone.
+         */
+        post: operations["dismiss_workspace_activation_v1_workspaces__workspace_id__activation_dismiss_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspace_id}/activation/key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Workspace Activation Key
+         * @description Issue the workspace's setup API key, rotating the one the guide already issued.
+         *
+         *     Workspace owners and admins only, like every other action that changes a
+         *     workspace. The plaintext is returned once and never stored, so a reopened
+         *     guide rotates the same key row rather than collecting a second one, and
+         *     answers 409 once the workspace has activated or the guide was dismissed.
+         */
+        post: operations["create_workspace_activation_key_v1_workspaces__workspace_id__activation_key_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{workspace_id}/member-budget-policies": {
         parameters: {
             query?: never;
@@ -2997,6 +3072,65 @@ export interface components {
             organization_name: string;
             /** Role */
             role: string;
+        };
+        /**
+         * ActivationApiKeyPublic
+         * @description The API key the guide hands out, with its plaintext.
+         *
+         *     Returned once per call and never stored in plaintext, like every other key
+         *     this gateway mints: a page reload issues a new one and rotates the same row,
+         *     which is what makes the guide able to show a working key without keeping a
+         *     readable secret anywhere.
+         */
+        ActivationApiKeyPublic: {
+            /** Key */
+            key: string;
+            /** Key Id */
+            key_id: string;
+            /** Key Name */
+            key_name: string | null;
+            /** Key Prefix */
+            key_prefix: string | null;
+        };
+        /**
+         * ActivationAttemptPublic
+         * @description One gateway request in this workspace, as the guide reports it.
+         */
+        ActivationAttemptPublic: {
+            /** Cost Usd */
+            cost_usd?: number | null;
+            /**
+             * Error Category
+             * @description What kind of failure this was, for a failed attempt only. The dashboard renders its own sentence per category; the provider's own error text is never returned here.
+             */
+            error_category?: ("invalid_request" | "configuration" | "policy" | "upstream" | "timeout" | "internal") | null;
+            /** Latency Ms */
+            latency_ms?: number | null;
+            /**
+             * Model
+             * @description Model the request named.
+             */
+            model?: string | null;
+            /**
+             * Occurred At
+             * @description When the request was recorded, UTC ISO-8601.
+             */
+            occurred_at: string;
+            /**
+             * Provider
+             * @description Provider instance that served it, when one did.
+             */
+            provider?: string | null;
+            /**
+             * Request Id
+             * @description The usage row's id, which the Activity page can be filtered by.
+             */
+            request_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "success" | "failed";
         };
         /**
          * ActiveOrganizationMemberCreateRequest
@@ -7389,6 +7523,32 @@ export interface components {
             msg: string;
             /** Error Type */
             type: string;
+        };
+        /**
+         * WorkspaceActivationPublic
+         * @description Where a workspace stands on its first successful request.
+         */
+        WorkspaceActivationPublic: {
+            /** @description The first request that succeeded, which is the guide's receipt. Null until one does. */
+            activation_attempt?: components["schemas"]["ActivationAttemptPublic"] | null;
+            /**
+             * Dismissed
+             * @description Whether someone skipped the guide for this workspace.
+             */
+            dismissed: boolean;
+            /**
+             * Experience Eligible
+             * @description Whether the dashboard should offer the guide to this caller right now: the deployment has it enabled, the workspace is classified for it, nobody dismissed it, no request has succeeded yet, and the caller may manage the workspace.
+             */
+            experience_eligible: boolean;
+            /** @description The most recent request, so a failure can be reported while the guide keeps waiting. */
+            latest_attempt?: components["schemas"]["ActivationAttemptPublic"] | null;
+            /**
+             * Status
+             * @description 'activated' once a gateway request in this workspace has succeeded, 'failed' when the last one failed and none has yet succeeded, 'waiting' when there has been none at all.
+             * @enum {string}
+             */
+            status: "waiting" | "failed" | "activated";
         };
         /**
          * WorkspaceAssignmentRequest
@@ -12103,6 +12263,99 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkspacePublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_workspace_activation_v1_workspaces__workspace_id__activation_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceActivationPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dismiss_workspace_activation_v1_workspaces__workspace_id__activation_dismiss_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Message"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_workspace_activation_key_v1_workspaces__workspace_id__activation_key_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivationApiKeyPublic"];
                 };
             };
             /** @description Validation Error */

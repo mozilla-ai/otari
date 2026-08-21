@@ -6,6 +6,7 @@ import {
 } from "@tanstack/react-query"
 import type {
   AcceptInvitationResult,
+  ActivationApiKey,
   AliasResponse,
   ApiKey,
   Budget,
@@ -90,6 +91,7 @@ import type {
   UsageSummary,
   User,
   Workspace,
+  WorkspaceActivation,
   WorkspaceBudgetDefault,
   WorkspaceMember,
   WorkspaceMemberRole,
@@ -132,6 +134,11 @@ const ORGANIZATION_MEMBERS = "organization-members"
 // edit should not make all of them refetch.
 const ORGANIZATION_PRICING = "organization-pricing"
 const WORKSPACES = "workspaces"
+// The first-request setup guide's state. Its own key rather than a child of
+// WORKSPACES: the guide polls while it is on screen, and nesting it would make
+// every one of those ticks invalidate (or be invalidated by) the workspace list
+// and its rosters.
+const ACTIVATION = "workspace-activation"
 
 // How often an open tab asks whether the app it is running is still the one the
 // gateway serves. Cheap (a hash of one small file) and only while the tab is
@@ -1966,5 +1973,80 @@ export function useDeleteOrganizationPricing() {
         method: "DELETE",
       }),
     onSuccess: () => invalidateOrganizationPricing(queryClient),
+  })
+}
+
+// ---------------------------------------------------------------------------
+// The first-request setup guide
+// ---------------------------------------------------------------------------
+
+// How often the guide asks whether the workspace's first request has landed.
+// Only while it is on screen and still waiting (the card passes `enabled`), and
+// the answer is one or two indexed reads server-side, so this is the interval
+// that makes "send the request, watch it arrive" feel live without polling for a
+// dashboard nobody is looking at.
+const ACTIVATION_POLL_MS = 4_000
+
+/**
+ * Where the selected workspace stands on its first successful request.
+ *
+ * Polls while `enabled` and while the workspace has not activated, then stops of
+ * its own accord: at that point the answer cannot change again, and what the
+ * card shows next is the payoff screen rather than another reading.
+ */
+export function useWorkspaceActivation(
+  workspaceId: string | null,
+  enabled = true,
+) {
+  return useQuery({
+    queryKey: [ACTIVATION, workspaceId],
+    queryFn: () =>
+      apiFetch<WorkspaceActivation>(
+        `/v1/workspaces/${encodeURIComponent(workspaceId as string)}/activation`,
+      ),
+    enabled: enabled && workspaceId !== null,
+    refetchInterval: (query) =>
+      query.state.data && query.state.data.status !== "activated"
+        ? ACTIVATION_POLL_MS
+        : false,
+    // A failed check is reported on the card, which offers "Check now": retrying
+    // twice behind the operator's back would only delay that by a poll interval.
+    ...NO_RETRY,
+  })
+}
+
+// Issues the workspace's setup key and returns its plaintext exactly once, like
+// `useCreateKey`: the caller shows it and must never write the response into the
+// query cache. KEYS is invalidated because the key it rotates is an ordinary row
+// on the Keys page, and ACTIVATION because the guide's state now records it.
+export function useCreateActivationKey() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (workspaceId: string) =>
+      apiFetch<ActivationApiKey>(
+        `/v1/workspaces/${encodeURIComponent(workspaceId)}/activation/key`,
+        { method: "POST" },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [KEYS] })
+      void queryClient.invalidateQueries({ queryKey: [ACTIVATION] })
+    },
+  })
+}
+
+// Permanent, and idempotent server-side. KEYS is invalidated as well because a
+// setup key that was never used is deactivated on the way out.
+export function useDismissActivation() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (workspaceId: string) =>
+      apiFetch<{ message: string }>(
+        `/v1/workspaces/${encodeURIComponent(workspaceId)}/activation/dismiss`,
+        { method: "POST" },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [ACTIVATION] })
+      void queryClient.invalidateQueries({ queryKey: [KEYS] })
+    },
   })
 }
