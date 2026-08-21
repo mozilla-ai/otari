@@ -1,5 +1,5 @@
 import { Button, Popover } from "@heroui/react"
-import { Link } from "@tanstack/react-router"
+import { Link, type LinkProps } from "@tanstack/react-router"
 import { useState } from "react"
 import type { IconType } from "react-icons"
 import {
@@ -160,7 +160,8 @@ function MenuLink({
 }: {
   label: string
   icon: IconType
-  to: "/account" | "/docs"
+  /** Typed off `Link` itself, so the route tree is what validates it. */
+  to: LinkProps["to"]
   onNavigate: () => void
   className?: string
 }) {
