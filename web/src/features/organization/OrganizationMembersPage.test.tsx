@@ -168,6 +168,10 @@ const OWNER = organizationMember({
 })
 const SECOND = "66666666-6666-6666-6666-666666666666"
 
+// What the scope control seeds from and writes back unchanged when the operator
+// does not touch it, which is what makes the access write assertable here.
+const ANALYST_ACCESS = ["openai:gpt-4o"]
+
 const ANALYST = organizationMember({
   organization_member_id: "analyst-membership",
   user_id: "bbbbbbbb-0000-0000-0000-000000000000",
@@ -514,7 +518,12 @@ describe("OrganizationMembersPage", () => {
     // that the ceiling is written against the membership rather than the person.
     const requests = mockApi({
       members: [OWNER, ANALYST],
-      users: [user({ user_id: ANALYST.attribution_user_id as string })],
+      users: [
+        user({
+          user_id: ANALYST.attribution_user_id as string,
+          allowed_models: ANALYST_ACCESS,
+        }),
+      ],
       workspaces: [workspace(), workspace({ id: SECOND, name: "Bravo" })],
       workspaceMembers: {
         "44444444-4444-4444-4444-444444444444": [
@@ -554,8 +563,14 @@ describe("OrganizationMembersPage", () => {
     await actor.click(screen.getByLabelText("Bravo"))
     await actor.click(screen.getByRole("button", { name: "Save changes" }))
 
-    // The join comes before the ceiling write: a ceiling names a membership, and
-    // a workspace just joined has no membership id until the server answers.
+    // All three writes land from the one save. Model access goes to the spend
+    // row the membership is joined to, and it is the third table the editor
+    // touches: without this the title would be claiming it without proof.
+    const access = requests.find(
+      (r) => r.method === "PATCH" && r.url.includes("/v1/users/"),
+    )
+    expect(access?.body).toEqual({ allowed_models: ANALYST_ACCESS })
+
     const join = requests.find(
       (r) =>
         r.method === "POST" &&
@@ -568,5 +583,10 @@ describe("OrganizationMembersPage", () => {
         r.method === "PATCH" && r.url.includes("/v1/scoped-budgets/ceiling-1"),
     )
     expect(ceiling?.body).toEqual({ budget_id: "bud-large" })
+
+    // The ordering, not just the presence of both: a ceiling names a membership,
+    // so a workspace just joined has no id to name until the server answers.
+    // Asserting the sequence is the point of testing the two together.
+    expect(requests.indexOf(join!)).toBeLessThan(requests.indexOf(ceiling!))
   })
 })
