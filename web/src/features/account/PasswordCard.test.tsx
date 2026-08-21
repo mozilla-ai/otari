@@ -3,6 +3,7 @@ import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { PasswordCard } from "@/features/account/PasswordCard"
+import { useOrganizationMembers } from "@/shared/api/hooks"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { bootstrap } from "@/tests/fixtures"
 import { AppProviders } from "@/tests/providers"
@@ -279,5 +280,56 @@ describe("PasswordCard policy checks", () => {
     ).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Set password" })).toBeDisabled()
     expect(fetchMock).not.toHaveBeenCalled()
+  })
+})
+
+describe("PasswordCard and the member roster", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("refreshes the roster, whose address a claim is what fills in", async () => {
+    // The operator's roster row carries `email: null` until the claim writes
+    // one, and `useOrganizationMembers` caches for a minute, so without an
+    // invalidation the Members page would show the pre-claim row for the rest
+    // of that minute.
+    let memberFetches = 0
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input)
+      if (url.includes("/v1/organizations/me/members")) {
+        memberFetches += 1
+        return jsonResponse({ count: 0, data: [] })
+      }
+      return jsonResponse(CLAIMED)
+    })
+    const user = userEvent.setup()
+
+    // Mounted beside the card, so the roster is an active query the way it is
+    // on the Members page. An inactive one would not refetch on invalidation
+    // and the test would pass without proving anything.
+    function Harness() {
+      useOrganizationMembers()
+      return <PasswordCard />
+    }
+    render(
+      <AppProviders>
+        <DeploymentProvider
+          value={bootstrap({ sign_in_methods: ["master_key"] })}
+        >
+          <Harness />
+        </DeploymentProvider>
+      </AppProviders>,
+    )
+    await waitFor(() => expect(memberFetches).toBe(1))
+
+    await user.type(screen.getByLabelText("Email"), "operator@example.com")
+    await user.type(screen.getByLabelText("New password"), "a-real-password")
+    await user.type(
+      screen.getByLabelText("Confirm new password"),
+      "a-real-password",
+    )
+    await user.click(screen.getByRole("button", { name: "Set password" }))
+
+    await waitFor(() => expect(memberFetches).toBe(2))
   })
 })

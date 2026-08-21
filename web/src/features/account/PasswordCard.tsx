@@ -114,11 +114,12 @@ function PasswordField({
  *
  * Which of the two applies is read from the bootstrap's `sign_in_methods`
  * rather than probed: `master_key` is published exactly while no identity on
- * this deployment holds a password. That context is populated once per page
- * load and cannot be refetched, so a claim that succeeds in this tab leaves it
- * stale; the response is what this card believes from then on, which is why the
- * mode is state seeded from the bootstrap rather than the bootstrap read
- * directly.
+ * this deployment holds a password. That context cannot be refetched, so a
+ * successful claim reports itself through `useRetireMasterKeySignIn` and the
+ * provider serves the corrected value from then on. This card therefore reads
+ * the context on every render and keeps no mode of its own: the fact belongs to
+ * the deployment, not to this component, and the account menu's session line
+ * and the sign-in screen a later sign-out lands on read the same one.
  */
 export function PasswordCard() {
   const { sign_in_methods } = useDeployment()

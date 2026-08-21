@@ -85,9 +85,13 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
    JSX; no structural markup copy-pasted between files. See
    [component-architecture.md](../skills/frontend-standards/component-architecture.md).
 
-8. **Navigation is data, and its three gates stay three.** A destination is declared in
-   `web/src/app/nav/registry.ts` and nowhere else; flag a nav link hand-written into a
-   component. An entry gates on `surface` (the deployment axis, from `GET /v1/bootstrap`
+8. **Navigation is data, and its three gates stay three.** A *rail* destination is declared in
+   `web/src/app/nav/registry.ts` and nowhere else; flag a sidebar link hand-written into a
+   component. Two routes are chrome rather than navigation and are hand-written `Link`s on
+   purpose, so do not flag them or ask for them to be registered: `/docs` (top bar, and the
+   account menu below `md`) and `/account` (that menu's first row). The registry is what the
+   rails render, so registering either would duplicate into the sidebar a row the design draws
+   once. An entry gates on `surface` (the deployment axis, from `GET /v1/bootstrap`
    via `useDeployment`), `capability` (the entitlement axis, via `useEntitlements`), and
    `flag` (the operational axis, valid only alongside a capability), composed as AND by
    `useNavVisibility`. Do not fold one into another, and do not reach past them: a page

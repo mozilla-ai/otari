@@ -74,11 +74,15 @@ can link Vite's esbuild binary at all.
 - Gate a deployment-dependent surface through `useDeployment()` / `useSurfaces()`, the one place
   that knows which deployment served the page. Mind the vocabulary: a *surface* is the
   deployment axis, a *capability* is the entitlement axis.
-- Declare a new destination in the nav registry (`web/src/app/nav/registry.ts`), never as a
-  hand-written link, with whichever of the three gates it needs (`surface`, `capability`,
+- Declare a new **rail** destination in the nav registry (`web/src/app/nav/registry.ts`), never
+  as a hand-written link, with whichever of the three gates it needs (`surface`, `capability`,
   `flag`). `EntitlementGate` is the component form for wrapping a page. See
   [web/AGENTS.md](../../../web/AGENTS.md) for how the gates compose and where a capability
-  the base build ships has to be declared.
+  the base build ships has to be declared. A route the *chrome* reaches is the exception and
+  is a hand-written `Link` on purpose: `/docs` from the top bar and the account menu, and
+  `/account` from that menu's first row. The registry is what the rails render, so an entry
+  there would duplicate into the sidebar a row the design draws once. Adding to the sidebar
+  has no exception.
 - Add a Vitest test for any component, hook, or helper whose behavior you change (`Foo.tsx` →
   `Foo.test.tsx`, colocated), and a screenshot entry for any new page. The screenshot suite
   runs on demand rather than as a PR gate while the migration lands, so the entry is owed

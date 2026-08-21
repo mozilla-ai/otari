@@ -618,19 +618,28 @@ export function useRotateMasterKey() {
  * first call on a deployment supplies an address as well, which is the act that
  * claims it and retires master-key sign-in (otari-ai#1716).
  *
- * Nothing is invalidated on success. The one thing this changes that the app
- * has cached is the bootstrap's `sign_in_methods`, which is a context read once
- * per load rather than a query, so the caller reads the response instead. Every
- * *other* session this identity holds is revoked server-side; this one is kept,
- * so no 401 follows.
+ * Two things this changes are cached elsewhere, and they are cached
+ * differently. The bootstrap's `sign_in_methods` is a context read once per
+ * load rather than a query, so no invalidation could reach it: the caller
+ * reports the claim through `useRetireMasterKeySignIn` instead. The roster is
+ * an ordinary query, and a claim writes `user.email` from null to the address,
+ * so the Members page would otherwise show the row it fetched before the claim
+ * for the rest of its `staleTime`. That one is invalidated here.
+ *
+ * Every *other* session this identity holds is revoked server-side; this one is
+ * kept, so no 401 follows.
  */
 export function useSetPassword() {
+  const queryClient = useQueryClient()
   return useMutation({
     mutationFn: (body: SetPasswordRequest) =>
       apiFetch<PasswordResponse>("/v1/auth/password", {
         method: "PUT",
         body: JSON.stringify(body),
       }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_MEMBERS] })
+    },
   })
 }
 
