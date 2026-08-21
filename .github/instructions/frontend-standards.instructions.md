@@ -26,11 +26,12 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
    and the rest are in `@heroui/styles/dist/themes/`, none of them aliased in `globals.css`
    yet), a shared utility once the look repeats, the component's own prop (`variant`, `size`,
    `isDisabled`, `isPending`, `fullWidth`, `isInvalid`), and only then a rule against HeroUI's
-   own classes under the `.otari-*` namespace. HeroUI supports that last one, so the finding is
-   never that it is forbidden: a rule like `.otari-table .table__cell` or
-   `.table__body tr:first-child td:first-child` is a finding when a prop or a variable would do
-   the same job, because it fixes one selector instead of every rule reading the value, and
-   because these rules are unlayered and so outrank a Tailwind class at the call site. A
+   own classes under the `.otari-*` namespace. HeroUI and Tailwind both permit that last one and
+   it stays discouraged here, so the finding is not that it is forbidden but that a rung above
+   reaches the value: a rule like `.otari-table .table__cell` or
+   `.table__body tr:first-child td:first-child` is a finding unless nothing above it can do the
+   job, because it fixes one selector instead of every rule reading the value, and because these
+   rules are unlayered and so outrank a Tailwind class at the call site. A
    `className` re-skinning something the component already styles is a finding too; reserve
    `className` for layout/position. Space siblings with
    `gap-*` on the parent, not `m-*` on children, and write arbitrary values in `rem`

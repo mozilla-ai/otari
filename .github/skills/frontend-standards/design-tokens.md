@@ -55,6 +55,20 @@ status `-subtle` fills, `bg-primary-subtle`, `text-primary-subtle-foreground`, t
 family, `shadow-elevation-sm/md/lg`, `shadow-modal`, and `font-sans` / `font-mono` /
 `font-display`.
 
+That is Tailwind v4's own model rather than a local invention: a variable in `@theme` generates
+the utilities for its namespace (`--color-*` the color utilities, `--radius-*` the `rounded-*`
+family, `--font-*` the font ones), which is why a token is consumed as a utility and not by
+name. One mechanic is worth knowing before you add a token that is an alias of another. Tailwind
+asks for `@theme inline` when a theme variable references a second variable, because a
+non-`inline` entry is substituted where it is declared, at `:root`, rather than at the element
+using it. This file's `@theme` block is not `inline`, and the reason it still follows a theme
+switch is the convention that every theme block declares the complete set: `--color-attention`
+and friends are self-referential registrations whose real values live in the light and dark
+blocks, and an alias like `--color-background-alt` is re-declared in each block rather than only
+in `@theme`. So when you add one, put it in both theme blocks (which `foundation.test.ts`
+enforces) or make the registration `inline`; a lone `@theme` alias resolves once, at the root,
+and stops tracking the theme.
+
 Two of those name a pairing rather than a color, and are the ones easiest to get wrong.
 **Text on a `-subtle` fill is not the fill's own color**: `text-primary-subtle-foreground` is
 what goes on `bg-primary-subtle` (the brand teal on the brand tint is 3.8:1, under AA), while
@@ -151,7 +165,10 @@ writing a rule against it. If a variable is behind it, set it where its scope ac
 the theme when the decision is system-wide (adding a role to the families above if it is one of
 ours), or on the component's own root when it is local. Scoping a variable to a subtree is our
 extension rather than something HeroUI's guide demonstrates, and it inherits, so check what else
-inside that subtree reads it. [components.md](./components.md) has the full order to work
+inside that subtree reads it, and scope **the variable the rule reads**: a derived custom
+property is substituted where it is declared, so `--radius-2xl` computed at `:root` keeps the
+root's value inside a subtree that redefines `--radius`.
+[components.md](./components.md) has the full order to work
 through.
 
 ## Type scale

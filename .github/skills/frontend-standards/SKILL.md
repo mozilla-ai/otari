@@ -46,9 +46,10 @@ can link Vite's esbuild binary at all.
   `--cursor-interactive` and `--disabled-opacity`, not just color), a wrapper or utility once
   the look repeats, the component's own prop (`variant`, `size`, `isDisabled`, `isPending`,
   `fullWidth`, `isInvalid`), and last a rule against HeroUI's own classes. HeroUI supports that
-  last one; it is last because a selector fixes one case where a variable fixes every rule that
-  reads it, and because the rules in `globals.css` are unlayered and so outrank a Tailwind class
-  at the call site. `className` is for layout/position, not for restyling a component HeroUI
+  last one and it stays discouraged: a selector fixes one case where a variable fixes every rule
+  that reads it, it is invisible from the call site, and because the rules in `globals.css` are
+  unlayered they outrank a Tailwind class at the call site too. Write one only when nothing above
+  reaches the value, and say so in its comment. `className` is for layout/position, not for restyling a component HeroUI
   already styles. See [components.md](./components.md).
 - Style from the semantic tokens in `web/src/styles/globals.css`, through the utilities they
   back (`text-muted`, `bg-surface`, `border-border`, `text-danger`, `text-heading`). The

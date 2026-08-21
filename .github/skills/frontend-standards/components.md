@@ -73,19 +73,28 @@ makes a bare `<Card>` wear the palette. Geometry and interaction are the half no
 claimed: `globals.css` sets none of those, so a component's corner radius, its disabled dimming
 and its pointer are all HeroUI's defaults. `--radius-2xl` is `calc(var(--radius) * 2)`, so a
 16px arc a component draws is one alias away from being ours. Read the value out of
-`@heroui/styles/dist` before concluding a rule is the only way to reach it, and note that
-scoping one of these to a subtree rather than to a theme is our extension of the documented
-pattern, so keep an eye on what else inherits it. See [design-tokens.md](./design-tokens.md).
+`@heroui/styles/dist` before concluding a rule is the only way to reach it.
 
-**2. A wrapper or a utility, once the look repeats.** The second call site that wants the same
-look gets one owner, not the same class list typed again. A component-shaped decision belongs in
-a wrapper that takes props (`DataTable` is exactly that: pages declare columns and rows and
-never style a table), which is also what HeroUI's styling guide points at for reusable
-extensions. A value-shaped one belongs in a utility or a shared class string: the
-`@utility text-heading` family in `globals.css` carries the type roles, and `navRowClass` and
-`NAV_TRANSITION` in `app/nav/rowStyles.ts` carry a chrome row. Two copies of a class list are
-two surfaces that are meant to match and will stop matching one fix at a time, and the copy
-that missed the fix is the one somebody notices.
+Two things to get right when you set one. Scope it where the decision lives: with the theme when
+it is system-wide, on a component's own root when it is local, and note that the second is our
+extension rather than something either upstream guide demonstrates, so check what else in that
+subtree inherits it. And **scope the variable the rule actually reads.** A derived custom
+property is substituted where it is declared, not where it is used, so `--radius-2xl`, computed
+at `:root` from `--radius`, keeps the root's value inside a subtree that redefines `--radius`.
+Setting `--radius` on `.otari-table` changes nothing HeroUI draws from `--radius-2xl`; setting
+`--radius-2xl` there does. See [design-tokens.md](./design-tokens.md).
+
+**2. A wrapper first, then a utility, once the look repeats.** The second call site that wants
+the same look gets one owner, not the same class list typed again, and both upstreams say the
+owner is usually a component: HeroUI's styling guide points at a wrapper built with
+`tailwind-variants` for a reusable extension, and Tailwind's own answer to duplication is that
+"the best strategy is to create a component", with custom CSS reserved for when a partial "feels
+heavy-handed". `DataTable` is exactly that wrapper: pages declare columns and rows and never
+style a table. A value-shaped decision, rather than a markup-shaped one, is where a utility or a
+shared class string comes in: the `@utility text-heading` family in `globals.css` carries the
+type roles, and `navRowClass` and `NAV_TRANSITION` in `app/nav/rowStyles.ts` carry a chrome row.
+Two copies of a class list are two surfaces that are meant to match and will stop matching one
+fix at a time, and the copy that missed the fix is the one somebody notices.
 
 **3. The component's own API.** `variant`, `size`, `isDisabled`, `isPending`, `fullWidth`,
 `isInvalid`, and on a compound component the `className` of the subcomponent that owns the part
@@ -95,11 +104,15 @@ root, which is a prop for something `.otari-table` currently neutralizes by hand
 `className` for layout and positioning (`flex`, `gap-*`, `min-w-[…]`, responsive prefixes), not
 for re-skinning something HeroUI already styles.
 
-**4. Last: a rule against the component's own classes.** `.otari-*` in `globals.css` is the
-namespace for it (see [design-tokens.md](./design-tokens.md)), and some cases genuinely land
-here: a keyframe, something that has to outrank an inline style, or a value the library paints
-in a place it gives you no other name for. HeroUI documents this route rather than forbidding
-it, so the question is never whether it is allowed but what it costs.
+**4. Discouraged, and only when nothing above reaches it: a rule against the component's own
+classes.** `.otari-*` in `globals.css` is the namespace for it (see
+[design-tokens.md](./design-tokens.md)), and some cases genuinely land here: a keyframe,
+something that has to outrank an inline style, or a value the library paints in a place it gives
+you no other name for. HeroUI documents the route rather than forbidding it, and Tailwind says
+the same thing about custom CSS in general ("writing some custom CSS is totally fine when a
+template partial feels heavy-handed"), so the bar is not permission. The bar is that a rung
+above genuinely does not reach the value, and reaching a value is what the three above are for.
+Write one when that is true and say so; do not write one because it is the shortest edit.
 
 Three costs. A rule is per-selector rather than per-value, so it fixes the case in front of you
 and leaves every other rule reading the same variable untouched. It is invisible from the call
@@ -110,7 +123,8 @@ virtualized are not, and `.table__body tr:first-child td:first-child` is a selec
 against all three.
 
 Two things about the cascade here, because both are easy to get backwards. HeroUI's styling
-guide puts a global override inside `@layer components`; the rules in `globals.css` are
+guide puts a global override inside `@layer components`, and Tailwind's own example of
+acceptable custom CSS is in `@layer components` too; the rules in `globals.css` are
 **unlayered**, which is what makes them win, and it is not their specificity that does it, so a
 comment explaining an override by its specificity is describing the wrong mechanism. The other
 half of being unlayered is that these rules also outrank `@layer utilities`, so a Tailwind class
