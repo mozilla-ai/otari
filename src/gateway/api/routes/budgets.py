@@ -288,13 +288,11 @@ async def delete_budget(
 ) -> None:
     """Delete a budget.
 
-    Refused with 409 while a workspace hands this budget to its members. The
-    foreign key is ``RESTRICT``, so the database would refuse it anyway, but as
-    an ``IntegrityError`` reported as "Database error" with nothing naming the
-    workspace to go and detach it from. Checked here so the refusal can say
-    which ones, and because SQLite only enforces the constraint when
-    ``PRAGMA foreign_keys`` is on, which would make the same request succeed on
-    one engine and fail on the other.
+    Refused with 409 while anything still names this budget: a workspace handing
+    it to its members, or a scoped ceiling enforcing it. Both foreign keys are
+    ``RESTRICT``, so the database would refuse either anyway, but as an
+    ``IntegrityError`` reported as "Database error" with nothing naming what to
+    go and change. Checked here so the refusal can say which, and where.
     """
     result = await db.execute(select(Budget).where(Budget.budget_id == budget_id))
     budget = result.scalar_one_or_none()
@@ -322,7 +320,8 @@ async def delete_budget(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
                 "This budget is the member default for "
-                f"{', '.join(holders)}. Change or remove that default before deleting it."
+                f"{', '.join(holders)}. Change or remove that default on the workspace "
+                "(Organization > Workspaces > Edit) before deleting it."
             ),
         )
 
@@ -337,8 +336,9 @@ async def delete_budget(
             status_code=status.HTTP_409_CONFLICT,
             detail=(
                 f"This budget is enforced by {enforcing} spend "
-                f"{'ceiling' if enforcing == 1 else 'ceilings'}. Point them at another budget "
-                "or remove them before deleting it."
+                f"{'ceiling' if enforcing == 1 else 'ceilings'}. A member's ceiling is "
+                "changed on Members & roles (Edit > Workspace access); others are managed "
+                "through /v1/scoped-budgets."
             ),
         )
 

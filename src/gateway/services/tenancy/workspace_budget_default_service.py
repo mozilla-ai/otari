@@ -24,7 +24,7 @@ on success.
 from __future__ import annotations
 
 import uuid
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 
 from pydantic import BaseModel, Field
 from sqlalchemy import func, select
@@ -35,6 +35,7 @@ from sqlmodel import col
 from gateway.models.entities import Budget, ScopedBudget, WorkspaceBudgetDefault
 from gateway.models.tenancy import User, Workspace, WorkspaceMember
 from gateway.repositories.tenancy import WorkspaceMemberRepository, WorkspaceRepository
+from gateway.services.budget_periods import period_window
 from gateway.services.tenancy import authorization
 from gateway.services.tenancy.errors import (
     WorkspaceBudgetDefaultAlreadyExistsError,
@@ -50,6 +51,11 @@ from gateway.services.tenancy.organization_service import OrganizationService
 # `WorkspaceService`'s own docstring on `_delete_scoped_budgets_for` for the
 # same avoidance. `tests/unit/test_service_module_imports.py` pins the graph
 # staying acyclic.
+#
+# The *period derivation* used to be duplicated for the same reason, and that
+# copy only understood durations, so a calendar-aligned budget materialized a
+# ceiling with no window and never reset. It lives in
+# `gateway.services.budget_periods` now, a leaf both sides import.
 _SCOPE_WORKSPACE_MEMBER = "workspace_member"
 
 # Page size for fanning a new default out across a workspace's active members,
@@ -57,29 +63,6 @@ _SCOPE_WORKSPACE_MEMBER = "workspace_member"
 _MATERIALIZE_PAGE_SIZE = 500
 _MAX_LIST_LIMIT = 1000
 
-# An upper bound on a period length, in seconds (roughly ten years). Without
-# one, `_period_window`'s `datetime + timedelta(seconds=...)` overflows on an
-# arbitrarily large value: `timedelta` itself refuses more than
-# `timedelta.max`, so a request near that raises `OverflowError` (a 500)
-# instead of the 422 an out-of-range period should be.
-_MAX_BUDGET_DURATION_SEC = 10 * 365 * 24 * 3600
-
-
-def _period_window(budget_duration_sec: int | None) -> tuple[datetime | None, datetime | None]:
-    """The ``(period_start, period_end)`` a freshly materialized ``ScopedBudget`` opens with.
-
-    A private, local duplicate of the same arithmetic
-    ``routes/scoped_budgets.create_scoped_budget`` does, for the same reason
-    ``_SCOPE_WORKSPACE_MEMBER`` above is a literal rather than an import
-    (importing ``scoped_budget_service`` closes a cycle). Centralized to one
-    definition *here* at least, so the module carries one derivation instead
-    of two; worth reconciling further, into one definition shared with
-    ``scoped_budgets.py`` itself, wherever that shared home ends up landing.
-    """
-    if budget_duration_sec is None:
-        return None, None
-    now = datetime.now(UTC)
-    return now, now + timedelta(seconds=budget_duration_sec)
 
 
 class WorkspaceMemberBudgetPolicyCreate(BaseModel):
@@ -308,10 +291,17 @@ class WorkspaceBudgetDefaultService:
         thing rather than a figure duplicated per member.
 
         Only the period *window* is stamped here, because a window is this
-        member's own: two people materialized a week apart from one monthly
-        budget are each a month from their own start.
+        member's own: two people materialized a week apart from one rolling
+        monthly budget are each a month from their own start. A calendar-aligned
+        budget lands them both on the same boundary, which is what the shared
+        derivation is for.
         """
-        period_start, period_end = _period_window(budget.budget_duration_sec)
+        window = period_window(
+            datetime.now(UTC),
+            duration=budget.budget_duration_sec,
+            alignment=budget.reset_alignment,
+        )
+        period_start, period_end = window if window is not None else (None, None)
         return ScopedBudget(
             scope_type=_SCOPE_WORKSPACE_MEMBER,
             scope_id=str(member_id),

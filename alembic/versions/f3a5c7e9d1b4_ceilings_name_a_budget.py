@@ -134,14 +134,35 @@ def upgrade() -> None:
 
     # One budget per distinct shape, not per ceiling: a deployment that gave
     # forty members the same figure should end up with one budget, not forty.
+    #
+    # Seeded with the budgets that already exist, which matters most for the ones
+    # the previous revision minted for workspace defaults. Without this, a
+    # workspace's default and the ceilings materialized from it end up naming
+    # two different budgets holding equal numbers, so the budgets list would say
+    # a budget was a workspace's default while nobody in that workspace was
+    # enforced against it, and editing it would move no one. That is the exact
+    # state this pair of revisions exists to remove, so re-creating it here would
+    # make the migration a no-op in practice.
     now = datetime.now(UTC)
-    minted: dict[tuple[object, object, object], str] = {}
+    minted: dict[tuple[object, object, object], str] = {
+        (row.max_budget, row.budget_duration_sec, row.reset_alignment): row.budget_id
+        for row in bind.execute(
+            sa.text(
+                "SELECT budget_id, max_budget, budget_duration_sec, reset_alignment FROM budgets ORDER BY created_at"
+            )
+        ).fetchall()
+    }
     rows = bind.execute(
         sa.text("SELECT id, name, max_budget, budget_duration_sec, reset_alignment FROM scoped_budgets")
     ).fetchall()
     for row in rows:
         shape = (row.max_budget, row.budget_duration_sec, row.reset_alignment)
         budget_id = minted.get(shape)
+        # A ceiling that names its own figure loses it here, which is the point:
+        # if an existing budget already says the same thing, that budget is what
+        # the ceiling should have been naming all along. A ceiling's own ``name``
+        # is dropped rather than renaming the budget it joins, since the budget
+        # may be one an operator created and named deliberately.
         if budget_id is None:
             budget_id = str(uuid.uuid4())
             minted[shape] = budget_id

@@ -12546,7 +12546,7 @@
     },
     "/v1/budgets/{budget_id}": {
       "delete": {
-        "description": "Delete a budget.\n\nRefused with 409 while a workspace hands this budget to its members. The\nforeign key is ``RESTRICT``, so the database would refuse it anyway, but as\nan ``IntegrityError`` reported as \"Database error\" with nothing naming the\nworkspace to go and detach it from. Checked here so the refusal can say\nwhich ones, and because SQLite only enforces the constraint when\n``PRAGMA foreign_keys`` is on, which would make the same request succeed on\none engine and fail on the other.",
+        "description": "Delete a budget.\n\nRefused with 409 while anything still names this budget: a workspace handing\nit to its members, or a scoped ceiling enforcing it. Both foreign keys are\n``RESTRICT``, so the database would refuse either anyway, but as an\n``IntegrityError`` reported as \"Database error\" with nothing naming what to\ngo and change. Checked here so the refusal can say which, and where.",
         "operationId": "delete_budget_v1_budgets__budget_id__delete",
         "parameters": [
           {

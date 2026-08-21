@@ -12,7 +12,7 @@ from gateway.core.config import GatewayConfig
 from gateway.models.entities import AgentTelemetry, APIKey, Budget, UsageLog, User
 from gateway.models.money import as_float
 from gateway.repositories.users_repository import get_active_user
-from gateway.services.budget_service import calculate_next_reset
+from gateway.services.budget_periods import budget_window
 from gateway.services.model_access import validate_allowed_models
 
 router = APIRouter(prefix="/v1/users", tags=["users"])
@@ -170,11 +170,10 @@ async def create_user(
 
     if budget is not None:
         now = datetime.now(UTC)
-        user.budget_started_at = now
-        if budget.budget_duration_sec:
-            user.next_budget_reset_at = calculate_next_reset(now, budget.budget_duration_sec)
-        else:
-            user.next_budget_reset_at = None
+        window = budget_window(now, budget)
+        user.budget_started_at, user.next_budget_reset_at = (
+            window if window is not None else (now, None)
+        )
 
     try:
         await db.commit()
@@ -268,11 +267,10 @@ async def update_user(
 
             user.budget_id = request.budget_id
             now = datetime.now(UTC)
-            user.budget_started_at = now
-            if budget.budget_duration_sec:
-                user.next_budget_reset_at = calculate_next_reset(now, budget.budget_duration_sec)
-            else:
-                user.next_budget_reset_at = None
+            window = budget_window(now, budget)
+            user.budget_started_at, user.next_budget_reset_at = (
+                window if window is not None else (now, None)
+            )
     if request.blocked is not None:
         user.blocked = request.blocked
     if request.metadata is not None:

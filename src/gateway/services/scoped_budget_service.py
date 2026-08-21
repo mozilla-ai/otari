@@ -25,7 +25,7 @@ from __future__ import annotations
 
 import uuid
 from dataclasses import dataclass
-from datetime import UTC, datetime, timedelta
+from datetime import UTC, datetime
 from typing import TYPE_CHECKING, Literal, get_args
 
 from sqlalchemy import and_, case, or_, select, update
@@ -35,6 +35,13 @@ from sqlmodel import col
 from gateway.log_config import logger
 from gateway.models.entities import APIKey, Budget, ScopedBudget
 from gateway.models.tenancy import OrganizationMember, Workspace, WorkspaceMember
+from gateway.services.budget_periods import (
+    ALIGN_DAY,
+    ALIGN_MONTH,
+    ALIGN_WEEK,
+    ResetAlignment,
+    period_window,
+)
 from gateway.services.workspace_scope import resolve_workspace_id
 
 if TYPE_CHECKING:
@@ -57,17 +64,6 @@ SCOPE_API_TOKEN = "api_token"
 ScopeType = Literal["organization", "workspace", "workspace_member", "org_member", "api_token"]
 SCOPE_TYPES: tuple[ScopeType, ...] = get_args(ScopeType)
 
-ALIGN_DAY = "calendar_day"
-ALIGN_WEEK = "calendar_week"
-ALIGN_MONTH = "calendar_month"
-
-# The other way a ceiling can carry a period, and like ``ScopeType`` the one
-# place the wire vocabulary is written. A row holds either a duration in seconds
-# (a rolling window measured from the last reset) or one of these (a window
-# snapped to a UTC calendar boundary), never both: a CHECK on the table refuses
-# the fourth state. This is not a period enum, it only says which boundary a
-# reset snaps to, and a calendar month is the one no number of seconds can name.
-ResetAlignment = Literal["calendar_day", "calendar_week", "calendar_month"]
 
 # Most specific first, so the ceiling closest to the caller is the one that
 # refuses when several are exhausted at once and the reported error is the
@@ -201,46 +197,6 @@ async def _resolve_identities(
     if scope.api_key is not None:
         identities.append((SCOPE_API_TOKEN, scope.api_key.id))
     return identities
-
-
-def _aligned_window(alignment: str, now: datetime) -> tuple[datetime, datetime]:
-    """The UTC calendar window containing ``now``.
-
-    Derived from the boundary rather than from ``now`` itself, which is the point:
-    a budget rolled late still lands on the window it belongs to, so when anything
-    looked at the row stops leaking into the period it gets.
-    """
-    day = now.astimezone(UTC).replace(hour=0, minute=0, second=0, microsecond=0)
-    if alignment == ALIGN_DAY:
-        return day, day + timedelta(days=1)
-    if alignment == ALIGN_WEEK:
-        # ISO weeks, so a week runs Monday 00:00 to the next Monday 00:00.
-        start = day - timedelta(days=day.weekday())
-        return start, start + timedelta(days=7)
-    if alignment == ALIGN_MONTH:
-        start = day.replace(day=1)
-        end = start.replace(year=start.year + 1, month=1) if start.month == 12 else start.replace(month=start.month + 1)
-        return start, end
-    raise ValueError(f"Unknown reset alignment: {alignment!r}")
-
-
-def period_window(
-    now: datetime,
-    *,
-    duration: int | None,
-    alignment: str | None,
-) -> tuple[datetime, datetime] | None:
-    """The window a ceiling with this cadence occupies at ``now``, or None for one that never resets.
-
-    The single place a period is derived, so a window written at creation, a
-    window rewritten by a retiming, and a window rolled at the gate cannot drift
-    apart. Raises ``ValueError`` for an alignment this codebase does not know.
-    """
-    if alignment is not None:
-        return _aligned_window(alignment, now)
-    if duration:
-        return now, now + timedelta(seconds=duration)
-    return None
 
 
 async def _roll_expired_periods(

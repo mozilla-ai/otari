@@ -1,7 +1,7 @@
 import { Button, Card, Chip } from "@heroui/react"
 import { useMemo, useState } from "react"
 
-import type { Budget, Workspace } from "@/client"
+import type { Budget, Workspace, WorkspaceBudgetDefault } from "@/client"
 import { canManage } from "@/features/organization/roles"
 import {
   useAllWorkspaceBudgetDefaults,
@@ -11,6 +11,7 @@ import {
   useDeleteWorkspace,
   useDeleteWorkspaceBudgetDefault,
   useOrganizationContext,
+  useProviders,
   useUpdateWorkspace,
   useUpdateWorkspaceBudgetDefault,
   useWorkspaceBudgetDefaults,
@@ -44,10 +45,25 @@ const LAST_WORKSPACE_REASON =
 // The budget every member of a workspace is given. It is not a field on the
 // workspace: it is a default row that materializes a real per-member ceiling
 // when someone joins, so a person in two workspaces holds two ceilings, one from
-// each. Only the aggregate default (the one narrowed to no provider) is offered
-// here, which is the one the design draws; a provider-narrowed default still
-// shows on the budgets list, under "Default for".
+// each.
+//
+// A workspace may also narrow a default to one provider, which the field below
+// does not cover. Those are managed in the section under it rather than left
+// unreachable: an upgraded deployment can already have them, they show on the
+// budgets list under "Default for", and deleting the budget one names is refused
+// with a message telling the operator to come and change it.
 const NO_DEFAULT = ""
+
+function budgetLabel(budget: Budget): string {
+  return budget.name ?? budget.budget_id.split("-")[0]
+}
+
+function budgetChoices(budgets: Budget[]): { value: string; label: string }[] {
+  return budgets.map((budget) => ({
+    value: budget.budget_id,
+    label: budgetLabel(budget),
+  }))
+}
 
 function DefaultBudgetPicker({
   budgets,
@@ -65,12 +81,139 @@ function DefaultBudgetPicker({
       onChange={onChange}
       options={[
         { value: NO_DEFAULT, label: "No default" },
-        ...budgets.map((budget) => ({
-          value: budget.budget_id,
-          label: budget.name ?? budget.budget_id.split("-")[0],
-        })),
+        ...budgetChoices(budgets),
       ]}
     />
+  )
+}
+
+/**
+ * The defaults a workspace narrows to one provider.
+ *
+ * Separate from the field above because they are a different question: that one
+ * is "what does everyone here get", these are "and what do they get on this
+ * provider specifically". Writes go straight through rather than waiting for the
+ * form's Save, since each is its own row and batching them would mean holding a
+ * pending create, a pending retarget and a pending delete for an arbitrary number
+ * of providers to no benefit.
+ */
+function NarrowedDefaults({
+  workspaceId,
+  budgets,
+  narrowed,
+  providers,
+}: {
+  workspaceId: string
+  budgets: Budget[]
+  narrowed: WorkspaceBudgetDefault[]
+  providers: string[]
+}) {
+  const createDefault = useCreateWorkspaceBudgetDefault()
+  const updateDefault = useUpdateWorkspaceBudgetDefault()
+  const deleteDefault = useDeleteWorkspaceBudgetDefault()
+  const [provider, setProvider] = useState("")
+  const [budgetId, setBudgetId] = useState("")
+
+  const taken = new Set(narrowed.map((row) => row.provider_key_id))
+  const available = providers.filter((instance) => !taken.has(instance))
+  const pending =
+    createDefault.isPending ||
+    updateDefault.isPending ||
+    deleteDefault.isPending
+
+  return (
+    <div className="flex flex-col gap-2">
+      <span className="text-sm font-medium text-foreground">
+        Per-provider defaults
+      </span>
+      <ErrorBanner
+        error={
+          createDefault.error ?? updateDefault.error ?? deleteDefault.error
+        }
+      />
+      {narrowed.length === 0 ? (
+        <span className="text-xs text-muted">
+          None. The budget above applies on every provider.
+        </span>
+      ) : (
+        <ul className="flex flex-col gap-1.5">
+          {narrowed.map((row) => (
+            <li key={row.id} className="flex items-center gap-2">
+              <Chip size="sm">{row.provider_key_id}</Chip>
+              <FilterSelect
+                ariaLabel={`Budget for ${row.provider_key_id}`}
+                value={row.budget_id}
+                onChange={(next) =>
+                  updateDefault.mutate({
+                    workspaceId,
+                    defaultId: row.id,
+                    body: { budget_id: next },
+                  })
+                }
+                options={budgetChoices(budgets)}
+                disabled={pending}
+              />
+              <Button
+                size="sm"
+                variant="danger-soft"
+                isDisabled={pending}
+                onPress={() =>
+                  deleteDefault.mutate({ workspaceId, defaultId: row.id })
+                }
+              >
+                Remove
+              </Button>
+            </li>
+          ))}
+        </ul>
+      )}
+      {available.length > 0 && budgets.length > 0 ? (
+        <div className="flex items-end gap-2">
+          <FilterSelect
+            label="Provider"
+            value={provider}
+            onChange={setProvider}
+            options={[
+              { value: "", label: "Select a provider…" },
+              ...available.map((instance) => ({
+                value: instance,
+                label: instance,
+              })),
+            ]}
+          />
+          <FilterSelect
+            label="Budget"
+            value={budgetId}
+            onChange={setBudgetId}
+            options={[
+              { value: "", label: "Select a budget…" },
+              ...budgetChoices(budgets),
+            ]}
+          />
+          <Button
+            size="sm"
+            variant="ghost"
+            isDisabled={pending || provider === "" || budgetId === ""}
+            onPress={() =>
+              createDefault.mutate(
+                {
+                  workspaceId,
+                  body: { budget_id: budgetId, provider_key_id: provider },
+                },
+                {
+                  onSuccess: () => {
+                    setProvider("")
+                    setBudgetId("")
+                  },
+                },
+              )
+            }
+          >
+            Add
+          </Button>
+        </div>
+      ) : null}
+    </div>
   )
 }
 
@@ -175,6 +318,10 @@ function EditWorkspaceForm({
   const aggregate = (defaults.data ?? []).find(
     (row) => row.provider_key_id === null,
   )
+  const narrowed = (defaults.data ?? []).filter(
+    (row) => row.provider_key_id !== null,
+  )
+  const providers = useProviders()
   const [name, setName] = useState(workspace.name)
   const [description, setDescription] = useState(workspace.description ?? "")
   const [budgetId, setBudgetId] = useState<string | null>(null)
@@ -243,8 +390,17 @@ function EditWorkspaceForm({
         <span className="max-w-md text-xs text-muted">
           Every member of this workspace is held to this budget, each with their
           own allowance. Changing it applies to members who join afterwards;
-          members already here keep what they were given.
+          members already here keep the budget they were given, though editing
+          that budget still moves them.
         </span>
+        <NarrowedDefaults
+          workspaceId={workspace.id}
+          budgets={budgets.data ?? []}
+          narrowed={narrowed}
+          providers={(providers.data?.providers ?? []).map(
+            (provider) => provider.instance,
+          )}
+        />
         <div className="flex gap-2">
           <Button
             variant="primary"

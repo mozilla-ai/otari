@@ -547,13 +547,11 @@ export interface paths {
          * Delete Budget
          * @description Delete a budget.
          *
-         *     Refused with 409 while a workspace hands this budget to its members. The
-         *     foreign key is ``RESTRICT``, so the database would refuse it anyway, but as
-         *     an ``IntegrityError`` reported as "Database error" with nothing naming the
-         *     workspace to go and detach it from. Checked here so the refusal can say
-         *     which ones, and because SQLite only enforces the constraint when
-         *     ``PRAGMA foreign_keys`` is on, which would make the same request succeed on
-         *     one engine and fail on the other.
+         *     Refused with 409 while anything still names this budget: a workspace handing
+         *     it to its members, or a scoped ceiling enforcing it. Both foreign keys are
+         *     ``RESTRICT``, so the database would refuse either anyway, but as an
+         *     ``IntegrityError`` reported as "Database error" with nothing naming what to
+         *     go and change. Checked here so the refusal can say which, and where.
          */
         delete: operations["delete_budget_v1_budgets__budget_id__delete"];
         options?: never;

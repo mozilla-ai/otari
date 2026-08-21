@@ -111,6 +111,7 @@ async def _budget(
     *,
     max_budget: float | None = None,
     budget_duration_sec: int | None = None,
+    reset_alignment: str | None = None,
     name: str | None = None,
 ) -> str:
     """A budget for a default to hand out, returning its id.
@@ -118,7 +119,12 @@ async def _budget(
     A default no longer carries a limit of its own: it names a ``budgets`` row,
     which is what lets the Budgets page say a limit is a workspace's default.
     """
-    budget = Budget(name=name, max_budget=max_budget, budget_duration_sec=budget_duration_sec)
+    budget = Budget(
+        name=name,
+        max_budget=max_budget,
+        budget_duration_sec=budget_duration_sec,
+        reset_alignment=reset_alignment,
+    )
     db.add(budget)
     await db.flush()
     return budget.budget_id
@@ -598,3 +604,106 @@ async def test_concurrent_default_create_and_member_add_both_land(
     budget = await _member_budget(async_db, joined_member.id)
     assert budget is not None, "the new member must get the default whichever transaction committed first"
     assert await _limit(async_db, budget) == 40.0
+
+
+@pytest.mark.asyncio
+async def test_a_calendar_aligned_budget_materializes_a_window_that_rolls(async_db: AsyncSession) -> None:
+    """A cadence the budget declares has to reach the ceiling it hands out.
+
+    Materialization derived the window from ``budget_duration_sec`` alone, in a
+    local copy of the derivation that predated budgets being able to carry an
+    alignment. A calendar-aligned budget therefore produced a ceiling with a null
+    window, and ``_roll_expired_periods`` only rolls a window that exists, so the
+    cadence was silently ignored forever and spend accumulated until the member
+    was permanently refused. Nothing surfaced it: the row looked normal.
+    """
+    org = await _organization(async_db, slug="acme-aligned")
+    owner = await _member(async_db, org, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, org, name="Engineering", owner=owner)
+
+    service = WorkspaceBudgetDefaultService(async_db)
+    await service.create_default(
+        user=owner,
+        workspace_id=workspace.id,
+        request=WorkspaceMemberBudgetPolicyCreate(
+            budget_id=await _budget(async_db, max_budget=500.0, reset_alignment="calendar_month")
+        ),
+    )
+
+    workspace_members = WorkspaceMemberRepository(async_db)
+    owner_member = await workspace_members.get_by_workspace_and_user(workspace.id, owner.id)
+    assert owner_member is not None
+    ceiling = await _member_budget(async_db, owner_member.id)
+    assert ceiling is not None
+
+    assert ceiling.period_start is not None, "an aligned budget must still open a window"
+    assert ceiling.period_end is not None
+    # The calendar boundary, not "a month from now": everyone on this budget rolls
+    # together, which is what distinguishes an alignment from a rolling duration.
+    assert ceiling.period_start.day == 1
+    assert ceiling.period_start.hour == 0
+    assert ceiling.period_end > ceiling.period_start
+
+
+@pytest.mark.asyncio
+async def test_editing_a_budget_moves_every_ceiling_naming_it(async_db: AsyncSession) -> None:
+    """The inversion this whole change is for, and nothing else pins it.
+
+    A ceiling used to copy the figure at materialization, so editing a budget
+    left everyone already holding one on the old number. It reads through now, so
+    one edit moves every ceiling naming it. Asserted at the enforcement layer's
+    own read rather than through the ORM object, since that is what the gate uses.
+    """
+    org = await _organization(async_db, slug="acme-retro")
+    owner = await _member(async_db, org, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, org, name="Engineering", owner=owner)
+
+    budget_id = await _budget(async_db, max_budget=10.0)
+    service = WorkspaceBudgetDefaultService(async_db)
+    await service.create_default(
+        user=owner, workspace_id=workspace.id, request=WorkspaceMemberBudgetPolicyCreate(budget_id=budget_id)
+    )
+
+    workspace_members = WorkspaceMemberRepository(async_db)
+    owner_member = await workspace_members.get_by_workspace_and_user(workspace.id, owner.id)
+    assert owner_member is not None
+    ceiling = await _member_budget(async_db, owner_member.id)
+    assert ceiling is not None
+    assert await _limit(async_db, ceiling) == 10.0
+
+    budget = await async_db.get(Budget, budget_id)
+    assert budget is not None
+    budget.max_budget = 250.0
+    await async_db.commit()
+
+    assert await _limit(async_db, ceiling) == 250.0, "an existing ceiling must follow the budget it names"
+
+
+@pytest.mark.asyncio
+async def test_removing_a_member_takes_their_workspace_ceiling_with_them(async_db: AsyncSession) -> None:
+    """An orphaned ceiling is not inert, so removal has to sweep it.
+
+    ``scoped_budgets.scope_id`` is not a foreign key, so nothing cascades. A
+    ceiling naming a membership that no longer exists can never bind again, and
+    it holds a RESTRICT reference to its budget, so leaving one behind refuses
+    that budget's deletion forever with no page listing ceilings to find it on.
+    """
+    org = await _organization(async_db, slug="acme-sweep")
+    owner = await _member(async_db, org, role="owner", full_name="Owner")
+    leaver = await _member(async_db, org, role="member", full_name="Leaver")
+    workspace = await _workspace(async_db, org, name="Engineering", owner=owner)
+
+    service = WorkspaceBudgetDefaultService(async_db)
+    await service.create_default(
+        user=owner,
+        workspace_id=workspace.id,
+        request=WorkspaceMemberBudgetPolicyCreate(budget_id=await _budget(async_db, max_budget=25.0)),
+    )
+
+    workspace_service = WorkspaceService(async_db)
+    added = await workspace_service.add_member(user=owner, workspace_id=workspace.id, user_id=leaver.id)
+    assert await _member_budget(async_db, added.id) is not None
+
+    await workspace_service.remove_member(user=owner, workspace_id=workspace.id, user_id=leaver.id)
+
+    assert await _member_budget(async_db, added.id) is None, "the ceiling must not outlive the membership"

@@ -433,6 +433,19 @@ class WorkspaceService:
         if member is None:
             return
 
+        # The ceilings keyed on this membership go with it, for the same reason
+        # `delete_workspace` sweeps them: `scoped_budgets.scope_id` is not a
+        # foreign key, so nothing cascades, and a ceiling naming a membership that
+        # no longer exists can never bind again. It is not inert, either: it holds
+        # a RESTRICT reference to its budget, so an orphan would refuse that
+        # budget's deletion forever, and there is no page listing ceilings to go
+        # and find it on. Same transaction, so a failed removal takes them back.
+        await self.db.execute(
+            delete(ScopedBudget).where(
+                ScopedBudget.scope_type == "workspace_member",
+                ScopedBudget.scope_id == str(member.id),
+            )
+        )
         await self.members.delete(member)
         await self.db.commit()
 
