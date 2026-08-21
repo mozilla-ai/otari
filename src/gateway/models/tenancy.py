@@ -273,6 +273,20 @@ class User(UserBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
     # would let either confirm the other's address.
     email_verification_token: str | None = Field(default=None, unique=True, index=True)
     email_verified_at: datetime | None = _timestamp_field(default=None, column_kwargs={})
+    # otari#650's own columns, added alongside rather than reusing
+    # ``email_verification_token`` above: that one is carried verbatim for
+    # hosted-edition parity and stores a raw token per its own comment, and
+    # repurposing it to hold a hash would be an undocumented divergence from
+    # whatever the hosted platform's production column still expects of it.
+    # These four follow the invitation token's own shape instead
+    # (`Invitation.token_hash`): only a SHA-256 hash is ever stored
+    # (`gateway.services.tenancy.tokens`), and single-use is enforced by
+    # clearing the hash and expiry to NULL on success rather than by a status
+    # column, so a replayed token simply matches no row.
+    email_verification_token_hash: str | None = Field(default=None, unique=True, index=True, max_length=64)
+    email_verification_token_expires_at: datetime | None = _timestamp_field(default=None, column_kwargs={})
+    password_reset_token_hash: str | None = Field(default=None, unique=True, index=True, max_length=64)
+    password_reset_token_expires_at: datetime | None = _timestamp_field(default=None, column_kwargs={})
     # NOT NULL: every identity is always looking at exactly one organization,
     # which is what lets the tenancy routes resolve a scope from the caller
     # alone. Provisioning therefore creates the organization first.

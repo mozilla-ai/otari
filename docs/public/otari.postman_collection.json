@@ -457,6 +457,108 @@
           }
         },
         {
+          "name": "Request Reset",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"email\": \"string\"\n}"
+            },
+            "description": "Mail a password-reset link, or do nothing: the response never says which.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "password",
+                "reset"
+              ],
+              "raw": "{{baseUrl}}/v1/auth/password/reset"
+            }
+          }
+        },
+        {
+          "name": "Confirm Reset",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"token\": \"string\",\n  \"new_password\": \"string\"\n}"
+            },
+            "description": "Complete a password reset. Single-use: the token stops working after this.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "password",
+                "reset",
+                "confirm"
+              ],
+              "raw": "{{baseUrl}}/v1/auth/password/reset/confirm"
+            }
+          }
+        },
+        {
+          "name": "Resend Verification",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"email\": \"string\"\n}"
+            },
+            "description": "Mail a fresh verification link, or do nothing: the response never says which.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "resend-verification"
+              ],
+              "raw": "{{baseUrl}}/v1/auth/resend-verification"
+            }
+          }
+        },
+        {
           "name": "Create Session",
           "request": {
             "body": {
@@ -505,6 +607,72 @@
                 "session"
               ],
               "raw": "{{baseUrl}}/v1/auth/session"
+            }
+          }
+        },
+        {
+          "name": "Signup",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"email\": \"string\",\n  \"password\": \"string\"\n}"
+            },
+            "description": "Claim a roster identity: set its password and send a verification link.\n\nNo session is minted. The identity is hard-blocked from signing in until it\nverifies, so there is nothing yet to sign it into.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "signup"
+              ],
+              "raw": "{{baseUrl}}/v1/auth/signup"
+            }
+          }
+        },
+        {
+          "name": "Verify Email Route",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"token\": \"string\"\n}"
+            },
+            "description": "Confirm an address from its verification link, lifting the sign-in gate.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "verify-email"
+              ],
+              "raw": "{{baseUrl}}/v1/auth/verify-email"
             }
           }
         }

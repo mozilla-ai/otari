@@ -5,7 +5,9 @@ from gateway.api.routes import (
     aliases,
     audio,
     auth_password,
+    auth_password_reset,
     auth_session,
+    auth_signup,
     batches,
     bootstrap,
     budgets,
@@ -63,6 +65,8 @@ def register_routers(app: FastAPI, config: GatewayConfig) -> None:
 
     app.include_router(auth_session.router)
     app.include_router(auth_password.router)
+    app.include_router(auth_signup.router)
+    app.include_router(auth_password_reset.router)
     app.include_router(embeddings.router)
     app.include_router(images.router)
     app.include_router(audio.router)

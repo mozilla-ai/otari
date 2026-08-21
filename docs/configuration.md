@@ -72,6 +72,8 @@ pricing:
 | `mail_from_email` | string | none | The `From` address on outgoing mail. Required, alongside `smtp_host`, for mail to actually send. |
 | `mail_from_name` | string | `Otari` | The `From` display name on outgoing mail |
 | `invitation_expiry_hours` | int | `168` | How long an organization invitation stays acceptable (default 7 days) |
+| `email_verification_expiry_hours` | int | `48` | How long an email-verification link stays acceptable |
+| `password_reset_expiry_hours` | int | `2` | How long a password-reset link stays acceptable |
 | `rate_limit_rpm` | int | none | Max requests per minute per user (none = disabled) |
 | `cors_allow_origins` | list | `[]` | Allowed CORS origins (empty = disabled) |
 | `providers` | dict | `{}` | Provider credentials (see below) |

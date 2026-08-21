@@ -268,16 +268,24 @@ def test_claiming_an_identity_that_already_has_an_address_stamps_it_verified(tmp
 
 
 def test_an_ordinary_password_change_does_not_stamp_the_address_verified(tmp_path: Path) -> None:
-    """Proving the current password says the caller owns the account, not the address."""
+    """Proving the current password says the caller owns the account, not the address.
+
+    The session is established *before* ``email_verified_at`` is nulled out, and
+    on purpose: #650's sign-in gate would otherwise refuse the very sign-in this
+    test uses to reach the change. A cookie already resolved does not re-check
+    verification on every request (``resolve_dashboard_session`` checks only
+    ``is_active``), so the established session still reaches the password
+    change, which is what is actually under test here.
+    """
     with _client(tmp_path) as client:
         _claim(client)
 
-    engine = create_engine(f"sqlite:///{tmp_path / 'password-test.db'}")
-    with engine.begin() as connection:
-        connection.execute(text('UPDATE "user" SET email_verified_at = NULL'))
-
-    with _client(tmp_path) as client:
         assert client.post("/v1/auth/session", json={"email": EMAIL, "password": PASSWORD}).status_code == 200
+
+        engine = create_engine(f"sqlite:///{tmp_path / 'password-test.db'}")
+        with engine.begin() as connection:
+            connection.execute(text('UPDATE "user" SET email_verified_at = NULL'))
+
         assert (
             client.put(
                 "/v1/auth/password",
@@ -462,6 +470,34 @@ def test_a_deactivated_identity_cannot_sign_in(tmp_path: Path) -> None:
 
     with _client(tmp_path) as client:
         assert client.post("/v1/auth/session", json={"email": EMAIL, "password": PASSWORD}).status_code == 401
+
+
+def test_an_unverified_identity_with_the_right_password_is_refused(tmp_path: Path) -> None:
+    """#650's hard-block: the right password is not enough until the address is verified.
+
+    Distinct from every other sign-in failure: the password has already been
+    proven correct by the time this is checked, so the caller is told what is
+    actually wrong rather than folded into ``InvalidCredentialsError``.
+    """
+    with _client(tmp_path) as client:
+        _claim(client)
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'password-test.db'}")
+    with engine.begin() as connection:
+        connection.execute(text('UPDATE "user" SET email_verified_at = NULL'))
+
+    with _client(tmp_path) as client:
+        response = client.post("/v1/auth/session", json={"email": EMAIL, "password": PASSWORD})
+        assert response.status_code == 403, response.text
+        assert "verify your email" in response.json()["detail"].lower()
+        assert SESSION_COOKIE_NAME not in client.cookies
+
+
+def test_a_verified_identity_signs_in_normally(tmp_path: Path) -> None:
+    """Claiming the deployment stamps ``email_verified_at``, so sign-in is unaffected by #650's gate."""
+    with _client(tmp_path) as client:
+        _claim(client)
+        assert client.post("/v1/auth/session", json={"email": EMAIL, "password": PASSWORD}).status_code == 200
 
 
 @pytest.mark.parametrize(

@@ -1,0 +1,145 @@
+"""Signup: claiming an identity ``organization_service`` already put on the roster.
+
+Unit rather than integration, the same reasoning ``test_password_sign_in.py``
+gives: everything under test is route, service and identity behavior that runs
+unchanged on the SQLite file each test stands up. Mail runs on the console
+transport, which logs the rendered message (including the verification link)
+rather than delivering it, the same pattern ``test_invitations_api.py`` uses to
+observe an emailed link without a real SMTP server.
+"""
+
+import logging
+import re
+from pathlib import Path
+
+import pytest
+from fastapi.testclient import TestClient
+from sqlalchemy import create_engine, text
+
+from gateway.core.config import GatewayConfig
+from gateway.log_config import logger as gateway_logger
+from gateway.main import create_app
+
+MASTER_KEY = "sk-test-master"
+PASSWORD = "a-real-password"  # pragma: allowlist secret
+
+_TOKEN_IN_LINK = re.compile(r"token=([\w-]+)")
+
+
+def _config(tmp_path: Path, *, mail_ready: bool = True) -> GatewayConfig:
+    return GatewayConfig(
+        database_url=f"sqlite:///{tmp_path / 'signup-test.db'}",
+        master_key=MASTER_KEY,
+        require_pricing=False,
+        mail_transport="console" if mail_ready else "none",
+        public_base_url="https://gw.example.com" if mail_ready else None,
+    )
+
+
+def _client(tmp_path: Path, *, mail_ready: bool = True) -> TestClient:
+    return TestClient(create_app(_config(tmp_path, mail_ready=mail_ready)))
+
+
+def _add_member(client: TestClient, *, email: str, role: str = "member") -> None:
+    """Put a password-less, unclaimed identity on the roster, as an admin would."""
+    response = client.post(
+        "/v1/organizations/me/members",
+        json={"email": email, "role": role},
+        headers={"Otari-Key": MASTER_KEY},
+    )
+    assert response.status_code == 201, response.text
+
+
+def _signup(client: TestClient, *, email: str, password: str = PASSWORD, **extra: object):  # noqa: ANN202
+    return client.post("/v1/auth/signup", json={"email": email, "password": password, **extra})
+
+
+def _captured_verification_link(caplog: pytest.LogCaptureFixture, client: TestClient, **kwargs: object) -> str:
+    """Sign up, expecting success, and pull the emailed link's token out of the console log."""
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.INFO, logger="gateway")
+    try:
+        response = _signup(client, **kwargs)
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+    assert response.status_code == 200, response.text
+    match = _TOKEN_IN_LINK.search(caplog.text)
+    assert match, caplog.text
+    return match.group(1)
+
+
+def test_signup_claims_a_roster_identity_and_sends_a_verification_link(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    with _client(tmp_path) as client:
+        _add_member(client, email="ada@example.com")
+
+        token = _captured_verification_link(
+            caplog, client, email="ada@example.com", full_name="Ada Lovelace"
+        )
+
+        # Unverified: the hard-block refuses the very password just set.
+        response = client.post("/v1/auth/session", json={"email": "ada@example.com", "password": PASSWORD})
+        assert response.status_code == 403
+
+        verified = client.post("/v1/auth/verify-email", json={"token": token})
+        assert verified.status_code == 200, verified.text
+        assert verified.json()["email"] == "ada@example.com"
+
+        response = client.post("/v1/auth/session", json={"email": "ada@example.com", "password": PASSWORD})
+        assert response.status_code == 200
+
+
+def test_signup_preserves_the_existing_membership_and_organization(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    with _client(tmp_path) as client:
+        _add_member(client, email="grace@example.com", role="admin")
+        headers = {"Otari-Key": MASTER_KEY}
+
+        def _roster_row() -> dict[str, object]:
+            members = client.get("/v1/organizations/me/members", headers=headers).json()["data"]
+            return next(row for row in members if row["email"] == "grace@example.com")
+
+        before = _roster_row()
+        _captured_verification_link(caplog, client, email="grace@example.com")
+        after = _roster_row()
+
+        assert after["role"] == before["role"] == "admin"
+        assert after["organization_member_id"] == before["organization_member_id"]
+
+
+def test_signup_on_an_untouched_address_is_refused(tmp_path: Path) -> None:
+    with _client(tmp_path) as client:
+        assert _signup(client, email="nobody@example.com").status_code == 404
+
+
+def test_signup_on_an_already_completed_address_is_refused(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    with _client(tmp_path) as client:
+        _add_member(client, email="ada@example.com")
+        _captured_verification_link(caplog, client, email="ada@example.com")
+
+        again = _signup(client, email="ada@example.com", password="a-different-password")
+        assert again.status_code == 409
+
+
+def test_signup_without_mail_configured_is_refused_and_writes_nothing(tmp_path: Path) -> None:
+    with _client(tmp_path, mail_ready=False) as client:
+        _add_member(client, email="ada@example.com")
+
+        assert _signup(client, email="ada@example.com").status_code == 503
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'signup-test.db'}")
+    with engine.begin() as connection:
+        row = (
+            connection.execute(
+                text('SELECT hashed_password, email_verification_token_hash FROM "user" WHERE email = :email'),
+                {"email": "ada@example.com"},
+            )
+            .mappings()
+            .one()
+        )
+    assert row["hashed_password"] is None
+    assert row["email_verification_token_hash"] is None

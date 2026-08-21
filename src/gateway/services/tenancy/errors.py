@@ -481,6 +481,86 @@ class InvitationAlreadyUsedError(TenancyValidationError):
         super().__init__("This invitation has already been used or is no longer valid")
 
 
+class VerificationTokenInvalidError(TenancyValidationError):
+    """A verification token that is unknown, expired, or already consumed.
+
+    One message for all three, the same reasoning ``InvitationNotFoundError``
+    gives an unknown-or-foreign invitation: distinguishing "expired" from
+    "already used" from "never existed" would let a caller narrow down which
+    is true of a token they do not hold.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("This verification link is invalid, expired, or already used")
+
+
+class SignupAlreadyCompletedError(TenancyConflictError):
+    """Signup was asked to claim an identity that already has a password.
+
+    A distinct message from ``EmailAlreadyInUseError``: that one says the
+    address belongs to someone else, which is false here. This identity
+    already finished claiming it and should sign in instead.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("This identity has already completed signup; sign in instead")
+
+
+class UnknownSignupAddressError(TenancyNotFoundError):
+    """Signup was asked to claim an address no admin has added or invited.
+
+    Not an enumeration risk the way a sign-in failure would be: the caller was
+    told by an operator to expect an invitation, not probing a stranger's
+    roster, so naming the actual condition guides them rather than leaking
+    anything about someone else's account.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "No pending identity holds this address; ask an administrator to add or invite you first"
+        )
+
+
+class ResetTokenInvalidError(TenancyValidationError):
+    """A password-reset token that is unknown, expired, or already consumed.
+
+    Same collapse as ``VerificationTokenInvalidError``, for the same reason.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("This password reset link is invalid, expired, or already used")
+
+
+class EmailNotVerifiedError(TenancyForbiddenError):
+    """A password sign-in on an identity that has not verified its address.
+
+    Raised only after the password itself has already checked out, which is
+    why it is allowed to say what is actually wrong: the distinction the
+    module docstring on ``authenticate`` promises survives once a caller has
+    proven something, the same way ``CurrentPasswordIncorrectError`` and
+    ``PasswordNotSetError`` do.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("Verify your email before signing in; request a new verification email if yours expired")
+
+
+class SignupMailNotConfiguredError(TenancyError):
+    """Wraps ``services.mail.MailNotConfiguredError`` so signup/verify/reset routes stay thin.
+
+    503, not a client error: the caller sent a well-formed request and a
+    missing mail transport is a deployment configuration gap they cannot fix,
+    the same reasoning ``SecretBoxUnavailableTenancyError`` gives a missing
+    secret key.
+    """
+
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+
+    def __init__(self, missing: tuple[str, ...] = ()) -> None:
+        detail = ", ".join(missing) if missing else "a mail transport"
+        super().__init__(f"This deployment cannot send the required email (missing: {detail})")
+
+
 class WorkspaceBudgetDefaultNotFoundError(TenancyNotFoundError):
     def __init__(self, default_id: object):
         super().__init__(f"Workspace budget default {default_id} not found")
@@ -497,6 +577,7 @@ __all__ = [
     "CurrentPasswordRequiredError",
     "EmailAlreadyInUseError",
     "EmailChangeNotSupportedError",
+    "EmailNotVerifiedError",
     "ForeignTenancyError",
     "InvalidCredentialsError",
     "InvalidEmailError",
@@ -526,14 +607,19 @@ __all__ = [
     "OrganizationPricingOverlapError",
     "PasswordNotSetError",
     "PasswordPolicyError",
+    "ResetTokenInvalidError",
     "SecretBoxUnavailableTenancyError",
     "SignInAddressRequiredError",
+    "SignupAlreadyCompletedError",
+    "SignupMailNotConfiguredError",
     "TenancyConflictError",
     "TenancyError",
     "TenancyForbiddenError",
     "TenancyNotFoundError",
     "TenancyValidationError",
+    "UnknownSignupAddressError",
     "UnmodifiedPasswordError",
+    "VerificationTokenInvalidError",
     "WorkspaceAlreadyExistsError",
     "WorkspaceBudgetDefaultAlreadyExistsError",
     "WorkspaceBudgetDefaultNotFoundError",
