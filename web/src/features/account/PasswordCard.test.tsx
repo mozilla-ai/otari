@@ -175,6 +175,31 @@ describe("PasswordCard on a claimed deployment", () => {
     // is still on screen with the form the operator filled in.
     expect(screen.getByLabelText("Current password")).toBeInTheDocument()
   })
+
+  it("drops the saved line as soon as any field is retyped", async () => {
+    mockPut({
+      email: "operator@example.com",
+      master_key_sign_in_retired: true,
+    })
+    const user = userEvent.setup()
+    renderCard(["password"])
+
+    await user.type(screen.getByLabelText("Current password"), "old-password")
+    await user.type(screen.getByLabelText("New password"), "new-password")
+    await user.type(
+      screen.getByLabelText("Confirm new password"),
+      "new-password",
+    )
+    await user.click(screen.getByRole("button", { name: "Change password" }))
+    expect(await screen.findByRole("status")).toBeInTheDocument()
+
+    // The password fields count, not only the first one: a line reporting a
+    // call that has been superseded is worse beside a half-filled form than no
+    // line at all.
+    await user.type(screen.getByLabelText("New password"), "a")
+
+    expect(screen.queryByRole("status")).not.toBeInTheDocument()
+  })
 })
 
 describe("PasswordCard policy checks", () => {

@@ -251,7 +251,7 @@ export function PasswordCard() {
               value={newPassword}
               onChange={(next) => {
                 setNewPassword(next)
-                setPassword.reset()
+                clearResult()
               }}
               autoComplete="new-password"
               description={`At least ${MIN_PASSWORD_LENGTH} characters, and at most ${MAX_PASSWORD_BYTES} bytes.`}
@@ -261,7 +261,7 @@ export function PasswordCard() {
               value={confirmPassword}
               onChange={(next) => {
                 setConfirmPassword(next)
-                setPassword.reset()
+                clearResult()
               }}
               autoComplete="new-password"
             />
