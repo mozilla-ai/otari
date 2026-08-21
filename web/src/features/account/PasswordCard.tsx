@@ -1,4 +1,11 @@
-import { Button, Card, Input, Label, TextField } from "@heroui/react"
+import {
+  Button,
+  Card,
+  Description,
+  Input,
+  Label,
+  TextField,
+} from "@heroui/react"
 import { useState } from "react"
 
 import { useSetPassword } from "@/shared/api/hooks"
@@ -69,7 +76,11 @@ function PasswordField({
       <Label className="text-sm font-medium text-foreground">{label}</Label>
       <Input autoComplete={autoComplete} autoFocus={autoFocus} />
       {description ? (
-        <span className="text-xs text-muted">{description}</span>
+        // HeroUI's Description renders through the TextField's "description"
+        // slot, so it reaches the input as aria-describedby; a raw span does
+        // not, and a policy the field states only to sighted users is a policy
+        // half the people typing into it cannot read.
+        <Description className="text-xs text-muted">{description}</Description>
       ) : null}
     </TextField>
   )
@@ -129,8 +140,12 @@ export function PasswordCard() {
   const complete = isClaimed
     ? currentPassword !== "" && newPassword !== "" && confirmPassword !== ""
     : email.trim() !== "" && newPassword !== "" && confirmPassword !== ""
-  const canSubmit =
-    complete && problem === null && !unchanged && !setPassword.isPending
+  // Deliberately not gated on `isPending`: that is the Button's own prop, which
+  // keeps it focusable and announces it busy, where `isDisabled` would drop
+  // focus out of the form mid-request. Double submission is stopped in
+  // `submit` instead, which is where it has to be anyway (a form submits on
+  // Enter, not only through the button).
+  const canSubmit = complete && problem === null && !unchanged
 
   // A refusal and the line reporting the last success both describe a call that
   // is no longer the one being made, so typing clears them together.
@@ -140,7 +155,7 @@ export function PasswordCard() {
   }
 
   const submit = () => {
-    if (!canSubmit) {
+    if (!canSubmit || setPassword.isPending) {
       return
     }
     setPassword.mutate(
@@ -224,10 +239,10 @@ export function PasswordCard() {
                   autoComplete="username"
                   autoFocus
                 />
-                <span className="text-xs text-muted">
+                <Description className="text-xs text-muted">
                   Changing this address later is not supported yet, so pick the
                   one you will keep.
-                </span>
+                </Description>
               </TextField>
             )}
 

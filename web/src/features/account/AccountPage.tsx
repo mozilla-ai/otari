@@ -29,7 +29,9 @@ export function AccountPage() {
         // A hosted session is minted by otari.ai and its credential is managed
         // there, so a password form here would write to the wrong control
         // plane. Said rather than left blank: an empty page reads as a page
-        // that failed to load.
+        // that failed to load. The enum's third value, "none", cannot reach
+        // this branch: only a hybrid gateway reports it, and `App` answers one
+        // with the landing page instead of the router.
         <p className="text-sm text-muted">
           This deployment's sign-in is managed by the control plane that issued
           your session, so there is nothing to change here.
