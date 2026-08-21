@@ -3,6 +3,7 @@ import { useMemo, useState } from "react"
 
 import type {
   User as ApiUser,
+  Budget,
   CreateOrganizationMemberRequest,
   InviteOrganizationMemberRequest,
   InviteOrganizationMemberResult,
@@ -12,6 +13,7 @@ import type {
   ScopedBudget,
   Workspace,
   WorkspaceAssignment,
+  WorkspaceBudgetDefault,
   WorkspaceMemberRole,
 } from "@/client"
 import {
@@ -21,7 +23,9 @@ import {
 import {
   useAddOrganizationMember,
   useAddWorkspaceMember,
+  useAllWorkspaceBudgetDefaults,
   useAllWorkspaceMembers,
+  useBudgets,
   useCreateScopedBudget,
   useDeleteScopedBudget,
   useInviteOrganizationMember,
@@ -431,12 +435,18 @@ function MemberEditor({
   member,
   spendRow,
   workspaces,
+  budgets,
+  defaultByWorkspace,
   placements,
   onClose,
 }: {
   member: OrganizationMember
   spendRow: ApiUser | undefined
   workspaces: Workspace[]
+  budgets: Budget[]
+  // What each workspace hands a new member, used both to say what someone would
+  // get and to give a ceiling created here the same cadence.
+  defaultByWorkspace: ReadonlyMap<string, WorkspaceBudgetDefault>
   placements: WorkspacePlacement[]
   onClose: () => void
 }) {
@@ -459,10 +469,10 @@ function MemberEditor({
           {
             member: placement !== undefined,
             role: placement?.role ?? "member",
-            limit:
-              placement?.ceiling?.max_budget == null
-                ? ""
-                : String(placement.ceiling.max_budget),
+            // A budget, not a figure. Nothing outside the budgets page maps a
+            // cap to an amount, so the period comes with it and there is no
+            // cadence to reconcile here.
+            budgetId: placement?.ceiling?.budget_id ?? "",
           },
         ]
       }),
@@ -477,9 +487,23 @@ function MemberEditor({
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState<unknown>(undefined)
 
+  // "No ceiling" first, then every budget. A workspace's own default is labelled
+  // so an operator can tell the inherited one from the rest without leaving the
+  // form to look it up.
+  const budgetOptions = (fallback: WorkspaceBudgetDefault | undefined) => [
+    { value: "", label: "No ceiling" },
+    ...budgets.map((budget) => ({
+      value: budget.budget_id,
+      label:
+        budget.budget_id === fallback?.budget_id
+          ? `${budget.name ?? budget.budget_id.split("-")[0]} (workspace default)`
+          : (budget.name ?? budget.budget_id.split("-")[0]),
+    })),
+  ]
+
   const setRow = (
     id: string,
-    patch: Partial<{ member: boolean; role: string; limit: string }>,
+    patch: Partial<{ member: boolean; role: string; budgetId: string }>,
   ) =>
     setRows((current) => {
       const next = new Map(current)
@@ -488,10 +512,7 @@ function MemberEditor({
       return next
     })
 
-  const limitsValid = [...rows.values()].every(
-    (row) => row.limit.trim() === "" || Number(row.limit) >= 0,
-  )
-  const canSave = !saving && scopeValid && limitsValid
+  const canSave = !saving && scopeValid
 
   const save = async () => {
     if (!canSave || !member.user_id) return
@@ -547,19 +568,19 @@ function MemberEditor({
         const membershipId = membershipIds.get(workspaceId)
         if (!membershipId) continue
         const existing = ceilings.get(membershipId)
-        const wanted = row.limit.trim() === "" ? null : Number(row.limit)
+        const wanted = row.budgetId === "" ? null : row.budgetId
         if (existing && wanted === null) {
           await deleteCeiling.mutateAsync(existing.id)
-        } else if (existing && existing.max_budget !== wanted) {
+        } else if (existing && existing.budget_id !== wanted) {
           await updateCeiling.mutateAsync({
             id: existing.id,
-            body: { max_budget: wanted },
+            body: { budget_id: wanted },
           })
         } else if (!existing && wanted !== null) {
           await createCeiling.mutateAsync({
             scope_type: "workspace_member",
             scope_id: membershipId,
-            max_budget: wanted,
+            budget_id: wanted,
           })
         }
       }
@@ -605,15 +626,13 @@ function MemberEditor({
               <tr className="text-left text-xs text-muted">
                 <th className="py-1 font-medium">Workspace</th>
                 <th className="py-1 font-medium">Role</th>
-                <th className="py-1 font-medium">Budget (USD)</th>
+                <th className="py-1 font-medium">Budget</th>
               </tr>
             </thead>
             <tbody>
               {workspaces.map((workspace) => {
                 const row = rows.get(workspace.id)
                 if (!row) return null
-                const limitInvalid =
-                  row.limit.trim() !== "" && !(Number(row.limit) >= 0)
                 return (
                   <tr key={workspace.id} className="border-t border-border">
                     <td className="py-1.5">
@@ -642,18 +661,16 @@ function MemberEditor({
                       />
                     </td>
                     <td className="py-1.5">
-                      <input
-                        type="text"
-                        aria-label={`Budget in ${workspace.name}`}
-                        value={row.limit}
-                        disabled={!row.member}
-                        placeholder="No ceiling"
-                        onChange={(event) =>
-                          setRow(workspace.id, { limit: event.target.value })
+                      <FilterSelect
+                        ariaLabel={`Budget in ${workspace.name}`}
+                        value={row.budgetId}
+                        onChange={(next) =>
+                          setRow(workspace.id, { budgetId: next })
                         }
-                        className={`w-32 rounded-lg border bg-surface-alt px-2 py-1 text-sm text-foreground disabled:opacity-50 ${
-                          limitInvalid ? "border-danger" : "border-border"
-                        }`}
+                        options={budgetOptions(
+                          defaultByWorkspace.get(workspace.id),
+                        )}
+                        disabled={!row.member}
                       />
                     </td>
                   </tr>
@@ -663,9 +680,11 @@ function MemberEditor({
           </table>
           <span className="max-w-2xl text-xs text-muted">
             Each workspace holds its own allowance, so someone in two workspaces
-            has two. Leave a budget blank to give them no ceiling of their own
-            there. Adding someone to a workspace that has a default member
-            budget gives them that budget unless a figure is entered here.
+            has two. The amount and the reset period belong to the budget, so
+            editing one moves everyone held to it; pick a different budget here
+            to change only this person. Adding them to a workspace that has a
+            default member budget gives them that budget unless another is
+            chosen.
           </span>
         </div>
 
@@ -697,6 +716,8 @@ export function OrganizationMembersPage() {
     [workspaces.data],
   )
   const workspaceMembers = useAllWorkspaceMembers(workspaceIds)
+  const workspaceDefaults = useAllWorkspaceBudgetDefaults(workspaceIds)
+  const budgets = useBudgets()
   const scopedBudgets = useScopedBudgets()
 
   const [editingMember, setEditingMember] = useState<string | null>(null)
@@ -741,6 +762,19 @@ export function OrganizationMembersPage() {
     }
     return byUser
   }, [workspaces.data, workspaceMembers.data, ceilingByMembership])
+  // What each workspace hands a new member: the aggregate default (the one
+  // narrowed to no provider). The editor needs it for two reasons: to show what
+  // someone would get, and to give a ceiling it creates the same cadence, rather
+  // than one that silently never resets.
+  const defaultByWorkspace = useMemo(
+    () =>
+      new Map(
+        workspaceDefaults.data
+          .filter(({ default: row }) => row.provider_key_id === null)
+          .map(({ workspaceId, default: row }) => [workspaceId, row]),
+      ),
+    [workspaceDefaults.data],
+  )
   const activeContext: OrganizationContext | undefined = context.data
   const manages = canManage(activeContext)
   const editingRow =
@@ -1053,6 +1087,8 @@ export function OrganizationMembersPage() {
               : undefined
           }
           workspaces={workspaces.data ?? []}
+          budgets={budgets.data ?? []}
+          defaultByWorkspace={defaultByWorkspace}
           placements={
             editingRow.user_id
               ? (placementsByUser.get(editingRow.user_id) ?? [])

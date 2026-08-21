@@ -98,11 +98,12 @@ class WorkspaceMemberBudgetPolicyCreate(BaseModel):
 
 
 class WorkspaceMemberBudgetPolicyUpdate(BaseModel):
-    """Request body for updating a default.
+    """Request body for pointing a default at a different budget.
 
-    Not retroactive: a member already materialized from this default keeps
-    the value that was in effect when they were materialized. Only a member
-    materialized after this update sees the new one.
+    Members already materialized from this default keep the budget they were
+    given: their ceiling names it directly, and this only changes what a member
+    joining afterwards is handed. Editing the *budget* is the retroactive act,
+    and it moves everyone naming it, in this workspace and outside it.
     """
 
     budget_id: str = Field(min_length=1, max_length=255)
@@ -299,20 +300,23 @@ class WorkspaceBudgetDefaultService:
     def _build_member_budget(
         member_id: uuid.UUID, default: WorkspaceBudgetDefault, budget: Budget
     ) -> ScopedBudget:
-        """One member's ceiling, with the limit copied off the budget the default names.
+        """One member's ceiling, naming the budget the default hands out.
 
-        Copied rather than referenced, deliberately: the ceiling is a snapshot,
-        which is what makes an update non-retroactive (see
-        :class:`WorkspaceMemberBudgetPolicyUpdate`). A member materialized before
-        the budget changed keeps the limit that was handed out at the time.
+        Named rather than copied: the limit and the period are read through the
+        budget on every request, so editing that budget moves everyone already
+        holding a ceiling from it. That is the point of a budget being a named
+        thing rather than a figure duplicated per member.
+
+        Only the period *window* is stamped here, because a window is this
+        member's own: two people materialized a week apart from one monthly
+        budget are each a month from their own start.
         """
         period_start, period_end = _period_window(budget.budget_duration_sec)
         return ScopedBudget(
             scope_type=_SCOPE_WORKSPACE_MEMBER,
             scope_id=str(member_id),
             provider_key_id=default.provider_key_id,
-            max_budget=budget.max_budget,
-            budget_duration_sec=budget.budget_duration_sec,
+            budget_id=budget.budget_id,
             period_start=period_start,
             period_end=period_end,
         )
@@ -476,13 +480,12 @@ class WorkspaceBudgetDefaultService:
     ) -> WorkspaceMemberBudgetPolicyPublic:
         """Point a default at a different budget.
 
-        Not retroactive (see :class:`WorkspaceMemberBudgetPolicyUpdate`):
-        members already materialized from this default keep their existing
-        ``ScopedBudget`` row untouched. The scope (``provider_key_id``) is not
-        editable, matching ``routes/scoped_budgets.py``'s own rule for the
-        concrete ceilings this produces: changing it would move the template
-        to a different identity, which is a delete and a create, not an
-        update.
+        Members already materialized keep the budget they were handed (see
+        :class:`WorkspaceMemberBudgetPolicyUpdate`); this changes what someone
+        joining afterwards gets. The scope (``provider_key_id``) is not editable,
+        matching ``routes/scoped_budgets.py``'s own rule for the concrete
+        ceilings this produces: changing it would move the template to a
+        different identity, which is a delete and a create, not an update.
         """
         workspace = await authorization.resolve_visible_workspace(
             self.db, user=user, workspace_id=workspace_id, organizations=self.organizations

@@ -95,6 +95,17 @@ async def _member_budget(
     return (await db.execute(stmt)).scalars().first()
 
 
+async def _limit(db: AsyncSession, ceiling: ScopedBudget) -> float | None:
+    """The cap a ceiling enforces, read through the budget it names.
+
+    A ceiling holds counters and a window; the figure is the budget's, which is
+    what makes editing a budget move everyone holding one from it.
+    """
+    budget = await db.get(Budget, ceiling.budget_id)
+    assert budget is not None
+    return budget.max_budget
+
+
 async def _budget(
     db: AsyncSession,
     *,
@@ -122,7 +133,11 @@ async def test_create_materializes_onto_existing_members_but_skips_an_override(a
     other_member = await workspace_members.create(workspace_id=workspace.id, user_id=other.id, role="member")
 
     # `other` already has a ceiling for this scope; the default must not touch it.
-    override = ScopedBudget(scope_type="workspace_member", scope_id=str(other_member.id), max_budget=999.0)
+    override = ScopedBudget(
+        scope_type="workspace_member",
+        scope_id=str(other_member.id),
+        budget_id=await _budget(async_db, max_budget=999.0),
+    )
     async_db.add(override)
     await async_db.commit()
 
@@ -140,12 +155,18 @@ async def test_create_materializes_onto_existing_members_but_skips_an_override(a
     assert owner_member is not None
     owner_budget = await _member_budget(async_db, owner_member.id)
     assert owner_budget is not None
-    assert owner_budget.max_budget == 50.0
-    assert owner_budget.budget_duration_sec == 86400
+    assert await _limit(async_db, owner_budget) == 50.0
+    owner_limit = await async_db.get(Budget, owner_budget.budget_id)
+    assert owner_limit is not None
+    assert owner_limit.budget_duration_sec == 86400
+    # The window is the member's own, stamped when they were materialized.
+    assert owner_budget.period_end is not None
 
     other_budget = await _member_budget(async_db, other_member.id)
     assert other_budget is not None
-    assert other_budget.max_budget == 999.0, "an existing member-specific ceiling must win over the template"
+    assert await _limit(async_db, other_budget) == 999.0, (
+        "an existing member-specific ceiling must win over the template"
+    )
 
 
 async def test_member_added_afterwards_is_materialized_on_join(async_db: AsyncSession) -> None:
@@ -166,7 +187,7 @@ async def test_member_added_afterwards_is_materialized_on_join(async_db: AsyncSe
 
     budget = await _member_budget(async_db, added.id)
     assert budget is not None
-    assert budget.max_budget == 25.0
+    assert await _limit(async_db, budget) == 25.0
 
 
 async def test_member_added_via_organization_workspace_assignment_is_materialized(async_db: AsyncSession) -> None:
@@ -192,13 +213,11 @@ async def test_member_added_via_organization_workspace_assignment_is_materialize
     )
 
     assert result.user_id is not None
-    workspace_member = await WorkspaceMemberRepository(async_db).get_by_workspace_and_user(
-        workspace.id, result.user_id
-    )
+    workspace_member = await WorkspaceMemberRepository(async_db).get_by_workspace_and_user(workspace.id, result.user_id)
     assert workspace_member is not None
     budget = await _member_budget(async_db, workspace_member.id)
     assert budget is not None
-    assert budget.max_budget == 15.0
+    assert await _limit(async_db, budget) == 15.0
 
 
 async def test_reviving_a_suspended_workspace_membership_is_materialized(async_db: AsyncSession) -> None:
@@ -252,7 +271,7 @@ async def test_reviving_a_suspended_workspace_membership_is_materialized(async_d
     assert revived.status == "active"
     budget = await _member_budget(async_db, revived.id)
     assert budget is not None, "a member revived from suspended must be materialized, not just reactivated"
-    assert budget.max_budget == 35.0
+    assert await _limit(async_db, budget) == 35.0
 
 
 async def test_reapplying_an_active_assignment_does_not_rematerialize_a_deleted_override(
@@ -318,7 +337,7 @@ async def test_update_is_not_retroactive(async_db: AsyncSession) -> None:
     assert owner_member is not None
     owner_budget_before = await _member_budget(async_db, owner_member.id)
     assert owner_budget_before is not None
-    assert owner_budget_before.max_budget == 10.0
+    assert await _limit(async_db, owner_budget_before) == 10.0
 
     await service.update_default(
         user=owner,
@@ -329,13 +348,13 @@ async def test_update_is_not_retroactive(async_db: AsyncSession) -> None:
 
     owner_budget_after = await _member_budget(async_db, owner_member.id)
     assert owner_budget_after is not None
-    assert owner_budget_after.max_budget == 10.0, "an already-materialized ceiling must not be rewritten"
+    assert await _limit(async_db, owner_budget_after) == 10.0, "an already-materialized ceiling must not be rewritten"
 
     workspace_service = WorkspaceService(async_db)
     joined = await workspace_service.add_member(user=owner, workspace_id=workspace.id, user_id=later_joiner.id)
     joiner_budget = await _member_budget(async_db, joined.id)
     assert joiner_budget is not None
-    assert joiner_budget.max_budget == 20.0, "a member joining after the edit must get the new value"
+    assert await _limit(async_db, joiner_budget) == 20.0, "a member joining after the edit must get the new value"
 
 
 async def test_delete_preserves_materialized_rows_and_stops_future_ones(async_db: AsyncSession) -> None:
@@ -462,30 +481,34 @@ async def test_materialize_batch_recovers_from_a_missed_collision(async_db: Asyn
     owner_member = await workspace_members.get_by_workspace_and_user(workspace.id, owner.id)
     assert owner_member is not None
 
-    default = WorkspaceBudgetDefault(
-        workspace_id=workspace.id, budget_id=await _budget(async_db, max_budget=40.0)
-    )
+    default = WorkspaceBudgetDefault(workspace_id=workspace.id, budget_id=await _budget(async_db, max_budget=40.0))
     async_db.add(default)
     await async_db.flush()
 
     # The row `_insert_member_budgets` will collide with, inserted directly
     # (not through the check-then-insert path this test bypasses).
-    collision = ScopedBudget(scope_type="workspace_member", scope_id=str(other_member.id), max_budget=999.0)
+    collision = ScopedBudget(
+        scope_type="workspace_member",
+        scope_id=str(other_member.id),
+        budget_id=await _budget(async_db, max_budget=999.0),
+    )
     async_db.add(collision)
     await async_db.flush()
 
     service = WorkspaceBudgetDefaultService(async_db)
     created = await service._insert_member_budgets(  # noqa: SLF001 - exercising the fallback directly
-        [owner_member.id, other_member.id], default, await service._budget_for(default)  # noqa: SLF001
+        [owner_member.id, other_member.id],
+        default,
+        await service._budget_for(default),  # noqa: SLF001
     )
 
     assert {budget.scope_id for budget in created} == {str(owner_member.id)}
     owner_budget = await _member_budget(async_db, owner_member.id)
     assert owner_budget is not None
-    assert owner_budget.max_budget == 40.0
+    assert await _limit(async_db, owner_budget) == 40.0
     other_budget = await _member_budget(async_db, other_member.id)
     assert other_budget is not None
-    assert other_budget.max_budget == 999.0, "the pre-existing row must survive the collision untouched"
+    assert await _limit(async_db, other_budget) == 999.0, "the pre-existing row must survive the collision untouched"
 
     # The broken version failed exactly here: PendingRollbackError on the next
     # statement, because the failed batch flush had already dirtied the outer
@@ -574,4 +597,4 @@ async def test_concurrent_default_create_and_member_add_both_land(
     assert joined_member is not None
     budget = await _member_budget(async_db, joined_member.id)
     assert budget is not None, "the new member must get the default whichever transaction committed first"
-    assert budget.max_budget == 40.0
+    assert await _limit(async_db, budget) == 40.0

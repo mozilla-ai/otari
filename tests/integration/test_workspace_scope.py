@@ -203,6 +203,16 @@ def test_a_key_cannot_be_created_in_a_workspace_that_does_not_exist(
     assert response.status_code == 404, response.text
 
 
+def _a_budget_id(client: Any, headers: dict[str, str], max_budget: float) -> str:
+    """A budget for a ceiling to enforce.
+
+    A ceiling names one rather than carrying a figure of its own, so a case that
+    only cares about the ceiling still has to mint the budget behind it.
+    """
+    made = client.post("/v1/budgets", json={"max_budget": max_budget}, headers=headers)
+    assert made.status_code == 200, made.text
+    return str(made.json()["budget_id"])
+
 
 def test_deleting_a_workspace_takes_its_ceilings_with_it(
     client: TestClient,
@@ -217,7 +227,11 @@ def test_deleting_a_workspace_takes_its_ceilings_with_it(
     workspace = _make_workspace(client, master_key_header, "Departing")
     created = client.post(
         "/v1/scoped-budgets",
-        json={"scope_type": "workspace", "scope_id": workspace, "max_budget": 5.0},
+        json={
+            "scope_type": "workspace",
+            "scope_id": workspace,
+            "budget_id": _a_budget_id(client, master_key_header, 5.0),
+        },
         headers=master_key_header,
     )
     assert created.status_code == status.HTTP_200_OK, created.text
@@ -243,7 +257,11 @@ def test_a_members_workspace_ceiling_goes_with_the_workspace(
     membership_id = members.json()["data"][0]["id"]
     created = client.post(
         "/v1/scoped-budgets",
-        json={"scope_type": "workspace_member", "scope_id": membership_id, "max_budget": 5.0},
+        json={
+            "scope_type": "workspace_member",
+            "scope_id": membership_id,
+            "budget_id": _a_budget_id(client, master_key_header, 5.0),
+        },
         headers=master_key_header,
     )
     assert created.status_code == status.HTTP_200_OK, created.text

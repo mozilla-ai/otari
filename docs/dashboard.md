@@ -534,19 +534,28 @@ by is the handle those flows will match them on.
   no spend row yet, and those cells read as empty rather than zero.
 
   **Edit** opens all of it at once: model access, which workspaces they are in
-  and at what role, and the budget they hold in each. Those are three tables
+  and at what role, and the budget they hold in each. A budget is picked, never
+  an amount: what a cap is worth and how often it resets are properties of the
+  budget, so editing one moves everyone held to it, and giving one person a
+  different limit means giving them a different budget. Those are three tables
   underneath, so saving is several writes, and they are ordered: a workspace
   budget is attached to the membership, so joining a workspace happens before the
   budget for it can be set. Adding someone to a workspace that has a default
-  member budget gives them that budget unless a different figure is entered.
+  member budget gives them that budget unless another is chosen.
 
 ### Cost & billing
 
-- **Spend & budgets**: spending limits callers are held to, with per-period
-  resets. Assign a budget to people from its own form; everyone on it is held to
-  the full amount separately, so five people on one budget hold five allowances
-  rather than sharing one. **Default for** names any workspace that hands this
-  budget to its members, which is set on the workspace rather than here.
+- **Spend & budgets**: the only page that says what a limit is worth. A budget
+  is an amount and a reset period, and everything that enforces one names it
+  rather than restating the figure, so editing a budget moves every place it
+  applies.
+
+  How it is enforced depends on what it is attached to. Assigned to people from
+  this page, everyone on it is held to the full amount separately, so five people
+  on one budget hold five allowances. Attached to a workspace or to one person's
+  membership of one, it is a single allowance everyone under that scope draws on
+  together. **Default for** names any workspace that hands this budget to its
+  members, which is set on the workspace rather than here.
 - **Model pricing**: what the gateway meters a request at, which is one rate per
   model for the whole deployment. The page opens with what an *unpriced* model
   costs, because that decides what the table under it means: with default pricing

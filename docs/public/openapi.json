@@ -1330,6 +1330,17 @@
             ],
             "title": "Name"
           },
+          "reset_alignment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Alignment"
+          },
           "total_reserved": {
             "default": 0.0,
             "title": "Total Reserved",
@@ -1355,6 +1366,7 @@
           "name",
           "max_budget",
           "budget_duration_sec",
+          "reset_alignment",
           "created_at",
           "updated_at"
         ],
@@ -2177,6 +2189,23 @@
             ],
             "description": "Admin-facing label for the budget",
             "title": "Name"
+          },
+          "reset_alignment": {
+            "anyOf": [
+              {
+                "enum": [
+                  "calendar_day",
+                  "calendar_week",
+                  "calendar_month"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Reset on a UTC calendar boundary instead of a fixed number of seconds, which is the only way to express a calendar month. Mutually exclusive with budget_duration_sec",
+            "title": "Reset Alignment"
           }
         },
         "title": "CreateBudgetRequest",
@@ -2420,31 +2449,12 @@
       "CreateScopedBudgetRequest": {
         "description": "Request model for creating a scoped budget.",
         "properties": {
-          "budget_duration_sec": {
-            "anyOf": [
-              {
-                "exclusiveMinimum": 0.0,
-                "type": "integer"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Period length in seconds (e.g. 86400 for daily); null never resets",
-            "title": "Budget Duration Sec"
-          },
-          "max_budget": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Maximum USD spend in the period",
-            "title": "Max Budget"
+          "budget_id": {
+            "description": "The budget this ceiling enforces; its limit and period are read through it",
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Budget Id",
+            "type": "string"
           },
           "name": {
             "anyOf": [
@@ -2456,7 +2466,7 @@
                 "type": "null"
               }
             ],
-            "description": "Admin-facing label for the budget",
+            "description": "Admin-facing label for this ceiling",
             "title": "Name"
           },
           "provider_key_id": {
@@ -2471,23 +2481,6 @@
             ],
             "description": "Narrow the cap to one provider instance; null caps spend across every provider",
             "title": "Provider Key Id"
-          },
-          "reset_alignment": {
-            "anyOf": [
-              {
-                "enum": [
-                  "calendar_day",
-                  "calendar_week",
-                  "calendar_month"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "description": "Reset on a UTC calendar boundary instead of a fixed number of seconds, which is the only way to express a calendar month. Mutually exclusive with budget_duration_sec",
-            "title": "Reset Alignment"
           },
           "scope_id": {
             "description": "Id of the capped identity: an organization, workspace, membership row, or API key",
@@ -2511,7 +2504,8 @@
         },
         "required": [
           "scope_type",
-          "scope_id"
+          "scope_id",
+          "budget_id"
         ],
         "title": "CreateScopedBudgetRequest",
         "type": "object"
@@ -7104,7 +7098,7 @@
         "type": "object"
       },
       "ScopedBudgetResponse": {
-        "description": "One scoped ceiling and its live counters.\n\nUnlike ``/v1/budgets``, the counters are the row's own: a scoped ceiling is\nenforced against ``current_spend + reserved_spend``, so there is no rollup\nover users to compute.",
+        "description": "One scoped ceiling and its live counters.\n\nUnlike ``/v1/budgets``, the counters are the row's own: a scoped ceiling is\nenforced against ``current_spend + reserved_spend``, so there is no rollup\nover users to compute.\n\n``max_budget``, ``budget_duration_sec`` and ``reset_alignment`` are read off\nthe budget rather than stored here, and are carried on the wire so a caller\ncan render a ceiling without fetching every budget to resolve one id.",
         "properties": {
           "budget_duration_sec": {
             "anyOf": [
@@ -7116,6 +7110,10 @@
               }
             ],
             "title": "Budget Duration Sec"
+          },
+          "budget_id": {
+            "title": "Budget Id",
+            "type": "string"
           },
           "created_at": {
             "title": "Created At",
@@ -7217,6 +7215,7 @@
           "scope_type",
           "scope_id",
           "provider_key_id",
+          "budget_id",
           "name",
           "max_budget",
           "current_spend",
@@ -8312,6 +8311,22 @@
               }
             ],
             "title": "Name"
+          },
+          "reset_alignment": {
+            "anyOf": [
+              {
+                "enum": [
+                  "calendar_day",
+                  "calendar_week",
+                  "calendar_month"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Alignment"
           }
         },
         "title": "UpdateBudgetRequest",
@@ -8420,29 +8435,18 @@
       "UpdateScopedBudgetRequest": {
         "description": "Request model for updating a scoped budget.",
         "properties": {
-          "budget_duration_sec": {
+          "budget_id": {
             "anyOf": [
               {
-                "exclusiveMinimum": 0.0,
-                "type": "integer"
+                "maxLength": 255,
+                "minLength": 1,
+                "type": "string"
               },
               {
                 "type": "null"
               }
             ],
-            "title": "Budget Duration Sec"
-          },
-          "max_budget": {
-            "anyOf": [
-              {
-                "minimum": 0.0,
-                "type": "number"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Max Budget"
+            "title": "Budget Id"
           },
           "name": {
             "anyOf": [
@@ -8455,22 +8459,6 @@
               }
             ],
             "title": "Name"
-          },
-          "reset_alignment": {
-            "anyOf": [
-              {
-                "enum": [
-                  "calendar_day",
-                  "calendar_week",
-                  "calendar_month"
-                ],
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reset Alignment"
           }
         },
         "title": "UpdateScopedBudgetRequest",
@@ -10752,7 +10740,7 @@
         "type": "object"
       },
       "WorkspaceMemberBudgetPolicyUpdate": {
-        "description": "Request body for updating a default.\n\nNot retroactive: a member already materialized from this default keeps\nthe value that was in effect when they were materialized. Only a member\nmaterialized after this update sees the new one.",
+        "description": "Request body for pointing a default at a different budget.\n\nMembers already materialized from this default keep the budget they were\ngiven: their ceiling names it directly, and this only changes what a member\njoining afterwards is handed. Editing the *budget* is the retroactive act,\nand it moves everyone naming it, in this workspace and outside it.",
         "properties": {
           "budget_id": {
             "maxLength": 255,
@@ -16662,7 +16650,7 @@
         ]
       },
       "patch": {
-        "description": "Update a scoped budget's label, limit, or period.\n\nThe scope and the provider narrowing are not editable: changing either would\nmove the ceiling to a different identity while carrying its spend, which is\na delete and a create, not an update.",
+        "description": "Relabel a ceiling, or point it at a different budget.\n\nThe scope and the provider narrowing are not editable: changing either would\nmove the ceiling to a different identity while carrying its spend, which is\na delete and a create, not an update.\n\nThere is no limit or period to set here any more. Both are properties of the\nbudget, so changing what a ceiling allows is either editing that budget,\nwhich moves every ceiling naming it, or naming a different one.",
         "operationId": "update_scoped_budget_v1_scoped_budgets__budget_id__patch",
         "parameters": [
           {

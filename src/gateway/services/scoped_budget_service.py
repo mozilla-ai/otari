@@ -33,7 +33,7 @@ from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import col
 
 from gateway.log_config import logger
-from gateway.models.entities import APIKey, ScopedBudget
+from gateway.models.entities import APIKey, Budget, ScopedBudget
 from gateway.models.tenancy import OrganizationMember, Workspace, WorkspaceMember
 from gateway.services.workspace_scope import resolve_workspace_id
 
@@ -326,10 +326,12 @@ async def applicable_budgets(
                 ScopedBudget.id,
                 ScopedBudget.scope_type,
                 ScopedBudget.provider_key_id,
-                ScopedBudget.budget_duration_sec,
-                ScopedBudget.reset_alignment,
+                Budget.budget_duration_sec,
+                Budget.reset_alignment,
                 ScopedBudget.period_end,
-            ).where(ident_clause, key_clause)
+            )
+            .join(Budget, Budget.budget_id == ScopedBudget.budget_id)
+            .where(ident_clause, key_clause)
         )
     ).all()
     if not rows:
@@ -401,16 +403,23 @@ async def reserve(
     the caller rejects.
     """
     taken: list[str] = []
+    # The cap is a column on the budget this ceiling names, read as a correlated
+    # subquery so the whole check stays inside the one conditional UPDATE. Reading
+    # it first and comparing in Python would reintroduce the read-then-write race
+    # this service exists to close.
+    cap = (
+        select(Budget.max_budget).where(Budget.budget_id == ScopedBudget.budget_id).scalar_subquery()
+    )
     for budget in budgets:
         result = await db.execute(
             update(ScopedBudget)
             .where(
                 ScopedBudget.id == budget.budget_id,
                 or_(
-                    ScopedBudget.max_budget.is_(None),
+                    cap.is_(None),
                     and_(
-                        ScopedBudget.current_spend + ScopedBudget.reserved_spend < ScopedBudget.max_budget,
-                        ScopedBudget.current_spend + ScopedBudget.reserved_spend + amount <= ScopedBudget.max_budget,
+                        ScopedBudget.current_spend + ScopedBudget.reserved_spend < cap,
+                        ScopedBudget.current_spend + ScopedBudget.reserved_spend + amount <= cap,
                     ),
                 ),
             )

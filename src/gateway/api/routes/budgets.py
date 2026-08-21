@@ -7,10 +7,26 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_db, verify_master_key
-from gateway.models.entities import Budget, BudgetResetLog, User, WorkspaceBudgetDefault
+from gateway.models.entities import Budget, BudgetResetLog, ScopedBudget, User, WorkspaceBudgetDefault
 from gateway.models.tenancy import Workspace
+from gateway.services.scoped_budget_service import ResetAlignment
 
 router = APIRouter(prefix="/v1/budgets", tags=["budgets"])
+
+
+def _require_single_period_source(duration: int | None, alignment: str | None) -> None:
+    """Refuse the state the table's CHECK refuses, with a message instead of a 500.
+
+    A period comes from a duration or from a calendar boundary. Both set is one
+    concept encoded twice, so the pair would need an "ignored when" rule to mean
+    anything. This moved here with the cadence itself, from the scoped-ceiling
+    route that used to own both.
+    """
+    if duration is not None and alignment is not None:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="A budget resets on budget_duration_sec or on reset_alignment, not both",
+        )
 
 
 class CreateBudgetRequest(BaseModel):
@@ -20,6 +36,13 @@ class CreateBudgetRequest(BaseModel):
     max_budget: float | None = Field(default=None, ge=0, description="Maximum spending limit")
     budget_duration_sec: int | None = Field(
         default=None, gt=0, description="Budget duration in seconds (e.g., 86400 for daily, 604800 for weekly)"
+    )
+    reset_alignment: ResetAlignment | None = Field(
+        default=None,
+        description=(
+            "Reset on a UTC calendar boundary instead of a fixed number of seconds, "
+            "which is the only way to express a calendar month. Mutually exclusive with budget_duration_sec"
+        ),
     )
 
 
@@ -37,6 +60,7 @@ class BudgetResponse(BaseModel):
     name: str | None
     max_budget: float | None
     budget_duration_sec: int | None
+    reset_alignment: str | None
     created_at: str
     updated_at: str
     user_count: int = 0
@@ -58,6 +82,7 @@ class BudgetResponse(BaseModel):
             name=budget.name,
             max_budget=budget.max_budget,
             budget_duration_sec=budget.budget_duration_sec,
+            reset_alignment=budget.reset_alignment,
             created_at=budget.created_at.isoformat(),
             updated_at=budget.updated_at.isoformat(),
             user_count=user_count,
@@ -72,6 +97,7 @@ class UpdateBudgetRequest(BaseModel):
     name: str | None = Field(default=None)
     max_budget: float | None = Field(default=None, ge=0)
     budget_duration_sec: int | None = Field(default=None, gt=0)
+    reset_alignment: ResetAlignment | None = Field(default=None)
 
 
 class BudgetResetLogResponse(BaseModel):
@@ -116,10 +142,12 @@ async def create_budget(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> BudgetResponse:
     """Create a new budget."""
+    _require_single_period_source(request.budget_duration_sec, request.reset_alignment)
     budget = Budget(
         name=request.name,
         max_budget=request.max_budget,
         budget_duration_sec=request.budget_duration_sec,
+        reset_alignment=request.reset_alignment,
     )
 
     db.add(budget)
@@ -220,8 +248,22 @@ async def update_budget(
         budget.name = request.name
     if request.max_budget is not None:
         budget.max_budget = request.max_budget
-    if request.budget_duration_sec is not None:
-        budget.budget_duration_sec = request.budget_duration_sec
+    # The two cadence fields settle together, because each is only legal in terms
+    # of the other: the pair that has to hold is the one the row ends up with, so
+    # an omitted field contributes what is stored. Switching a rolling budget to a
+    # calendar one is one request that nulls the duration and names the alignment.
+    if {"budget_duration_sec", "reset_alignment"} & request.model_fields_set:
+        duration = (
+            request.budget_duration_sec
+            if "budget_duration_sec" in request.model_fields_set
+            else budget.budget_duration_sec
+        )
+        alignment = (
+            request.reset_alignment if "reset_alignment" in request.model_fields_set else budget.reset_alignment
+        )
+        _require_single_period_source(duration, alignment)
+        budget.budget_duration_sec = duration
+        budget.reset_alignment = alignment
 
     try:
         await db.commit()
@@ -281,6 +323,22 @@ async def delete_budget(
             detail=(
                 "This budget is the member default for "
                 f"{', '.join(holders)}. Change or remove that default before deleting it."
+            ),
+        )
+
+    # The same refusal for the ceilings themselves, which name a budget directly
+    # and whose foreign key is RESTRICT too. Counted rather than named: a scope id
+    # is a bare uuid, so listing them would say less than the number does.
+    enforcing = (
+        await db.execute(select(func.count()).select_from(ScopedBudget).where(ScopedBudget.budget_id == budget_id))
+    ).scalar_one()
+    if enforcing:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail=(
+                f"This budget is enforced by {enforcing} spend "
+                f"{'ceiling' if enforcing == 1 else 'ceilings'}. Point them at another budget "
+                "or remove them before deleting it."
             ),
         )
 

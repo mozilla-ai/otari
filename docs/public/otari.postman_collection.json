@@ -757,7 +757,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\"\n}"
+              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"reset_alignment\": \"calendar_day\"\n}"
             },
             "description": "Create a new budget.",
             "header": [
@@ -815,7 +815,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\"\n}"
+              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"reset_alignment\": \"calendar_day\"\n}"
             },
             "description": "Update a budget.",
             "header": [
@@ -3432,7 +3432,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"scope_type\": \"organization\",\n  \"scope_id\": \"string\"\n}"
+              "raw": "{\n  \"scope_type\": \"organization\",\n  \"scope_id\": \"string\",\n  \"budget_id\": \"string\"\n}"
             },
             "description": "Create a scoped budget.\n\nAnswers 404 when the scope names nothing, rather than creating a ceiling\nthat can never bind.",
             "header": [
@@ -3490,9 +3490,9 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"budget_duration_sec\": 0,\n  \"max_budget\": 0,\n  \"name\": \"string\",\n  \"reset_alignment\": \"calendar_day\"\n}"
+              "raw": "{\n  \"budget_id\": \"string\",\n  \"name\": \"string\"\n}"
             },
-            "description": "Update a scoped budget's label, limit, or period.\n\nThe scope and the provider narrowing are not editable: changing either would\nmove the ceiling to a different identity while carrying its spend, which is\na delete and a create, not an update.",
+            "description": "Relabel a ceiling, or point it at a different budget.\n\nThe scope and the provider narrowing are not editable: changing either would\nmove the ceiling to a different identity while carrying its spend, which is\na delete and a create, not an update.\n\nThere is no limit or period to set here any more. Both are properties of the\nbudget, so changing what a ceiling allows is either editing that budget,\nwhich moves every ceiling naming it, or naming a different one.",
             "header": [
               {
                 "key": "Content-Type",

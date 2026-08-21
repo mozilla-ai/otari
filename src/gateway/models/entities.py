@@ -123,11 +123,28 @@ class Budget(Base):
     """Budget model for spending limits."""
 
     __tablename__ = "budgets"
+    __table_args__ = (
+        # A period comes from one place or the other, never both, matching the
+        # rule ``scoped_budgets`` already enforced when it carried its own. Without
+        # it the pair encodes one concept twice and ``(86400, calendar_month)`` is
+        # storable and meaningless.
+        CheckConstraint(
+            "NOT (budget_duration_sec IS NOT NULL AND reset_alignment IS NOT NULL)",
+            name="ck_budgets_single_period_source",
+        ),
+    )
 
     budget_id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
     name: Mapped[str | None] = mapped_column(default=None)
     max_budget: Mapped[float | None] = mapped_column()
     budget_duration_sec: Mapped[int | None] = mapped_column()
+    # Snap the window to a UTC calendar boundary instead of counting a fixed
+    # number of seconds, which is the only way to express a calendar month (2592000
+    # seconds is a different, 1.5 percent more generous, product). It lives here
+    # rather than on the rows that enforce a budget because a limit and the period
+    # it is spent over are one product decision, and splitting them let a ceiling
+    # reset on a cadence the budget defining it had never heard of.
+    reset_alignment: Mapped[str | None] = mapped_column(default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     updated_at: Mapped[datetime] = mapped_column(
         DateTime(timezone=True),
@@ -939,9 +956,9 @@ class ScopedBudget(Base):
     counters and its own period window, unlike ``budgets``, where the window and
     the counters live on the user.
 
-    USD only. There are deliberately no token or request limits in this pass:
-    the gateway prices in dollars everywhere else, and a second enforced
-    dimension is a separate decision from having scopes at all.
+    Nothing here is denominated in dollars. A limit is a property of the budget
+    this names, which is the only place in the schema that maps a cap to an
+    amount.
 
     ``scope_type`` is a plain string rather than a database enum so a new scope
     needs no enum migration, and ``scope_id`` is a string so it holds both this
@@ -950,11 +967,18 @@ class ScopedBudget(Base):
     different tables, and a provider instance may be configured in ``config.yml``
     and have no row at all.
 
-    This table does not replace ``budgets``. That one is many-to-one from
-    ``users`` and is enforced against ``users.spend + users.reserved``, so N
-    users sharing a budget each get the full limit; folding counters onto it
-    would silently turn that into a pooled cap. Both mechanisms are enforced,
-    side by side.
+    A row names a ``budgets`` row and holds the counters for spending it. The
+    limit and the period are read through the budget, never copied, so editing a
+    budget moves every ceiling that names it. That is deliberate: a budget is a
+    named thing an operator hands out, and the alternative was the same figure
+    typed once per place it applied.
+
+    This table does not replace ``budgets``, and the two enforce differently. A
+    budget reached through ``users.budget_id`` is checked against
+    ``users.spend + users.reserved``, so N users sharing one each get the full
+    limit. A budget reached through a row here is checked against *this row's*
+    counters, so everyone the scope names draws on one allowance. Same budget,
+    two enforcement shapes, which is why both mechanisms exist.
     """
 
     __tablename__ = "scoped_budgets"
@@ -986,13 +1010,6 @@ class ScopedBudget(Base):
         # non-partial index: neither unique index above covers a scan that spans
         # narrowed and aggregate rows.
         Index("ix_scoped_budgets_scope", "scope_type", "scope_id"),
-        # A period comes from one place or the other, never both. Without this the
-        # two columns would encode one concept with an implicit "ignored when"
-        # rule, and ``(86400, calendar_month)`` would be storable and meaningless.
-        CheckConstraint(
-            "NOT (budget_duration_sec IS NOT NULL AND reset_alignment IS NOT NULL)",
-            name="ck_scoped_budgets_single_period_source",
-        ),
     )
 
     id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -1000,23 +1017,19 @@ class ScopedBudget(Base):
     scope_id: Mapped[str] = mapped_column()
     provider_key_id: Mapped[str | None] = mapped_column(default=None)
     name: Mapped[str | None] = mapped_column(default=None)
-    max_budget: Mapped[float | None] = mapped_column(default=None)
+    # The budget this ceiling enforces. NOT NULL: a ceiling with no budget caps
+    # nothing. The limit and the period are read through it rather than copied, so
+    # editing a budget moves every ceiling that names it, which is the point of a
+    # budget being a named thing rather than a number typed twice.
+    budget_id: Mapped[str] = mapped_column(
+        ForeignKey("budgets.budget_id", ondelete="RESTRICT"), nullable=False, index=True
+    )
     current_spend: Mapped[float] = mapped_column(default=0.0, server_default="0")
     # In-flight holds from reservations that have passed the gate but whose actual
     # cost is not known yet. Headroom is ``max_budget - current_spend -
     # reserved_spend``; a period roll zeroes ``current_spend`` only, so a hold
     # taken before the roll is still released correctly after it.
     reserved_spend: Mapped[float] = mapped_column(default=0.0, server_default="0")
-    budget_duration_sec: Mapped[int | None] = mapped_column(default=None)
-    # Either this or ``budget_duration_sec``, and the CHECK above enforces that.
-    # A duration is a rolling window measured from the last reset; an alignment
-    # snaps the window to a UTC calendar boundary instead, which is the only way
-    # to express a calendar month (2592000 seconds is a different, 1.5 percent
-    # more generous, product). A plain string rather than a database enum, for the
-    # same reason ``scope_type`` is one. Boundaries are UTC only: a local calendar
-    # day is 23 or 25 hours across a DST transition, and a ``reset_timezone``
-    # column stays additive if that is ever wanted.
-    reset_alignment: Mapped[str | None] = mapped_column(default=None)
     period_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))

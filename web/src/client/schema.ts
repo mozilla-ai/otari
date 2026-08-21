@@ -2031,11 +2031,15 @@ export interface paths {
         head?: never;
         /**
          * Update Scoped Budget
-         * @description Update a scoped budget's label, limit, or period.
+         * @description Relabel a ceiling, or point it at a different budget.
          *
          *     The scope and the provider narrowing are not editable: changing either would
          *     move the ceiling to a different identity while carrying its spend, which is
          *     a delete and a create, not an update.
+         *
+         *     There is no limit or period to set here any more. Both are properties of the
+         *     budget, so changing what a ceiling allows is either editing that budget,
+         *     which moves every ceiling naming it, or naming a different one.
          */
         patch: operations["update_scoped_budget_v1_scoped_budgets__budget_id__patch"];
         trace?: never;
@@ -3594,6 +3598,8 @@ export interface components {
             max_budget: number | null;
             /** Name */
             name: string | null;
+            /** Reset Alignment */
+            reset_alignment: string | null;
             /**
              * Total Reserved
              * @default 0
@@ -3892,6 +3898,11 @@ export interface components {
              * @description Admin-facing label for the budget
              */
             name?: string | null;
+            /**
+             * Reset Alignment
+             * @description Reset on a UTC calendar boundary instead of a fixed number of seconds, which is the only way to express a calendar month. Mutually exclusive with budget_duration_sec
+             */
+            reset_alignment?: ("calendar_day" | "calendar_week" | "calendar_month") | null;
         };
         /**
          * CreateKeyRequest
@@ -3987,18 +3998,13 @@ export interface components {
          */
         CreateScopedBudgetRequest: {
             /**
-             * Budget Duration Sec
-             * @description Period length in seconds (e.g. 86400 for daily); null never resets
+             * Budget Id
+             * @description The budget this ceiling enforces; its limit and period are read through it
              */
-            budget_duration_sec?: number | null;
-            /**
-             * Max Budget
-             * @description Maximum USD spend in the period
-             */
-            max_budget?: number | null;
+            budget_id: string;
             /**
              * Name
-             * @description Admin-facing label for the budget
+             * @description Admin-facing label for this ceiling
              */
             name?: string | null;
             /**
@@ -4006,11 +4012,6 @@ export interface components {
              * @description Narrow the cap to one provider instance; null caps spend across every provider
              */
             provider_key_id?: string | null;
-            /**
-             * Reset Alignment
-             * @description Reset on a UTC calendar boundary instead of a fixed number of seconds, which is the only way to express a calendar month. Mutually exclusive with budget_duration_sec
-             */
-            reset_alignment?: ("calendar_day" | "calendar_week" | "calendar_month") | null;
             /**
              * Scope Id
              * @description Id of the capped identity: an organization, workspace, membership row, or API key
@@ -6106,10 +6107,16 @@ export interface components {
          *     Unlike ``/v1/budgets``, the counters are the row's own: a scoped ceiling is
          *     enforced against ``current_spend + reserved_spend``, so there is no rollup
          *     over users to compute.
+         *
+         *     ``max_budget``, ``budget_duration_sec`` and ``reset_alignment`` are read off
+         *     the budget rather than stored here, and are carried on the wire so a caller
+         *     can render a ceiling without fetching every budget to resolve one id.
          */
         ScopedBudgetResponse: {
             /** Budget Duration Sec */
             budget_duration_sec: number | null;
+            /** Budget Id */
+            budget_id: string;
             /** Created At */
             created_at: string;
             /** Current Spend */
@@ -6672,6 +6679,8 @@ export interface components {
             max_budget?: number | null;
             /** Name */
             name?: string | null;
+            /** Reset Alignment */
+            reset_alignment?: ("calendar_day" | "calendar_week" | "calendar_month") | null;
         };
         /**
          * UpdateKeyRequest
@@ -6702,14 +6711,10 @@ export interface components {
          * @description Request model for updating a scoped budget.
          */
         UpdateScopedBudgetRequest: {
-            /** Budget Duration Sec */
-            budget_duration_sec?: number | null;
-            /** Max Budget */
-            max_budget?: number | null;
+            /** Budget Id */
+            budget_id?: string | null;
             /** Name */
             name?: string | null;
-            /** Reset Alignment */
-            reset_alignment?: ("calendar_day" | "calendar_week" | "calendar_month") | null;
         };
         /**
          * UpdateSearchToolRequest
@@ -7474,11 +7479,12 @@ export interface components {
         };
         /**
          * WorkspaceMemberBudgetPolicyUpdate
-         * @description Request body for updating a default.
+         * @description Request body for pointing a default at a different budget.
          *
-         *     Not retroactive: a member already materialized from this default keeps
-         *     the value that was in effect when they were materialized. Only a member
-         *     materialized after this update sees the new one.
+         *     Members already materialized from this default keep the budget they were
+         *     given: their ceiling names it directly, and this only changes what a member
+         *     joining afterwards is handed. Editing the *budget* is the retroactive act,
+         *     and it moves everyone naming it, in this workspace and outside it.
          */
         WorkspaceMemberBudgetPolicyUpdate: {
             /** Budget Id */

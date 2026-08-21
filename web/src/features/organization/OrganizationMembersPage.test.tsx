@@ -5,6 +5,7 @@ import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type {
+  Budget,
   DeploymentBootstrap,
   OrganizationContext,
   OrganizationMember,
@@ -17,6 +18,7 @@ import { OrganizationMembersPage } from "@/features/organization/OrganizationMem
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
   bootstrap,
+  budget,
   organizationContext,
   organizationMember,
   scopedBudget,
@@ -52,6 +54,9 @@ function mockApi(opts: {
   // each", which the editor writes to.
   workspaceMembers?: Record<string, WorkspaceMember[]>
   scopedBudgets?: ScopedBudget[]
+  // The editor picks a budget rather than typing an amount, so the list has to
+  // be served for the picker to have anything in it.
+  budgets?: Budget[]
 }) {
   const context = opts.context ?? organizationContext()
   const members = opts.members ?? [organizationMember()]
@@ -59,6 +64,7 @@ function mockApi(opts: {
   const users = opts.users ?? []
   const workspaceMembers = opts.workspaceMembers ?? {}
   const scopedBudgets = opts.scopedBudgets ?? []
+  const budgetList = opts.budgets ?? []
   const requests: Request[] = []
 
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -78,6 +84,9 @@ function mockApi(opts: {
     }
     if (url.includes("/v1/aliases")) {
       return jsonResponse([])
+    }
+    if (url.includes("/v1/budgets")) {
+      return jsonResponse(budgetList)
     }
     if (url.includes("/v1/scoped-budgets")) {
       if (method === "GET") return jsonResponse(scopedBudgets)
@@ -516,11 +525,16 @@ describe("OrganizationMembersPage", () => {
           }),
         ],
       },
+      budgets: [
+        budget({ budget_id: "bud-small", name: "Small", max_budget: 50 }),
+        budget({ budget_id: "bud-large", name: "Large", max_budget: 125 }),
+      ],
       scopedBudgets: [
         scopedBudget({
           id: "ceiling-1",
           scope_type: "workspace_member",
           scope_id: "membership-1",
+          budget_id: "bud-small",
           max_budget: 50,
         }),
       ],
@@ -533,10 +547,10 @@ describe("OrganizationMembersPage", () => {
     await actor.click(within(row).getByRole("button", { name: "Edit" }))
     await screen.findByText("Workspace access")
 
-    // Already in Default Workspace with a $50 ceiling; raise it and join Bravo.
-    const limit = await screen.findByLabelText("Budget in Default Workspace")
-    await actor.clear(limit)
-    await actor.type(limit, "125")
+    // Already in Default Workspace on the Small budget; move to Large and join
+    // Bravo. A budget is picked, never an amount: the figure is the budget's.
+    const picker = await screen.findByLabelText("Budget in Default Workspace")
+    await actor.selectOptions(picker, "bud-large")
     await actor.click(screen.getByLabelText("Bravo"))
     await actor.click(screen.getByRole("button", { name: "Save changes" }))
 
@@ -553,6 +567,6 @@ describe("OrganizationMembersPage", () => {
       (r) =>
         r.method === "PATCH" && r.url.includes("/v1/scoped-budgets/ceiling-1"),
     )
-    expect(ceiling?.body).toEqual({ max_budget: 125 })
+    expect(ceiling?.body).toEqual({ budget_id: "bud-large" })
   })
 })

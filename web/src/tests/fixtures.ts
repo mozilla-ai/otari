@@ -215,6 +215,9 @@ export function scopedBudget(
     scope_id: "99999999-9999-9999-9999-999999999999",
     provider_key_id: null,
     name: null,
+    // The budget this ceiling enforces. `max_budget` and the cadence below are
+    // read off it and travel on the wire; they are not stored on the ceiling.
+    budget_id: "77777777-7777-7777-7777-777777777777",
     max_budget: 50,
     current_spend: 0,
     reserved_spend: 0,
@@ -235,6 +238,9 @@ export function budget(overrides: Partial<Budget> = {}): Budget {
     name: "Team standard",
     max_budget: 100,
     budget_duration_sec: 2_592_000,
+    // The calendar cadence, which lives here rather than on the rows enforcing
+    // this budget: a limit and the period it is spent over are one decision.
+    reset_alignment: null,
     user_count: 0,
     total_spend: 0,
     total_reserved: 0,
