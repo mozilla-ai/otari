@@ -19,9 +19,11 @@ separate top-level field, so they get their own per-format helpers here.
 
 from __future__ import annotations
 
+from collections.abc import Container, Sequence
 from typing import Any
 
 from gateway.core.env import otari_env
+from gateway.core.observation import UNDECLARED_HINT
 from gateway.services.mcp_loop import PURPOSE_HINT_HEADER
 
 
@@ -67,11 +69,45 @@ def _resolve_header(header: str | None) -> str:
     return header or otari_env("TOOLS_HEADER") or PURPOSE_HINT_HEADER
 
 
-def _build_hint_block(hints: list[tuple[str, str]], header: str | None) -> str:
+def build_hint_block(hints: Sequence[tuple[str, str]], header: str | None = None) -> str:
+    """Assemble the purpose-hint preamble, in the caller's declaration order.
+
+    Public because the block is what the model actually saw, which Reprise records
+    as ``injected_block_hash`` (:func:`gateway.core.observation.text_hash`). It is a
+    pure function of ``(hints, header)`` for all three wire formats: chat
+    completions assembles an identical block inline in
+    :func:`gateway.services.mcp_loop.inject_purpose_hints`, and
+    ``test_purpose_hint_normalization`` pins the two together.
+    """
     lines = [_resolve_header(header)]
     for name, hint in hints:
         lines.append(f"- {name}: {hint}")
     return "\n".join(lines)
+
+
+def normalize_purpose_hints(
+    hints: Sequence[tuple[str, str]],
+    *,
+    caller_declared: Container[str],
+) -> list[tuple[str, str]]:
+    """Normalize purpose hints for :func:`gateway.core.observation.hint_hash`.
+
+    Sorted, because the pairs come out in the order the request body listed the
+    servers (``MCPClientPool.purpose_hints``), so the same two servers listed the
+    other way round would otherwise hash differently. The injected block keeps the
+    caller's order, since that is what the model sees; only the hash sorts.
+
+    A name absent from ``caller_declared`` hashes as
+    :data:`~gateway.core.observation.UNDECLARED_HINT` rather than as its resolved
+    text, so ``caller_declared`` is the set of names the *request body* carried a
+    ``purpose_hint`` for, not the set that ended up with one.
+
+    The pairs arrive per server for MCP and per tool for the sandbox
+    (``SandboxBackend.purpose_hints``); this does not care which produced them.
+    The deployment's header is not an input: ``OTARI_TOOLS_HEADER`` is an operator
+    knob rather than customer content, so it never reaches the key.
+    """
+    return sorted((name, hint if name in caller_declared else UNDECLARED_HINT) for name, hint in hints)
 
 
 def inject_purpose_hints_anthropic(
@@ -92,7 +128,7 @@ def inject_purpose_hints_anthropic(
     if not hints:
         return call_kwargs
 
-    block = _build_hint_block(hints, header)
+    block = build_hint_block(hints, header)
     existing = call_kwargs.get("system")
 
     if existing is None:
@@ -150,7 +186,7 @@ def inject_purpose_hints_responses(
     if not hints:
         return call_kwargs
 
-    block = _build_hint_block(hints, header)
+    block = build_hint_block(hints, header)
     existing = call_kwargs.get("instructions")
 
     if not existing:

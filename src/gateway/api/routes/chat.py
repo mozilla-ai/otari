@@ -38,6 +38,7 @@ from gateway.api.routes._platform import ResolvedAttempt, SettledCost
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
+from gateway.core.observation import message_text
 from gateway.core.usage import GatewayUsage
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
@@ -260,6 +261,22 @@ class _ChatAdapter:
             **kwargs,
             "messages": inject_purpose_hints(kwargs["messages"], hints, header=header),
         }
+
+    def client_system_prompt(self, kwargs: dict[str, Any]) -> str:
+        # A leading ``developer`` message counts too. ``inject_purpose_hints`` only
+        # merges into ``system`` and otherwise inserts one, so a developer-led
+        # request gets the hint block as a separate message; both roles are the
+        # caller's own prompt as far as the hash is concerned.
+        leading = next(iter(kwargs.get("messages") or []), None)
+        if not isinstance(leading, dict) or leading.get("role") not in {"system", "developer"}:
+            return ""
+        return message_text(leading.get("content"))
+
+    def first_user_message(self, kwargs: dict[str, Any]) -> str:
+        for message in kwargs.get("messages") or []:
+            if isinstance(message, dict) and message.get("role") == "user":
+                return message_text(message.get("content"))
+        return ""
 
     def attempt_kwargs(
         self,

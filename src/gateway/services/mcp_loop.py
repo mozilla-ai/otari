@@ -24,9 +24,11 @@ from contextlib import aclosing
 from typing import TYPE_CHECKING, Any
 
 from any_llm import acompletion
-from any_llm.types.completion import PromptTokensDetails
+from any_llm.types.completion import CompletionUsage, PromptTokensDetails
 
 from gateway.core.env import otari_env
+from gateway.core.observation import NormalizedTool, normalized_tool
+from gateway.core.usage import GatewayUsage
 from gateway.log_config import logger
 from gateway.services._tool_loop import (
     MaxToolIterationsExceeded,
@@ -92,6 +94,12 @@ def inject_purpose_hints(
     else:
         out.insert(0, {"role": "system", "content": block})
     return out
+
+
+def _definition_of(tool: dict[str, Any]) -> dict[str, Any]:
+    """The chat-completions tool definition, unwrapped from its ``function`` nesting."""
+    fn = tool.get("function")
+    return fn if isinstance(fn, dict) else tool
 
 
 def _accumulate_tool_call_deltas(slots: dict[int, dict[str, Any]], deltas: list[Any]) -> None:
@@ -227,6 +235,11 @@ class _ChatStreamState:
         # official OpenAI client raise IndexError.
         self.visible_tool_index: dict[int, int] = {}
         self.next_visible_tool_index = 0
+        # This round's provider-reported usage, for the Reprise usage snapshot
+        # (otari-ai#1647). Recorded only: the chunk carrying it is forwarded
+        # untouched, and the client-facing usage accounting still happens
+        # downstream in ``streaming_generator``.
+        self.usage: CompletionUsage | None = None
 
 
 class _ChatToolLoopStrategy:
@@ -243,6 +256,11 @@ class _ChatToolLoopStrategy:
 
     def convert_pool_tools(self, tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return tools
+
+    def normalize_tools(self, tools: list[dict[str, Any]]) -> list[NormalizedTool]:
+        # Chat nests the definition under ``function``; an entry that is not a
+        # function tool is read flat, so a provider-native tool still counts by name.
+        return [normalized_tool(_definition_of(tool), "parameters") for tool in tools]
 
     # ---- non-streaming hooks ----
 
@@ -263,6 +281,14 @@ class _ChatToolLoopStrategy:
 
     def fold_usage(self, result: ChatCompletion, acc: dict[str, int]) -> None:
         _fold_usage(result, acc["prompt"], acc["completion"], acc["cache_read"])
+
+    def usage_snapshot(self, result: ChatCompletion) -> GatewayUsage | None:
+        # OpenAI-shaped: cached tokens are a slice of prompt_tokens rather than an
+        # additive bucket, which ``from_completion_usage`` records by leaving
+        # ``cache_tokens_in_prompt`` at its True default.
+        if result.usage is None:
+            return None
+        return GatewayUsage.from_completion_usage(result.usage)
 
     def exit_before_split(self, result: ChatCompletion) -> bool:
         return not result.choices or result.choices[0].finish_reason != "tool_calls"
@@ -347,6 +373,11 @@ class _ChatToolLoopStrategy:
         pool: ToolBackend,
         acc: None,
     ) -> tuple[StreamAction, ChatCompletionChunk]:
+        if event.usage is not None:
+            # Usually a trailing choices-less chunk, but a provider any-llm
+            # synthesizes streaming for may attach it to the terminal chunk
+            # instead; last one wins, since the counts are cumulative.
+            state.usage = event.usage
         chunk_is_terminal = False
         hide = False
         visible = event
@@ -449,6 +480,15 @@ class _ChatToolLoopStrategy:
 
     def accumulate_stream_usage(self, acc: None, state: _ChatStreamState) -> None:
         return None
+
+    def stream_usage_snapshot(self, state: _ChatStreamState) -> GatewayUsage | None:
+        # ``None`` rather than a zero-filled snapshot when the caller set
+        # ``include_usage: False`` and the provider therefore sent nothing: this is
+        # the one format where a round's usage can be genuinely unknown, and
+        # unknown must not read as zero.
+        if state.usage is None:
+            return None
+        return GatewayUsage.from_completion_usage(state.usage)
 
     def synthetic_events(self, state: _ChatStreamState, acc: None) -> list[Any]:
         # This format has no native vocabulary for a server-side tool call, so the

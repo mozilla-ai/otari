@@ -9,8 +9,6 @@ from any_llm.types.responses import ResponsesParams, ResponseStreamEvent
 from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Request, status
 from fastapi import Response as FastAPIResponse
 from fastapi.responses import StreamingResponse
-from openai.types.responses import ResponseUsage
-from openresponses_types.types import Usage as OpenResponsesUsage
 from pydantic import ConfigDict, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -38,7 +36,8 @@ from gateway.api.routes._platform import ResolvedAttempt, SettledCost, build_att
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
-from gateway.core.usage import GatewayUsage
+from gateway.core.observation import message_text
+from gateway.core.usage import responses_usage
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import McpServerConfig
@@ -217,21 +216,6 @@ def _with_codex_extra_body(fields: dict[str, Any], provider: LLMProvider) -> dic
     return result
 
 
-def _usage_to_completion_usage(
-    usage: ResponseUsage | OpenResponsesUsage | None,
-) -> CompletionUsage | None:
-    if usage is None:
-        return None
-    details = getattr(usage, "input_tokens_details", None)
-    cache_read_tokens = (getattr(details, "cached_tokens", 0) or 0) if details is not None else 0
-    return GatewayUsage(
-        prompt_tokens=getattr(usage, "input_tokens", 0) or 0,
-        completion_tokens=getattr(usage, "output_tokens", 0) or 0,
-        total_tokens=getattr(usage, "total_tokens", 0) or 0,
-        cache_read_tokens=cache_read_tokens,
-    )
-
-
 def _ensure_provider_supports_responses(provider: LLMProvider) -> None:
     provider_class = AnyLLM.get_provider_class(provider)
     if not getattr(provider_class, "SUPPORTS_RESPONSES", False):
@@ -272,11 +256,11 @@ class _ResponsesAdapter:
     def extract_stream_usage(self, chunk: ResponseStreamEvent) -> CompletionUsage | None:
         response_obj = getattr(chunk, "response", None)
         if response_obj and getattr(response_obj, "usage", None):
-            return _usage_to_completion_usage(response_obj.usage)
+            return responses_usage(response_obj.usage)
         return None
 
     def extract_usage(self, result: ResponsesResponse) -> CompletionUsage | None:
-        return _usage_to_completion_usage(getattr(result, "usage", None))
+        return responses_usage(getattr(result, "usage", None))
 
     def attach_cost(
         self,
@@ -366,6 +350,21 @@ class _ResponsesAdapter:
         header: str | None,
     ) -> dict[str, Any]:
         return inject_purpose_hints_responses({**kwargs}, hints, header=header)
+
+    def client_system_prompt(self, kwargs: dict[str, Any]) -> str:
+        return message_text(kwargs.get("instructions"))
+
+    def first_user_message(self, kwargs: dict[str, Any]) -> str:
+        # ``input`` is a bare string or a list of items. A bare string is itself
+        # the opening turn; in a list it is the first ``user`` item, which may be
+        # a plain message or a ``{"type": "message"}`` one carrying input_text parts.
+        input_data = kwargs.get("input_data")
+        if isinstance(input_data, str):
+            return input_data
+        for item in input_data or []:
+            if isinstance(item, dict) and item.get("role") == "user":
+                return message_text(item.get("content"))
+        return ""
 
     def attempt_kwargs(
         self,

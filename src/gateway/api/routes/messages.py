@@ -50,7 +50,8 @@ from gateway.api.routes._platform import (
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
 from gateway.api.routes._tools import _strip_gateway_fields
 from gateway.core.config import GatewayConfig
-from gateway.core.usage import GatewayUsage
+from gateway.core.observation import message_text
+from gateway.core.usage import GatewayUsage, anthropic_billable_usage, anthropic_cache_write_1h_tokens
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import McpServerConfig
@@ -261,29 +262,9 @@ _ERROR_KIND_TO_ANTHROPIC_TYPE = {
 }
 
 
-def _billable_messages_usage(usage: Any) -> GatewayUsage:
-    """Use per-iteration totals when Anthropic reports compaction sampling."""
-    billable_parts = list(getattr(usage, "iterations", None) or []) or [usage]
-    input_tokens = sum((getattr(part, "input_tokens", None) or 0) for part in billable_parts)
-    output_tokens = sum((getattr(part, "output_tokens", None) or 0) for part in billable_parts)
-    return GatewayUsage(
-        prompt_tokens=input_tokens,
-        completion_tokens=output_tokens,
-        total_tokens=input_tokens + output_tokens,
-        cache_read_tokens=sum(
-            (getattr(part, "cache_read_input_tokens", None) or 0) for part in billable_parts
-        ),
-        cache_write_tokens=sum(
-            (getattr(part, "cache_creation_input_tokens", None) or 0) for part in billable_parts
-        ),
-        cache_write_1h_tokens=sum(_cache_write_1h_tokens(part) for part in billable_parts),
-        cache_tokens_in_prompt=False,
-    )
-
-
 def _messages_stream_usage(event: MessageStreamEvent) -> CompletionUsage | None:
     if isinstance(event, MessageDeltaEvent):
-        return _billable_messages_usage(event.usage)
+        return anthropic_billable_usage(event.usage)
     if isinstance(event, MessageStartEvent):
         usage = event.message.usage
         input_tokens = usage.input_tokens or 0
@@ -296,16 +277,10 @@ def _messages_stream_usage(event: MessageStreamEvent) -> CompletionUsage | None:
                 total_tokens=input_tokens,
                 cache_read_tokens=cache_read,
                 cache_write_tokens=cache_write,
-                cache_write_1h_tokens=_cache_write_1h_tokens(usage),
+                cache_write_1h_tokens=anthropic_cache_write_1h_tokens(usage),
                 cache_tokens_in_prompt=False,
             )
     return None
-
-
-def _cache_write_1h_tokens(usage: Any) -> int:
-    """Read Anthropic's optional 1-hour cache-creation breakdown."""
-    cache_creation = getattr(usage, "cache_creation", None)
-    return getattr(cache_creation, "ephemeral_1h_input_tokens", 0) or 0
 
 
 def _requested_cache_write_ttl(*values: Any) -> Literal["5m", "1h"] | None:
@@ -369,7 +344,7 @@ class _MessagesAdapter:
     def extract_usage(self, result: MessageResponse) -> CompletionUsage | None:
         if not result.usage:
             return None
-        return _billable_messages_usage(result.usage)
+        return anthropic_billable_usage(result.usage)
 
     def attach_cost(
         self,
@@ -458,6 +433,17 @@ class _MessagesAdapter:
         header: str | None,
     ) -> dict[str, Any]:
         return inject_purpose_hints_anthropic({**kwargs}, hints, header=header)
+
+    def client_system_prompt(self, kwargs: dict[str, Any]) -> str:
+        # ``system`` is legally a string or a list of content blocks meaning the
+        # same thing; both flatten to the same text.
+        return message_text(kwargs.get("system"))
+
+    def first_user_message(self, kwargs: dict[str, Any]) -> str:
+        for message in kwargs.get("messages") or []:
+            if isinstance(message, dict) and message.get("role") == "user":
+                return message_text(message.get("content"))
+        return ""
 
     def attempt_kwargs(
         self,

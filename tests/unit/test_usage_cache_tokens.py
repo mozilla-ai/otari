@@ -9,8 +9,13 @@ from any_llm.types.completion import (
 
 from gateway.api.routes.chat import _ChatAdapter
 from gateway.api.routes.messages import _messages_stream_usage, _MessagesAdapter, _requested_cache_write_ttl
-from gateway.api.routes.responses import _usage_to_completion_usage
-from gateway.core.usage import GatewayUsage, cache_read_tokens_of, cache_write_1h_tokens_of, cache_write_tokens_of
+from gateway.core.usage import (
+    GatewayUsage,
+    cache_read_tokens_of,
+    cache_write_1h_tokens_of,
+    cache_write_tokens_of,
+    responses_usage,
+)
 
 
 def test_gateway_usage_defaults_to_zero() -> None:
@@ -285,7 +290,7 @@ def test_responses_captures_cached_tokens() -> None:
         input_tokens_details=InputTokensDetails(cached_tokens=33),
         output_tokens_details=OutputTokensDetails(reasoning_tokens=0),
     )
-    usage = _usage_to_completion_usage(usage_in)
+    usage = responses_usage(usage_in)
     assert isinstance(usage, GatewayUsage)
     assert usage.cache_read_tokens == 33
     assert usage.cache_write_tokens == 0

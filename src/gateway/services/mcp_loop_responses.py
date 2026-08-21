@@ -33,6 +33,8 @@ from openai.types.responses.response_function_web_search import ActionSearch
 from openai.types.responses.response_output_item_added_event import ResponseOutputItemAddedEvent
 from openai.types.responses.response_output_item_done_event import ResponseOutputItemDoneEvent
 
+from gateway.core.observation import NormalizedTool, normalized_tool
+from gateway.core.usage import GatewayUsage, responses_usage
 from gateway.log_config import logger
 from gateway.services._tool_loop import StreamAction, run_tool_loop, run_tool_loop_stream
 from gateway.services.mcp_loop import (
@@ -306,6 +308,13 @@ class _ResponsesStreamState:
         self.function_calls: dict[int, dict[str, Any]] = {}
         self.compaction_items: dict[int, Any] = {}
         self.deferred_completed: ResponseStreamEvent | None = None
+        # This round's provider-reported usage, for the Reprise usage snapshot
+        # (otari-ai#1647). Taken from any event that carries one rather than from
+        # ``deferred_completed`` alone, because a round truncated by
+        # ``max_output_tokens`` or a content filter ends on ``response.incomplete``,
+        # which the gateway bills and which would otherwise read as unknown usage.
+        # Recorded only: no event's handling changes.
+        self.usage: Any = None
         self.owned_specs: list[dict[str, Any]] = []
         # Output items the gateway runs itself. Their events are swallowed: the
         # client can never be sent a ``function_call_output`` for a call the
@@ -332,6 +341,9 @@ class _ResponsesToolLoopStrategy:
     def convert_pool_tools(self, tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return openai_to_responses_tools(tools)
 
+    def normalize_tools(self, tools: list[dict[str, Any]]) -> list[NormalizedTool]:
+        return [normalized_tool(tool, "parameters") for tool in tools]
+
     # ---- non-streaming hooks ----
 
     async def call(self, kwargs: dict[str, Any]) -> Response:
@@ -349,6 +361,9 @@ class _ResponsesToolLoopStrategy:
             acc["input"] += result.usage.input_tokens or 0
             acc["output"] += result.usage.output_tokens or 0
             acc["total"] += result.usage.total_tokens or 0
+
+    def usage_snapshot(self, result: Response) -> GatewayUsage | None:
+        return responses_usage(getattr(result, "usage", None))
 
     def fold_usage(self, result: Response, acc: dict[str, Any]) -> None:
         _fold_usage(result, acc["input"], acc["output"], acc["total"])
@@ -457,6 +472,9 @@ class _ResponsesToolLoopStrategy:
         acc: dict[str, Any],
     ) -> tuple[StreamAction, ResponseStreamEvent]:
         etype = getattr(event, "type", None)
+        usage = getattr(getattr(event, "response", None), "usage", None)
+        if usage is not None:
+            state.usage = usage
 
         if etype == "response.created":
             if acc["started"]:
@@ -591,6 +609,12 @@ class _ResponsesToolLoopStrategy:
             if iter_usage is not None:
                 acc["output_tokens"] += getattr(iter_usage, "output_tokens", 0) or 0
         acc["compactions"].extend(state.compaction_items[index] for index in sorted(state.compaction_items))
+
+    def stream_usage_snapshot(self, state: _ResponsesStreamState) -> GatewayUsage | None:
+        # One round's whole usage object rides on its terminal event, recorded by
+        # ``observe`` whichever terminal it was. Matches what the route's
+        # ``extract_stream_usage`` bills off the same stream.
+        return responses_usage(state.usage)
 
     def synthetic_events(
         self, state: _ResponsesStreamState, acc: dict[str, Any]

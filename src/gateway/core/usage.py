@@ -12,7 +12,11 @@ as plain integers (rather than relying on ``prompt_tokens_details``) lets the re
 builder forward them uniformly across providers, including Anthropic cache writes.
 """
 
+from typing import Any
+
 from any_llm.types.completion import CompletionUsage
+from openai.types.responses import ResponseUsage
+from openresponses_types.types import Usage as OpenResponsesUsage
 
 
 class GatewayUsage(CompletionUsage):
@@ -77,6 +81,62 @@ class GatewayUsage(CompletionUsage):
             cache_write_1h_tokens=cache_write_1h_tokens,
             cache_tokens_in_prompt=cache_tokens_in_prompt,
         )
+
+
+def anthropic_cache_write_1h_tokens(usage: Any) -> int:
+    """Read Anthropic's optional 1-hour cache-creation breakdown."""
+    cache_creation = getattr(usage, "cache_creation", None)
+    return getattr(cache_creation, "ephemeral_1h_input_tokens", 0) or 0
+
+
+def anthropic_billable_usage(usage: Any) -> GatewayUsage:
+    """Read an Anthropic usage object, using per-iteration totals when present.
+
+    Anthropic reports compaction sampling as an ``iterations`` list, whose parts
+    sum to what the request is actually billed; the top-level counts describe only
+    the last one. ``cache_tokens_in_prompt`` is ``False`` because ``input_tokens``
+    excludes the cache buckets on this path.
+
+    Lives in ``core`` because both the Messages route (for billing) and the
+    Messages tool-loop strategy (for the Reprise usage snapshot) need it, and a
+    service may not import the API layer.
+    """
+    billable_parts = list(getattr(usage, "iterations", None) or []) or [usage]
+    input_tokens = sum((getattr(part, "input_tokens", None) or 0) for part in billable_parts)
+    output_tokens = sum((getattr(part, "output_tokens", None) or 0) for part in billable_parts)
+    return GatewayUsage(
+        prompt_tokens=input_tokens,
+        completion_tokens=output_tokens,
+        total_tokens=input_tokens + output_tokens,
+        cache_read_tokens=sum((getattr(part, "cache_read_input_tokens", None) or 0) for part in billable_parts),
+        cache_write_tokens=sum(
+            (getattr(part, "cache_creation_input_tokens", None) or 0) for part in billable_parts
+        ),
+        cache_write_1h_tokens=sum(anthropic_cache_write_1h_tokens(part) for part in billable_parts),
+        cache_tokens_in_prompt=False,
+    )
+
+
+def responses_usage(usage: ResponseUsage | OpenResponsesUsage | None) -> GatewayUsage | None:
+    """Read an OpenAI Responses usage object, or ``None`` when there is none.
+
+    OpenAI-shaped, so ``cached_tokens`` is a slice of ``input_tokens`` rather than
+    an additive bucket and ``cache_tokens_in_prompt`` keeps its ``True`` default.
+    The Responses API reports no cache-write charge.
+
+    In ``core`` for the same reason as :func:`anthropic_billable_usage`: both the
+    Responses route and its tool-loop strategy read it, on opposite sides of the
+    service/API boundary.
+    """
+    if usage is None:
+        return None
+    details = getattr(usage, "input_tokens_details", None)
+    return GatewayUsage(
+        prompt_tokens=getattr(usage, "input_tokens", 0) or 0,
+        completion_tokens=getattr(usage, "output_tokens", 0) or 0,
+        total_tokens=getattr(usage, "total_tokens", 0) or 0,
+        cache_read_tokens=(getattr(details, "cached_tokens", 0) or 0) if details is not None else 0,
+    )
 
 
 def cache_read_tokens_of(usage: CompletionUsage) -> int:

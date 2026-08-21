@@ -518,6 +518,39 @@ class FormatAdapter(Protocol, Generic[ResultT, ChunkT]):
         """Prepend tool purpose hints to the format's system/instructions slot."""
         ...
 
+    def client_system_prompt(self, kwargs: dict[str, Any]) -> str:
+        """The caller's own system prompt, normalized, before hint injection.
+
+        Feeds Reprise's ``client_system_hash`` (otari-ai#1647). It lives here
+        rather than in the loop because :meth:`inject_hints` runs at the route
+        layer and every adapter copies before injecting, so this is the last
+        place ``kwargs`` still holds the caller's original text. Each format
+        carries it somewhere else (a top-level ``system``, a leading ``system``
+        or ``developer`` message, ``instructions``) and Anthropic's is a string
+        or a block list, so the accessor normalizes rather than merely reads:
+        see :func:`gateway.core.observation.message_text`. Absent and empty both
+        give ``""``.
+
+        The gateway prepends the hint block for two formats and appends it for
+        the third, so hashing the injected result would never group the same
+        automation across SDKs; the pre-injection text is the only thing they
+        can agree on.
+        """
+        ...
+
+    def first_user_message(self, kwargs: dict[str, Any]) -> str:
+        """The caller's opening turn, normalized. Never a fingerprint input.
+
+        Recorded in the Reprise payload as ``first_user_message_hash``, which
+        #1488 conditions a pile's agreement on, so that a workspace where one
+        automation dominates cannot report the dominant behavior as the pile's.
+        Same per-format problem as :meth:`client_system_prompt`: the opening turn
+        is the first ``user`` message for chat and messages, and ``input`` for
+        responses. The transcript as a whole is deliberately not an input to
+        anything, so a later turn in the same conversation must not move it.
+        """
+        ...
+
     def attempt_kwargs(
         self,
         attempt: ResolvedAttempt,

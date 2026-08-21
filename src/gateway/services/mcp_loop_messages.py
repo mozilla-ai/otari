@@ -28,6 +28,8 @@ from any_llm.types.messages import (
     ContentBlockStopEvent,
 )
 
+from gateway.core.observation import NormalizedTool, normalized_tool
+from gateway.core.usage import GatewayUsage, anthropic_billable_usage
 from gateway.log_config import logger
 from gateway.services._tool_loop import StreamAction, run_tool_loop, run_tool_loop_stream
 from gateway.services.mcp_loop import (
@@ -329,6 +331,11 @@ class _MessagesStreamState:
         # ``synthetic_events`` into content_block start/stop pairs.
         self.native_blocks: list[Any] = []
         self.stop_reason: str | None = None
+        # This round's ``message_start`` usage, which is where Anthropic reports the
+        # input side (input, cache reads, cache writes). Recorded for the Reprise
+        # usage snapshot (otari-ai#1647); the event itself is forwarded or deferred
+        # exactly as before.
+        self.start_usage: Any = None
         self.deferred_terminal: list[MessageStreamEvent] = []
         self.owned_specs: list[dict[str, Any]] = []
         # Blocks the gateway runs itself. Their events are swallowed rather than
@@ -367,6 +374,9 @@ class _MessagesToolLoopStrategy:
     def convert_pool_tools(self, tools: list[dict[str, Any]]) -> list[dict[str, Any]]:
         return openai_to_anthropic_tools(tools)
 
+    def normalize_tools(self, tools: list[dict[str, Any]]) -> list[NormalizedTool]:
+        return [normalized_tool(tool, "input_schema") for tool in tools]
+
     # ---- non-streaming hooks ----
 
     async def call(self, kwargs: dict[str, Any]) -> MessageResponse:
@@ -394,6 +404,11 @@ class _MessagesToolLoopStrategy:
                 result.content = [*acc["native_blocks"], *(result.content or [])]
             except (AttributeError, TypeError):
                 logger.warning("Could not add native web-search blocks to the response content")
+
+    def usage_snapshot(self, result: MessageResponse) -> GatewayUsage | None:
+        if result.usage is None:
+            return None
+        return anthropic_billable_usage(result.usage)
 
     def exit_before_split(self, result: MessageResponse) -> bool:
         return False
@@ -489,6 +504,7 @@ class _MessagesToolLoopStrategy:
         event_type = getattr(event, "type", None)
 
         if event_type == "message_start":
+            state.start_usage = getattr(getattr(event, "message", None), "usage", None)
             # One envelope per response, no matter how many upstream messages the
             # tool loop consumed to produce it.
             if acc["started"]:
@@ -616,6 +632,52 @@ class _MessagesToolLoopStrategy:
             context_management = getattr(term, "context_management", None)
             if context_management is not None:
                 acc["applied_edits"].extend(getattr(context_management, "applied_edits", None) or [])
+
+    def stream_usage_snapshot(self, state: _MessagesStreamState) -> GatewayUsage | None:
+        """One round's usage, reassembled from where Anthropic splits it.
+
+        The input side (input tokens, cache reads, cache writes) ordinarily arrives
+        on ``message_start`` and the cumulative output on the last ``message_delta``,
+        but the split is not clean enough to take either source wholesale. When the
+        round sampled compaction, only the delta carries the ``iterations`` list
+        whose parts sum to what the round is billed, ``message_start`` having been
+        emitted before the compaction pass happened; newer API versions repeat the
+        input fields on the delta too. Picking ``message_start`` for the whole input
+        side would then report a compaction round's output summed over every
+        iteration and its input from only the first, understating the cache re-read
+        the estimate is mostly made of, and disagreeing with what the same stream is
+        billed.
+
+        So the two are reconciled per field, last non-zero winning, which is the
+        convention ``gateway.streaming._merge_usage`` already applies to this stream
+        for the client-facing totals. Both events reach ``observe`` even on a
+        continuing round, where they are deferred rather than dropped.
+        """
+        delta_usage = next(
+            (
+                usage
+                for term in reversed(state.deferred_terminal)
+                if getattr(term, "type", None) == "message_delta"
+                and (usage := getattr(term, "usage", None)) is not None
+            ),
+            None,
+        )
+        if state.start_usage is None and delta_usage is None:
+            return None
+        empty = GatewayUsage(prompt_tokens=0, completion_tokens=0, total_tokens=0)
+        start = anthropic_billable_usage(state.start_usage) if state.start_usage is not None else empty
+        delta = anthropic_billable_usage(delta_usage) if delta_usage is not None else empty
+        prompt_tokens = delta.prompt_tokens or start.prompt_tokens
+        completion_tokens = delta.completion_tokens or start.completion_tokens
+        return GatewayUsage(
+            prompt_tokens=prompt_tokens,
+            completion_tokens=completion_tokens,
+            total_tokens=prompt_tokens + completion_tokens,
+            cache_read_tokens=delta.cache_read_tokens or start.cache_read_tokens,
+            cache_write_tokens=delta.cache_write_tokens or start.cache_write_tokens,
+            cache_write_1h_tokens=delta.cache_write_1h_tokens or start.cache_write_1h_tokens,
+            cache_tokens_in_prompt=False,
+        )
 
     @staticmethod
     def _native_block_events(blocks: list[Any], acc: _MessagesStreamAccumulator) -> list[Any]:
