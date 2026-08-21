@@ -343,11 +343,16 @@ class WorkspaceActivationService:
     async def dismiss(self, *, user: User, workspace_id: uuid.UUID) -> None:
         """Retire the guide for this workspace. Permanent, and idempotent.
 
-        The key the guide issued is deactivated on the way out **unless it has
-        been used**: a credential nobody asked for and nobody called is a
-        liability, while one that has already served a request is somebody's
-        working integration and is left alone. Either way the row stays on the
-        Keys page, so nothing disappears silently.
+        Dismissing means "stop offering me this card" and nothing more: the key
+        the guide issued is left exactly as it is. An earlier version of this
+        deactivated an unused one, on the reasoning that a credential nobody
+        asked for is a liability, and that reasoning did not survive the
+        decision to mint on a press: every key here was explicitly requested and
+        shown once, so an unused one means "not used *yet*". Revoking it would
+        break the likeliest sequence in the whole flow, which is copy the key,
+        paste it into your app, press Skip to clear the card, and have the first
+        request answer 401. A key's lifecycle belongs to the Keys page, which is
+        where the operator can see and revoke it.
         """
         workspace = await self._resolve_manageable(user=user, workspace_id=workspace_id)
         state = await self._state_for_update(workspace.id)
@@ -355,9 +360,6 @@ class WorkspaceActivationService:
             state = await self._create_state(workspace.id)
         if state.dismissed_at is None:
             state.dismissed_at = datetime.now(UTC)
-        record = await self._existing_key(state)
-        if record is not None and record.last_used_at is None:
-            record.is_active = False
         await self.db.commit()
 
     # ------------------------------------------------------------------

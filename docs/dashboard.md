@@ -250,10 +250,11 @@ Four things are worth knowing about it:
   new one and retires the previous one. Issuing it is a workspace management
   action: an owner or admin of the workspace (or of the organization) sees the
   offer, and a member who only has read access does not.
-- **"Skip this guide" is permanent, per workspace.** The offer does not come
-  back on the next page load, for you or for a colleague. A setup key that was
-  never used is deactivated on the way out; one that has already served a
-  request is left alone, because by then it is somebody's working integration.
+- **"Skip this guide" is permanent, per workspace**, and it retires the card and
+  nothing else. The offer does not come back on the next page load, for you or
+  for a colleague, and the key stays exactly as it is: you asked for it, you may
+  well have pasted it somewhere already, and revoking one is the API keys page's
+  job.
 - **Whether the workspace has activated is read from its own traffic**, not
   recorded separately: the first successful gateway request in the workspace is
   what closes the guide. Usage imported through
@@ -263,6 +264,11 @@ Four things are worth knowing about it:
   `OTARI_ACTIVATION_GUIDE=false`). The endpoints stay mounted and report every
   workspace ineligible, so a dashboard that is already open stops offering it
   too.
+
+One consequence worth knowing if you are upgrading rather than starting fresh: a
+workspace whose usage arrived only through `POST /v1/usage/external-events` has
+never actually called this gateway, so the guide appears for it after the
+upgrade. Skip retires it, or turn the flow off with the setting above.
 
 ### Observe
 

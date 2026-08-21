@@ -16,6 +16,7 @@ import pytest
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 
+from gateway.auth.models import hash_key
 from gateway.core.config import GatewayConfig
 from gateway.models.entities import APIKey, UsageLog, WorkspaceActivationState
 from gateway.models.tenancy import Organization, User, Workspace
@@ -348,20 +349,16 @@ async def test_a_key_deleted_from_the_keys_page_is_replaced_rather_than_resurrec
 # ----------------------------------------------------------------------
 
 
-async def test_dismiss_retires_the_guide_idempotently_and_deactivates_an_unused_key(async_db: AsyncSession) -> None:
+async def test_dismiss_retires_the_guide_idempotently(async_db: AsyncSession) -> None:
     owner, workspace = await _setup(async_db, slug="acme-dismiss")
     service = WorkspaceActivationService(async_db, _config())
-    issued = await service.issue_api_key(user=owner, workspace_id=workspace.id)
+    await service.issue_api_key(user=owner, workspace_id=workspace.id)
 
     await service.dismiss(user=owner, workspace_id=workspace.id)
     state = await async_db.get(WorkspaceActivationState, workspace.id)
     assert state is not None
     assert state.dismissed_at is not None
     dismissed_at = state.dismissed_at
-
-    key = await async_db.get(APIKey, issued.key_id)
-    assert key is not None
-    assert key.is_active is False
 
     await service.dismiss(user=owner, workspace_id=workspace.id)
     await async_db.refresh(state)
@@ -374,20 +371,24 @@ async def test_dismiss_retires_the_guide_idempotently_and_deactivates_an_unused_
         await service.issue_api_key(user=owner, workspace_id=workspace.id)
 
 
-async def test_dismiss_leaves_a_key_that_has_already_served_a_request_alone(async_db: AsyncSession) -> None:
-    owner, workspace = await _setup(async_db, slug="acme-dismiss-used")
+async def test_dismiss_leaves_the_key_it_issued_working(async_db: AsyncSession) -> None:
+    """Skip retires the card, not the credential.
+
+    The likeliest sequence in the whole flow is copy the key, paste it into your
+    app, press Skip to clear the card, then send the request. Deactivating an
+    unused key would answer that with a 401, in the flow that exists to make it
+    a 200. Revoking a key is the Keys page's job.
+    """
+    owner, workspace = await _setup(async_db, slug="acme-dismiss-key")
     service = WorkspaceActivationService(async_db, _config())
     issued = await service.issue_api_key(user=owner, workspace_id=workspace.id)
 
-    key = await async_db.get(APIKey, issued.key_id)
-    assert key is not None
-    key.last_used_at = datetime.now(UTC)
-    await async_db.commit()
-
     await service.dismiss(user=owner, workspace_id=workspace.id)
 
-    await async_db.refresh(key)
-    assert key.is_active is True, "somebody's working integration must survive a Skip"
+    key = await async_db.get(APIKey, issued.key_id)
+    assert key is not None
+    assert key.is_active is True
+    assert key.key_hash == hash_key(issued.key), "the plaintext the operator copied still authenticates"
 
 
 async def test_dismiss_before_the_guide_ever_issued_a_key_still_records_it(async_db: AsyncSession) -> None:

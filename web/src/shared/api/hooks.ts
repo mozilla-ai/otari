@@ -2034,8 +2034,9 @@ export function useCreateActivationKey() {
   })
 }
 
-// Permanent, and idempotent server-side. KEYS is invalidated as well because a
-// setup key that was never used is deactivated on the way out.
+// Permanent, and idempotent server-side. Only ACTIVATION is invalidated:
+// dismissing retires the card and leaves the key it issued alone, so nothing on
+// the Keys page changed.
 export function useDismissActivation() {
   const queryClient = useQueryClient()
   return useMutation({
@@ -2046,7 +2047,6 @@ export function useDismissActivation() {
       ),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [ACTIVATION] })
-      void queryClient.invalidateQueries({ queryKey: [KEYS] })
     },
   })
 }

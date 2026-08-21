@@ -20379,7 +20379,7 @@
     },
     "/v1/workspaces/{workspace_id}/activation/dismiss": {
       "post": {
-        "description": "Retire the guide for this workspace. Permanent, and idempotent.\n\nWorkspace owners and admins only. The key the guide issued is deactivated on\nthe way out unless it has already served a request, in which case it is\nsomebody's working integration and is left alone.",
+        "description": "Retire the guide for this workspace. Permanent, and idempotent.\n\nWorkspace owners and admins only. It retires the card and nothing else: the\nkey the guide issued keeps working, because the operator asked for it and\nmay well have pasted it somewhere already. Revoking one is the Keys page's\njob.",
         "operationId": "dismiss_workspace_activation_v1_workspaces__workspace_id__activation_dismiss_post",
         "parameters": [
           {

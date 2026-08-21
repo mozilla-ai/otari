@@ -2818,9 +2818,10 @@ export interface paths {
          * Dismiss Workspace Activation
          * @description Retire the guide for this workspace. Permanent, and idempotent.
          *
-         *     Workspace owners and admins only. The key the guide issued is deactivated on
-         *     the way out unless it has already served a request, in which case it is
-         *     somebody's working integration and is left alone.
+         *     Workspace owners and admins only. It retires the card and nothing else: the
+         *     key the guide issued keeps working, because the operator asked for it and
+         *     may well have pasted it somewhere already. Revoking one is the Keys page's
+         *     job.
          */
         post: operations["dismiss_workspace_activation_v1_workspaces__workspace_id__activation_dismiss_post"];
         delete?: never;
