@@ -13,6 +13,7 @@ import type {
   OrganizationContext,
   OrganizationMember,
   PricingResponse,
+  ScopedBudget,
   UsageSeriesPoint,
   UsageTotals,
   User,
@@ -194,6 +195,35 @@ export function workspaceMember(
     status: "active",
     created_at: "2026-01-01T00:00:00+00:00",
     updated_at: null,
+    ...overrides,
+  }
+}
+
+/**
+ * A ceiling on one tenancy scope, with its own counters.
+ *
+ * Not a variant of `budget`: a budget is a limit template with no counters,
+ * replicated per person, while this pools over whatever its scope names. The
+ * workspace_member ones are what a workspace's default materializes.
+ */
+export function scopedBudget(
+  overrides: Partial<ScopedBudget> = {},
+): ScopedBudget {
+  return {
+    id: "88888888-8888-8888-8888-888888888888",
+    scope_type: "workspace_member",
+    scope_id: "99999999-9999-9999-9999-999999999999",
+    provider_key_id: null,
+    name: null,
+    max_budget: 50,
+    current_spend: 0,
+    reserved_spend: 0,
+    budget_duration_sec: null,
+    reset_alignment: null,
+    period_start: null,
+    period_end: null,
+    created_at: "2026-01-01T00:00:00+00:00",
+    updated_at: "2026-01-01T00:00:00+00:00",
     ...overrides,
   }
 }

@@ -526,11 +526,19 @@ by is the handle those flows will match them on.
 
   The roster also carries what a person may spend and what their keys may call.
   **Model access** is the default every key issued to them inherits, which a key
-  can narrow but never exceed; **Spend** is what they have spent, plus anything
-  held in flight by a request whose cost is not settled yet; and **Block** stops
-  their keys making requests without removing them from the organization or
-  touching their history. A member added by address before any key was issued to
-  them has no spend row yet, and those cells read as empty rather than zero.
+  can narrow but never exceed; **Workspaces** names the ones they are in and the
+  budget they hold in each; **Spend** is what they have spent, plus anything held
+  in flight by a request whose cost is not settled yet; and **Block** stops their
+  keys making requests without removing them from the organization or touching
+  their history. A member added by address before any key was issued to them has
+  no spend row yet, and those cells read as empty rather than zero.
+
+  **Edit** opens all of it at once: model access, which workspaces they are in
+  and at what role, and the budget they hold in each. Those are three tables
+  underneath, so saving is several writes, and they are ordered: a workspace
+  budget is attached to the membership, so joining a workspace happens before the
+  budget for it can be set. Adding someone to a workspace that has a default
+  member budget gives them that budget unless a different figure is entered.
 
 ### Cost & billing
 

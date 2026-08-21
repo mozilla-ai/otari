@@ -9,7 +9,10 @@ import type {
   MembershipRole,
   OrganizationContext,
   OrganizationMember,
+  ScopedBudget,
+  Workspace,
   WorkspaceAssignment,
+  WorkspaceMemberRole,
 } from "@/client"
 import {
   accessLabel,
@@ -17,13 +20,21 @@ import {
 } from "@/features/models/ModelScopeControl"
 import {
   useAddOrganizationMember,
+  useAddWorkspaceMember,
+  useAllWorkspaceMembers,
+  useCreateScopedBudget,
+  useDeleteScopedBudget,
   useInviteOrganizationMember,
   useOrganizationContext,
   useOrganizationMembers,
   useRemoveOrganizationMember,
+  useRemoveWorkspaceMember,
   useRevokeOrganizationMemberInvitation,
+  useScopedBudgets,
   useUpdateOrganizationMember,
+  useUpdateScopedBudget,
   useUpdateUser,
+  useUpdateWorkspaceMemberRole,
   useUsers,
   useWorkspaces,
 } from "@/shared/api/hooks"
@@ -66,6 +77,14 @@ const usd = new Intl.NumberFormat(undefined, {
   currency: "USD",
   maximumFractionDigits: 2,
 })
+
+/** One workspace a person is in, with the ceiling they hold there. */
+interface WorkspacePlacement {
+  workspaceId: string
+  workspaceName: string
+  role: string
+  ceiling: ScopedBudget | null
+}
 
 const ROLE_OPTIONS = MEMBERSHIP_ROLES.map((role) => ({
   value: role,
@@ -393,51 +412,273 @@ function InviteMemberForm({ onClose }: { onClose: () => void }) {
 }
 
 /**
- * The default model access a member's keys inherit.
+ * Everything about one person that is not their organization role.
  *
- * Its own component so the scope control seeds from the row on mount only; the
- * page keys it on the member being edited, which is what makes switching rows
- * reseed rather than carry the previous member's selection over.
+ * One editor rather than a control per column: what their keys may call, which
+ * workspaces they are in, and what they may spend in each are the same
+ * question asked three ways, and editing them separately meant three round
+ * trips through the same row.
+ *
+ * The three live in different tables, so a save is several writes rather than
+ * one. They are ordered: memberships first, then ceilings, because a ceiling is
+ * keyed on the *membership* and a workspace someone has just been added to has
+ * no membership id until the server answers. The scoped budgets are refetched
+ * between the two passes for the same reason, since joining a workspace with a
+ * default budget materializes a ceiling server-side that this form then has to
+ * edit rather than duplicate.
  */
-function AccessEditor({
-  user,
-  isPending,
-  onSave,
+function MemberEditor({
+  member,
+  spendRow,
+  workspaces,
+  placements,
   onClose,
 }: {
-  user: ApiUser
-  isPending: boolean
-  onSave: (allowedModels: string[] | null) => void
+  member: OrganizationMember
+  spendRow: ApiUser | undefined
+  workspaces: Workspace[]
+  placements: WorkspacePlacement[]
   onClose: () => void
 }) {
+  const updateUser = useUpdateUser()
+  const addMember = useAddWorkspaceMember()
+  const removeMember = useRemoveWorkspaceMember()
+  const updateRole = useUpdateWorkspaceMemberRole()
+  const scopedBudgets = useScopedBudgets()
+  const createCeiling = useCreateScopedBudget()
+  const updateCeiling = useUpdateScopedBudget()
+  const deleteCeiling = useDeleteScopedBudget()
+
+  const initial = useMemo(() => {
+    const byWorkspace = new Map(placements.map((p) => [p.workspaceId, p]))
+    return new Map(
+      workspaces.map((workspace) => {
+        const placement = byWorkspace.get(workspace.id)
+        return [
+          workspace.id,
+          {
+            member: placement !== undefined,
+            role: placement?.role ?? "member",
+            limit:
+              placement?.ceiling?.max_budget == null
+                ? ""
+                : String(placement.ceiling.max_budget),
+          },
+        ]
+      }),
+    )
+  }, [workspaces, placements])
+
+  const [rows, setRows] = useState(initial)
   const [allowedModels, setAllowedModels] = useState<string[] | null>(
-    user.allowed_models,
+    spendRow?.allowed_models ?? null,
   )
-  const [valid, setValid] = useState(true)
+  const [scopeValid, setScopeValid] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState<unknown>(undefined)
+
+  const setRow = (
+    id: string,
+    patch: Partial<{ member: boolean; role: string; limit: string }>,
+  ) =>
+    setRows((current) => {
+      const next = new Map(current)
+      const existing = next.get(id)
+      if (existing) next.set(id, { ...existing, ...patch })
+      return next
+    })
+
+  const limitsValid = [...rows.values()].every(
+    (row) => row.limit.trim() === "" || Number(row.limit) >= 0,
+  )
+  const canSave = !saving && scopeValid && limitsValid
+
+  const save = async () => {
+    if (!canSave || !member.user_id) return
+    setSaving(true)
+    setError(undefined)
+    try {
+      if (spendRow) {
+        await updateUser.mutateAsync({
+          id: spendRow.user_id,
+          body: { allowed_models: allowedModels },
+        })
+      }
+
+      // Pass one: memberships. The id of anything created here is kept, since
+      // a ceiling names the membership and nothing else can resolve it yet.
+      const membershipIds = new Map(
+        placements.map((p) => [p.workspaceId, p.ceiling?.scope_id ?? null]),
+      )
+      const wasMember = new Set(placements.map((p) => p.workspaceId))
+      const roleWas = new Map(placements.map((p) => [p.workspaceId, p.role]))
+      for (const [workspaceId, row] of rows) {
+        if (row.member && !wasMember.has(workspaceId)) {
+          const created = await addMember.mutateAsync({
+            workspaceId,
+            userId: member.user_id,
+            role: row.role as WorkspaceMemberRole,
+          })
+          membershipIds.set(workspaceId, created.id)
+        } else if (!row.member && wasMember.has(workspaceId)) {
+          await removeMember.mutateAsync({
+            workspaceId,
+            userId: member.user_id,
+          })
+        } else if (row.member && roleWas.get(workspaceId) !== row.role) {
+          await updateRole.mutateAsync({
+            workspaceId,
+            userId: member.user_id,
+            role: row.role as WorkspaceMemberRole,
+          })
+        }
+      }
+
+      // Pass two: ceilings, against a roster that now includes the joins above
+      // and the ceilings their workspaces' defaults just materialized.
+      const fresh = await scopedBudgets.refetch()
+      const ceilings = new Map(
+        (fresh.data ?? [])
+          .filter((budget) => budget.scope_type === "workspace_member")
+          .map((budget) => [budget.scope_id, budget]),
+      )
+      for (const [workspaceId, row] of rows) {
+        if (!row.member) continue
+        const membershipId = membershipIds.get(workspaceId)
+        if (!membershipId) continue
+        const existing = ceilings.get(membershipId)
+        const wanted = row.limit.trim() === "" ? null : Number(row.limit)
+        if (existing && wanted === null) {
+          await deleteCeiling.mutateAsync(existing.id)
+        } else if (existing && existing.max_budget !== wanted) {
+          await updateCeiling.mutateAsync({
+            id: existing.id,
+            body: { max_budget: wanted },
+          })
+        } else if (!existing && wanted !== null) {
+          await createCeiling.mutateAsync({
+            scope_type: "workspace_member",
+            scope_id: membershipId,
+            max_budget: wanted,
+          })
+        }
+      }
+      onClose()
+    } catch (caught) {
+      setError(caught)
+    } finally {
+      setSaving(false)
+    }
+  }
+
   return (
-    <>
-      <ModelScopeControl
-        title="Model access (default for this member's keys)"
-        description="The models this member's keys may list and call by default. A key can narrow this, but never exceed it."
-        initial={user.allowed_models}
-        onChange={(value, isValid) => {
-          setAllowedModels(value)
-          setValid(isValid)
-        }}
-      />
-      <div className="flex gap-2">
-        <Button
-          variant="primary"
-          isDisabled={!valid || isPending}
-          onPress={() => onSave(allowedModels)}
-        >
-          {isPending ? "Saving…" : "Save access"}
-        </Button>
-        <Button variant="ghost" isDisabled={isPending} onPress={onClose}>
-          Cancel
-        </Button>
-      </div>
-    </>
+    <Card>
+      <Card.Content className="flex flex-col gap-5 p-5">
+        <div className="text-sm font-semibold text-foreground">
+          Edit {memberLabel(member)}
+        </div>
+        <ErrorBanner error={error} />
+
+        {spendRow ? (
+          <ModelScopeControl
+            title="Model access (default for this member's keys)"
+            description="The models this member's keys may list and call by default. A key can narrow this, but never exceed it."
+            initial={spendRow.allowed_models}
+            onChange={(value, isValid) => {
+              setAllowedModels(value)
+              setScopeValid(isValid)
+            }}
+          />
+        ) : (
+          <span className="text-xs text-muted">
+            No spend row yet, so there is no model access to set. One is minted
+            when a key is issued to this member.
+          </span>
+        )}
+
+        <div className="flex flex-col gap-2">
+          <span className="text-sm font-medium text-foreground">
+            Workspace access
+          </span>
+          <table className="w-full max-w-3xl text-sm">
+            <thead>
+              <tr className="text-left text-xs text-muted">
+                <th className="py-1 font-medium">Workspace</th>
+                <th className="py-1 font-medium">Role</th>
+                <th className="py-1 font-medium">Budget (USD)</th>
+              </tr>
+            </thead>
+            <tbody>
+              {workspaces.map((workspace) => {
+                const row = rows.get(workspace.id)
+                if (!row) return null
+                const limitInvalid =
+                  row.limit.trim() !== "" && !(Number(row.limit) >= 0)
+                return (
+                  <tr key={workspace.id} className="border-t border-border">
+                    <td className="py-1.5">
+                      <label className="flex items-center gap-2 text-foreground">
+                        <input
+                          type="checkbox"
+                          checked={row.member}
+                          onChange={(event) =>
+                            setRow(workspace.id, {
+                              member: event.target.checked,
+                            })
+                          }
+                        />
+                        {workspace.name}
+                      </label>
+                    </td>
+                    <td className="py-1.5">
+                      <FilterSelect
+                        ariaLabel={`Role in ${workspace.name}`}
+                        value={row.role}
+                        onChange={(next) =>
+                          setRow(workspace.id, { role: next })
+                        }
+                        options={ROLE_OPTIONS}
+                        disabled={!row.member}
+                      />
+                    </td>
+                    <td className="py-1.5">
+                      <input
+                        type="text"
+                        aria-label={`Budget in ${workspace.name}`}
+                        value={row.limit}
+                        disabled={!row.member}
+                        placeholder="No ceiling"
+                        onChange={(event) =>
+                          setRow(workspace.id, { limit: event.target.value })
+                        }
+                        className={`w-32 rounded-lg border bg-surface-alt px-2 py-1 text-sm text-foreground disabled:opacity-50 ${
+                          limitInvalid ? "border-danger" : "border-border"
+                        }`}
+                      />
+                    </td>
+                  </tr>
+                )
+              })}
+            </tbody>
+          </table>
+          <span className="max-w-2xl text-xs text-muted">
+            Each workspace holds its own allowance, so someone in two workspaces
+            has two. Leave a budget blank to give them no ceiling of their own
+            there. Adding someone to a workspace that has a default member
+            budget gives them that budget unless a figure is entered here.
+          </span>
+        </div>
+
+        <div className="flex gap-2">
+          <Button variant="primary" isDisabled={!canSave} onPress={save}>
+            {saving ? "Saving…" : "Save changes"}
+          </Button>
+          <Button variant="ghost" isDisabled={saving} onPress={onClose}>
+            Cancel
+          </Button>
+        </div>
+      </Card.Content>
+    </Card>
   )
 }
 
@@ -450,7 +691,15 @@ export function OrganizationMembersPage() {
 
   const users = useUsers()
   const updateUser = useUpdateUser()
-  const [editingAccess, setEditingAccess] = useState<string | null>(null)
+  const workspaces = useWorkspaces()
+  const workspaceIds = useMemo(
+    () => (workspaces.data ?? []).map((w) => w.id),
+    [workspaces.data],
+  )
+  const workspaceMembers = useAllWorkspaceMembers(workspaceIds)
+  const scopedBudgets = useScopedBudgets()
+
+  const [editingMember, setEditingMember] = useState<string | null>(null)
   const [removing, setRemoving] = useState<OrganizationMember | null>(null)
   const [revoking, setRevoking] = useState<OrganizationMember | null>(null)
   const [adding, setAdding] = useState(false)
@@ -461,11 +710,41 @@ export function OrganizationMembersPage() {
     () => new Map((users.data ?? []).map((user) => [user.user_id, user])),
     [users.data],
   )
-  const editingUser = editingAccess
-    ? userByAttribution.get(editingAccess)
-    : undefined
+
+  // Where a person is, and what they may spend there. A workspace ceiling is a
+  // `scoped_budgets` row keyed on the *membership* id, not on the person, which
+  // is why the roster has to be resolved first: a member in two workspaces holds
+  // two memberships and therefore two ceilings, one per workspace.
+  const ceilingByMembership = useMemo(
+    () =>
+      new Map(
+        (scopedBudgets.data ?? [])
+          .filter((budget) => budget.scope_type === "workspace_member")
+          .map((budget) => [budget.scope_id, budget]),
+      ),
+    [scopedBudgets.data],
+  )
+  const placementsByUser = useMemo(() => {
+    const names = new Map((workspaces.data ?? []).map((w) => [w.id, w.name]))
+    const byUser = new Map<string, WorkspacePlacement[]>()
+    for (const { workspaceId, member } of workspaceMembers.data) {
+      const placement: WorkspacePlacement = {
+        workspaceId,
+        workspaceName: names.get(workspaceId) ?? workspaceId.slice(0, 8),
+        role: member.role,
+        ceiling: ceilingByMembership.get(member.id) ?? null,
+      }
+      byUser.set(member.user_id, [
+        ...(byUser.get(member.user_id) ?? []),
+        placement,
+      ])
+    }
+    return byUser
+  }, [workspaces.data, workspaceMembers.data, ceilingByMembership])
   const activeContext: OrganizationContext | undefined = context.data
   const manages = canManage(activeContext)
+  const editingRow =
+    rows.find((row) => memberRowKey(row) === editingMember) ?? null
 
   const columns = useMemo<DataTableColumn<OrganizationMember>[]>(
     () => [
@@ -562,27 +841,43 @@ export function OrganizationMembersPage() {
           }
           const { text, tone } = accessLabel(spendRow.allowed_models)
           return (
-            <div className="flex items-center gap-2">
-              <span
-                className={
-                  tone === "danger"
-                    ? "text-xs text-danger"
-                    : tone === "muted"
-                      ? "text-xs text-muted"
-                      : "text-xs text-foreground"
-                }
-              >
-                {text}
-              </span>
-              {manages ? (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onPress={() => setEditingAccess(spendRow.user_id)}
-                >
-                  Edit
-                </Button>
-              ) : null}
+            <span
+              className={
+                tone === "danger"
+                  ? "text-xs text-danger"
+                  : tone === "muted"
+                    ? "text-xs text-muted"
+                    : "text-xs text-foreground"
+              }
+            >
+              {text}
+            </span>
+          )
+        },
+      },
+      {
+        id: "workspaces",
+        header: "Workspaces",
+        // A toggle rather than chips: the budget someone holds in a workspace is
+        // the other half of the answer, and neither fits in a cell beside the
+        // other. The detail panel below carries both.
+        cell: (member) => {
+          const placements = member.user_id
+            ? (placementsByUser.get(member.user_id) ?? [])
+            : []
+          if (placements.length === 0) {
+            return <span className="text-xs text-muted">None</span>
+          }
+          return (
+            <div className="flex flex-wrap gap-1">
+              {placements.map((placement) => (
+                <Chip key={placement.workspaceId} size="sm">
+                  {placement.workspaceName}
+                  {placement.ceiling?.max_budget != null
+                    ? ` · ${usd.format(placement.ceiling.max_budget)}`
+                    : ""}
+                </Chip>
+              ))}
             </div>
           )
         },
@@ -649,6 +944,15 @@ export function OrganizationMembersPage() {
             : undefined
           return (
             <div className="flex items-center justify-end gap-1.5">
+              {manages ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onPress={() => setEditingMember(memberRowKey(member))}
+                >
+                  Edit
+                </Button>
+              ) : null}
               {manages && spendRow ? (
                 <Button
                   size="sm"
@@ -695,6 +999,7 @@ export function OrganizationMembersPage() {
       userByAttribution,
       updateUser.isPending,
       updateUser.mutate,
+      placementsByUser,
     ],
   )
 
@@ -736,29 +1041,25 @@ export function OrganizationMembersPage() {
         <InviteMemberForm onClose={() => setInviting(false)} />
       ) : null}
 
-      {editingUser ? (
-        <Card>
-          <Card.Content className="flex flex-col gap-4 p-5">
-            <div className="text-sm font-semibold text-foreground">
-              Model access for <code>{editingUser.user_id}</code>
-            </div>
-            <ErrorBanner error={updateUser.error} />
-            <AccessEditor
-              user={editingUser}
-              isPending={updateUser.isPending}
-              onSave={(allowedModels) =>
-                updateUser.mutate(
-                  {
-                    id: editingUser.user_id,
-                    body: { allowed_models: allowedModels },
-                  },
-                  { onSuccess: () => setEditingAccess(null) },
-                )
-              }
-              onClose={() => setEditingAccess(null)}
-            />
-          </Card.Content>
-        </Card>
+      {/* Keyed on the row so switching which member is edited remounts the
+          form: its fields seed from the member on mount only. */}
+      {editingRow ? (
+        <MemberEditor
+          key={memberRowKey(editingRow)}
+          member={editingRow}
+          spendRow={
+            editingRow.attribution_user_id
+              ? userByAttribution.get(editingRow.attribution_user_id)
+              : undefined
+          }
+          workspaces={workspaces.data ?? []}
+          placements={
+            editingRow.user_id
+              ? (placementsByUser.get(editingRow.user_id) ?? [])
+              : []
+          }
+          onClose={() => setEditingMember(null)}
+        />
       ) : null}
 
       <DataTable

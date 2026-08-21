@@ -8,8 +8,10 @@ import type {
   DeploymentBootstrap,
   OrganizationContext,
   OrganizationMember,
+  ScopedBudget,
   User,
   Workspace,
+  WorkspaceMember,
 } from "@/client"
 import { OrganizationMembersPage } from "@/features/organization/OrganizationMembersPage"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
@@ -17,8 +19,10 @@ import {
   bootstrap,
   organizationContext,
   organizationMember,
+  scopedBudget,
   user,
   workspace,
+  workspaceMember,
 } from "@/tests/fixtures"
 
 interface Request {
@@ -43,11 +47,18 @@ function mockApi(opts: {
   // to show what a member may call and what they have spent, neither of which
   // is a column on the membership itself.
   users?: User[]
+  // Workspace rosters, keyed by workspace id, and the ceilings keyed on those
+  // membership rows. Together they answer "which workspaces, and what budget in
+  // each", which the editor writes to.
+  workspaceMembers?: Record<string, WorkspaceMember[]>
+  scopedBudgets?: ScopedBudget[]
 }) {
   const context = opts.context ?? organizationContext()
   const members = opts.members ?? [organizationMember()]
   const workspaces = opts.workspaces ?? []
   const users = opts.users ?? []
+  const workspaceMembers = opts.workspaceMembers ?? {}
+  const scopedBudgets = opts.scopedBudgets ?? []
   const requests: Request[] = []
 
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -59,6 +70,30 @@ function mockApi(opts: {
       body: init?.body ? JSON.parse(String(init.body)) : undefined,
     })
 
+    if (url.includes("/v1/providers")) {
+      return jsonResponse({ providers: [] })
+    }
+    if (url.includes("/v1/models/discoverable")) {
+      return jsonResponse({ models: [] })
+    }
+    if (url.includes("/v1/aliases")) {
+      return jsonResponse([])
+    }
+    if (url.includes("/v1/scoped-budgets")) {
+      if (method === "GET") return jsonResponse(scopedBudgets)
+      return jsonResponse(
+        scopedBudgets[0] ?? {},
+        method === "DELETE" ? 204 : 200,
+      )
+    }
+    if (url.includes("/members") && url.includes("/v1/workspaces/")) {
+      const id = url.split("/v1/workspaces/")[1]?.split("/")[0] ?? ""
+      const roster = workspaceMembers[id] ?? []
+      if (method === "GET") {
+        return jsonResponse({ data: roster, count: roster.length })
+      }
+      return jsonResponse(roster[0] ?? {})
+    }
     if (url.includes("/v1/workspaces")) {
       return jsonResponse({ data: workspaces, count: workspaces.length })
     }
@@ -122,6 +157,8 @@ const OWNER = organizationMember({
   full_name: "Operator",
   role: "owner",
 })
+const SECOND = "66666666-6666-6666-6666-666666666666"
+
 const ANALYST = organizationMember({
   organization_member_id: "analyst-membership",
   user_id: "bbbbbbbb-0000-0000-0000-000000000000",
@@ -460,5 +497,62 @@ describe("OrganizationMembersPage", () => {
       (r) => r.method === "PATCH" && r.url.includes("/v1/users/"),
     )
     expect(patch?.body).toEqual({ blocked: true })
+  })
+
+  it("edits model access, workspace membership and the workspace budget in one save", async () => {
+    // The three used to be separate controls on the row. They are three tables
+    // underneath, so this asserts all three writes land from a single save, and
+    // that the ceiling is written against the membership rather than the person.
+    const requests = mockApi({
+      members: [OWNER, ANALYST],
+      users: [user({ user_id: ANALYST.attribution_user_id as string })],
+      workspaces: [workspace(), workspace({ id: SECOND, name: "Bravo" })],
+      workspaceMembers: {
+        "44444444-4444-4444-4444-444444444444": [
+          workspaceMember({
+            id: "membership-1",
+            user_id: ANALYST.user_id as string,
+            role: "member",
+          }),
+        ],
+      },
+      scopedBudgets: [
+        scopedBudget({
+          id: "ceiling-1",
+          scope_type: "workspace_member",
+          scope_id: "membership-1",
+          max_budget: 50,
+        }),
+      ],
+    })
+    const actor = userEvent.setup()
+    renderPage(<OrganizationMembersPage />)
+
+    await screen.findByText("Analyst")
+    const row = rowFor("Analyst")
+    await actor.click(within(row).getByRole("button", { name: "Edit" }))
+    await screen.findByText("Workspace access")
+
+    // Already in Default Workspace with a $50 ceiling; raise it and join Bravo.
+    const limit = await screen.findByLabelText("Budget in Default Workspace")
+    await actor.clear(limit)
+    await actor.type(limit, "125")
+    await actor.click(screen.getByLabelText("Bravo"))
+    await actor.click(screen.getByRole("button", { name: "Save changes" }))
+
+    // The join comes before the ceiling write: a ceiling names a membership, and
+    // a workspace just joined has no membership id until the server answers.
+    const join = requests.find(
+      (r) =>
+        r.method === "POST" &&
+        r.url.includes(`/v1/workspaces/${SECOND}/members/`),
+    )
+    expect(join).toBeDefined()
+
+    const ceiling = requests.find(
+      (r) =>
+        r.method === "PATCH" && r.url.includes("/v1/scoped-budgets/ceiling-1"),
+    )
+    expect(ceiling?.body).toEqual({ max_budget: 125 })
   })
 })
