@@ -843,15 +843,36 @@ h6 {
    the edges and the root's `overflow: hidden` clips it (and the last row) to one
    12px radius, so header and card share the same corner.
 
-   Column selectors are replicated with the `.otari-table` prefix so they outrank
-   HeroUI's own first/last-column radius rules (which are more specific than a
-   bare `.table__column`). */
+   Nothing in this section wins on specificity, and none of it needs to:
+   `@heroui/styles` imports its component CSS with `layer(components)` while this
+   file's rules are unlayered, and an unlayered declaration beats a layered one
+   whatever its specificity. So the replicated column selectors are here to
+   *match* HeroUI's virtualized and non-virtualized shapes, not to outrank
+   anything. */
 .otari-table.table-root {
   background-color: var(--color-surface);
   border: 1px solid var(--color-border);
   border-radius: 0.75rem; /* rounded-xl */
   padding: 0;
   overflow: hidden;
+
+  /* HeroUI rounds the body's four corner cells (and a virtualized body) to
+     `min(32px, var(--radius-2xl))`, a 16px arc off its `--radius: 0.5rem`. That
+     is right for the primary variant, where the body is a card inside the root,
+     and wrong here, where the root is the only card: the wider arc was drawn
+     just inside the root's 12px clip, so at the bottom the cell's border curved
+     away from the container's and the two crossing arcs left a crescent, while
+     at the top the first row notched away from the header.
+
+     Setting the variable rather than the radius lets HeroUI compute the corners
+     flat itself, on every rule that reads it, with nothing to keep in step with
+     its selectors. Aliasing a HeroUI variable to our own value is the pattern
+     the theme blocks already use; the radius ramp is simply not aliased yet.
+     Scoped by what actually reads the token: in the built stylesheet the only
+     `var(--radius-2xl)` consumers are Table rules and the Drawer dialog, and no
+     drawer opens inside a table. A chip or an avatar in a cell reads `--radius`,
+     so both keep their own shape. */
+  --radius-2xl: 0;
 }
 .otari-table .table__header {
   background-color: var(--color-primary-subtle);
@@ -876,36 +897,6 @@ h6 {
 }
 .otari-table .table__row .table__cell {
   border-color: var(--color-border);
-}
-
-/* Two things HeroUI's Table draws for a body that is its own card inside the
-   root, both of which fight the single card `.otari-table` makes of the root,
-   and both of which showed up as artifacts in the corners.
-
-   The body's four corner cells are rounded to the primary variant's radius
-   (`min(32px, --radius-2xl)`), a second and much wider arc drawn just inside the
-   root's 12px clip: at the bottom the cell's own border followed the 32px curve
-   away from the container's 12px one and the two crossing arcs left a crescent,
-   and at the top the first row's corners notched away from the header. The
-   root's radius plus its `overflow: hidden` is the whole shape, so flatten these.
-
-   And the separator between rows is painted by the cells, while HeroUI clears
-   only the *row's* border on the last row, so the last row still drew a line
-   directly on top of the container's bottom border: doubled along the flat edge,
-   clipped to a stub inside the corner. The container's border closes the table.
-
-   Both carry `.table-root` alongside `.otari-table`, for the specificity to
-   outrank HeroUI's own corner-cell rules, which are three classes deep. The
-   detail row's cell needs the same pair and gets them below, where it is
-   styled. */
-.otari-table.table-root
-  .table__body
-  tr:is(:first-child, :last-child)
-  .table__cell {
-  border-radius: 0;
-}
-.otari-table.table-root .table__body > tr:last-child > .table__cell {
-  border-bottom: 0;
 }
 .otari-table .table__row:hover .table__cell {
   background-color: var(--color-surface-muted);
@@ -939,15 +930,19 @@ h6 {
    rather than through the table variant. The reveal animates the CSS grid
    0fr -> 1fr track so the panel slides open from under its row instead of
    popping in and shoving the rows below. */
-.otari-table.table-root .otari-detail-row > .otari-detail-cell {
+.otari-table .otari-detail-row > td {
   padding: 0;
   border-bottom: 1px solid var(--color-border);
-  border-radius: 0;
   background-color: var(--color-surface-muted);
 }
-/* Expanded under the bottom row, the panel is what closes the table, so it drops
-   its border for the container's exactly as an ordinary last row does. */
-.otari-table.table-root .table__body > tr:last-child > .otari-detail-cell {
+/* The separator between rows is painted by the cells, while HeroUI clears only
+   the *row's* border on the last row, so the last row drew a line directly on
+   top of the container's own bottom border: doubled along the flat edge, and
+   clipped to a stub inside the corner radius. The container's border is what
+   closes the table. `> td` rather than `> .table__cell` so it reaches the detail
+   row's cell too, and after that row's rule so the panel is what gives up its
+   border when the panel is what sits at the bottom. */
+.otari-table .table__body > tr:last-child > td {
   border-bottom: 0;
 }
 /* Same-frame acknowledgment of a row click while react-aria's interaction
@@ -1119,6 +1114,7 @@ h6 {
   font-size: 0.85rem;
 }
 .otari-markdown th,
+/* biome-ignore lint/style/noDescendingSpecificity: the earlier, more specific td rule is scoped to .otari-table, so these two never apply to the same cell */
 .otari-markdown td {
   border: 1px solid var(--color-border);
   padding: 0.4rem 0.7rem;

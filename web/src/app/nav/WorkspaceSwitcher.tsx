@@ -13,12 +13,18 @@ import { NAV_TRANSITION, navIndicatorClass } from "./rowStyles"
 // the menu rather than separating two groups inside it.
 const MENU_HEADING = "flex items-center px-2.5 text-overline"
 const MENU_ROW = `flex min-h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-sm font-medium ${NAV_TRANSITION}`
-const MENU_ROW_RESTING = "text-foreground hover:bg-surface-alt"
+// `cursor-pointer` on the row states, not on `MENU_ROW`: every row that carries
+// one of these is a `<button>`, which Tailwind's reset leaves on the default
+// arrow, while the organization row below is a `<div>` that states the scope
+// rather than offering to change it and correctly keeps the arrow. Putting it on
+// the base string would give that row a cursor that promises a control.
+const MENU_ROW_RESTING = "cursor-pointer text-foreground hover:bg-surface-alt"
 // The current *workspace* is a tinted chip here, unlike the rail, where
 // selection is a lifted one. In a menu the tint is the only thing that can carry
 // "this is the one you are in" alongside the check; on the rail the fill is read
 // against the rail's own ground, which a tint fights.
-const MENU_ROW_CURRENT = "bg-primary-subtle text-primary-subtle-foreground"
+const MENU_ROW_CURRENT =
+  "cursor-pointer bg-primary-subtle text-primary-subtle-foreground"
 // The dividers are inset to the rows' own text lane rather than run edge to
 // edge, so they separate the groups without drawing a line across the card.
 const MENU_DIVIDER = "mx-2.5 my-1 h-px shrink-0 bg-border"
@@ -209,7 +215,7 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
             {managesOrganization ? (
               <button
                 type="button"
-                className={`${MENU_ROW} font-semibold text-muted hover:bg-surface-alt hover:text-foreground`}
+                className={`${MENU_ROW} cursor-pointer font-semibold text-muted hover:bg-surface-alt hover:text-foreground`}
                 onClick={() => {
                   setOpen(false)
                   setCreating(true)
@@ -236,7 +242,7 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
             {createsOrganizations ? (
               <button
                 type="button"
-                className={`${MENU_ROW} text-muted hover:bg-surface-alt hover:text-foreground`}
+                className={`${MENU_ROW} cursor-pointer text-muted hover:bg-surface-alt hover:text-foreground`}
                 onClick={() => setOpen(false)}
               >
                 <PlusMark />
