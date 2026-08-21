@@ -128,6 +128,34 @@ describe("App", () => {
     ).toBeNull()
   })
 
+  it("renders a public auth page ahead of the sign-in screen", async () => {
+    vi.mocked(apiFetch).mockResolvedValue({ email: "ada@example.com" } as never)
+    window.location.hash = "#/verify-email?token=abc123"
+
+    renderApp(bootstrap())
+
+    // No session marker is stored, and the emailed token is this visitor's
+    // whole credential, so the sign-in gate must not be what answers the link.
+    expect(
+      await screen.findByRole("heading", { name: "Email verified" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole("heading", { name: "Otari Dashboard" }),
+    ).toBeNull()
+  })
+
+  it("answers a mail-gated public auth path with a panel, not a form", () => {
+    // The default fixture reports mail_ready: false, which is what hides the
+    // link on the sign-in screen; the URL is still reachable from a bookmark.
+    window.location.hash = "#/signup"
+
+    renderApp(bootstrap())
+
+    expect(
+      screen.getByRole("heading", { name: "Not available on this gateway" }),
+    ).toBeInTheDocument()
+  })
+
   it("remounts with a fresh token when a different invitation link opens in the same tab", async () => {
     // App.tsx keys the accept-invitation branch on the hash for exactly this:
     // without it, a same-type re-render on hashchange would keep the first

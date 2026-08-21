@@ -15,13 +15,20 @@ import { AppProviders } from "@/tests/providers"
 function Mounted({
   children,
   signInMethods = ["master_key"],
+  mailReady = false,
 }: {
   children: React.ReactNode
   signInMethods?: ("master_key" | "password")[]
+  mailReady?: boolean
 }) {
   return (
     <AppProviders>
-      <DeploymentProvider value={bootstrap({ sign_in_methods: signInMethods })}>
+      <DeploymentProvider
+        value={bootstrap({
+          sign_in_methods: signInMethods,
+          mail_ready: mailReady,
+        })}
+      >
         {children}
       </DeploymentProvider>
     </AppProviders>
@@ -86,6 +93,59 @@ describe("Login", () => {
     expect(Object.values({ ...window.sessionStorage })).not.toContain(
       "sk-correct",
     )
+  })
+
+  it("offers no signup or recovery link on a gateway that cannot send mail", () => {
+    render(
+      <Mounted signInMethods={["password"]}>
+        <Harness />
+      </Mounted>,
+    )
+
+    // Hidden rather than offered and then refused with a 503: all three flows
+    // begin by sending a message.
+    expect(
+      screen.queryByRole("link", { name: /Claim your account/ }),
+    ).toBeNull()
+    expect(
+      screen.queryByRole("link", { name: /Forgot your password/ }),
+    ).toBeNull()
+    expect(screen.queryByRole("link", { name: /verification link/ })).toBeNull()
+  })
+
+  it("links to signup, recovery and a fresh verification link once mail works", () => {
+    render(
+      <Mounted signInMethods={["password"]} mailReady>
+        <Harness />
+      </Mounted>,
+    )
+
+    expect(
+      screen.getByRole("link", { name: /Claim your account/ }),
+    ).toHaveAttribute("href", "#/signup")
+    expect(
+      screen.getByRole("link", { name: /Forgot your password/ }),
+    ).toHaveAttribute("href", "#/recover-password")
+    expect(
+      screen.getByRole("link", { name: /verification link/ }),
+    ).toHaveAttribute("href", "#/resend-verification")
+  })
+
+  it("hides recovery on an unclaimed deployment, where no password exists to reset", () => {
+    render(
+      <Mounted mailReady>
+        <Harness />
+      </Mounted>,
+    )
+
+    expect(
+      screen.queryByRole("link", { name: /Forgot your password/ }),
+    ).toBeNull()
+    expect(screen.queryByRole("link", { name: /verification link/ })).toBeNull()
+    // Signup still stands: a member an admin added by address claims it here.
+    expect(
+      screen.getByRole("link", { name: /Claim your account/ }),
+    ).toBeInTheDocument()
   })
 
   it("links to the auth-free welcome page", () => {

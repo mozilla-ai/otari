@@ -6,6 +6,8 @@ import { createSession } from "@/shared/api/client"
 import { ErrorBanner } from "@/shared/components/ui"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
+import { PublicAuthLink } from "./PublicAuthLayout"
+
 /**
  * The sign-in screen, rendering whichever credential this deployment accepts.
  *
@@ -16,16 +18,23 @@ import { useDeployment } from "@/shared/hooks/useDeployment"
  * from a refusal: presenting the master-key box to a claimed deployment would
  * ask for the one credential its sign-in endpoint no longer takes.
  *
- * The rest of the auth surface (signup, verification, password reset, OAuth,
- * passkeys) is #653's, and each lights up as its backend lands. This screen
- * covers the two credentials that exist today and nothing else, which is why
- * there is no "forgot password" link: nothing would answer it yet, and the way
- * back in is the master key against `PUT /v1/auth/password` (see
- * docs/access-control.md).
+ * Below the form sit the ways in that are not a credential: claiming a rostered
+ * identity, recovering a forgotten password, and asking for a fresh
+ * verification link (otari#650, the pages in `publicAuthPaths.ts`). All three
+ * start by sending a message, so all three are hidden on a deployment whose
+ * bootstrap reports `mail_ready: false` rather than offered and then refused
+ * with a 503, the way otari#648 already settled it for the invitation form.
+ * Recovery is hidden on an unclaimed deployment as well: `master_key` is
+ * published exactly while no identity holds a password, so there is nothing
+ * yet for a reset link to reset, and the way back in is the master key against
+ * `PUT /v1/auth/password` (see docs/access-control.md).
+ *
+ * The OAuth buttons and the passkey affordances are still #651's and #652's,
+ * and are absent rather than disabled: their backends have not landed.
  */
 export function Login() {
   const { login, isSigningOut } = useAuth()
-  const { sign_in_methods } = useDeployment()
+  const { sign_in_methods, mail_ready } = useDeployment()
   const usesPassword = sign_in_methods.includes("password")
   // An empty list is the gateway saying it cannot mint a session at all right
   // now, which is what `/v1/bootstrap` answers when it cannot reach its
@@ -33,6 +42,15 @@ export function Login() {
   // box whose only possible outcome is a refusal, and on a claimed deployment
   // it would be the *master-key* box, whose refusal reads as "wrong key".
   const signInUnavailable = sign_in_methods.length === 0
+  // Every flow below the form begins with an email, so none of them can work
+  // on a gateway that cannot send one. The two recovery links need one thing
+  // more: an identity that already holds a password, which is exactly what
+  // `password` (rather than `master_key`) reports. Nothing has a reset link to
+  // reset or a verification to redo before then, and a claimed-but-unverified
+  // signup already flips the deployment to `password`, so this is not the
+  // caller who needs a resend being left without one.
+  const offersSignup = mail_ready
+  const offersRecovery = mail_ready && usesPassword
 
   const [masterKey, setMasterKey] = useState("")
   const [email, setEmail] = useState("")
@@ -229,7 +247,22 @@ export function Login() {
               : "The key is sent once to this gateway and exchanged for a session cookie. It is never written to browser storage, and the cookie that replaces it cannot be read by this page."}
           </p>
 
-          <div className="border-t border-border pt-4 text-center">
+          <div className="flex flex-col items-center gap-2 border-t border-border pt-4 text-center">
+            {offersSignup ? (
+              <PublicAuthLink to="#/signup">
+                Added to this gateway? Claim your account
+              </PublicAuthLink>
+            ) : null}
+            {offersRecovery ? (
+              <PublicAuthLink to="#/recover-password">
+                Forgot your password?
+              </PublicAuthLink>
+            ) : null}
+            {offersRecovery ? (
+              <PublicAuthLink to="#/resend-verification">
+                Need a new verification link?
+              </PublicAuthLink>
+            ) : null}
             <Link
               href="/welcome"
               className="text-sm font-medium text-link hover:text-link-hover"

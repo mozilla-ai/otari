@@ -188,6 +188,8 @@ curl -X POST http://localhost:8000/v1/auth/resend-verification \
   -d '{"email": "erin@example.com"}'
 ```
 
+The dashboard offers the whole of this without `curl`: **Added to this gateway? Claim your account** on the sign-in screen is the signup form, the verification link lands on a page that confirms the address on arrival, and **Need a new verification link?** resends. Those links are absent on a deployment that cannot send mail, since none of the three routes can work there.
+
 A verification token is single-use: presenting it again, or presenting an unknown, expired, or deactivated identity's token, answers `400` without saying which is true. Resending answers the same message whether the address is unregistered, already verified, or genuinely waiting, and only the last case actually sends anything, so the endpoint cannot be used to learn which addresses exist. All three routes share the sign-in endpoint's rate limiter (`dashboard_login_rate_limit_per_minute`) and answer `503` naming what is missing when this deployment cannot send mail (`GET /v1/bootstrap`'s `mail_ready` says so in advance).
 
 #### Password reset
@@ -204,7 +206,7 @@ curl -X POST http://localhost:8000/v1/auth/password/reset/confirm \
   -d '{"token": "<the token from the link>", "new_password": "<a new password>"}'
 ```
 
-The request answers the same message whether or not the address holds a password, for the same enumeration-safety reason resending a verification link does. The reset token expires (`password_reset_expiry_hours`, default 2) and is single-use: unlike a stateless token, it is cleared the moment it is spent, so it cannot be replayed even inside its own expiry window. It is also cleared the moment the identity's password changes through any other channel (an ordinary self-service change, an operator recovery through the master key) while it is still live, so a reset link generated and then overtaken elsewhere cannot undo that change later. Completing a reset revokes every other session the identity holds, the same as an ordinary password change. Both routes share the sign-in rate limiter and the same `503`-when-unconfigured behavior signup does.
+**Forgot your password?** on the dashboard's sign-in screen is the same pair of calls, and the reset link lands on a page that asks for the new password. The request answers the same message whether or not the address holds a password, for the same enumeration-safety reason resending a verification link does. The reset token expires (`password_reset_expiry_hours`, default 2) and is single-use: unlike a stateless token, it is cleared the moment it is spent, so it cannot be replayed even inside its own expiry window. It is also cleared the moment the identity's password changes through any other channel (an ordinary self-service change, an operator recovery through the master key) while it is still live, so a reset link generated and then overtaken elsewhere cannot undo that change later. Completing a reset revokes every other session the identity holds, the same as an ordinary password change. Both routes share the sign-in rate limiter and the same `503`-when-unconfigured behavior signup does.
 
 #### Who can sign in
 

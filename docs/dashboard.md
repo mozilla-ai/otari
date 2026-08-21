@@ -536,13 +536,14 @@ every later request resolves that same operator. Giving that operator an email
 address and a password is what turns it into a sign-in rather than a label, and
 what retires the master key as the dashboard login (step 5 of the walkthrough
 above). Members added after that hold a role and can be placed in workspaces, but
-cannot sign in from here yet: nothing here sets a password for someone else,
-and the dashboard has no signup or reset page of its own. The API underneath
-already supports both (`POST /v1/auth/signup`, `POST /v1/auth/password/reset`;
-see [Access control](access-control.md#signup-claiming-a-roster-identity)), so
-a member can claim their own address today without this UI; the dashboard
-pages that would let them do it from here are a fast follow. The address they
-are added by is the handle signup matches them on.
+nothing here sets a password for someone else: a member claims their own
+address from the sign-in screen instead, through **Added to this gateway?
+Claim your account**, and confirms it by following the emailed link. The
+address they are added by is the handle that claims it. **Forgot your
+password?** on the same screen mails a reset link. Both need this deployment
+to be able to send mail; with none configured the links are absent, and the
+way in is [Access control](access-control.md#dashboard-sessions-and-identity)'s
+master-key recovery.
 
 ### People & access
 

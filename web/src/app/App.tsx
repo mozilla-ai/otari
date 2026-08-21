@@ -5,6 +5,8 @@ import { router } from "@/app/router"
 import type { DeploymentBootstrap } from "@/client"
 import { useAuth } from "@/features/auth/AuthContext"
 import { Login } from "@/features/auth/Login"
+import { PublicAuthPage } from "@/features/auth/PublicAuthPage"
+import { publicAuthPath } from "@/features/auth/publicAuthPaths"
 import { AcceptInvitationPage } from "@/features/invitations/AcceptInvitationPage"
 import { ErrorBanner } from "@/shared/components/ui"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
@@ -97,6 +99,19 @@ function DeploymentRoot() {
   // makes "once" mean once per link rather than once per tab.
   if (hash.startsWith("#/accept-invitation")) {
     return <AcceptInvitationPage key={hash} />
+  }
+
+  // The rest of the auth surface a visitor may reach without a session
+  // (otari#650): claiming a rostered identity, confirming an address from an
+  // emailed link, and recovering a forgotten password. Checked here for the
+  // same reason as the line above, and keyed on the hash for a version of the
+  // same reason: `#/verify-email` verifies on mount and `#/reset-password`
+  // holds a typed-in password, so a second emailed link pasted over the first
+  // in an open tab has to tear both down rather than re-render on top of the
+  // previous link's result.
+  const publicAuth = publicAuthPath(hash)
+  if (publicAuth) {
+    return <PublicAuthPage path={publicAuth} hash={hash} key={hash} />
   }
 
   // Any deployment that issues a session needs one before the shell renders.

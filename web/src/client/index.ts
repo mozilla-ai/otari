@@ -64,6 +64,28 @@ export type SetPasswordRequest = Schemas["SetPasswordRequest"]
 export type PasswordResponse = Schemas["PasswordResponse"]
 
 // ---------------------------------------------------------------------------
+// The public auth flows (otari#650): signup, email verification, and password
+// recovery. Every one of them answers a caller who holds neither the master key
+// nor a session, so the address or the token in the request is the whole of
+// what the gateway has to go on, and each response is deliberately the same
+// whether or not there was anything to act on.
+//
+// `terms_accepted` carries a schema default, which the generator emits as
+// required; the signup form omits it when this deployment publishes no terms,
+// so `Defaulted` puts that back.
+// ---------------------------------------------------------------------------
+export type SignupRequest = Defaulted<
+  Schemas["SignupRequest"],
+  "terms_accepted"
+>
+export type SignupResponse = Schemas["SignupResponse"]
+export type VerifyEmailResponse = Schemas["VerifyEmailResponse"]
+export type ResendVerificationResponse = Schemas["ResendVerificationResponse"]
+export type RequestPasswordResetResponse =
+  Schemas["RequestPasswordResetResponse"]
+export type ResetPasswordRequest = Schemas["ResetPasswordRequest"]
+
+// ---------------------------------------------------------------------------
 // Usage and analytics
 // ---------------------------------------------------------------------------
 export type UsageEntry = Schemas["UsageEntry"]

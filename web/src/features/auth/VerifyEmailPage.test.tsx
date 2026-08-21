@@ -1,0 +1,91 @@
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
+import { render, screen } from "@testing-library/react"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
+
+import { VerifyEmailPage } from "@/features/auth/VerifyEmailPage"
+import { ApiError, apiFetch } from "@/shared/api/client"
+
+vi.mock("@/shared/api/client", async (importOriginal) => {
+  const actual = await importOriginal<typeof import("@/shared/api/client")>()
+  return { ...actual, apiFetch: vi.fn() }
+})
+
+function renderPage(hash: string) {
+  const client = new QueryClient({
+    defaultOptions: { mutations: { retry: false } },
+  })
+  return render(
+    <QueryClientProvider client={client}>
+      <VerifyEmailPage hash={hash} />
+    </QueryClientProvider>,
+  )
+}
+
+beforeEach(() => {
+  vi.clearAllMocks()
+})
+
+afterEach(() => {
+  vi.restoreAllMocks()
+})
+
+describe("VerifyEmailPage", () => {
+  it("verifies on arrival and names the address that is now confirmed", async () => {
+    vi.mocked(apiFetch).mockResolvedValue({ email: "ada@example.com" } as never)
+
+    renderPage("#/verify-email?token=abc123")
+
+    expect(
+      await screen.findByRole("heading", { name: "Email verified" }),
+    ).toBeInTheDocument()
+    expect(screen.getByText(/ada@example.com is confirmed/)).toBeInTheDocument()
+    const [path, init] = vi.mocked(apiFetch).mock.calls[0] ?? []
+    expect(path).toBe("/v1/auth/verify-email")
+    // In the body, not the URL: the token is a bearer credential and a URL is
+    // what an access log retains.
+    expect(JSON.parse(String(init?.body))).toEqual({ token: "abc123" })
+  })
+
+  it("verifies exactly once for one link", async () => {
+    vi.mocked(apiFetch).mockResolvedValue({ email: "ada@example.com" } as never)
+
+    const { rerender } = renderPage("#/verify-email?token=abc123")
+    await screen.findByRole("heading", { name: "Email verified" })
+    rerender(
+      <QueryClientProvider client={new QueryClient()}>
+        <VerifyEmailPage hash="#/verify-email?token=abc123" />
+      </QueryClientProvider>,
+    )
+
+    expect(apiFetch).toHaveBeenCalledTimes(1)
+  })
+
+  it("offers a fresh link when the token is expired or already used", async () => {
+    vi.mocked(apiFetch).mockRejectedValue(
+      new ApiError(
+        400,
+        "This verification link is invalid, expired, or already used",
+      ),
+    )
+
+    renderPage("#/verify-email?token=stale")
+
+    expect(
+      await screen.findByText(
+        "This verification link is invalid, expired, or already used",
+      ),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("link", { name: "Send a new verification link" }),
+    ).toHaveAttribute("href", "#/resend-verification")
+  })
+
+  it("asks the gateway nothing when the link carries no token", () => {
+    renderPage("#/verify-email")
+
+    expect(
+      screen.getByText(/missing its verification token/),
+    ).toBeInTheDocument()
+    expect(apiFetch).not.toHaveBeenCalled()
+  })
+})
