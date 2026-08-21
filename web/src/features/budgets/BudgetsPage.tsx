@@ -507,7 +507,12 @@ export function BudgetsPage() {
   const [bulkPending, setBulkPending] = useState(false)
 
   const rows = budgets.data ?? []
-  const loading = budgets.isLoading
+  // The roster is part of the edit form's seed: `assignedUserIds` is read on
+  // mount, and the form is keyed by budget id so it does not reseed when `users`
+  // resolves. Opening Edit against an empty roster would therefore start the
+  // multiselect empty and read as "detach everyone" on save, so the table waits
+  // for both reads rather than only for the budgets one.
+  const loading = budgets.isLoading || users.isLoading
 
   // Which workspaces hand out each budget. A budget may be the default for
   // several, and a workspace may narrow one to a provider, which is named here
@@ -772,9 +777,9 @@ export function BudgetsPage() {
       />
 
       <InfoBanner>
-        Assign a budget to users when you create it, or later from the Users
-        page. Each row&rsquo;s usage aggregates the spend of the users currently
-        on that budget.
+        Assign a budget to people when you create it, or from this page&rsquo;s
+        Edit action later. Each row&rsquo;s usage aggregates the spend of
+        everyone currently on that budget.
       </InfoBanner>
 
       {showOnboarding ? (

@@ -247,22 +247,32 @@ async def update_user(
 
     if request.alias is not None:
         user.alias = request.alias
-    if request.budget_id is not None:
-        budget_result = await db.execute(select(Budget).where(Budget.budget_id == request.budget_id))
-        budget = budget_result.scalar_one_or_none()
-        if not budget:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Budget with id '{request.budget_id}' not found",
-            )
-
-        user.budget_id = request.budget_id
-        now = datetime.now(UTC)
-        user.budget_started_at = now
-        if budget.budget_duration_sec:
-            user.next_budget_reset_at = calculate_next_reset(now, budget.budget_duration_sec)
-        else:
+    # Tri-state like ``allowed_models`` above, keyed on ``model_fields_set``
+    # rather than on the value: omitting the field leaves the assignment alone,
+    # and an explicit null detaches. Testing ``is not None`` made a budget
+    # assignable and never removable, which is the state the budgets page's
+    # deselect writes and reported as saved.
+    if "budget_id" in request.model_fields_set:
+        if request.budget_id is None:
+            user.budget_id = None
+            user.budget_started_at = None
             user.next_budget_reset_at = None
+        else:
+            budget_result = await db.execute(select(Budget).where(Budget.budget_id == request.budget_id))
+            budget = budget_result.scalar_one_or_none()
+            if not budget:
+                raise HTTPException(
+                    status_code=status.HTTP_404_NOT_FOUND,
+                    detail=f"Budget with id '{request.budget_id}' not found",
+                )
+
+            user.budget_id = request.budget_id
+            now = datetime.now(UTC)
+            user.budget_started_at = now
+            if budget.budget_duration_sec:
+                user.next_budget_reset_at = calculate_next_reset(now, budget.budget_duration_sec)
+            else:
+                user.next_budget_reset_at = None
     if request.blocked is not None:
         user.blocked = request.blocked
     if request.metadata is not None:

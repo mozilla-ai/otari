@@ -43,6 +43,7 @@ _WITH_KEY = "uq_workspace_budget_defaults_with_key"
 _NO_KEY = "uq_workspace_budget_defaults_no_key"
 _WORKSPACE_INDEX = "ix_workspace_budget_defaults_workspace_id"
 _BUDGET_FK = "fk_workspace_budget_defaults_budget_id"
+_BUDGET_INDEX = "ix_workspace_budget_defaults_budget_id"
 
 
 def _defaults_table(*, with_budget_id: bool, with_inline: bool, budget_id_nullable: bool = True) -> sa.Table:
@@ -141,11 +142,16 @@ def upgrade() -> None:
         batch.drop_column("name")
         batch.drop_column("max_budget")
         batch.drop_column("budget_duration_sec")
+    # The model declares ``index=True`` on the column, so without this a migrated
+    # database and a ``create_all`` one differ, and the delete-guard's lookup by
+    # ``budget_id`` has no index behind it.
+    op.create_index(op.f(_BUDGET_INDEX), "workspace_budget_defaults", ["budget_id"])
 
 
 def downgrade() -> None:
     """Downgrade schema."""
     bind = op.get_bind()
+    op.drop_index(op.f(_BUDGET_INDEX), table_name="workspace_budget_defaults")
     with op.batch_alter_table(
         "workspace_budget_defaults",
         copy_from=_defaults_table(with_budget_id=True, with_inline=False, budget_id_nullable=False),

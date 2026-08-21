@@ -50,10 +50,13 @@ def _alembic_config(database_url: str) -> Config:
 
 @pytest.fixture
 def sqlite_at_head(tmp_path: Path) -> Iterator[tuple[Config, Engine]]:
-    """A SQLite database migrated to head, with its config for further steps."""
+    """A SQLite database migrated to the alignment revision, with its config."""
     database_url = f"sqlite:///{tmp_path / 'alignment.db'}"
     config = _alembic_config(database_url)
-    command.upgrade(config, "head")
+    # This revision, not ``head``: a later revision moves the cadence onto
+    # ``budgets`` and drops these columns, and what is under test here is this
+    # revision's own batch rebuild.
+    command.upgrade(config, _ALIGNMENT_REVISION)
     engine = create_engine(database_url)
     try:
         yield config, engine

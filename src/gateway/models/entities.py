@@ -1254,7 +1254,7 @@ class WorkspaceBudgetDefault(Base):
     )
     # ``UtcDateTime``, not ``DateTime(timezone=True)``: these two are serialized with
     # ``.isoformat()`` (``WorkspaceMemberBudgetPolicyPublic.from_model``) for the
-    # budget-defaults page, and on SQLite (this repo's default ``database_url``)
+    # dashboard, and on SQLite (this repo's default ``database_url``)
     # a plain ``DateTime(timezone=True)`` round-trips naive, so the wire value
     # would carry no offset and a browser would read it as local time.
     # ``UtcDateTime.impl`` is ``DateTime(timezone=True)``, so the DDL is unchanged.

@@ -406,7 +406,7 @@ function BudgetExemptToggle({
 
 // Access-control adjacent: a three-way override of the deployment-wide
 // reject_user_mismatch, so it is a picker rather than a checkbox. Same shape as
-// the budget picker on the Users page.
+// the budget picker on the budgets page.
 function UserMismatchPicker({
   value,
   onChange,

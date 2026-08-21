@@ -14,7 +14,7 @@ import { memberLabel } from "./roles"
 // this map becomes the identity function and can go when they do.
 //
 // A member whose `attribution_user_id` is null has no usable row (nobody minted
-// one, or it was soft-deleted through the spend identities page), and key
+// one, or it was soft-deleted through `DELETE /v1/users`), and key
 // creation would refuse them. Those are left out rather than mapped, so nothing
 // offers an owner the server will reject.
 export function memberLabelsByAttributionId(
