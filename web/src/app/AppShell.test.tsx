@@ -61,7 +61,6 @@ function renderShell(
 ) {
   const entitlements: Entitlements = {
     capabilities: BASE_CAPABILITIES,
-    flags: {},
     isLoading: false,
     ...options.entitlements,
   }
@@ -195,14 +194,17 @@ describe("AppShell responsive layout", () => {
     expect(container.querySelector("aside")?.className).toContain("w-[4.5rem]")
   })
 
-  it("closes the drawer when the viewport grows past the mobile breakpoint", async () => {
+  it("resets the submenu and preserves focus across the mobile breakpoint", async () => {
     const { listeners } = mockMatchMedia(true)
     const user = userEvent.setup()
-    await renderShell()
+    const { container } = await renderShell()
 
     await user.click(screen.getByRole("button", { name: "Open navigation" }))
+    await user.click(
+      await screen.findByRole("button", { name: "Organization" }),
+    )
     expect(
-      screen.getByRole("button", { name: "Close navigation" }),
+      await screen.findByRole("link", { name: "Members & roles" }),
     ).toBeInTheDocument()
 
     // Simulate crossing to a desktop viewport.
@@ -215,6 +217,23 @@ describe("AppShell responsive layout", () => {
     expect(
       screen.getByRole("button", { name: "Open navigation" }),
     ).toHaveAttribute("aria-expanded", "false")
+    // The focused submenu control unmounted, but focus stays on the navigation
+    // landmark rather than falling back to the document body.
+    expect(container.querySelector("aside")).toHaveFocus()
+
+    // Returning to mobile and reopening starts at the workspace level. The
+    // submenu belongs to the drawer that framed it and cannot survive the
+    // breakpoint transition.
+    act(() => {
+      listeners.forEach((cb) => {
+        cb({ matches: true } as MediaQueryListEvent)
+      })
+    })
+    await user.click(screen.getByRole("button", { name: "Open navigation" }))
+    expect(
+      await screen.findByRole("link", { name: "API keys" }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Members & roles" })).toBeNull()
   })
 
   it("closes the drawer on Escape and restores focus to the toggle", async () => {
@@ -470,7 +489,7 @@ describe("AppShell surface gating", () => {
   })
 })
 
-describe("AppShell entitlement and flag gating", () => {
+describe("AppShell entitlement gating", () => {
   afterEach(() => {
     vi.restoreAllMocks()
     vi.unstubAllGlobals()
@@ -582,8 +601,137 @@ describe("AppShell entitlement and flag gating", () => {
     // In: a footer entry, not a nav section.
     const enter = await screen.findByRole("link", { name: "Organization" })
     expect(enter).toHaveAttribute("href", "/organization/members")
+    // A link on the desk, where the rail it swaps to stays on screen to read.
+    // The drawer's submenu trigger is the mobile shape of this row and must not
+    // turn up beside it.
+    expect(screen.queryByRole("button", { name: "Organization" })).toBeNull()
     // Out only exists on the other rail.
     expect(screen.queryByText(/^Back to /)).toBeNull()
+  })
+
+  it("opens the organization rail inside the mobile drawer rather than navigating", async () => {
+    mockMatchMedia(true)
+    const user = userEvent.setup()
+    await renderShell()
+
+    await user.click(screen.getByRole("button", { name: "Open navigation" }))
+    await user.click(
+      await screen.findByRole("button", { name: "Organization" }),
+    )
+
+    // The rail swapped, one level down inside the drawer: the organization's
+    // destinations are all there to choose from, and the workspace's are not.
+    expect(
+      await screen.findByRole("link", { name: "Members & roles" }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "API keys" })).toBeNull()
+    // Nothing navigated, so the page behind the drawer is the one the menu was
+    // opened from, and the drawer is still over it.
+    expect(screen.getByText("PAGE CONTENT")).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Close navigation" }),
+    ).toHaveAttribute("aria-expanded", "true")
+    // Focus follows the level, onto the control that leaves it again: the row
+    // that opened it is gone, so without this a keyboard or AT cursor would be
+    // dropped to the top of the document.
+    expect(screen.getByRole("button", { name: /^Back to / })).toHaveFocus()
+  })
+
+  it("dismisses the drawer once a destination on that submenu is chosen", async () => {
+    mockMatchMedia(true)
+    const user = userEvent.setup()
+    await renderShell()
+
+    await user.click(screen.getByRole("button", { name: "Open navigation" }))
+    await user.click(
+      await screen.findByRole("button", { name: "Organization" }),
+    )
+    await user.click(
+      await screen.findByRole("link", { name: "Members & roles" }),
+    )
+
+    // This is the tap that navigates, so this is the tap that closes.
+    expect(
+      screen.getByRole("button", { name: "Open navigation" }),
+    ).toHaveAttribute("aria-expanded", "false")
+    expect(screen.queryByText("PAGE CONTENT")).toBeNull()
+    // And the rail is now the organization one because the route says so, which
+    // is what the way back out belongs to.
+    expect(
+      await screen.findByRole("link", { name: /^Back to / }),
+    ).toBeInTheDocument()
+  })
+
+  it("returns to the workspace menu from the submenu, without navigating", async () => {
+    mockMatchMedia(true)
+    const user = userEvent.setup()
+    await renderShell()
+
+    await user.click(screen.getByRole("button", { name: "Open navigation" }))
+    await user.click(
+      await screen.findByRole("button", { name: "Organization" }),
+    )
+    // A button, not the link the organization rail's own head is: the page
+    // under the drawer never left the workspace, so there is nowhere to go.
+    await user.click(screen.getByRole("button", { name: /^Back to / }))
+
+    expect(
+      await screen.findByRole("link", { name: "API keys" }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Members & roles" })).toBeNull()
+    expect(screen.getByText("PAGE CONTENT")).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Close navigation" }),
+    ).toHaveAttribute("aria-expanded", "true")
+    // Focus comes back to the row that opened the level.
+    expect(screen.getByRole("button", { name: "Organization" })).toHaveFocus()
+  })
+
+  it("unwinds one level at a time on Escape", async () => {
+    mockMatchMedia(true)
+    const user = userEvent.setup()
+    await renderShell()
+
+    await user.click(screen.getByRole("button", { name: "Open navigation" }))
+    await user.click(
+      await screen.findByRole("button", { name: "Organization" }),
+    )
+
+    // The submenu first: taking the whole drawer would be the wrong amount of
+    // dismissal when the row you were after is the level above.
+    await user.keyboard("{Escape}")
+    expect(
+      await screen.findByRole("link", { name: "API keys" }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Close navigation" }),
+    ).toHaveAttribute("aria-expanded", "true")
+
+    await user.keyboard("{Escape}")
+    expect(
+      screen.getByRole("button", { name: "Open navigation" }),
+    ).toHaveAttribute("aria-expanded", "false")
+  })
+
+  it("reopens the drawer on the workspace menu, not on the level it was left in", async () => {
+    mockMatchMedia(true)
+    const user = userEvent.setup()
+    await renderShell()
+
+    await user.click(screen.getByRole("button", { name: "Open navigation" }))
+    await user.click(
+      await screen.findByRole("button", { name: "Organization" }),
+    )
+    await user.click(screen.getByRole("button", { name: "Close navigation" }))
+    await user.click(screen.getByRole("button", { name: "Open navigation" }))
+
+    // The submenu belongs to the drawer that framed it. Surviving the close
+    // would show the organization's rows to someone reopening the menu from a
+    // workspace page, with no tap of theirs to explain it.
+    expect(
+      await screen.findByRole("link", { name: "API keys" }),
+    ).toBeInTheDocument()
+    expect(screen.queryByRole("link", { name: "Members & roles" })).toBeNull()
   })
 
   it("offers Create workspace to a role the server would let create one", async () => {

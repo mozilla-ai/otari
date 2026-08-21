@@ -335,6 +335,66 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/auth/password/reset": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Request Reset
+         * @description Mail a password-reset link, or do nothing: the response never says which.
+         */
+        post: operations["request_reset_v1_auth_password_reset_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/password/reset/confirm": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Confirm Reset
+         * @description Complete a password reset. Single-use: the token stops working after this.
+         */
+        post: operations["confirm_reset_v1_auth_password_reset_confirm_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/resend-verification": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Resend Verification
+         * @description Mail a fresh verification link, or do nothing: the response never says which.
+         */
+        post: operations["resend_verification_v1_auth_resend_verification_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/auth/session": {
         parameters: {
             query?: never;
@@ -377,6 +437,49 @@ export interface paths {
          *     forged call could do is sign the operator out.
          */
         delete: operations["delete_session_v1_auth_session_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/signup": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Signup
+         * @description Claim a roster identity, or do nothing: the response never says which.
+         *
+         *     No session is minted. A newly claimed identity is hard-blocked from
+         *     signing in until it verifies, so there is nothing yet to sign it into.
+         */
+        post: operations["signup_v1_auth_signup_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/verify-email": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Verify Email Route
+         * @description Confirm an address from its verification link, lifting the sign-in gate.
+         */
+        post: operations["verify_email_route_v1_auth_verify_email_post"];
+        delete?: never;
         options?: never;
         head?: never;
         patch?: never;
@@ -2789,6 +2892,82 @@ export interface paths {
         patch: operations["update_workspace_v1_workspaces__workspace_id__patch"];
         trace?: never;
     };
+    "/v1/workspaces/{workspace_id}/activation": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Workspace Activation
+         * @description Where a workspace stands on its first successful request.
+         *
+         *     Readable by any member who can see the workspace. Whether the guide should
+         *     actually be offered to this caller is ``experience_eligible``, which also
+         *     answers false when the deployment has the flow turned off
+         *     (``activation_guide``), so a dashboard left open stops offering it without
+         *     needing to be reloaded.
+         */
+        get: operations["get_workspace_activation_v1_workspaces__workspace_id__activation_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspace_id}/activation/dismiss": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Dismiss Workspace Activation
+         * @description Retire the guide for this workspace. Permanent, and idempotent.
+         *
+         *     Workspace owners and admins only. It retires the card and nothing else: the
+         *     key the guide issued keeps working, because the operator asked for it and
+         *     may well have pasted it somewhere already. Revoking one is the Keys page's
+         *     job.
+         */
+        post: operations["dismiss_workspace_activation_v1_workspaces__workspace_id__activation_dismiss_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/workspaces/{workspace_id}/activation/key": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Workspace Activation Key
+         * @description Issue the workspace's setup API key, rotating the one the guide already issued.
+         *
+         *     Workspace owners and admins only, like every other action that changes a
+         *     workspace. The plaintext is returned once and never stored, so a reopened
+         *     guide rotates the same key row rather than collecting a second one, and
+         *     answers 409 once the workspace has activated or the guide was dismissed.
+         */
+        post: operations["create_workspace_activation_key_v1_workspaces__workspace_id__activation_key_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{workspace_id}/member-budget-policies": {
         parameters: {
             query?: never;
@@ -3007,6 +3186,65 @@ export interface components {
             organization_name: string;
             /** Role */
             role: string;
+        };
+        /**
+         * ActivationApiKeyPublic
+         * @description The API key the guide hands out, with its plaintext.
+         *
+         *     Returned once per call and never stored in plaintext, like every other key
+         *     this gateway mints: a page reload issues a new one and rotates the same row,
+         *     which is what makes the guide able to show a working key without keeping a
+         *     readable secret anywhere.
+         */
+        ActivationApiKeyPublic: {
+            /** Key */
+            key: string;
+            /** Key Id */
+            key_id: string;
+            /** Key Name */
+            key_name: string | null;
+            /** Key Prefix */
+            key_prefix: string | null;
+        };
+        /**
+         * ActivationAttemptPublic
+         * @description One gateway request in this workspace, as the guide reports it.
+         */
+        ActivationAttemptPublic: {
+            /** Cost Usd */
+            cost_usd?: number | null;
+            /**
+             * Error Category
+             * @description What kind of failure this was, for a failed attempt only. The dashboard renders its own sentence per category; the provider's own error text is never returned here.
+             */
+            error_category?: ("invalid_request" | "configuration" | "policy" | "upstream" | "timeout" | "internal") | null;
+            /** Latency Ms */
+            latency_ms?: number | null;
+            /**
+             * Model
+             * @description Model the request named.
+             */
+            model?: string | null;
+            /**
+             * Occurred At
+             * @description When the request was recorded, UTC ISO-8601.
+             */
+            occurred_at: string;
+            /**
+             * Provider
+             * @description Provider instance that served it, when one did.
+             */
+            provider?: string | null;
+            /**
+             * Request Id
+             * @description The usage row's id, which the Activity page can be filtered by.
+             */
+            request_id: string;
+            /**
+             * Status
+             * @enum {string}
+             */
+            status: "success" | "failed";
         };
         /**
          * ActiveOrganizationMemberCreateRequest
@@ -5908,6 +6146,22 @@ export interface components {
              */
             unreadable: number;
         };
+        /** RequestPasswordResetRequest */
+        RequestPasswordResetRequest: {
+            /**
+             * Email
+             * @description The address to send a reset link to.
+             */
+            email: string;
+        };
+        /** RequestPasswordResetResponse */
+        RequestPasswordResetResponse: {
+            /**
+             * Message
+             * @description The same message whether or not the address has a password to reset.
+             */
+            message: string;
+        };
         /**
          * RerankRequest
          * @description Rerank request.
@@ -5943,6 +6197,35 @@ export interface components {
              * @description User ID for usage attribution
              */
             user?: string | null;
+        };
+        /** ResendVerificationRequest */
+        ResendVerificationRequest: {
+            /**
+             * Email
+             * @description The address to resend a verification link to.
+             */
+            email: string;
+        };
+        /** ResendVerificationResponse */
+        ResendVerificationResponse: {
+            /**
+             * Message
+             * @description The same message whether or not the address has anything to verify.
+             */
+            message: string;
+        };
+        /** ResetPasswordRequest */
+        ResetPasswordRequest: {
+            /**
+             * New Password
+             * @description The password to sign in with from now on. At least 8 characters, at most 72 bytes.
+             */
+            new_password: string;
+            /**
+             * Token
+             * @description The token from the reset link.
+             */
+            token: string;
         };
         /**
          * ResponsesRequest
@@ -6415,6 +6698,44 @@ export interface components {
              * @description Whole-request context thresholds. Fields omitted by a tier inherit the base rate.
              */
             pricing_tiers?: components["schemas"]["PricingTier"][] | null;
+        };
+        /**
+         * SignupRequest
+         * @description Claim an identity already on the roster by setting its password.
+         */
+        SignupRequest: {
+            /**
+             * Email
+             * @description The address an admin added or invited.
+             */
+            email: string;
+            /**
+             * Full Name
+             * @description Filled in only if not already set.
+             */
+            full_name?: string | null;
+            /**
+             * Password
+             * @description The password to sign in with once verified. At least 8 characters, at most 72 bytes.
+             */
+            password: string;
+            /**
+             * Terms Accepted
+             * @description Whether the caller accepted this deployment's terms.
+             * @default false
+             */
+            terms_accepted: boolean;
+        };
+        /**
+         * SignupResponse
+         * @description The same message whether or not the address had anything to claim.
+         */
+        SignupResponse: {
+            /**
+             * Message
+             * @description What the caller should do next.
+             */
+            message: string;
         };
         /**
          * StoredProviderResponse
@@ -7401,6 +7722,48 @@ export interface components {
             /** Error Type */
             type: string;
         };
+        /** VerifyEmailRequest */
+        VerifyEmailRequest: {
+            /**
+             * Token
+             * @description The token from the verification link.
+             */
+            token: string;
+        };
+        /** VerifyEmailResponse */
+        VerifyEmailResponse: {
+            /**
+             * Email
+             * @description The address that is now verified.
+             */
+            email: string;
+        };
+        /**
+         * WorkspaceActivationPublic
+         * @description Where a workspace stands on its first successful request.
+         */
+        WorkspaceActivationPublic: {
+            /** @description The first request that succeeded, which is the guide's receipt. Null until one does. */
+            activation_attempt?: components["schemas"]["ActivationAttemptPublic"] | null;
+            /**
+             * Dismissed
+             * @description Whether someone skipped the guide for this workspace.
+             */
+            dismissed: boolean;
+            /**
+             * Experience Eligible
+             * @description Whether the dashboard should offer the guide to this caller right now: the deployment has it enabled, the workspace is classified for it, nobody dismissed it, no request has succeeded yet, and the caller may manage the workspace.
+             */
+            experience_eligible: boolean;
+            /** @description The most recent request, so a failure can be reported while the guide keeps waiting. */
+            latest_attempt?: components["schemas"]["ActivationAttemptPublic"] | null;
+            /**
+             * Status
+             * @description 'activated' once a gateway request in this workspace has succeeded, 'failed' when the last one failed and none has yet succeeded, 'waiting' when there has been none at all.
+             * @enum {string}
+             */
+            status: "waiting" | "failed" | "activated";
+        };
         /**
          * WorkspaceAssignmentRequest
          * @description A workspace and the role to grant in it, applied when a member is added.
@@ -8060,6 +8423,103 @@ export interface operations {
             };
         };
     };
+    request_reset_v1_auth_password_reset_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RequestPasswordResetRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["RequestPasswordResetResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    confirm_reset_v1_auth_password_reset_confirm_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResetPasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    resend_verification_v1_auth_resend_verification_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["ResendVerificationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ResendVerificationResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     create_session_v1_auth_session_post: {
         parameters: {
             query?: never;
@@ -8108,6 +8568,72 @@ export interface operations {
                     [name: string]: unknown;
                 };
                 content?: never;
+            };
+        };
+    };
+    signup_v1_auth_signup_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SignupRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["SignupResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    verify_email_route_v1_auth_verify_email_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["VerifyEmailRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["VerifyEmailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
             };
         };
     };
@@ -12103,6 +12629,99 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["WorkspacePublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_workspace_activation_v1_workspaces__workspace_id__activation_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceActivationPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    dismiss_workspace_activation_v1_workspaces__workspace_id__activation_dismiss_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Message"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_workspace_activation_key_v1_workspaces__workspace_id__activation_key_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["ActivationApiKeyPublic"];
                 };
             };
             /** @description Validation Error */

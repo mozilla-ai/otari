@@ -140,6 +140,8 @@ _CONFIG_VIEW: tuple[tuple[str, tuple[str, ...]], ...] = (
             "mail_from_email",
             "mail_from_name",
             "invitation_expiry_hours",
+            "email_verification_expiry_hours",
+            "password_reset_expiry_hours",
         ),
     ),
     (

@@ -1,23 +1,23 @@
-"""Password sign-in for the reconciled control plane's identities.
+"""Password sign-in, signup, and email verification and reset for the reconciled
+control plane's identities.
 
-Ported from the platform's ``user_service`` (``authenticate`` and
-``update_password``), which is where the shape of this comes from. What it is
-*for* here is narrower, and settled by mozilla-ai/otari-ai#1716: the master key
-bootstraps a standalone deployment and stays its deployment-wide API credential,
-while a password against a `gateway.services.dashboard_session_service` session
-becomes the steady-state dashboard login. Retiring a login is not retiring a
-credential, so nothing here touches what authenticates ``/v1/keys``,
-``/v1/users``, or the rest of the management surface.
+Ported from the platform's ``user_service`` (``authenticate``,
+``update_password``, ``create_user_for_signup``, ``verify_email``,
+``resend_verification_email``, and the recover/reset password pair, the last
+two of which live in the platform's ``login.py`` route rather than its service),
+which is where the shape of this comes from. What it is *for* here is narrower,
+and settled by mozilla-ai/otari-ai#1716: the master key bootstraps a standalone
+deployment and stays its deployment-wide API credential, while a password
+against a `gateway.services.dashboard_session_service` session becomes the
+steady-state dashboard login. Retiring a login is not retiring a credential, so
+nothing here touches what authenticates ``/v1/keys``, ``/v1/users``, or the rest
+of the management surface.
 
-Four departures from the port, each for a reason that belongs to this edition:
+Departures from the port, each for a reason that belongs to this edition:
 
 - **Sign-in failures collapse into one error.** See ``InvalidCredentialsError``.
-- **``email_verified_at`` is written but not checked.** The verification flow is
-  #650's, and enforcing a gate before the flow that clears it exists would lock
-  out the operator who just claimed the deployment. Setting a password through
-  the deployment credential stamps the column, so when #650 turns the check on
-  it is an added gate rather than a migration: the identities that exist by then
-  already pass it.
+  An unverified email is the one exception, and only once the password has
+  already checked out: see ``EmailNotVerifiedError``.
 - **A password can be set without proving the old one, by the master key.** That
   is the claim path and the recovery path in one, and it is not a weakening: a
   caller holding the master key can already do anything the management API can
@@ -27,23 +27,40 @@ Four departures from the port, each for a reason that belongs to this edition:
   ``authenticate`` does not check ``is_active``; this one does, so deactivating
   someone ends their access now rather than when their cookie expires, which is
   the rule ``resolve_dashboard_session`` already follows.
+- **Signup only ever claims an identity that already exists.** The platform's
+  ``create_user_for_signup`` always inserts a new user into a brand-new
+  organization; a standalone deployment is one tenant with several people in
+  it (`organization_service`'s own docstring), so this edition's signup
+  completes an identity `organization_service.create_active_organization_member_for_user`
+  or ``invite_active_organization_member_for_user`` already put on the roster,
+  password-less. An address nobody has touched is refused rather than
+  onboarded from nothing.
+- **Verification and reset tokens are opaque and hashed at rest, not JWTs.**
+  ``gateway.services.tenancy.tokens`` mirrors the shape
+  ``organization_service`` already uses for an invitation token: a random
+  token handed to the caller once, only its SHA-256 hash stored, an explicit
+  expiry column, and single-use enforced by clearing both to ``NULL`` on
+  success. The platform's password-reset token is a stateless JWT with no
+  persisted record of it, which means it can be replayed any number of times
+  until it expires; this port closes that gap rather than carrying it over.
 
 An identity with an address and no password is the normal state for someone an
-admin added to the roster (`organization_service`); they cannot sign in until
-#650 gives them a way to set one, and nothing here lets an admin set it for
-them.
+admin added to the roster (`organization_service`); ``create_user_for_signup``
+below is what gives it a way to sign in.
 """
 
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 
 from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
+from gateway.core.config import GatewayConfig
 from gateway.models.tenancy import User
 from gateway.repositories.tenancy import UserRepository
 from gateway.services.dashboard_session_service import revoke_user_dashboard_sessions
+from gateway.services.mail import Mailer
 from gateway.services.password_service import (
     MAX_PASSWORD_BYTES,
     MIN_PASSWORD_LENGTH,
@@ -55,28 +72,47 @@ from gateway.services.tenancy.email_address import validated_email
 from gateway.services.tenancy.errors import (
     CurrentPasswordIncorrectError,
     EmailAlreadyInUseError,
+    EmailNotVerifiedError,
     InvalidCredentialsError,
     PasswordNotSetError,
     PasswordPolicyError,
+    ResetTokenInvalidError,
     SignInAddressRequiredError,
     UnmodifiedPasswordError,
+    VerificationTokenInvalidError,
 )
+from gateway.services.tenancy.password_reset_email import render_password_reset_email
+from gateway.services.tenancy.tokens import generate_token, hash_token
+from gateway.services.tenancy.verification_email import render_verification_email
 
 # The unique index alembic creates on ``user.email`` (c4b6d8e0f2a3).
 _EMAIL_UNIQUE_INDEX = "ix_user_email"
+
+# Fed to ``verify_absent_password_async`` on an enumeration-safe early return
+# that has no password of its own to burn the cost against (resend, request a
+# reset): the value is never checked against anything, only its length and the
+# fixed bcrypt cost matter, so a constant is as good as a real one.
+_TIMING_EQUALIZER = "otari:no-op-verification"  # pragma: allowlist secret
 
 
 async def authenticate(db: AsyncSession, *, email: str, password: str) -> User:
     """Return the identity this address and password authenticate.
 
-    Every failure raises the same ``InvalidCredentialsError``, and the ones that
-    have no stored hash to check against still pay for one verification, so a
-    caller cannot learn from the answer or from its timing which addresses hold
-    an account here.
+    Every failure up to and including a wrong password raises the same
+    ``InvalidCredentialsError``, and the ones that have no stored hash to check
+    against still pay for one verification, so a caller cannot learn from the
+    answer or from its timing which addresses hold an account here.
 
     A deactivated identity does not authenticate, which matches
     ``resolve_dashboard_session``: deactivating someone has to end their access
     now, not once their current session expires.
+
+    ``EmailNotVerifiedError`` is the one exception to the single-error rule,
+    and it is checked only after the password has already been proven correct.
+    By then the caller has already demonstrated they hold the account, so
+    naming the real reason is not an enumeration leak, the same reasoning that
+    lets ``CurrentPasswordIncorrectError`` and ``PasswordNotSetError`` speak
+    plainly once a caller has proven something.
     """
     identity = await UserRepository(db).get_by_email(email)
     if identity is None or not identity.is_active or identity.hashed_password is None:
@@ -84,6 +120,8 @@ async def authenticate(db: AsyncSession, *, email: str, password: str) -> User:
         raise InvalidCredentialsError
     if not await verify_password_async(password, identity.hashed_password):
         raise InvalidCredentialsError
+    if identity.email_verified_at is None:
+        raise EmailNotVerifiedError
     return identity
 
 
@@ -151,6 +189,15 @@ async def set_password(
     excepted, so a stolen cookie does not outlive the password it was minted
     under. The caller passes its own session's hash to stay signed in; a
     header-authenticated caller passes nothing and every session ends.
+
+    Any outstanding verification or reset token this identity holds is cleared
+    the same way: whichever channel just proved deployment authority over the
+    account (a claim, an operator recovery, or a proven current password
+    through ``update_password``) is a stronger proof than a bearer link sent to
+    an inbox, and a token minted before this change has no reason to survive
+    it. Without this, a reset link generated and then overtaken by a password
+    change elsewhere (the operator recovers the account before the link is
+    opened, say) would still work, letting whoever holds it undo the change.
     """
     _validate_password(new_password)
     vouches_for_the_address = email is not None or identity.hashed_password is None
@@ -161,6 +208,10 @@ async def set_password(
     if vouches_for_the_address:
         identity.email_verified_at = datetime.now(UTC)
     identity.hashed_password = await hash_password_async(new_password)
+    identity.email_verification_token_hash = None
+    identity.email_verification_token_expires_at = None
+    identity.password_reset_token_hash = None
+    identity.password_reset_token_expires_at = None
     # The write and the revocation are inside the try together, and that is not
     # tidiness: the revocation issues a DELETE, which autoflushes the pending
     # UPDATE first, so a duplicate address raises *there* rather than at the
@@ -183,6 +234,219 @@ async def set_password(
         # someone chasing the wrong thing.
         raise
     await db.refresh(identity)
+
+
+async def create_user_for_signup(
+    db: AsyncSession,
+    config: GatewayConfig,
+    *,
+    email: str,
+    password: str,
+    full_name: str | None = None,
+    terms_accepted: bool = False,
+) -> None:
+    """Claim an identity ``organization_service`` already put on the roster, or do nothing.
+
+    This edition's signup only ever completes an identity an admin already
+    added or invited by address (password-less, per that service's own
+    docstrings): it never creates one from nothing. Enumeration-safe the same
+    way ``resend_verification_email`` and ``request_password_reset`` are: an
+    address nobody has touched, one that already has a password, and one whose
+    identity has been deactivated all return with nothing written and nothing
+    mailed, and only a genuinely pending identity is claimed. Deactivation is
+    checked here for the reason ``verify_email`` and ``reset_password`` already
+    check it: it has to close every road in, and without this an identity
+    deactivated before it ever signed up could still have a password set and a
+    live verification token minted on it, waiting to become usable the moment
+    an operator reactivated it. An earlier version of this call answered the
+    three cases with distinguishable 404/409/200 statuses, which let an
+    unauthenticated caller enumerate an organization's roster and signup
+    progress, exactly what the sibling functions were already written to
+    avoid; this closes that gap. ``password`` is still validated and reported
+    on its own shape (too short, too long) before the lookup, since a policy
+    violation says nothing about whether the address exists and checking it
+    first means a bad password answers the same way whether or not the
+    address is real.
+
+    Refuses before writing anything if this deployment cannot mail the
+    verification link: a signup that could never be verified would strand the
+    caller in the unverified, hard-blocked state #650's sign-in gate enforces.
+    The mail send after commit is not guarded by a ``try`` on purpose, the same
+    reason ``organization_service.invite_active_organization_member_for_user``
+    does not guard its own: ``Mailer.send`` never raises, so the account this
+    call creates is durable whether or not the message actually goes out.
+    """
+    mailer = Mailer(config)
+    mailer.require_ready()
+    _validate_password(password)
+
+    address = validated_email(email)
+    identity = await UserRepository(db).get_by_email(address)
+    if identity is None or identity.hashed_password is not None or not identity.is_active:
+        # Pays the same bcrypt cost the claim path pays hashing a fresh
+        # password, so the two cases are closer in wall-clock time than a bare
+        # early return would be. Not a full equalization (the claim path also
+        # commits and mails), but it closes the cheapest, most repeatable part
+        # of the gap the way ``authenticate`` already does for a sign-in on an
+        # address with no stored hash.
+        await verify_absent_password_async(password)
+        return
+
+    identity.full_name = identity.full_name or full_name
+    identity.hashed_password = await hash_password_async(password)
+    if terms_accepted:
+        identity.terms_accepted_at = datetime.now(UTC)
+    token = generate_token()
+    identity.email_verification_token_hash = hash_token(token)
+    identity.email_verification_token_expires_at = datetime.now(UTC) + timedelta(
+        hours=config.email_verification_expiry_hours
+    )
+    db.add(identity)
+    await db.commit()
+
+    await mailer.send(
+        to=address,
+        message=render_verification_email(
+            verify_link=mailer.link(f"/#/verify-email?token={token}"),
+            expiry_hours=config.email_verification_expiry_hours,
+        ),
+    )
+
+
+async def verify_email(db: AsyncSession, *, token: str) -> User:
+    """Confirm an address, lifting the sign-in gate #650 added to ``authenticate``.
+
+    One error for unknown, expired, already-consumed, and deactivated: a token
+    that no longer resolves to a row (cleared by a prior use, or never issued),
+    one whose expiry has passed, and one whose identity has been deactivated
+    since it was issued all raise ``VerificationTokenInvalidError``, the same
+    collapse ``InvitationNotFoundError`` gives an invitation token for the same
+    reason. The deactivation check matches ``resolve_dashboard_session`` and
+    ``authenticate``: deactivating someone has to end every road back in, not
+    just the one ``authenticate`` itself checks. Single-use is the hash and
+    expiry columns going back to ``NULL`` on success: a replayed token then
+    matches no row at all.
+    """
+    identity = await UserRepository(db).get_by_verification_token_hash(hash_token(token))
+    if identity is None or identity.email_verification_token_expires_at is None or not identity.is_active:
+        raise VerificationTokenInvalidError
+    if identity.email_verification_token_expires_at < datetime.now(UTC):
+        raise VerificationTokenInvalidError
+
+    identity.email_verified_at = datetime.now(UTC)
+    identity.email_verification_token_hash = None
+    identity.email_verification_token_expires_at = None
+    db.add(identity)
+    await db.commit()
+    return identity
+
+
+async def resend_verification_email(db: AsyncSession, config: GatewayConfig, *, email: str) -> None:
+    """Mail a fresh verification link, or do nothing: the caller cannot tell which.
+
+    Enumeration-safe by construction rather than by a caller-side generic
+    response: an unknown address, one with no password yet (never claimed),
+    one already verified, and one whose identity has been deactivated all
+    return with nothing sent, and only the genuinely-unverified case mints a
+    token and mails it. A fresh token replaces any prior one outright, so an
+    old, unopened link stops working the moment a new one is requested.
+
+    The early return still pays a bcrypt-equivalent cost first
+    (``verify_absent_password_async``), the same reason ``authenticate`` pays
+    one for an address with no stored hash: without it, the ineligible path
+    returns after one SELECT while the eligible one goes on to a commit and an
+    awaited mail send, and that gap is measurable enough to narrow down which
+    case a given address fell into.
+    """
+    mailer = Mailer(config)
+    mailer.require_ready()
+
+    address = validated_email(email)
+    identity = await UserRepository(db).get_by_email(address)
+    if (
+        identity is None
+        or identity.hashed_password is None
+        or identity.email_verified_at is not None
+        or not identity.is_active
+    ):
+        await verify_absent_password_async(_TIMING_EQUALIZER)
+        return
+
+    token = generate_token()
+    identity.email_verification_token_hash = hash_token(token)
+    identity.email_verification_token_expires_at = datetime.now(UTC) + timedelta(
+        hours=config.email_verification_expiry_hours
+    )
+    db.add(identity)
+    await db.commit()
+
+    await mailer.send(
+        to=address,
+        message=render_verification_email(
+            verify_link=mailer.link(f"/#/verify-email?token={token}"),
+            expiry_hours=config.email_verification_expiry_hours,
+        ),
+    )
+
+
+async def request_password_reset(db: AsyncSession, config: GatewayConfig, *, email: str) -> None:
+    """Mail a password-reset link, or do nothing: the caller cannot tell which.
+
+    Enumeration-safe the same way ``resend_verification_email`` is, including
+    paying the same timing-equalizing cost on the early return, and refusing a
+    deactivated identity for the same reason. Works on an unverified identity
+    too, deliberately: forgetting a password predates ever verifying it, so
+    gating this on ``email_verified_at`` would strand exactly the caller it
+    exists to help.
+    """
+    mailer = Mailer(config)
+    mailer.require_ready()
+
+    address = validated_email(email)
+    identity = await UserRepository(db).get_by_email(address)
+    if identity is None or identity.hashed_password is None or not identity.is_active:
+        await verify_absent_password_async(_TIMING_EQUALIZER)
+        return
+
+    token = generate_token()
+    identity.password_reset_token_hash = hash_token(token)
+    identity.password_reset_token_expires_at = datetime.now(UTC) + timedelta(hours=config.password_reset_expiry_hours)
+    db.add(identity)
+    await db.commit()
+
+    await mailer.send(
+        to=address,
+        message=render_password_reset_email(
+            reset_link=mailer.link(f"/#/reset-password?token={token}"),
+            expiry_hours=config.password_reset_expiry_hours,
+        ),
+    )
+
+
+async def reset_password(db: AsyncSession, *, token: str, new_password: str) -> None:
+    """Complete a password reset. Single-use, the same way ``verify_email`` is.
+
+    No current password to prove, unlike ``update_password``: that is the
+    entire point of a reset. Every other session this identity holds is
+    revoked, the same as an ordinary password change, so a session opened
+    before the account was recovered does not outlive the reset that took it
+    back. A deactivated identity's token is refused the same way an unknown or
+    expired one is, matching ``verify_email``: deactivation has to end every
+    road back in, not just the one ``authenticate`` itself checks.
+    """
+    identity = await UserRepository(db).get_by_reset_token_hash(hash_token(token))
+    if identity is None or identity.password_reset_token_expires_at is None or not identity.is_active:
+        raise ResetTokenInvalidError
+    if identity.password_reset_token_expires_at < datetime.now(UTC):
+        raise ResetTokenInvalidError
+    _validate_password(new_password)
+
+    identity.hashed_password = await hash_password_async(new_password)
+    identity.password_reset_token_hash = None
+    identity.password_reset_token_expires_at = None
+    db.add(identity)
+    await revoke_user_dashboard_sessions(db, identity.id)
+    await db.commit()
 
 
 async def has_password_identity(db: AsyncSession) -> bool:
@@ -250,7 +514,12 @@ async def _claimable_email(db: AsyncSession, identity: User, email: str) -> str:
 
 __all__ = [
     "authenticate",
+    "create_user_for_signup",
     "has_password_identity",
+    "request_password_reset",
+    "resend_verification_email",
+    "reset_password",
     "set_password",
     "update_password",
+    "verify_email",
 ]

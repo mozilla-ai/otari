@@ -20,12 +20,16 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
 
 2. **Variables and props over hand-written CSS.** Start from a HeroUI component or a shared
    primitive rather than a native element, which arrives with the tokens and its states
-   (pointer, focus ring, disabled dimming) already wired. Then four ways to change how it
-   looks, in order: a variable (ours as a token, or one of HeroUI's own aliased onto ours;
+   (pointer, focus ring, disabled dimming) already wired. A native element is sometimes the
+   right call anyway (a nav row has to be the router's `Link`), and then those states become
+   classes the call site names itself, so `cursor-pointer` on a bare `<button>` is correct
+   rather than a finding. Then four ways to change how it looks, in order: a variable (ours
+   as a token, or one of HeroUI's own aliased onto ours;
    `--radius` drives its whole radius ramp, and `--cursor-interactive`, `--disabled-opacity`
    and the rest are in `@heroui/styles/dist/themes/`, none of them aliased in `globals.css`
-   yet), a shared utility once the look repeats, the component's own prop (`variant`, `size`,
-   `isDisabled`, `isPending`, `fullWidth`, `isInvalid`), and only then a rule against HeroUI's
+   yet, and the alias goes there rather than into a class string of ours), a shared utility
+   once the look repeats, the component's own prop (`variant`, `size`, `isDisabled`,
+   `isPending`, `fullWidth`, `isInvalid`), and only then a rule against HeroUI's
    own classes under the `.otari-*` namespace. HeroUI and Tailwind both permit that last one and
    it stays discouraged here, so the finding is not that it is forbidden but that a rung above
    reaches the value: a rule like `.otari-table .table__cell` or
@@ -92,9 +96,8 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
    account menu below `md`) and `/account` (that menu's first row). The registry is what the
    rails render, so registering either would duplicate into the sidebar a row the design draws
    once. An entry gates on `surface` (the deployment axis, from `GET /v1/bootstrap`
-   via `useDeployment`), `capability` (the entitlement axis, via `useEntitlements`), and
-   `flag` (the operational axis, valid only alongside a capability), composed as AND by
-   `useNavVisibility`. Do not fold one into another, and do not reach past them: a page
+   via `useDeployment`) and `capability` (the entitlement axis, via `useEntitlements`),
+   composed as AND by `useNavVisibility`. Do not fold one into another, and do not reach past them: a page
    component that reads the gateway's mode itself, or infers it from an endpoint's 404, is
    the scattered mode check this replaced. A new base capability belongs in
    `BASE_CAPABILITIES`; an overlay's belongs in neither. Hiding a surface client-side is a

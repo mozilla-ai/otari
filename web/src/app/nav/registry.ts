@@ -38,11 +38,11 @@ import type { NavItem, NavLabelOverride, NavSection } from "./types"
  * may call it (keys, the upstream credentials those keys spend, and the
  * workspace's roster).
  *
- * Each entry declares its own gating, and the three axes are independent:
- * `surface` (does this deployment host it), `capability` (is it entitled), and
- * `flag` (is its rollout on). The sidebar composes them as AND. Hiding a link
- * is a convenience and never an authorization; the server still authorizes
- * every request the page behind it makes.
+ * Each entry declares its own gating, and the two axes are independent:
+ * `surface` (does this deployment host it) and `capability` (is it entitled).
+ * The sidebar composes them as AND. Hiding a link is a convenience and never an
+ * authorization; the server still authorizes every request the page behind it
+ * makes.
  */
 const BASE_NAV_SECTIONS = [
   {
@@ -524,7 +524,7 @@ export function navItemForPath(pathname: string): NavItem | undefined {
  *
  * Nesting is where the rule has an edge: `navItemForPath` answers a child with
  * its parent carrying the child's `surface`, so a child is gated on *its own*
- * surface rather than on the group's, plus the parent's capability and flag. A
+ * surface rather than on the group's, plus the parent's capability. A
  * path the registry does not declare (the guide, the 404 splat) is not gated at
  * all, and this says so with `true`.
  */

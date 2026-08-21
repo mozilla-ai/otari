@@ -12,10 +12,10 @@ import { useDeployment } from "@/shared/hooks/useDeployment"
 // anyway, because this cluster is hidden below `md` and the guide would
 // otherwise have no entry point on a phone.
 //
-// Playground is a hosted surface, gated on the two things it actually needs
-// rather than on a flag that stands in for them: it is a page otari.ai serves
-// and this gateway does not, so the link needs both the entitlement and a
-// `management_url` to point at, which only a gateway attached to otari.ai has.
+// Playground is a hosted surface, gated on the two things it actually needs:
+// it is a page otari.ai serves and this gateway does not, so the link needs
+// both the entitlement and a `management_url` to point at, which only a gateway
+// attached to otari.ai has.
 //
 // The design also draws a balance here. It is not built: this gateway meters
 // spend but holds no wallet, and there is no seam that could feed one, since an

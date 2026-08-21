@@ -186,11 +186,19 @@ finds nothing.
 
 ### 8. Send your first request
 
-The Providers page includes a "Send your first request" snippet you can copy.
-Point any OpenAI-compatible client at the gateway using an Otari API key or the
-master key, and select a model in `provider:model` form (for example
-`openai:gpt-4o`). See the [Quickstart](quickstart.md) for a full end-to-end
-example.
+Go back to **Overview**. Now that a provider exists, the page offers a setup
+guide: press **Create a setup key** and it issues an API key for the selected
+workspace and shows the two calls that use it, with the base URL and a model
+filled in, ready to paste. Leave the page open and it watches the workspace's
+traffic; when your request lands it says so, and if the request fails it names
+the cause and the page that fixes it.
+
+Nothing depends on the guide. Any OpenAI-compatible client pointed at this
+gateway with an Otari API key (or the master key) and a model in
+`provider:model` form does the same thing, and the
+[Quickstart](quickstart.md) is the full end-to-end example. See
+[The setup guide](#the-setup-guide) for what it records and how to turn it
+off.
 
 ### 9. (Optional) Set up keys, people, and budgets
 
@@ -227,6 +235,41 @@ The groups below match the current dashboard, rail by rail.
 
 The landing page. An at-a-glance view of spend, traffic, and health across the
 gateway.
+
+#### The setup guide
+
+Until a workspace has served a successful request, the Overview also carries the
+guide from step 8 above. It is the second half of a pair: with no provider
+configured, this page and the Providers page both say to add one, and once one
+exists the guide takes over and offers the key and the call.
+
+Four things are worth knowing about it:
+
+- **The key it issues is an ordinary API key**, scoped to the selected
+  workspace and listed on the API keys page as **Setup guide**. It is shown
+  once, like every key this gateway mints, so opening the guide again issues a
+  new one and retires the previous one. Issuing it is a workspace management
+  action: an owner or admin of the workspace (or of the organization) sees the
+  offer, and a member who only has read access does not.
+- **"Skip this guide" is permanent, per workspace**, and it retires the card and
+  nothing else. The offer does not come back on the next page load, for you or
+  for a colleague, and the key stays exactly as it is: you asked for it, you may
+  well have pasted it somewhere already, and revoking one is the API keys page's
+  job.
+- **Whether the workspace has activated is read from its own traffic**, not
+  recorded separately: the first successful gateway request in the workspace is
+  what closes the guide. Usage imported through
+  `POST /v1/usage/external-events` deliberately does not count, since it was
+  served by something else.
+- **A deployment can turn the flow off** with `activation_guide: false` (or
+  `OTARI_ACTIVATION_GUIDE=false`). The endpoints stay mounted and report every
+  workspace ineligible, so a dashboard that is already open stops offering it
+  too.
+
+One consequence worth knowing if you are upgrading rather than starting fresh: a
+workspace whose usage arrived only through `POST /v1/usage/external-events` has
+never actually called this gateway, so the guide appears for it after the
+upgrade. Skip retires it, or turn the flow off with the setting above.
 
 ### Observe
 
@@ -496,9 +539,13 @@ every later request resolves that same operator. Giving that operator an email
 address and a password is what turns it into a sign-in rather than a label, and
 what retires the master key as the dashboard login (step 5 of the walkthrough
 above). Members added after that hold a role and can be placed in workspaces, but
-cannot sign in yet: nothing here sets a password for someone else, and the
-signup and reset flows that would are still to come. The address they are added
-by is the handle those flows will match them on.
+cannot sign in from here yet: nothing here sets a password for someone else,
+and the dashboard has no signup or reset page of its own. The API underneath
+already supports both (`POST /v1/auth/signup`, `POST /v1/auth/password/reset`;
+see [Access control](access-control.md#signup-claiming-a-roster-identity)), so
+a member can claim their own address today without this UI; the dashboard
+pages that would let them do it from here are a fast follow. The address they
+are added by is the handle signup matches them on.
 
 ### People & access
 

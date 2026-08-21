@@ -1,0 +1,8 @@
+Verify your email
+
+Confirm this address to finish signing in to Otari.
+
+Verify your email (expires in {{VALID_PERIOD}}) by opening this link:
+{{VERIFY_LINK}}
+
+If you weren't expecting this, you can ignore this email.

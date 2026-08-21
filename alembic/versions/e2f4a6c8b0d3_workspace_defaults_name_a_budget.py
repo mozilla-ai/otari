@@ -23,7 +23,7 @@ leaves the minted rows behind rather than guessing which budgets were only ever
 a default.
 
 Revision ID: e2f4a6c8b0d3
-Revises: a7c3e5d9b1f4
+Revises: db8fbf901ee0
 Create Date: 2026-08-21
 """
 
@@ -35,7 +35,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "e2f4a6c8b0d3"
-down_revision: str | Sequence[str] | None = "a7c3e5d9b1f4"
+down_revision: str | Sequence[str] | None = "db8fbf901ee0"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

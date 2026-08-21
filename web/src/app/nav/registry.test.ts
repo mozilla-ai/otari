@@ -157,13 +157,12 @@ describe("nav registry", () => {
     expect(routing?.capability).toBeUndefined()
   })
 
-  it("leaves the index ungated on all three axes", () => {
+  it("leaves the index ungated on both axes", () => {
     const overview = NAV_ITEMS.find((item) => item.label === "Overview")
     // The deployment's own front page: it reads whatever it is allowed to, so
     // gating it would leave a deployment with no landing page at all.
     expect(overview?.surface).toBeUndefined()
     expect(overview?.capability).toBeUndefined()
-    expect(overview?.flag).toBeUndefined()
   })
 
   it("names the usage surface on both observability pages", () => {
@@ -180,14 +179,11 @@ describe("nav registry", () => {
     ])
   })
 
-  it("gates no base entry on a capability or a flag", () => {
-    // Neither axis has a base user yet. Routing is the one candidate for a
-    // capability, and ARCHITECTURE.md marks that split provisional, so the tag
-    // waits for the decision rather than anticipating it. Flags belong to
-    // whoever is rolling something out, and the base ships none, so a flagged
-    // base entry would be permanently hidden.
+  it("gates no base entry on a capability", () => {
+    // The axis has no base user yet. Routing is the one candidate, and
+    // ARCHITECTURE.md marks that split provisional, so the tag waits for the
+    // decision rather than anticipating it.
     expect(NAV_ITEMS.every((item) => item.capability === undefined)).toBe(true)
-    expect(NAV_ITEMS.every((item) => item.flag === undefined)).toBe(true)
   })
 
   it("entitles every capability the base registry gates on", () => {

@@ -439,6 +439,113 @@ export function CopyableValue({
   )
 }
 
+// A readonly, always-selectable field with a copy button: how a value an
+// operator has to paste elsewhere is handed over. Shared by the Keys page's
+// one-time reveal and the setup guide, which hand out the same key and the same
+// snippets.
+//
+// The Clipboard API is undefined on the non-secure origins this dashboard is
+// routinely served from, so the text is selected on click and Ctrl/Cmd-C always
+// works even when the button cannot copy programmatically. "Copied" is only
+// claimed when it truly copied.
+//
+// The label is a real `<label>` for the field, not a caption beside it: these
+// values are handed over in pairs and threes (a key and two snippets), so
+// "which field is this" has to be answerable by a screen reader and by a test
+// that queries the way an operator reads.
+export function CopyField({
+  label,
+  value,
+  multiline = false,
+  fieldRef,
+}: {
+  label: string
+  value: string
+  multiline?: boolean
+  fieldRef?: React.RefObject<HTMLInputElement | HTMLTextAreaElement | null>
+}) {
+  const internalRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(
+    null,
+  )
+  const ref = fieldRef ?? internalRef
+  const fieldId = useId()
+  const [copied, setCopied] = useState(false)
+  const [selectHint, setSelectHint] = useState(false)
+  // Same shape as CopyButton's below: the acknowledgement clears itself on a
+  // timer, so the timer has to die with the component (and be replaced rather
+  // than stacked when a second copy lands inside the window).
+  const resetTimer = useRef<ReturnType<typeof setTimeout> | undefined>(
+    undefined,
+  )
+
+  useEffect(() => () => clearTimeout(resetTimer.current), [])
+
+  const copy = async () => {
+    ref.current?.focus()
+    ref.current?.select()
+    try {
+      if (navigator.clipboard?.writeText) {
+        await navigator.clipboard.writeText(value)
+        setCopied(true)
+        setSelectHint(false)
+        clearTimeout(resetTimer.current)
+        resetTimer.current = setTimeout(() => setCopied(false), 2_000)
+        return
+      }
+    } catch {
+      // fall through to the manual path
+    }
+    // No Clipboard API (or it threw): the text is selected, so the operator can
+    // press Ctrl/Cmd-C. Never claim it was copied.
+    setSelectHint(true)
+  }
+
+  const shared =
+    "w-full rounded-lg border border-border bg-surface-alt px-3 py-2 font-mono text-xs text-foreground"
+
+  return (
+    <div className="flex flex-col gap-1">
+      <div className="flex items-center justify-between">
+        <label htmlFor={fieldId} className="text-xs font-medium text-muted">
+          {label}
+        </label>
+        <Button size="sm" variant="outline" onPress={copy}>
+          {copied ? "Copied" : "Copy"}
+        </Button>
+      </div>
+      {multiline ? (
+        <textarea
+          id={fieldId}
+          ref={ref as React.RefObject<HTMLTextAreaElement>}
+          readOnly
+          rows={value.split("\n").length}
+          value={value}
+          onFocus={(e) => e.currentTarget.select()}
+          className={`${shared} resize-none whitespace-pre`}
+        />
+      ) : (
+        <input
+          id={fieldId}
+          ref={ref as React.RefObject<HTMLInputElement>}
+          readOnly
+          value={value}
+          onFocus={(e) => e.currentTarget.select()}
+          className={shared}
+        />
+      )}
+      {/* Announce only the "Copied" event, never the secret itself. */}
+      <span aria-live="polite" className="text-xs text-success">
+        {copied ? "Copied to clipboard." : ""}
+      </span>
+      {selectHint ? (
+        <span className="text-xs text-muted">
+          Selected. Press Ctrl/Cmd-C to copy.
+        </span>
+      ) : null}
+    </div>
+  )
+}
+
 // A compact copy control for an identifier an operator has to paste elsewhere (a
 // model id, an alias target). Table rows own click-drag for selection, so the
 // text in a cell cannot be highlighted by hand (issue #478); this is how it gets
@@ -567,7 +674,11 @@ export function PageLoading({ label = "Loading…" }: { label?: string }) {
       role="status"
       className="flex items-center justify-center gap-2 px-4 py-10 text-sm text-muted"
     >
-      <Spinner size="sm" />
+      {/* The spinner is its own role="status" live region as of HeroUI 3.2.4,
+          which would nest one status inside another and announce a bare
+          "Loading" alongside this label. Hide it; the label below carries the
+          announcement for the region. */}
+      <Spinner size="sm" aria-hidden="true" />
       <span>{label}</span>
     </div>
   )

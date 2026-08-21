@@ -81,6 +81,41 @@ export const authHeaders = {
   "Content-Type": "application/json",
 } as const
 
+/**
+ * Retire the first-request setup guide for every workspace on the deployment.
+ *
+ * A fixture step, not a flow: the guide is offered until a *gateway* request in
+ * the workspace succeeds, and the suite's usage is imported rather than served,
+ * so without this it sits at the top of the Overview every later spec reads.
+ * Permanent and idempotent server-side, so calling it on a warm database is
+ * fine.
+ */
+export async function dismissSetupGuide(page: Page): Promise<void> {
+  const listed = await page.request.get("/v1/workspaces?skip=0&limit=1000", {
+    headers: authHeaders,
+  })
+  await expectOk(listed, "list workspaces")
+  const { data, count } = (await listed.json()) as {
+    data: { id: string }[]
+    count: number
+  }
+  // One page, and the endpoint's own total says whether that was all of them.
+  // A silent short page would leave a workspace still being offered the guide,
+  // which surfaces as an unexplained card on top of a later spec's page rather
+  // than as a failure here.
+  expect(
+    data.length,
+    `listed ${data.length} of ${count} workspaces on one page`,
+  ).toBe(count)
+  for (const workspace of data) {
+    const dismissed = await page.request.post(
+      `/v1/workspaces/${workspace.id}/activation/dismiss`,
+      { headers: authHeaders },
+    )
+    await expectOk(dismissed, `dismiss the setup guide in ${workspace.id}`)
+  }
+}
+
 // Open a client route directly. The router runs on hash history, so a
 // filtered view is a hash URL and its query string is what `useUrlState` reads.
 export async function gotoRoute(page: Page, route: string): Promise<void> {

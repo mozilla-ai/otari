@@ -203,7 +203,12 @@ covers them.
 ## What stayed in otari-ai
 
 Its marketing type roles, pre-login gradient, activation-modal and border-beam tokens, and
-HubSpot patch dress a public site and a hosted signup that do not exist here.
+HubSpot patch dress a public site and a hosted signup that do not exist here. The
+first-request setup guide *is* ported (`features/onboarding/SetupGuideCard.tsx`), and it
+deliberately dresses itself in the status and surface families rather than bringing that
+bespoke `activation-*` set with it: a panel on the Overview page is a card with a status
+row, so the roles the foundation already names are the right ones, and a family with one
+consumer is a second palette to keep in step for no reader benefit.
 
 Its `shared/components/ui/adapters/` layer stayed too, and that one is worth knowing about,
 because it is the obvious thing to reach for and it should not be reached for. It is a HeroUI

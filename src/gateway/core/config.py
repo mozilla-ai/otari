@@ -337,6 +337,15 @@ class GatewayConfig(BaseSettings):
             "lifetime; the master key itself never expires."
         ),
     )
+    activation_guide: bool = Field(
+        default=True,
+        description=(
+            "Offer the dashboard's first-request setup guide in a workspace that has not served "
+            "a successful request yet. False turns the flow off for the whole deployment: the "
+            "endpoints stay mounted and report every workspace ineligible, so a dashboard that "
+            "is already open stops offering it too."
+        ),
+    )
     rate_limit_rpm: int | None = Field(
         default=None, ge=1, description="Maximum requests per minute per user (None disables rate limiting)"
     )
@@ -346,8 +355,9 @@ class GatewayConfig(BaseSettings):
         description=(
             "Maximum calls per client IP per minute to the app's unauthenticated "
             "surfaces (None disables this limit): failed POST /v1/auth/session "
-            "attempts (a correct master key is never throttled there), and every "
-            "call to the two public invitation-accept routes, counted whether they "
+            "attempts (a correct master key is never throttled there), every call "
+            "to the two public invitation-accept routes, and every call to the "
+            "signup, verification and password-reset routes, counted whether they "
             "succeed or fail. Separate from rate_limit_rpm, which is keyed to "
             "authenticated users and does not cover any of these pre-auth paths."
         ),
@@ -398,6 +408,16 @@ class GatewayConfig(BaseSettings):
         default=168,
         ge=1,
         description="How long an organization invitation stays acceptable, in hours (default 7 days).",
+    )
+    email_verification_expiry_hours: int = Field(
+        default=48,
+        ge=1,
+        description="How long an email-verification link stays acceptable, in hours.",
+    )
+    password_reset_expiry_hours: int = Field(
+        default=2,
+        ge=1,
+        description="How long a password-reset link stays acceptable, in hours.",
     )
     providers: dict[str, dict[str, Any]] = Field(
         default_factory=dict,

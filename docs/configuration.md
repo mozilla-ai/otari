@@ -72,7 +72,10 @@ pricing:
 | `mail_from_email` | string | none | The `From` address on outgoing mail. Required, alongside `smtp_host`, for mail to actually send. |
 | `mail_from_name` | string | `Otari` | The `From` display name on outgoing mail |
 | `invitation_expiry_hours` | int | `168` | How long an organization invitation stays acceptable (default 7 days) |
+| `email_verification_expiry_hours` | int | `48` | How long an email-verification link stays acceptable |
+| `password_reset_expiry_hours` | int | `2` | How long a password-reset link stays acceptable |
 | `rate_limit_rpm` | int | none | Max requests per minute per user (none = disabled) |
+| `activation_guide` | bool | `true` | Offer the dashboard's first-request setup guide in a workspace that has not served a successful request yet. `false` turns the flow off deployment-wide. See [The setup guide](dashboard.md#the-setup-guide). |
 | `cors_allow_origins` | list | `[]` | Allowed CORS origins (empty = disabled) |
 | `providers` | dict | `{}` | Provider credentials (see below) |
 | `routing` | dict | `{}` | Named routing policies: which real model serves a request, what is tried after a retryable failure, and which guardrails always run. An alias is the one-target case. See [Routing policies](routing.md). Standalone mode only. |

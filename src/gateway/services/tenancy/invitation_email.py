@@ -7,21 +7,7 @@ pair plus a function this shape, not another renderer.
 """
 
 from gateway.services.mail import MailMessage, render_email
-
-
-def _format_expiry(hours: int) -> str:
-    """A recipient-facing duration that never overstates how long a link lives.
-
-    ``invitation_expiry_hours`` is not required to be a multiple of 24.
-    Rounding an inexact remainder up to the next day (25 hours -> "2 days")
-    overstates it exactly the way rounding down (12 hours -> "1 day") does,
-    just in fewer cases; the fix for both is to only switch to days on an
-    exact multiple, and stay in hours otherwise.
-    """
-    if hours < 24 or hours % 24:
-        return f"{hours} hour{'s' if hours != 1 else ''}"
-    days = hours // 24
-    return f"{days} day{'s' if days != 1 else ''}"
+from gateway.services.tenancy.tokens import format_expiry
 
 
 def _article_for(role: str) -> str:
@@ -55,7 +41,7 @@ def render_invitation_email(
             "ROLE": role,
             "ROLE_ARTICLE": _article_for(role),
             "ACCEPT_LINK": accept_link,
-            "VALID_DAYS": _format_expiry(expiry_hours),
+            "VALID_DAYS": format_expiry(expiry_hours),
         },
     )
 

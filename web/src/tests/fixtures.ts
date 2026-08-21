@@ -7,6 +7,7 @@
 // the part under test, so a test states what it is about and nothing else.
 
 import type {
+  ActivationAttempt,
   Budget,
   DeploymentBootstrap,
   Organization,
@@ -18,6 +19,7 @@ import type {
   UsageTotals,
   User,
   Workspace,
+  WorkspaceActivation,
   WorkspaceBudgetDefault,
   WorkspaceMember,
 } from "@/client"
@@ -291,6 +293,41 @@ export function workspaceBudgetDefault(
     budget_duration_sec: 2_592_000,
     created_at: "2026-01-01T00:00:00+00:00",
     updated_at: "2026-01-01T00:00:00+00:00",
+    ...overrides,
+  }
+}
+
+/** A request the setup guide reports, successful by default. */
+export function activationAttempt(
+  overrides: Partial<ActivationAttempt> = {},
+): ActivationAttempt {
+  return {
+    occurred_at: "2026-01-01T00:00:00+00:00",
+    request_id: "77777777-7777-7777-7777-777777777777",
+    status: "success",
+    provider: "openai",
+    model: "openai:gpt-4o-mini",
+    error_category: null,
+    cost_usd: 0.000123,
+    latency_ms: 412,
+    ...overrides,
+  }
+}
+
+/**
+ * Where a workspace stands on its first request: waiting and on offer, which is
+ * the state the guide exists for. A test about the payoff or a failure overrides
+ * `status` and the attempt beside it.
+ */
+export function workspaceActivation(
+  overrides: Partial<WorkspaceActivation> = {},
+): WorkspaceActivation {
+  return {
+    status: "waiting",
+    activation_attempt: null,
+    latest_attempt: null,
+    experience_eligible: true,
+    dismissed: false,
     ...overrides,
   }
 }

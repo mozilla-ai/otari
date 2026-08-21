@@ -1,5 +1,6 @@
 import { test } from "@playwright/test"
 
+import { dismissSetupGuide } from "./helpers"
 import { seedParityUsage } from "./parity-data"
 
 // Seeding runs as its own Playwright project (see web/playwright.config.ts), not
@@ -10,4 +11,10 @@ import { seedParityUsage } from "./parity-data"
 // alphabetical order of filenames.
 test("seed the behavioural-parity usage fixture", async ({ page }) => {
   await seedParityUsage(page)
+  // The fixture is imported usage, which is deliberately not a call to this
+  // gateway, so the first-request setup guide is still on offer and would sit at
+  // the top of the Overview the parity specs read. Retiring it here keeps the
+  // fixture, not another spec's side effects, in charge of what those pages
+  // start from. Idempotent server-side, so this is safe on a warm database.
+  await dismissSetupGuide(page)
 })

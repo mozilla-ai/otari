@@ -5,7 +5,9 @@ from gateway.api.routes import (
     aliases,
     audio,
     auth_password,
+    auth_password_reset,
     auth_session,
+    auth_signup,
     batches,
     bootstrap,
     budgets,
@@ -39,6 +41,7 @@ from gateway.api.routes import (
     tools,
     usage,
     users,
+    workspace_activation,
     workspace_member_budget_policies,
     workspaces,
 )
@@ -63,6 +66,8 @@ def register_routers(app: FastAPI, config: GatewayConfig) -> None:
 
     app.include_router(auth_session.router)
     app.include_router(auth_password.router)
+    app.include_router(auth_signup.router)
+    app.include_router(auth_password_reset.router)
     app.include_router(embeddings.router)
     app.include_router(images.router)
     app.include_router(audio.router)
@@ -80,6 +85,7 @@ def register_routers(app: FastAPI, config: GatewayConfig) -> None:
     app.include_router(workspaces.router)
     app.include_router(invitations.router)
     app.include_router(workspace_member_budget_policies.router)
+    app.include_router(workspace_activation.router)
     app.include_router(org_provider_keys.org_router)
     app.include_router(org_provider_keys.workspace_router)
     app.include_router(budgets.router)

@@ -1,46 +1,37 @@
 /**
- * The entitlement and feature-flag axes, and the seam an overlay resolves them
- * through.
+ * The entitlement axis, and the seam an overlay resolves it through.
  *
- * Two of the three gates a surface composes (ARCHITECTURE.md, "Deployment,
- * entitlements, and feature flags"):
+ * One of the two gates a surface composes (ARCHITECTURE.md, "Deployment and
+ * entitlements"). **Entitlement** is the licensing axis: is this capability
+ * enabled for this deployment at all? Scoped per deployment, never per user,
+ * and a standing property rather than a switch.
  *
- * - **Entitlement** is the licensing axis: is this capability enabled for this
- *   deployment or org at all? Scoped per deployment or org, never per user, and
- *   a standing property rather than a switch.
- * - **Feature flag** is the operational axis: is this sub-feature of a
- *   capability I already hold turned on right now? Engineering's rollout
- *   switch, retired once the rollout lands.
+ * It is never folded together with the deployment axis in `useDeployment`
+ * (that one answers whether the process serving this page hosts the surface at
+ * all).
  *
- * They are never folded together, and neither is the deployment axis in
- * `useDeployment` (that one answers whether the process serving this page hosts
- * the surface at all).
- *
- * **The base build answers both from a constant**, which is what the context's
+ * **The base build answers from a constant**, which is what the context's
  * default value is. That is the honest core adapter ARCHITECTURE.md describes:
  * it grants every capability the base ships and reports every overlay-only one
- * as absent, and the base ships no feature flags because a flag belongs to
- * whoever is rolling something out. An overlay, or a later release that resolves
- * these from the server, supplies its own answer by rendering
- * `EntitlementProvider` above the shell; nothing that reads a capability changes.
+ * as absent. An overlay, or a later release that resolves this from the server,
+ * supplies its own answer by rendering `EntitlementProvider` above the shell;
+ * nothing that reads a capability changes.
  *
- * The hooks return `{ entitled, isLoading }` / `{ enabled, isLoading }` rather
- * than a bare boolean, matching `otari-ai/frontend/src/shared/hooks`, where both
- * are TanStack queries. `isLoading` is always false here. Keeping the shape is
- * what lets the resolver become asynchronous later without touching a call site,
- * and it is why `EntitlementGate` has a loading state to render at all.
+ * The hook returns `{ entitled, isLoading }` rather than a bare boolean,
+ * matching `otari-ai/frontend/src/shared/hooks`, where it is a TanStack query.
+ * `isLoading` is always false here. Keeping the shape is what lets the resolver
+ * become asynchronous later without touching a call site, and it is why
+ * `EntitlementGate` has a loading state to render at all.
  */
 
 import type { ReactNode } from "react"
 import { createContext, useContext } from "react"
 
-/** What the two axes resolve to for the current deployment. */
+/** What the entitlement axis resolves to for the current deployment. */
 export interface Entitlements {
-  /** Capability names this deployment or org is entitled to. */
+  /** Capability names this deployment is entitled to. */
   capabilities: readonly string[]
-  /** Evaluated feature flags, by key. An absent key is off. */
-  flags: Readonly<Record<string, boolean>>
-  /** Whether either is still resolving. Always false for the base answer. */
+  /** Whether it is still resolving. Always false for the base answer. */
   isLoading: boolean
 }
 
@@ -65,7 +56,6 @@ export const BASE_CAPABILITIES: readonly string[] = []
 
 const BASE_ENTITLEMENTS: Entitlements = {
   capabilities: BASE_CAPABILITIES,
-  flags: {},
   isLoading: false,
 }
 
@@ -88,25 +78,16 @@ export function EntitlementProvider({
   )
 }
 
-/** Everything both axes resolved to. Prefer the two single-name hooks below. */
+/** Everything the entitlement axis resolved to. Prefer `useEntitlement`. */
 export function useEntitlements(): Entitlements {
   return useContext(EntitlementContext)
 }
 
-/** Whether this deployment or org is entitled to a capability. */
+/** Whether this deployment is entitled to a capability. */
 export function useEntitlement(capability: string): {
   entitled: boolean
   isLoading: boolean
 } {
   const { capabilities, isLoading } = useEntitlements()
   return { entitled: capabilities.includes(capability), isLoading }
-}
-
-/** Whether a feature flag is on. An unknown key is off. */
-export function useFeatureFlag(flag: string): {
-  enabled: boolean
-  isLoading: boolean
-} {
-  const { flags, isLoading } = useEntitlements()
-  return { enabled: flags[flag] ?? false, isLoading }
 }

@@ -104,13 +104,13 @@ A self-hosted deployment is **one organization with several people in it**, not 
 
 Nothing is required to set it up. The first request to one of those endpoints provisions a default organization, a default workspace, and one owner identity representing the operator, and every later request resolves that same identity. Organization owners and admins can create further workspaces, add members, and manage roles; a workspace's own owners and admins can manage the workspace they belong to.
 
-Adding a member takes an email address (`POST /v1/organizations/me/members`), optionally with the workspaces to grant at the same time. If no identity holds that address yet, one is created carrying it, and the member is active immediately with nothing emailed. Such an identity is a roster and attribution entry today: it carries no password, and only the operator can set one for their own identity, so it cannot sign in until the signup and reset flows land. The address is the handle those flows will match it on.
+Adding a member takes an email address (`POST /v1/organizations/me/members`), optionally with the workspaces to grant at the same time. If no identity holds that address yet, one is created carrying it, and the member is active immediately with nothing emailed. Such an identity is a roster and attribution entry until it signs up: it carries no password, and the address is the handle [signup](#signup-claiming-a-roster-identity) matches it on to give it one.
 
 ### Invitations
 
 `POST /v1/organizations/me/member-invitations` is the other way to add someone: the membership lands `invited` rather than `active`, and an email with an accept link goes out if mail is configured (see [Configuration](configuration.md)). If it isn't, the response still carries the link (`accept_link`) so the operator can share it another way; `mail_sent` says whether it was actually emailed.
 
-The recipient follows the link to a public accept page (`POST /v1/invitations/validate` to preview it, `POST /v1/invitations/accept` to commit, both with the token in the body rather than the URL), which resolves the membership to `active` and grants any workspaces parked on the invitation. No session is minted, and accepting sets no password: the identity it resolves to is in the same state as an address added directly, so it signs in once the signup and reset flows give it a way to set one.
+The recipient follows the link to a public accept page (`POST /v1/invitations/validate` to preview it, `POST /v1/invitations/accept` to commit, both with the token in the body rather than the URL), which resolves the membership to `active` and grants any workspaces parked on the invitation. No session is minted, and accepting sets no password: the identity it resolves to is in the same state as an address added directly, so it signs in once it [signs up](#signup-claiming-a-roster-identity) the same way.
 
 An invitation expires after `invitation_expiry_hours` (default 7 days) and can be revoked before it is accepted (`DELETE /v1/organizations/me/member-invitations/{invitation_id}`), which cancels it and suspends the membership, the same as removing a member. Re-inviting the same address revives it.
 
@@ -149,7 +149,7 @@ curl -X PUT http://localhost:8000/v1/auth/password \
 ```
 
 - A password is at least 8 characters and at most 72 bytes, which is bcrypt's own ceiling; accented and non-Latin characters count for more than one byte each. There are no composition rules.
-- The address is stored lower-cased and matched case-insensitively at sign-in. It is not delivered to and not verified by anyone: this edition has no verification flow yet, and the master key is what proved the claim.
+- The address is stored lower-cased and matched case-insensitively at sign-in. Claiming through the master key does not deliver to it or verify it: the master key is what proves the claim, and `email_verified_at` is stamped as a consequence rather than checked. A roster member proves their own address by [signing up](#signup-claiming-a-roster-identity) instead, which does send and check a verification link.
 - The same endpoint changes a password later, and the same **Account settings** page is where the dashboard does it. From a session it needs `current_password`; sent with the master key in a header it does not, which is the recovery path (see below) and the one form of this call the dashboard cannot make, since reaching the page needs a session. Changing the address afterwards is refused rather than half-supported.
 - Every other session that identity holds is revoked, so a cookie minted under the old password does not outlive it. The caller's own session is spared when the change came from the browser, and is not when it came from the master key, since a header caller has no session to keep.
 - **Claiming is one-way.** No endpoint clears a password, so a deployment that has been claimed cannot be returned to master-key sign-in. The sign-in screen follows `sign_in_methods` and asks for the address and password from then on, and the master key still authenticates the whole management API, so the step costs you nothing you cannot reach; it is simply not reversible. See the [Admin dashboard guide](dashboard.md).
@@ -168,11 +168,51 @@ A failed sign-in answers `401 Incorrect email or password` whichever part was wr
 
 Everything else. It authenticates `/v1/keys`, `/v1/users`, `/v1/budgets`, and the rest of this guide exactly as before, in the `Otari-Key` or `Authorization` header. Claiming a deployment changes one endpoint's answer and no others.
 
-It also stays the way back in. An operator who forgets the password sets a new one through the same `PUT /v1/auth/password`, with the master key in a header and no `current_password`. That is deliberate rather than a gap: a caller holding the master key can already do anything the management API can do, so asking them for a password they have lost would lock the dashboard while leaving the API wide open. Password recovery for someone who holds no master key needs mail, and arrives with the signup and reset flows.
+It also stays the way back in. An operator who forgets the password sets a new one through the same `PUT /v1/auth/password`, with the master key in a header and no `current_password`. That is deliberate rather than a gap: a caller holding the master key can already do anything the management API can do, so asking them for a password they have lost would lock the dashboard while leaving the API wide open. Password recovery for someone who holds no master key needs mail; see [Password reset](#password-reset) below.
 
-#### Who can sign in, and who cannot yet
+#### Signup: claiming a roster identity
 
-Only an identity with a password, and only the operator can get one today: the endpoint above always acts on the caller's own identity, so there is no way for an admin to set someone else's. A member added by address holds a role and can be placed in workspaces, and their address is the handle the signup and reset flows will match them on. Those flows, along with email verification and OAuth and passkey sign-in, are the rest of the identity track.
+An identity an admin added or invited by address carries no password until it signs up. `POST /v1/auth/signup` claims it: it sets a password on the identity that address already names and sends a verification link. It never creates an identity from nothing (self-service registration for a wholly new address is not part of this edition), and it is enumeration-safe about that: an address nobody has touched, one that already completed signup, and one whose identity has been deactivated all answer with the same generic message and nothing written or mailed, the same shape resending and requesting a reset already take below. Only the password itself is judged and reported on its own terms (too short, too long), since that says nothing about whether the address exists.
+
+```bash
+curl -X POST http://localhost:8000/v1/auth/signup \
+  -H "Content-Type: application/json" \
+  -d '{"email": "erin@example.com", "password": "<a password>"}'
+```
+
+A genuinely pending identity exists and has a password from this call on, but it is **hard-blocked from signing in until it verifies**, with no time limit on how long it may wait to: `POST /v1/auth/session` answers `403` for the right password on an unverified address, naming the reason rather than folding it into the generic `401`, because by then the password has already proven the caller holds the account. The verification link itself does expire (`email_verification_expiry_hours`, default 48), and can be requested again at any time:
+
+```bash
+curl -X POST http://localhost:8000/v1/auth/verify-email \
+  -H "Content-Type: application/json" \
+  -d '{"token": "<the token from the link>"}'
+
+curl -X POST http://localhost:8000/v1/auth/resend-verification \
+  -H "Content-Type: application/json" \
+  -d '{"email": "erin@example.com"}'
+```
+
+A verification token is single-use: presenting it again, or presenting an unknown, expired, or deactivated identity's token, answers `400` without saying which is true. Resending answers the same message whether the address is unregistered, already verified, or genuinely waiting, and only the last case actually sends anything, so the endpoint cannot be used to learn which addresses exist. All three routes share the sign-in endpoint's rate limiter (`dashboard_login_rate_limit_per_minute`) and answer `503` naming what is missing when this deployment cannot send mail (`GET /v1/bootstrap`'s `mail_ready` says so in advance).
+
+#### Password reset
+
+`POST /v1/auth/password/reset` mails a reset link to an address that has a password, whether or not that address has verified yet (forgetting a password predates ever confirming it). `POST /v1/auth/password/reset/confirm` completes it with the token and a new password:
+
+```bash
+curl -X POST http://localhost:8000/v1/auth/password/reset \
+  -H "Content-Type: application/json" \
+  -d '{"email": "erin@example.com"}'
+
+curl -X POST http://localhost:8000/v1/auth/password/reset/confirm \
+  -H "Content-Type: application/json" \
+  -d '{"token": "<the token from the link>", "new_password": "<a new password>"}'
+```
+
+The request answers the same message whether or not the address holds a password, for the same enumeration-safety reason resending a verification link does. The reset token expires (`password_reset_expiry_hours`, default 2) and is single-use: unlike a stateless token, it is cleared the moment it is spent, so it cannot be replayed even inside its own expiry window. It is also cleared the moment the identity's password changes through any other channel (an ordinary self-service change, an operator recovery through the master key) while it is still live, so a reset link generated and then overtaken elsewhere cannot undo that change later. Completing a reset revokes every other session the identity holds, the same as an ordinary password change. Both routes share the sign-in rate limiter and the same `503`-when-unconfigured behavior signup does.
+
+#### Who can sign in
+
+An identity with a password can sign in once it has verified its address: the operator gets one by claiming the deployment (verified automatically, since the master key proved it), and a roster member gets one by signing up (verified by the link). There is still no way for an admin to set a password on somebody else's identity; a member added or invited by address holds a role and can be placed in workspaces, but only that address's own signup or reset gives it a way in. OAuth and passkey sign-in are the rest of the identity track.
 
 A session is revoked on sign-out, on a password change as described above, on master-key rotation (every session, with the rotating tab's own re-minted for the same identity), when the master key changes across a restart, and when the identity it names is deleted or deactivated. A deactivated identity also stops being able to sign in, rather than keeping access until its cookie expires. Deactivation is enforced when the session is read, and the identity's sessions are deleted at that point rather than only refused, so re-activating it later does not hand back the access of any cookie that was presented while it was off. Nothing sweeps the rest: a cookie that is never presented in that window survives to its TTL, because no flow here deactivates an identity and none therefore revokes ahead of the read.
 

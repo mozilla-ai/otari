@@ -425,7 +425,9 @@ export function DataTable<Row extends object>({
               <div className="px-4 py-10 text-center text-muted">
                 {isLoading ? (
                   <span className="inline-flex items-center gap-2">
-                    <Spinner size="sm" /> Loading…
+                    {/* Decorative beside its own label: HeroUI's spinner is a
+                        role="status" region announcing "Loading" on its own. */}
+                    <Spinner size="sm" aria-hidden="true" /> Loading…
                   </span>
                 ) : (
                   emptyContent

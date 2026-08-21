@@ -457,6 +457,108 @@
           }
         },
         {
+          "name": "Request Reset",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"email\": \"string\"\n}"
+            },
+            "description": "Mail a password-reset link, or do nothing: the response never says which.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "password",
+                "reset"
+              ],
+              "raw": "{{baseUrl}}/v1/auth/password/reset"
+            }
+          }
+        },
+        {
+          "name": "Confirm Reset",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"token\": \"string\",\n  \"new_password\": \"string\"\n}"
+            },
+            "description": "Complete a password reset. Single-use: the token stops working after this.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "password",
+                "reset",
+                "confirm"
+              ],
+              "raw": "{{baseUrl}}/v1/auth/password/reset/confirm"
+            }
+          }
+        },
+        {
+          "name": "Resend Verification",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"email\": \"string\"\n}"
+            },
+            "description": "Mail a fresh verification link, or do nothing: the response never says which.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "resend-verification"
+              ],
+              "raw": "{{baseUrl}}/v1/auth/resend-verification"
+            }
+          }
+        },
+        {
           "name": "Create Session",
           "request": {
             "body": {
@@ -505,6 +607,72 @@
                 "session"
               ],
               "raw": "{{baseUrl}}/v1/auth/session"
+            }
+          }
+        },
+        {
+          "name": "Signup",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"email\": \"string\",\n  \"password\": \"string\"\n}"
+            },
+            "description": "Claim a roster identity, or do nothing: the response never says which.\n\nNo session is minted. A newly claimed identity is hard-blocked from\nsigning in until it verifies, so there is nothing yet to sign it into.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "signup"
+              ],
+              "raw": "{{baseUrl}}/v1/auth/signup"
+            }
+          }
+        },
+        {
+          "name": "Verify Email Route",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"token\": \"string\"\n}"
+            },
+            "description": "Confirm an address from its verification link, lifting the sign-in gate.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "verify-email"
+              ],
+              "raw": "{{baseUrl}}/v1/auth/verify-email"
             }
           }
         }
@@ -5260,6 +5428,94 @@
         }
       ],
       "name": "workspaces"
+    },
+    {
+      "item": [
+        {
+          "name": "Get Workspace Activation",
+          "request": {
+            "description": "Where a workspace stands on its first successful request.\n\nReadable by any member who can see the workspace. Whether the guide should\nactually be offered to this caller is ``experience_eligible``, which also\nanswers false when the deployment has the flow turned off\n(``activation_guide``), so a dashboard left open stops offering it without\nneeding to be reloaded.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "activation"
+              ],
+              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/activation",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Dismiss Workspace Activation",
+          "request": {
+            "description": "Retire the guide for this workspace. Permanent, and idempotent.\n\nWorkspace owners and admins only. It retires the card and nothing else: the\nkey the guide issued keeps working, because the operator asked for it and\nmay well have pasted it somewhere already. Revoking one is the Keys page's\njob.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "activation",
+                "dismiss"
+              ],
+              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/activation/dismiss",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Workspace Activation Key",
+          "request": {
+            "description": "Issue the workspace's setup API key, rotating the one the guide already issued.\n\nWorkspace owners and admins only, like every other action that changes a\nworkspace. The plaintext is returned once and never stored, so a reopened\nguide rotates the same key row rather than collecting a second one, and\nanswers 409 once the workspace has activated or the guide was dismissed.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "activation",
+                "key"
+              ],
+              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/activation/key",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "workspace-activation"
     },
     {
       "item": [

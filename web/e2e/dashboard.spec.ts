@@ -40,6 +40,34 @@ test.describe("dashboard core flows", () => {
     await expect(page.getByText("Welcome to Otari")).toBeHidden()
   })
 
+  // Runs here, right after a provider exists, because that is the deployment
+  // state the guide is for, and it ends by skipping: the dismissal is
+  // per-workspace and permanent, so every project after this one sees the
+  // Overview without it (parity.setup.ts asks for the same thing again, rather
+  // than depending on this spec having run).
+  test("the setup guide hands out a key, then skips for good", async ({
+    page,
+  }) => {
+    await login(page)
+
+    const guide = page.getByRole("heading", {
+      name: "Send your first request",
+    })
+    await expect(guide).toBeVisible()
+
+    await page.getByRole("button", { name: "Create a setup key" }).click()
+    // Shown once, in a labeled field an operator can select and copy.
+    await expect(page.getByLabel("API key")).toHaveValue(/^gw-/)
+
+    await page.getByRole("button", { name: "Skip this guide" }).click()
+    await expect(guide).toBeHidden()
+
+    // Permanent: the offer does not come back on the next page load.
+    await page.reload()
+    await expect(page.getByRole("heading", { name: "Overview" })).toBeVisible()
+    await expect(guide).toBeHidden()
+  })
+
   test("navigate the management pages", async ({ page }) => {
     await login(page)
     // The workspace rail, then the organization one. The sidebar label and the

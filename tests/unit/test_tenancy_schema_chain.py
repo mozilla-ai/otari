@@ -60,6 +60,17 @@ _CREDENTIAL_COLUMNS = {
 }
 _TOKEN_INDEX = "ix_user_email_verification_token"
 
+_TOKEN_REVISION = "db8fbf901ee0"
+_BEFORE_TOKENS = "c8e2a4f6b0d3"
+_TOKEN_COLUMNS = {
+    "email_verification_token_hash",
+    "email_verification_token_expires_at",
+    "password_reset_token_hash",
+    "password_reset_token_expires_at",
+}
+_VERIFICATION_TOKEN_HASH_INDEX = "ix_user_email_verification_token_hash"
+_RESET_TOKEN_HASH_INDEX = "ix_user_password_reset_token_hash"
+
 
 def _alembic_config(database_url: str) -> Config:
     config = Config()
@@ -396,6 +407,77 @@ def test_the_migrated_columns_match_the_model(sqlite_at_head: tuple[Config, Engi
     assert migrated == set(declared.columns.keys())
     for name in ("terms_accepted_at", "email_verified_at"):
         assert isinstance(declared.columns[name].type, UtcDateTime)
+
+
+def test_the_token_columns_arrive_nullable(sqlite_at_head: tuple[Config, Engine]) -> None:
+    """All four, and every one of them optional: nothing has claimed or reset yet."""
+    _, engine = sqlite_at_head
+    columns = {column["name"]: column for column in inspect(engine).get_columns("user")}
+
+    assert _TOKEN_COLUMNS <= set(columns)
+    assert [columns[name]["nullable"] for name in sorted(_TOKEN_COLUMNS)] == [True] * 4
+
+
+def test_the_token_hashes_are_uniquely_indexed(sqlite_at_head: tuple[Config, Engine]) -> None:
+    """Unique like the invitation token's hash: two identities cannot share one."""
+    _, engine = sqlite_at_head
+    indexes_by_column = {
+        index["column_names"][0]: index for index in inspect(engine).get_indexes("user") if index["column_names"]
+    }
+
+    verification_index = indexes_by_column["email_verification_token_hash"]
+    reset_index = indexes_by_column["password_reset_token_hash"]
+    assert verification_index["name"] == _VERIFICATION_TOKEN_HASH_INDEX
+    assert verification_index["unique"]
+    assert reset_index["name"] == _RESET_TOKEN_HASH_INDEX
+    assert reset_index["unique"]
+
+
+def test_an_existing_database_upgrades_with_its_token_columns_untouched(tmp_path: Path) -> None:
+    """The upgrade an operator on an earlier v0.x runs: additive, and null everywhere it lands."""
+    url = f"sqlite:///{tmp_path / 'tokens.db'}"
+    config = _alembic_config(url)
+    command.upgrade(config, _BEFORE_TOKENS)
+    engine = create_engine(url)
+
+    with engine.begin() as connection:
+        user_id = _insert_identity(connection, email="ada@example.com")
+
+    command.upgrade(config, _TOKEN_REVISION)
+
+    with engine.begin() as connection:
+        row = connection.execute(
+            text(
+                "SELECT email_verification_token_hash, email_verification_token_expires_at, "
+                'password_reset_token_hash, password_reset_token_expires_at FROM "user" WHERE id = :id'
+            ),
+            {"id": user_id},
+        ).mappings().one()
+
+    assert all(row[column] is None for column in _TOKEN_COLUMNS)
+    engine.dispose()
+
+
+def test_the_token_revision_round_trips(sqlite_at_head: tuple[Config, Engine]) -> None:
+    """Down drops the four columns and both indexes; up puts them back.
+
+    The downgrade drops both indexes before their columns on purpose: SQLite
+    refuses ``DROP COLUMN`` while an index covers the column, mirroring the
+    credential revision's own ordering.
+    """
+    config, engine = sqlite_at_head
+
+    command.downgrade(config, _BEFORE_TOKENS)
+
+    inspector = inspect(engine)
+    assert not (_TOKEN_COLUMNS & {column["name"] for column in inspector.get_columns("user")})
+    index_names = {index["name"] for index in inspector.get_indexes("user")}
+    assert _VERIFICATION_TOKEN_HASH_INDEX not in index_names
+    assert _RESET_TOKEN_HASH_INDEX not in index_names
+
+    command.upgrade(config, _TOKEN_REVISION)
+
+    assert _TOKEN_COLUMNS <= {column["name"] for column in inspect(engine).get_columns("user")}
 
 
 def test_the_revision_chain_has_one_head() -> None:

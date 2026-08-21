@@ -24,7 +24,7 @@ from sqlalchemy import Engine, create_engine, inspect, text
 _ALEMBIC_DIR = Path(__file__).resolve().parents[2] / "alembic"
 _DEFAULTS_REVISION = "e2f4a6c8b0d3"
 _CEILINGS_REVISION = "f3a5c7e9d1b4"
-_PREVIOUS_REVISION = "a7c3e5d9b1f4"
+_PREVIOUS_REVISION = "db8fbf901ee0"
 
 _DEFAULT_INDEXES = {
     "uq_workspace_budget_defaults_with_key",

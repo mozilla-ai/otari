@@ -74,9 +74,8 @@ Three words mean specific things here and are not interchangeable:
   serves. It comes from `GET /v1/bootstrap` through `useSurfaces()`.
 - A **capability** is the entitlement axis: what a build or a customer is licensed for, from
   `useEntitlements()`.
-- A **flag** is the operational axis, only valid alongside a capability.
 
-A nav entry may gate on all three and they compose as AND. Calling a surface a capability in a
+A nav entry may gate on both and they compose as AND. Calling a surface a capability in a
 variable name is how the two vocabularies start merging, which is exactly what the M5
 convergence has to avoid (see [web/AGENTS.md](../../../web/AGENTS.md)).
 

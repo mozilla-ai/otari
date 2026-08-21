@@ -104,6 +104,18 @@ const ROW_FOCUS =
  * Naming the family on the shared row is what keeps the rail one typeface
  * wherever a row is rendered, rather than patching the one heading that has a
  * control inside it.
+ *
+ * Deliberately no `cursor-pointer`, and it is the one thing a call site is left
+ * to name. Nearly every element this dresses already resolves to `pointer` on
+ * its own: the leaves and the footer's desktop rows are `Link`s, so the
+ * `<a href>` takes it from the user agent, and the expand triggers and the
+ * account control carry HeroUI's `.disclosure__trigger` or `.button`, which set
+ * `cursor: var(--cursor-interactive)`. The exceptions are the mobile drawer's
+ * two bare `<button>`s, the row that opens the organization submenu and the row
+ * that leaves it again, where the user agent gives a plain button the default
+ * arrow; both add the utility themselves. It stays out of the base because here
+ * it would also outrank `status-disabled`'s `--cursor-disabled` on the account
+ * control, so a disabled row would promise a click.
  */
 const ROW_BASE = `flex min-h-11 w-full items-center gap-3 rounded-lg px-3 font-sans text-sm font-medium leading-[1.375rem] ${NAV_TRANSITION} ${ROW_FOCUS}`
 

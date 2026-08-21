@@ -33,6 +33,145 @@
         "title": "AcceptInvitationResultPublic",
         "type": "object"
       },
+      "ActivationApiKeyPublic": {
+        "description": "The API key the guide hands out, with its plaintext.\n\nReturned once per call and never stored in plaintext, like every other key\nthis gateway mints: a page reload issues a new one and rotates the same row,\nwhich is what makes the guide able to show a working key without keeping a\nreadable secret anywhere.",
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "key_id": {
+            "title": "Key Id",
+            "type": "string"
+          },
+          "key_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Name"
+          },
+          "key_prefix": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Prefix"
+          }
+        },
+        "required": [
+          "key",
+          "key_id",
+          "key_prefix",
+          "key_name"
+        ],
+        "title": "ActivationApiKeyPublic",
+        "type": "object"
+      },
+      "ActivationAttemptPublic": {
+        "description": "One gateway request in this workspace, as the guide reports it.",
+        "properties": {
+          "cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Usd"
+          },
+          "error_category": {
+            "anyOf": [
+              {
+                "enum": [
+                  "invalid_request",
+                  "configuration",
+                  "policy",
+                  "upstream",
+                  "timeout",
+                  "internal"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What kind of failure this was, for a failed attempt only. The dashboard renders its own sentence per category; the provider's own error text is never returned here.",
+            "title": "Error Category"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Model the request named.",
+            "title": "Model"
+          },
+          "occurred_at": {
+            "description": "When the request was recorded, UTC ISO-8601.",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Provider instance that served it, when one did.",
+            "title": "Provider"
+          },
+          "request_id": {
+            "description": "The usage row's id, which the Activity page can be filtered by.",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "success",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "occurred_at",
+          "request_id",
+          "status"
+        ],
+        "title": "ActivationAttemptPublic",
+        "type": "object"
+      },
       "ActiveOrganizationMemberCreateRequest": {
         "description": "Add someone to the caller's organization, optionally into workspaces at once.",
         "properties": {
@@ -6513,6 +6652,35 @@
         "title": "ReencryptSearchToolsResponse",
         "type": "object"
       },
+      "RequestPasswordResetRequest": {
+        "properties": {
+          "email": {
+            "description": "The address to send a reset link to.",
+            "maxLength": 255,
+            "title": "Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "RequestPasswordResetRequest",
+        "type": "object"
+      },
+      "RequestPasswordResetResponse": {
+        "properties": {
+          "message": {
+            "description": "The same message whether or not the address has a password to reset.",
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "RequestPasswordResetResponse",
+        "type": "object"
+      },
       "RerankRequest": {
         "description": "Rerank request.",
         "properties": {
@@ -6580,6 +6748,58 @@
           "documents"
         ],
         "title": "RerankRequest",
+        "type": "object"
+      },
+      "ResendVerificationRequest": {
+        "properties": {
+          "email": {
+            "description": "The address to resend a verification link to.",
+            "maxLength": 255,
+            "title": "Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "ResendVerificationRequest",
+        "type": "object"
+      },
+      "ResendVerificationResponse": {
+        "properties": {
+          "message": {
+            "description": "The same message whether or not the address has anything to verify.",
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "ResendVerificationResponse",
+        "type": "object"
+      },
+      "ResetPasswordRequest": {
+        "properties": {
+          "new_password": {
+            "description": "The password to sign in with from now on. At least 8 characters, at most 72 bytes.",
+            "maxLength": 1024,
+            "minLength": 8,
+            "title": "New Password",
+            "type": "string"
+          },
+          "token": {
+            "description": "The token from the reset link.",
+            "maxLength": 512,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token",
+          "new_password"
+        ],
+        "title": "ResetPasswordRequest",
         "type": "object"
       },
       "ResponsesRequest": {
@@ -7735,6 +7955,64 @@
           "output_price_per_million"
         ],
         "title": "SetPricingRequest",
+        "type": "object"
+      },
+      "SignupRequest": {
+        "description": "Claim an identity already on the roster by setting its password.",
+        "properties": {
+          "email": {
+            "description": "The address an admin added or invited.",
+            "maxLength": 255,
+            "title": "Email",
+            "type": "string"
+          },
+          "full_name": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Filled in only if not already set.",
+            "title": "Full Name"
+          },
+          "password": {
+            "description": "The password to sign in with once verified. At least 8 characters, at most 72 bytes.",
+            "maxLength": 1024,
+            "minLength": 8,
+            "title": "Password",
+            "type": "string"
+          },
+          "terms_accepted": {
+            "default": false,
+            "description": "Whether the caller accepted this deployment's terms.",
+            "title": "Terms Accepted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "email",
+          "password"
+        ],
+        "title": "SignupRequest",
+        "type": "object"
+      },
+      "SignupResponse": {
+        "description": "The same message whether or not the address had anything to claim.",
+        "properties": {
+          "message": {
+            "description": "What the caller should do next.",
+            "title": "Message",
+            "type": "string"
+          }
+        },
+        "required": [
+          "message"
+        ],
+        "title": "SignupResponse",
         "type": "object"
       },
       "StoredProviderResponse": {
@@ -10553,6 +10831,89 @@
         "title": "ValidationError",
         "type": "object"
       },
+      "VerifyEmailRequest": {
+        "properties": {
+          "token": {
+            "description": "The token from the verification link.",
+            "maxLength": 512,
+            "title": "Token",
+            "type": "string"
+          }
+        },
+        "required": [
+          "token"
+        ],
+        "title": "VerifyEmailRequest",
+        "type": "object"
+      },
+      "VerifyEmailResponse": {
+        "properties": {
+          "email": {
+            "description": "The address that is now verified.",
+            "title": "Email",
+            "type": "string"
+          }
+        },
+        "required": [
+          "email"
+        ],
+        "title": "VerifyEmailResponse",
+        "type": "object"
+      },
+      "WorkspaceActivationPublic": {
+        "description": "Where a workspace stands on its first successful request.",
+        "properties": {
+          "activation_attempt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActivationAttemptPublic"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The first request that succeeded, which is the guide's receipt. Null until one does."
+          },
+          "dismissed": {
+            "description": "Whether someone skipped the guide for this workspace.",
+            "title": "Dismissed",
+            "type": "boolean"
+          },
+          "experience_eligible": {
+            "description": "Whether the dashboard should offer the guide to this caller right now: the deployment has it enabled, the workspace is classified for it, nobody dismissed it, no request has succeeded yet, and the caller may manage the workspace.",
+            "title": "Experience Eligible",
+            "type": "boolean"
+          },
+          "latest_attempt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActivationAttemptPublic"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The most recent request, so a failure can be reported while the guide keeps waiting."
+          },
+          "status": {
+            "description": "'activated' once a gateway request in this workspace has succeeded, 'failed' when the last one failed and none has yet succeeded, 'waiting' when there has been none at all.",
+            "enum": [
+              "waiting",
+              "failed",
+              "activated"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "experience_eligible",
+          "dismissed"
+        ],
+        "title": "WorkspaceActivationPublic",
+        "type": "object"
+      },
       "WorkspaceAssignmentRequest": {
         "description": "A workspace and the role to grant in it, applied when a member is added.",
         "properties": {
@@ -12043,6 +12404,125 @@
         ]
       }
     },
+    "/v1/auth/password/reset": {
+      "post": {
+        "description": "Mail a password-reset link, or do nothing: the response never says which.",
+        "operationId": "request_reset_v1_auth_password_reset_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RequestPasswordResetRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/RequestPasswordResetResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Request Reset",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/password/reset/confirm": {
+      "post": {
+        "description": "Complete a password reset. Single-use: the token stops working after this.",
+        "operationId": "confirm_reset_v1_auth_password_reset_confirm_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResetPasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Confirm Reset",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/resend-verification": {
+      "post": {
+        "description": "Mail a fresh verification link, or do nothing: the response never says which.",
+        "operationId": "resend_verification_v1_auth_resend_verification_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/ResendVerificationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ResendVerificationResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Resend Verification",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/v1/auth/session": {
       "delete": {
         "description": "Sign out: revoke the cookie's session server-side and expire the cookie.\n\nDeliberately unauthenticated and idempotent: it only ever revokes the\nsession named by the caller's own cookie, and the dashboard calls it on the\n401-bounce path where no valid credential exists anymore. Unlike the read\npath in ``deps.py`` it applies no Sec-Fetch-Site check: ``SameSite=Strict``\nalready keeps cross-site requests from carrying the cookie, and the worst a\nforged call could do is sign the operator out.",
@@ -12093,6 +12573,90 @@
           }
         },
         "summary": "Create Session",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/signup": {
+      "post": {
+        "description": "Claim a roster identity, or do nothing: the response never says which.\n\nNo session is minted. A newly claimed identity is hard-blocked from\nsigning in until it verifies, so there is nothing yet to sign it into.",
+        "operationId": "signup_v1_auth_signup_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SignupRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/SignupResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Signup",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/verify-email": {
+      "post": {
+        "description": "Confirm an address from its verification link, lifting the sign-in gate.",
+        "operationId": "verify_email_route_v1_auth_verify_email_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/VerifyEmailRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/VerifyEmailResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Verify Email Route",
         "tags": [
           "auth"
         ]
@@ -20064,6 +20628,162 @@
         "summary": "Update Workspace",
         "tags": [
           "workspaces"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/activation": {
+      "get": {
+        "description": "Where a workspace stands on its first successful request.\n\nReadable by any member who can see the workspace. Whether the guide should\nactually be offered to this caller is ``experience_eligible``, which also\nanswers false when the deployment has the flow turned off\n(``activation_guide``), so a dashboard left open stops offering it without\nneeding to be reloaded.",
+        "operationId": "get_workspace_activation_v1_workspaces__workspace_id__activation_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceActivationPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Workspace Activation",
+        "tags": [
+          "workspace-activation"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/activation/dismiss": {
+      "post": {
+        "description": "Retire the guide for this workspace. Permanent, and idempotent.\n\nWorkspace owners and admins only. It retires the card and nothing else: the\nkey the guide issued keeps working, because the operator asked for it and\nmay well have pasted it somewhere already. Revoking one is the Keys page's\njob.",
+        "operationId": "dismiss_workspace_activation_v1_workspaces__workspace_id__activation_dismiss_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Dismiss Workspace Activation",
+        "tags": [
+          "workspace-activation"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/activation/key": {
+      "post": {
+        "description": "Issue the workspace's setup API key, rotating the one the guide already issued.\n\nWorkspace owners and admins only, like every other action that changes a\nworkspace. The plaintext is returned once and never stored, so a reopened\nguide rotates the same key row rather than collecting a second one, and\nanswers 409 once the workspace has activated or the guide was dismissed.",
+        "operationId": "create_workspace_activation_key_v1_workspaces__workspace_id__activation_key_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivationApiKeyPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Workspace Activation Key",
+        "tags": [
+          "workspace-activation"
         ]
       }
     },

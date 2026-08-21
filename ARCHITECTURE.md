@@ -69,14 +69,14 @@ Otari's core defines interfaces called **ports**, and delegates the real work to
 There are two ways to extend the system across that boundary, because there are two different kinds of thing sitting on it:
 
 - **Work which the core hands off: change it by swapping the adapter.** Some work the core relies on but does not implement itself, such as authorizing a request, choosing the provider attempts, running the inference call, executing sandboxed code, or billing for usage. For each of these the core defines a port and depends on it, and an adapter supplies the actual implementation. Binding a different adapter changes the behavior, and the core stays as it is.
-- **Surfaces exposed to callers: change it by adding a surface and gating it.** The API routes and frontend pages that callers reach. Each is registered into a central list the core owns (a router list on the backend, a nav registry on the frontend) and switched on by an entitlement, and optionally a feature flag. Extending here means registering a new route or page and gating it, whether that surface ships in Otari's core or comes from an overlay. Nothing is swapped; a surface is added and made conditional.
+- **Surfaces exposed to callers: change it by adding a surface and gating it.** The API routes and frontend pages that callers reach. Each is registered into a central list the core owns (a router list on the backend, a nav registry on the frontend) and switched on by an entitlement. Extending here means registering a new route or page and gating it, whether that surface ships in Otari's core or comes from an overlay. Nothing is swapped; a surface is added and made conditional.
 
 A **port** is a domain-named interface (a Python `Protocol`), named for what it does, never for how it is implemented (`RoutingPort`, not `SmartRouterClient`). The seam is built around this set of ports:
 
 | Port | Responsibility |
 |---|---|
 | `AuthzPort` | Authorization decisions (who may do what). |
-| `EntitlementPort` | Which capabilities a deployment or org is entitled to. |
+| `EntitlementPort` | Which capabilities a deployment is entitled to. |
 | `IdentityProviderPort` | Authenticating users/sign-in. |
 | `RoutingPort` | Choosing the provider/model attempts for a request. |
 | `ModelProviderPort` | Executing the model inference call. |
@@ -159,29 +159,20 @@ The **provisional** rows (RBAC, SSO, routing) share one open question: how deep 
 
 The inference and code-execution ports share a shape: a compute-heavy backend behind a port, chosen by the control plane, executed in the data plane. Self-hosting is a first-class path in the core, not a degraded one. In the resolve protocol this seam is already latent: `managed: false` with an `api_base` is the self-hosted path, and `managed: true` is a hosted, metered backend (see [docs/modes.md](docs/modes.md)).
 
-## Deployment, entitlements, and feature flags
+## Deployment and entitlements
 
-Three gates decide whether a piece of behavior runs. They **compose but never merge**, because they answer different questions:
+Two gates decide whether a piece of behavior runs. They **compose but never merge**, because they answer different questions:
 
 - **Surface** is the topology axis: *does the process serving this URL host this surface at all?* It is answered by the deployment bootstrap (`GET /v1/bootstrap`), whose `surfaces` list the dashboard shell reads once before it renders, and it is the reason a hybrid gateway shows no management UI: its control plane is otari.ai, not itself. Standalone and hosted deployments host the surface; a data-plane gateway does not. It is named `surface` and never `capability`, because otari.ai already spends that word on the entitlement axis below, down to a nav item's `capability` field, and the two vocabularies meet in one shell when the control-plane UI converges.
-- **Entitlement** is the licensing axis: *is this capability enabled for this deployment or org at all?* It is scoped per deployment or per org, never per user. It is resolved by `EntitlementPort`, whose core adapter grants every base capability and reports every overlay-only one as absent; a real resolver is an overlay adapter.
-- **Feature flag** is the operational axis: *is this sub-feature of a capability I already hold turned on right now?* It is engineering's controlled-rollout switch, transient by design: once its rollout lands the flag is retired, unlike an entitlement, which is a standing property.
+- **Entitlement** is the licensing axis: *is this capability enabled for this deployment at all?* It is scoped per deployment, never per user. It is resolved by `EntitlementPort`, whose core adapter grants every base capability and reports every overlay-only one as absent; a real resolver is an overlay adapter.
 
-The first is about *where the code is running*, the second about *what this customer bought*, the third about *what engineering has switched on*. All three are client-side conveniences over server-side authorization: hiding a surface never grants access to it, and the server authorizes every request behind one regardless.
+The first is about *where the code is running* and the second about *what this customer bought*. Both are client-side conveniences over server-side authorization: hiding a surface never grants access to it, and the server authorizes every request behind one regardless.
 
-Otari's core provides both gates as mechanisms; a surface composes them. Because the core entitles every base capability, a check written in the core usually just tests a flag. The composed check is one an overlay surface writes, since it gates a capability that is not universally entitled. An overlay surface for smart model selection, for example, checks both, in this order:
+In the dashboard both meet on one nav entry, which is where the vocabulary earns its keep: `web/src/app/nav/registry.ts` declares a destination's `surface` and `capability`, and `useNavVisibility` composes them as AND, so either one hides the link and the shell answers the route behind it with a panel rather than a page. An overlay replaces `web/src/app/nav/overlaySections.ts` to register its own destinations, without editing a base source file.
 
-```text
-entitled("routing") AND flag("smart-model-selection-v2")
-```
+Be clear about how much of that is built. The surface axis is real and served: `GET /v1/bootstrap` answers it. **`EntitlementPort` is not implemented anywhere in `src/gateway/`, and no endpoint serves entitlements**, so the entitlement axis resolves entirely in the browser, from the constant that is the default value of the context in `web/src/shared/hooks/useEntitlements.tsx`. It grants `BASE_CAPABILITIES` and reports everything else absent, which is the behavior the core adapter above describes, in the only place there is currently anything to put it. That constant is itself empty, because no base nav entry is gated on a capability: the one candidate is routing, whose split this document still marks provisional. An overlay answers it for real by rendering `EntitlementProvider`.
 
-A deployment entitled to `routing` still does not get `smart-model-selection-v2` while that flag is off in test. Do not fold one axis into the other: an entitlement is not "a flag that is on for some deployments", a flag is not "a cheap entitlement", and neither is "a deployment that happens to host this". They are different mechanisms with different scopes and different owners.
-
-In the dashboard all three meet on one nav entry, which is where the vocabulary earns its keep: `web/src/app/nav/registry.ts` declares a destination's `surface`, `capability`, and `flag`, and `useNavVisibility` composes them as AND, so any one of them hides the link and the shell answers the route behind it with a panel rather than a page. An overlay replaces `web/src/app/nav/overlaySections.ts` to register its own destinations, without editing a base source file.
-
-Be clear about how much of that is built. The surface axis is real and served: `GET /v1/bootstrap` answers it. **`EntitlementPort` is not implemented anywhere in `src/gateway/`, and no endpoint serves entitlements or flags**, so the other two axes resolve entirely in the browser, from the constant that is the default value of the context in `web/src/shared/hooks/useEntitlements.tsx`. It grants `BASE_CAPABILITIES` and reports everything else absent, which is the behavior the core adapter above describes, in the only place there is currently anything to put it. That constant is itself empty, because no base nav entry is gated on a capability: the one candidate is routing, whose split this document still marks provisional. An overlay answers both gates for real by rendering `EntitlementProvider`.
-
-That is sound while otari.ai owns the only real resolver, and it stops being sound for a paid self-hosted deployment, where the customer owns the process and an answer computed in their browser is an answer they can edit. Building that means a real port, an endpoint, verification the gateway can check but not mint, and enforcement on the routes themselves rather than only on the nav. Do not read the client-side gate as licensing, and do not let a surface built on top of it assume a resolver exists.
+That is sound while every capability the axis gates belongs to an overlay, since a deployment with no overlay has nothing to withhold. It stops being sound when an overlay mounts a router into this process, because hiding a link is not authorization and that route has to refuse for itself, on `EntitlementPort` and a `require_capability` dependency. The axis does not enforce against the operator, who owns the process; do not let a surface built on the client gate assume a resolver exists.
 
 ## Cardinal rules for contributors
 
@@ -193,7 +184,7 @@ These are the rules that keep the boundary from eroding. They apply to anyone ad
 4. **Ports live in the core, in domain terms.** Name the port for the domain (`RoutingPort`), never for an implementation.
 5. **Only the composition root names a concrete adapter.** Services, routers, and the frontend refer to ports; the composition root is the single place that binds a concrete one.
 6. **An overlay never edits an Otari source file.** It registers into the extension points Otari exposes (the container, the router list, the nav registry) and supplies configuration. If extending an overlay *requires* editing an Otari file, that is a missing seam, and the seam belongs in Otari. Supplying configuration or a bootstrap module is not editing the core.
-7. **Introduce a port only when it earns one.** A port that will only ever have one implementation is ceremony with no benefit. A capability earns a port only when a genuine second implementation is real, or a hard boundary (intellectual property, or a hosted service) runs through it. Plain CRUD and infrastructure (user, team, and trace management, feature-flag storage, and the bulk of orgs/workspaces management) stay concrete in the core. "Most of the management plane is core" and "most services are not ports" are the same statement.
+7. **Introduce a port only when it earns one.** A port that will only ever have one implementation is ceremony with no benefit. A capability earns a port only when a genuine second implementation is real, or a hard boundary (intellectual property, or a hosted service) runs through it. Plain CRUD and infrastructure (user, team, and trace management, and the bulk of orgs/workspaces management) stay concrete in the core. "Most of the management plane is core" and "most services are not ports" are the same statement.
 
 These rules are meant to be enforced mechanically, not only in review. A boundary check (planned: a `check_architecture.py` script run in CI) asserts the layering, for example: ports may import models, exceptions, and core, but not services, API, or any adapter; services may import ports but not a concrete adapter; only the composition root may import an adapter. This document is the human-readable companion to that check; the two are kept in step so the boundary the doc describes is the boundary CI enforces.
 
@@ -206,7 +197,7 @@ A step-by-step recipe for adding a capability without crossing the boundary. The
 3. **Route callers through the port.** Services depend on the port, resolved from the container; they never name a concrete adapter.
 4. **Ship a working core adapter.** Add a real lightweight implementation, or an honest Null Object, to the core adapters package. Verify the capability behaves correctly with only this adapter present.
 5. **Bind the default in the composition root.** Register `Port -> core factory` in the container built at startup in `create_app`, and resolve it through a dependency in `deps.py`.
-6. **If the capability has API or UI surface, add and gate it.** Add its router to the central additive router list (a planned mechanism) and register its nav item into the nav registry (`web/src/app/nav/registry.ts`), each gated by an entitlement and optionally a feature flag. Do not swap anything on this side; add surface and make it conditional.
+6. **If the capability has API or UI surface, add and gate it.** Add its router to the central additive router list (a planned mechanism) and register its nav item into the nav registry (`web/src/app/nav/registry.ts`), each gated by an entitlement. Do not swap anything on this side; add surface and make it conditional.
 7. **Verify Otari still stands alone.** It must boot standalone with only the core adapters bound (no overlay bootstrap configured) and pass its smoke suite, and the boundary check must pass. Both are automated: `uv run --frozen --no-dev python scripts/oss_edition_smoke.py` is the smoke suite (run by `.github/workflows/otari-oss-edition.yml` on any pull request that touches the app, the migrations, or dependency resolution), and `make check-architecture` is the boundary check.
 
 Once the seam exists, an overlay adds its own adapter by registering it through these same extension points, with zero edits to Otari's source. Building the seam is core work; using it is overlay work.
@@ -219,5 +210,4 @@ Once the seam exists, an overlay adds its own adapter by registering it through 
 - **Overlay**: a build that layers its own adapters, routers, and pages on top of Otari through its extension points, without editing Otari's source.
 - **Composition root**: the single place that decides which adapter answers a port. Only it may name a concrete adapter.
 - **Container**: the process-level registry of `Port -> factory` bindings, built once at startup.
-- **Entitlement**: whether a capability is enabled for a deployment or org, at capability grain. The licensing axis.
-- **Feature flag**: engineering's controlled-rollout switch within a capability already held. The operational axis.
+- **Entitlement**: whether a capability is enabled for a deployment, at capability grain. The licensing axis.

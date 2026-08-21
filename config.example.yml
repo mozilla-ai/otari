@@ -19,6 +19,11 @@ master_key: YOUR_MASTER_KEY_HERE
 # Prometheus metrics endpoint at /metrics. Set to true to enable.
 # enable_metrics: true
 
+# The dashboard's first-request setup guide, offered in a workspace that has not
+# served a successful request yet. Set to false to turn the flow off for the
+# whole deployment. See docs/dashboard.md#the-setup-guide.
+# activation_guide: false
+
 # --- Outgoing mail (optional) ----------------------------------------------
 # Mail is optional and a deployment that never configures it works fine: an
 # organization invitation is still created and the dashboard hands you the

@@ -81,18 +81,33 @@ _PUBLIC_PREFIXES = ("/health",)
 _COOKIE_AUTH_PREFIXES = ("/v1/auth/session",)
 # Paths that carry no credential at all. The deployment bootstrap is what tells a
 # browser whether signing in is even possible here, so requiring a credential to
-# read it would be circular; the two invitation routes are unauthenticated for a
-# different reason (the token in the request body is the caller's whole
-# credential, and it is not one of the header/cookie schemes this stamps
-# everything else with). Named as full leaf paths rather than the shared
-# `/v1/invitations` prefix on purpose: a prefix would exempt any future route
+# read it would be circular; the invitation and signup/verification/reset routes
+# are unauthenticated for a different reason (the token or address in the request
+# body is the caller's whole credential, and it is not one of the header/cookie
+# schemes this stamps everything else with). Matched exactly rather than by
+# prefix, unlike the two tuples above: a prefix would exempt any future route
 # mounted under it too, by inheritance rather than by decision (an operator-only
-# resend or list-pending endpoint, say). Listed separately from
-# _PUBLIC_PREFIXES because these still get the no-store cache headers: an
-# invitation's answer is specific to the caller, and bootstrap's changes with
-# the deployment's configuration, so a shared cache must not serve either to a
-# different caller/gateway.
-_UNAUTHENTICATED_PREFIXES = ("/v1/bootstrap", "/v1/invitations/validate", "/v1/invitations/accept")
+# resend or list-pending endpoint, say; `/v1/auth/session` and
+# `/v1/auth/password` both live under `/v1/auth` and do require a credential),
+# and `/v1/auth/password/reset` is already a prefix of
+# `/v1/auth/password/reset/confirm`, so the inheritance is not hypothetical.
+# Listed separately from _PUBLIC_PREFIXES because these still get
+# the no-store cache headers: each answer is specific to the caller or the
+# request's own token, and bootstrap's changes with the deployment's
+# configuration, so a shared cache must not serve any of them to a different
+# caller/gateway.
+_UNAUTHENTICATED_PATHS = frozenset(
+    {
+        "/v1/bootstrap",
+        "/v1/invitations/validate",
+        "/v1/invitations/accept",
+        "/v1/auth/signup",
+        "/v1/auth/verify-email",
+        "/v1/auth/resend-verification",
+        "/v1/auth/password/reset",
+        "/v1/auth/password/reset/confirm",
+    }
+)
 # Public, unauthenticated static assets that shared caches may keep. Paths here
 # set their own Cache-Control at the route (favicon.svg), so the middleware only
 # fills one in when it is missing.
@@ -503,7 +518,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
         }
 
         for path, path_item in openapi_schema.get("paths", {}).items():
-            if path.startswith(_PUBLIC_PREFIXES + _COOKIE_AUTH_PREFIXES + _UNAUTHENTICATED_PREFIXES):
+            if path in _UNAUTHENTICATED_PATHS or path.startswith(_PUBLIC_PREFIXES + _COOKIE_AUTH_PREFIXES):
                 continue
             for operation in path_item.values():
                 if isinstance(operation, dict):

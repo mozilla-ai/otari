@@ -73,7 +73,10 @@ makes a bare `<Card>` wear the palette. Geometry and interaction are the half no
 claimed: `globals.css` sets none of those, so a component's corner radius, its disabled dimming
 and its pointer are all HeroUI's defaults. `--radius-2xl` is `calc(var(--radius) * 2)`, so a
 16px arc a component draws is one alias away from being ours. Read the value out of
-`@heroui/styles/dist` before concluding a rule is the only way to reach it.
+`@heroui/styles/dist` before concluding a rule is the only way to reach it. **Alias, never
+consume:** the alias belongs in `globals.css` beside the color ones, and a rule or class
+string of ours never spells `var(--cursor-interactive)` or `var(--radius-2xl)` at the call
+site, because that points our own code at a namespace the library is free to rename.
 
 Two things to get right when you set one. Scope it where the decision lives: with the theme when
 it is system-wide, on a component's own root when it is local, and note that the second is our

@@ -104,6 +104,21 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         await self.db.refresh(user)
         return user
 
+    async def get_by_verification_token_hash(self, token_hash: str) -> User | None:
+        """Return the identity a hashed email-verification token names, or None.
+
+        Exact match: the hash is the key `otari.services.tenancy.tokens.hash_token`
+        produces, and it either matches the one live row that column holds or it
+        does not, the same way an invitation resolves by ``token_hash``.
+        """
+        result = await self.db.execute(select(User).where(col(User.email_verification_token_hash) == token_hash))
+        return result.scalars().first()
+
+    async def get_by_reset_token_hash(self, token_hash: str) -> User | None:
+        """Return the identity a hashed password-reset token names, or None."""
+        result = await self.db.execute(select(User).where(col(User.password_reset_token_hash) == token_hash))
+        return result.scalars().first()
+
     async def set_active_organization(self, user: User, organization_id: uuid.UUID) -> User:
         """Stage a change of the identity's active organization."""
         user.active_organization_id = organization_id

@@ -4,6 +4,7 @@ Covers auth, content-free validation, idempotency, historical + cache pricing,
 budget isolation, and the read-surface (source filter, by_source, CSV).
 """
 
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 import pytest
@@ -48,10 +49,25 @@ def _seed_pricing(
     assert resp.status_code == 200, resp.text
 
 
+# An hour ago, not a fixed date. `GET /v1/usage/summary` bounds itself to the
+# last 30 days when the caller names no window (`_DEFAULT_SUMMARY_LOOKBACK`), so
+# a literal timestamp puts every summary assertion in this file on a fuse: it
+# passes until the day the clock is 30 days past it, then fails everywhere at
+# once with nothing in the diff to explain it. That day was 2026-08-21, between
+# one green run on `main` and the next.
+#
+# The per-run pricing revision this would churn on a *shared* database (see
+# `web/e2e/parity-data.ts`, which backdates for exactly that reason) is not a
+# concern here: the integration fixtures own their database and drop it in
+# teardown.
+def _event_timestamp() -> str:
+    return (datetime.now(UTC) - timedelta(hours=1)).isoformat().replace("+00:00", "Z")
+
+
 def _event(source_event_id: str = "req_1", **overrides: Any) -> dict[str, Any]:
     event: dict[str, Any] = {
         "source_event_id": source_event_id,
-        "timestamp": "2026-07-22T12:34:56Z",
+        "timestamp": _event_timestamp(),
         "provider": "anthropic",
         "model": "claude-sonnet-4-6",
         "status": "success",
@@ -326,6 +342,9 @@ def test_historical_pricing(
     """An event is priced at the rate effective at its own timestamp."""
     _seed_user(client, master_key_header)
     # Old cheap rate effective a year before the event; new expensive rate after.
+    # Both relative to the event, for the reason `_event_timestamp` gives: the
+    # boundary this test is about is "before and after the event", never a date.
+    now = datetime.now(UTC)
     _seed_pricing(
         client,
         master_key_header,
@@ -333,7 +352,7 @@ def test_historical_pricing(
         output_price=1.0,
         cache_read_price=0.0,
         cache_write_price=0.0,
-        effective_at="2025-01-01T00:00:00Z",
+        effective_at=(now - timedelta(days=365)).isoformat().replace("+00:00", "Z"),
     )
     _seed_pricing(
         client,
@@ -342,10 +361,10 @@ def test_historical_pricing(
         output_price=1000.0,
         cache_read_price=0.0,
         cache_write_price=0.0,
-        effective_at="2026-07-23T00:00:00Z",
+        effective_at=(now + timedelta(days=1)).isoformat().replace("+00:00", "Z"),
     )
 
-    # Event timestamp (2026-07-22) precedes the new rate, so the cheap rate applies.
+    # The event is an hour old, so it precedes the new rate and is priced cheap.
     resp = _post(
         client,
         master_key_header,

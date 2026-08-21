@@ -395,4 +395,16 @@ export type CreateWorkspaceBudgetDefaultRequest =
 export type UpdateWorkspaceBudgetDefaultRequest =
   Schemas["WorkspaceMemberBudgetPolicyUpdate"]
 
+// The first-request setup guide's state, and the API key it issues. The wire
+// names carry the platform's "activation" vocabulary (see
+// `src/gateway/services/tenancy/workspace_activation_service.py`); the
+// dashboard calls the thing an operator sees the setup guide.
+export type WorkspaceActivation = Schemas["WorkspaceActivationPublic"]
+export type ActivationAttempt = Schemas["ActivationAttemptPublic"]
+export type ActivationApiKey = Schemas["ActivationApiKeyPublic"]
+/** The failure classes the guide's copy is written for. */
+export type ActivationErrorCategory = NonNullable<
+  ActivationAttempt["error_category"]
+>
+
 export type * from "./local"

@@ -7,6 +7,7 @@ import type { IconType } from "react-icons"
 import {
   FiArrowLeft,
   FiChevronDown,
+  FiChevronRight,
   FiMenu,
   FiSettings,
   FiSidebar,
@@ -293,7 +294,7 @@ function NavGroup({
 
 export function AppShell() {
   // Navigation is data: the shell renders whatever the registry declares and
-  // decides visibility from the deployment, the entitlements, and the flags,
+  // decides visibility from the deployment and the entitlements,
   // rather than each page asking what it is running against.
   const isVisible = useNavVisibility()
   const { pathname } = useLocation()
@@ -312,12 +313,6 @@ export function AppShell() {
   // workspace one, so the two never render together.
   const navContext = navContextForPath(pathname)
   const inOrganization = navContext === "organization"
-  // Filtered before it is indexed, so the divider and top margin below key off
-  // the first *rendered* section rather than the first registered one.
-  const visibleSections = visibleNavSections(
-    inOrganization ? ORG_NAV_SECTIONS : NAV_SECTIONS,
-    isVisible,
-  )
   const organization = useOrganizationContext()
   const { selected: selectedWorkspace } = useSelectedWorkspace()
   // Always true in a standalone deployment, where the one session is the local
@@ -352,9 +347,40 @@ export function AppShell() {
   const asideRef = useRef<HTMLElement>(null)
   const mainRef = useRef<HTMLElement>(null)
   const toggleRef = useRef<HTMLButtonElement>(null)
+  const orgNavTriggerRef = useRef<HTMLButtonElement>(null)
+  const orgNavBackRef = useRef<HTMLButtonElement>(null)
+  const restoreSidebarFocusRef = useRef(false)
   const [collapsed, setCollapsed] = useState<boolean>(readStoredCollapsed)
   const [isMobile, setIsMobile] = useState<boolean>(readIsMobile)
   const [mobileNavOpen, setMobileNavOpen] = useState(false)
+  // The organization rail, opened as a level *inside* the drawer rather than by
+  // going to a page. Mobile only, and it exists because the two rails are a
+  // context switch rather than a section: on the desk the footer row can change
+  // the whole rail and leave you looking at it, while on a phone the same row
+  // navigated and the drawer closed over the result, so the rail it opened was
+  // never a thing you got to read. Here the row opens that rail in place, and
+  // choosing a destination in it is what dismisses the drawer.
+  const [mobileOrgNavOpen, setMobileOrgNavOpen] = useState(false)
+
+  // Every control that leaves the drawer goes through this rather than lowering
+  // the one flag it knows about, so the submenu cannot outlive the drawer that
+  // framed it: reopening the menu from a workspace page would otherwise land
+  // back on the organization rows the last tap left showing.
+  const closeMobileNav = useCallback(() => {
+    setMobileNavOpen(false)
+    setMobileOrgNavOpen(false)
+  }, [])
+
+  // Which of the two rails is drawn. The route decides it, except on mobile,
+  // where the drawer can be one level down inside the organization rail while
+  // the page behind it is still a workspace page.
+  const showOrganizationRail = inOrganization || (isMobile && mobileOrgNavOpen)
+  // Filtered before it is indexed, so the divider and top margin below key off
+  // the first *rendered* section rather than the first registered one.
+  const visibleSections = visibleNavSections(
+    showOrganizationRail ? ORG_NAV_SECTIONS : NAV_SECTIONS,
+    isVisible,
+  )
 
   // Track the mobile breakpoint so the sidebar can render as an off-canvas
   // drawer below it and as the fixed-width rail above it. Closing the drawer when
@@ -368,8 +394,12 @@ export function AppShell() {
       return
     const query = window.matchMedia(MOBILE_QUERY)
     const onChange = (event: MediaQueryListEvent) => {
+      if (!event.matches) {
+        restoreSidebarFocusRef.current =
+          asideRef.current?.contains(document.activeElement) ?? false
+        closeMobileNav()
+      }
       setIsMobile(event.matches)
-      if (!event.matches) setMobileNavOpen(false)
     }
     // Safari < 14 (and some older engines) only expose the deprecated
     // addListener/removeListener; fall back to it so the shell doesn't throw.
@@ -379,32 +409,63 @@ export function AppShell() {
     }
     query.addListener(onChange)
     return () => query.removeListener(onChange)
-  }, [])
+  }, [closeMobileNav])
 
-  // Escape closes the drawer, matching the dismissible-overlay convention.
+  // Escape closes the drawer, matching the dismissible-overlay convention. The
+  // organization submenu first when it is open, so one press unwinds one level
+  // rather than taking the whole menu with it when the row you were after is
+  // the level above.
   useEffect(() => {
     if (!mobileNavOpen) return
     const onKeyDown = (event: KeyboardEvent) => {
-      if (event.key === "Escape") setMobileNavOpen(false)
+      if (event.key !== "Escape") return
+      if (mobileOrgNavOpen) setMobileOrgNavOpen(false)
+      else setMobileNavOpen(false)
     }
     window.addEventListener("keydown", onKeyDown)
     return () => window.removeEventListener("keydown", onKeyDown)
-  }, [mobileNavOpen])
+  }, [mobileNavOpen, mobileOrgNavOpen])
 
   // Focus management for the mobile drawer, which is a modal overlay: move focus
   // into it when it opens and restore focus to the toggle when it closes, so
   // keyboard and screen-reader users are neither stranded inside a hidden panel
-  // nor dropped back to the top of the document. The isMobile guard means a
-  // breakpoint change to desktop (which also closes the drawer) never yanks focus
-  // to the now-hidden toggle.
+  // nor dropped back to the top of the document. A breakpoint change to desktop
+  // keeps focus on the sidebar when it came from the drawer, rather than moving
+  // it to the now-hidden toggle or losing it when the submenu unmounts.
   useEffect(() => {
-    if (!isMobile) return
+    if (!isMobile) {
+      if (restoreSidebarFocusRef.current) {
+        restoreSidebarFocusRef.current = false
+        asideRef.current?.focus()
+      }
+      return
+    }
     if (mobileNavOpen) {
       asideRef.current?.focus()
     } else if (asideRef.current?.contains(document.activeElement)) {
       toggleRef.current?.focus()
     }
   }, [isMobile, mobileNavOpen])
+
+  // The submenu is a level inside the drawer rather than a second overlay, so it
+  // moves focus the way the drawer does: onto the control that leaves the level
+  // when it opens, and back onto the row that opened it when it closes. Both
+  // controls unmount when the level changes, so without this a tap would leave
+  // focus on an element that is gone and drop a keyboard or AT cursor to the top
+  // of the document.
+  useEffect(() => {
+    if (!isMobile || !mobileNavOpen) return
+    if (mobileOrgNavOpen) {
+      orgNavBackRef.current?.focus()
+      return
+    }
+    // Only when the control that closed the level has left focus behind it. On
+    // the render that opens the drawer, focus is on the panel itself, and
+    // pulling it down to the footer would skip the whole rail.
+    if (document.activeElement === document.body) {
+      orgNavTriggerRef.current?.focus()
+    }
+  }, [isMobile, mobileNavOpen, mobileOrgNavOpen])
 
   useEffect(() => {
     try {
@@ -474,7 +535,10 @@ export function AppShell() {
           // lives in that bar. While closed it is off-canvas, so inert takes its
           // links out of the tab order and the accessibility tree until opened.
           aria-label={isMobile ? "Navigation" : undefined}
-          tabIndex={isMobile ? -1 : undefined}
+          // Programmatically focusable on both layouts so a breakpoint change
+          // can preserve focus on the navigation landmark without adding it to
+          // the natural tab order.
+          tabIndex={-1}
           inert={isMobile && !mobileNavOpen ? true : undefined}
           className={clsx(
             "flex flex-col gap-4 border-r border-border bg-background-alt p-3 focus:outline-none",
@@ -506,20 +570,42 @@ export function AppShell() {
           {/* The scope the rail below belongs to. In the workspace context that
               is the switcher; in the organization context it is the way back
               out, which is how the prototype leaves that rail. */}
-          {inOrganization ? (
+          {showOrganizationRail ? (
             <div className="flex min-h-14 items-center">
-              <Link
-                to={workspaceLanding?.to ?? "/"}
-                onClick={() => setMobileNavOpen(false)}
-                className={navRowClass({ collapsed: effectiveCollapsed })}
-                aria-label={effectiveCollapsed ? backLabel : undefined}
-                title={effectiveCollapsed ? backLabel : undefined}
-              >
-                <FiArrowLeft aria-hidden="true" className={NAV_ICON_CLASS} />
-                {effectiveCollapsed ? null : (
-                  <span className="min-w-0 flex-1 truncate">{backLabel}</span>
-                )}
-              </Link>
+              {inOrganization ? (
+                <Link
+                  to={workspaceLanding?.to ?? "/"}
+                  onClick={closeMobileNav}
+                  className={navRowClass({ collapsed: effectiveCollapsed })}
+                  aria-label={effectiveCollapsed ? backLabel : undefined}
+                  title={effectiveCollapsed ? backLabel : undefined}
+                >
+                  <FiArrowLeft aria-hidden="true" className={NAV_ICON_CLASS} />
+                  {effectiveCollapsed ? null : (
+                    <span className="min-w-0 flex-1 truncate">{backLabel}</span>
+                  )}
+                </Link>
+              ) : (
+                // The submenu's way back, which closes a level rather than
+                // navigating: the page under the drawer is still the workspace
+                // page you opened the menu from, so there is nothing to go back
+                // *to* yet. Same row and same name as the link above, because it
+                // means the same thing to whoever reads it and differs only in
+                // whether the route has moved yet. `cursor-pointer` because a
+                // bare button resolves to the default arrow, which is the one
+                // thing `navRowClass` leaves to its call sites.
+                <button
+                  type="button"
+                  ref={orgNavBackRef}
+                  onClick={() => setMobileOrgNavOpen(false)}
+                  className={`${navRowClass()} cursor-pointer`}
+                >
+                  <FiArrowLeft aria-hidden="true" className={NAV_ICON_CLASS} />
+                  <span className="min-w-0 flex-1 truncate text-left">
+                    {backLabel}
+                  </span>
+                </button>
+              )}
             </div>
           ) : (
             <WorkspaceSwitcher collapsed={effectiveCollapsed} />
@@ -559,7 +645,7 @@ export function AppShell() {
                           key={item.to}
                           item={item}
                           currentPath={pathname}
-                          onNavigate={() => setMobileNavOpen(false)}
+                          onNavigate={closeMobileNav}
                           isVisible={isVisible}
                           collapsed={effectiveCollapsed}
                         />
@@ -580,7 +666,7 @@ export function AppShell() {
                           collapsed={effectiveCollapsed}
                           // Tapping a destination dismisses the mobile drawer so
                           // the page it landed on is visible, not behind it.
-                          onNavigate={() => setMobileNavOpen(false)}
+                          onNavigate={closeMobileNav}
                         />
                       ),
                     )}
@@ -606,25 +692,56 @@ export function AppShell() {
                 that an operator whose sidebar used to list Users, Budgets and
                 Settings needed to find where they went. Both were true and
                 neither survives the design: the box makes the footer read as a
-                button bar under the rail rather than as the end of it, and the
-                chevron promises a submenu that never opens. */}
-            {!inOrganization && managesOrganization ? (
-              <Link
-                to={organizationLanding?.to ?? "/organization/members"}
-                onClick={() => setMobileNavOpen(false)}
-                className={navRowClass({ collapsed: effectiveCollapsed })}
-                aria-label={effectiveCollapsed ? "Organization" : undefined}
-                title={
-                  effectiveCollapsed
-                    ? "Organization: members, spend and budgets, users, settings"
-                    : undefined
-                }
-              >
-                <FiSettings aria-hidden="true" className={NAV_ICON_CLASS} />
-                {effectiveCollapsed ? null : (
-                  <span className="min-w-0 flex-1 truncate">Organization</span>
-                )}
-              </Link>
+                button bar under the rail rather than as the end of it.
+
+                Two controls for one entry, because the rail behaves differently
+                under the two layouts. On the desk it navigates, and the rail it
+                swaps to is left on screen to read. On a phone the drawer closes
+                over whatever it navigated to, so the same tap would show the
+                organization's first page and never the rail that lists the
+                rest; there the row opens that rail inside the drawer instead,
+                and a destination in it is what dismisses the drawer. That is
+                also what earns the trailing chevron back: it promises a submenu
+                only where one now opens. */}
+            {!showOrganizationRail && managesOrganization ? (
+              isMobile ? (
+                // `cursor-pointer` because a bare button resolves to the default
+                // arrow, which is the one thing `navRowClass` leaves to its call
+                // sites (its other rows are links or HeroUI buttons).
+                <button
+                  type="button"
+                  ref={orgNavTriggerRef}
+                  onClick={() => setMobileOrgNavOpen(true)}
+                  className={`${navRowClass()} cursor-pointer`}
+                >
+                  <FiSettings aria-hidden="true" className={NAV_ICON_CLASS} />
+                  <span className="min-w-0 flex-1 truncate text-left">
+                    Organization
+                  </span>
+                  <FiChevronRight
+                    aria-hidden="true"
+                    className={NAV_ICON_CLASS}
+                  />
+                </button>
+              ) : (
+                <Link
+                  to={organizationLanding?.to ?? "/organization/members"}
+                  className={navRowClass({ collapsed: effectiveCollapsed })}
+                  aria-label={effectiveCollapsed ? "Organization" : undefined}
+                  title={
+                    effectiveCollapsed
+                      ? "Organization: members, spend and budgets, users, settings"
+                      : undefined
+                  }
+                >
+                  <FiSettings aria-hidden="true" className={NAV_ICON_CLASS} />
+                  {effectiveCollapsed ? null : (
+                    <span className="min-w-0 flex-1 truncate">
+                      Organization
+                    </span>
+                  )}
+                </Link>
+              )
             ) : null}
             {/* One control, not a stack of links: the guide, appearance, and
                 sign-out all live in its menu, which is how the prototype ends
@@ -632,7 +749,7 @@ export function AppShell() {
             {/* The design rules the account row off from the row above it, so
                 the control that ends the rail is not read as one more
                 destination in the group that changes context. */}
-            {!inOrganization && managesOrganization ? (
+            {!showOrganizationRail && managesOrganization ? (
               <div aria-hidden="true" className="h-px shrink-0 bg-border" />
             ) : null}
             <AccountMenu collapsed={effectiveCollapsed} />
@@ -650,7 +767,9 @@ export function AppShell() {
               <button
                 type="button"
                 ref={toggleRef}
-                onClick={() => setMobileNavOpen((value) => !value)}
+                onClick={() =>
+                  mobileNavOpen ? closeMobileNav() : setMobileNavOpen(true)
+                }
                 aria-label={
                   mobileNavOpen ? "Close navigation" : "Open navigation"
                 }
