@@ -612,10 +612,14 @@ async def _tool_rates(
 
     One statement rather than a lookup per tool: an MCP pool can put up to
     ``MAX_TOOL_NAMES`` distinct names on a single request, and this runs on the
-    settlement path. Rows come back oldest-first so the newest effective row for a key
-    wins the dict assignment, the same "latest as of" rule :func:`find_model_pricing`
-    applies one key at a time. The genai-prices fallback is deliberately not consulted
-    (see the note in :func:`price_tool_calls`).
+    settlement path. Results are assigned into a dict keyed on the tool, so the
+    last row for a tool is the one that wins, and each ``ORDER BY`` below is
+    arranged to make that the right row: least-preferred key spelling first where
+    both are in play, then oldest period first, so the survivor is the canonical
+    spelling's newest applicable row. That is the same precedence
+    :func:`find_model_pricing` applies one key at a time. The genai-prices
+    fallback is deliberately not consulted (see the note in
+    :func:`price_tool_calls`).
     """
     lookup_time = normalize_effective_at(as_of)
     # Both spellings, mapped back to the tool, because the gate that admits the

@@ -866,3 +866,45 @@ async def test_a_check_violation_is_not_reported_as_a_conflict(
             await service.create_for_caller(owner, _MODEL_KEY, _rates(input_price_per_million=-1.0))
     finally:
         module.validate_rates = original
+
+
+@pytest.mark.asyncio
+async def test_an_update_that_fails_for_another_reason_is_not_reported_as_a_conflict(
+    async_db: AsyncSession,
+) -> None:
+    """The replace path must not find itself in the post-rollback read-back.
+
+    The rollback restores the row being rewritten to its stored period, so an
+    update that keeps that period and fails the flush for some other reason (here
+    the table's rate CHECK) matched itself and returned a 409 naming the caller's
+    own override. Same reachability as the create-path case above; the difference
+    is that on this path a row legitimately occupies the period already.
+    """
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Acme", slug="acme-update-check", created_by_user_id=None
+    )
+    owner = await _identity(async_db, organization, role="owner", name="owner person")
+    service = OrganizationPricingService(async_db)
+    period = _rates()
+    stored = await service.create_for_caller(owner, _MODEL_KEY, period)
+    await async_db.commit()
+    stored_id = stored.id
+
+    def _no_rate_check(_override: PricingOverrideInput) -> None:
+        return None
+
+    import gateway.services.organization_pricing_service as module
+
+    original = module.validate_rates
+    module.validate_rates = _no_rate_check  # type: ignore[assignment]
+    try:
+        # Same period, so the read-back would match the row being rewritten; the
+        # negative rate is what actually fails the flush.
+        with pytest.raises(IntegrityError):
+            await service.replace_for_caller(
+                owner,
+                stored_id,
+                _rates(input_price_per_million=-1.0, effective_from=period.effective_from),
+            )
+    finally:
+        module.validate_rates = original

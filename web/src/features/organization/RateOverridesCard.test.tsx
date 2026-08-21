@@ -120,7 +120,9 @@ describe("RateOverridesCard", () => {
     // front of it; an unset cache rate must read as "no rate stored", not as a
     // negotiated zero.
     expect(screen.queryByText("$0.00")).not.toBeInTheDocument()
-    expect(await screen.findAllByText("—")).not.toHaveLength(0)
+    // Exactly the two cache columns the table renders, not "at least one": a
+    // count pins which cells are absent rather than merely that some are.
+    expect(await screen.findAllByText("—")).toHaveLength(2)
   })
 
   it("explains itself when the organization has no overrides", async () => {

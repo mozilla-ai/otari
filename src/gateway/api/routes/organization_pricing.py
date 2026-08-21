@@ -301,10 +301,9 @@ async def create_organization_pricing(
     call ``POST /v1/pricing`` makes, and that is what makes one model one row
     rather than one per spelling. Stored verbatim, ``openai:gpt-4o`` and
     ``openai/gpt-4o`` are two keys: the overlap rule would not see them as
-    colliding, resolution prefers the canonical one so the other sits dormant
-    until the first is deleted, and the batched tool-rate lookup matches only the
-    canonical form, so a tool priced under the slash spelling would pass the
-    require-pricing gate and then settle at zero.
+    colliding, and both would resolve, with the canonical one preferred, leaving
+    the other dormant until the first is deleted. Normalizing on the way in is
+    what stops that pair existing at all.
     """
     model_key = normalize_pricing_key(config, body.model_key)
     override = await service.create_for_caller(identity, model_key, _to_input(body))
