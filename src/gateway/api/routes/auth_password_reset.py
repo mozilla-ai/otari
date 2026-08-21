@@ -9,12 +9,13 @@ the same "the request's own token is the whole proof" shape as
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, Request, status
+from fastapi import APIRouter, Depends, HTTPException, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db
 from gateway.core.config import GatewayConfig
+from gateway.services.mail import MailNotConfiguredError
 from gateway.services.tenancy.email_address import MAX_EMAIL_LENGTH
 from gateway.services.tenancy.user_service import request_password_reset, reset_password
 
@@ -62,6 +63,18 @@ def _throttle(request: Request) -> None:
     limiter.check(client_ip)
 
 
+def _as_503(exc: MailNotConfiguredError) -> HTTPException:
+    """Render a mail-gated refusal the way ``mail.py``'s own does.
+
+    Not a ``TenancyError``: the central handler in ``gateway.main`` renders
+    every status of 500 or above with a generic "Internal server error" body,
+    on purpose, for the errors that already live in that family. This one is
+    the opposite: the missing settings are exactly what the caller needs to
+    see, the same reason ``send_test_mail`` raises ``HTTPException`` directly.
+    """
+    return HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
+
+
 @router.post("/reset")
 async def request_reset(
     body: RequestPasswordResetRequest,
@@ -71,7 +84,10 @@ async def request_reset(
 ) -> RequestPasswordResetResponse:
     """Mail a password-reset link, or do nothing: the response never says which."""
     _throttle(request)
-    await request_password_reset(db, config, email=body.email)
+    try:
+        await request_password_reset(db, config, email=body.email)
+    except MailNotConfiguredError as exc:
+        raise _as_503(exc) from None
     return RequestPasswordResetResponse(message=_RESET_REQUEST_MESSAGE)
 
 

@@ -204,6 +204,9 @@ def test_request_reset_without_mail_configured_is_refused(tmp_path: Path, caplog
     with _client(tmp_path, mail_transport="none", public_base_url=None) as client:
         response = client.post("/v1/auth/password/reset", json={"email": "ada@example.com"})
         assert response.status_code == 503
+        # Not the central tenancy handler's generic 5xx body: this refusal has
+        # to name what is missing, the same as GET /v1/settings/mail's own.
+        assert "mail_transport" in response.json()["detail"]
 
 
 def test_repeated_reset_requests_get_throttled(tmp_path: Path) -> None:

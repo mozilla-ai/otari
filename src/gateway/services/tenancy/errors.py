@@ -545,22 +545,6 @@ class EmailNotVerifiedError(TenancyForbiddenError):
         super().__init__("Verify your email before signing in; request a new verification email if yours expired")
 
 
-class SignupMailNotConfiguredError(TenancyError):
-    """Wraps ``services.mail.MailNotConfiguredError`` so signup/verify/reset routes stay thin.
-
-    503, not a client error: the caller sent a well-formed request and a
-    missing mail transport is a deployment configuration gap they cannot fix,
-    the same reasoning ``SecretBoxUnavailableTenancyError`` gives a missing
-    secret key.
-    """
-
-    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
-
-    def __init__(self, missing: tuple[str, ...] = ()) -> None:
-        detail = ", ".join(missing) if missing else "a mail transport"
-        super().__init__(f"This deployment cannot send the required email (missing: {detail})")
-
-
 class WorkspaceBudgetDefaultNotFoundError(TenancyNotFoundError):
     def __init__(self, default_id: object):
         super().__init__(f"Workspace budget default {default_id} not found")
@@ -611,7 +595,6 @@ __all__ = [
     "SecretBoxUnavailableTenancyError",
     "SignInAddressRequiredError",
     "SignupAlreadyCompletedError",
-    "SignupMailNotConfiguredError",
     "TenancyConflictError",
     "TenancyError",
     "TenancyForbiddenError",

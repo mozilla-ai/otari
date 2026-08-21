@@ -79,7 +79,6 @@ from gateway.services.tenancy.errors import (
     ResetTokenInvalidError,
     SignInAddressRequiredError,
     SignupAlreadyCompletedError,
-    SignupMailNotConfiguredError,
     UnknownSignupAddressError,
     UnmodifiedPasswordError,
     VerificationTokenInvalidError,
@@ -247,8 +246,7 @@ async def create_user_for_signup(
     call creates is durable whether or not the message actually goes out.
     """
     mailer = Mailer(config)
-    if not mailer.can_send_links:
-        raise SignupMailNotConfiguredError(mailer.missing_settings)
+    mailer.require_ready()
 
     address = validated_email(email)
     identity = await UserRepository(db).get_by_email(address)
@@ -317,8 +315,7 @@ async def resend_verification_email(db: AsyncSession, config: GatewayConfig, *, 
     the moment a new one is requested.
     """
     mailer = Mailer(config)
-    if not mailer.can_send_links:
-        raise SignupMailNotConfiguredError(mailer.missing_settings)
+    mailer.require_ready()
 
     address = validated_email(email)
     identity = await UserRepository(db).get_by_email(address)
@@ -351,8 +348,7 @@ async def request_password_reset(db: AsyncSession, config: GatewayConfig, *, ema
     the caller it exists to help.
     """
     mailer = Mailer(config)
-    if not mailer.can_send_links:
-        raise SignupMailNotConfiguredError(mailer.missing_settings)
+    mailer.require_ready()
 
     address = validated_email(email)
     identity = await UserRepository(db).get_by_email(address)
