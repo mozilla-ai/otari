@@ -21,6 +21,7 @@ import type {
   Workspace,
   WorkspaceActivation,
   WorkspaceBudgetDefault,
+  WorkspaceCodeExecutionPolicy,
   WorkspaceMember,
 } from "@/client"
 
@@ -328,6 +329,25 @@ export function workspaceActivation(
     latest_attempt: null,
     experience_eligible: true,
     dismissed: false,
+    ...overrides,
+  }
+}
+
+export function workspaceCodeExecutionPolicy(
+  overrides: Partial<WorkspaceCodeExecutionPolicy> = {},
+): WorkspaceCodeExecutionPolicy {
+  return {
+    workspace_id: "44444444-4444-4444-4444-444444444444",
+    // The zero-rows state, which is what a workspace has until somebody sets a
+    // policy: nothing configured, nothing narrowed.
+    configured: false,
+    sandbox_configured: true,
+    enabled: true,
+    default_purpose_hint: null,
+    max_iterations: null,
+    exec_timeout_s: null,
+    created_at: null,
+    updated_at: null,
     ...overrides,
   }
 }

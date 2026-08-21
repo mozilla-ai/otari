@@ -158,6 +158,44 @@ Use in a request:
 
 A runnable walkthrough is in `demo/code-exec/`.
 
+### Per-workspace policy
+
+The sandbox above is deployment-wide: one operator points Otari at one backend.
+On top of it, each workspace can carry a policy saying whether requests billed to
+that workspace may use code execution at all, and within which limits.
+
+```bash
+# Read (an organization owner/admin, or an owner/admin of the workspace)
+curl -H "Otari-Key: Bearer $OTARI_MASTER_KEY" \
+  http://localhost:8000/v1/workspaces/$WORKSPACE_ID/code-execution-policy
+
+# Turn it off for this workspace, or narrow the limits
+curl -X PUT -H "Otari-Key: Bearer $OTARI_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"enabled": true, "max_iterations": 3, "exec_timeout_s": 20}' \
+  http://localhost:8000/v1/workspaces/$WORKSPACE_ID/code-execution-policy
+
+# Drop the policy, returning the workspace to the deployment default
+curl -X DELETE -H "Otari-Key: Bearer $OTARI_MASTER_KEY" \
+  http://localhost:8000/v1/workspaces/$WORKSPACE_ID/code-execution-policy
+```
+
+A policy can only narrow what the deployment already permits:
+
+- `enabled: false` refuses `otari_code_execution` for that workspace with a 403.
+  It cannot enable a sandbox the deployment has not configured.
+- `max_iterations` and `exec_timeout_s` lower the tool-loop and per-execution
+  ceilings. A value above the deployment's own ceiling is refused rather than
+  stored, since it could never take effect.
+- `default_purpose_hint` is used only when a request declares
+  `otari_code_execution` without a hint of its own.
+
+A workspace with no policy is not narrowed, so a deployment that configures none
+behaves exactly as it did. The workspace comes from the API key that
+authenticated the request, never from a header; a master-key request resolves to
+the deployment's default workspace. In hybrid mode the same policy is resolved
+from otari.ai instead, and this endpoint is not served.
+
 ## Web search
 
 Brings up a SearXNG instance Otari dispatches `otari_web_search` calls to.

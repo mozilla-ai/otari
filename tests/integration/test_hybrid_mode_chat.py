@@ -1994,6 +1994,7 @@ class _FakeSandboxBackend:
         *,
         sandbox_url: str,
         purpose_hint: str | None = None,
+        timeout_s: float = 0.0,
         auth_token: str | None = None,
         tally: Any = None,
     ) -> None:

@@ -5520,6 +5520,106 @@
     {
       "item": [
         {
+          "name": "Get Workspace Code Execution Policy",
+          "request": {
+            "description": "Read a workspace's code-execution policy.\n\nTakes the same role as setting it (an organization owner/admin, or an\nowner/admin of this workspace), because the policy describes the\nworkspace's security and billing posture rather than one member's\nallowance. A workspace with no policy answers with the unconfigured one\n(``configured: false``), which is the deployment's own behavior described\nin the same shape rather than a 404.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "code-execution-policy"
+              ],
+              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/code-execution-policy",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Set Workspace Code Execution Policy",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"enabled\": false\n}"
+            },
+            "description": "Set a workspace's code-execution policy, replacing any existing one.\n\nAn organization owner/admin, or an owner/admin of this workspace, may\nwrite it. The policy can only narrow what the deployment permits: turning\ncode execution off for the workspace, and lowering the loop and execution\nceilings. It never turns a sandbox the deployment has not configured on.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PUT",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "code-execution-policy"
+              ],
+              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/code-execution-policy",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Clear Workspace Code Execution Policy",
+          "request": {
+            "description": "Drop a workspace's policy, returning it to the deployment's behavior.\n\nIdempotent: a workspace that has no policy is already in the state this\nasks for, so it answers with the unconfigured policy rather than a 404.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "code-execution-policy"
+              ],
+              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/code-execution-policy",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "workspace-code-execution-policy"
+    },
+    {
+      "item": [
+        {
           "name": "List Workspace Mcp Servers",
           "request": {
             "description": "List the MCP servers configured for a workspace.\n\nOrganization owners/admins or this workspace's owners/admins. Reads are\ngated like writes because these rows name the endpoints the gateway\nconnects to on the workspace's behalf. Authorization tokens are never\nincluded; each server reports only whether it has one.",

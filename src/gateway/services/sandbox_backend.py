@@ -52,7 +52,11 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
 
 CODE_EXECUTION_TOOL_NAME = "code_execution"
-_DEFAULT_TIMEOUT_S = 60.0
+# The execution budget one call gets when nothing narrows it. Public because a
+# workspace code-execution policy floors its own ceiling against this value
+# rather than carrying a second idea of the default (see
+# ``services/tenancy/workspace_code_execution_policy_service.py``).
+DEFAULT_EXEC_TIMEOUT_S = 60.0
 # Headroom added on top of the execution budget for the exec POST's own read
 # timeout. The sandbox is granted ``timeout_seconds`` to run the code; the HTTP
 # client must wait longer than that (network + serialization + the sandbox's own
@@ -138,7 +142,7 @@ class SandboxBackend:
         *,
         sandbox_url: str,
         purpose_hint: str | None = None,
-        timeout_s: float = _DEFAULT_TIMEOUT_S,
+        timeout_s: float = DEFAULT_EXEC_TIMEOUT_S,
         auth_token: str | None = None,
         tally: ToolUsageTally | None = None,
     ) -> None:

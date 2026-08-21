@@ -7,6 +7,7 @@ import type {
   UpdateToolSettingsRequest,
 } from "@/client"
 import { SearchToolsCard } from "@/features/tools/SearchToolsCard"
+import { WorkspaceCodeExecutionPolicyCard } from "@/features/tools/WorkspaceCodeExecutionPolicyCard"
 import {
   usePricing,
   useSetPricing,
@@ -782,6 +783,12 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
                 one set just above it. */}
               {service.key === "web_search" ? (
                 <SearchToolsCard onSaved={showToast} />
+              ) : null}
+              {/* And directly below the sandbox settings, for the same reason:
+                the workspace policy narrows the deployment-wide sandbox set
+                just above it, and reads as nonsense apart from it. */}
+              {service.key === "sandbox" ? (
+                <WorkspaceCodeExecutionPolicyCard onSaved={showToast} />
               ) : null}
             </Fragment>
           )

@@ -222,6 +222,13 @@ DELETE /v1/workspaces/{workspace_id}/member-budget-policies/{default_id} # dashb
 GET /v1/workspaces/{workspace_id}/activation                # dashboard-only
 POST /v1/workspaces/{workspace_id}/activation/key           # dashboard-only
 POST /v1/workspaces/{workspace_id}/activation/dismiss       # dashboard-only
+# The workspace's code-execution policy (otari#657) is set by whoever administers
+# the workspace, not by the key-holder running code inside it, so it is the same
+# dashboard-side surface as the rows above. An SDK caller sees its effect on
+# `otari_code_execution` (a 403, a lower iteration ceiling), never the policy row.
+GET /v1/workspaces/{workspace_id}/code-execution-policy                  # dashboard-only
+PUT /v1/workspaces/{workspace_id}/code-execution-policy                  # dashboard-only
+DELETE /v1/workspaces/{workspace_id}/code-execution-policy               # dashboard-only
 # Organization-scoped provider keys (otari-ai#1748, otari#643): the same
 # tenancy-admin surface as the organization/workspace rows just above, and
 # excluded for the same reason. An SDK caller acts inside one workspace with a

@@ -98,7 +98,7 @@ workspace row is a veto and a refinement and never a grant, and no row means no 
 question is [#655](https://github.com/mozilla-ai/otari/issues/655) and the reasoning is in
 the PR that answered it,
 [#678](https://github.com/mozilla-ai/otari/pull/678). Read both before building
-any of #654, #656 or #657, each of which settles its own surface under the rule above.
+either of #654 or #656, each of which settles its own surface under the rule above.
 
 MCP's own surface is the one that has landed (#658). `workspace_mcp_servers`
 (`models/entities.py`) holds a workspace's configured servers, with the bearer token
@@ -108,6 +108,18 @@ encrypted by the same `secret_box` the two stores above use; it is managed over
 `_pipeline._resolve_mcp_server_ids`, the standalone half of an `mcp_server_ids` field the
 platform answers in hybrid mode. There is no overlay and no cache: it resolves per
 request against `ctx.db`, which is what the decision above says the seam should do.
+
+Code execution is the second to land (#657), and the first that has a
+deployment-wide setting to compose over, so it is the worked example of the
+narrowing rule rather than of the exception. `workspace_code_execution_policies`
+(`models/entities.py`) holds one row per workspace or none, managed over
+`/v1/workspaces/{workspace_id}/code-execution-policy` through
+`services/tenancy/workspace_code_execution_policy_service.py`, whose two halves are
+the role-gated CRUD and the identity-free `resolve_workspace_code_execution_policy`
+that `prepare_gateway_tools` calls. The row carries no URL and no credential: the
+sandbox stays deployment-scoped on `/v1/tool-settings`, and the row only refuses it,
+lowers its two ceilings, or supplies a hint the request omitted. No row means no
+narrowing.
 
 ## The first-request setup guide
 `services/tenancy/workspace_activation_service.py` is the state behind the dashboard's setup guide (`routes/workspace_activation.py`, `/v1/workspaces/{id}/activation`): whether to offer it, the API key it hands out, what the workspace's traffic says about the attempt, and the dismissal that retires it. Ported from the platform's `WorkspaceActivationService`, and the one departure to know is that **activation is derived, not recorded**: the first successful `source="gateway"` row in `usage_logs` for the workspace *is* the evidence, read through `ix_usage_logs_workspace_source_status_timestamp`. The platform stores that telemetry in columns because its usage pipeline is asynchronous and crosses services; here the row is written by this process into this database, so a second copy could only drift. `workspace_activation_state` therefore holds one row per workspace carrying what cannot be observed elsewhere (the dismissal, when a key was last issued, and which key it was).

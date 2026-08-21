@@ -429,4 +429,11 @@ export type ActivationErrorCategory = NonNullable<
   ActivationAttempt["error_category"]
 >
 
+// The per-workspace code-execution policy over the deployment-wide sandbox; see
+// `src/gateway/services/tenancy/workspace_code_execution_policy_service.py`.
+export type WorkspaceCodeExecutionPolicy =
+  Schemas["WorkspaceCodeExecutionPolicyPublic"]
+export type UpdateWorkspaceCodeExecutionPolicyRequest =
+  Schemas["WorkspaceCodeExecutionPolicyUpdate"]
+
 export type * from "./local"

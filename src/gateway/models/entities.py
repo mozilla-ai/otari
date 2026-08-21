@@ -1423,3 +1423,70 @@ class WorkspaceMcpServer(Base):
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
+
+
+class WorkspaceCodeExecutionPolicy(Base):
+    """A workspace's policy over the deployment-wide code-execution sandbox.
+
+    The sandbox itself stays deployment-wide (``sandbox_url`` and its
+    credential are operator concerns and never move here, see
+    ``src/gateway/AGENTS.md``); this row says who on that deployment may ask
+    for it and within which limits. Resolved at admission by
+    ``prepare_gateway_tools`` and applied to the tool loop, the standalone
+    counterpart of the hybrid path's ``/gateway/code-execution/resolve``.
+
+    A row may only *narrow*: ``enabled=False`` refuses the tool for this
+    workspace, and the two limits are floored against the values a request
+    would otherwise get. No row means no narrowing, which is what keeps a
+    deployment that configures nothing behaving as it did (#655/#678).
+
+    ``workspace_id`` is the primary key: a workspace has one policy or none,
+    so there is nothing else to identify a row by. It is a real foreign key
+    with ``CASCADE``, like ``workspace_budget_defaults``: nothing else names
+    the row, so it rides the workspace's own delete.
+
+    There is deliberately no per-tool allow-list, which the hosted policy
+    carries as ``tools``: the gateway's own sandbox backend exposes exactly one
+    tool (``code_execution``), so a list here would be either a no-op or a
+    second spelling of ``enabled``. The hosted proxy, which fronts more than
+    one, keeps enforcing its own.
+    """
+
+    __tablename__ = "workspace_code_execution_policies"
+    __table_args__ = (
+        # Both limits are ceilings that get floored into an effective value, so
+        # zero or negative is a storage error rather than a stricter policy: it
+        # would floor the loop to nothing runnable while reading as configured.
+        # The request schemas refuse it first; these are the backstop for a
+        # writer that is not the service.
+        CheckConstraint(
+            "max_iterations IS NULL OR max_iterations > 0",
+            name="ck_workspace_code_execution_policies_max_iterations_positive",
+        ),
+        CheckConstraint(
+            "exec_timeout_s IS NULL OR exec_timeout_s > 0",
+            name="ck_workspace_code_execution_policies_exec_timeout_positive",
+        ),
+    )
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), primary_key=True
+    )
+    enabled: Mapped[bool] = mapped_column(default=True, nullable=False)
+    # NULL means "no workspace default": the request's own hint, then the
+    # deployment's, then the backend's built-in, exactly as today.
+    default_purpose_hint: Mapped[str | None] = mapped_column(Text, default=None)
+    # Both NULL-able ceilings, applied with ``min`` against what the request
+    # would otherwise get, so a value above the deployment ceiling narrows
+    # nothing rather than raising it.
+    max_iterations: Mapped[int | None] = mapped_column(default=None)
+    exec_timeout_s: Mapped[int | None] = mapped_column(default=None)
+    # ``UtcDateTime`` for the same reason ``WorkspaceBudgetDefault`` uses it:
+    # these are serialized with ``.isoformat()`` for the dashboard, and a plain
+    # ``DateTime(timezone=True)`` round-trips naive on SQLite.
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )

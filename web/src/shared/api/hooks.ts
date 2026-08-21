@@ -86,6 +86,7 @@ import type {
   UpdateToolSettingsRequest,
   UpdateUserRequest,
   UpdateWorkspaceBudgetDefaultRequest,
+  UpdateWorkspaceCodeExecutionPolicyRequest,
   UpdateWorkspaceRequest,
   UsageBucket,
   UsageCount,
@@ -103,6 +104,7 @@ import type {
   Workspace,
   WorkspaceActivation,
   WorkspaceBudgetDefault,
+  WorkspaceCodeExecutionPolicy,
   WorkspaceMember,
   WorkspaceMemberRole,
 } from "@/client"
@@ -2128,6 +2130,62 @@ export function useDeleteWorkspaceBudgetDefault() {
     onSuccess: (_data, { workspaceId }) => {
       void queryClient.invalidateQueries({
         queryKey: [WORKSPACES, workspaceId, "budget-defaults"],
+      })
+    },
+  })
+}
+
+// A workspace's code-execution policy over the deployment-wide sandbox. One
+// object or none, so it is a plain read rather than a paged list, and it is
+// nested under the workspaces key for the same reason the budget defaults are.
+export function useWorkspaceCodeExecutionPolicy(workspaceId: string | null) {
+  return useQuery({
+    queryKey: [WORKSPACES, workspaceId, "code-execution-policy"],
+    queryFn: () =>
+      apiFetch<WorkspaceCodeExecutionPolicy>(
+        `/v1/workspaces/${encodeURIComponent(workspaceId as string)}/code-execution-policy`,
+      ),
+    enabled: workspaceId !== null,
+    staleTime: 60_000,
+  })
+}
+
+export function useSetWorkspaceCodeExecutionPolicy() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      body,
+    }: {
+      workspaceId: string
+      body: UpdateWorkspaceCodeExecutionPolicyRequest
+    }) =>
+      apiFetch<WorkspaceCodeExecutionPolicy>(
+        `/v1/workspaces/${encodeURIComponent(workspaceId)}/code-execution-policy`,
+        { method: "PUT", body: JSON.stringify(body) },
+      ),
+    onSuccess: (_data, { workspaceId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: [WORKSPACES, workspaceId, "code-execution-policy"],
+      })
+    },
+  })
+}
+
+// Drops the row, which returns the workspace to the deployment's own behavior.
+// Not the same as saving `enabled: true`: that is a stored decision not to
+// narrow, while this is no decision at all.
+export function useClearWorkspaceCodeExecutionPolicy() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ workspaceId }: { workspaceId: string }) =>
+      apiFetch<WorkspaceCodeExecutionPolicy>(
+        `/v1/workspaces/${encodeURIComponent(workspaceId)}/code-execution-policy`,
+        { method: "DELETE" },
+      ),
+    onSuccess: (_data, { workspaceId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: [WORKSPACES, workspaceId, "code-execution-policy"],
       })
     },
   })

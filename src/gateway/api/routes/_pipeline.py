@@ -153,6 +153,7 @@ from gateway.services.routing import (
 from gateway.services.routing.decide import RoutingSignal, decide_ordering
 from gateway.services.sandbox_backend import (
     CODE_EXECUTION_TOOL_NAME,
+    DEFAULT_EXEC_TIMEOUT_S,
     SandboxBackend,
     SandboxNotReachableError,
 )
@@ -160,6 +161,9 @@ from gateway.services.scoped_budget_service import BudgetScopeRequest
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError
 from gateway.services.tenancy.errors import WorkspaceMcpServerNotFoundError
 from gateway.services.tenancy.org_provider_key_service import cached_org_model_restriction
+from gateway.services.tenancy.workspace_code_execution_policy_service import (
+    resolve_workspace_code_execution_policy,
+)
 from gateway.services.tenancy.workspace_mcp_server_service import resolve_workspace_mcp_servers
 from gateway.services.tool_usage import (
     MAX_TOOL_NAMES,
@@ -231,6 +235,7 @@ WEB_SEARCH_CONFLICT_DETAIL = (
 WEB_SEARCH_NOT_ENABLED_DETAIL = "web search is not enabled for this workspace"
 SANDBOX_NOT_ENABLED_DETAIL = "code execution is not enabled for this workspace"
 MALFORMED_CODE_EXEC_POLICY_DETAIL = "Authorization service returned a malformed code-execution policy"
+CODE_EXEC_POLICY_UNRESOLVABLE_DETAIL = "Code execution policy could not be resolved for this request"
 SANDBOX_UNREACHABLE_DETAIL = (
     "code_execution sandbox unreachable. Check the sandbox URL in the dashboard's "
     "Tools settings, or OTARI_SANDBOX_URL, and that the container is running."
@@ -1491,6 +1496,7 @@ class ToolContext:
         sandbox_tool_entry: dict[str, Any] | None,
         sandbox_url: str | None,
         sandbox_auth_token: str | None,
+        sandbox_exec_timeout_s: int | None = None,
         use_web_search: bool,
         web_search_tool_entry: dict[str, Any] | None,
         web_search_url: str | None,
@@ -1506,6 +1512,10 @@ class ToolContext:
         self.sandbox_tool_entry = sandbox_tool_entry
         self.sandbox_url = sandbox_url
         self.sandbox_auth_token = sandbox_auth_token
+        # The execution budget one sandbox call gets. A workspace policy may only
+        # lower it, so the deployment's default is the ceiling rather than a value
+        # a policy replaces.
+        self.sandbox_timeout_s = min(DEFAULT_EXEC_TIMEOUT_S, float(sandbox_exec_timeout_s or DEFAULT_EXEC_TIMEOUT_S))
         self.use_web_search = use_web_search
         self.web_search_tool_entry = web_search_tool_entry
         self.web_search_url = web_search_url
@@ -1735,6 +1745,7 @@ async def prepare_gateway_tools(
         # leak it to a standalone exec-service an operator pointed the URL at.
         sandbox_auth_token: str | None = None
         sandbox_max_iterations: int | None = None
+        sandbox_exec_timeout_s: int | None = None
         if use_sandbox and ctx.hybrid_mode:
             assert ctx.user_token is not None  # guaranteed by the hybrid-mode preamble
             assert sandbox_tool_entry is not None  # use_sandbox implies the entry is present
@@ -1759,6 +1770,42 @@ async def prepare_gateway_tools(
             # `bool` is an `int` subclass — exclude it so a JSON `true` isn't read as 1.
             if isinstance(resolved_iters, int) and not isinstance(resolved_iters, bool) and resolved_iters > 0:
                 sandbox_max_iterations = resolved_iters
+        elif use_sandbox:
+            # Standalone's counterpart to the resolve above: the policy is a row in
+            # this deployment's own database, read here at admission because this is
+            # where the request's session is live and where the values it carries
+            # (the hint, the two ceilings) still have somewhere to land. The
+            # workspace comes off the key that authenticated the request, never off
+            # a header; a master-key request resolves to the deployment's default
+            # workspace, so an operator who has narrowed that workspace is narrowed
+            # by it too (`services/workspace_scope.py`).
+            #
+            # No row means no narrowing, which is what keeps a deployment that has
+            # configured nothing per-workspace behaving exactly as it did. A row may
+            # only narrow: it refuses the tool, lowers the ceilings (applied with
+            # `min` further down and in `ToolContext`), and fills in a hint the
+            # request did not give. It can never turn on a sandbox the deployment
+            # has not configured, which the missing-URL 400 above already settled.
+            assert sandbox_tool_entry is not None  # use_sandbox implies the entry is present
+            if ctx.db is None or ctx.workspace_id is None:
+                # Fail closed. Both are invariants on this path today (a standalone
+                # request with no session is refused with `DB_UNAVAILABLE_DETAIL`
+                # before this, and `resolve_workspace_id` always answers, falling
+                # back to the default workspace), so this is unreachable, which is
+                # exactly why it refuses rather than falling through. What this arm
+                # guards is a *veto*: skipping it would serve code execution to a
+                # workspace whose row says `enabled=False`, silently, on the day one
+                # of those invariants stops holding. `_resolve_mcp_server_ids`
+                # refuses at the identical condition.
+                raise adapter.error(500, CODE_EXEC_POLICY_UNRESOLVABLE_DETAIL, ErrorKind.API)
+            workspace_policy = await resolve_workspace_code_execution_policy(ctx.db, ctx.workspace_id)
+            if workspace_policy is not None:
+                if not workspace_policy.enabled:
+                    raise adapter.error(403, SANDBOX_NOT_ENABLED_DETAIL, ErrorKind.PERMISSION)
+                if not sandbox_tool_entry.get("purpose_hint") and workspace_policy.default_purpose_hint:
+                    sandbox_tool_entry["purpose_hint"] = workspace_policy.default_purpose_hint
+                sandbox_max_iterations = workspace_policy.max_iterations
+                sandbox_exec_timeout_s = workspace_policy.exec_timeout_s
 
         web_search_url: str | None = ctx.config.web_search_url or otari_env("WEB_SEARCH_URL") or None
         # Interception (claiming the provider-named web_search keywords) is opt-in and
@@ -1832,8 +1879,9 @@ async def prepare_gateway_tools(
         await release_reservation(ctx)
         raise
     except SQLAlchemyError:
-        # Two reads in this block touch the database (the workspace MCP servers
-        # above, and `_require_tool_pricing`), and a failure in either is not an
+        # Three reads in this block touch the database (the workspace MCP servers
+        # and the workspace code-execution policy above, and
+        # `_require_tool_pricing`), and a failure in any of them is not an
         # `HTTPException`, so without this arm it would leave `users.reserved`
         # holding the estimate until the budget's next reset, or forever for a
         # budget with no reset period. The rollback comes first because a failed
@@ -1856,6 +1904,7 @@ async def prepare_gateway_tools(
         sandbox_tool_entry=sandbox_tool_entry,
         sandbox_url=sandbox_url,
         sandbox_auth_token=sandbox_auth_token,
+        sandbox_exec_timeout_s=sandbox_exec_timeout_s,
         use_web_search=use_web_search,
         web_search_tool_entry=web_search_tool_entry,
         web_search_url=web_search_url,
@@ -2410,6 +2459,7 @@ async def dispatch_non_stream(
         async with SandboxBackend(
             sandbox_url=tool_ctx.sandbox_url,
             purpose_hint=sandbox_hint,
+            timeout_s=tool_ctx.sandbox_timeout_s,
             auth_token=tool_ctx.sandbox_auth_token,
             tally=tool_ctx.tally,
         ) as backend:
@@ -2500,6 +2550,7 @@ async def open_stream(
         sandbox_backend = SandboxBackend(
             sandbox_url=tool_ctx.sandbox_url,
             purpose_hint=sandbox_hint,
+            timeout_s=tool_ctx.sandbox_timeout_s,
             auth_token=tool_ctx.sandbox_auth_token,
             tally=tool_ctx.tally,
         )
@@ -3135,6 +3186,7 @@ async def run_streaming_with_fallback(
                 SandboxBackend(
                     sandbox_url=tool_ctx.sandbox_url,
                     purpose_hint=sandbox_hint,
+                    timeout_s=tool_ctx.sandbox_timeout_s,
                     auth_token=tool_ctx.sandbox_auth_token,
                     tally=tool_ctx.tally,
                 ),

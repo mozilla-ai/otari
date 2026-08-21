@@ -10945,6 +10945,152 @@
         "title": "WorkspaceAssignmentRequest",
         "type": "object"
       },
+      "WorkspaceCodeExecutionPolicyPublic": {
+        "description": "A workspace's policy, or the unconfigured policy it has without one.",
+        "properties": {
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "default_purpose_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Default Purpose Hint"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "exec_timeout_s": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Exec Timeout S"
+          },
+          "max_iterations": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Iterations"
+          },
+          "sandbox_configured": {
+            "title": "Sandbox Configured",
+            "type": "boolean"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace_id",
+          "configured",
+          "sandbox_configured",
+          "enabled",
+          "default_purpose_hint",
+          "max_iterations",
+          "exec_timeout_s",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "WorkspaceCodeExecutionPolicyPublic",
+        "type": "object"
+      },
+      "WorkspaceCodeExecutionPolicyUpdate": {
+        "description": "The policy to store for a workspace, as a whole.\n\n``PUT`` semantics, ported from the hosted ``CodeExecutionConfigUpsert``:\nwhat is sent is what the workspace has afterwards, so an omitted limit is\ncleared rather than left as it was.",
+        "properties": {
+          "default_purpose_hint": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Hint used when a request declares otari_code_execution without one of its own",
+            "title": "Default Purpose Hint"
+          },
+          "enabled": {
+            "description": "False refuses code execution for this workspace",
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "exec_timeout_s": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 60.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Ceiling on one execution's runtime in seconds; only ever lowers the effective limit, so at most 60",
+            "title": "Exec Timeout S"
+          },
+          "max_iterations": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 25.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Ceiling on tool-loop iterations; only ever lowers the effective limit, so at most 25",
+            "title": "Max Iterations"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "WorkspaceCodeExecutionPolicyUpdate",
+        "type": "object"
+      },
       "WorkspaceCreate": {
         "properties": {
           "description": {
@@ -21025,6 +21171,168 @@
         "summary": "Create Workspace Activation Key",
         "tags": [
           "workspace-activation"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/code-execution-policy": {
+      "delete": {
+        "description": "Drop a workspace's policy, returning it to the deployment's behavior.\n\nIdempotent: a workspace that has no policy is already in the state this\nasks for, so it answers with the unconfigured policy rather than a 404.",
+        "operationId": "clear_workspace_code_execution_policy_v1_workspaces__workspace_id__code_execution_policy_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceCodeExecutionPolicyPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Clear Workspace Code Execution Policy",
+        "tags": [
+          "workspace-code-execution-policy"
+        ]
+      },
+      "get": {
+        "description": "Read a workspace's code-execution policy.\n\nTakes the same role as setting it (an organization owner/admin, or an\nowner/admin of this workspace), because the policy describes the\nworkspace's security and billing posture rather than one member's\nallowance. A workspace with no policy answers with the unconfigured one\n(``configured: false``), which is the deployment's own behavior described\nin the same shape rather than a 404.",
+        "operationId": "get_workspace_code_execution_policy_v1_workspaces__workspace_id__code_execution_policy_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceCodeExecutionPolicyPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Workspace Code Execution Policy",
+        "tags": [
+          "workspace-code-execution-policy"
+        ]
+      },
+      "put": {
+        "description": "Set a workspace's code-execution policy, replacing any existing one.\n\nAn organization owner/admin, or an owner/admin of this workspace, may\nwrite it. The policy can only narrow what the deployment permits: turning\ncode execution off for the workspace, and lowering the loop and execution\nceilings. It never turns a sandbox the deployment has not configured on.",
+        "operationId": "set_workspace_code_execution_policy_v1_workspaces__workspace_id__code_execution_policy_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceCodeExecutionPolicyUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceCodeExecutionPolicyPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Set Workspace Code Execution Policy",
+        "tags": [
+          "workspace-code-execution-policy"
         ]
       }
     },

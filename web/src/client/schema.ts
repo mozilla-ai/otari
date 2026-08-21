@@ -2968,6 +2968,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{workspace_id}/code-execution-policy": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Workspace Code Execution Policy
+         * @description Read a workspace's code-execution policy.
+         *
+         *     Takes the same role as setting it (an organization owner/admin, or an
+         *     owner/admin of this workspace), because the policy describes the
+         *     workspace's security and billing posture rather than one member's
+         *     allowance. A workspace with no policy answers with the unconfigured one
+         *     (``configured: false``), which is the deployment's own behavior described
+         *     in the same shape rather than a 404.
+         */
+        get: operations["get_workspace_code_execution_policy_v1_workspaces__workspace_id__code_execution_policy_get"];
+        /**
+         * Set Workspace Code Execution Policy
+         * @description Set a workspace's code-execution policy, replacing any existing one.
+         *
+         *     An organization owner/admin, or an owner/admin of this workspace, may
+         *     write it. The policy can only narrow what the deployment permits: turning
+         *     code execution off for the workspace, and lowering the loop and execution
+         *     ceilings. It never turns a sandbox the deployment has not configured on.
+         */
+        put: operations["set_workspace_code_execution_policy_v1_workspaces__workspace_id__code_execution_policy_put"];
+        post?: never;
+        /**
+         * Clear Workspace Code Execution Policy
+         * @description Drop a workspace's policy, returning it to the deployment's behavior.
+         *
+         *     Idempotent: a workspace that has no policy is already in the state this
+         *     asks for, so it answers with the unconfigured policy rather than a 404.
+         */
+        delete: operations["clear_workspace_code_execution_policy_v1_workspaces__workspace_id__code_execution_policy_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces/{workspace_id}/mcp-servers": {
         parameters: {
             query?: never;
@@ -7842,6 +7885,63 @@ export interface components {
              * Format: uuid
              */
             workspace_id: string;
+        };
+        /**
+         * WorkspaceCodeExecutionPolicyPublic
+         * @description A workspace's policy, or the unconfigured policy it has without one.
+         */
+        WorkspaceCodeExecutionPolicyPublic: {
+            /** Configured */
+            configured: boolean;
+            /** Created At */
+            created_at: string | null;
+            /** Default Purpose Hint */
+            default_purpose_hint: string | null;
+            /** Enabled */
+            enabled: boolean;
+            /** Exec Timeout S */
+            exec_timeout_s: number | null;
+            /** Max Iterations */
+            max_iterations: number | null;
+            /** Sandbox Configured */
+            sandbox_configured: boolean;
+            /** Updated At */
+            updated_at: string | null;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+        };
+        /**
+         * WorkspaceCodeExecutionPolicyUpdate
+         * @description The policy to store for a workspace, as a whole.
+         *
+         *     ``PUT`` semantics, ported from the hosted ``CodeExecutionConfigUpsert``:
+         *     what is sent is what the workspace has afterwards, so an omitted limit is
+         *     cleared rather than left as it was.
+         */
+        WorkspaceCodeExecutionPolicyUpdate: {
+            /**
+             * Default Purpose Hint
+             * @description Hint used when a request declares otari_code_execution without one of its own
+             */
+            default_purpose_hint?: string | null;
+            /**
+             * Enabled
+             * @description False refuses code execution for this workspace
+             */
+            enabled: boolean;
+            /**
+             * Exec Timeout S
+             * @description Ceiling on one execution's runtime in seconds; only ever lowers the effective limit, so at most 60
+             */
+            exec_timeout_s?: number | null;
+            /**
+             * Max Iterations
+             * @description Ceiling on tool-loop iterations; only ever lowers the effective limit, so at most 25
+             */
+            max_iterations?: number | null;
         };
         /** WorkspaceCreate */
         WorkspaceCreate: {
@@ -12894,6 +12994,103 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["ActivationApiKeyPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_workspace_code_execution_policy_v1_workspaces__workspace_id__code_execution_policy_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceCodeExecutionPolicyPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_workspace_code_execution_policy_v1_workspaces__workspace_id__code_execution_policy_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceCodeExecutionPolicyUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceCodeExecutionPolicyPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_workspace_code_execution_policy_v1_workspaces__workspace_id__code_execution_policy_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceCodeExecutionPolicyPublic"];
                 };
             };
             /** @description Validation Error */
