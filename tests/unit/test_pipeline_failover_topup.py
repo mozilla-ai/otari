@@ -16,6 +16,7 @@ are stubbed, so what is pinned is the decision logic: when the hold grows, by ho
 much, when it does not, and which failure the caller sees.
 """
 
+from decimal import Decimal
 from types import SimpleNamespace
 from typing import Any, cast
 
@@ -50,7 +51,7 @@ def _attempt(position: int, instance: str, model: str) -> Attempt:
 
 def _ctx(
     *,
-    estimate: float = 5.0,
+    estimate: Decimal = Decimal(5),
     counts_toward_budget: bool = True,
     require_pricing: bool = False,
     db: object | None = object(),
@@ -87,9 +88,9 @@ def _ctx(
 
 
 @pytest.fixture
-def increases(monkeypatch: pytest.MonkeyPatch) -> list[float]:
+def increases(monkeypatch: pytest.MonkeyPatch) -> list[Decimal]:
     """Record every top-up delta, with pricing stubbed from ``_PRICES``."""
-    recorded: list[float] = []
+    recorded: list[Decimal] = []
 
     async def fake_find_pricing(_db: Any, instance: str, model: str, *, organization_id: Any, **_kwargs: Any) -> Any:
         # ``organization_id`` is named, and deliberately has no default, so this
@@ -99,10 +100,10 @@ def increases(monkeypatch: pytest.MonkeyPatch) -> list[float]:
         price = _PRICES.get((instance, model))
         return None if price is None else SimpleNamespace(price=price)
 
-    def fake_estimate_cost(pricing: Any, **_kwargs: Any) -> float:
-        return 0.0 if pricing is None else float(pricing.price)
+    def fake_estimate_cost(pricing: Any, **_kwargs: Any) -> Decimal:
+        return Decimal(0) if pricing is None else Decimal(str(pricing.price))
 
-    async def fake_increase(_db: Any, _handle: Any, delta: float, **_kwargs: Any) -> None:
+    async def fake_increase(_db: Any, _handle: Any, delta: Decimal, **_kwargs: Any) -> None:
         recorded.append(delta)
 
     monkeypatch.setattr(pipeline, "find_model_pricing", fake_find_pricing)
@@ -112,31 +113,31 @@ def increases(monkeypatch: pytest.MonkeyPatch) -> list[float]:
 
 
 @pytest.mark.asyncio
-async def test_a_pricier_candidate_grows_the_hold_before_dispatch(increases: list[float]) -> None:
+async def test_a_pricier_candidate_grows_the_hold_before_dispatch(increases: list[Decimal]) -> None:
     """The delta, not the full price: the original hold already covers the head."""
-    await pipeline.top_up_reservation_for_attempt(_ctx(estimate=5.0), _attempt(2, "anthropic", "pricey"))
-    assert increases == [4.0]
+    await pipeline.top_up_reservation_for_attempt(_ctx(estimate=Decimal(5)), _attempt(2, "anthropic", "pricey"))
+    assert increases == [Decimal(4)]
 
 
 @pytest.mark.asyncio
-async def test_a_cheaper_candidate_is_a_no_op(increases: list[float]) -> None:
+async def test_a_cheaper_candidate_is_a_no_op(increases: list[Decimal]) -> None:
     """The hold only ever grows toward the candidate that serves. Shrinking it
     would release budget another request could take, on a chain that has not
     finished spending.
     """
-    await pipeline.top_up_reservation_for_attempt(_ctx(estimate=5.0), _attempt(2, "openai", "cheap"))
+    await pipeline.top_up_reservation_for_attempt(_ctx(estimate=Decimal(5)), _attempt(2, "openai", "cheap"))
     assert increases == []
 
 
 @pytest.mark.asyncio
-async def test_an_equally_priced_candidate_is_a_no_op(increases: list[float]) -> None:
-    await pipeline.top_up_reservation_for_attempt(_ctx(estimate=5.0), _attempt(2, "openai", "same"))
+async def test_an_equally_priced_candidate_is_a_no_op(increases: list[Decimal]) -> None:
+    await pipeline.top_up_reservation_for_attempt(_ctx(estimate=Decimal(5)), _attempt(2, "openai", "same"))
     assert increases == []
 
 
 @pytest.mark.asyncio
 async def test_a_refused_top_up_stops_the_chain_with_the_failover_detail(
-    monkeypatch: pytest.MonkeyPatch, increases: list[float]
+    monkeypatch: pytest.MonkeyPatch, increases: list[Decimal]
 ) -> None:
     """The refusal is reported as its own condition rather than as a generic
     budget rejection: the caller was admitted, so "you are out of budget" alone
@@ -149,7 +150,7 @@ async def test_a_refused_top_up_stops_the_chain_with_the_failover_detail(
     monkeypatch.setattr(pipeline, "increase_reservation", refuse)
 
     with pytest.raises(HTTPException) as exc_info:
-        await pipeline.top_up_reservation_for_attempt(_ctx(estimate=5.0), _attempt(2, "anthropic", "pricey"))
+        await pipeline.top_up_reservation_for_attempt(_ctx(estimate=Decimal(5)), _attempt(2, "anthropic", "pricey"))
 
     assert exc_info.value.status_code == 402
     assert exc_info.value.detail == pipeline.budget_exhausted_mid_failover_detail()
@@ -157,7 +158,7 @@ async def test_a_refused_top_up_stops_the_chain_with_the_failover_detail(
 
 
 @pytest.mark.asyncio
-async def test_an_unpriced_fallback_is_refused_under_require_pricing(increases: list[float]) -> None:
+async def test_an_unpriced_fallback_is_refused_under_require_pricing(increases: list[Decimal]) -> None:
     """Otherwise a model that 402s when named directly serves for free by being
     reached as a fallback, and logs cost=null.
     """
@@ -171,13 +172,13 @@ async def test_an_unpriced_fallback_is_refused_under_require_pricing(increases: 
 
 
 @pytest.mark.asyncio
-async def test_an_unpriced_fallback_is_allowed_when_require_pricing_is_off(increases: list[float]) -> None:
+async def test_an_unpriced_fallback_is_allowed_when_require_pricing_is_off(increases: list[Decimal]) -> None:
     await pipeline.top_up_reservation_for_attempt(_ctx(require_pricing=False), _attempt(2, "openai", "no-such-model"))
     assert increases == []
 
 
 @pytest.mark.asyncio
-async def test_a_budget_exempt_request_skips_the_pricing_gate(increases: list[float]) -> None:
+async def test_a_budget_exempt_request_skips_the_pricing_gate(increases: list[Decimal]) -> None:
     """A request that is never debited cannot overshoot a cap, so the gate does
     not apply to it. Matches the admission-time rule.
     """
@@ -188,7 +189,7 @@ async def test_a_budget_exempt_request_skips_the_pricing_gate(increases: list[fl
 
 
 @pytest.mark.asyncio
-async def test_no_reservation_means_nothing_to_top_up(increases: list[float]) -> None:
+async def test_no_reservation_means_nothing_to_top_up(increases: list[Decimal]) -> None:
     """Budget enforcement disabled, or a user with no budget: there is no hold to
     grow, so the chain proceeds rather than failing on a missing handle.
     """
@@ -199,7 +200,7 @@ async def test_no_reservation_means_nothing_to_top_up(increases: list[float]) ->
 
 
 @pytest.mark.asyncio
-async def test_no_estimate_inputs_means_nothing_to_reprice(increases: list[float]) -> None:
+async def test_no_estimate_inputs_means_nothing_to_reprice(increases: list[Decimal]) -> None:
     ctx = _ctx()
     ctx.estimate_inputs = None
     await pipeline.top_up_reservation_for_attempt(ctx, _attempt(2, "anthropic", "pricey"))

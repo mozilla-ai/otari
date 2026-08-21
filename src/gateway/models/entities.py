@@ -136,7 +136,11 @@ class Budget(Base):
 
     budget_id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
     name: Mapped[str | None] = mapped_column(default=None)
-    max_budget: Mapped[float | None] = mapped_column()
+    # Exact, like the counters it is compared against: the gate is
+    # ``spend + reserved <= max_budget``, and a cap stored as a binary float
+    # would decide a 403 against an amount an operator never typed
+    # (mozilla-ai/otari#691).
+    max_budget: Mapped[Decimal | None] = mapped_column(UsdCost())
     budget_duration_sec: Mapped[int | None] = mapped_column()
     # Snap the window to a UTC calendar boundary instead of counting a fixed
     # number of seconds, which is the only way to express a calendar month (2592000
@@ -175,12 +179,17 @@ class User(Base):
 
     user_id: Mapped[str] = mapped_column(primary_key=True)
     alias: Mapped[str | None] = mapped_column()
-    spend: Mapped[float] = mapped_column(default=0.0)
+    # The spend ledger, exact to the micro-dollar like the ``usage_logs`` rows
+    # that sum into it (mozilla-ai/otari#691). As a float it drifted: four
+    # completions whose settled costs were each exact left this at
+    # 0.6619999999999999, and the drift accumulated across every reconcile until
+    # the budget reset.
+    spend: Mapped[Decimal] = mapped_column(UsdCost(), default=Decimal(0))
     # In-flight budget held by requests that have passed the budget gate but
     # whose actual cost is not yet known. The effective committed amount is
     # ``spend + reserved``; reservations are reconciled into ``spend`` (actual
     # cost) on success or released on failure. See gateway.services.budget_service.
-    reserved: Mapped[float] = mapped_column(default=0.0, server_default="0")
+    reserved: Mapped[Decimal] = mapped_column(UsdCost(), default=Decimal(0), server_default="0")
     # Indexed: the budgets list groups users by this column to build each budget's
     # usage rollup, so an unindexed FK turns that page into a users table scan.
     budget_id: Mapped[str | None] = mapped_column(ForeignKey("budgets.budget_id"), index=True)
@@ -942,7 +951,10 @@ class BudgetResetLog(Base):
     # Indexed: the reset-log drill-down filters on this column, and the table only
     # grows, so an unindexed FK degrades that endpoint to a full scan over time.
     budget_id: Mapped[str] = mapped_column(ForeignKey("budgets.budget_id"), index=True)
-    previous_spend: Mapped[float] = mapped_column()
+    # The ledger's record of a counter that is now exact, so it is exact too:
+    # a float snapshot of an exact ``users.spend`` would no longer equal the
+    # spend it claims to have recorded.
+    previous_spend: Mapped[Decimal] = mapped_column(UsdCost())
     reset_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
     next_reset_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
@@ -1040,12 +1052,12 @@ class ScopedBudget(Base):
     budget_id: Mapped[str] = mapped_column(
         ForeignKey("budgets.budget_id", ondelete="RESTRICT"), nullable=False, index=True
     )
-    current_spend: Mapped[float] = mapped_column(default=0.0, server_default="0")
+    current_spend: Mapped[Decimal] = mapped_column(UsdCost(), default=Decimal(0), server_default="0")
     # In-flight holds from reservations that have passed the gate but whose actual
     # cost is not known yet. Headroom is ``max_budget - current_spend -
     # reserved_spend``; a period roll zeroes ``current_spend`` only, so a hold
     # taken before the roll is still released correctly after it.
-    reserved_spend: Mapped[float] = mapped_column(default=0.0, server_default="0")
+    reserved_spend: Mapped[Decimal] = mapped_column(UsdCost(), default=Decimal(0), server_default="0")
     period_start: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     period_end: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None)
     created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))

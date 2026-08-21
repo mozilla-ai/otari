@@ -43,6 +43,20 @@ from gateway.core.metered_pricing import COST_SCALE, RATE_SCALE, quantize_cost, 
 RATE_PRECISION = 18
 COST_PRECISION = 18
 
+# The largest USD amount a cost column holds, ~$1T less one micro-dollar.
+MAX_USD_COST = Decimal(10) ** (COST_PRECISION - COST_SCALE) - Decimal(1).scaleb(-COST_SCALE)
+
+# The largest budget limit a request body may set, and the bound the OpenAPI
+# schema advertises. A *cap* is operator-typed where a settled cost is not, and
+# an operator reaching for "no limit" reaches for a big round number: above the
+# column's ceiling PostgreSQL refuses the write with a bare numeric overflow,
+# which a route can only render as a 500 (mozilla-ai/otari#691). A whole dollar
+# below :data:`MAX_USD_COST`, because the ceiling itself is not representable in
+# the float the wire carries: ``float(MAX_USD_COST)`` rounds *up* to 1e12, which
+# the column would then refuse. Spend counters need no such bound; they are sums
+# of real settled costs.
+MAX_USD_LIMIT = 999_999_999_999.0
+
 
 def to_usd(value: Decimal | float | int | str) -> Decimal:
     """Coerce a value to ``Decimal`` without inheriting float error.

@@ -53,6 +53,7 @@ from gateway.model_labeling import relabel_model
 from gateway.models.entities import APIKey, ModelPricing, UsageLog
 from gateway.rate_limit import check_rate_limit
 from gateway.services.budget_service import (
+    ZERO,
     ReservationHandle,
     reconcile_reservation,
     refund_reservation,
@@ -138,7 +139,7 @@ async def run_passthrough(
     call_provider: Callable[[ResolvedProvider], Awaitable[ResultT]],
     lookup_pricing: bool = True,
     pricing_use_defaults: bool = True,
-    estimate: Callable[[ModelPricing | None], float] | None = None,
+    estimate: Callable[[ModelPricing | None], Decimal] | None = None,
     enforce_require_pricing: bool = False,
     usage_tokens: Callable[[ResultT], tuple[int | None, int | None, int | None]] | None = None,
     compute_cost: Callable[[ResultT, ModelPricing | None], Decimal | None] | None = None,
@@ -178,7 +179,7 @@ async def run_passthrough(
             as USD per image, writing a charge line at the wrong unit for a rate
             nobody configured.
         estimate: Maps the pricing row to the reservation estimate in USD.
-            Defaults to 0.0, which still enforces per-user state (user exists,
+            Defaults to zero, which still enforces per-user state (user exists,
             not blocked, not already over budget).
         enforce_require_pricing: When True and ``config.require_pricing`` is
             set, reject unpriced models with 402. The check runs after the
@@ -281,7 +282,7 @@ async def run_passthrough(
             started_at=started_at,
         )
 
-    async def _reserve(estimated_cost: float, *, row_model: str, row_provider: str | None) -> ReservationHandle:
+    async def _reserve(estimated_cost: Decimal, *, row_model: str, row_provider: str | None) -> ReservationHandle:
         """Reserve the estimate, recording a blocked/over-budget refusal.
 
         ``reserve_budget`` reserves nothing on the paths that raise, so there is
@@ -315,7 +316,7 @@ async def run_passthrough(
         # Nothing is resolved yet, so a rejection here records the requested
         # selector with no provider.
         reservation = await _reserve(
-            estimate(None) if estimate else 0.0,
+            estimate(None) if estimate else ZERO,
             row_model=model,
             row_provider=None,
         )
@@ -375,7 +376,7 @@ async def run_passthrough(
         # Reserve first so user/blocked/budget rejections (404/403) precede the
         # missing-pricing rejection (402); refund if we then reject for no pricing.
         reservation = await _reserve(
-            estimate(pricing) if estimate else 0.0,
+            estimate(pricing) if estimate else ZERO,
             row_model=resolved.model,
             row_provider=resolved.instance,
         )

@@ -105,8 +105,10 @@ from gateway.model_labeling import relabel_model
 from gateway.models.entities import ModelPricing, UsageLog
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import McpServerConfig
+from gateway.models.money import to_usd
 from gateway.rate_limit import RateLimitInfo, check_rate_limit
 from gateway.services.budget_service import (
+    ZERO,
     ReservationHandle,
     estimate_cost,
     get_budget_state,
@@ -769,7 +771,7 @@ async def _bill_vision_side_call(
         db,
         ReservationHandle(
             user_id=user_id,
-            estimate=0.0,
+            estimate=ZERO,
             reserved=False,
             strategy=config.budget_strategy,
             counts_toward_budget=counts_toward_budget,
@@ -873,7 +875,7 @@ async def top_up_reservation_for_attempt(ctx: RequestContext, attempt: Attempt) 
         cache_write_ttl=ctx.estimate_inputs.cache_write_ttl,
     )
     delta = repriced - ctx.reservation.estimate
-    if delta <= 0:
+    if delta <= ZERO:
         return
     try:
         await increase_reservation(
@@ -2032,9 +2034,7 @@ async def log_usage(
     # stream-missing-usage estimate policy), record that amount on the log row
     # so usage_logs.cost stays consistent with the spend that was reconciled.
     if cost_override is not None:
-        # The estimate paths still hold a float (``users.reserved`` is one), so
-        # the amount is made exact here rather than at each call site.
-        usage_log.cost = Decimal(str(cost_override))
+        usage_log.cost = to_usd(cost_override)
 
     # Gateway-run tool calls are a separate charge from the model's tokens, so they
     # are folded in last: after the token branch (which may not have run at all) and

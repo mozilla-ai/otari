@@ -8,6 +8,7 @@ is untouched by a request that also passes scoped ceilings.
 import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
+from decimal import Decimal
 from typing import Any
 
 import pytest
@@ -210,7 +211,7 @@ async def test_per_user_refusal_compensates_the_scoped_holds(async_db: AsyncSess
 
     user = (await async_db.execute(select(User).where(User.user_id == tenancy.user_id))).scalar_one()
     user.budget_id = "tiny"
-    user.spend = 1.0
+    user.spend = Decimal("1.0")
     await async_db.commit()
 
     with pytest.raises(HTTPException) as exc_info:
@@ -285,7 +286,7 @@ async def test_expired_period_rolls_before_the_gate(async_db: AsyncSession, tena
         period_start=now - timedelta(seconds=7200),
         period_end=now - timedelta(seconds=3600),
     )
-    cap.current_spend = 9.5
+    cap.current_spend = Decimal("9.5")
     async_db.add(cap)
     await async_db.commit()
 
@@ -342,7 +343,7 @@ async def test_an_aligned_period_rolls_onto_the_boundary_not_onto_the_request(
         period_start=midnight - timedelta(days=4),
         period_end=midnight - timedelta(days=3),
     )
-    cap.current_spend = 9.5
+    cap.current_spend = Decimal("9.5")
     async_db.add(cap)
     await async_db.commit()
 
@@ -377,7 +378,7 @@ async def test_a_monthly_ceiling_asleep_for_two_months_lands_in_the_current_one(
         period_start=first_of_month - timedelta(days=90),
         period_end=first_of_month - timedelta(days=60),
     )
-    cap.current_spend = 10.0
+    cap.current_spend = Decimal("10.0")
     async_db.add(cap)
     await async_db.commit()
 
@@ -410,7 +411,7 @@ async def test_an_unrecognized_alignment_leaves_the_exhausted_window_in_place(
         period_start=now - timedelta(days=2),
         period_end=now - timedelta(days=1),
     )
-    cap.current_spend = 10.0
+    cap.current_spend = Decimal("10.0")
     async_db.add(cap)
     await async_db.commit()
 
@@ -540,7 +541,7 @@ async def test_settle_is_inert_for_a_handle_that_held_nothing(async_db: AsyncSes
     async_db.add(User(user_id="plain-user"))
     await async_db.commit()
 
-    handle = ReservationHandle(user_id="plain-user", estimate=0.0, reserved=False, strategy="disabled")
+    handle = ReservationHandle(user_id="plain-user", estimate=Decimal(0), reserved=False, strategy="disabled")
     await reconcile_reservation(async_db, handle, 3.0)
 
     async_db.expire_all()

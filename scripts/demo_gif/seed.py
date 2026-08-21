@@ -35,6 +35,7 @@ from gateway.models.entities import (
     UsageLog,
     User,
 )
+from gateway.models.money import to_usd
 from gateway.models.tenancy import Organization, Workspace
 
 URL = sys.argv[1] if len(sys.argv) > 1 else "sqlite:///./scripts/demo_gif/demo.db"
@@ -264,7 +265,7 @@ for _ in range(4000):
 for uid, spent in period_spend.items():
     user = db.get(User, uid)
     if user is not None:
-        user.spend = round(spent, 2)
+        user.spend = to_usd(round(spent, 2))
 
 
 # Derive each budget's dollar limit from the highest member's spend and the
@@ -280,7 +281,7 @@ def _nice_ceiling(value: float) -> float:
 for name, (util_target, _duration) in BUDGETS.items():
     members = [uid for uid, (_alias, bname) in USERS.items() if bname == name]
     peak = max((period_spend[uid] for uid in members), default=0.0)
-    budgets[name].max_budget = _nice_ceiling(peak / util_target)
+    budgets[name].max_budget = to_usd(_nice_ceiling(peak / util_target))
 
 db.commit()
 
@@ -289,5 +290,5 @@ print(f"Seeded: {len(BUDGETS)} budgets, {len(USERS)} users, {len(KEYS)} keys, "
 print("(providers are declared in scripts/demo_gif/otari.yml)")
 for uid, spent in sorted(period_spend.items()):
     bname = USERS[uid][1]
-    limit = budgets[bname].max_budget or 1.0
+    limit = float(budgets[bname].max_budget or 1.0)
     print(f"  {uid:18s} ${spent:8.2f} / ${limit:7.0f}  ({spent / limit:4.0%})  {bname}")

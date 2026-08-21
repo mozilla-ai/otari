@@ -1,3 +1,4 @@
+from decimal import Decimal
 from typing import Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -9,10 +10,14 @@ from sqlmodel import col
 
 from gateway.api.deps import get_db, verify_master_key
 from gateway.models.entities import Budget, BudgetResetLog, ScopedBudget, User, WorkspaceBudgetDefault
+from gateway.models.money import MAX_USD_LIMIT, as_float, to_usd, to_usd_or_none
 from gateway.models.tenancy import Workspace
 from gateway.services.scoped_budget_service import ResetAlignment
 
 router = APIRouter(prefix="/v1/budgets", tags=["budgets"])
+
+# The rollup below sums exact counters, so its coalesce default is exact too.
+_ZERO = Decimal(0)
 
 
 def _require_single_period_source(duration: int | None, alignment: str | None) -> None:
@@ -34,7 +39,7 @@ class CreateBudgetRequest(BaseModel):
     """Request model for creating a new budget."""
 
     name: str | None = Field(default=None, description="Admin-facing label for the budget")
-    max_budget: float | None = Field(default=None, ge=0, description="Maximum spending limit")
+    max_budget: float | None = Field(default=None, ge=0, le=MAX_USD_LIMIT, description="Maximum spending limit")
     budget_duration_sec: int | None = Field(
         default=None, gt=0, description="Budget duration in seconds (e.g., 86400 for daily, 604800 for weekly)"
     )
@@ -81,7 +86,9 @@ class BudgetResponse(BaseModel):
         return cls(
             budget_id=budget.budget_id,
             name=budget.name,
-            max_budget=budget.max_budget,
+            # Narrowed on the way out: the cap is exact in the database, while
+            # the wire contract and the dashboard client stay float.
+            max_budget=as_float(budget.max_budget),
             budget_duration_sec=budget.budget_duration_sec,
             reset_alignment=budget.reset_alignment,
             created_at=budget.created_at.isoformat(),
@@ -96,7 +103,7 @@ class UpdateBudgetRequest(BaseModel):
     """Request model for updating a budget."""
 
     name: str | None = Field(default=None)
-    max_budget: float | None = Field(default=None, ge=0)
+    max_budget: float | None = Field(default=None, ge=0, le=MAX_USD_LIMIT)
     budget_duration_sec: int | None = Field(default=None, gt=0)
     reset_alignment: ResetAlignment | None = Field(default=None)
 
@@ -129,8 +136,12 @@ async def _budget_usage(db: AsyncSession, budget_id: str) -> tuple[int, float, f
         await db.execute(
             select(
                 func.count(),
-                func.coalesce(func.sum(User.spend), 0.0),
-                func.coalesce(func.sum(User.reserved), 0.0),
+                # ``Decimal`` defaults, not ``0.0``: in PostgreSQL
+                # ``coalesce(numeric, double precision)`` resolves the whole sum
+                # as double precision, which would roll exact counters up through
+                # a binary float on the way to a page that reports them.
+                func.coalesce(func.sum(User.spend), _ZERO),
+                func.coalesce(func.sum(User.reserved), _ZERO),
             ).where(User.budget_id == budget_id, User.deleted_at.is_(None))
         )
     ).one()
@@ -146,7 +157,7 @@ async def create_budget(
     _require_single_period_source(request.budget_duration_sec, request.reset_alignment)
     budget = Budget(
         name=request.name,
-        max_budget=request.max_budget,
+        max_budget=to_usd_or_none(request.max_budget),
         budget_duration_sec=request.budget_duration_sec,
         reset_alignment=request.reset_alignment,
     )
@@ -187,8 +198,8 @@ async def list_budgets(
             select(
                 User.budget_id,
                 func.count(),
-                func.coalesce(func.sum(User.spend), 0.0),
-                func.coalesce(func.sum(User.reserved), 0.0),
+                func.coalesce(func.sum(User.spend), _ZERO),
+                func.coalesce(func.sum(User.reserved), _ZERO),
             )
             .where(User.budget_id.in_(page_ids), User.deleted_at.is_(None))
             .group_by(User.budget_id)
@@ -248,7 +259,7 @@ async def update_budget(
     if "name" in request.model_fields_set:
         budget.name = request.name
     if request.max_budget is not None:
-        budget.max_budget = request.max_budget
+        budget.max_budget = to_usd(request.max_budget)
     # The two cadence fields settle together, because each is only legal in terms
     # of the other: the pair that has to hold is the one the row ends up with, so
     # an omitted field contributes what is stored. Switching a rolling budget to a

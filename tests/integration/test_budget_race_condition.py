@@ -1,5 +1,12 @@
-"""Tests for budget enforcement behavior."""
+"""Tests for budget enforcement behavior.
 
+The counters are compared exactly rather than with ``pytest.approx``. They are
+``NUMERIC(18, 6)`` as of mozilla-ai/otari#691, so an exact comparison is the
+honest one, and it is also the only one that would notice a counter regressing
+to binary floating point: the drift is far too small for ``approx`` to see.
+"""
+
+from decimal import Decimal
 from typing import Any
 from unittest.mock import patch
 
@@ -100,8 +107,8 @@ async def test_reservation_accumulates_to_prevent_overspend(async_db: Any) -> No
     async_db.expire_all()
     user = await get_active_user(async_db, "resv-user")
     assert user is not None
-    assert user.reserved == pytest.approx(0.8)
-    assert user.spend == pytest.approx(9.0)
+    assert user.reserved == Decimal("0.8")
+    assert user.spend == Decimal("9.0")
 
 
 @pytest.mark.asyncio
@@ -114,14 +121,14 @@ async def test_reconcile_records_actual_cost_and_releases_hold(async_db: Any) ->
     handle = await reserve_budget(async_db, "rec-user", 5.0)
     async_db.expire_all()
     user = await get_active_user(async_db, "rec-user")
-    assert user is not None and user.reserved == pytest.approx(5.0)
+    assert user is not None and user.reserved == Decimal("5.0")
 
     await reconcile_reservation(async_db, handle, 3.0)
     async_db.expire_all()
     user = await get_active_user(async_db, "rec-user")
     assert user is not None
-    assert user.spend == pytest.approx(13.0)  # 10 + actual 3 (not the 5 estimate)
-    assert user.reserved == pytest.approx(0.0)
+    assert user.spend == Decimal("13.0")  # 10 + actual 3 (not the 5 estimate)
+    assert user.reserved == Decimal("0.0")
 
 
 @pytest.mark.asyncio
@@ -137,8 +144,8 @@ async def test_refund_releases_hold_without_charging(async_db: Any) -> None:
     async_db.expire_all()
     user = await get_active_user(async_db, "ref-user")
     assert user is not None
-    assert user.spend == pytest.approx(10.0)  # unchanged
-    assert user.reserved == pytest.approx(0.0)
+    assert user.spend == Decimal("10.0")  # unchanged
+    assert user.reserved == Decimal("0.0")
 
 
 def test_estimate_cost_clamps_negative_output_tokens() -> None:
@@ -147,7 +154,7 @@ def test_estimate_cost_clamps_negative_output_tokens() -> None:
     est = estimate_cost(pricing, prompt_chars=400, max_output_tokens=-1_000_000, default_output_tokens=1024)
     # Output term clamped to 0 → only the prompt contributes; never negative.
     assert est >= 0.0
-    assert est == pytest.approx((400 / 4 / 1_000_000) * 2.5)
+    assert est == Decimal("0.000250")
 
 
 @pytest.mark.asyncio
@@ -162,8 +169,8 @@ async def test_reserve_budget_clamps_negative_estimate(async_db: Any) -> None:
     async_db.expire_all()
     user = await get_active_user(async_db, "neg-user")
     assert user is not None
-    assert user.reserved == pytest.approx(4.0)  # unchanged — negative clamped to 0
-    assert user.spend == pytest.approx(10.0)
+    assert user.reserved == Decimal("4.0")  # unchanged: negative clamped to 0
+    assert user.spend == Decimal("10.0")
 
 
 @pytest.mark.asyncio
@@ -177,18 +184,18 @@ async def test_increase_reservation_grows_hold_and_folds_handle(async_db: Any) -
     await increase_reservation(async_db, handle, 7.0)
 
     # Delta folded into the handle so the single reconcile/refund covers it all.
-    assert handle.estimate == pytest.approx(12.0)
+    assert handle.estimate == Decimal("12.0")
     async_db.expire_all()
     user = await get_active_user(async_db, "inc-user")
-    assert user is not None and user.reserved == pytest.approx(12.0)
+    assert user is not None and user.reserved == Decimal("12.0")
 
     # Reconcile releases the full held amount.
     await reconcile_reservation(async_db, handle, 9.0)
     async_db.expire_all()
     user = await get_active_user(async_db, "inc-user")
     assert user is not None
-    assert user.reserved == pytest.approx(0.0)
-    assert user.spend == pytest.approx(19.0)  # 10 + actual 9
+    assert user.reserved == Decimal("0.0")
+    assert user.spend == Decimal("19.0")  # 10 + actual 9
 
 
 @pytest.mark.asyncio
@@ -214,13 +221,13 @@ async def test_increase_reservation_rejects_without_touching_original(async_db: 
     async_db.expire_all()
     user = await get_active_user(async_db, "incr-user")
     assert user is not None
-    assert user.reserved == pytest.approx(1.0)
-    assert user.spend == pytest.approx(8.0)
+    assert user.reserved == Decimal("1.0")
+    assert user.spend == Decimal("8.0")
 
     await refund_reservation(async_db, handle)
     async_db.expire_all()
     user = await get_active_user(async_db, "incr-user")
-    assert user is not None and user.reserved == pytest.approx(0.0)
+    assert user is not None and user.reserved == Decimal("0.0")
 
 
 @pytest.mark.asyncio
@@ -234,10 +241,10 @@ async def test_increase_reservation_noop_for_nonpositive_delta(async_db: Any) ->
     await increase_reservation(async_db, handle, 0.0)
     await increase_reservation(async_db, handle, -3.0)
 
-    assert handle.estimate == pytest.approx(5.0)
+    assert handle.estimate == Decimal("5.0")
     async_db.expire_all()
     user = await get_active_user(async_db, "incn-user")
-    assert user is not None and user.reserved == pytest.approx(5.0)
+    assert user is not None and user.reserved == Decimal("5.0")
 
 
 @pytest.mark.asyncio
@@ -253,5 +260,5 @@ async def test_reconcile_clamps_negative_cost(async_db: Any) -> None:
     async_db.expire_all()
     user = await get_active_user(async_db, "negc-user")
     assert user is not None
-    assert user.spend == pytest.approx(10.0)  # not reduced by the negative cost
-    assert user.reserved == pytest.approx(0.0)  # hold released
+    assert user.spend == Decimal("10.0")  # not reduced by the negative cost
+    assert user.reserved == Decimal("0.0")  # hold released

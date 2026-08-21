@@ -1,6 +1,7 @@
 """Dashboard-facing budget endpoints: per-budget usage rollup and reset history."""
 
 from datetime import UTC, datetime
+from decimal import Decimal
 
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, select
@@ -62,10 +63,10 @@ def test_budget_rollup_aggregates_assigned_users(
 
     # Seed spend/reserved directly; there is no API to set them without a live call.
     users = db_session.execute(select(User).where(User.budget_id == budget_id)).scalars().all()
-    users[0].spend = 10.0
-    users[0].reserved = 1.5
-    users[1].spend = 4.0
-    users[1].reserved = 0.5
+    users[0].spend = Decimal("10.0")
+    users[0].reserved = Decimal("1.5")
+    users[1].spend = Decimal("4.0")
+    users[1].reserved = Decimal("0.5")
     db_session.commit()
 
     # Single-budget aggregate.

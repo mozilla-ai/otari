@@ -18,6 +18,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_db, verify_master_key
 from gateway.models.entities import APIKey, Budget, ScopedBudget
+from gateway.models.money import as_float
 from gateway.models.tenancy import Organization, OrganizationMember, Workspace, WorkspaceMember
 
 # ``ScopeType`` comes from the service that resolves a scope, not from a copy
@@ -104,9 +105,11 @@ class ScopedBudgetResponse(BaseModel):
             provider_key_id=budget.provider_key_id,
             budget_id=budget.budget_id,
             name=budget.name,
-            max_budget=limit.max_budget,
-            current_spend=budget.current_spend,
-            reserved_spend=budget.reserved_spend,
+            # Narrowed on the way out: the cap and the counters are exact in the
+            # database, while the wire contract and the dashboard client stay float.
+            max_budget=as_float(limit.max_budget),
+            current_spend=float(budget.current_spend),
+            reserved_spend=float(budget.reserved_spend),
             budget_duration_sec=limit.budget_duration_sec,
             reset_alignment=limit.reset_alignment,
             period_start=budget.period_start.isoformat() if budget.period_start else None,

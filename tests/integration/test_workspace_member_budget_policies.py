@@ -10,6 +10,7 @@ services with identities built at whatever role a case needs.
 import asyncio
 import uuid
 from collections.abc import AsyncIterator
+from decimal import Decimal
 
 import pytest
 import pytest_asyncio
@@ -17,6 +18,7 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from gateway.models.entities import Budget, ScopedBudget, WorkspaceBudgetDefault
+from gateway.models.money import as_float
 from gateway.models.tenancy import (
     ActiveOrganizationMemberCreateRequest,
     Organization,
@@ -103,7 +105,7 @@ async def _limit(db: AsyncSession, ceiling: ScopedBudget) -> float | None:
     """
     budget = await db.get(Budget, ceiling.budget_id)
     assert budget is not None
-    return budget.max_budget
+    return as_float(budget.max_budget)
 
 
 async def _budget(
@@ -673,7 +675,7 @@ async def test_editing_a_budget_moves_every_ceiling_naming_it(async_db: AsyncSes
 
     budget = await async_db.get(Budget, budget_id)
     assert budget is not None
-    budget.max_budget = 250.0
+    budget.max_budget = Decimal("250.0")
     await async_db.commit()
 
     assert await _limit(async_db, ceiling) == 250.0, "an existing ceiling must follow the budget it names"

@@ -26,6 +26,7 @@ from __future__ import annotations
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import TYPE_CHECKING, Literal, get_args
 
 from sqlalchemy import and_, case, or_, select, update
@@ -48,6 +49,12 @@ if TYPE_CHECKING:
     from collections.abc import Sequence
 
     from sqlalchemy.ext.asyncio import AsyncSession
+
+# The counters on this table are ``NUMERIC(18, 6)`` (mozilla-ai/otari#691), so
+# the constants the SQL is built from are ``Decimal``: a bare ``0.0`` in a CASE
+# arm or a ``.values()`` would make PostgreSQL resolve the expression as double
+# precision and hand a binary-rounded amount back to an exact column.
+ZERO = Decimal(0)
 
 SCOPE_ORGANIZATION = "organization"
 SCOPE_WORKSPACE = "workspace"
@@ -237,7 +244,7 @@ async def _roll_expired_periods(
                 ScopedBudget.period_end <= now,
             )
             .values(
-                current_spend=0.0,
+                current_spend=ZERO,
                 period_start=period_start,
                 period_end=period_end,
             )
@@ -318,21 +325,21 @@ async def applicable_budgets(
     return tuple(resolved)
 
 
-def _release_expression(amount: float) -> object:
+def _release_expression(amount: Decimal) -> object:
     """Subtract ``amount`` from the hold, clamped at zero.
 
     CASE rather than GREATEST, matching the per-user release, because SQLite has
-    no GREATEST.
+    no GREATEST. Both arms are ``Decimal`` so the CASE resolves as ``numeric``.
     """
     return case(
-        (ScopedBudget.reserved_spend - amount < 0, 0.0),
+        (ScopedBudget.reserved_spend - amount < ZERO, ZERO),
         else_=ScopedBudget.reserved_spend - amount,
     )
 
 
-async def release(db: AsyncSession, budget_ids: Sequence[str], amount: float) -> None:
+async def release(db: AsyncSession, budget_ids: Sequence[str], amount: Decimal) -> None:
     """Give a held amount back to every ceiling that took it."""
-    if not budget_ids or amount <= 0:
+    if not budget_ids or amount <= ZERO:
         return
     await db.execute(
         update(ScopedBudget)
@@ -346,7 +353,7 @@ async def release(db: AsyncSession, budget_ids: Sequence[str], amount: float) ->
 async def reserve(
     db: AsyncSession,
     budgets: Sequence[ApplicableBudget],
-    amount: float,
+    amount: Decimal,
 ) -> ApplicableBudget | None:
     """Hold ``amount`` on every ceiling, or hold none and name the one that refused.
 
@@ -394,17 +401,17 @@ async def settle(
     db: AsyncSession,
     budget_ids: Sequence[str],
     *,
-    actual_cost: float,
-    held: float,
+    actual_cost: Decimal,
+    held: Decimal,
     counts_toward_budget: bool = True,
 ) -> None:
     """Record the real cost on every ceiling and release what the request held."""
     if not budget_ids:
         return
     values: dict[str, object] = {}
-    if actual_cost > 0 and counts_toward_budget:
+    if actual_cost > ZERO and counts_toward_budget:
         values["current_spend"] = ScopedBudget.current_spend + actual_cost
-    if held > 0:
+    if held > ZERO:
         values["reserved_spend"] = _release_expression(held)
     if not values:
         return

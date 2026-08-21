@@ -485,12 +485,26 @@ of the `cost` column on a usage row. That is the only rounding in the cost path:
 a charge below half a micro-dollar settles at zero, and one at or above it
 settles at one micro-dollar.
 
+The budget counters are exact at the same scale, so a user's spend is the sum of
+the rows that produced it, over any number of requests. That is the number a
+budget refusal is decided against: before, it accumulated a little floating-point
+error per request and carried it until the budget reset, so a limit could be
+enforced against an amount slightly off from what was actually spent.
+
+A budget limit is held at that scale too, so a cap you type is the cap that is
+enforced, and it tops out just under $1,000,000,000,000. The API refuses a larger
+one. If you were using a very large number to mean "no limit", leave `max_budget`
+unset instead, which is what an uncapped budget is.
+
 Upgrading an existing deployment converts the stored values in place. Rates
-convert exactly. Costs are rounded to the micro-dollar as they convert, so a
-historical row that recorded a fraction of a micro-dollar (a few tokens of a
+convert exactly, and so does a limit within that range: one above it stops the
+migration with a message naming the row, and one carrying more than six decimals
+is rounded like a cost. Costs are rounded to the micro-dollar as they convert, so
+a historical row that recorded a fraction of a micro-dollar (a few tokens of a
 cheap embedding model) settles to `0.000000`, and a deployment's lifetime spend
 total can move very slightly in either direction (under half a micro-dollar per
-row). The conversion is one way: downgrading restores the column type, not the
+row). An already-drifted spend counter converts to the amount it should have
+held. The conversion is one way: downgrading restores the column types, not the
 discarded digits.
 
 Exactness at rest needs PostgreSQL. SQLite, the default for a single-node

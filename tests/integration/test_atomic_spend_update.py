@@ -1,4 +1,12 @@
-"""Tests for atomic spend update via SQL expression in reconcile_reservation."""
+"""Tests for atomic spend update via SQL expression in reconcile_reservation.
+
+Compared exactly rather than within a tolerance: ``users.spend`` is
+``NUMERIC(18, 6)`` as of mozilla-ai/otari#691, so the sum of the settled amounts
+is the value, and a tolerance would keep passing on a counter that had gone back
+to binary floating point.
+"""
+
+from decimal import Decimal
 
 import pytest
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -16,19 +24,19 @@ async def test_spend_update_uses_sql_expression(async_db: AsyncSession) -> None:
     await async_db.commit()
 
     # actual_cost equivalent to the old log_usage computation:
-    # (1M / 1M) * 2.5 + (100K / 1M) * 10.0 = 2.5 + 1.0 = 3.5
-    actual_cost = 3.5
+    # (1M / 1M) * 2.5 + (100K / 1M) * 10.0 = 2.5 + 1.0 = 3.5, plus a
+    # micro-dollar tail so the assertion below is about the column's full scale.
+    actual_cost = Decimal("3.500001")
     await reconcile_reservation(
         async_db,
-        ReservationHandle(user_id="atomic-user", estimate=0.0, reserved=False, strategy="for_update"),
+        ReservationHandle(user_id="atomic-user", estimate=Decimal(0), reserved=False, strategy="for_update"),
         actual_cost,
     )
 
     await async_db.refresh(user)
     assert user is not None
 
-    expected_new_spend = 5.0 + 3.5
-    assert abs(user.spend - expected_new_spend) < 0.001, f"Expected spend {expected_new_spend}, got {user.spend}"
+    assert user.spend == Decimal("8.500001")
 
 
 @pytest.mark.asyncio
@@ -38,15 +46,18 @@ async def test_multiple_spend_updates_accumulate(async_db: AsyncSession) -> None
     async_db.add(user)
     await async_db.commit()
 
-    # Each call costs (1M/1M)*10 + (1M/1M)*10 = 20.0, x3 = 60.0
+    # Each call costs (1M/1M)*10 + (1M/1M)*10 = 20.0, plus a micro-dollar tail so
+    # three of them accumulate at the column's full scale rather than at a value
+    # a float would have carried unharmed. A float caller still reaches this
+    # function; ``test_budget_race_condition.py`` is where that path is covered.
     for _ in range(3):
         await reconcile_reservation(
             async_db,
-            ReservationHandle(user_id="multi-spend-user", estimate=0.0, reserved=False, strategy="for_update"),
-            20.0,
+            ReservationHandle(user_id="multi-spend-user", estimate=Decimal(0), reserved=False, strategy="for_update"),
+            Decimal("20.000001"),
         )
 
     await async_db.refresh(user)
     assert user is not None
 
-    assert abs(user.spend - 60.0) < 0.001, f"Expected spend 60.0, got {user.spend}"
+    assert user.spend == Decimal("60.000003")

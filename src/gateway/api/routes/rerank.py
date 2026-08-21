@@ -52,7 +52,7 @@ async def create_rerank(
     # Rerank bills on total tokens (input only). Estimate from query + documents.
     prompt_chars = len(request.query) + sum(len(doc) for doc in request.documents)
 
-    def estimate(pricing: ModelPricing | None) -> float:
+    def estimate(pricing: ModelPricing | None) -> Decimal:
         return estimate_cost(pricing, prompt_chars=prompt_chars, max_output_tokens=None, default_output_tokens=0)
 
     def usage_tokens(result: RerankResponse) -> tuple[int | None, int | None, int | None]:

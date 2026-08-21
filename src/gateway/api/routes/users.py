@@ -1,4 +1,5 @@
 from datetime import UTC, datetime
+from decimal import Decimal
 from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -149,7 +150,7 @@ async def create_user(
     if existing_user and existing_user.deleted_at is not None:
         user = existing_user
         user.deleted_at = None
-        user.spend = 0.0
+        user.spend = Decimal(0)
         user.alias = request.alias
         user.budget_id = request.budget_id
         user.blocked = request.blocked

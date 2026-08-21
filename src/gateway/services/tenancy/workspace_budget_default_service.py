@@ -33,6 +33,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
 from gateway.models.entities import Budget, ScopedBudget, WorkspaceBudgetDefault
+from gateway.models.money import as_float
 from gateway.models.tenancy import User, Workspace, WorkspaceMember
 from gateway.repositories.tenancy import WorkspaceMemberRepository, WorkspaceRepository
 from gateway.services.budget_periods import period_window
@@ -116,7 +117,9 @@ class WorkspaceMemberBudgetPolicyPublic(BaseModel):
             budget_id=default.budget_id,
             provider_key_id=default.provider_key_id,
             name=budget.name,
-            max_budget=budget.max_budget,
+            # Narrowed on the way out: the cap is exact in the database, while
+            # the wire contract and the dashboard client stay float.
+            max_budget=as_float(budget.max_budget),
             budget_duration_sec=budget.budget_duration_sec,
             created_at=default.created_at.isoformat(),
             updated_at=default.updated_at.isoformat(),

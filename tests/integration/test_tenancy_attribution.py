@@ -10,6 +10,7 @@ rather than minting a second or resurrecting a clean one.
 
 import uuid
 from collections.abc import Callable
+from decimal import Decimal
 from typing import Any
 
 from fastapi.testclient import TestClient
@@ -144,7 +145,7 @@ def test_re_adding_revives_a_soft_deleted_row_without_clearing_its_spend(
     try:
         row = session.get(GatewayUser, attribution_user_id)
         assert row is not None
-        row.spend = 12.5
+        row.spend = Decimal("12.5")
         session.commit()
     finally:
         session.close()

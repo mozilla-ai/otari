@@ -55,9 +55,8 @@ async def create_image(
     # `is None` (not `or`) so an explicit n=0 isn't silently treated as 1.
     requested_images = request.n if request.n is not None else 1
 
-    def estimate(pricing: ModelPricing | None) -> float:
-        # The reservation ledger is float; the settled amount below is not.
-        return float(per_image_cost(requested_images, pricing)) if pricing else 0.0
+    def estimate(pricing: ModelPricing | None) -> Decimal:
+        return per_image_cost(requested_images, pricing) if pricing else Decimal(0)
 
     def compute_cost(result: ImagesResponse, pricing: ModelPricing | None) -> Decimal | None:
         if pricing is None:

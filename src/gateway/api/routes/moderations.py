@@ -75,9 +75,8 @@ async def create_moderation(
     def compute_meters(result: ModerationResponse, pricing: ModelPricing | None, cost: Decimal) -> BillingMeters | None:
         return per_request_meters(cost)
 
-    def estimate(pricing: ModelPricing | None) -> float:
-        # The reservation ledger is float; the settled cost above stays exact.
-        return float(flat_request_cost(pricing))
+    def estimate(pricing: ModelPricing | None) -> Decimal:
+        return flat_request_cost(pricing)
 
     def usage_tokens(result: ModerationResponse) -> tuple[int | None, int | None, int | None]:
         return (None, 0, None)

@@ -17,6 +17,7 @@ from gateway.core.metered_pricing import estimate_metered_cost
 from gateway.log_config import logger
 from gateway.metrics import record_budget_exceeded
 from gateway.models.entities import Budget, BudgetResetLog, ModelPricing, User
+from gateway.models.money import to_usd
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.budget_periods import budget_window
 from gateway.services.pricing_service import find_model_pricing
@@ -30,6 +31,12 @@ from gateway.services.scoped_budget_service import release as release_scoped
 from gateway.services.scoped_budget_service import reserve as reserve_scoped
 from gateway.services.scoped_budget_service import settle as settle_scoped
 from gateway.types.budget_state import BudgetState
+
+# Every counter in this module is a ``NUMERIC(18, 6)`` column, so the constants
+# the SQL is built from are ``Decimal`` too. A bare ``0.0`` in a CASE arm or a
+# ``.values()`` would make PostgreSQL resolve the whole expression as double
+# precision and hand a binary-rounded amount back to an exact column.
+ZERO = Decimal(0)
 
 
 async def _cas_reset_user_budget(db: AsyncSession, user: User, budget: Budget, now: datetime) -> User:
@@ -48,7 +55,7 @@ async def _cas_reset_user_budget(db: AsyncSession, user: User, budget: Budget, n
             User.next_budget_reset_at <= now,
         )
         .values(
-            spend=0.0,
+            spend=ZERO,
             # The window's start, not ``now``: an aligned budget rolled late
             # belongs to the period it is in, not to the moment it was noticed.
             budget_started_at=started_at,
@@ -66,7 +73,7 @@ async def _cas_reset_user_budget(db: AsyncSession, user: User, budget: Budget, n
         reset_log = BudgetResetLog(
             user_id=user_id_str,
             budget_id=budget.budget_id,
-            previous_spend=float(user.spend),
+            previous_spend=user.spend,
             reset_at=now,
             next_reset_at=next_reset_at,
         )
@@ -113,7 +120,10 @@ async def get_budget_state(db: AsyncSession, user_id: str) -> BudgetState:
     spend, reserved, max_budget = row
     if max_budget is None or max_budget <= 0:
         return BudgetState()
-    committed = float(spend or 0.0) + float(reserved or 0.0)
+    # Narrowed deliberately: ``BudgetState`` feeds a routing policy's percentage
+    # and headroom conditions, which are thresholds rather than accounting, and
+    # the compiler that reads them is float throughout.
+    committed = float(spend or 0) + float(reserved or 0)
     return BudgetState(
         used_pct=committed / float(max_budget) * 100.0,
         remaining_usd=max(0.0, float(max_budget) - committed),
@@ -183,7 +193,7 @@ class ReservationHandle:
     """
 
     user_id: str
-    estimate: float
+    estimate: Decimal
     reserved: bool
     strategy: str
     # When false, reconciliation records the usage row's cost but does NOT write it
@@ -196,7 +206,7 @@ class ReservationHandle:
     # passes no scope, which is what keeps every pre-existing construction site
     # (an empty handle for external spend, the vision side-call) inert here.
     scoped_budgets: tuple[ApplicableBudget, ...] = ()
-    scoped_estimate: float = 0.0
+    scoped_estimate: Decimal = ZERO
 
     @property
     def scoped_budget_ids(self) -> tuple[str, ...]:
@@ -211,7 +221,7 @@ def estimate_cost(
     max_output_tokens: int | None,
     default_output_tokens: int,
     cache_write_ttl: Literal["5m", "1h"] | None = None,
-) -> float:
+) -> Decimal:
     """Estimate request cost up front for budget pre-debit.
 
     There is no tokenizer in the gateway, so prompt tokens are approximated as
@@ -224,7 +234,7 @@ def estimate_cost(
     reconciled to actual usage on completion.
     """
     if pricing is None:
-        return 0.0
+        return ZERO
     # Whole tokens, rounded up: a fraction of a token is not billable, and the
     # estimate is an upper bound, so the fraction rounds towards the gateway.
     prompt_tokens = (max(prompt_chars, 0) + 3) // 4
@@ -233,25 +243,24 @@ def estimate_cost(
     # so a hostile max_output_tokens can't produce a negative estimate.
     output_tokens = max_output_tokens if max_output_tokens is not None else default_output_tokens
     output_tokens = max(output_tokens, 0)
-    # Narrowed to float here, once: the reservation counters (``users.reserved``,
-    # ``scoped_budgets.reserved_spend``) are float columns, and converting the
-    # budget ledger is not this change (mozilla-ai/otari#661 covers the rate and
-    # the settled row). The estimate is a held upper bound that is reconciled
-    # against an exact settled cost, so the conversion cannot reach accounting.
-    return float(
-        estimate_metered_cost(
-            pricing,
-            estimated_input_tokens=prompt_tokens,
-            estimated_output_tokens=output_tokens,
-            cache_write_ttl=cache_write_ttl,
-        )
+    # Stays ``Decimal``: the estimate is an upper bound reconciled against an
+    # exact settlement and so *could* be narrowed here, but on the
+    # stream-without-usage path it is what ``log_usage`` settles the row at
+    # (``cost_override=reservation.estimate``), which makes it accounting after
+    # all. Keeping it exact also means the amount released is the amount held
+    # (mozilla-ai/otari#691).
+    return estimate_metered_cost(
+        pricing,
+        estimated_input_tokens=prompt_tokens,
+        estimated_output_tokens=output_tokens,
+        cache_write_ttl=cache_write_ttl,
     )
 
 
 async def reserve_budget(
     db: AsyncSession,
     user_id: str,
-    estimate: float,
+    estimate: Decimal | float,
     *,
     model: str | None = None,
     pricing_provider: str | None = None,
@@ -286,10 +295,15 @@ async def reserve_budget(
     The returned handle must be passed to :func:`reconcile_reservation` (success)
     or :func:`refund_reservation` (failure) so the reservation does not leak.
     """
+    # Widened once, here, so every expression below is exact whatever the caller
+    # handed in: a route that estimates a flat dollar amount still passes a float,
+    # and in PostgreSQL a float added to a NUMERIC column resolves the whole
+    # expression as double precision.
+    #
     # Defense-in-depth: estimates derive from client-controlled fields (max
     # tokens, image count). A negative estimate would *reduce* users.reserved and
     # weaken the budget gate, so never let one reach the DB.
-    estimate = max(estimate, 0.0)
+    held = max(to_usd(estimate), ZERO)
     normalized = _normalize_strategy(strategy)
     user = await get_active_user(db, user_id, for_update=False)
 
@@ -311,13 +325,13 @@ async def reserve_budget(
     if not counts_toward_budget:
         return ReservationHandle(
             user_id=user_id,
-            estimate=0.0,
+            estimate=ZERO,
             reserved=False,
             strategy=normalized,
             counts_toward_budget=False,
         )
 
-    no_reservation = ReservationHandle(user_id=user_id, estimate=0.0, reserved=False, strategy=normalized)
+    no_reservation = ReservationHandle(user_id=user_id, estimate=ZERO, reserved=False, strategy=normalized)
 
     if normalized == "disabled":
         return no_reservation
@@ -348,7 +362,7 @@ async def reserve_budget(
         return no_reservation
 
     if scoped:
-        refused = await reserve_scoped(db, scoped, estimate)
+        refused = await reserve_scoped(db, scoped, held)
         if refused is not None:
             record_budget_exceeded()
             raise HTTPException(
@@ -361,11 +375,11 @@ async def reserve_budget(
         # returned above), so the user leg of the handle is deliberately empty.
         return ReservationHandle(
             user_id=user_id,
-            estimate=0.0,
+            estimate=ZERO,
             reserved=False,
             strategy=normalized,
             scoped_budgets=scoped,
-            scoped_estimate=estimate,
+            scoped_estimate=held,
         )
 
     if budget.max_budget is None:
@@ -374,17 +388,17 @@ async def reserve_budget(
         await db.execute(
             update(User)
             .where(User.user_id == user_id, User.deleted_at.is_(None))
-            .values(reserved=User.reserved + estimate)
+            .values(reserved=User.reserved + held)
             .execution_options(synchronize_session=False)
         )
         await db.commit()
         return ReservationHandle(
             user_id=user_id,
-            estimate=estimate,
+            estimate=held,
             reserved=True,
             strategy=normalized,
             scoped_budgets=scoped,
-            scoped_estimate=estimate if scoped else 0.0,
+            scoped_estimate=held if scoped else ZERO,
         )
 
     result = await db.execute(
@@ -397,9 +411,9 @@ async def reserve_budget(
             # requests like audio for a maxed-out user).
             User.spend + User.reserved < budget.max_budget,
             # ...and this request must not push committed spend past the cap.
-            User.spend + User.reserved + estimate <= budget.max_budget,
+            User.spend + User.reserved + held <= budget.max_budget,
         )
-        .values(reserved=User.reserved + estimate)
+        .values(reserved=User.reserved + held)
         .execution_options(synchronize_session=False)
     )
     await db.commit()
@@ -409,7 +423,7 @@ async def reserve_budget(
         # The scoped ceilings admitted this request and are already holding the
         # estimate, so give it back before rejecting. Without this the holds would
         # leak on every per-user refusal and permanently shrink each ceiling.
-        await release_scoped(db, [item.budget_id for item in scoped], estimate)
+        await release_scoped(db, [item.budget_id for item in scoped], held)
         raise HTTPException(
             status_code=status.HTTP_403_FORBIDDEN,
             detail=f"User '{user_id}' has exceeded budget limit",
@@ -417,21 +431,24 @@ async def reserve_budget(
 
     return ReservationHandle(
         user_id=user_id,
-        estimate=estimate,
+        estimate=held,
         reserved=True,
         strategy=normalized,
         scoped_budgets=scoped,
-        scoped_estimate=estimate if scoped else 0.0,
+        scoped_estimate=held if scoped else ZERO,
     )
 
 
-def _release_reserved(estimate: float) -> object:
+def _release_reserved(estimate: Decimal) -> object:
     """Column expression that subtracts ``estimate`` from reserved, clamped at 0.
 
-    Uses CASE rather than GREATEST for SQLite compatibility.
+    Uses CASE rather than GREATEST for SQLite compatibility. Both arms are
+    ``Decimal`` so the CASE resolves as ``numeric``: a bare ``0.0`` in the
+    clamp arm would make PostgreSQL type the whole expression ``double
+    precision`` and round-trip the untouched amount through a binary float.
     """
     return case(
-        (User.reserved - estimate < 0, 0.0),
+        (User.reserved - estimate < ZERO, ZERO),
         else_=User.reserved - estimate,
     )
 
@@ -451,10 +468,12 @@ async def reconcile_reservation(db: AsyncSession, handle: ReservationHandle, act
     reservation). Runs inline in the request, not in the (possibly batched) log
     writer, so the next request's reservation sees fresh totals.
     """
-    # The settled cost arrives exact and is narrowed here, at the one place it
-    # meets the float spend counters (see :func:`estimate_cost`). Never let a
-    # negative cost reduce recorded spend.
-    spent = max(float(actual_cost), 0.0)
+    # The settled cost reaches ``users.spend`` unchanged: both are exact to the
+    # micro-dollar, so the sum of a user's rows is the counter a 403 is decided
+    # against. A caller still holding a float (an imported amount, a platform
+    # report) is widened rather than the counter narrowed. Never let a negative
+    # cost reduce recorded spend.
+    spent = max(to_usd(actual_cost), ZERO)
     values: dict[str, object] = {}
     # Budget-exempt rows are recorded (their cost still lands on the usage row) but
     # never fold into users.spend, so they cannot gate a later request. Gating the
@@ -499,7 +518,7 @@ async def record_external_spend(db: AsyncSession, user_id: str, cost: Decimal | 
     to resolve a workspace or a provider from, so folding the cost in would have
     to guess which ceilings it belonged to.
     """
-    handle = ReservationHandle(user_id=user_id, estimate=0.0, reserved=False, strategy="disabled")
+    handle = ReservationHandle(user_id=user_id, estimate=ZERO, reserved=False, strategy="disabled")
     await reconcile_reservation(db, handle, cost)
 
 
@@ -520,7 +539,7 @@ async def refund_reservation(db: AsyncSession, handle: ReservationHandle) -> Non
 async def increase_reservation(
     db: AsyncSession,
     handle: ReservationHandle,
-    additional_estimate: float,
+    additional_estimate: Decimal | float,
     *,
     model: str | None = None,
     strategy: str = "for_update",
@@ -543,7 +562,8 @@ async def increase_reservation(
     took, not re-resolved: the request scope has not changed, and re-resolving
     would risk holding twice against a ceiling that appeared in between.
     """
-    if additional_estimate <= 0:
+    additional = to_usd(additional_estimate)
+    if additional <= ZERO:
         return
     # A budget-exempt request never grows a reservation: there is nothing to hold and
     # nothing to gate. Without this, the top-up path would silently re-enter the
@@ -551,17 +571,17 @@ async def increase_reservation(
     if not handle.counts_toward_budget:
         return
     if handle.scoped_budgets:
-        refused = await reserve_scoped(db, handle.scoped_budgets, additional_estimate)
+        refused = await reserve_scoped(db, handle.scoped_budgets, additional)
         if refused is not None:
             record_budget_exceeded()
             raise HTTPException(
                 status_code=status.HTTP_403_FORBIDDEN,
                 detail=f"{refused.subject} has exceeded budget limit",
             )
-        handle.scoped_estimate += additional_estimate
+        handle.scoped_estimate += additional
     # No scope is passed through: the scoped ceilings were just grown above, and
     # letting the inner call resolve them again would hold the delta twice.
-    delta = await reserve_budget(db, handle.user_id, additional_estimate, model=model, strategy=strategy)
+    delta = await reserve_budget(db, handle.user_id, additional, model=model, strategy=strategy)
     if delta.reserved:
         handle.estimate += delta.estimate
         handle.reserved = True

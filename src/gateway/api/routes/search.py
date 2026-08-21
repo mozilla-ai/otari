@@ -317,8 +317,7 @@ async def _dispatch_search(
     reservation = await reserve_budget(
         db,
         user_id,
-        # The reservation ledger is float; the settled cost below stays exact.
-        float(flat_request_cost(pricing)),
+        flat_request_cost(pricing),
         # Deliberately not the pricing key: ``model`` exists only to drive
         # reserve_budget's free-model shortcut, which splits the string through
         # any-llm. A search tool is not an any-llm model, so passing it logs a

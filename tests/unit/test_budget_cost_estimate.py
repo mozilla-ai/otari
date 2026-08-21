@@ -1,11 +1,26 @@
-"""Unit tests for threshold-aware budget reservation estimates."""
+"""Unit tests for threshold-aware budget reservation estimates.
 
+Compared exactly: the estimate is a ``Decimal`` quantized to the micro-dollar
+(mozilla-ai/otari#691), so the expected amount is spelled as the arithmetic that
+produces it rather than approximated. ``pytest.approx`` here would pass on an
+estimate that had gone back to binary floating point.
+"""
+
+from decimal import Decimal
 from typing import Any
-
-import pytest
 
 from gateway.models.entities import ModelPricing
 from gateway.services.budget_service import estimate_cost
+
+
+def _micro_dollars(*terms: Decimal | int) -> Decimal:
+    """The USD total of per-million-token charges, exactly.
+
+    Each term is ``tokens * rate``, which the cost core divides by a million
+    once. Written this way so the expected value stays the arithmetic under
+    test rather than a constant somebody would have to re-derive.
+    """
+    return sum((Decimal(term) for term in terms), Decimal(0)) / 1_000_000
 
 
 def _pricing(**overrides: Any) -> ModelPricing:
@@ -37,7 +52,7 @@ def test_estimate_cost_uses_base_rates_below_context_threshold() -> None:
         default_output_tokens=1_024,
     )
 
-    assert estimate == pytest.approx((199_999 * 3.0 + 100 * 15.0) / 1_000_000)
+    assert estimate == _micro_dollars(199_999 * 3, 100 * 15)
 
 
 def test_estimate_cost_uses_context_tier_for_all_meters_at_threshold() -> None:
@@ -48,7 +63,7 @@ def test_estimate_cost_uses_context_tier_for_all_meters_at_threshold() -> None:
         default_output_tokens=1_024,
     )
 
-    assert estimate == pytest.approx((200_000 * 6.0 + 100 * 22.5) / 1_000_000)
+    assert estimate == _micro_dollars(200_000 * 6, Decimal(100) * Decimal("22.5"))
 
 
 def test_estimate_cost_reserves_explicit_cache_write_at_the_write_rate() -> None:
@@ -62,7 +77,7 @@ def test_estimate_cost_reserves_explicit_cache_write_at_the_write_rate() -> None
 
     # Any prompt token could become a 5m cache write, so the input side is
     # reserved at the (dearer) cache-write rate rather than stacked on top of it.
-    assert estimate == pytest.approx((1_000 * 3.75 + 100 * 15.0) / 1_000_000)
+    assert estimate == _micro_dollars(Decimal(1_000) * Decimal("3.75"), 100 * 15)
 
 
 def test_estimate_cost_reserves_cache_write_using_the_context_tier() -> None:
@@ -76,7 +91,7 @@ def test_estimate_cost_reserves_cache_write_using_the_context_tier() -> None:
 
     # The estimated input alone crosses the tier, so the tier's write and output
     # rates apply; the tier is selected from the real billable total, not double.
-    assert estimate == pytest.approx((200_000 * 7.5 + 100 * 22.5) / 1_000_000)
+    assert estimate == _micro_dollars(Decimal(200_000) * Decimal("7.5"), Decimal(100) * Decimal("22.5"))
 
 
 def test_estimate_cost_uses_requested_one_hour_cache_write_rate() -> None:
@@ -88,7 +103,7 @@ def test_estimate_cost_uses_requested_one_hour_cache_write_rate() -> None:
         cache_write_ttl="1h",
     )
 
-    assert estimate == pytest.approx(1_000 * 6.0 / 1_000_000)
+    assert estimate == _micro_dollars(1_000 * 6)
 
 
 def test_estimate_cost_falls_back_to_input_when_cache_write_is_unpriced() -> None:
@@ -100,7 +115,7 @@ def test_estimate_cost_falls_back_to_input_when_cache_write_is_unpriced() -> Non
         cache_write_ttl="1h",
     )
 
-    assert estimate == pytest.approx(1_000 * 3.0 / 1_000_000)
+    assert estimate == _micro_dollars(1_000 * 3)
 
 
 def test_estimate_cost_preserves_a_free_cache_write_rate() -> None:
@@ -112,4 +127,4 @@ def test_estimate_cost_preserves_a_free_cache_write_rate() -> None:
         cache_write_ttl="1h",
     )
 
-    assert estimate == pytest.approx(1_000 * 3.0 / 1_000_000)
+    assert estimate == _micro_dollars(1_000 * 3)

@@ -19,6 +19,7 @@ import re
 import time
 import uuid
 from collections.abc import AsyncIterator
+from decimal import Decimal
 from typing import Any, cast
 
 import pytest
@@ -279,7 +280,7 @@ def _chunk(usage: CompletionUsage | None = None) -> ChatCompletionChunk:
     )
 
 
-def _reservation(estimate: float = 0.5) -> ReservationHandle:
+def _reservation(estimate: Decimal = Decimal("0.5")) -> ReservationHandle:
     return ReservationHandle(user_id="user-1", estimate=estimate, reserved=True, strategy="for_update")
 
 
@@ -1359,7 +1360,7 @@ async def test_standalone_non_stream_marks_budget_exempt_rows(monkeypatch: pytes
     settlement.install(monkeypatch)
 
     exempt = ReservationHandle(
-        user_id="user-1", estimate=0.0, reserved=False, strategy="for_update", counts_toward_budget=False
+        user_id="user-1", estimate=Decimal(0), reserved=False, strategy="for_update", counts_toward_budget=False
     )
     await _run_standalone(monkeypatch, result=_completion(usage=_usage()), reservation=exempt)
 

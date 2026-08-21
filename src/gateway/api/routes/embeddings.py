@@ -51,7 +51,7 @@ async def create_embedding(
     # Embeddings have no generated output, so only the prompt contributes cost.
     prompt_chars = sum(len(s) for s in request.input) if isinstance(request.input, list) else len(request.input)
 
-    def estimate(pricing: ModelPricing | None) -> float:
+    def estimate(pricing: ModelPricing | None) -> Decimal:
         return estimate_cost(pricing, prompt_chars=prompt_chars, max_output_tokens=None, default_output_tokens=0)
 
     def usage_tokens(result: CreateEmbeddingResponse) -> tuple[int | None, int | None, int | None]:
