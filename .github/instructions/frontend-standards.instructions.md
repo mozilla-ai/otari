@@ -20,12 +20,16 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
 
 2. **Variables and props over hand-written CSS.** Start from a HeroUI component or a shared
    primitive rather than a native element, which arrives with the tokens and its states
-   (pointer, focus ring, disabled dimming) already wired. Then four ways to change how it
-   looks, in order: a variable (ours as a token, or one of HeroUI's own aliased onto ours;
+   (pointer, focus ring, disabled dimming) already wired. A native element is sometimes the
+   right call anyway (a nav row has to be the router's `Link`), and then those states become
+   classes the call site names itself, so `cursor-pointer` on a bare `<button>` is correct
+   rather than a finding. Then four ways to change how it looks, in order: a variable (ours
+   as a token, or one of HeroUI's own aliased onto ours;
    `--radius` drives its whole radius ramp, and `--cursor-interactive`, `--disabled-opacity`
    and the rest are in `@heroui/styles/dist/themes/`, none of them aliased in `globals.css`
-   yet), a shared utility once the look repeats, the component's own prop (`variant`, `size`,
-   `isDisabled`, `isPending`, `fullWidth`, `isInvalid`), and only then a rule against HeroUI's
+   yet, and the alias goes there rather than into a class string of ours), a shared utility
+   once the look repeats, the component's own prop (`variant`, `size`, `isDisabled`,
+   `isPending`, `fullWidth`, `isInvalid`), and only then a rule against HeroUI's
    own classes under the `.otari-*` namespace. HeroUI and Tailwind both permit that last one and
    it stays discouraged here, so the finding is not that it is forbidden but that a rung above
    reaches the value: a rule like `.otari-table .table__cell` or
