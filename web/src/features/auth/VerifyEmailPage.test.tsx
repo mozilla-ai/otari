@@ -15,11 +15,14 @@ function renderPage(hash: string) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  return render(
-    <QueryClientProvider client={client}>
-      <VerifyEmailPage hash={hash} />
-    </QueryClientProvider>,
-  )
+  return {
+    client,
+    ...render(
+      <QueryClientProvider client={client}>
+        <VerifyEmailPage hash={hash} />
+      </QueryClientProvider>,
+    ),
+  }
 }
 
 beforeEach(() => {
@@ -75,10 +78,12 @@ describe("VerifyEmailPage", () => {
   it("re-renders without re-verifying", async () => {
     vi.mocked(apiFetch).mockResolvedValue({ email: "ada@example.com" } as never)
 
-    const { rerender } = renderPage("#/verify-email?token=abc123")
+    // The same client across both renders. Handing the second one a fresh
+    // QueryClient would throw away the cache that is the thing under test.
+    const { client, rerender } = renderPage("#/verify-email?token=abc123")
     await screen.findByRole("heading", { name: "Email verified" })
     rerender(
-      <QueryClientProvider client={new QueryClient()}>
+      <QueryClientProvider client={client}>
         <VerifyEmailPage hash="#/verify-email?token=abc123" />
       </QueryClientProvider>,
     )
@@ -106,12 +111,19 @@ describe("VerifyEmailPage", () => {
     ).toHaveAttribute("href", "#/resend-verification")
   })
 
-  it("asks the gateway nothing when the link carries no token", () => {
-    renderPage("#/verify-email")
+  it.each(["#/verify-email", "#/verify-email?token="])(
+    "asks the gateway nothing when %s carries no token",
+    (hash) => {
+      // The truncated form is the one that used to strand: an empty string is
+      // not null, so the missing-token branch was skipped, and it is not a
+      // non-empty token either, so the query stayed disabled and the page sat
+      // on "Confirming your address…" forever having asked nothing.
+      renderPage(hash)
 
-    expect(
-      screen.getByText(/missing its verification token/),
-    ).toBeInTheDocument()
-    expect(apiFetch).not.toHaveBeenCalled()
-  })
+      expect(
+        screen.getByText(/missing its verification token/),
+      ).toBeInTheDocument()
+      expect(apiFetch).not.toHaveBeenCalled()
+    },
+  )
 })

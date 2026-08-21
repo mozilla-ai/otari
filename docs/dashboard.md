@@ -541,9 +541,13 @@ address from the sign-in screen instead, through **Added to this gateway?
 Claim your account**, and confirms it by following the emailed link. The
 address they are added by is the handle that claims it. **Forgot your
 password?** on the same screen mails a reset link. Both need this deployment
-to be able to send mail; with none configured the links are absent, and the
-way in is [Access control](access-control.md#dashboard-sessions-and-identity)'s
-master-key recovery.
+to be able to send mail, and with none configured the links are absent and
+neither flow has a fallback: a member cannot claim an address or recover a
+password on a gateway that cannot mail them a link. The master-key recovery in
+[Access control](access-control.md#dashboard-sessions-and-identity) is not that
+fallback, because `PUT /v1/auth/password` always acts on the caller's own
+identity: it is how the operator gets back in, and it sets nobody else's
+password. Configure mail before you expect members to sign in.
 
 ### People & access
 

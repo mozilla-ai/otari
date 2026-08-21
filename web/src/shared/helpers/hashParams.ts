@@ -14,5 +14,11 @@
 
 /** The `token` in `#/verify-email?token=…`, or null if the link is malformed. */
 export function tokenFromHash(hash: string): string | null {
-  return new URLSearchParams(hash.split("?")[1] ?? "").get("token")
+  const token = new URLSearchParams(hash.split("?")[1] ?? "").get("token")
+  // A truncated link (`?token=` with nothing after it) is malformed, not a
+  // token of length zero, and the difference is a page that strands. Every
+  // caller branches on null to say "this link carries nothing to act on", and
+  // gates its request on a non-empty string; an empty string satisfies neither,
+  // so the page would sit on its loading line forever having asked nothing.
+  return token === "" ? null : token
 }

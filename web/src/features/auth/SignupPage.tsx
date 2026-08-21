@@ -54,7 +54,7 @@ export function SignupPage() {
 
   // A refusal describes a call that is no longer the one being made, so typing
   // clears it. Never while one is in flight: `reset()` returns the observer to
-  // idle without cancelling the request, so clearing mid-call would drop the
+  // idle without canceling the request, so clearing mid-call would drop the
   // `isPending` that `submit` guards on and let a keystroke start a second one.
   const clearError = () => {
     if (signup.isPending) {

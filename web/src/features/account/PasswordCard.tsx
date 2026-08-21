@@ -124,7 +124,7 @@ export function PasswordCard() {
   // is no longer the one being made, so typing clears them together.
   //
   // Never while one is in flight. `reset()` returns the observer to idle
-  // without cancelling the request, so resetting mid-call would clear the
+  // without canceling the request, so resetting mid-call would clear the
   // `isPending` that `submit` guards on and let a keystroke reopen the form to
   // a second, concurrent password change.
   const clearResult = () => {

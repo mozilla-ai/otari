@@ -14,5 +14,11 @@ describe("tokenFromHash", () => {
     expect(tokenFromHash("#/verify-email")).toBeNull()
     expect(tokenFromHash("#/verify-email?other=1")).toBeNull()
     expect(tokenFromHash("")).toBeNull()
+    // A truncated link, which `URLSearchParams` reports as "" rather than
+    // null. Answered as malformed, because every caller reads null as "this
+    // link carries nothing" and gates its request on a non-empty string: an
+    // empty string satisfies neither and strands the page on its loading line.
+    expect(tokenFromHash("#/verify-email?token=")).toBeNull()
+    expect(tokenFromHash("#/accept-invitation?token=")).toBeNull()
   })
 })

@@ -102,6 +102,15 @@ describe("ResetPasswordPage", () => {
     expect(
       screen.getByRole("link", { name: "Request a new reset link" }),
     ).toHaveAttribute("href", "#/recover-password")
+
+    // The refusal describes a call that is no longer the one being made.
+    await user.type(screen.getByLabelText("New password", { exact: true }), "x")
+
+    expect(
+      screen.queryByText(
+        "This password reset link is invalid, expired, or already used",
+      ),
+    ).toBeNull()
   })
 
   it("says there is nothing to set when the link carries no token", () => {
