@@ -5264,6 +5264,94 @@
     {
       "item": [
         {
+          "name": "Get Workspace Activation",
+          "request": {
+            "description": "Where a workspace stands on its first successful request.\n\nReadable by any member who can see the workspace. Whether the guide should\nactually be offered to this caller is ``experience_eligible``, which also\nanswers false when the deployment has the flow turned off\n(``activation_guide``), so a dashboard left open stops offering it without\nneeding to be reloaded.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "activation"
+              ],
+              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/activation",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Dismiss Workspace Activation",
+          "request": {
+            "description": "Retire the guide for this workspace. Permanent, and idempotent.\n\nWorkspace owners and admins only. The key the guide issued is deactivated on\nthe way out unless it has already served a request, in which case it is\nsomebody's working integration and is left alone.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "activation",
+                "dismiss"
+              ],
+              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/activation/dismiss",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Create Workspace Activation Key",
+          "request": {
+            "description": "Issue the workspace's setup API key, rotating the one the guide already issued.\n\nWorkspace owners and admins only, like every other action that changes a\nworkspace. The plaintext is returned once and never stored, so a reopened\nguide rotates the same key row rather than collecting a second one, and\nanswers 409 once the workspace has activated or the guide was dismissed.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "activation",
+                "key"
+              ],
+              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/activation/key",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "workspace-activation"
+    },
+    {
+      "item": [
+        {
           "name": "List Workspace Budget Defaults",
           "request": {
             "description": "List the budget defaults attached to a workspace. Any member may read it.",

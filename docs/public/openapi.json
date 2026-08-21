@@ -33,6 +33,145 @@
         "title": "AcceptInvitationResultPublic",
         "type": "object"
       },
+      "ActivationApiKeyPublic": {
+        "description": "The API key the guide hands out, with its plaintext.\n\nReturned once per call and never stored in plaintext, like every other key\nthis gateway mints: a page reload issues a new one and rotates the same row,\nwhich is what makes the guide able to show a working key without keeping a\nreadable secret anywhere.",
+        "properties": {
+          "key": {
+            "title": "Key",
+            "type": "string"
+          },
+          "key_id": {
+            "title": "Key Id",
+            "type": "string"
+          },
+          "key_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Name"
+          },
+          "key_prefix": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Prefix"
+          }
+        },
+        "required": [
+          "key",
+          "key_id",
+          "key_prefix",
+          "key_name"
+        ],
+        "title": "ActivationApiKeyPublic",
+        "type": "object"
+      },
+      "ActivationAttemptPublic": {
+        "description": "One gateway request in this workspace, as the guide reports it.",
+        "properties": {
+          "cost_usd": {
+            "anyOf": [
+              {
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Cost Usd"
+          },
+          "error_category": {
+            "anyOf": [
+              {
+                "enum": [
+                  "invalid_request",
+                  "configuration",
+                  "policy",
+                  "upstream",
+                  "timeout",
+                  "internal"
+                ],
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What kind of failure this was, for a failed attempt only. The dashboard renders its own sentence per category; the provider's own error text is never returned here.",
+            "title": "Error Category"
+          },
+          "latency_ms": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Latency Ms"
+          },
+          "model": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Model the request named.",
+            "title": "Model"
+          },
+          "occurred_at": {
+            "description": "When the request was recorded, UTC ISO-8601.",
+            "title": "Occurred At",
+            "type": "string"
+          },
+          "provider": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Provider instance that served it, when one did.",
+            "title": "Provider"
+          },
+          "request_id": {
+            "description": "The usage row's id, which the Activity page can be filtered by.",
+            "title": "Request Id",
+            "type": "string"
+          },
+          "status": {
+            "enum": [
+              "success",
+              "failed"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "occurred_at",
+          "request_id",
+          "status"
+        ],
+        "title": "ActivationAttemptPublic",
+        "type": "object"
+      },
       "ActiveOrganizationMemberCreateRequest": {
         "description": "Add someone to the caller's organization, optionally into workspaces at once.",
         "properties": {
@@ -10565,6 +10704,60 @@
         "title": "ValidationError",
         "type": "object"
       },
+      "WorkspaceActivationPublic": {
+        "description": "Where a workspace stands on its first successful request.",
+        "properties": {
+          "activation_attempt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActivationAttemptPublic"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The first request that succeeded, which is the guide's receipt. Null until one does."
+          },
+          "dismissed": {
+            "description": "Whether someone skipped the guide for this workspace.",
+            "title": "Dismissed",
+            "type": "boolean"
+          },
+          "experience_eligible": {
+            "description": "Whether the dashboard should offer the guide to this caller right now: the deployment has it enabled, the workspace is classified for it, nobody dismissed it, no request has succeeded yet, and the caller may manage the workspace.",
+            "title": "Experience Eligible",
+            "type": "boolean"
+          },
+          "latest_attempt": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ActivationAttemptPublic"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The most recent request, so a failure can be reported while the guide keeps waiting."
+          },
+          "status": {
+            "description": "'activated' once a gateway request in this workspace has succeeded, 'failed' when the last one failed and none has yet succeeded, 'waiting' when there has been none at all.",
+            "enum": [
+              "waiting",
+              "failed",
+              "activated"
+            ],
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "status",
+          "experience_eligible",
+          "dismissed"
+        ],
+        "title": "WorkspaceActivationPublic",
+        "type": "object"
+      },
       "WorkspaceAssignmentRequest": {
         "description": "A workspace and the role to grant in it, applied when a member is added.",
         "properties": {
@@ -20129,6 +20322,162 @@
         "summary": "Update Workspace",
         "tags": [
           "workspaces"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/activation": {
+      "get": {
+        "description": "Where a workspace stands on its first successful request.\n\nReadable by any member who can see the workspace. Whether the guide should\nactually be offered to this caller is ``experience_eligible``, which also\nanswers false when the deployment has the flow turned off\n(``activation_guide``), so a dashboard left open stops offering it without\nneeding to be reloaded.",
+        "operationId": "get_workspace_activation_v1_workspaces__workspace_id__activation_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceActivationPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Workspace Activation",
+        "tags": [
+          "workspace-activation"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/activation/dismiss": {
+      "post": {
+        "description": "Retire the guide for this workspace. Permanent, and idempotent.\n\nWorkspace owners and admins only. The key the guide issued is deactivated on\nthe way out unless it has already served a request, in which case it is\nsomebody's working integration and is left alone.",
+        "operationId": "dismiss_workspace_activation_v1_workspaces__workspace_id__activation_dismiss_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Dismiss Workspace Activation",
+        "tags": [
+          "workspace-activation"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/activation/key": {
+      "post": {
+        "description": "Issue the workspace's setup API key, rotating the one the guide already issued.\n\nWorkspace owners and admins only, like every other action that changes a\nworkspace. The plaintext is returned once and never stored, so a reopened\nguide rotates the same key row rather than collecting a second one, and\nanswers 409 once the workspace has activated or the guide was dismissed.",
+        "operationId": "create_workspace_activation_key_v1_workspaces__workspace_id__activation_key_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/ActivationApiKeyPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Workspace Activation Key",
+        "tags": [
+          "workspace-activation"
         ]
       }
     },

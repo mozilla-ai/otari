@@ -79,6 +79,41 @@ async def resolve_workspace_in_organization(
     return workspace
 
 
+async def has_workspace_management_access(
+    db: AsyncSession,
+    *,
+    user: User,
+    workspace: Workspace,
+    organizations: OrganizationService,
+) -> bool:
+    """Whether the caller is a superuser, an organization owner/admin, or an owner/admin here.
+
+    The superuser arm is what makes this agree with the two checks either side
+    of it: ``resolve_visible_workspace`` grants a superuser read on every
+    workspace, and organization-level management access grants them
+    organization management, so without it a superuser could delete a
+    workspace but not rename it.
+
+    The predicate form exists for the one caller that has to *report* the answer
+    rather than act on it: the first-request setup guide tells the dashboard
+    whether to offer itself, so a member who may see the workspace without
+    managing it is told "not for you" instead of being refused. Everything else
+    wants :func:`require_workspace_management_access`.
+    """
+    if user.is_superuser:
+        return True
+
+    organization_membership = await organizations.members.get_active_by_organization_and_user(
+        workspace.organization_id,
+        user.id,
+    )
+    if organization_membership is not None and organization_membership.role in MANAGEMENT_ROLES:
+        return True
+
+    membership = await WorkspaceMemberRepository(db).get_by_workspace_and_user(workspace.id, user.id)
+    return membership is not None and membership.status == "active" and membership.role in MANAGEMENT_ROLES
+
+
 async def require_workspace_management_access(
     db: AsyncSession,
     *,
@@ -86,32 +121,13 @@ async def require_workspace_management_access(
     workspace: Workspace,
     organizations: OrganizationService,
 ) -> None:
-    """Allow a superuser, an organization owner/admin, or an owner/admin of this workspace.
-
-    The superuser arm is what makes this agree with the two checks either side
-    of it: ``resolve_visible_workspace`` grants a superuser read on every
-    workspace, and organization-level management access grants them
-    organization management, so without it a superuser could delete a
-    workspace but not rename it.
-    """
-    if user.is_superuser:
-        return
-
-    organization_membership = await organizations.members.get_active_by_organization_and_user(
-        workspace.organization_id,
-        user.id,
-    )
-    if organization_membership is not None and organization_membership.role in MANAGEMENT_ROLES:
-        return
-
-    membership = await WorkspaceMemberRepository(db).get_by_workspace_and_user(workspace.id, user.id)
-    if membership is not None and membership.status == "active" and membership.role in MANAGEMENT_ROLES:
-        return
-
-    raise NotAuthorizedError
+    """Allow a superuser, an organization owner/admin, or an owner/admin of this workspace."""
+    if not await has_workspace_management_access(db, user=user, workspace=workspace, organizations=organizations):
+        raise NotAuthorizedError
 
 
 __all__ = [
+    "has_workspace_management_access",
     "require_workspace_management_access",
     "resolve_visible_workspace",
     "resolve_workspace_in_organization",
