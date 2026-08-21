@@ -110,8 +110,6 @@ describe("RateOverridesCard", () => {
     expect(await screen.findByText("Active")).toBeInTheDocument()
   })
 
-  // A blank optional rate means the tokens are priced as fresh input. Rendering
-  // it as "$0.0000" would claim the organization negotiated a free cache read.
   it("shows an unset cache rate as absent rather than as zero", async () => {
     mockApi({ overrides: [pricingOverride()] })
 

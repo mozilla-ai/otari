@@ -597,3 +597,47 @@ def test_both_lookup_paths_pick_the_canonical_row_when_both_spellings_exist() ->
         assert total == 1.0
 
     _run(scenario)
+
+
+def test_the_deployment_price_list_also_prefers_the_canonical_tool_key() -> None:
+    """``_tool_rates`` resolves two tables, and both need the same preference.
+
+    The override statement got it first; this covers the ``model_pricing`` half,
+    which is the likelier one in practice because that table is what an operator
+    re-imports and it predates key normalization. Ordering on ``effective_at``
+    alone let the legacy spelling win whenever it carried the later row, while
+    ``find_model_pricing`` gated on the canonical one: admitted at one rate,
+    settled at another.
+    """
+
+    async def scenario(session: AsyncSession) -> None:
+        # The legacy row is deliberately the newer one, so a time-only ordering
+        # picks it.
+        session.add(
+            ModelPricing(
+                model_key="otari/web_search",
+                effective_at=_NOW - timedelta(hours=1),
+                input_price_per_million=9_000_000.0,
+                output_price_per_million=0.0,
+            )
+        )
+        session.add(
+            ModelPricing(
+                model_key="otari:web_search",
+                effective_at=_NOW - timedelta(days=1),
+                input_price_per_million=1_000_000.0,
+                output_price_per_million=0.0,
+            )
+        )
+        await session.flush()
+
+        gate = await find_model_pricing(session, "otari", "web_search", as_of=_NOW, use_defaults=False)
+        total, _lines, unpriced = await price_tool_calls(session, {"web_search": 1}, as_of=_NOW)
+
+        assert gate is not None
+        assert unpriced == []
+        # Both resolve the canonical row: 1_000_000 / 1e6 == $1.00 per call.
+        assert gate.input_price_per_million == 1_000_000.0
+        assert total == 1.0
+
+    _run(scenario)

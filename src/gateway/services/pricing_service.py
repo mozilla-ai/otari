@@ -639,7 +639,17 @@ async def _tool_rates(
     stmt = (
         select(ModelPricing)
         .where(ModelPricing.model_key.in_(keys), ModelPricing.effective_at <= lookup_time)
-        .order_by(ModelPricing.effective_at)
+        # Same last-write-wins dict assignment as the override statement below, so
+        # it needs the same key preference. Ordering on time alone let the legacy
+        # spelling win whenever it carried the later ``effective_at``, while
+        # ``find_model_pricing`` gated on the canonical row: the tool was admitted
+        # at one rate and settled at another. This is the likelier half of the two,
+        # because ``model_pricing`` is the table an operator re-imports and it
+        # predates key normalization.
+        .order_by(
+            case((ModelPricing.model_key.in_(canonical_keys), 1), else_=0),
+            ModelPricing.effective_at,
+        )
     )
     found: dict[str, ModelPricing] = {}
     for row in (await db.execute(stmt)).scalars():

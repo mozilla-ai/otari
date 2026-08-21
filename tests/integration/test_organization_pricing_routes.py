@@ -16,6 +16,7 @@ import pytest
 from fastapi import status
 from fastapi.testclient import TestClient
 from sqlalchemy import delete, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
@@ -798,3 +799,70 @@ async def test_a_racing_duplicate_period_is_a_conflict_not_an_integrity_error(
 
     assert caught.value.status_code == 409
     assert _MODEL_KEY in caught.value.message
+
+
+@pytest.mark.asyncio
+async def test_the_race_conflict_names_the_period_it_actually_hit(
+    async_db: AsyncSession,
+) -> None:
+    """The 409 describes the stored row's period, not the candidate's start.
+
+    The first version fabricated an open end from the candidate's own start and
+    passed it as ``existing_period``, so the message told the operator about a
+    period that was not the one in the way.
+    """
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Acme", slug="acme-race-message", created_by_user_id=None
+    )
+    owner = await _identity(async_db, organization, role="owner", name="owner person")
+    service = OrganizationPricingService(async_db)
+    start = datetime.now(UTC)
+    bounded = _rates(effective_from=start, effective_to=start + timedelta(days=1))
+
+    await service.create_for_caller(owner, _MODEL_KEY, bounded)
+    await async_db.commit()
+
+    async def _no_overlap_check(**_kwargs: object) -> None:
+        return None
+
+    service.raise_if_overlapping = _no_overlap_check  # type: ignore[method-assign]
+
+    with pytest.raises(OrganizationPricingOverlapError) as caught:
+        await service.create_for_caller(owner, _MODEL_KEY, bounded)
+
+    # The stored row is bounded, so the message must not claim "onwards".
+    assert "onwards" not in caught.value.message
+    assert bounded.effective_to is not None
+    assert bounded.effective_to.isoformat() in caught.value.message
+
+
+@pytest.mark.asyncio
+async def test_a_check_violation_is_not_reported_as_a_conflict(
+    async_db: AsyncSession,
+) -> None:
+    """Only the unique-index race is a conflict; other integrity failures are not.
+
+    A broad ``except IntegrityError`` that always mapped to 409 told the caller
+    another writer had taken the period when nothing of the kind had happened.
+    The row is read back to prove which failure it was.
+    """
+    organization = await OrganizationRepository(async_db).create_organization(
+        name="Acme", slug="acme-check", created_by_user_id=None
+    )
+    owner = await _identity(async_db, organization, role="owner", name="owner person")
+    service = OrganizationPricingService(async_db)
+
+    # The service's own rate validation would refuse this first, so bypass it to
+    # reach the table's CHECK, which is the constraint under test.
+    def _no_rate_check(_override: PricingOverrideInput) -> None:
+        return None
+
+    import gateway.services.organization_pricing_service as module
+
+    original = module.validate_rates
+    module.validate_rates = _no_rate_check  # type: ignore[assignment]
+    try:
+        with pytest.raises(IntegrityError):
+            await service.create_for_caller(owner, _MODEL_KEY, _rates(input_price_per_million=-1.0))
+    finally:
+        module.validate_rates = original
