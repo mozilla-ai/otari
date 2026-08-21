@@ -123,16 +123,18 @@ describe("UsersPage", () => {
     mockApi({ users: [] })
     renderPage(<UsersPage />)
 
-    expect(await screen.findByText("No users yet")).toBeInTheDocument()
     expect(
-      screen.getByRole("button", { name: "Create your first user" }),
+      await screen.findByText("No spend identities yet"),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Create your first spend identity" }),
     ).toBeInTheDocument()
     // Only the onboarding panel shows: the table (and its own "no rows" fallback,
     // whose "auto-create one" text is unique to it) is suppressed so the two empty
     // states are not stacked.
     expect(screen.queryByText(/auto-create one/)).not.toBeInTheDocument()
     expect(
-      screen.queryByRole("grid", { name: "Users" }),
+      screen.queryByRole("grid", { name: "Spend identities" }),
     ).not.toBeInTheDocument()
   })
 
@@ -176,7 +178,9 @@ describe("UsersPage", () => {
     renderPage(<UsersPage />)
 
     // Hidden by default: a lone virtual user reads as an empty managed list.
-    expect(await screen.findByText("No users yet")).toBeInTheDocument()
+    expect(
+      await screen.findByText("No spend identities yet"),
+    ).toBeInTheDocument()
     expect(screen.queryByText("apikey-abcdef")).not.toBeInTheDocument()
 
     await user_.click(
@@ -195,14 +199,16 @@ describe("UsersPage", () => {
     const user_ = userEvent.setup()
     renderPage(<UsersPage />)
 
-    await screen.findByText("No users yet")
+    await screen.findByText("No spend identities yet")
     await user_.click(
-      screen.getByRole("button", { name: "Create your first user" }),
+      screen.getByRole("button", { name: "Create your first spend identity" }),
     )
     await user_.type(screen.getByLabelText("User ID"), "bob")
     await user_.type(screen.getByLabelText("Alias (optional)"), "Bob")
     await user_.selectOptions(screen.getByLabelText("Budget"), "bud-1111-2222")
-    await user_.click(screen.getByRole("button", { name: "Create user" }))
+    await user_.click(
+      screen.getByRole("button", { name: "Create spend identity" }),
+    )
 
     const post = fetchMock.mock.calls.find(
       ([u, init]) =>
@@ -221,9 +227,9 @@ describe("UsersPage", () => {
     const user_ = userEvent.setup()
     renderPage(<UsersPage />)
 
-    await screen.findByText("No users yet")
+    await screen.findByText("No spend identities yet")
     await user_.click(
-      screen.getByRole("button", { name: "Create your first user" }),
+      screen.getByRole("button", { name: "Create your first spend identity" }),
     )
     await user_.type(screen.getByLabelText("User ID"), "carol")
     await user_.click(screen.getByRole("button", { name: "Only selected" }))
@@ -232,7 +238,9 @@ describe("UsersPage", () => {
       await screen.findByRole("option", { name: "openai:gpt-4o" }),
     )
     await user_.keyboard("{Escape}")
-    await user_.click(screen.getByRole("button", { name: "Create user" }))
+    await user_.click(
+      screen.getByRole("button", { name: "Create spend identity" }),
+    )
 
     const post = fetchMock.mock.calls.find(
       ([u, init]) =>
@@ -289,7 +297,9 @@ describe("UsersPage", () => {
     expect(
       within(row).getByText(/deactivates its API keys/),
     ).toBeInTheDocument()
-    await user_.click(within(row).getByRole("button", { name: "Delete user" }))
+    await user_.click(
+      within(row).getByRole("button", { name: "Delete spend identity" }),
+    )
 
     const del = fetchMock.mock.calls.find(
       ([u, init]) =>

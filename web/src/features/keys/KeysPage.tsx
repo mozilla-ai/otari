@@ -1022,7 +1022,7 @@ export function KeysPage() {
           to="/users"
           className="font-medium text-link hover:text-link-hover"
         >
-          Organization → Users
+          Organization → Spend identities
         </Link>
         , and their limits under{" "}
         <Link

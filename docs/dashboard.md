@@ -2,8 +2,8 @@
 
 Otari ships with a web admin dashboard for operators. It browses the model
 catalog, sets model pricing, manages routing policies, adds and edits provider API
-keys, manages users, keys, and budgets, and toggles runtime settings, all
-against the local management API.
+keys, manages spend identities, keys, and budgets, and toggles runtime settings,
+all against the local management API.
 
 The management pages are a **standalone-mode** feature. In standalone mode Otari
 serves the whole dashboard at the gateway root (`/`). A gateway connected to
@@ -192,12 +192,12 @@ master key, and select a model in `provider:model` form (for example
 `openai:gpt-4o`). See the [Quickstart](quickstart.md) for a full end-to-end
 example.
 
-### 9. (Optional) Set up keys, users, and budgets
+### 9. (Optional) Set up keys, spend identities, and budgets
 
 For multi-user or multi-app deployments, hand out scoped API keys from
-**Access** on the workspace rail, then define users and attach budgets on the
-organization rail, so spend is enforced before each call. These are optional: a
-single-operator setup can run on the master key alone.
+**Access** on the workspace rail, then define spend identities and attach
+budgets on the organization rail, so spend is enforced before each call. These
+are optional: a single-operator setup can run on the master key alone.
 
 ## Page-by-page reference
 
@@ -210,8 +210,8 @@ the switcher's own popover says which is which.
 
 The **organization rail** holds what belongs to the tenant rather than to one
 workspace. It is reached from the **Organization** entry at the foot of the
-workspace rail, and left by the link at its top. Users, budgets, and settings
-live there.
+workspace rail, and left by the link at its top. Spend identities, budgets, and
+settings live there.
 
 At the very bottom sits the account control, which holds **Account settings**
 (the password you sign in with), an **Appearance** row that cycles through
@@ -439,9 +439,12 @@ hand.
   A workspace's members are always a subset of the organization's, so someone
   joins the organization first, on the organization rail.
 
-Users and budgets moved to the organization rail; see below. For how users,
-keys, and budgets fit together and the management endpoints behind these pages,
-see [Access control](access-control.md).
+Spend identities and budgets moved to the organization rail; see below. For how
+they, keys, and budgets fit together and the management endpoints behind these
+pages, see [Access control](access-control.md). The API calls a spend identity a
+`user`, which is the field name a caller sends and the one those endpoints use;
+the dashboard names the page for what it holds so it is not mistaken for the
+organization roster.
 
 ### Tools
 
@@ -510,15 +513,17 @@ by is the handle those flows will match them on.
   send); with none configured, the invite is still created and the dashboard
   hands you the link to share yourself. A pending invitation can be revoked
   before it is accepted.
-- **Users**: the principals that keys and budgets attach to, including the
-  default model access for a user's keys. Distinct from members: a member is a
-  person who signs in, a user is what spend is attributed to, and the two merge
-  once the request plane is re-parented onto tenancy.
 
 ### Cost & billing
 
 - **Spend & budgets**: spending limits callers are held to, with per-period
   resets.
+- **Spend identities**: what an API key spends against. Each one carries a
+  budget and the default model access the keys issued to it inherit. Distinct
+  from **Members & roles** above: a member is a person who belongs to the
+  organization, an identity is what spend is attributed to, and a member is
+  linked to one so a key can be issued to them by name. They are two tables
+  today and are expected to converge in a later release.
 - **Model pricing**: what the gateway meters a request at, which is one rate per
   model for the whole deployment. The page opens with what an *unpriced* model
   costs, because that decides what the table under it means: with default pricing

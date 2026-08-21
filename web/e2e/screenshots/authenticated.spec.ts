@@ -26,7 +26,7 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
     name: "budget-defaults",
     heading: /budget defaults/i,
   },
-  { route: "/users", name: "users", heading: /users/i },
+  { route: "/users", name: "spend-identities", heading: /spend identities/i },
   { route: "/usage", name: "usage", heading: /usage/i },
   { route: "/activity", name: "activity", heading: /activity/i },
   { route: "/tools", name: "tools", heading: /tools/i },

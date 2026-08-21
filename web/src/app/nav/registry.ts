@@ -230,13 +230,6 @@ const ORGANIZATION_NAV_SECTIONS = [
         surface: "organizations",
         icon: FiUsers,
       },
-      // Absent from the design, which folds per-user spend into "Spend &
-      // budgets". Kept because a budget names a `users` row, so this is the only
-      // place a budget is attached to anything. It sits beside the members
-      // rather than beside the budgets it feeds, because what the page edits is
-      // an identity: the two identity tables have not merged yet (M4), and this
-      // row stops being a destination when they do.
-      { to: "/users", label: "Users", surface: "users", icon: FiUsers },
       // The organization's own upstream credentials, which is a different table
       // from the workspace rail's `/providers`: over there a credential belongs
       // to the process, here it would belong to the tenant. This gateway has only
@@ -258,6 +251,24 @@ const ORGANIZATION_NAV_SECTIONS = [
         label: "Spend & budgets",
         surface: "budgets",
         icon: FiDollarSign,
+      },
+      // The per-identity half of the row above: a budget is a ceiling, and this
+      // is the set of things held to one. Named for what it holds rather than
+      // for its table, because "Users" put a second people-shaped row on this
+      // rail and nothing distinguished it from the organization roster, which is
+      // a different table answering a different question (see
+      // `features/organization/attribution.ts`).
+      //
+      // It sits here rather than beside Members & roles because the group
+      // heading is what separates them: this is what a key spends against, not
+      // who belongs to the organization. Both rows survive only until otari's
+      // two identity tables converge (otari-ai#1727), at which point one page
+      // answers both.
+      {
+        to: "/users",
+        label: "Spend identities",
+        surface: "users",
+        icon: FiUsers,
       },
       {
         to: "/organization/billing",

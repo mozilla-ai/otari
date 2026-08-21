@@ -61,7 +61,7 @@ test.describe("dashboard core flows", () => {
 
     await openOrganization(page)
     for (const [link, heading] of [
-      ["Users", "Users"],
+      ["Spend identities", "Spend identities"],
       ["Spend & budgets", "Budgets"],
       ["Model pricing", "Model pricing"],
       // Exact, because this rail also carries "Org settings" and the default
@@ -91,11 +91,11 @@ test.describe("dashboard core flows", () => {
   test("create a user and assign the budget", async ({ page }) => {
     await login(page)
     await openOrganization(page)
-    await nav(page).getByRole("link", { name: "Users" }).click()
-    // A bootstrap virtual user already exists (from the first-run key), so use the
-    // header action, not the empty-state button. It is removed when the form opens,
-    // leaving the form's own "Create user" as the only match.
-    await page.getByRole("button", { name: "Create user" }).click()
+    await nav(page).getByRole("link", { name: "Spend identities" }).click()
+    // A bootstrap virtual identity already exists (from the first-run key), so use
+    // the header action, not the empty-state button. It is removed when the form
+    // opens, leaving the form's own "Create spend identity" as the only match.
+    await page.getByRole("button", { name: "Create spend identity" }).click()
     // Role-scoped: the rows behind this form carry "Copy user id" controls, whose
     // accessible names also contain "user id".
     await page
@@ -103,7 +103,7 @@ test.describe("dashboard core flows", () => {
       .fill("alice@example.com")
     // The budget created by the prior test is the only non-default option.
     await page.getByLabel("Budget").selectOption({ index: 1 })
-    await page.getByRole("button", { name: "Create user" }).click()
+    await page.getByRole("button", { name: "Create spend identity" }).click()
 
     const row = page.getByRole("row", { name: /alice@example\.com/ })
     await expect(row).toBeVisible()

@@ -3071,9 +3071,9 @@ export interface components {
          *     ``POST /v1/keys`` to give this member a key. It is null when no usable row
          *     exists (nobody minted one, or it was soft-deleted through
          *     ``DELETE /v1/users``), which is the signal not to offer this member as a key
-         *     owner: key creation would refuse. The two ids converge when the request plane
-         *     re-parents onto tenancy (M4), and this field is what lets that happen without
-         *     the dashboard changing.
+         *     owner: key creation would refuse. How the two ids converge is the open
+         *     question in otari-ai#1727; this field is the join until it is answered, and
+         *     is what lets either answer land without the dashboard changing.
          */
         ActiveOrganizationMemberPublic: {
             /** Attribution User Id */

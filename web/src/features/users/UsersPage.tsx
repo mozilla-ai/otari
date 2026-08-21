@@ -102,8 +102,8 @@ function BudgetSelect({
         ))}
       </select>
       <span className="text-xs text-muted">
-        The spending limit this user is held to. Manage budgets on the Budgets
-        page.
+        The spending limit this identity is held to. Manage budgets on the
+        Budgets page.
       </span>
     </div>
   )
@@ -134,7 +134,9 @@ function CreateUserForm({ onClose }: { onClose: () => void }) {
   return (
     <Card>
       <Card.Content className="flex flex-col gap-4 p-5">
-        <div className="text-sm font-semibold text-foreground">Create user</div>
+        <div className="text-sm font-semibold text-foreground">
+          Create spend identity
+        </div>
         <ErrorBanner error={create.error} />
         <div className="grid gap-4 sm:grid-cols-2">
           <Field
@@ -159,8 +161,8 @@ function CreateUserForm({ onClose }: { onClose: () => void }) {
           budgets={budgets.data ?? []}
         />
         <ModelScopeControl
-          title="Model access (default for this user's keys)"
-          description="The models this user's keys may list and call by default. A key can narrow this, but never exceed it."
+          title="Model access (default for this identity's keys)"
+          description="The models this identity's keys may list and call by default. A key can narrow this, but never exceed it."
           initial={null}
           onChange={(value, valid) => {
             setAllowedModels(value)
@@ -173,7 +175,7 @@ function CreateUserForm({ onClose }: { onClose: () => void }) {
             isDisabled={create.isPending || !scopeValid || userId.trim() === ""}
             onPress={submit}
           >
-            {create.isPending ? "Creating…" : "Create user"}
+            {create.isPending ? "Creating…" : "Create spend identity"}
           </Button>
           <Button variant="ghost" onPress={onClose}>
             Cancel
@@ -223,8 +225,8 @@ function EditUserForm({ user, onClose }: { user: User; onClose: () => void }) {
           budgets={budgets.data ?? []}
         />
         <ModelScopeControl
-          title="Model access (default for this user's keys)"
-          description="The models this user's keys may list and call by default. A key can narrow this, but never exceed it."
+          title="Model access (default for this identity's keys)"
+          description="The models this identity's keys may list and call by default. A key can narrow this, but never exceed it."
           initial={user.allowed_models}
           onChange={(value, valid) => {
             setAllowedModels(value)
@@ -365,7 +367,7 @@ function AssignBudgetDialog({
               <AlertDialog.Body className="flex flex-col gap-4">
                 <p className="text-sm text-muted">
                   Assign a budget to {count} selected{" "}
-                  {count === 1 ? "user" : "users"}.
+                  {count === 1 ? "spend identity" : "spend identities"}.
                 </p>
                 <FilterSelect
                   label="Budget"
@@ -555,12 +557,12 @@ export function UsersPage() {
             </Button>
             <InlineConfirm
               trigger="Delete"
-              confirmLabel="Delete user"
+              confirmLabel="Delete spend identity"
               isPending={deleteUser.isPending}
               message={
                 <>
                   Delete <strong>{u.user_id}</strong>? This deactivates its API
-                  keys and hides the user; usage history is preserved.
+                  keys and hides the identity; usage history is preserved.
                 </>
               }
               onConfirm={() => deleteUser.mutate(u.user_id)}
@@ -581,8 +583,8 @@ export function UsersPage() {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        title="Users"
-        description="People and teams that own API keys. Set each one's budget and default model access here; issue their keys on the API keys page."
+        title="Spend identities"
+        description="What an API key spends against: each one carries a budget and a default model access list, and every key issued to it inherits both. Not the organization roster, which is Members & roles under People & access; a person listed there is linked to an identity here so a key can be issued to them by name."
         action={
           addOpen ? null : (
             <Button
@@ -592,7 +594,7 @@ export function UsersPage() {
                 setAddOpen(true)
               }}
             >
-              Create user
+              Create spend identity
             </Button>
           )
         }
@@ -604,9 +606,9 @@ export function UsersPage() {
 
       {showOnboarding ? (
         <EmptyState
-          title="No users yet"
-          description="A user owns API keys and carries the budget and default model access those keys inherit. Create a user here, then issue its keys on the API keys page."
-          actionLabel="Create your first user"
+          title="No spend identities yet"
+          description="A spend identity owns API keys and carries the budget and default model access those keys inherit. Create one here, then issue its keys on the API keys page."
+          actionLabel="Create your first spend identity"
           onAction={() => {
             setEditing(null)
             setAddOpen(true)
@@ -621,7 +623,7 @@ export function UsersPage() {
             checked={showVirtual}
             onChange={(e) => setShowVirtual(e.target.checked)}
           />
-          Show auto-created (virtual) users ({virtualCount})
+          Show auto-created (virtual) identities ({virtualCount})
         </label>
       ) : null}
 
@@ -667,12 +669,12 @@ export function UsersPage() {
           not a panel stacked over a redundant "no rows" table. */}
       {showOnboarding ? null : (
         <DataTable
-          ariaLabel="Users"
+          ariaLabel="Spend identities"
           columns={columns}
           rows={rows}
           getRowKey={getUserRowKey}
           isLoading={loading}
-          emptyContent="No users yet. Create one, or create an API key to auto-create one."
+          emptyContent="No spend identities yet. Create one, or create an API key to auto-create one."
           selectionMode="multiple"
           selectedKeys={selection.selectedKeys}
           onSelectionChange={selection.onSelectionChange}
@@ -682,9 +684,9 @@ export function UsersPage() {
       <ConfirmDialog
         isOpen={bulkDeleteOpen}
         onOpenChange={setBulkDeleteOpen}
-        heading="Delete users"
+        heading="Delete spend identities"
         body={`Delete ${selectedIds.length} ${
-          selectedIds.length === 1 ? "user" : "users"
+          selectedIds.length === 1 ? "spend identity" : "spend identities"
         }? This deactivates their API keys and hides them; usage history is preserved.`}
         confirmLabel="Delete"
         isPending={bulkPending}

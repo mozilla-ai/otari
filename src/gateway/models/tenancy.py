@@ -234,10 +234,14 @@ class User(UserBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
     """An identity in the reconciled control plane.
 
     Not to be confused with `entities.User`, the gateway's own string-keyed
-    per-request spend identity. Both exist during the strangle: M4 re-parents
-    the gateway's rows onto this table through the identity bridge, and the
-    legacy table contracts away one milestone after parity, at which point this
-    is the only ``User``.
+    per-request spend identity, which is what keys, budgets, and usage attach to.
+    Both exist, and how they converge is no longer settled: otari-ai#1719 made
+    otari's schema the survivor, which retired the pre-flip plan of re-parenting
+    the request plane onto this table through the identity bridge. otari-ai#1727
+    holds the open decision and names two candidates, re-pointing the
+    request-plane foreign keys here or keeping both with one authoritative. Until
+    it lands, ``ActiveOrganizationMemberPublic.attribution_user_id`` is the join
+    between the two.
 
     ``email`` is nullable and unique. PostgreSQL and SQLite both allow repeated
     NULLs in a unique index, so email-less local identities coexist without
@@ -464,9 +468,9 @@ class ActiveOrganizationMemberPublic(SQLModel):
     ``POST /v1/keys`` to give this member a key. It is null when no usable row
     exists (nobody minted one, or it was soft-deleted through
     ``DELETE /v1/users``), which is the signal not to offer this member as a key
-    owner: key creation would refuse. The two ids converge when the request plane
-    re-parents onto tenancy (M4), and this field is what lets that happen without
-    the dashboard changing.
+    owner: key creation would refuse. How the two ids converge is the open
+    question in otari-ai#1727; this field is the join until it is answered, and
+    is what lets either answer land without the dashboard changing.
     """
 
     organization_member_id: uuid.UUID | None = None

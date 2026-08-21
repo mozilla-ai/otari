@@ -563,7 +563,7 @@ export function BudgetsPage() {
       },
       {
         id: "users",
-        header: "Users",
+        header: "Identities",
         cell: (b) => <span className="text-muted">{b.user_count}</span>,
       },
       { id: "usage", header: "Usage", cell: (b) => <UsageCell budget={b} /> },

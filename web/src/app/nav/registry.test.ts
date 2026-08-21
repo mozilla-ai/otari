@@ -61,9 +61,9 @@ describe("nav registry", () => {
       "Budget defaults",
       "Workspaces",
       "Members & roles",
-      "Users",
       "Providers",
       "Spend & budgets",
+      "Spend identities",
       "Billing",
       "Model pricing",
       "Guardrails",
@@ -102,11 +102,19 @@ describe("nav registry", () => {
     expect(tenancy?.items.map((item) => [item.label, item.surface])).toEqual([
       ["Workspaces", "workspaces"],
       ["Members & roles", "organizations"],
-      // Grouped with the tenancy rows but gated on its own surface: Users reads
-      // the pre-tenancy `users` table, so a deployment serving one identity
-      // without the other hides exactly the row it cannot answer for.
-      ["Users", "users"],
       ["Providers", "organization_providers"],
+    ])
+    // Spend identities reads the pre-tenancy `users` table and answers a
+    // different question from the roster above, so it gates on its own surface
+    // and sits under the money heading. Pinned here, beside the roster it used
+    // to be confused with, because the two being one group apart is the whole
+    // reason the rail stopped reading as two rosters.
+    const money = ORG_NAV_SECTIONS.find((section) => section.id === "org-money")
+    expect(money?.items.map((item) => [item.label, item.surface])).toEqual([
+      ["Spend & budgets", "budgets"],
+      ["Spend identities", "users"],
+      ["Billing", "billing"],
+      ["Model pricing", "pricing"],
     ])
   })
 

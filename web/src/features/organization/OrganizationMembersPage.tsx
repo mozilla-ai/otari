@@ -505,7 +505,7 @@ export function OrganizationMembersPage() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Members"
-        description="Who belongs to this organization and what each of them may do. Roles are fixed: owners and admins manage the organization, members use it, viewers only read."
+        description="Who belongs to this organization and what each of them may do. Roles are fixed: owners and admins manage the organization, members use it, viewers only read. Budgets and API keys do not attach to this list; they attach to a spend identity under Cost & billing, and a member is linked to one so a key can be issued to them by name."
         action={
           manages && !adding && !inviting ? (
             <div className="flex gap-2">
