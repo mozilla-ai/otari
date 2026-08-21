@@ -1,17 +1,16 @@
-import { Button, Card } from "@heroui/react"
-import { useCallback, useMemo, useState } from "react"
+import { Button, Card, Chip } from "@heroui/react"
+import { useMemo, useState } from "react"
 
 import type { Budget, Workspace } from "@/client"
 import { canManage } from "@/features/organization/roles"
-import { WorkspaceMembersPanel } from "@/features/workspaces/WorkspaceMembersPanel"
 import {
+  useAllWorkspaceBudgetDefaults,
   useBudgets,
   useCreateWorkspace,
   useCreateWorkspaceBudgetDefault,
   useDeleteWorkspace,
   useDeleteWorkspaceBudgetDefault,
   useOrganizationContext,
-  useOrganizationMembers,
   useUpdateWorkspace,
   useUpdateWorkspaceBudgetDefault,
   useWorkspaceBudgetDefaults,
@@ -283,15 +282,38 @@ function EditWorkspaceForm({
 export function WorkspacesPage() {
   const context = useOrganizationContext()
   const workspaces = useWorkspaces()
-  const orgMembers = useOrganizationMembers()
+  const budgets = useBudgets()
   const remove = useDeleteWorkspace()
 
   const [creating, setCreating] = useState(false)
   const [editing, setEditing] = useState<string | null>(null)
-  const [expanded, setExpanded] = useState<string | null>(null)
   const [deleting, setDeleting] = useState<Workspace | null>(null)
 
   const rows = workspaces.data ?? []
+  const workspaceIds = useMemo(() => rows.map((row) => row.id), [rows])
+  const workspaceDefaults = useAllWorkspaceBudgetDefaults(workspaceIds)
+  // The budget each workspace hands to its members, by workspace. Only the
+  // aggregate default (no provider narrowing) is named: that is the one the
+  // edit form sets, and a narrowed one is the budget's business, where it shows
+  // under "Default for".
+  const defaultBudgetName = useMemo(() => {
+    const names = new Map(
+      (budgets.data ?? []).map((budget) => [
+        budget.budget_id,
+        budget.name ?? budget.budget_id.split("-")[0],
+      ]),
+    )
+    const byWorkspace = new Map<string, string>()
+    for (const { workspaceId, default: row } of workspaceDefaults.data) {
+      if (row.provider_key_id === null) {
+        byWorkspace.set(
+          workspaceId,
+          names.get(row.budget_id) ?? row.budget_id.split("-")[0],
+        )
+      }
+    }
+    return byWorkspace
+  }, [budgets.data, workspaceDefaults.data])
   // Only once the list has actually answered: an empty list while loading is
   // not one workspace, and disabling on it would flicker.
   const isOnlyWorkspace = workspaces.isSuccess && rows.length === 1
@@ -326,22 +348,23 @@ export function WorkspacesPage() {
         ),
       },
       {
+        id: "default-budget",
+        header: "Default member budget",
+        cell: (workspace) => {
+          const name = defaultBudgetName.get(workspace.id)
+          return name ? (
+            <Chip size="sm">{name}</Chip>
+          ) : (
+            <span className="text-xs text-muted">None</span>
+          )
+        },
+      },
+      {
         id: "actions",
         header: "Actions",
         align: "end",
         cell: (workspace) => (
           <div className="flex items-center justify-end gap-1.5">
-            <Button
-              size="sm"
-              variant="outline"
-              onPress={() =>
-                setExpanded((current) =>
-                  current === workspace.id ? null : workspace.id,
-                )
-              }
-            >
-              {expanded === workspace.id ? "Hide members" : "Members"}
-            </Button>
             <Button
               size="sm"
               variant="ghost"
@@ -379,20 +402,7 @@ export function WorkspacesPage() {
         ),
       },
     ],
-    [expanded, manages, isOnlyWorkspace],
-  )
-
-  const renderDetail = useCallback(
-    (workspace: Workspace) => (
-      <WorkspaceMembersPanel
-        workspaceId={workspace.id}
-        workspaceName={workspace.name}
-        orgMembers={orgMembers.data ?? []}
-        rosterResolved={orgMembers.isSuccess}
-        canManageWorkspace={manages}
-      />
-    ),
-    [orgMembers.data, orgMembers.isSuccess, manages],
+    [manages, isOnlyWorkspace, defaultBudgetName],
   )
 
   return (
@@ -418,9 +428,7 @@ export function WorkspacesPage() {
       {/* `remove.error` is deliberately absent: the confirm dialog renders that
           mutation's error itself, and listing it here too paints the same
           message twice, once behind the open dialog. */}
-      <ErrorBanner
-        error={context.error ?? workspaces.error ?? orgMembers.error}
-      />
+      <ErrorBanner error={context.error ?? workspaces.error} />
 
       {/* Withheld until the context answers, so an owner is not told for one
           paint that they may not manage their own workspaces. */}
@@ -460,8 +468,6 @@ export function WorkspacesPage() {
           getRowKey={getWorkspaceRowKey}
           isLoading={workspaces.isLoading}
           emptyContent="No workspaces yet."
-          detailKey={expanded}
-          renderDetail={renderDetail}
         />
       )}
 
@@ -484,7 +490,6 @@ export function WorkspacesPage() {
           if (deleting) {
             remove.mutate(deleting.id, {
               onSuccess: () => {
-                if (expanded === deleting.id) setExpanded(null)
                 if (editing === deleting.id) setEditing(null)
                 setDeleting(null)
               },

@@ -4,7 +4,7 @@ import {
   useOrganizationContext,
   useOrganizationMembers,
 } from "@/shared/api/hooks"
-import { EmptyState, PageHeader } from "@/shared/components/ui"
+import { EmptyState, ErrorBanner, PageHeader } from "@/shared/components/ui"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 
 // The roster of the workspace the switcher has selected, which is the one page
@@ -51,6 +51,11 @@ export function WorkspaceMembersPage() {
         title="Members"
         description={`People assigned to ${selected.name} and their role in it. A workspace's members are a subset of the organization's, so someone joins the organization first.`}
       />
+      {/* The organization roster is what the panel picks candidates from, so a
+          failure there is reported rather than left to read as "everyone is
+          already in this workspace", which is what an empty candidate list
+          otherwise looks like. */}
+      <ErrorBanner error={orgMembers.error} />
       <WorkspaceMembersPanel
         workspaceId={selected.workspace_id}
         workspaceName={selected.name}

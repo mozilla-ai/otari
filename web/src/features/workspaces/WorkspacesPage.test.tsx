@@ -1,20 +1,24 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen } from "@testing-library/react"
+import { render, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type {
+  Budget,
   OrganizationContext,
   OrganizationMember,
   Workspace,
+  WorkspaceBudgetDefault,
   WorkspaceMember,
 } from "@/client"
 import { WorkspacesPage } from "@/features/workspaces/WorkspacesPage"
 import {
+  budget,
   organizationContext,
   organizationMember,
   workspace,
+  workspaceBudgetDefault,
   workspaceMember,
 } from "@/tests/fixtures"
 
@@ -37,12 +41,18 @@ function mockApi(
     workspaces?: Workspace[]
     members?: WorkspaceMember[]
     orgMembers?: OrganizationMember[]
+    budgets?: Budget[]
+    // Keyed by workspace id, so a test can give one workspace a default and
+    // leave another without one.
+    budgetDefaults?: Record<string, WorkspaceBudgetDefault[]>
   } = {},
 ) {
   const context = opts.context ?? organizationContext()
   const list = opts.workspaces ?? [workspace()]
   const members = opts.members ?? [workspaceMember()]
   const orgMembers = opts.orgMembers ?? [organizationMember()]
+  const budgets = opts.budgets ?? []
+  const budgetDefaults = opts.budgetDefaults ?? {}
   const requests: Request[] = []
 
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -59,6 +69,14 @@ function mockApi(
         return jsonResponse({ data: members, count: members.length })
       }
       return jsonResponse(members[0] ?? workspaceMember())
+    }
+    if (url.includes("member-budget-policies")) {
+      const id = url.split("/v1/workspaces/")[1]?.split("/")[0] ?? ""
+      const rows = budgetDefaults[id] ?? []
+      return jsonResponse({ data: rows, count: rows.length })
+    }
+    if (url.includes("/v1/budgets")) {
+      return jsonResponse(budgets)
     }
     if (url.includes("/v1/workspaces")) {
       if (method === "GET") {
@@ -127,103 +145,6 @@ describe("WorkspacesPage", () => {
     })
   })
 
-  it("opens a workspace's roster and names the identity behind each row", async () => {
-    mockApi({
-      orgMembers: [
-        organizationMember({
-          user_id: "33333333-3333-3333-3333-333333333333",
-          full_name: "Operator",
-        }),
-      ],
-    })
-    const user = userEvent.setup()
-    renderPage(<WorkspacesPage />)
-
-    await user.click(await screen.findByRole("button", { name: "Members" }))
-    expect(
-      await screen.findByText("Members of Default Workspace"),
-    ).toBeInTheDocument()
-    // The roster carries user ids only, so the name comes from the
-    // organization's roster rather than from the workspace endpoint.
-    expect(screen.getByText("Operator")).toBeInTheDocument()
-  })
-
-  it("says why there is nobody left to add once the roster is exhausted", async () => {
-    mockApi({})
-    const user = userEvent.setup()
-    renderPage(<WorkspacesPage />)
-
-    await user.click(await screen.findByRole("button", { name: "Members" }))
-    // The one organization member is already in the workspace, which in a
-    // standalone deployment is the permanent state until sign-in lands.
-    expect(
-      await screen.findByText(/already in this workspace/),
-    ).toBeInTheDocument()
-    expect(screen.queryByLabelText("Organization member")).toBeNull()
-  })
-
-  it("reports a roster that failed instead of calling the workspace full", async () => {
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      const url = String(input)
-      if (url.includes("/v1/organizations/me/members")) {
-        return jsonResponse({ detail: "Roster unavailable" }, 500)
-      }
-      if (url.includes("/members")) {
-        return jsonResponse({ data: [workspaceMember()], count: 1 })
-      }
-      if (url.includes("/v1/workspaces")) {
-        return jsonResponse({ data: [workspace()], count: 1 })
-      }
-      return jsonResponse(organizationContext())
-    })
-    const user = userEvent.setup()
-    renderPage(<WorkspacesPage />)
-
-    await user.click(await screen.findByRole("button", { name: "Members" }))
-    // An empty candidate list is only "everyone is already here" once the
-    // roster has answered; a failed one has to say so instead.
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      "Roster unavailable",
-    )
-    expect(screen.queryByText(/already in this workspace/)).toBeNull()
-  })
-
-  it("adds an organization member to a workspace with a chosen role", async () => {
-    const requests = mockApi({
-      orgMembers: [
-        organizationMember({
-          organization_member_id: "owner-membership",
-          user_id: "33333333-3333-3333-3333-333333333333",
-          full_name: "Operator",
-        }),
-        organizationMember({
-          organization_member_id: "analyst-membership",
-          user_id: "77777777-7777-7777-7777-777777777777",
-          full_name: "Analyst",
-          role: "member",
-        }),
-      ],
-    })
-    const user = userEvent.setup()
-    renderPage(<WorkspacesPage />)
-
-    await user.click(await screen.findByRole("button", { name: "Members" }))
-    const picker = await screen.findByLabelText("Organization member")
-    await user.selectOptions(picker, "77777777-7777-7777-7777-777777777777")
-    await user.selectOptions(screen.getByLabelText("Role"), "admin")
-    await user.click(screen.getByRole("button", { name: "Add member" }))
-
-    const post = requests.find(
-      (request) =>
-        request.method === "POST" && request.url.includes("/members"),
-    )
-    // The role travels as a query parameter, which is the rehomed wire
-    // contract; a body would be ignored.
-    expect(post?.url).toContain(
-      "/v1/workspaces/44444444-4444-4444-4444-444444444444/members/77777777-7777-7777-7777-777777777777?role=admin",
-    )
-  })
-
   it("confirms before deleting a workspace", async () => {
     // Two, because the last workspace cannot be deleted and its button says so.
     const requests = mockApi({
@@ -255,14 +176,14 @@ describe("WorkspacesPage", () => {
     expect(remove).toHaveAccessibleName(/keeps at least one workspace/)
   })
 
-  it("offers a non-manager the roster but none of the write controls", async () => {
+  it("denies a non-manager every write control on this page", async () => {
     // Two workspaces, so the Delete button is about the caller's role rather
-    // than about the last-workspace rule.
+    // than about the last-workspace rule. The roster's own controls are the
+    // members page's business now.
     mockApi({
       context: organizationContext({ role: "viewer" }),
       workspaces: [workspace(), workspace({ id: SECOND, name: "Bravo" })],
     })
-    const user = userEvent.setup()
     renderPage(<WorkspacesPage />)
 
     await screen.findByText("Default Workspace")
@@ -271,11 +192,6 @@ describe("WorkspacesPage", () => {
     ).toBeNull()
     expect(screen.getAllByRole("button", { name: "Edit" })[0]).toBeDisabled()
     expect(screen.getAllByRole("button", { name: "Delete" })[0]).toBeDisabled()
-
-    await user.click(screen.getAllByRole("button", { name: "Members" })[0])
-    const roster = await screen.findByText("Members of Default Workspace")
-    expect(roster).toBeInTheDocument()
-    expect(screen.getByRole("button", { name: "Remove" })).toBeDisabled()
   })
 
   it("renames a workspace through the update endpoint", async () => {
@@ -294,5 +210,32 @@ describe("WorkspacesPage", () => {
       "/v1/workspaces/44444444-4444-4444-4444-444444444444",
     )
     expect(patch?.body).toEqual({ name: "Renamed", description: null })
+  })
+
+  it("names the budget each workspace hands to its members", async () => {
+    // The other half of the field on the edit form: a workspace's default is
+    // readable from the list without opening it, and mirrors the budgets page's
+    // own "Default for" column.
+    mockApi({
+      workspaces: [workspace(), workspace({ id: SECOND, name: "Bravo" })],
+      budgets: [budget({ budget_id: "bud-team", name: "Team standard" })],
+      budgetDefaults: {
+        "44444444-4444-4444-4444-444444444444": [
+          workspaceBudgetDefault({ budget_id: "bud-team" }),
+        ],
+      },
+    })
+    renderPage(<WorkspacesPage />)
+
+    // Awaited, not read synchronously: the defaults are a fan-out over the
+    // workspaces, so they land after the list the row itself comes from.
+    const chip = await screen.findByText("Team standard")
+    expect(chip.closest("tr")).toContainElement(
+      await screen.findByText("Default Workspace"),
+    )
+
+    // Bravo has none, which reads as "None" rather than as an empty cell.
+    const bravo = (await screen.findByText("Bravo")).closest("tr")!
+    expect(within(bravo).getByText("None")).toBeInTheDocument()
   })
 })

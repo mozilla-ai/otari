@@ -7,6 +7,7 @@
 // the part under test, so a test states what it is about and nothing else.
 
 import type {
+  Budget,
   DeploymentBootstrap,
   Organization,
   OrganizationContext,
@@ -193,6 +194,22 @@ export function workspaceMember(
     status: "active",
     created_at: "2026-01-01T00:00:00+00:00",
     updated_at: null,
+    ...overrides,
+  }
+}
+
+/** A spending limit and its reset period, as the budgets list reports one. */
+export function budget(overrides: Partial<Budget> = {}): Budget {
+  return {
+    budget_id: "77777777-7777-7777-7777-777777777777",
+    name: "Team standard",
+    max_budget: 100,
+    budget_duration_sec: 2_592_000,
+    user_count: 0,
+    total_spend: 0,
+    total_reserved: 0,
+    created_at: "2026-01-01T00:00:00+00:00",
+    updated_at: "2026-01-01T00:00:00+00:00",
     ...overrides,
   }
 }

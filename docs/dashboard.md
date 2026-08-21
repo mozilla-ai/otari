@@ -502,13 +502,18 @@ by is the handle those flows will match them on.
 
 ### People & access
 
-- **Workspaces**: create, rename, and delete workspaces, and manage each
-  roster. The last workspace cannot be deleted. The create and edit forms carry
-  a **Default member budget**: pick a budget and every member of that workspace
-  is held to it, each with an allowance of their own rather than a shared pool.
-  Someone in two workspaces therefore holds two, one per workspace. Changing it
-  applies to members who join afterwards; members already there keep what they
-  were given.
+- **Workspaces**: create, rename, and delete workspaces. The last workspace
+  cannot be deleted. Rosters are not managed here: a workspace's members are
+  **Members** on the workspace rail, for whichever workspace the switcher has
+  selected, and the organization's are **Members & roles**. Two roster pages,
+  one per scope, and each picks the roles for its own.
+
+  The create and edit forms carry a **Default member budget**, and the list has
+  a column naming it: pick a budget and every member of that workspace is held
+  to it, each with an allowance of their own rather than a shared pool. Someone
+  in two workspaces therefore holds two, one per workspace. Changing it applies
+  to members who join afterwards; members already there keep what they were
+  given.
 - **Members & roles**: who belongs to the organization, their role
   (owner, admin, member, viewer), and their status. Adding someone directly
   takes an email address and optionally the workspaces to put them in straight
