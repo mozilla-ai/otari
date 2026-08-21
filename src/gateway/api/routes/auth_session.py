@@ -56,7 +56,7 @@ from gateway.services.dashboard_session_service import (
 )
 from gateway.services.password_service import MAX_PASSWORD_BYTES
 from gateway.services.tenancy.email_address import MAX_EMAIL_LENGTH
-from gateway.services.tenancy.errors import InvalidCredentialsError
+from gateway.services.tenancy.errors import EmailNotVerifiedError, InvalidCredentialsError
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 from gateway.services.tenancy.user_service import authenticate, has_password_identity
 
@@ -216,9 +216,15 @@ async def _sign_in_with_master_key(
 async def _sign_in_with_password(email: str, password: str, request: Request, db: AsyncSession) -> TenancyUser:
     """Steady-state sign-in: verify an identity's own email and password.
 
-    The one failure ``authenticate`` raises is converted here rather than left
-    to the tenancy error handler, because a failed sign-in has to be counted and
-    throttled, and the handler knows about neither.
+    Both failures ``authenticate`` raises are converted here rather than left
+    to the tenancy error handler, because a failed sign-in has to be counted
+    and throttled, and the handler knows about neither. ``EmailNotVerifiedError``
+    is still a failed sign-in attempt by every measure that matters here: it
+    costs a bcrypt verification the same as a wrong password, and a caller who
+    already knows a valid (email, password) pair for an unverified account
+    would otherwise be able to hammer this endpoint with it, uncounted and
+    unthrottled, unlike every other way this call can fail. Its own status and
+    message survive the conversion, unlike ``InvalidCredentialsError``'s.
     """
     try:
         return await authenticate(db, email=email, password=password)
@@ -226,6 +232,10 @@ async def _sign_in_with_password(email: str, password: str, request: Request, db
         record_auth_failure("invalid_password")
         _check_login_rate_limit(request)
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail=exc.message) from None
+    except EmailNotVerifiedError as exc:
+        record_auth_failure("email_not_verified")
+        _check_login_rate_limit(request)
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=exc.message) from None
 
 
 @router.post("")

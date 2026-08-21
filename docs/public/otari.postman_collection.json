@@ -622,7 +622,7 @@
               },
               "raw": "{\n  \"email\": \"string\",\n  \"password\": \"string\"\n}"
             },
-            "description": "Claim a roster identity: set its password and send a verification link.\n\nNo session is minted. The identity is hard-blocked from signing in until it\nverifies, so there is nothing yet to sign it into.",
+            "description": "Claim a roster identity, or do nothing: the response never says which.\n\nNo session is minted. A newly claimed identity is hard-blocked from\nsigning in until it verifies, so there is nothing yet to sign it into.",
             "header": [
               {
                 "key": "Content-Type",

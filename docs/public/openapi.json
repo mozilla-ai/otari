@@ -7863,13 +7863,8 @@
         "type": "object"
       },
       "SignupResponse": {
-        "description": "What happens next: a verification message, not a session.",
+        "description": "The same message whether or not the address had anything to claim.",
         "properties": {
-          "email": {
-            "description": "The address a verification link was sent to.",
-            "title": "Email",
-            "type": "string"
-          },
           "message": {
             "description": "What the caller should do next.",
             "title": "Message",
@@ -7877,7 +7872,6 @@
           }
         },
         "required": [
-          "email",
           "message"
         ],
         "title": "SignupResponse",
@@ -12318,14 +12312,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
         "summary": "Request Reset",
         "tags": [
           "auth"
@@ -12361,14 +12347,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
         "summary": "Confirm Reset",
         "tags": [
           "auth"
@@ -12411,14 +12389,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
         "summary": "Resend Verification",
         "tags": [
           "auth"
@@ -12482,7 +12452,7 @@
     },
     "/v1/auth/signup": {
       "post": {
-        "description": "Claim a roster identity: set its password and send a verification link.\n\nNo session is minted. The identity is hard-blocked from signing in until it\nverifies, so there is nothing yet to sign it into.",
+        "description": "Claim a roster identity, or do nothing: the response never says which.\n\nNo session is minted. A newly claimed identity is hard-blocked from\nsigning in until it verifies, so there is nothing yet to sign it into.",
         "operationId": "signup_v1_auth_signup_post",
         "requestBody": {
           "content": {
@@ -12516,14 +12486,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
         "summary": "Signup",
         "tags": [
           "auth"
@@ -12566,14 +12528,6 @@
             "description": "Validation Error"
           }
         },
-        "security": [
-          {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
-          }
-        ],
         "summary": "Verify Email Route",
         "tags": [
           "auth"

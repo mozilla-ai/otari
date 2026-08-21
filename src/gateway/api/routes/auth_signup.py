@@ -8,15 +8,19 @@ their whole proof of anything here.
 Signup only ever claims an identity ``organization_service`` already put on
 the roster (an admin added or invited the address). It never creates one from
 nothing; see ``user_service.create_user_for_signup``'s own docstring for why.
+It is also enumeration-safe the same way resend and reset-request are: the
+response never says whether the address was unknown, already claimed, or
+genuinely just claimed.
 """
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db
+from gateway.api.routes._public_auth import mail_unavailable, throttle_public_auth
 from gateway.core.config import GatewayConfig
 from gateway.services.mail import MailNotConfiguredError
 from gateway.services.tenancy.email_address import MAX_EMAIL_LENGTH
@@ -52,9 +56,8 @@ class SignupRequest(BaseModel):
 
 
 class SignupResponse(BaseModel):
-    """What happens next: a verification message, not a session."""
+    """The same message whether or not the address had anything to claim."""
 
-    email: str = Field(description="The address a verification link was sent to.")
     message: str = Field(description="What the caller should do next.")
 
 
@@ -74,38 +77,8 @@ class ResendVerificationResponse(BaseModel):
     message: str = Field(description="The same message whether or not the address has anything to verify.")
 
 
+_SIGNUP_MESSAGE = "If this address is on our roster and unclaimed, check your email to verify it, then sign in."
 _RESEND_MESSAGE = "If this address is registered and unverified, a verification email is on its way."
-
-
-def _throttle(request: Request) -> None:
-    """Throttle calls to these routes per client IP.
-
-    Unconditional, not just on failure, the same reasoning ``invitations._throttle``
-    gives its own two routes: there is no legitimate caller here at a rate worth
-    exempting, only a client with an address it can retry from. Reuses the
-    sign-in route's limiter/budget rather than a separate one.
-    """
-    limiter = getattr(request.app.state, "login_rate_limiter", None)
-    if limiter is None:
-        return
-    client_ip = request.client.host if request.client else None
-    if client_ip is None:
-        return
-    limiter.check(client_ip)
-
-
-def _as_503(exc: MailNotConfiguredError) -> HTTPException:
-    """Render a mail-gated refusal the way ``mail.py``'s own does.
-
-    Not a ``TenancyError``: the central handler in ``gateway.main`` renders
-    every status of 500 or above with a generic "Internal server error" body,
-    on purpose, for the errors that already live in that family (an operator
-    problem the caller cannot act on). This one is the opposite: the missing
-    settings are exactly what the caller (or the dashboard reading them) needs
-    to see, the same reason ``send_test_mail`` raises ``HTTPException``
-    directly instead of wrapping this in a tenancy error.
-    """
-    return HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
 
 
 @router.post("/signup")
@@ -115,14 +88,14 @@ async def signup(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> SignupResponse:
-    """Claim a roster identity: set its password and send a verification link.
+    """Claim a roster identity, or do nothing: the response never says which.
 
-    No session is minted. The identity is hard-blocked from signing in until it
-    verifies, so there is nothing yet to sign it into.
+    No session is minted. A newly claimed identity is hard-blocked from
+    signing in until it verifies, so there is nothing yet to sign it into.
     """
-    _throttle(request)
+    throttle_public_auth(request)
     try:
-        identity = await create_user_for_signup(
+        await create_user_for_signup(
             db,
             config,
             email=body.email,
@@ -131,12 +104,8 @@ async def signup(
             terms_accepted=body.terms_accepted,
         )
     except MailNotConfiguredError as exc:
-        raise _as_503(exc) from None
-    assert identity.email is not None  # guaranteed: signup only claims an address-holding row
-    return SignupResponse(
-        email=identity.email,
-        message="Check your email to verify your address, then sign in.",
-    )
+        raise mail_unavailable(exc) from None
+    return SignupResponse(message=_SIGNUP_MESSAGE)
 
 
 @router.post("/verify-email")
@@ -146,7 +115,7 @@ async def verify_email_route(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> VerifyEmailResponse:
     """Confirm an address from its verification link, lifting the sign-in gate."""
-    _throttle(request)
+    throttle_public_auth(request)
     identity = await verify_email(db, token=body.token)
     assert identity.email is not None  # guaranteed: only a claimed identity has a verification token
     return VerifyEmailResponse(email=identity.email)
@@ -160,11 +129,11 @@ async def resend_verification(
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> ResendVerificationResponse:
     """Mail a fresh verification link, or do nothing: the response never says which."""
-    _throttle(request)
+    throttle_public_auth(request)
     try:
         await resend_verification_email(db, config, email=body.email)
     except MailNotConfiguredError as exc:
-        raise _as_503(exc) from None
+        raise mail_unavailable(exc) from None
     return ResendVerificationResponse(message=_RESEND_MESSAGE)
 
 

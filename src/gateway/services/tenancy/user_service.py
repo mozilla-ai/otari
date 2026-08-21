@@ -78,8 +78,6 @@ from gateway.services.tenancy.errors import (
     PasswordPolicyError,
     ResetTokenInvalidError,
     SignInAddressRequiredError,
-    SignupAlreadyCompletedError,
-    UnknownSignupAddressError,
     UnmodifiedPasswordError,
     VerificationTokenInvalidError,
 )
@@ -89,6 +87,12 @@ from gateway.services.tenancy.verification_email import render_verification_emai
 
 # The unique index alembic creates on ``user.email`` (c4b6d8e0f2a3).
 _EMAIL_UNIQUE_INDEX = "ix_user_email"
+
+# Fed to ``verify_absent_password_async`` on an enumeration-safe early return
+# that has no password of its own to burn the cost against (resend, request a
+# reset): the value is never checked against anything, only its length and the
+# fixed bcrypt cost matter, so a constant is as good as a real one.
+_TIMING_EQUALIZER = "otari:no-op-verification"  # pragma: allowlist secret
 
 
 async def authenticate(db: AsyncSession, *, email: str, password: str) -> User:
@@ -185,6 +189,15 @@ async def set_password(
     excepted, so a stolen cookie does not outlive the password it was minted
     under. The caller passes its own session's hash to stay signed in; a
     header-authenticated caller passes nothing and every session ends.
+
+    Any outstanding verification or reset token this identity holds is cleared
+    the same way: whichever channel just proved deployment authority over the
+    account (a claim, an operator recovery, or a proven current password
+    through ``update_password``) is a stronger proof than a bearer link sent to
+    an inbox, and a token minted before this change has no reason to survive
+    it. Without this, a reset link generated and then overtaken by a password
+    change elsewhere (the operator recovers the account before the link is
+    opened, say) would still work, letting whoever holds it undo the change.
     """
     _validate_password(new_password)
     vouches_for_the_address = email is not None or identity.hashed_password is None
@@ -195,6 +208,10 @@ async def set_password(
     if vouches_for_the_address:
         identity.email_verified_at = datetime.now(UTC)
     identity.hashed_password = await hash_password_async(new_password)
+    identity.email_verification_token_hash = None
+    identity.email_verification_token_expires_at = None
+    identity.password_reset_token_hash = None
+    identity.password_reset_token_expires_at = None
     # The write and the revocation are inside the try together, and that is not
     # tidiness: the revocation issues a DELETE, which autoflushes the pending
     # UPDATE first, so a duplicate address raises *there* rather than at the
@@ -227,15 +244,24 @@ async def create_user_for_signup(
     password: str,
     full_name: str | None = None,
     terms_accepted: bool = False,
-) -> User:
-    """Claim an identity ``organization_service`` already put on the roster.
+) -> None:
+    """Claim an identity ``organization_service`` already put on the roster, or do nothing.
 
     This edition's signup only ever completes an identity an admin already
     added or invited by address (password-less, per that service's own
-    docstrings): it never creates one from nothing. An address nobody has
-    touched raises ``UnknownSignupAddressError`` rather than being onboarded,
-    and an address that already has a password raises
-    ``SignupAlreadyCompletedError`` rather than being silently re-claimed.
+    docstrings): it never creates one from nothing. Enumeration-safe the same
+    way ``resend_verification_email`` and ``request_password_reset`` are: an
+    address nobody has touched and one that already has a password both return
+    with nothing written and nothing mailed, and only a genuinely pending
+    identity is claimed. An earlier version of this call answered the three
+    cases with distinguishable 404/409/200 statuses, which let an
+    unauthenticated caller enumerate an organization's roster and signup
+    progress, exactly what the sibling functions were already written to
+    avoid; this closes that gap. ``password`` is still validated and reported
+    on its own shape (too short, too long) before the lookup, since a policy
+    violation says nothing about whether the address exists and checking it
+    first means a bad password answers the same way whether or not the
+    address is real.
 
     Refuses before writing anything if this deployment cannot mail the
     verification link: a signup that could never be verified would strand the
@@ -247,14 +273,19 @@ async def create_user_for_signup(
     """
     mailer = Mailer(config)
     mailer.require_ready()
+    _validate_password(password)
 
     address = validated_email(email)
     identity = await UserRepository(db).get_by_email(address)
-    if identity is None:
-        raise UnknownSignupAddressError
-    if identity.hashed_password is not None:
-        raise SignupAlreadyCompletedError
-    _validate_password(password)
+    if identity is None or identity.hashed_password is not None:
+        # Pays the same bcrypt cost the claim path pays hashing a fresh
+        # password, so the two cases are closer in wall-clock time than a bare
+        # early return would be. Not a full equalization (the claim path also
+        # commits and mails), but it closes the cheapest, most repeatable part
+        # of the gap the way ``authenticate`` already does for a sign-in on an
+        # address with no stored hash.
+        await verify_absent_password_async(password)
+        return
 
     identity.full_name = identity.full_name or full_name
     identity.hashed_password = await hash_password_async(password)
@@ -267,7 +298,6 @@ async def create_user_for_signup(
     )
     db.add(identity)
     await db.commit()
-    await db.refresh(identity)
 
     await mailer.send(
         to=address,
@@ -276,21 +306,24 @@ async def create_user_for_signup(
             expiry_hours=config.email_verification_expiry_hours,
         ),
     )
-    return identity
 
 
 async def verify_email(db: AsyncSession, *, token: str) -> User:
     """Confirm an address, lifting the sign-in gate #650 added to ``authenticate``.
 
-    One error for unknown, expired, and already-consumed: a token that no
-    longer resolves to a row (cleared by a prior use, or never issued) and one
-    whose expiry has passed both raise ``VerificationTokenInvalidError``,
-    the same collapse ``InvitationNotFoundError`` gives an invitation token for
-    the same reason. Single-use is the hash and expiry columns going back to
-    ``NULL`` on success: a replayed token then matches no row at all.
+    One error for unknown, expired, already-consumed, and deactivated: a token
+    that no longer resolves to a row (cleared by a prior use, or never issued),
+    one whose expiry has passed, and one whose identity has been deactivated
+    since it was issued all raise ``VerificationTokenInvalidError``, the same
+    collapse ``InvitationNotFoundError`` gives an invitation token for the same
+    reason. The deactivation check matches ``resolve_dashboard_session`` and
+    ``authenticate``: deactivating someone has to end every road back in, not
+    just the one ``authenticate`` itself checks. Single-use is the hash and
+    expiry columns going back to ``NULL`` on success: a replayed token then
+    matches no row at all.
     """
     identity = await UserRepository(db).get_by_verification_token_hash(hash_token(token))
-    if identity is None or identity.email_verification_token_expires_at is None:
+    if identity is None or identity.email_verification_token_expires_at is None or not identity.is_active:
         raise VerificationTokenInvalidError
     if identity.email_verification_token_expires_at < datetime.now(UTC):
         raise VerificationTokenInvalidError
@@ -300,7 +333,6 @@ async def verify_email(db: AsyncSession, *, token: str) -> User:
     identity.email_verification_token_expires_at = None
     db.add(identity)
     await db.commit()
-    await db.refresh(identity)
     return identity
 
 
@@ -313,6 +345,13 @@ async def resend_verification_email(db: AsyncSession, config: GatewayConfig, *, 
     genuinely-unverified case mints a token and mails it. A fresh token
     replaces any prior one outright, so an old, unopened link stops working
     the moment a new one is requested.
+
+    The early return still pays a bcrypt-equivalent cost first
+    (``verify_absent_password_async``), the same reason ``authenticate`` pays
+    one for an address with no stored hash: without it, the ineligible path
+    returns after one SELECT while the eligible one goes on to a commit and an
+    awaited mail send, and that gap is measurable enough to narrow down which
+    case a given address fell into.
     """
     mailer = Mailer(config)
     mailer.require_ready()
@@ -320,6 +359,7 @@ async def resend_verification_email(db: AsyncSession, config: GatewayConfig, *, 
     address = validated_email(email)
     identity = await UserRepository(db).get_by_email(address)
     if identity is None or identity.hashed_password is None or identity.email_verified_at is not None:
+        await verify_absent_password_async(_TIMING_EQUALIZER)
         return
 
     token = generate_token()
@@ -342,7 +382,8 @@ async def resend_verification_email(db: AsyncSession, config: GatewayConfig, *, 
 async def request_password_reset(db: AsyncSession, config: GatewayConfig, *, email: str) -> None:
     """Mail a password-reset link, or do nothing: the caller cannot tell which.
 
-    Enumeration-safe the same way ``resend_verification_email`` is. Works on an
+    Enumeration-safe the same way ``resend_verification_email`` is, including
+    paying the same timing-equalizing cost on the early return. Works on an
     unverified identity too, deliberately: forgetting a password predates ever
     verifying it, so gating this on ``email_verified_at`` would strand exactly
     the caller it exists to help.
@@ -353,6 +394,7 @@ async def request_password_reset(db: AsyncSession, config: GatewayConfig, *, ema
     address = validated_email(email)
     identity = await UserRepository(db).get_by_email(address)
     if identity is None or identity.hashed_password is None:
+        await verify_absent_password_async(_TIMING_EQUALIZER)
         return
 
     token = generate_token()
@@ -377,10 +419,12 @@ async def reset_password(db: AsyncSession, *, token: str, new_password: str) -> 
     entire point of a reset. Every other session this identity holds is
     revoked, the same as an ordinary password change, so a session opened
     before the account was recovered does not outlive the reset that took it
-    back.
+    back. A deactivated identity's token is refused the same way an unknown or
+    expired one is, matching ``verify_email``: deactivation has to end every
+    road back in, not just the one ``authenticate`` itself checks.
     """
     identity = await UserRepository(db).get_by_reset_token_hash(hash_token(token))
-    if identity is None or identity.password_reset_token_expires_at is None:
+    if identity is None or identity.password_reset_token_expires_at is None or not identity.is_active:
         raise ResetTokenInvalidError
     if identity.password_reset_token_expires_at < datetime.now(UTC):
         raise ResetTokenInvalidError

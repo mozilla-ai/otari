@@ -185,6 +185,61 @@ def test_an_expired_reset_token_is_refused(tmp_path: Path, caplog: pytest.LogCap
         assert response.status_code == 400
 
 
+def test_a_reset_token_is_refused_once_the_identity_is_deactivated(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A live token must not outlive the account it was issued to.
+
+    Matches ``authenticate``'s own ``is_active`` check: deactivating someone
+    has to end every road back in, not just sign-in.
+    """
+    with _client(tmp_path) as client:
+        _claimed_and_verified(client, caplog, email="ada@example.com")
+        _, log_text = _request_reset(client, caplog, email="ada@example.com")
+        token = _TOKEN_IN_LINK.search(log_text).group(1)
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'reset-test.db'}")
+    with engine.begin() as connection:
+        connection.execute(text('UPDATE "user" SET is_active = 0 WHERE email = :email'), {"email": "ada@example.com"})
+
+    with _client(tmp_path) as client:
+        response = client.post(
+            "/v1/auth/password/reset/confirm", json={"token": token, "new_password": NEW_PASSWORD}
+        )
+        assert response.status_code == 400
+
+
+def test_a_password_change_elsewhere_invalidates_an_outstanding_reset_token(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A reset token minted before a password change has no reason to survive it.
+
+    Without this, a reset link generated and then overtaken by a change
+    through another channel (the operator recovers the account before the
+    link is opened, an ordinary self-service change) would still work,
+    letting whoever holds it undo the change.
+    """
+    with _client(tmp_path) as client:
+        _claimed_and_verified(client, caplog, email="ada@example.com")
+        _, log_text = _request_reset(client, caplog, email="ada@example.com")
+        token = _TOKEN_IN_LINK.search(log_text).group(1)
+
+        # The account owner changes their password through the ordinary,
+        # session-authenticated channel while the reset link is still live.
+        signed_in = client.post("/v1/auth/session", json={"email": "ada@example.com", "password": PASSWORD})
+        assert signed_in.status_code == 200
+        changed = client.put(
+            "/v1/auth/password",
+            json={"current_password": PASSWORD, "new_password": "an-unrelated-change"},
+        )
+        assert changed.status_code == 200, changed.text
+
+        confirmed = client.post(
+            "/v1/auth/password/reset/confirm", json={"token": token, "new_password": NEW_PASSWORD}
+        )
+        assert confirmed.status_code == 400
+
+
 def test_request_reset_is_enumeration_safe(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     with _client(tmp_path) as client:
         _claimed_and_verified(client, caplog, email="ada@example.com")

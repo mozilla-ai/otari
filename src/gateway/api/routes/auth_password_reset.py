@@ -9,11 +9,12 @@ the same "the request's own token is the whole proof" shape as
 
 from typing import Annotated
 
-from fastapi import APIRouter, Depends, HTTPException, Request, status
+from fastapi import APIRouter, Depends, Request, status
 from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db
+from gateway.api.routes._public_auth import mail_unavailable, throttle_public_auth
 from gateway.core.config import GatewayConfig
 from gateway.services.mail import MailNotConfiguredError
 from gateway.services.tenancy.email_address import MAX_EMAIL_LENGTH
@@ -47,34 +48,6 @@ class ResetPasswordRequest(BaseModel):
     )
 
 
-def _throttle(request: Request) -> None:
-    """Throttle calls to these routes per client IP.
-
-    Unconditional, the same reasoning ``auth_signup._throttle`` and
-    ``invitations._throttle`` give their own routes: no legitimate caller here
-    needs a rate this would exempt.
-    """
-    limiter = getattr(request.app.state, "login_rate_limiter", None)
-    if limiter is None:
-        return
-    client_ip = request.client.host if request.client else None
-    if client_ip is None:
-        return
-    limiter.check(client_ip)
-
-
-def _as_503(exc: MailNotConfiguredError) -> HTTPException:
-    """Render a mail-gated refusal the way ``mail.py``'s own does.
-
-    Not a ``TenancyError``: the central handler in ``gateway.main`` renders
-    every status of 500 or above with a generic "Internal server error" body,
-    on purpose, for the errors that already live in that family. This one is
-    the opposite: the missing settings are exactly what the caller needs to
-    see, the same reason ``send_test_mail`` raises ``HTTPException`` directly.
-    """
-    return HTTPException(status_code=status.HTTP_503_SERVICE_UNAVAILABLE, detail=str(exc))
-
-
 @router.post("/reset")
 async def request_reset(
     body: RequestPasswordResetRequest,
@@ -83,11 +56,11 @@ async def request_reset(
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> RequestPasswordResetResponse:
     """Mail a password-reset link, or do nothing: the response never says which."""
-    _throttle(request)
+    throttle_public_auth(request)
     try:
         await request_password_reset(db, config, email=body.email)
     except MailNotConfiguredError as exc:
-        raise _as_503(exc) from None
+        raise mail_unavailable(exc) from None
     return RequestPasswordResetResponse(message=_RESET_REQUEST_MESSAGE)
 
 
@@ -98,7 +71,7 @@ async def confirm_reset(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
     """Complete a password reset. Single-use: the token stops working after this."""
-    _throttle(request)
+    throttle_public_auth(request)
     await reset_password(db, token=body.token, new_password=body.new_password)
 
 

@@ -9,8 +9,9 @@ rate limit (the limiter is built into the app at boot from a session-scoped
 config, before a test's own ``monkeypatch`` call runs).
 ``test_email_verification.py::test_repeated_resend_calls_get_throttled``
 covers it instead, against SQLite, the same way ``test_invitation_rate_limit.py``
-does for the invitation routes; it exercises the same ``_throttle`` this
-module's own signup and verify-email routes share.
+does for the invitation routes; it exercises the same
+``_public_auth.throttle_public_auth`` this module's own signup and
+verify-email routes share.
 """
 
 import logging
@@ -78,13 +79,14 @@ def test_signup_then_verify_then_sign_in(
     assert signed_in.status_code == 200, signed_in.text
 
 
-def test_signup_on_an_untouched_address_is_not_found(
+def test_signup_on_an_untouched_address_is_enumeration_safe(
     client: TestClient,
     test_config: GatewayConfig,
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    """200 with nothing written, not a 404: see ``test_signup.py`` for the reasoning."""
     monkeypatch.setattr(test_config, "mail_transport", "console")
     monkeypatch.setattr(test_config, "public_base_url", "https://otari.example.com")
 
     response = client.post("/v1/auth/signup", json={"email": "nobody@example.com", "password": PASSWORD})
-    assert response.status_code == 404
+    assert response.status_code == 200

@@ -494,33 +494,6 @@ class VerificationTokenInvalidError(TenancyValidationError):
         super().__init__("This verification link is invalid, expired, or already used")
 
 
-class SignupAlreadyCompletedError(TenancyConflictError):
-    """Signup was asked to claim an identity that already has a password.
-
-    A distinct message from ``EmailAlreadyInUseError``: that one says the
-    address belongs to someone else, which is false here. This identity
-    already finished claiming it and should sign in instead.
-    """
-
-    def __init__(self) -> None:
-        super().__init__("This identity has already completed signup; sign in instead")
-
-
-class UnknownSignupAddressError(TenancyNotFoundError):
-    """Signup was asked to claim an address no admin has added or invited.
-
-    Not an enumeration risk the way a sign-in failure would be: the caller was
-    told by an operator to expect an invitation, not probing a stranger's
-    roster, so naming the actual condition guides them rather than leaking
-    anything about someone else's account.
-    """
-
-    def __init__(self) -> None:
-        super().__init__(
-            "No pending identity holds this address; ask an administrator to add or invite you first"
-        )
-
-
 class ResetTokenInvalidError(TenancyValidationError):
     """A password-reset token that is unknown, expired, or already consumed.
 
@@ -594,13 +567,11 @@ __all__ = [
     "ResetTokenInvalidError",
     "SecretBoxUnavailableTenancyError",
     "SignInAddressRequiredError",
-    "SignupAlreadyCompletedError",
     "TenancyConflictError",
     "TenancyError",
     "TenancyForbiddenError",
     "TenancyNotFoundError",
     "TenancyValidationError",
-    "UnknownSignupAddressError",
     "UnmodifiedPasswordError",
     "VerificationTokenInvalidError",
     "WorkspaceAlreadyExistsError",

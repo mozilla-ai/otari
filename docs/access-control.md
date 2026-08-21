@@ -168,7 +168,7 @@ It also stays the way back in. An operator who forgets the password sets a new o
 
 #### Signup: claiming a roster identity
 
-An identity an admin added or invited by address carries no password until it signs up. `POST /v1/auth/signup` claims it: it sets a password on the identity that address already names, sends a verification link, and refuses an address nothing has touched yet rather than creating one from nothing (self-service registration for a wholly new address is not part of this edition).
+An identity an admin added or invited by address carries no password until it signs up. `POST /v1/auth/signup` claims it: it sets a password on the identity that address already names and sends a verification link. It never creates an identity from nothing (self-service registration for a wholly new address is not part of this edition), and it is enumeration-safe about that: an address nobody has touched and one that already completed signup both answer with the same generic message and nothing written or mailed, the same shape resending and requesting a reset already take below. Only the password itself is judged and reported on its own terms (too short, too long), since that says nothing about whether the address exists.
 
 ```bash
 curl -X POST http://localhost:8000/v1/auth/signup \
@@ -176,7 +176,7 @@ curl -X POST http://localhost:8000/v1/auth/signup \
   -d '{"email": "erin@example.com", "password": "<a password>"}'
 ```
 
-The identity exists and has a password from this call on, but it is **hard-blocked from signing in until it verifies**, with no time limit on how long it may wait to: `POST /v1/auth/session` answers `403` for the right password on an unverified address, naming the reason rather than folding it into the generic `401`, because by then the password has already proven the caller holds the account. The verification link itself does expire (`email_verification_expiry_hours`, default 48), and can be requested again at any time:
+A genuinely pending identity exists and has a password from this call on, but it is **hard-blocked from signing in until it verifies**, with no time limit on how long it may wait to: `POST /v1/auth/session` answers `403` for the right password on an unverified address, naming the reason rather than folding it into the generic `401`, because by then the password has already proven the caller holds the account. The verification link itself does expire (`email_verification_expiry_hours`, default 48), and can be requested again at any time:
 
 ```bash
 curl -X POST http://localhost:8000/v1/auth/verify-email \
@@ -188,7 +188,7 @@ curl -X POST http://localhost:8000/v1/auth/resend-verification \
   -d '{"email": "erin@example.com"}'
 ```
 
-A verification token is single-use: presenting it again, or presenting an unknown or expired one, answers `400` without saying which of the three is true. Resending answers the same message whether the address is unregistered, already verified, or genuinely waiting, and only the last case actually sends anything, so the endpoint cannot be used to learn which addresses exist. Both routes, and signup itself, share the sign-in endpoint's rate limiter (`dashboard_login_rate_limit_per_minute`) and answer `503` naming what is missing when this deployment cannot send mail (`GET /v1/bootstrap`'s `mail_ready` says so in advance).
+A verification token is single-use: presenting it again, or presenting an unknown, expired, or deactivated identity's token, answers `400` without saying which is true. Resending answers the same message whether the address is unregistered, already verified, or genuinely waiting, and only the last case actually sends anything, so the endpoint cannot be used to learn which addresses exist. All three routes share the sign-in endpoint's rate limiter (`dashboard_login_rate_limit_per_minute`) and answer `503` naming what is missing when this deployment cannot send mail (`GET /v1/bootstrap`'s `mail_ready` says so in advance).
 
 #### Password reset
 
@@ -204,7 +204,7 @@ curl -X POST http://localhost:8000/v1/auth/password/reset/confirm \
   -d '{"token": "<the token from the link>", "new_password": "<a new password>"}'
 ```
 
-The request answers the same message whether or not the address holds a password, for the same enumeration-safety reason resending a verification link does. The reset token expires (`password_reset_expiry_hours`, default 2) and is single-use: unlike a stateless token, it is cleared the moment it is spent, so it cannot be replayed even inside its own expiry window. Completing a reset revokes every other session the identity holds, the same as an ordinary password change. Both routes share the sign-in rate limiter and the same `503`-when-unconfigured behavior signup does.
+The request answers the same message whether or not the address holds a password, for the same enumeration-safety reason resending a verification link does. The reset token expires (`password_reset_expiry_hours`, default 2) and is single-use: unlike a stateless token, it is cleared the moment it is spent, so it cannot be replayed even inside its own expiry window. It is also cleared the moment the identity's password changes through any other channel (an ordinary self-service change, an operator recovery through the master key) while it is still live, so a reset link generated and then overtaken elsewhere cannot undo that change later. Completing a reset revokes every other session the identity holds, the same as an ordinary password change. Both routes share the sign-in rate limiter and the same `503`-when-unconfigured behavior signup does.
 
 #### Who can sign in
 

@@ -120,6 +120,26 @@ def test_an_expired_token_is_refused(tmp_path: Path, caplog: pytest.LogCaptureFi
         assert response.status_code == 400
 
 
+def test_a_token_is_refused_once_the_identity_is_deactivated(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """A live token must not outlive the account it was issued to.
+
+    Matches ``authenticate``'s own ``is_active`` check: deactivating someone
+    has to end every road back in, not just sign-in.
+    """
+    with _client(tmp_path) as client:
+        token = _signed_up(client, caplog, email="ada@example.com")
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'verification-test.db'}")
+    with engine.begin() as connection:
+        connection.execute(text('UPDATE "user" SET is_active = 0 WHERE email = :email'), {"email": "ada@example.com"})
+
+    with _client(tmp_path) as client:
+        response = client.post("/v1/auth/verify-email", json={"token": token})
+        assert response.status_code == 400
+
+
 def test_resend_for_an_unknown_address_sends_nothing(tmp_path: Path, caplog: pytest.LogCaptureFixture) -> None:
     with _client(tmp_path) as client:
         status_code, text_seen = _resend(client, caplog, email="grace@example.com")

@@ -109,20 +109,59 @@ def test_signup_preserves_the_existing_membership_and_organization(
         assert after["organization_member_id"] == before["organization_member_id"]
 
 
-def test_signup_on_an_untouched_address_is_refused(tmp_path: Path) -> None:
-    with _client(tmp_path) as client:
-        assert _signup(client, email="nobody@example.com").status_code == 404
-
-
-def test_signup_on_an_already_completed_address_is_refused(
+def test_signup_on_an_untouched_address_is_enumeration_safe(
     tmp_path: Path, caplog: pytest.LogCaptureFixture
 ) -> None:
+    """An earlier version answered 404 here, letting a caller enumerate the roster."""
+    with _client(tmp_path) as client:
+        gateway_logger.addHandler(caplog.handler)
+        caplog.set_level(logging.INFO, logger="gateway")
+        try:
+            response = _signup(client, email="nobody@example.com")
+        finally:
+            gateway_logger.removeHandler(caplog.handler)
+
+        assert response.status_code == 200
+        assert "mail:console" not in caplog.text
+
+
+def test_signup_on_an_already_completed_address_is_enumeration_safe(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """An earlier version answered 409 here, letting a caller enumerate signup progress."""
     with _client(tmp_path) as client:
         _add_member(client, email="ada@example.com")
         _captured_verification_link(caplog, client, email="ada@example.com")
 
+        caplog.clear()
         again = _signup(client, email="ada@example.com", password="a-different-password")
-        assert again.status_code == 409
+
+        assert again.status_code == 200
+        assert again.json() == _signup(client, email="nobody@example.com").json()
+        # Nothing was re-sent, and the original password is untouched.
+        assert "mail:console" not in caplog.text
+        assert client.post(
+            "/v1/auth/session", json={"email": "ada@example.com", "password": "a-different-password"}
+        ).status_code == 401
+
+
+def test_signup_password_policy_is_enforced_before_any_enumeration_check(tmp_path: Path) -> None:
+    """A policy-violating password answers the same 400 whether or not the address exists.
+
+    Checked first, ahead of the address lookup, so the shape of the failure
+    never depends on account state: only the password itself is being judged.
+    Longer than bcrypt's 72-byte ceiling rather than merely short, so the
+    schema's own ``min_length=8`` does not intercept it as a 422 first.
+    """
+    with _client(tmp_path) as client:
+        too_long = "a" * 100
+        unknown = _signup(client, email="nobody@example.com", password=too_long)
+        assert unknown.status_code == 400
+
+        _add_member(client, email="ada@example.com")
+        known = _signup(client, email="ada@example.com", password=too_long)
+        assert known.status_code == 400
+        assert known.json() == unknown.json()
 
 
 def test_signup_without_mail_configured_is_refused_and_writes_nothing(tmp_path: Path) -> None:
