@@ -2,8 +2,8 @@
 
 Otari ships with a web admin dashboard for operators. It browses the model
 catalog, sets model pricing, manages routing policies, adds and edits provider API
-keys, manages spend identities, keys, and budgets, and toggles runtime settings,
-all against the local management API.
+keys, manages members, keys, and budgets, and toggles runtime settings, all
+against the local management API.
 
 The management pages are a **standalone-mode** feature. In standalone mode Otari
 serves the whole dashboard at the gateway root (`/`). A gateway connected to
@@ -192,12 +192,13 @@ master key, and select a model in `provider:model` form (for example
 `openai:gpt-4o`). See the [Quickstart](quickstart.md) for a full end-to-end
 example.
 
-### 9. (Optional) Set up keys, spend identities, and budgets
+### 9. (Optional) Set up keys, people, and budgets
 
 For multi-user or multi-app deployments, hand out scoped API keys from
-**Access** on the workspace rail, then define spend identities and attach
-budgets on the organization rail, so spend is enforced before each call. These
-are optional: a single-operator setup can run on the master key alone.
+**Access** on the workspace rail, then define budgets on the organization rail
+and attach them to people or to a whole workspace, so spend is enforced before
+each call. These are optional: a single-operator setup can run on the master key
+alone.
 
 ## Page-by-page reference
 
@@ -210,8 +211,8 @@ the switcher's own popover says which is which.
 
 The **organization rail** holds what belongs to the tenant rather than to one
 workspace. It is reached from the **Organization** entry at the foot of the
-workspace rail, and left by the link at its top. Spend identities, budgets, and
-settings live there.
+workspace rail, and left by the link at its top. Members, budgets, and settings
+live there.
 
 At the very bottom sits the account control, which holds **Account settings**
 (the password you sign in with), an **Appearance** row that cycles through
@@ -439,12 +440,11 @@ hand.
   A workspace's members are always a subset of the organization's, so someone
   joins the organization first, on the organization rail.
 
-Spend identities and budgets moved to the organization rail; see below. For how
-they, keys, and budgets fit together and the management endpoints behind these
-pages, see [Access control](access-control.md). The API calls a spend identity a
-`user`, which is the field name a caller sends and the one those endpoints use;
-the dashboard names the page for what it holds so it is not mistaken for the
-organization roster.
+Budgets moved to the organization rail; see below. For how people, keys, and
+budgets fit together and the management endpoints behind these pages, see
+[Access control](access-control.md). The API still calls a person a `user`,
+which is the field name a caller sends and the one those endpoints use; the
+dashboard shows that person as a member of the organization.
 
 ### Tools
 
@@ -503,7 +503,12 @@ by is the handle those flows will match them on.
 ### People & access
 
 - **Workspaces**: create, rename, and delete workspaces, and manage each
-  roster. The last workspace cannot be deleted.
+  roster. The last workspace cannot be deleted. The create and edit forms carry
+  a **Default member budget**: pick a budget and every member of that workspace
+  is held to it, each with an allowance of their own rather than a shared pool.
+  Someone in two workspaces therefore holds two, one per workspace. Changing it
+  applies to members who join afterwards; members already there keep what they
+  were given.
 - **Members & roles**: who belongs to the organization, their role
   (owner, admin, member, viewer), and their status. Adding someone directly
   takes an email address and optionally the workspaces to put them in straight
@@ -514,16 +519,21 @@ by is the handle those flows will match them on.
   hands you the link to share yourself. A pending invitation can be revoked
   before it is accepted.
 
+  The roster also carries what a person may spend and what their keys may call.
+  **Model access** is the default every key issued to them inherits, which a key
+  can narrow but never exceed; **Spend** is what they have spent, plus anything
+  held in flight by a request whose cost is not settled yet; and **Block** stops
+  their keys making requests without removing them from the organization or
+  touching their history. A member added by address before any key was issued to
+  them has no spend row yet, and those cells read as empty rather than zero.
+
 ### Cost & billing
 
 - **Spend & budgets**: spending limits callers are held to, with per-period
-  resets.
-- **Spend identities**: what an API key spends against. Each one carries a
-  budget and the default model access the keys issued to it inherit. Distinct
-  from **Members & roles** above: a member is a person who belongs to the
-  organization, an identity is what spend is attributed to, and a member is
-  linked to one so a key can be issued to them by name. They are two tables
-  today and are expected to converge in a later release.
+  resets. Assign a budget to people from its own form; everyone on it is held to
+  the full amount separately, so five people on one budget hold five allowances
+  rather than sharing one. **Default for** names any workspace that hands this
+  budget to its members, which is set on the workspace rather than here.
 - **Model pricing**: what the gateway meters a request at, which is one rate per
   model for the whole deployment. The page opens with what an *unpriced* model
   costs, because that decides what the table under it means: with default pricing

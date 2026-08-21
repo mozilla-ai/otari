@@ -14,6 +14,7 @@ import type {
   PricingResponse,
   UsageSeriesPoint,
   UsageTotals,
+  User,
   Workspace,
   WorkspaceBudgetDefault,
   WorkspaceMember,
@@ -196,12 +197,41 @@ export function workspaceMember(
   }
 }
 
+/**
+ * A gateway spend row: what a key charges against.
+ *
+ * Shared rather than per-file because the organization roster now joins these
+ * onto its members (`attribution_user_id`) to show model access and spend, so
+ * more than one suite needs the shape.
+ */
+export function user(overrides: Partial<User> = {}): User {
+  return {
+    user_id: "33333333-3333-3333-3333-333333333333",
+    alias: null,
+    spend: 0,
+    reserved: 0,
+    budget_id: null,
+    allowed_models: null,
+    budget_started_at: null,
+    next_budget_reset_at: null,
+    blocked: false,
+    created_at: "2026-01-01T00:00:00+00:00",
+    updated_at: "2026-01-01T00:00:00+00:00",
+    metadata: {},
+    ...overrides,
+  }
+}
+
 export function workspaceBudgetDefault(
   overrides: Partial<WorkspaceBudgetDefault> = {},
 ): WorkspaceBudgetDefault {
   return {
     id: "66666666-6666-6666-6666-666666666666",
     workspace_id: "44444444-4444-4444-4444-444444444444",
+    // The budget the default hands out. Name, limit and period are read off it
+    // rather than stored on the default, and travel on the wire so a caller can
+    // render one without fetching every budget to resolve an id.
+    budget_id: "77777777-7777-7777-7777-777777777777",
     provider_key_id: null,
     name: "Default member budget",
     max_budget: 50.0,

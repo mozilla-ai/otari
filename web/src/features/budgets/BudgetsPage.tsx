@@ -1,4 +1,4 @@
-import { Button, Card, Spinner } from "@heroui/react"
+import { Button, Card, Chip, Spinner } from "@heroui/react"
 import { useEffect, useMemo, useState } from "react"
 import type {
   Budget,
@@ -8,6 +8,7 @@ import type {
 } from "@/client"
 import { UserMultiSelect } from "@/features/users/UserMultiSelect"
 import {
+  useAllWorkspaceBudgetDefaults,
   useBudgetResetLogs,
   useBudgets,
   useCreateBudget,
@@ -15,6 +16,7 @@ import {
   useUpdateBudget,
   useUpdateUser,
   useUsers,
+  useWorkspaces,
 } from "@/shared/api/hooks"
 import { BulkActionBar } from "@/shared/components/BulkActionBar"
 import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
@@ -203,6 +205,7 @@ function BudgetForm({
   onSubmit,
   onClose,
   assignUsers,
+  assignedUserIds,
 }: {
   title: string
   submitLabel: string
@@ -215,10 +218,14 @@ function BudgetForm({
   isPending: boolean
   onSubmit: (body: CreateBudgetRequest, userIds: string[]) => void
   onClose: () => void
-  // When provided (create only), offer an optional multiselect to assign the new
-  // budget to existing users on save. Omitted for edit, where membership is
-  // managed per-user on the Users page.
+  // Offer a multiselect to assign this budget to existing users on save. Given
+  // on both create and edit: assignment used to be reachable per-person on the
+  // Users page, and that page is gone, so this is the only place a budget is
+  // attached to a person.
   assignUsers?: User[]
+  // Who already holds this budget, so edit opens with them selected rather than
+  // reading as an empty assignment that would clear them on save.
+  assignedUserIds?: string[]
 }) {
   const [name, setName] = useState(initial.name ?? "")
   const [limit, setLimit] = useState(
@@ -228,7 +235,7 @@ function BudgetForm({
     initial.budget_duration_sec,
   )
   const [periodInvalid, setPeriodInvalid] = useState(false)
-  const [userIds, setUserIds] = useState<string[]>([])
+  const [userIds, setUserIds] = useState<string[]>(assignedUserIds ?? [])
 
   const parsed = parseLimit(limit)
   const canSubmit = !isPending && parsed.valid && !periodInvalid
@@ -281,8 +288,8 @@ function BudgetForm({
         />
         {assignUsers ? (
           <UserMultiSelect
-            label="Assign to users (optional)"
-            description="Attach this budget to existing users now. You can also manage assignments later on the Users page."
+            label="Assign to people (optional)"
+            description="Everyone selected is held to this budget, each with their own allowance rather than a shared pool."
             value={userIds}
             onChange={setUserIds}
             users={assignUsers}
@@ -474,6 +481,12 @@ function budgetLabel(budget: Budget): string {
 export function BudgetsPage() {
   const budgets = useBudgets()
   const users = useUsers()
+  const workspaces = useWorkspaces()
+  const workspaceIds = useMemo(
+    () => (workspaces.data ?? []).map((workspace) => workspace.id),
+    [workspaces.data],
+  )
+  const workspaceDefaults = useAllWorkspaceBudgetDefaults(workspaceIds)
   const createBudget = useCreateBudget()
   const updateBudget = useUpdateBudget()
   const deleteBudget = useDeleteBudget()
@@ -495,6 +508,30 @@ export function BudgetsPage() {
 
   const rows = budgets.data ?? []
   const loading = budgets.isLoading
+
+  // Which workspaces hand out each budget. A budget may be the default for
+  // several, and a workspace may narrow one to a provider, which is named here
+  // because the workspace form only offers the unnarrowed one.
+  const defaultFor = useMemo(() => {
+    const names = new Map(
+      (workspaces.data ?? []).map((workspace) => [
+        workspace.id,
+        workspace.name,
+      ]),
+    )
+    const byBudget = new Map<string, string[]>()
+    for (const { workspaceId, default: row } of workspaceDefaults.data) {
+      const name = names.get(workspaceId) ?? workspaceId.slice(0, 8)
+      const label = row.provider_key_id
+        ? `${name} (${row.provider_key_id})`
+        : name
+      byBudget.set(row.budget_id, [
+        ...(byBudget.get(row.budget_id) ?? []),
+        label,
+      ])
+    }
+    return byBudget
+  }, [workspaces.data, workspaceDefaults.data])
   const editingBudget = rows.find((b) => b.budget_id === editing) ?? null
   const historyBudget = rows.find((b) => b.budget_id === historyOpen) ?? null
   const showOnboarding = !loading && rows.length === 0 && !addOpen
@@ -566,6 +603,25 @@ export function BudgetsPage() {
         header: "Identities",
         cell: (b) => <span className="text-muted">{b.user_count}</span>,
       },
+      {
+        id: "default-for",
+        header: "Default for",
+        cell: (b) => {
+          const holders = defaultFor.get(b.budget_id)
+          if (!holders || holders.length === 0) {
+            return <span className="text-xs text-muted">&mdash;</span>
+          }
+          return (
+            <div className="flex flex-wrap gap-1">
+              {holders.map((holder) => (
+                <Chip key={holder} size="sm">
+                  {holder}
+                </Chip>
+              ))}
+            </div>
+          )
+        },
+      },
       { id: "usage", header: "Usage", cell: (b) => <UsageCell budget={b} /> },
       {
         id: "actions",
@@ -603,34 +659,61 @@ export function BudgetsPage() {
         ),
       },
     ],
-    [historyOpen, deleteBudget.isPending, deleteBudget.mutate],
+    [historyOpen, deleteBudget.isPending, deleteBudget.mutate, defaultFor],
   )
 
-  const assignUsers = async (budgetId: string, userIds: string[]) => {
+  /**
+   * Reconcile who holds this budget.
+   *
+   * Both directions, because this is now the only place a budget is attached to
+   * a person: deselecting someone on the edit form has to detach them, which an
+   * assign-only pass would silently ignore while the form reported success.
+   * Returns whether everything landed, so the caller decides what to close.
+   */
+  const assignUsers = async (
+    budgetId: string,
+    userIds: string[],
+    previousUserIds: string[] = [],
+  ): Promise<boolean> => {
+    const added = userIds.filter((id) => !previousUserIds.includes(id))
+    const removed = previousUserIds.filter((id) => !userIds.includes(id))
+    if (added.length === 0 && removed.length === 0) {
+      setPendingAssignments(null)
+      return true
+    }
     setAssigningUsers(true)
     setAssignmentError(null)
+    const targets = [
+      ...added.map((id) => ({ id, budgetId: budgetId as string | null })),
+      ...removed.map((id) => ({ id, budgetId: null })),
+    ]
     const results = await Promise.allSettled(
-      userIds.map((id) =>
-        updateUser.mutateAsync({ id, body: { budget_id: budgetId } }),
+      targets.map(({ id, budgetId: value }) =>
+        updateUser.mutateAsync({ id, body: { budget_id: value } }),
       ),
     )
     setAssigningUsers(false)
 
     const failedUserIds = results.flatMap((result, index) =>
-      result.status === "rejected" ? [userIds[index]] : [],
+      result.status === "rejected" ? [targets[index].id] : [],
     )
     if (failedUserIds.length > 0) {
-      setPendingAssignments({ budgetId, userIds: failedUserIds })
+      // Only the additions are worth retrying as a set; a failed detach is
+      // re-attempted by saving again with the same selection.
+      setPendingAssignments({
+        budgetId,
+        userIds: failedUserIds.filter((id) => added.includes(id)),
+      })
       setAssignmentError(
         new Error(
-          `Budget created, but could not assign it to: ${failedUserIds.join(", ")}. Retry to try again.`,
+          `The budget was saved, but these people were not updated: ${failedUserIds.join(", ")}. Retry to try again.`,
         ),
       )
-      return
+      return false
     }
 
     setPendingAssignments(null)
-    setAddOpen(false)
+    return true
   }
 
   // Create the budget, then (optionally) attach it to the chosen users. The
@@ -645,8 +728,10 @@ export function BudgetsPage() {
     setAssignmentError(null)
     createBudget.mutate(body, {
       onSuccess: async (budget: Budget) => {
-        if (userIds.length > 0) {
-          await assignUsers(budget.budget_id, userIds)
+        if (
+          userIds.length > 0 &&
+          !(await assignUsers(budget.budget_id, userIds))
+        ) {
           return
         }
         setAddOpen(false)
@@ -736,12 +821,27 @@ export function BudgetsPage() {
             max_budget: editingBudget.max_budget,
             budget_duration_sec: editingBudget.budget_duration_sec,
           }}
-          error={updateBudget.error}
-          isPending={updateBudget.isPending}
-          onSubmit={(body) =>
+          error={updateBudget.error ?? assignmentError}
+          isPending={updateBudget.isPending || assigningUsers}
+          assignUsers={users.data ?? []}
+          assignedUserIds={(users.data ?? [])
+            .filter((u) => u.budget_id === editingBudget.budget_id)
+            .map((u) => u.user_id)}
+          onSubmit={(body, userIds) =>
             updateBudget.mutate(
               { id: editingBudget.budget_id, body },
-              { onSuccess: () => setEditing(null) },
+              {
+                onSuccess: async () => {
+                  const held = (users.data ?? [])
+                    .filter((u) => u.budget_id === editingBudget.budget_id)
+                    .map((u) => u.user_id)
+                  if (
+                    await assignUsers(editingBudget.budget_id, userIds, held)
+                  ) {
+                    setEditing(null)
+                  }
+                },
+              },
             )
           }
           onClose={() => setEditing(null)}

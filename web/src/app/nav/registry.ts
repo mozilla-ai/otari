@@ -10,7 +10,6 @@ import {
   FiHome,
   FiKey,
   FiLayers,
-  FiPieChart,
   FiRepeat,
   FiServer,
   FiShield,
@@ -164,15 +163,6 @@ const BASE_NAV_SECTIONS = [
         surface: "workspaces",
         icon: FiUsers,
       },
-      // Per-member spend templates for the selected workspace. Gated on the
-      // same surface as Members: a default names members of this workspace and
-      // materializes onto the same `workspace_member` rows the roster reads.
-      {
-        to: "/budget-defaults",
-        label: "Budget defaults",
-        surface: "workspaces",
-        icon: FiDollarSign,
-      },
     ],
   },
 ] as const satisfies readonly NavSection[]
@@ -252,29 +242,6 @@ const ORGANIZATION_NAV_SECTIONS = [
         label: "Spend & budgets",
         surface: "budgets",
         icon: FiDollarSign,
-      },
-      // The per-identity half of the row above: a budget is a ceiling, and this
-      // is the set of things held to one. Named for what it holds rather than
-      // for its table, because "Users" put a second people-shaped row on this
-      // rail and nothing distinguished it from the organization roster, which is
-      // a different table answering a different question (see
-      // `features/organization/attribution.ts`).
-      //
-      // It sits here rather than beside Members & roles because the group
-      // heading is what separates them: this is what a key spends against, not
-      // who belongs to the organization. Both rows survive only until otari's
-      // two identity tables converge (otari-ai#1727), at which point one page
-      // answers both.
-      //
-      // Not `FiUsers`, which the two rosters share because they are the same
-      // concept on two rails. This is a spend bucket that happens to be named
-      // after a person, so it wears a money-group mark instead: the icon is the
-      // part of a rail read before the label is.
-      {
-        to: "/users",
-        label: "Spend identities",
-        surface: "users",
-        icon: FiPieChart,
       },
       {
         to: "/organization/billing",

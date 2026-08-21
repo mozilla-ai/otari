@@ -8,6 +8,7 @@ import type {
   DeploymentBootstrap,
   OrganizationContext,
   OrganizationMember,
+  User,
   Workspace,
 } from "@/client"
 import { OrganizationMembersPage } from "@/features/organization/OrganizationMembersPage"
@@ -16,6 +17,7 @@ import {
   bootstrap,
   organizationContext,
   organizationMember,
+  user,
   workspace,
 } from "@/tests/fixtures"
 
@@ -37,10 +39,15 @@ function mockApi(opts: {
   members?: OrganizationMember[]
   workspaces?: Workspace[]
   inviteResult?: unknown
+  // The gateway's spend rows. The roster joins them on `attribution_user_id`
+  // to show what a member may call and what they have spent, neither of which
+  // is a column on the membership itself.
+  users?: User[]
 }) {
   const context = opts.context ?? organizationContext()
   const members = opts.members ?? [organizationMember()]
   const workspaces = opts.workspaces ?? []
+  const users = opts.users ?? []
   const requests: Request[] = []
 
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -54,6 +61,9 @@ function mockApi(opts: {
 
     if (url.includes("/v1/workspaces")) {
       return jsonResponse({ data: workspaces, count: workspaces.length })
+    }
+    if (url.includes("/v1/users")) {
+      return jsonResponse(method === "PATCH" ? users[0] : users)
     }
     if (url.includes("/v1/organizations/me/member-invitations")) {
       if (method === "POST") {
@@ -373,5 +383,82 @@ describe("OrganizationMembersPage", () => {
     expect(revoke?.url).toContain(
       "/v1/organizations/me/member-invitations/invitation-1",
     )
+  })
+
+  it("shows what a member may call and what they have spent", async () => {
+    // Both read off the gateway's `users` row, reached through the membership's
+    // `attribution_user_id`. The roster is the only place they are now, so a
+    // regression here is a capability that quietly disappeared with the page
+    // these columns replaced.
+    mockApi({
+      members: [OWNER, ANALYST],
+      users: [
+        user({
+          user_id: ANALYST.attribution_user_id as string,
+          allowed_models: ["openai:gpt-4o"],
+          spend: 12.5,
+          reserved: 2.25,
+        }),
+      ],
+    })
+    renderPage(<OrganizationMembersPage />)
+
+    await screen.findByText("Analyst")
+    const row = rowFor("Analyst")
+    expect(within(row).getByText("Selected models")).toBeInTheDocument()
+    expect(within(row).getByText("$12.50")).toBeInTheDocument()
+    expect(within(row).getByText("$2.25 in flight")).toBeInTheDocument()
+  })
+
+  it("leaves the spend cells empty for a member with no spend row", async () => {
+    // A member added by address before any key was issued has no `users` row, so
+    // there is nothing to report. Empty rather than zero: zero would claim they
+    // are on the gateway and have spent nothing.
+    mockApi({
+      members: [
+        OWNER,
+        organizationMember({
+          organization_member_id: "pending-membership",
+          user_id: "cccccccc-0000-0000-0000-000000000000",
+          attribution_user_id: null,
+          full_name: "Pending",
+          role: "member",
+        }),
+      ],
+      users: [],
+    })
+    renderPage(<OrganizationMembersPage />)
+
+    await screen.findByText("Pending")
+    const row = rowFor("Pending")
+    expect(within(row).queryByText("All models")).not.toBeInTheDocument()
+    expect(
+      within(row).queryByRole("button", { name: "Block" }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("blocks a member through their spend row, not their membership", async () => {
+    // Blocking stops their keys without touching the membership, which is what
+    // makes it a different act from Remove one column over.
+    const requests = mockApi({
+      members: [OWNER, ANALYST],
+      users: [
+        user({
+          user_id: ANALYST.attribution_user_id as string,
+          blocked: false,
+        }),
+      ],
+    })
+    const actor = userEvent.setup()
+    renderPage(<OrganizationMembersPage />)
+
+    await screen.findByText("Analyst")
+    const row = rowFor("Analyst")
+    await actor.click(within(row).getByRole("button", { name: "Block" }))
+
+    const patch = requests.find(
+      (r) => r.method === "PATCH" && r.url.includes("/v1/users/"),
+    )
+    expect(patch?.body).toEqual({ blocked: true })
   })
 })

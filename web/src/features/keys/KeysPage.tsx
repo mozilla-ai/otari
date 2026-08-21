@@ -1019,10 +1019,10 @@ export function KeysPage() {
       <p className="text-sm text-muted">
         A key spends against its owner's budget. Owners live under{" "}
         <Link
-          to="/users"
+          to="/organization/members"
           className="font-medium text-link hover:text-link-hover"
         >
-          Organization → Spend identities
+          Organization → Members &amp; roles
         </Link>
         , and their limits under{" "}
         <Link

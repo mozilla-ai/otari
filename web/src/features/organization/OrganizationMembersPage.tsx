@@ -2,6 +2,7 @@ import { Button, Card, Chip } from "@heroui/react"
 import { useMemo, useState } from "react"
 
 import type {
+  User as ApiUser,
   CreateOrganizationMemberRequest,
   InviteOrganizationMemberRequest,
   InviteOrganizationMemberResult,
@@ -11,6 +12,10 @@ import type {
   WorkspaceAssignment,
 } from "@/client"
 import {
+  accessLabel,
+  ModelScopeControl,
+} from "@/features/models/ModelScopeControl"
+import {
   useAddOrganizationMember,
   useInviteOrganizationMember,
   useOrganizationContext,
@@ -18,6 +23,8 @@ import {
   useRemoveOrganizationMember,
   useRevokeOrganizationMemberInvitation,
   useUpdateOrganizationMember,
+  useUpdateUser,
+  useUsers,
   useWorkspaces,
 } from "@/shared/api/hooks"
 import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
@@ -48,6 +55,18 @@ import {
 // member, viewer) and the server enforces the same two rules this page disables
 // controls for, so a refusal is explained here rather than only reported.
 
+// What a member spends and what their keys may call live on the gateway's own
+// `users` row, not on the membership: `organization_member` has no such columns.
+// `attribution_user_id` is the join, minted when the member is created, so a
+// member without one has no spend row and those cells stay empty rather than
+// reading as zero. The two tables converge in otari-ai#1727, at which point this
+// join is the identity and can go.
+const usd = new Intl.NumberFormat(undefined, {
+  style: "currency",
+  currency: "USD",
+  maximumFractionDigits: 2,
+})
+
 const ROLE_OPTIONS = MEMBERSHIP_ROLES.map((role) => ({
   value: role,
   label: membershipLabel(role),
@@ -66,6 +85,15 @@ function memberRowKey(member: OrganizationMember): string {
 }
 
 function StatusChip({ status }: { status: string }) {
+  // Not a membership status: it is the gateway refusing this person's keys, and
+  // it is shown here because the membership is active while every request fails.
+  if (status === "blocked") {
+    return (
+      <Chip size="sm" color="danger">
+        Blocked
+      </Chip>
+    )
+  }
   if (status === "active") {
     return (
       <Chip size="sm" color="accent">
@@ -364,6 +392,55 @@ function InviteMemberForm({ onClose }: { onClose: () => void }) {
   )
 }
 
+/**
+ * The default model access a member's keys inherit.
+ *
+ * Its own component so the scope control seeds from the row on mount only; the
+ * page keys it on the member being edited, which is what makes switching rows
+ * reseed rather than carry the previous member's selection over.
+ */
+function AccessEditor({
+  user,
+  isPending,
+  onSave,
+  onClose,
+}: {
+  user: ApiUser
+  isPending: boolean
+  onSave: (allowedModels: string[] | null) => void
+  onClose: () => void
+}) {
+  const [allowedModels, setAllowedModels] = useState<string[] | null>(
+    user.allowed_models,
+  )
+  const [valid, setValid] = useState(true)
+  return (
+    <>
+      <ModelScopeControl
+        title="Model access (default for this member's keys)"
+        description="The models this member's keys may list and call by default. A key can narrow this, but never exceed it."
+        initial={user.allowed_models}
+        onChange={(value, isValid) => {
+          setAllowedModels(value)
+          setValid(isValid)
+        }}
+      />
+      <div className="flex gap-2">
+        <Button
+          variant="primary"
+          isDisabled={!valid || isPending}
+          onPress={() => onSave(allowedModels)}
+        >
+          {isPending ? "Saving…" : "Save access"}
+        </Button>
+        <Button variant="ghost" isDisabled={isPending} onPress={onClose}>
+          Cancel
+        </Button>
+      </div>
+    </>
+  )
+}
+
 export function OrganizationMembersPage() {
   const context = useOrganizationContext()
   const members = useOrganizationMembers()
@@ -371,12 +448,22 @@ export function OrganizationMembersPage() {
   const remove = useRemoveOrganizationMember()
   const revoke = useRevokeOrganizationMemberInvitation()
 
+  const users = useUsers()
+  const updateUser = useUpdateUser()
+  const [editingAccess, setEditingAccess] = useState<string | null>(null)
   const [removing, setRemoving] = useState<OrganizationMember | null>(null)
   const [revoking, setRevoking] = useState<OrganizationMember | null>(null)
   const [adding, setAdding] = useState(false)
   const [inviting, setInviting] = useState(false)
 
   const rows = useMemo(() => members.data ?? [], [members.data])
+  const userByAttribution = useMemo(
+    () => new Map((users.data ?? []).map((user) => [user.user_id, user])),
+    [users.data],
+  )
+  const editingUser = editingAccess
+    ? userByAttribution.get(editingAccess)
+    : undefined
   const activeContext: OrganizationContext | undefined = context.data
   const manages = canManage(activeContext)
 
@@ -447,7 +534,83 @@ export function OrganizationMembersPage() {
         // re-adding the address revives the membership instead. "invited" has
         // its own control in the Actions column (Revoke) rather than a status
         // a picker could set, for the same reason.
-        cell: (member) => <StatusChip status={member.status} />,
+        cell: (member) => {
+          const spendRow = member.attribution_user_id
+            ? userByAttribution.get(member.attribution_user_id)
+            : undefined
+          // Blocked outranks the membership status here: the membership is
+          // active, and every request the person makes is still refused, which
+          // is what someone reading this column wants to know.
+          return spendRow?.blocked ? (
+            <StatusChip status="blocked" />
+          ) : (
+            <StatusChip status={member.status} />
+          )
+        },
+      },
+      {
+        id: "access",
+        header: "Model access",
+        // The default every key issued to this person inherits. A key may narrow
+        // it and never widen it, so this is the ceiling rather than the grant.
+        cell: (member) => {
+          const spendRow = member.attribution_user_id
+            ? userByAttribution.get(member.attribution_user_id)
+            : undefined
+          if (!spendRow) {
+            return <span className="text-xs text-muted">&mdash;</span>
+          }
+          const { text, tone } = accessLabel(spendRow.allowed_models)
+          return (
+            <div className="flex items-center gap-2">
+              <span
+                className={
+                  tone === "danger"
+                    ? "text-xs text-danger"
+                    : tone === "muted"
+                      ? "text-xs text-muted"
+                      : "text-xs text-foreground"
+                }
+              >
+                {text}
+              </span>
+              {manages ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onPress={() => setEditingAccess(spendRow.user_id)}
+                >
+                  Edit
+                </Button>
+              ) : null}
+            </div>
+          )
+        },
+      },
+      {
+        id: "spend",
+        header: "Spend",
+        align: "end",
+        cell: (member) => {
+          const spendRow = member.attribution_user_id
+            ? userByAttribution.get(member.attribution_user_id)
+            : undefined
+          if (!spendRow) {
+            return <span className="text-xs text-muted">&mdash;</span>
+          }
+          return (
+            <div className="flex flex-col items-end gap-0.5">
+              <span className="text-sm text-foreground">
+                {usd.format(spendRow.spend)}
+              </span>
+              {spendRow.reserved > 0 ? (
+                <span className="text-xs text-muted">
+                  {usd.format(spendRow.reserved)} in flight
+                </span>
+              ) : null}
+            </div>
+          )
+        },
       },
       {
         id: "actions",
@@ -476,29 +639,63 @@ export function OrganizationMembersPage() {
               </Button>
             )
           }
+          // Blocking stops this person's keys from making requests without
+          // touching their membership or their spend history, which is a
+          // different act from removing them from the organization. It writes
+          // the gateway's `users` row, so a member with no attribution row has
+          // nothing to block and the control is absent rather than disabled.
+          const spendRow = member.attribution_user_id
+            ? userByAttribution.get(member.attribution_user_id)
+            : undefined
           return (
-            <span title={blocked}>
-              <Button
-                size="sm"
-                variant="danger-soft"
-                // See the Role cell: the reason has to be in the name, not only
-                // in the tooltip, to reach anything but a pointer.
-                aria-label={
-                  blocked
-                    ? `Remove ${memberLabel(member)} (${blocked})`
-                    : undefined
-                }
-                isDisabled={blocked !== undefined}
-                onPress={() => setRemoving(member)}
-              >
-                Remove
-              </Button>
-            </span>
+            <div className="flex items-center justify-end gap-1.5">
+              {manages && spendRow ? (
+                <Button
+                  size="sm"
+                  variant={spendRow.blocked ? "ghost" : "danger-soft"}
+                  isDisabled={updateUser.isPending}
+                  onPress={() =>
+                    updateUser.mutate({
+                      id: spendRow.user_id,
+                      body: { blocked: !spendRow.blocked },
+                    })
+                  }
+                >
+                  {spendRow.blocked ? "Unblock" : "Block"}
+                </Button>
+              ) : null}
+              <span title={blocked}>
+                <Button
+                  size="sm"
+                  variant="danger-soft"
+                  // See the Role cell: the reason has to be in the name, not only
+                  // in the tooltip, to reach anything but a pointer.
+                  aria-label={
+                    blocked
+                      ? `Remove ${memberLabel(member)} (${blocked})`
+                      : undefined
+                  }
+                  isDisabled={blocked !== undefined}
+                  onPress={() => setRemoving(member)}
+                >
+                  Remove
+                </Button>
+              </span>
+            </div>
           )
         },
       },
     ],
-    [activeContext, rows, update.isPending, update.mutate, manages],
+    [
+      activeContext,
+      rows,
+      update.isPending,
+      update.mutate,
+      manages,
+      userByAttribution,
+      updateUser.isPending,
+      updateUser.mutate,
+    ],
   )
 
   return (
@@ -537,6 +734,31 @@ export function OrganizationMembersPage() {
       {adding ? <AddMemberForm onClose={() => setAdding(false)} /> : null}
       {inviting ? (
         <InviteMemberForm onClose={() => setInviting(false)} />
+      ) : null}
+
+      {editingUser ? (
+        <Card>
+          <Card.Content className="flex flex-col gap-4 p-5">
+            <div className="text-sm font-semibold text-foreground">
+              Model access for <code>{editingUser.user_id}</code>
+            </div>
+            <ErrorBanner error={updateUser.error} />
+            <AccessEditor
+              user={editingUser}
+              isPending={updateUser.isPending}
+              onSave={(allowedModels) =>
+                updateUser.mutate(
+                  {
+                    id: editingUser.user_id,
+                    body: { allowed_models: allowedModels },
+                  },
+                  { onSuccess: () => setEditingAccess(null) },
+                )
+              }
+              onClose={() => setEditingAccess(null)}
+            />
+          </Card.Content>
+        </Card>
       ) : null}
 
       <DataTable

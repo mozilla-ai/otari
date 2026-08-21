@@ -279,7 +279,7 @@ describe("BudgetsPage", () => {
     await user.click(screen.getByRole("button", { name: "Create budget" }))
 
     expect(
-      await screen.findByText(/could not assign it to: alice/),
+      await screen.findByText(/these people were not updated: alice/),
     ).toBeInTheDocument()
     await user.click(screen.getByRole("button", { name: "Retry assignments" }))
     await vi.waitFor(() => {

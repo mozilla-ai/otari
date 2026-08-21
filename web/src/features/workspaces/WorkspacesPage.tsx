@@ -1,15 +1,20 @@
 import { Button, Card } from "@heroui/react"
 import { useCallback, useMemo, useState } from "react"
 
-import type { Workspace } from "@/client"
+import type { Budget, Workspace } from "@/client"
 import { canManage } from "@/features/organization/roles"
 import { WorkspaceMembersPanel } from "@/features/workspaces/WorkspaceMembersPanel"
 import {
+  useBudgets,
   useCreateWorkspace,
+  useCreateWorkspaceBudgetDefault,
   useDeleteWorkspace,
+  useDeleteWorkspaceBudgetDefault,
   useOrganizationContext,
   useOrganizationMembers,
   useUpdateWorkspace,
+  useUpdateWorkspaceBudgetDefault,
+  useWorkspaceBudgetDefaults,
   useWorkspaces,
 } from "@/shared/api/hooks"
 import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
@@ -18,6 +23,7 @@ import { Field } from "@/shared/components/Field"
 import {
   EmptyState,
   ErrorBanner,
+  FilterSelect,
   InfoBanner,
   PageHeader,
 } from "@/shared/components/ui"
@@ -36,6 +42,39 @@ const getWorkspaceRowKey = (workspace: Workspace): string => workspace.id
 const LAST_WORKSPACE_REASON =
   "An organization keeps at least one workspace; create another first"
 
+// The budget every member of a workspace is given. It is not a field on the
+// workspace: it is a default row that materializes a real per-member ceiling
+// when someone joins, so a person in two workspaces holds two ceilings, one from
+// each. Only the aggregate default (the one narrowed to no provider) is offered
+// here, which is the one the design draws; a provider-narrowed default still
+// shows on the budgets list, under "Default for".
+const NO_DEFAULT = ""
+
+function DefaultBudgetPicker({
+  budgets,
+  value,
+  onChange,
+}: {
+  budgets: Budget[]
+  value: string
+  onChange: (budgetId: string) => void
+}) {
+  return (
+    <FilterSelect
+      label="Default member budget"
+      value={value}
+      onChange={onChange}
+      options={[
+        { value: NO_DEFAULT, label: "No default" },
+        ...budgets.map((budget) => ({
+          value: budget.budget_id,
+          label: budget.name ?? budget.budget_id.split("-")[0],
+        })),
+      ]}
+    />
+  )
+}
+
 /**
  * The one form that creates a workspace, wherever it is offered from.
  *
@@ -46,8 +85,11 @@ const LAST_WORKSPACE_REASON =
  */
 export function CreateWorkspaceForm({ onClose }: { onClose: () => void }) {
   const create = useCreateWorkspace()
+  const createDefault = useCreateWorkspaceBudgetDefault()
+  const budgets = useBudgets()
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
+  const [budgetId, setBudgetId] = useState(NO_DEFAULT)
   const trimmed = name.trim()
   return (
     <Card>
@@ -55,7 +97,7 @@ export function CreateWorkspaceForm({ onClose }: { onClose: () => void }) {
         <div className="text-sm font-semibold text-foreground">
           Create workspace
         </div>
-        <ErrorBanner error={create.error} />
+        <ErrorBanner error={create.error ?? createDefault.error} />
         <Field
           label="Name"
           value={name}
@@ -70,15 +112,38 @@ export function CreateWorkspaceForm({ onClose }: { onClose: () => void }) {
           value={description}
           onChange={setDescription}
         />
+        <DefaultBudgetPicker
+          budgets={budgets.data ?? []}
+          value={budgetId}
+          onChange={setBudgetId}
+        />
         <div className="flex gap-2">
           <Button
             variant="primary"
             isDisabled={trimmed === ""}
-            isPending={create.isPending}
+            isPending={create.isPending || createDefault.isPending}
             onPress={() =>
               create.mutate(
                 { name: trimmed, description: description.trim() || null },
-                { onSuccess: onClose },
+                {
+                  // The default is a second call: the workspace has to exist
+                  // before anything can be defaulted onto its members. A failure
+                  // here leaves the workspace created and undefaulted, which the
+                  // banner reports and the edit form can finish.
+                  onSuccess: (workspace) => {
+                    if (budgetId === NO_DEFAULT) {
+                      onClose()
+                      return
+                    }
+                    createDefault.mutate(
+                      {
+                        workspaceId: workspace.id,
+                        body: { budget_id: budgetId },
+                      },
+                      { onSuccess: onClose },
+                    )
+                  },
+                },
               )
             }
           >
@@ -101,8 +166,55 @@ function EditWorkspaceForm({
   onClose: () => void
 }) {
   const update = useUpdateWorkspace()
+  const budgets = useBudgets()
+  const defaults = useWorkspaceBudgetDefaults(workspace.id)
+  const createDefault = useCreateWorkspaceBudgetDefault()
+  const updateDefault = useUpdateWorkspaceBudgetDefault()
+  const deleteDefault = useDeleteWorkspaceBudgetDefault()
+  // The aggregate default: the one narrowed to no provider. A workspace has at
+  // most one, enforced by a partial unique index.
+  const aggregate = (defaults.data ?? []).find(
+    (row) => row.provider_key_id === null,
+  )
   const [name, setName] = useState(workspace.name)
   const [description, setDescription] = useState(workspace.description ?? "")
+  const [budgetId, setBudgetId] = useState<string | null>(null)
+  // Null until the operator touches the picker, so a default that arrives after
+  // the form mounted is still what the picker shows.
+  const selectedBudget = budgetId ?? aggregate?.budget_id ?? NO_DEFAULT
+  const savingDefault =
+    createDefault.isPending ||
+    updateDefault.isPending ||
+    deleteDefault.isPending
+
+  // Three outcomes rather than one call: the default is its own row, so moving
+  // between "none" and a budget is a create or a delete, not a field write.
+  const saveDefault = async (): Promise<void> => {
+    if (selectedBudget === NO_DEFAULT) {
+      if (aggregate) {
+        await deleteDefault.mutateAsync({
+          workspaceId: workspace.id,
+          defaultId: aggregate.id,
+        })
+      }
+      return
+    }
+    if (!aggregate) {
+      await createDefault.mutateAsync({
+        workspaceId: workspace.id,
+        body: { budget_id: selectedBudget },
+      })
+      return
+    }
+    if (aggregate.budget_id !== selectedBudget) {
+      await updateDefault.mutateAsync({
+        workspaceId: workspace.id,
+        defaultId: aggregate.id,
+        body: { budget_id: selectedBudget },
+      })
+    }
+  }
+
   const trimmed = name.trim()
   return (
     <Card>
@@ -110,18 +222,35 @@ function EditWorkspaceForm({
         <div className="text-sm font-semibold text-foreground">
           Edit <code>{workspace.name}</code>
         </div>
-        <ErrorBanner error={update.error} />
+        <ErrorBanner
+          error={
+            update.error ??
+            createDefault.error ??
+            updateDefault.error ??
+            deleteDefault.error
+          }
+        />
         <Field label="Name" value={name} onChange={setName} isRequired />
         <Field
           label="Description"
           value={description}
           onChange={setDescription}
         />
+        <DefaultBudgetPicker
+          budgets={budgets.data ?? []}
+          value={selectedBudget}
+          onChange={setBudgetId}
+        />
+        <span className="max-w-md text-xs text-muted">
+          Every member of this workspace is held to this budget, each with their
+          own allowance. Changing it applies to members who join afterwards;
+          members already here keep what they were given.
+        </span>
         <div className="flex gap-2">
           <Button
             variant="primary"
             isDisabled={trimmed === ""}
-            isPending={update.isPending}
+            isPending={update.isPending || savingDefault}
             onPress={() =>
               update.mutate(
                 {
@@ -131,7 +260,12 @@ function EditWorkspaceForm({
                     description: description.trim() || null,
                   },
                 },
-                { onSuccess: onClose },
+                {
+                  onSuccess: async () => {
+                    await saveDefault()
+                    onClose()
+                  },
+                },
               )
             }
           >

@@ -1,6 +1,7 @@
 import {
   keepPreviousData,
   useMutation,
+  useQueries,
   useQuery,
   useQueryClient,
 } from "@tanstack/react-query"
@@ -1871,6 +1872,42 @@ export function useWorkspaceBudgetDefaults(workspaceId: string | null) {
       ),
     enabled: workspaceId !== null,
     staleTime: 60_000,
+  })
+}
+
+/**
+ * Every workspace's budget defaults, as one list.
+ *
+ * A fan-out rather than one call: defaults are only served per workspace
+ * (`/v1/workspaces/{id}/member-budget-policies`), and a standalone deployment
+ * has few workspaces, so N small cached reads beat adding a route. Each shares
+ * the cache entry `useWorkspaceBudgetDefaults` uses, so opening a workspace
+ * afterwards costs nothing.
+ *
+ * This is what lets the budgets list say a budget is a workspace's default:
+ * without it the page would know the budget and not the assignment.
+ */
+export function useAllWorkspaceBudgetDefaults(workspaceIds: string[]) {
+  return useQueries({
+    queries: workspaceIds.map((workspaceId) => ({
+      queryKey: [WORKSPACES, workspaceId, "budget-defaults"],
+      queryFn: () =>
+        fetchAllPaged<WorkspaceBudgetDefault>(
+          `/v1/workspaces/${encodeURIComponent(workspaceId)}/member-budget-policies`,
+        ),
+      staleTime: 60_000,
+    })),
+    combine: (results) => ({
+      // Paired with its workspace on the way out: a default names a workspace by
+      // id, and the caller wants the name.
+      data: results.flatMap((result, index) =>
+        (result.data ?? []).map((row) => ({
+          workspaceId: workspaceIds[index],
+          default: row,
+        })),
+      ),
+      isLoading: results.some((result) => result.isLoading),
+    }),
   })
 }
 

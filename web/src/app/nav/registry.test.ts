@@ -58,12 +58,10 @@ describe("nav registry", () => {
       "API keys",
       "Providers",
       "Members",
-      "Budget defaults",
       "Workspaces",
       "Members & roles",
       "Providers",
       "Spend & budgets",
-      "Spend identities",
       "Billing",
       "Model pricing",
       "Guardrails",
@@ -104,18 +102,17 @@ describe("nav registry", () => {
       ["Members & roles", "organizations"],
       ["Providers", "organization_providers"],
     ])
-    // Spend identities reads the pre-tenancy `users` table and answers a
-    // different question from the roster above, so it gates on its own surface
-    // and sits under the money heading. Pinned here, beside the roster it used
-    // to be confused with, because the two being one group apart is the whole
-    // reason the rail stopped reading as two rosters.
     const money = ORG_NAV_SECTIONS.find((section) => section.id === "org-money")
     expect(money?.items.map((item) => [item.label, item.surface])).toEqual([
       ["Spend & budgets", "budgets"],
-      ["Spend identities", "users"],
       ["Billing", "billing"],
       ["Model pricing", "pricing"],
     ])
+    // No row gates on `users` any more. The gateway still serves that surface
+    // (budgets, keys and the roster all read `/v1/users`), but a person is a
+    // member now: what they may spend and what their keys may call are columns
+    // on Members & roles rather than a second people-shaped destination.
+    expect(NAV_ITEMS.map((item) => item.surface)).not.toContain("users")
   })
 
   it("resolves a child route to its own entry, not to its parent's", () => {

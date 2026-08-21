@@ -362,9 +362,9 @@ export function OverviewPage({
           to="/keys"
         />
         <StatCard
-          label="Active identities"
+          label="Active members"
           value={users.data ? formatNumber(activeUsers) : "—"}
-          to="/users"
+          to="/organization/members"
         />
       </div>
 

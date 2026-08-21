@@ -3,10 +3,11 @@
 from datetime import UTC, datetime
 
 from fastapi.testclient import TestClient
-from sqlalchemy import select
+from sqlalchemy import delete, select
 from sqlalchemy.orm import Session
 
-from gateway.models.entities import BudgetResetLog, User
+from gateway.models.entities import BudgetResetLog, User, WorkspaceBudgetDefault
+from gateway.models.tenancy import Organization, Workspace
 
 
 def _make_budget(client: TestClient, headers: dict[str, str], max_budget: float | None = 100.0) -> str:
@@ -137,3 +138,37 @@ def test_reset_logs_unknown_budget_404(client: TestClient, master_key_header: di
     response = client.get("/v1/budgets/does-not-exist/reset-logs", headers=master_key_header)
     assert response.status_code == 404
     assert "not found" in response.json()["detail"].lower()
+
+
+def test_deleting_a_budget_a_workspace_hands_out_is_refused_by_name(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    """A budget that is a workspace's member default cannot be deleted out from under it.
+
+    The foreign key is RESTRICT, so the database would refuse this anyway, but as
+    an opaque integrity error. The route checks first so the refusal names the
+    workspace an operator has to go and change, and so the answer does not depend
+    on whether the engine is enforcing foreign keys (SQLite only does with
+    ``PRAGMA foreign_keys`` on).
+    """
+    budget_id = _make_budget(client, master_key_header)
+    organization = Organization(name="Acme", slug="acme-delete-guard")
+    db_session.add(organization)
+    db_session.flush()
+    workspace = Workspace(organization_id=organization.id, name="Research")
+    db_session.add(workspace)
+    db_session.flush()
+    db_session.add(WorkspaceBudgetDefault(workspace_id=workspace.id, budget_id=budget_id))
+    db_session.commit()
+
+    refused = client.delete(f"/v1/budgets/{budget_id}", headers=master_key_header)
+    assert refused.status_code == 409, refused.text
+    assert "Research" in refused.json()["detail"]
+
+    # Still there, and deletable once nothing hands it out.
+    assert client.get(f"/v1/budgets/{budget_id}", headers=master_key_header).status_code == 200
+    db_session.execute(delete(WorkspaceBudgetDefault).where(WorkspaceBudgetDefault.budget_id == budget_id))
+    db_session.commit()
+    assert client.delete(f"/v1/budgets/{budget_id}", headers=master_key_header).status_code == 204

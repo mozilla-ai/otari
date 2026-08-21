@@ -130,7 +130,9 @@ async def test_create_materializes_onto_existing_members_but_skips_an_override(a
     created = await service.create_default(
         user=owner,
         workspace_id=workspace.id,
-        request=WorkspaceMemberBudgetPolicyCreate(budget_id=await _budget(async_db, name="Default", max_budget=50.0, budget_duration_sec=86400)),
+        request=WorkspaceMemberBudgetPolicyCreate(
+            budget_id=await _budget(async_db, name="Default", max_budget=50.0, budget_duration_sec=86400)
+        ),
     )
     assert created.max_budget == 50.0
 
