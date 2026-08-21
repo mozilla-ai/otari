@@ -627,3 +627,32 @@ def test_a_refused_sign_in_body_is_not_echoed_back(tmp_path: Path) -> None:
             # The reason still reaches the caller; only the value is dropped.
             assert response.json()["detail"][0]["msg"]
             assert set(response.json()["detail"][0]) == {"type", "loc", "msg"}
+
+
+def test_an_address_stored_with_other_casing_is_still_the_identity_s_own(tmp_path: Path) -> None:
+    """Resubmitting the held address must not depend on how the row was written.
+
+    ``user.email`` is only lower-cased when this tree wrote it. A row from the
+    M4 re-parenting backfill, or from an operator's own SQL, can carry any
+    casing, which ``UserRepository.get_by_email`` already matches
+    case-insensitively. Comparing a normalized candidate against the raw column
+    refused the identity its own address with "changing it is not supported",
+    which is the one thing the field documents as accepted and ignored.
+    """
+    with _client(tmp_path) as client:
+        _claim(client)
+
+    engine = create_engine(f"sqlite:///{tmp_path / 'password-test.db'}")
+    with engine.begin() as connection:
+        connection.execute(text('UPDATE "user" SET email = :stored'), {"stored": "Operator@Example.COM"})
+    engine.dispose()
+
+    with _client(tmp_path) as client:
+        response = client.put(
+            "/v1/auth/password",
+            json={"email": EMAIL, "new_password": NEW_PASSWORD},
+            headers={"Otari-Key": MASTER_KEY},
+        )
+
+        assert response.status_code == 200, response.text
+        assert client.post("/v1/auth/session", json={"email": EMAIL, "password": NEW_PASSWORD}).status_code == 200

@@ -103,6 +103,15 @@ async def resolve_dashboard_session(db: AsyncSession, token: str) -> User | None
     trusted from the session row: deactivating an operator has to end their
     dashboard access, not wait out the TTL.
 
+    A deactivated identity's sessions are *deleted* here, not merely refused.
+    Refusing alone leaves the rows alive, so re-activating an identity hands
+    every cookie it held before back its access, which is the opposite of what
+    deactivating it for a lost laptop was for. Nothing in this tree deactivates
+    a tenancy identity yet (``is_active`` is only set at creation), so this read
+    path is the one place the revocation can hang; a flow that does deactivate
+    should call ``revoke_user_dashboard_sessions`` directly rather than rely on
+    the cookie coming back.
+
     Expiry is compared in Python, as the rest of this module does: SQLite hands
     the stored timestamp back naive, so the check goes through ``_as_utc``.
     """
@@ -122,8 +131,29 @@ async def resolve_dashboard_session(db: AsyncSession, token: str) -> User | None
     if _as_utc(session.expires_at) < datetime.now(UTC):
         return None
     if not identity.is_active:
+        await _revoke_deactivated_identity_sessions(db, identity.id)
         return None
     return identity
+
+
+async def _revoke_deactivated_identity_sessions(db: AsyncSession, user_id: uuid.UUID) -> None:
+    """Delete a deactivated identity's sessions, committing on its own.
+
+    Commits rather than leaving the DELETE staged for the caller: this runs
+    inside an auth dependency, and the request it is refusing never reaches a
+    handler that would commit. It is a self-contained revocation, so nothing
+    else is in flight to interfere with.
+
+    A failure here is swallowed. The caller's answer is "not authenticated"
+    either way, and turning a 401 into a 503 because the cleanup could not be
+    written would be a worse outcome than the rows surviving to their TTL.
+    """
+    try:
+        await revoke_user_dashboard_sessions(db, user_id)
+        await db.commit()
+    except SQLAlchemyError:
+        await db.rollback()
+        logger.warning("Could not revoke the sessions of a deactivated identity", exc_info=True)
 
 
 async def revoke_dashboard_session(db: AsyncSession, token: str) -> None:

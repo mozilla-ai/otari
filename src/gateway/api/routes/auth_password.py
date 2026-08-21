@@ -166,10 +166,14 @@ async def set_dashboard_password(
     keep_session = _caller_session_hash(request, by_master_key=by_master_key)
     # Resubmitting the address the identity already holds is not a change, and
     # refusing it would break any client that keeps one form for both claiming
-    # and changing a password. Normalized on both sides, because that is how the
-    # stored value was written and how sign-in matches it.
+    # and changing a password. Normalized on both sides, because the stored
+    # value is only lower-cased when this tree wrote it: a row from the M4
+    # re-parenting backfill or from an operator's own SQL can carry any casing,
+    # which ``UserRepository.get_by_email`` already accounts for, and comparing
+    # a normalized candidate against a raw column would refuse an identity its
+    # own address.
     if body.email is not None and identity.email is not None:
-        if validated_email(body.email) != identity.email:
+        if validated_email(body.email) != validated_email(identity.email):
             raise EmailChangeNotSupportedError
         body = body.model_copy(update={"email": None})
     if identity.hashed_password is not None and not by_master_key:

@@ -475,3 +475,30 @@ def test_login_rate_limit_disabled_by_config(tmp_path: Path) -> None:
         # Many failures in a row, none throttled: the limiter is off entirely.
         for _ in range(5):
             assert client.post("/v1/auth/session", json={"master_key": "wrong"}).status_code == 401
+
+
+def test_reactivating_the_identity_does_not_restore_its_old_sessions(tmp_path: Path) -> None:
+    """Deactivation deletes the sessions rather than only refusing them.
+
+    Refusing alone leaves the rows alive, so flipping ``is_active`` back would
+    hand every cookie the identity held before its access again, which is the
+    opposite of what deactivating it for a lost laptop was for.
+    """
+    config = _config(tmp_path)
+    with TestClient(create_app(config)) as client:
+        _sign_in(client)
+        assert client.get("/v1/settings").status_code == 200
+
+        engine = create_engine(config.database_url)
+        with engine.begin() as connection:
+            connection.execute(text('UPDATE "user" SET is_active = 0'))
+
+        # The refusal is what triggers the revocation, so present the cookie once.
+        assert client.get("/v1/settings").status_code == 401
+        assert _sessions(config) == []
+
+        with engine.begin() as connection:
+            connection.execute(text('UPDATE "user" SET is_active = 1'))
+        engine.dispose()
+
+        assert client.get("/v1/settings").status_code == 401

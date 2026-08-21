@@ -21,7 +21,10 @@ if (!container) {
 // this settles: a stalled gateway or proxy would otherwise hold a blank page for
 // half a minute before the error state appears. A refused connection fails fast
 // and never reaches this deadline; a healthy gateway answers immediately, since
-// the route reads configuration and touches no database.
+// the route reads configuration plus one `LIMIT 1` probe for whether any
+// identity holds a password (which credential the sign-in screen should ask
+// for). A database it cannot reach answers "no sign-in methods" rather than
+// hanging, so this deadline covers the network, not that query.
 const BOOTSTRAP_TIMEOUT_MS = 8_000
 
 function loadBootstrap(): Promise<DeploymentBootstrap | null> {
