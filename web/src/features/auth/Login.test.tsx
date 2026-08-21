@@ -4,7 +4,29 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import { useAuth } from "@/features/auth/AuthContext"
 import { Login } from "@/features/auth/Login"
+import { DeploymentProvider } from "@/shared/hooks/useDeployment"
+import { bootstrap } from "@/tests/fixtures"
 import { AppProviders } from "@/tests/providers"
+
+// The sign-in screen picks its form from the bootstrap, so every render here
+// goes through a DeploymentProvider. Unclaimed (master key) is the default
+// because that is what a fresh deployment serves; the password tests override
+// `sign_in_methods` the way the gateway does once an operator has claimed it.
+function Mounted({
+  children,
+  signInMethods = ["master_key"],
+}: {
+  children: React.ReactNode
+  signInMethods?: ("master_key" | "password")[]
+}) {
+  return (
+    <AppProviders>
+      <DeploymentProvider value={bootstrap({ sign_in_methods: signInMethods })}>
+        {children}
+      </DeploymentProvider>
+    </AppProviders>
+  )
+}
 
 function Harness() {
   const { isAuthenticated } = useAuth()
@@ -42,9 +64,9 @@ describe("Login", () => {
     const user = userEvent.setup()
 
     render(
-      <AppProviders>
+      <Mounted>
         <Harness />
-      </AppProviders>,
+      </Mounted>,
     )
 
     await user.type(screen.getByLabelText("Master key"), "sk-correct")
@@ -68,9 +90,9 @@ describe("Login", () => {
 
   it("links to the auth-free welcome page", () => {
     render(
-      <AppProviders>
+      <Mounted>
         <Harness />
-      </AppProviders>,
+      </Mounted>,
     )
 
     const link = screen.getByRole("link", { name: /welcome/i })
@@ -84,17 +106,138 @@ describe("Login", () => {
     const user = userEvent.setup()
 
     render(
-      <AppProviders>
+      <Mounted>
         <Harness />
-      </AppProviders>,
+      </Mounted>,
     )
 
     await user.type(screen.getByLabelText("Master key"), "sk-wrong")
     await user.click(screen.getByRole("button", { name: "Sign in" }))
 
-    expect(await screen.findByText("Invalid master key.")).toBeInTheDocument()
+    // The gateway's own detail, verbatim, rather than a string this screen
+    // guessed: it is the only party that knows which refusal happened.
+    expect(await screen.findByText("Invalid master key")).toBeInTheDocument()
     expect(screen.queryByText("SIGNED IN")).not.toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Sign in" })).toBeInTheDocument()
+  })
+
+  it("asks for email and password once the deployment has been claimed", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(jsonResponse({ expires_at: "2026-07-30T00:00:00Z" }))
+    const user = userEvent.setup()
+
+    render(
+      <Mounted signInMethods={["password"]}>
+        <Harness />
+      </Mounted>,
+    )
+
+    // The master-key box is gone, per otari-ai#1716: presenting it here would
+    // ask for the one credential this deployment's sign-in no longer takes.
+    expect(screen.queryByLabelText("Master key")).not.toBeInTheDocument()
+
+    await user.type(screen.getByLabelText("Email"), "operator@example.com")
+    await user.type(screen.getByLabelText("Password"), "a-real-password")
+    await user.click(screen.getByRole("button", { name: "Sign in" }))
+
+    expect(await screen.findByText("SIGNED IN")).toBeInTheDocument()
+
+    const [url, init] = fetchMock.mock.calls[0]
+    expect(url).toBe("/v1/auth/session")
+    expect(init?.body).toBe(
+      JSON.stringify({
+        email: "operator@example.com",
+        password: "a-real-password",
+      }),
+    )
+    // Neither half of the credential may land in JS-readable storage.
+    const stored = [
+      ...Object.values({ ...window.localStorage }),
+      ...Object.values({ ...window.sessionStorage }),
+    ]
+    expect(stored).not.toContain("a-real-password")
+    expect(stored).not.toContain("operator@example.com")
+  })
+
+  it("keeps the submit button disabled until both halves of the credential are typed", async () => {
+    const user = userEvent.setup()
+
+    render(
+      <Mounted signInMethods={["password"]}>
+        <Harness />
+      </Mounted>,
+    )
+
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeDisabled()
+    await user.type(screen.getByLabelText("Email"), "operator@example.com")
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeDisabled()
+    await user.type(screen.getByLabelText("Password"), "a-real-password")
+    expect(screen.getByRole("button", { name: "Sign in" })).toBeEnabled()
+  })
+
+  it("shows the gateway's own wording when a password is rejected", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ detail: "Incorrect email or password" }, 401),
+    )
+    const user = userEvent.setup()
+
+    render(
+      <Mounted signInMethods={["password"]}>
+        <Harness />
+      </Mounted>,
+    )
+
+    await user.type(screen.getByLabelText("Email"), "operator@example.com")
+    await user.type(screen.getByLabelText("Password"), "wrong")
+    await user.click(screen.getByRole("button", { name: "Sign in" }))
+
+    expect(
+      await screen.findByText("Incorrect email or password"),
+    ).toBeInTheDocument()
+    expect(screen.queryByText("SIGNED IN")).not.toBeInTheDocument()
+  })
+
+  it("surfaces the retirement message when a stale client posts a master key to a claimed deployment", async () => {
+    // A 403 is not a wrong credential, and rendering "Invalid master key." over
+    // it (what this screen did before it could post a password) tells the
+    // operator to retry the one thing that cannot work.
+    const retired =
+      "Master-key sign-in is retired on this deployment: an identity here has a password."
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ detail: retired }, 403),
+    )
+    const user = userEvent.setup()
+
+    render(
+      <Mounted>
+        <Harness />
+      </Mounted>,
+    )
+
+    await user.type(screen.getByLabelText("Master key"), "sk-correct-but-late")
+    await user.click(screen.getByRole("button", { name: "Sign in" }))
+
+    expect(await screen.findByText(retired)).toBeInTheDocument()
+    expect(screen.queryByText("Invalid master key.")).not.toBeInTheDocument()
+  })
+
+  it("offers no credential box when the gateway reports it cannot mint a session", async () => {
+    // `/v1/bootstrap` answers [] when it cannot reach its database. A form here
+    // could only ever be refused, and on a claimed deployment the fallback form
+    // would be the master-key one, whose refusal reads as "wrong key".
+    render(
+      <Mounted signInMethods={[]}>
+        <Harness />
+      </Mounted>,
+    )
+
+    expect(screen.getByText("Sign-in is unavailable")).toBeInTheDocument()
+    expect(screen.queryByLabelText("Master key")).not.toBeInTheDocument()
+    expect(screen.queryByLabelText("Email")).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Sign in" }),
+    ).not.toBeInTheDocument()
   })
 
   it("refuses a new credential while a prior sign-out's revocation is still in flight (#557)", async () => {
@@ -117,9 +260,9 @@ describe("Login", () => {
     const user = userEvent.setup()
 
     render(
-      <AppProviders>
+      <Mounted>
         <SignOutThenLoginHarness />
-      </AppProviders>,
+      </Mounted>,
     )
 
     await user.click(screen.getByRole("button", { name: "Sign out" }))

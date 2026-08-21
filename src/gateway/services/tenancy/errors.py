@@ -124,6 +124,107 @@ class InvitationAlreadyPendingError(TenancyConflictError):
         super().__init__(f"{identifier} already has a pending invitation")
 
 
+class InvalidCredentialsError(TenancyError):
+    """A password sign-in that did not succeed, without saying which part failed.
+
+    401 rather than 403: nothing is known about the caller, so the answer is
+    "authenticate", not "you may not". Declared on this class rather than on a
+    shared 401 base, because it is the only 401 the tenancy family raises today
+    and a base class with one subclass is an abstraction with no second user.
+
+    **A deliberate departure from the platform's port.** ``user_service`` there
+    distinguishes ``UserNotFoundError``, ``OAuthAccountPasswordLoginError``,
+    ``IncorrectPasswordError`` and ``EmailNotVerifiedError`` at the sign-in
+    endpoint. Each of those answers "does this address hold an account here, and
+    how does it sign in", which is a question an unauthenticated caller may ask
+    an unlimited number of times. A self-hosted deployment's roster is small
+    enough that enumerating it is worth doing, so the four collapse into one
+    message here, and `gateway.services.password_service` makes them cost the
+    same wall-clock time as well.
+
+    The distinctions survive where a caller has already authenticated:
+    ``CurrentPasswordIncorrectError`` and ``PasswordNotSetError`` below say
+    exactly what went wrong, because by then the caller is not being told
+    anything about somebody else's account.
+    """
+
+    status_code = status.HTTP_401_UNAUTHORIZED
+
+    def __init__(self) -> None:
+        super().__init__("Incorrect email or password")
+
+
+class CurrentPasswordIncorrectError(TenancyValidationError):
+    """The current password given with a password change does not match.
+
+    400 and not 401, as the platform's own note says: a 401 on this route reads
+    to a browser client as "your session died", and it would sign the caller out
+    of a form they filled in correctly except for one field.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("Current password is incorrect")
+
+
+class PasswordNotSetError(TenancyValidationError):
+    """A password change on an identity that has no password to change."""
+
+    def __init__(self) -> None:
+        super().__init__("This identity has no password set; set one instead of changing it")
+
+
+class UnmodifiedPasswordError(TenancyValidationError):
+    """The new password is the one already stored."""
+
+    def __init__(self) -> None:
+        super().__init__("The new password cannot be the same as the current one")
+
+
+class CurrentPasswordRequiredError(TenancyValidationError):
+    """A password change from a session, with no current password supplied."""
+
+    def __init__(self) -> None:
+        super().__init__("The current password is required to change it")
+
+
+class EmailChangeNotSupportedError(TenancyValidationError):
+    """An address change attempted through the password endpoint.
+
+    Supplying an address is part of claiming an identity that has none. Changing
+    one that already exists is a different operation with its own requirements
+    (it invalidates a sign-in handle, and the new address has to be verified),
+    and it belongs to the verification flow rather than being smuggled in
+    alongside a password.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("This identity already has an email address; changing it is not supported yet")
+
+
+class PasswordPolicyError(TenancyValidationError):
+    """A password that is too short, or longer than bcrypt will hash."""
+
+
+class SignInAddressRequiredError(TenancyValidationError):
+    """Setting a password on an identity that has no address to sign in with.
+
+    The operator identity first boot provisions is a label rather than a sign-in
+    address (`gateway.services.tenancy.provisioning_service`), so claiming it
+    supplies one. Refused rather than defaulted: a synthesized address would be
+    a credential handle nobody knows.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("This identity has no email address; supply one to sign in with a password")
+
+
+class EmailAlreadyInUseError(TenancyConflictError):
+    """Another identity already holds the address being claimed."""
+
+    def __init__(self, email: str) -> None:
+        super().__init__(f"'{email}' already belongs to another identity")
+
+
 class InvalidEmailError(TenancyValidationError):
     """An address that could not be a claim handle.
 
@@ -392,7 +493,12 @@ class WorkspaceBudgetDefaultAlreadyExistsError(TenancyConflictError):
 
 
 __all__ = [
+    "CurrentPasswordIncorrectError",
+    "CurrentPasswordRequiredError",
+    "EmailAlreadyInUseError",
+    "EmailChangeNotSupportedError",
     "ForeignTenancyError",
+    "InvalidCredentialsError",
     "InvalidEmailError",
     "InvalidRoleError",
     "InvitationAlreadyPendingError",
@@ -418,12 +524,16 @@ __all__ = [
     "OrganizationNotFoundError",
     "OrganizationPricingNotFoundError",
     "OrganizationPricingOverlapError",
+    "PasswordNotSetError",
+    "PasswordPolicyError",
     "SecretBoxUnavailableTenancyError",
+    "SignInAddressRequiredError",
     "TenancyConflictError",
     "TenancyError",
     "TenancyForbiddenError",
     "TenancyNotFoundError",
     "TenancyValidationError",
+    "UnmodifiedPasswordError",
     "WorkspaceAlreadyExistsError",
     "WorkspaceBudgetDefaultAlreadyExistsError",
     "WorkspaceBudgetDefaultNotFoundError",

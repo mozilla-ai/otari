@@ -30,6 +30,12 @@ test("the deployment bootstrap is served unauthenticated", async ({
       "users",
       "workspaces",
     ],
+    // The master key, because nothing in this environment has claimed the
+    // deployment by setting an operator password. Once something does, the
+    // gateway answers ["password"] instead and the master key stops being a
+    // sign-in credential while staying the API one; see
+    // docs/access-control.md#dashboard-sessions-and-identity.
+    sign_in_methods: ["master_key"],
     management_url: null,
     // No SMTP configured in this e2e environment, so invitations are
     // creatable but not emailed; see docs/configuration.md#mail.

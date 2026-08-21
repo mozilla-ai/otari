@@ -4,6 +4,7 @@ from gateway.api.routes import (
     agent_telemetry,
     aliases,
     audio,
+    auth_password,
     auth_session,
     batches,
     bootstrap,
@@ -61,6 +62,7 @@ def register_routers(app: FastAPI, config: GatewayConfig) -> None:
         return  # Remaining routers (including batches) are standalone-mode only
 
     app.include_router(auth_session.router)
+    app.include_router(auth_password.router)
     app.include_router(embeddings.router)
     app.include_router(images.router)
     app.include_router(audio.router)

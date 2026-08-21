@@ -1,8 +1,9 @@
 // Thin fetch wrapper for the gateway's management API. The dashboard is served
 // from the same origin as the API, so paths are relative ("/v1/models") and the
 // HttpOnly session cookie minted at sign-in rides along automatically (fetch
-// defaults to credentials: "same-origin"). The raw master key is sent exactly
-// once, to POST /v1/auth/session, and never stored in the browser.
+// defaults to credentials: "same-origin"). A credential is sent exactly once, to
+// POST /v1/auth/session, and is never written to browser storage: it lives in
+// the sign-in form's state until the request goes out and is gone on reload.
 
 export class ApiError extends Error {
   status: number
@@ -37,12 +38,37 @@ async function extractErrorMessage(response: Response): Promise<string> {
   return response.statusText || `Request failed (${response.status})`
 }
 
-// Exchange the master key for a server-issued session: the gateway verifies the
-// key and answers with an HttpOnly cookie holding an opaque session token, so
-// the key itself never needs to be stored (or even kept in memory) afterwards.
-// Returns false on 401/403 (wrong key) and throws ApiError for network/other
-// failures so the UI can explain them.
-export async function createSession(key: string): Promise<boolean> {
+// The credentials POST /v1/auth/session accepts. Exactly one form per request:
+// the gateway refuses a body carrying both. Which one a deployment currently
+// takes is published in the bootstrap's `sign_in_methods`, so the sign-in screen
+// renders the form that will work rather than discovering it from a refusal.
+export type SignInCredential =
+  | { masterKey: string }
+  | { email: string; password: string }
+
+// A refusal carries the gateway's own explanation rather than a bare false,
+// because the two refusals mean different things and only the server knows
+// which applies: a 401 is a wrong credential, while a 403 is the master key
+// being presented to a deployment that has retired it as a sign-in. Rendering
+// "Invalid master key." over the second one, as this did before there was a
+// second credential, tells the operator to retry the thing that cannot work.
+export interface SignInResult {
+  ok: boolean
+  message?: string
+}
+
+// Exchange a credential for a server-issued session: the gateway verifies it and
+// answers with an HttpOnly cookie holding an opaque session token, so the
+// credential itself never needs to be stored (or even kept in memory)
+// afterwards. Refusals (401/403) come back as `ok: false` with the gateway's
+// message; network and other failures throw ApiError so the UI can explain them.
+export async function createSession(
+  credential: SignInCredential,
+): Promise<SignInResult> {
+  const body =
+    "masterKey" in credential
+      ? { master_key: credential.masterKey }
+      : { email: credential.email, password: credential.password }
   let response: Response
   try {
     response = await fetch("/v1/auth/session", {
@@ -51,7 +77,7 @@ export async function createSession(key: string): Promise<boolean> {
         Accept: "application/json",
         "Content-Type": "application/json",
       },
-      body: JSON.stringify({ master_key: key }),
+      body: JSON.stringify(body),
       signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
     })
   } catch (error) {
@@ -61,12 +87,12 @@ export async function createSession(key: string): Promise<boolean> {
     throw new ApiError(0, "Network error: could not reach the gateway.")
   }
   if (response.status === 401 || response.status === 403) {
-    return false
+    return { ok: false, message: await extractErrorMessage(response) }
   }
   if (!response.ok) {
     throw new ApiError(response.status, await extractErrorMessage(response))
   }
-  return true
+  return { ok: true }
 }
 
 // Best-effort server-side sign-out: revokes the cookie's session and expires

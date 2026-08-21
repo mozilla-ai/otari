@@ -2,16 +2,19 @@
 
 The shell fetches this before it renders anything, so it decides whether a
 sign-in screen, a management dashboard, or a data-plane landing page is the
-right thing to show. Unit rather than integration because the route reads
-configuration and nothing else: no database, so no PostgreSQL to stand up.
+right thing to show, and which credential that sign-in screen should ask for.
+Unit rather than integration because the one database read the route makes runs
+on the SQLite file each test stands up, so there is no PostgreSQL to wait for.
 """
 
 from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import SQLAlchemyError
 
 from gateway.api.deps import reset_config
+from gateway.api.routes import bootstrap as bootstrap_route
 from gateway.api.routes.bootstrap import STANDALONE_SURFACES
 from gateway.core.config import GatewayConfig
 from gateway.core.database import reset_db
@@ -46,9 +49,33 @@ def test_standalone_reports_a_local_operator_and_the_full_surface_set(tmp_path: 
         "deployment_type": "standalone",
         "session_type": "local_operator",
         "surfaces": sorted(STANDALONE_SURFACES),
+        "sign_in_methods": ["master_key"],
         "management_url": None,
         "mail_ready": False,
     }
+
+
+def test_a_database_outage_reports_no_sign_in_rather_than_failing(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The shell fetches this first, so a 500 here is a blank page, not a login screen.
+
+    "No sign-in method" is also the truth while the database is unreachable:
+    minting a session writes a row, so neither credential could get anyone in.
+    """
+
+    async def _unavailable(_db: object) -> bool:
+        raise SQLAlchemyError("database is down")
+
+    monkeypatch.setattr(bootstrap_route, "has_password_identity", _unavailable)
+    app = create_app(_standalone(tmp_path))
+
+    with TestClient(app) as client:
+        response = client.get("/v1/bootstrap")
+
+    assert response.status_code == 200
+    assert response.json()["deployment_type"] == "standalone"
+    assert response.json()["sign_in_methods"] == []
 
 
 def test_bootstrap_needs_no_credential(tmp_path: Path) -> None:
@@ -124,6 +151,7 @@ def test_hybrid_reports_no_session_no_surfaces_and_the_hosted_url(monkeypatch: p
         "deployment_type": "hybrid",
         "session_type": "none",
         "surfaces": [],
+        "sign_in_methods": [],
         "management_url": "https://otari.ai",
         "mail_ready": False,
     }

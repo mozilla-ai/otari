@@ -1,8 +1,10 @@
 # Access control: users, keys, and budgets
 
-Standalone Otari decides three things about every request: who is calling (the **user**), what credential they presented (the **API key**), and whether they have room to spend (the **budget**). This guide is a task-oriented tour of those three, with the management endpoints that drive them. Everything here is standalone-only and authenticated with the master key; hybrid mode delegates identity and spend to otari.ai.
+Standalone Otari decides three things about every request: who is calling (the **user**), what credential they presented (the **API key**), and whether they have room to spend (the **budget**). This guide is a task-oriented tour of those three, with the management endpoints that drive them. Everything here is standalone-only; hybrid mode delegates identity and spend to otari.ai.
 
 The user, key, and budget endpoints in this guide all require the master key (some other management endpoints, such as read-only pricing lookups, also accept a regular API key; see the [API reference](api-reference.md)). Send the master key as `Otari-Key: <master-key>` or `Authorization: Bearer <master-key>`. The same actions are available in the dashboard's **Access** section; see the [Admin dashboard guide](dashboard.md).
+
+**The master key authenticates this API. It is not, for long, how you sign in to the dashboard.** It bootstraps a new deployment and stays the deployment-wide API credential, which is what every script, CI job, and `curl` example here uses. The browser sign-in moves to an email address and a password once an operator claims the deployment, and [Dashboard sessions and identity](#dashboard-sessions-and-identity) below is where that happens. Retiring a login is not retiring a credential: nothing in this guide stops working when it does.
 
 ## How the pieces fit
 
@@ -98,13 +100,13 @@ A self-hosted deployment is **one organization with several people in it**, not 
 
 Nothing is required to set it up. The first request to one of those endpoints provisions a default organization, a default workspace, and one owner identity representing the operator, and every later request resolves that same identity. Organization owners and admins can create further workspaces, add members, and manage roles; a workspace's own owners and admins can manage the workspace they belong to.
 
-Adding a member takes an email address (`POST /v1/organizations/me/members`), optionally with the workspaces to grant at the same time. If no identity holds that address yet, one is created carrying it, and the member is active immediately with nothing emailed. Such an identity is a roster and attribution entry today. It cannot sign in until Otari grows a sign-in flow, at which point the address is the handle its owner claims it by.
+Adding a member takes an email address (`POST /v1/organizations/me/members`), optionally with the workspaces to grant at the same time. If no identity holds that address yet, one is created carrying it, and the member is active immediately with nothing emailed. Such an identity is a roster and attribution entry today: it carries no password, and only the operator can set one for their own identity, so it cannot sign in until the signup and reset flows land. The address is the handle those flows will match it on.
 
 ### Invitations
 
 `POST /v1/organizations/me/member-invitations` is the other way to add someone: the membership lands `invited` rather than `active`, and an email with an accept link goes out if mail is configured (see [Configuration](configuration.md)). If it isn't, the response still carries the link (`accept_link`) so the operator can share it another way; `mail_sent` says whether it was actually emailed.
 
-The recipient follows the link to a public accept page (`POST /v1/invitations/validate` to preview it, `POST /v1/invitations/accept` to commit, both with the token in the body rather than the URL), which resolves the membership to `active` and grants any workspaces parked on the invitation. No session is minted: Otari has no per-user sign-in yet, so accepting only clears the way to use the sign-in flow once it exists, the same as an address added directly.
+The recipient follows the link to a public accept page (`POST /v1/invitations/validate` to preview it, `POST /v1/invitations/accept` to commit, both with the token in the body rather than the URL), which resolves the membership to `active` and grants any workspaces parked on the invitation. No session is minted, and accepting sets no password: the identity it resolves to is in the same state as an address added directly, so it signs in once the signup and reset flows give it a way to set one.
 
 An invitation expires after `invitation_expiry_hours` (default 7 days) and can be revoked before it is accepted (`DELETE /v1/organizations/me/member-invitations/{invitation_id}`), which cancels it and suspends the membership, the same as removing a member. Re-inviting the same address revives it.
 
@@ -120,9 +122,55 @@ Granting the `owner` role is an owner's to give. An admin manages members, works
 
 ### Dashboard sessions and identity
 
-Signing in to the dashboard exchanges the master key for a session: an opaque token in an HttpOnly cookie, stored only as a SHA-256 hash, revocable server-side, expiring on `dashboard_session_ttl_hours`. Each session names the identity it was minted for, so a cookie-authenticated request resolves a user and, through that user's `active_organization_id`, the organization it is acting in. `POST /v1/auth/session` returns both ids alongside the expiry.
+Signing in to the dashboard exchanges a credential for a session: an opaque token in an HttpOnly cookie, stored only as a SHA-256 hash, revocable server-side, expiring on `dashboard_session_ttl_hours`. Each session names the identity it was minted for, so a cookie-authenticated request resolves a user and, through that user's `active_organization_id`, the organization it is acting in. `POST /v1/auth/session` returns both ids alongside the expiry.
 
-Master-key sign-in binds the session to the operator identity described above, which is the same identity a request carrying the master key in a header resolves to, so the two credentials answer for the same organization. A session is revoked on sign-out, on master-key rotation (every session, with the rotating tab's own re-minted for the same identity), when the master key changes across a restart, and when the identity it names is deleted or deactivated. Sign-in flows that authenticate a person rather than the deployment are a separate track; they mint the same kind of session, bound to whoever signed in.
+**Which credential signs in depends on whether the deployment has been claimed.** A deployment where no identity has a password yet accepts the master key, which is what makes first boot work with nothing configured. The moment an identity has one, the master key stops being accepted at the sign-in endpoint and email and password is the login. `GET /v1/bootstrap` publishes which of the two applies right now, in `sign_in_methods`, so the sign-in page asks for the credential that will work:
+
+```bash
+curl http://localhost:8000/v1/bootstrap        # no credential needed
+# {"deployment_type":"standalone", ..., "sign_in_methods":["master_key"]}
+```
+
+Nothing schedules the switch and nothing expires. A deployment that never claims goes on signing in with the master key indefinitely, which is a reasonable end state for a single-operator gateway that only ever talks to itself.
+
+#### Claiming the deployment
+
+First boot provisions the operator identity as a label with no address and no password, so claiming supplies both, in one call authenticated by the master key:
+
+```bash
+curl -X PUT http://localhost:8000/v1/auth/password \
+  -H "Otari-Key: <master-key>" \
+  -H "Content-Type: application/json" \
+  -d '{"email": "you@example.com", "new_password": "<a password>"}'
+```
+
+- A password is at least 8 characters and at most 72 bytes, which is bcrypt's own ceiling; accented and non-Latin characters count for more than one byte each. There are no composition rules.
+- The address is stored lower-cased and matched case-insensitively at sign-in. It is not delivered to and not verified by anyone: this edition has no verification flow yet, and the master key is what proved the claim.
+- The same endpoint changes a password later. From a session it needs `current_password`; sent with the master key in a header it does not, which is the recovery path (see below). Changing the address afterwards is refused rather than half-supported.
+- Every other session that identity holds is revoked, so a cookie minted under the old password does not outlive it. The caller's own session is spared when the change came from the browser, and is not when it came from the master key, since a header caller has no session to keep.
+- **Claiming is one-way.** No endpoint clears a password, so a deployment that has been claimed cannot be returned to master-key sign-in. The sign-in screen follows `sign_in_methods` and asks for the address and password from then on, and the master key still authenticates the whole management API, so the step costs you nothing you cannot reach; it is simply not reversible. See the [Admin dashboard guide](dashboard.md).
+
+After that, sign in with the address:
+
+```bash
+curl -X POST http://localhost:8000/v1/auth/session \
+  -H "Content-Type: application/json" \
+  -d '{"email": "you@example.com", "password": "<the password>"}'
+```
+
+A failed sign-in answers `401 Incorrect email or password` whichever part was wrong, and takes the same time to do it, so the endpoint cannot be used to find out which addresses hold an account. A master key presented after the deployment is claimed answers `403` naming the password login, which is a different answer from a wrong master key's `401` on purpose: the credential is fine, that use of it is over.
+
+#### What the master key still does
+
+Everything else. It authenticates `/v1/keys`, `/v1/users`, `/v1/budgets`, and the rest of this guide exactly as before, in the `Otari-Key` or `Authorization` header. Claiming a deployment changes one endpoint's answer and no others.
+
+It also stays the way back in. An operator who forgets the password sets a new one through the same `PUT /v1/auth/password`, with the master key in a header and no `current_password`. That is deliberate rather than a gap: a caller holding the master key can already do anything the management API can do, so asking them for a password they have lost would lock the dashboard while leaving the API wide open. Password recovery for someone who holds no master key needs mail, and arrives with the signup and reset flows.
+
+#### Who can sign in, and who cannot yet
+
+Only an identity with a password, and only the operator can get one today: the endpoint above always acts on the caller's own identity, so there is no way for an admin to set someone else's. A member added by address holds a role and can be placed in workspaces, and their address is the handle the signup and reset flows will match them on. Those flows, along with email verification and OAuth and passkey sign-in, are the rest of the identity track.
+
+A session is revoked on sign-out, on a password change as described above, on master-key rotation (every session, with the rotating tab's own re-minted for the same identity), when the master key changes across a restart, and when the identity it names is deleted or deactivated. A deactivated identity also stops being able to sign in, rather than keeping access until its cookie expires.
 
 An opaque session token is the settled shape here, not a stopgap: it is revocable, which a bearer JWT is not, and [mozilla-ai/otari-ai#1716](https://github.com/mozilla-ai/otari-ai/issues/1716) settled that sessions are the steady-state dashboard login. **The platform's JWT `Token` therefore does not survive the rehome.** Anything on the platform frontend that reads or stores a bearer token changes when its pages arrive: the credential is an HttpOnly cookie the page's own script cannot read, sent automatically and same-origin only, so there is no token to attach to a header and no expiry to decode out of a payload. Sign-in state comes from the session endpoint's response and from a 401 bounce, not from inspecting a token.
 

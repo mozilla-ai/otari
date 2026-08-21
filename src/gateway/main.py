@@ -5,6 +5,7 @@ from typing import Any, Callable
 from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request, Response, status
+from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
 from fastapi.staticfiles import StaticFiles
@@ -420,6 +421,37 @@ async def _tenancy_error_handler(_: Request, exc: Exception) -> Response:
     return JSONResponse(status_code=exc.status_code, content={"detail": exc.message})
 
 
+async def _validation_error_handler(_: Request, exc: Exception) -> Response:
+    """Render a request-validation failure without echoing what was sent.
+
+    Pydantic v2 puts the rejected value on every error entry, and FastAPI's
+    default handler serializes it straight back. On ``POST /v1/auth/session``
+    that value is the credential: a password longer than the field's ceiling
+    comes back in full, and a body carrying both credentials comes back with the
+    master key in it. The dashboard renders the whole ``detail`` into its error
+    banner, so the operator's own password ends up on screen.
+
+    It is also the difference between a 40-byte refusal and a reply as large as
+    the request on an unauthenticated endpoint, since the rejected value is held
+    twice more (once in the error entry, once serialized) before it is sent.
+
+    Dropping ``input`` and ``ctx`` keeps the body inside the ``ValidationError``
+    schema the OpenAPI document already publishes, which requires only ``loc``,
+    ``msg`` and ``type``.
+    """
+    if not isinstance(exc, RequestValidationError):  # pragma: no cover - registered for it only
+        raise exc
+    return JSONResponse(
+        status_code=status.HTTP_422_UNPROCESSABLE_CONTENT,
+        content={
+            "detail": [
+                {"type": error.get("type", ""), "loc": list(error.get("loc", ())), "msg": error.get("msg", "")}
+                for error in exc.errors()
+            ]
+        },
+    )
+
+
 def create_app(config: GatewayConfig) -> FastAPI:
     """Create and configure FastAPI application."""
 
@@ -603,6 +635,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
 
     register_routers(app, config)
     app.add_exception_handler(TenancyError, _tenancy_error_handler)
+    app.add_exception_handler(RequestValidationError, _validation_error_handler)
 
     if config.enable_metrics:
         from gateway.metrics import metrics_endpoint

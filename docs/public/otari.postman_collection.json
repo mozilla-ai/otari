@@ -424,6 +424,39 @@
     {
       "item": [
         {
+          "name": "Set Dashboard Password",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"email\": \"operator@example.com\",\n  \"new_password\": \"a-real-password\"\n}"
+            },
+            "description": "Set or change the password the caller signs in to the dashboard with.\n\nAlways the caller's own identity. Supply ``email`` when it has no sign-in\naddress yet, which is the state first boot leaves the operator in, and\n``current_password`` when it already has a password and the request is\nauthenticated by the session cookie. The master key in a header is what\nexcuses ``current_password``, which is how a forgotten password is\nrecovered; it does not excuse ``email``, because an identity with no address\nhas nothing to sign in with whoever is asking. Setting a password for the\nfirst time retires master-key sign-in on this deployment.\n\nEvery other session this identity holds ends, the caller's own excepted, so\na cookie stolen before the change does not outlive it.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PUT",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "password"
+              ],
+              "raw": "{{baseUrl}}/v1/auth/password"
+            }
+          }
+        },
+        {
           "name": "Create Session",
           "request": {
             "body": {
@@ -433,9 +466,9 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"master_key\": \"string\"\n}"
+              "raw": "{\n  \"email\": \"operator@example.com\",\n  \"password\": \"a-real-password\"\n}"
             },
-            "description": "Verify the master key and set the HttpOnly session cookie.\n\nThe session is bound to the bootstrap operator identity, so every request it\nlater authenticates resolves a user and that user's active organization\nrather than only \"the master key was presented once\". The response names\nboth, so a client knows who it is signed in as without a second call.\n\nThe rate-limit check deliberately runs only after a failed verification,\nnot before it: a pre-verification gate can't know whether *this* attempt\nwould have succeeded, so once an IP has used up its failure quota it\nwould end up blocking that IP's legitimate owner too, not just further\nattackers. The issue this implements explicitly rules that out. The\nDB/hash lookup this exposes to repeated attempts only runs when no fixed\nmaster_key is configured (the auto-generated bootstrap-key path); with a\nconfigured master_key, verification is a constant-time string compare,\nnot a DB round trip.",
+            "description": "Verify a sign-in credential and set the HttpOnly session cookie.\n\nThe session is bound to the identity that authenticated, so every request it\nlater authenticates resolves a user and that user's active organization\nrather than only \"a credential was presented once\". The response names both,\nso a client knows who it is signed in as without a second call.\n\nThe rate-limit check deliberately runs only after a failed verification,\nnot before it: a pre-verification gate can't know whether *this* attempt\nwould have succeeded, so once an IP has used up its failure quota it\nwould end up blocking that IP's legitimate owner too, not just further\nattackers. Running after verification also means the throttle bounds how\nmany verdicts an IP gets, not how much work it can cause: a password attempt\npays for a bcrypt verification (cost 12, on the order of 200ms of CPU, and\none is burned against a stand-in hash even for an address nobody holds)\nbefore the limit is consulted, so a 429 costs the same as a 401. A gateway\nexposed to the internet should rate-limit this path at the proxy as well.",
             "header": [
               {
                 "key": "Content-Type",
@@ -662,7 +695,7 @@
         {
           "name": "Get Bootstrap",
           "request": {
-            "description": "Return the deployment context the dashboard shell renders from.\n\nPublic: the shell fetches this before it knows whether it can authenticate.",
+            "description": "Return the deployment context the dashboard shell renders from.\n\nPublic: the shell fetches this before it knows whether it can authenticate.\nThat is also why ``sign_in_methods`` is answered here rather than behind a\ncredential, and it publishes nothing an unauthenticated caller could not\nalready learn by trying both credentials against the sign-in endpoint.\n\nThe one database read is a ``LIMIT 1`` probe for any identity holding a\npassword, over a table a standalone deployment keeps one row per person in.\nIt runs only in standalone mode: a hybrid gateway has no session to describe,\nand ``get_db_if_needed`` hands it no session to read one from.",
             "header": [],
             "method": "GET",
             "url": {

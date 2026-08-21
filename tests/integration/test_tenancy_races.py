@@ -12,8 +12,11 @@ import uuid
 from collections.abc import Callable
 
 import pytest
+from sqlalchemy import select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session
+from sqlmodel import col
 
 from gateway.core.config import GatewayConfig
 from gateway.models.tenancy import (
@@ -33,8 +36,9 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
-from gateway.services.tenancy import OrganizationService, WorkspaceService
+from gateway.services.tenancy import OrganizationService, WorkspaceService, user_service
 from gateway.services.tenancy.errors import (
+    EmailAlreadyInUseError,
     ForeignTenancyError,
     InvitationAlreadyPendingError,
     InvitationAlreadyUsedError,
@@ -48,6 +52,7 @@ from gateway.services.tenancy.provisioning_service import (
     BOOTSTRAP_IDENTITY_KEY,
     ensure_bootstrap_identity,
 )
+from gateway.services.tenancy.user_service import set_password
 
 pytestmark = pytest.mark.asyncio
 
@@ -119,6 +124,83 @@ async def test_concurrent_workspace_creates_conflict_rather_than_fail(
     assert len(conflicts) == _RACERS - 1
     _, count = await WorkspaceRepository(async_db).get_by_organization(organization.id, limit=1)
     assert count == 1
+
+
+async def test_concurrent_claims_of_one_address_leave_exactly_one_holder(
+    async_db: AsyncSession,
+    sessions: async_sessionmaker[AsyncSession],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two identities claiming the same sign-in address at once.
+
+    ``_claimable_email`` is a preflight, not a lock, so both racers can pass it
+    and the unique index on ``user.email`` is what actually decides. The loser
+    has to report the conflict its preflight would have reported rather than
+    surfacing the driver's integrity error as a 500. Postgres is the engine that
+    matters here: the unit suite runs on SQLite, whose error text differs, and
+    the detector has to recognize both.
+    """
+    organization, _ = await _seed_owner(async_db)
+    # Count how many losers came through the integrity-error mapping. Without
+    # this the test passes whether the racers overlapped or not: a serialized
+    # run refuses them at the ``_claimable_email`` preflight, which raises the
+    # very same ``EmailAlreadyInUseError``, so the outcome assertions below
+    # cannot tell the two routes apart and would green-light a fix that never
+    # runs.
+    mapped: list[bool] = []
+    real_detector = user_service._is_email_conflict
+
+    def counting_detector(exc: IntegrityError) -> bool:
+        verdict = real_detector(exc)
+        mapped.append(verdict)
+        return verdict
+
+    monkeypatch.setattr(user_service, "_is_email_conflict", counting_detector)
+
+    users = UserRepository(async_db)
+    racer_ids = [
+        (
+            await users.create_local_identity(
+                full_name=f"Claimer {index}", active_organization_id=organization.id
+            )
+        ).id
+        for index in range(_RACERS)
+    ]
+    await async_db.commit()
+    # One identity per racer, handed out in order. `next` on a plain iterator is
+    # safe here because the racers only interleave at their awaits.
+    hand_out = iter(racer_ids)
+
+    async def attempt(session: AsyncSession) -> object:
+        # Each racer claims *its own* identity, all of them naming one address.
+        identity = await UserRepository(session).get(next(hand_out))
+        assert identity is not None
+        await set_password(
+            session,
+            identity,
+            new_password="a-real-password",
+            email="contested@example.com",
+        )
+        # `set_password` returns None, so the racer that got through reports a
+        # marker rather than a value indistinguishable from "nothing happened".
+        return "claimed"
+
+    outcomes = await _race(sessions, attempt)
+
+    claimed = [outcome for outcome in outcomes if not isinstance(outcome, Exception)]
+    refused = [outcome for outcome in outcomes if isinstance(outcome, EmailAlreadyInUseError)]
+    escaped = [o for o in outcomes if isinstance(o, Exception) and not isinstance(o, EmailAlreadyInUseError)]
+    assert not escaped, f"a raw database error reached the caller: {escaped}"
+    assert len(claimed) == 1, outcomes
+    assert len(refused) == _RACERS - 1, outcomes
+    # Every loser reached the unique index rather than the preflight, which is
+    # what makes this a test of the mapping and not of the pre-check.
+    assert mapped == [True] * (_RACERS - 1), mapped
+
+    holders = (
+        (await async_db.execute(select(User).where(col(User.email) == "contested@example.com"))).scalars().all()
+    )
+    assert len(holders) == 1
 
 
 async def test_concurrent_member_adds_create_one_identity(

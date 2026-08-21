@@ -303,6 +303,38 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/auth/password": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        /**
+         * Set Dashboard Password
+         * @description Set or change the password the caller signs in to the dashboard with.
+         *
+         *     Always the caller's own identity. Supply ``email`` when it has no sign-in
+         *     address yet, which is the state first boot leaves the operator in, and
+         *     ``current_password`` when it already has a password and the request is
+         *     authenticated by the session cookie. The master key in a header is what
+         *     excuses ``current_password``, which is how a forgotten password is
+         *     recovered; it does not excuse ``email``, because an identity with no address
+         *     has nothing to sign in with whoever is asking. Setting a password for the
+         *     first time retires master-key sign-in on this deployment.
+         *
+         *     Every other session this identity holds ends, the caller's own excepted, so
+         *     a cookie stolen before the change does not outlive it.
+         */
+        put: operations["set_dashboard_password_v1_auth_password_put"];
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/auth/session": {
         parameters: {
             query?: never;
@@ -314,22 +346,23 @@ export interface paths {
         put?: never;
         /**
          * Create Session
-         * @description Verify the master key and set the HttpOnly session cookie.
+         * @description Verify a sign-in credential and set the HttpOnly session cookie.
          *
-         *     The session is bound to the bootstrap operator identity, so every request it
+         *     The session is bound to the identity that authenticated, so every request it
          *     later authenticates resolves a user and that user's active organization
-         *     rather than only "the master key was presented once". The response names
-         *     both, so a client knows who it is signed in as without a second call.
+         *     rather than only "a credential was presented once". The response names both,
+         *     so a client knows who it is signed in as without a second call.
          *
          *     The rate-limit check deliberately runs only after a failed verification,
          *     not before it: a pre-verification gate can't know whether *this* attempt
          *     would have succeeded, so once an IP has used up its failure quota it
          *     would end up blocking that IP's legitimate owner too, not just further
-         *     attackers. The issue this implements explicitly rules that out. The
-         *     DB/hash lookup this exposes to repeated attempts only runs when no fixed
-         *     master_key is configured (the auto-generated bootstrap-key path); with a
-         *     configured master_key, verification is a constant-time string compare,
-         *     not a DB round trip.
+         *     attackers. Running after verification also means the throttle bounds how
+         *     many verdicts an IP gets, not how much work it can cause: a password attempt
+         *     pays for a bcrypt verification (cost 12, on the order of 200ms of CPU, and
+         *     one is burned against a stand-in hash even for an address nobody holds)
+         *     before the limit is consulted, so a 429 costs the same as a 401. A gateway
+         *     exposed to the internet should rate-limit this path at the proxy as well.
          */
         post: operations["create_session_v1_auth_session_post"];
         /**
@@ -454,6 +487,14 @@ export interface paths {
          * @description Return the deployment context the dashboard shell renders from.
          *
          *     Public: the shell fetches this before it knows whether it can authenticate.
+         *     That is also why ``sign_in_methods`` is answered here rather than behind a
+         *     credential, and it publishes nothing an unauthenticated caller could not
+         *     already learn by trying both credentials against the sign-in endpoint.
+         *
+         *     The one database read is a ``LIMIT 1`` probe for any identity holding a
+         *     password, over a table a standalone deployment keeps one row per person in.
+         *     It runs only in standalone mode: a hybrid gateway has no session to describe,
+         *     and ``get_db_if_needed`` hands it no session to read one from.
          */
         get: operations["get_bootstrap_v1_bootstrap_get"];
         put?: never;
@@ -4020,14 +4061,37 @@ export interface components {
         };
         /**
          * CreateSessionRequest
-         * @description Sign in to the dashboard by proving possession of the master key.
+         * @description Sign in to the dashboard with exactly one credential.
+         *
+         *     A flat body with an optional field per credential, rather than a tagged
+         *     union: it is one extra key on the wire, it generates a client type a
+         *     hand-written form can fill in, and the validator below makes the two forms
+         *     exclusive anyway.
+         *
+         *     The example carries one credential, because a generated example is a body
+         *     somebody will post: the schema alone would produce every field at once,
+         *     which is the one shape the validator below refuses.
+         * @example {
+         *       "email": "operator@example.com",
+         *       "password": "a-real-password"
+         *     }
          */
         CreateSessionRequest: {
             /**
-             * Master Key
-             * @description The gateway master key; verified once and never stored by the browser.
+             * Email
+             * @description The identity's sign-in address.
              */
-            master_key: string;
+            email?: string | null;
+            /**
+             * Master Key
+             * @description The gateway master key; verified once and never stored by the browser. Accepted only while no identity on this deployment has a password (see GET /v1/bootstrap).
+             */
+            master_key?: string | null;
+            /**
+             * Password
+             * @description The identity's password.
+             */
+            password?: string | null;
         };
         /**
          * CreateStoredProviderRequest
@@ -4118,10 +4182,15 @@ export interface components {
             management_url: string | null;
             /**
              * Session Type
-             * @description The kind of session this deployment issues, not whether the caller holds one. 'local_operator' is the standalone master-key sign-in, 'hosted_user' an otari.ai account, and 'none' a deployment that issues no management session at all.
+             * @description The kind of session this deployment issues, not whether the caller holds one. 'local_operator' is the standalone operator sign-in (see sign_in_methods for which credential it currently accepts), 'hosted_user' an otari.ai account, and 'none' a deployment that issues no management session at all.
              * @enum {string}
              */
             session_type: "local_operator" | "hosted_user" | "none";
+            /**
+             * Sign In Methods
+             * @description How POST /v1/auth/session may be authenticated right now, sorted. 'master_key' is the first-boot credential and is offered until some identity on this deployment has a password; 'password' replaces it from then on, and the master key stays the credential for the management API. Empty for a hybrid gateway, which issues no session. The login page renders from this rather than trying a credential to find out.
+             */
+            sign_in_methods: ("master_key" | "password")[];
             /**
              * Surfaces
              * @description Management API groups this deployment serves, sorted, which is what its dashboard pages gate on. Named surfaces, not capabilities: capability is otari.ai's word for the entitlement (licensing) axis, and this is the deployment (topology) axis. Empty for a hybrid gateway.
@@ -5460,6 +5529,22 @@ export interface components {
             updated_at?: string | null;
         };
         /**
+         * PasswordResponse
+         * @description What the identity signs in with now.
+         */
+        PasswordResponse: {
+            /**
+             * Email
+             * @description The address this identity signs in with.
+             */
+            email: string;
+            /**
+             * Master Key Sign In Retired
+             * @description Always true once this succeeds: some identity on this deployment now has a password, so POST /v1/auth/session no longer accepts the master key. It stays the credential for the management API.
+             */
+            master_key_sign_in_retired: boolean;
+        };
+        /**
          * PolicyRequest
          * @description Request to create or update a routing policy.
          */
@@ -6240,6 +6325,38 @@ export interface components {
              * @description The identity this session speaks for.
              */
             user_id: string;
+        };
+        /**
+         * SetPasswordRequest
+         * @description Set or change the signed-in identity's password.
+         *
+         *     The example is the first-boot claim, because that is the call an operator
+         *     makes first and the one whose required fields are not obvious from the
+         *     schema: ``email`` is optional here in general and *required* when the
+         *     identity has no address yet. Without it the generated Postman body carries
+         *     only ``new_password``, which is the one shape that cannot complete the flow
+         *     the docs walk through.
+         * @example {
+         *       "email": "operator@example.com",
+         *       "new_password": "a-real-password"
+         *     }
+         */
+        SetPasswordRequest: {
+            /**
+             * Current Password
+             * @description The password being replaced. Required when the identity already has one and the request is authenticated by the session cookie; ignored when the master key is sent in a header, which needs no proof of the old password (it still needs `email` when the identity has no sign-in address yet).
+             */
+            current_password?: string | null;
+            /**
+             * Email
+             * @description The address to sign in with. Required when the identity has none, which is the state first boot leaves the operator in, including when the master key is what authenticates the call. Resubmitting the address the identity already holds is accepted and ignored; only a *different* address is refused, because changing one is not supported yet.
+             */
+            email?: string | null;
+            /**
+             * New Password
+             * @description The password to sign in with from now on. At least 8 characters, and at most 72 bytes, which is bcrypt's ceiling.
+             */
+            new_password: string;
         };
         /**
          * SetPricingRequest
@@ -7898,6 +8015,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_dashboard_password_v1_auth_password_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SetPasswordRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PasswordResponse"];
                 };
             };
             /** @description Validation Error */

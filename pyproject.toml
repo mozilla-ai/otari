@@ -16,6 +16,15 @@ dependencies = [
     "alembic>=1.13.0",
     "aiosqlite>=0.19.0",
     "asyncpg>=0.29.0",
+    # Password hashing for the dashboard sign-in (docs/access-control.md).
+    # The library directly rather than passlib, which the platform wraps it in:
+    # passlib has been unmaintained since 2020 and its bcrypt backend breaks on
+    # bcrypt 4.1+. The stored hash is the same "$2b$" string on either side, so an
+    # identity imported from otari.ai signs in here and one created here signs in
+    # there. 5.0 is the floor because that is the release that refuses a password
+    # over 72 bytes instead of truncating it, which is the behavior
+    # `gateway.services.password_service` documents and relies on.
+    "bcrypt>=5.0.0",
     "click>=8.1.0",
     "cryptography>=50.0.0",
     "fastapi>=0.115.0",

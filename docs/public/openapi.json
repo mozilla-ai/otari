@@ -2594,17 +2594,52 @@
         "type": "object"
       },
       "CreateSessionRequest": {
-        "description": "Sign in to the dashboard by proving possession of the master key.",
+        "description": "Sign in to the dashboard with exactly one credential.\n\nA flat body with an optional field per credential, rather than a tagged\nunion: it is one extra key on the wire, it generates a client type a\nhand-written form can fill in, and the validator below makes the two forms\nexclusive anyway.\n\nThe example carries one credential, because a generated example is a body\nsomebody will post: the schema alone would produce every field at once,\nwhich is the one shape the validator below refuses.",
+        "example": {
+          "email": "operator@example.com",
+          "password": "a-real-password"
+        },
         "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The identity's sign-in address.",
+            "title": "Email"
+          },
           "master_key": {
-            "description": "The gateway master key; verified once and never stored by the browser.",
-            "title": "Master Key",
-            "type": "string"
+            "anyOf": [
+              {
+                "maxLength": 512,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The gateway master key; verified once and never stored by the browser. Accepted only while no identity on this deployment has a password (see GET /v1/bootstrap).",
+            "title": "Master Key"
+          },
+          "password": {
+            "anyOf": [
+              {
+                "maxLength": 72,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The identity's password.",
+            "title": "Password"
           }
         },
-        "required": [
-          "master_key"
-        ],
         "title": "CreateSessionRequest",
         "type": "object"
       },
@@ -2768,7 +2803,7 @@
             "title": "Management Url"
           },
           "session_type": {
-            "description": "The kind of session this deployment issues, not whether the caller holds one. 'local_operator' is the standalone master-key sign-in, 'hosted_user' an otari.ai account, and 'none' a deployment that issues no management session at all.",
+            "description": "The kind of session this deployment issues, not whether the caller holds one. 'local_operator' is the standalone operator sign-in (see sign_in_methods for which credential it currently accepts), 'hosted_user' an otari.ai account, and 'none' a deployment that issues no management session at all.",
             "enum": [
               "local_operator",
               "hosted_user",
@@ -2776,6 +2811,18 @@
             ],
             "title": "Session Type",
             "type": "string"
+          },
+          "sign_in_methods": {
+            "description": "How POST /v1/auth/session may be authenticated right now, sorted. 'master_key' is the first-boot credential and is offered until some identity on this deployment has a password; 'password' replaces it from then on, and the master key stays the credential for the management API. Empty for a hybrid gateway, which issues no session. The login page renders from this rather than trying a credential to find out.",
+            "items": {
+              "enum": [
+                "master_key",
+                "password"
+              ],
+              "type": "string"
+            },
+            "title": "Sign In Methods",
+            "type": "array"
           },
           "surfaces": {
             "description": "Management API groups this deployment serves, sorted, which is what its dashboard pages gate on. Named surfaces, not capabilities: capability is otari.ai's word for the entitlement (licensing) axis, and this is the deployment (topology) axis. Empty for a hybrid gateway.",
@@ -2791,6 +2838,7 @@
           "session_type",
           "surfaces",
           "management_url",
+          "sign_in_methods",
           "mail_ready"
         ],
         "title": "DeploymentBootstrap",
@@ -5705,6 +5753,27 @@
         "title": "OrganizationPublic",
         "type": "object"
       },
+      "PasswordResponse": {
+        "description": "What the identity signs in with now.",
+        "properties": {
+          "email": {
+            "description": "The address this identity signs in with.",
+            "title": "Email",
+            "type": "string"
+          },
+          "master_key_sign_in_retired": {
+            "description": "Always true once this succeeds: some identity on this deployment now has a password, so POST /v1/auth/session no longer accepts the master key. It stays the credential for the management API.",
+            "title": "Master Key Sign In Retired",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "email",
+          "master_key_sign_in_retired"
+        ],
+        "title": "PasswordResponse",
+        "type": "object"
+      },
       "PolicyRequest": {
         "description": "Request to create or update a routing policy.",
         "properties": {
@@ -7524,6 +7593,53 @@
           "active_organization_id"
         ],
         "title": "SessionResponse",
+        "type": "object"
+      },
+      "SetPasswordRequest": {
+        "description": "Set or change the signed-in identity's password.\n\nThe example is the first-boot claim, because that is the call an operator\nmakes first and the one whose required fields are not obvious from the\nschema: ``email`` is optional here in general and *required* when the\nidentity has no address yet. Without it the generated Postman body carries\nonly ``new_password``, which is the one shape that cannot complete the flow\nthe docs walk through.",
+        "example": {
+          "email": "operator@example.com",
+          "new_password": "a-real-password"
+        },
+        "properties": {
+          "current_password": {
+            "anyOf": [
+              {
+                "maxLength": 1024,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The password being replaced. Required when the identity already has one and the request is authenticated by the session cookie; ignored when the master key is sent in a header, which needs no proof of the old password (it still needs `email` when the identity has no sign-in address yet).",
+            "title": "Current Password"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "The address to sign in with. Required when the identity has none, which is the state first boot leaves the operator in, including when the master key is what authenticates the call. Resubmitting the address the identity already holds is accepted and ignored; only a *different* address is refused, because changing one is not supported yet.",
+            "title": "Email"
+          },
+          "new_password": {
+            "description": "The password to sign in with from now on. At least 8 characters, and at most 72 bytes, which is bcrypt's ceiling.",
+            "maxLength": 1024,
+            "minLength": 8,
+            "title": "New Password",
+            "type": "string"
+          }
+        },
+        "required": [
+          "new_password"
+        ],
+        "title": "SetPasswordRequest",
         "type": "object"
       },
       "SetPricingRequest": {
@@ -11942,6 +12058,56 @@
         ]
       }
     },
+    "/v1/auth/password": {
+      "put": {
+        "description": "Set or change the password the caller signs in to the dashboard with.\n\nAlways the caller's own identity. Supply ``email`` when it has no sign-in\naddress yet, which is the state first boot leaves the operator in, and\n``current_password`` when it already has a password and the request is\nauthenticated by the session cookie. The master key in a header is what\nexcuses ``current_password``, which is how a forgotten password is\nrecovered; it does not excuse ``email``, because an identity with no address\nhas nothing to sign in with whoever is asking. Setting a password for the\nfirst time retires master-key sign-in on this deployment.\n\nEvery other session this identity holds ends, the caller's own excepted, so\na cookie stolen before the change does not outlive it.",
+        "operationId": "set_dashboard_password_v1_auth_password_put",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SetPasswordRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasswordResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Set Dashboard Password",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
     "/v1/auth/session": {
       "delete": {
         "description": "Sign out: revoke the cookie's session server-side and expire the cookie.\n\nDeliberately unauthenticated and idempotent: it only ever revokes the\nsession named by the caller's own cookie, and the dashboard calls it on the\n401-bounce path where no valid credential exists anymore. Unlike the read\npath in ``deps.py`` it applies no Sec-Fetch-Site check: ``SameSite=Strict``\nalready keeps cross-site requests from carrying the cookie, and the worst a\nforged call could do is sign the operator out.",
@@ -11957,7 +12123,7 @@
         ]
       },
       "post": {
-        "description": "Verify the master key and set the HttpOnly session cookie.\n\nThe session is bound to the bootstrap operator identity, so every request it\nlater authenticates resolves a user and that user's active organization\nrather than only \"the master key was presented once\". The response names\nboth, so a client knows who it is signed in as without a second call.\n\nThe rate-limit check deliberately runs only after a failed verification,\nnot before it: a pre-verification gate can't know whether *this* attempt\nwould have succeeded, so once an IP has used up its failure quota it\nwould end up blocking that IP's legitimate owner too, not just further\nattackers. The issue this implements explicitly rules that out. The\nDB/hash lookup this exposes to repeated attempts only runs when no fixed\nmaster_key is configured (the auto-generated bootstrap-key path); with a\nconfigured master_key, verification is a constant-time string compare,\nnot a DB round trip.",
+        "description": "Verify a sign-in credential and set the HttpOnly session cookie.\n\nThe session is bound to the identity that authenticated, so every request it\nlater authenticates resolves a user and that user's active organization\nrather than only \"a credential was presented once\". The response names both,\nso a client knows who it is signed in as without a second call.\n\nThe rate-limit check deliberately runs only after a failed verification,\nnot before it: a pre-verification gate can't know whether *this* attempt\nwould have succeeded, so once an IP has used up its failure quota it\nwould end up blocking that IP's legitimate owner too, not just further\nattackers. Running after verification also means the throttle bounds how\nmany verdicts an IP gets, not how much work it can cause: a password attempt\npays for a bcrypt verification (cost 12, on the order of 200ms of CPU, and\none is burned against a stand-in hash even for an address nobody holds)\nbefore the limit is consulted, so a 429 costs the same as a 401. A gateway\nexposed to the internet should rate-limit this path at the proxy as well.",
         "operationId": "create_session_v1_auth_session_post",
         "requestBody": {
           "content": {
@@ -12306,7 +12472,7 @@
     },
     "/v1/bootstrap": {
       "get": {
-        "description": "Return the deployment context the dashboard shell renders from.\n\nPublic: the shell fetches this before it knows whether it can authenticate.",
+        "description": "Return the deployment context the dashboard shell renders from.\n\nPublic: the shell fetches this before it knows whether it can authenticate.\nThat is also why ``sign_in_methods`` is answered here rather than behind a\ncredential, and it publishes nothing an unauthenticated caller could not\nalready learn by trying both credentials against the sign-in endpoint.\n\nThe one database read is a ``LIMIT 1`` probe for any identity holding a\npassword, over a table a standalone deployment keeps one row per person in.\nIt runs only in standalone mode: a hybrid gateway has no session to describe,\nand ``get_db_if_needed`` hands it no session to read one from.",
         "operationId": "get_bootstrap_v1_bootstrap_get",
         "responses": {
           "200": {

@@ -3,7 +3,7 @@
 Otari ships with a web admin dashboard for operators. It browses the model
 catalog, sets model pricing, manages routing policies, adds and edits provider API
 keys, manages users, keys, and budgets, and toggles runtime settings, all
-against the local management API using the master key.
+against the local management API.
 
 The management pages are a **standalone-mode** feature. In standalone mode Otari
 serves the whole dashboard at the gateway root (`/`). A gateway connected to
@@ -20,17 +20,20 @@ straight.
 
 | | Master key | `OTARI_SECRET_KEY` |
 | --- | --- | --- |
-| **Purpose** | Signs in to the dashboard and authorizes every management API call | Encrypts provider API keys stored through the dashboard (encryption at rest) |
+| **Purpose** | Authorizes every management API call, and signs in to the dashboard until you set an operator password | Encrypts provider API keys stored through the dashboard (encryption at rest) |
 | **Set via** | `OTARI_MASTER_KEY` (or `master_key` in `config.yml`); generated on first run if unset | `OTARI_SECRET_KEY` only; never generated for you |
 | **Format** | Any string you choose, or a generated `otari-mk-…` value | A Fernet key (generate with `otari gen-secret-key`) |
-| **Where it lives** | Only its SHA-256 hash is stored; the browser never keeps the key itself, just the session cookie it is exchanged for | Supplied out of band at runtime; never written to the database |
+| **Where it lives** | Only its SHA-256 hash is stored; the browser never writes the key to storage, keeping only the session cookie it is exchanged for | Supplied out of band at runtime; never written to the database |
 | **If you lose it** | Rotate or reset it; nothing else is affected | Every provider key stored in the dashboard becomes undecryptable |
 
 A few consequences worth internalizing:
 
-- **The master key is your dashboard password.** It gates every management route
-  exactly like an operator-set key would. Anyone with it can read and change
-  gateway configuration, so treat it like an admin credential.
+- **The master key is an admin credential for the whole deployment.** It gates
+  every management route, so anyone with it can read and change gateway
+  configuration. It is also how you sign in to the dashboard on a new install,
+  and it stops being that as soon as you give the operator identity an email
+  address and a password (step 5 below). It stays the API credential either way:
+  nothing you have scripted against it changes.
 - **`OTARI_SECRET_KEY` is deliberately separate from the master key.** The
   gateway may rotate the master key; the encryption key must not move with it, or
   encryption at rest would be theatre against a stolen database. Otari never
@@ -98,8 +101,9 @@ can skip this step if all your providers live in `config.yml`.
 
 Browse to the gateway root, for example `http://localhost:8000/`. You land on a
 sign-in screen. Paste your master key and select **Sign in**. The key is sent
-once to this gateway and exchanged for a session cookie; the browser never stores
-the key itself, so it cannot be read back out of the page. The sign-in lasts
+once to this gateway and exchanged for a session cookie; the browser never writes
+the key to storage, so it is gone on reload and cannot be read back out of the
+page afterwards. The sign-in lasts
 `dashboard_session_ttl_hours` (a week by default) and survives closing the tab,
 so you normally sign in once and not again. It survives restarting the gateway
 too, as long as the gateway's database does: sessions are rows in it, so a
@@ -108,7 +112,44 @@ signed out. If you are on a fresh install and are not sure where your key is, th
 "First run? Where to find your key" hint on the sign-in screen points you back at
 the logs.
 
-### 5. Add a provider
+### 5. (Optional) Claim the deployment with an email and a password
+
+The master key signs you in because nobody here has a password yet. Giving the
+operator identity an address and a password makes that pair the sign-in from then
+on, which is what you want as soon as more than one person needs the dashboard,
+or as soon as you would rather not paste a deployment-wide credential into a
+browser:
+
+```bash
+curl -X PUT http://localhost:8000/v1/auth/password \
+  -H "Otari-Key: <master-key>" \
+  -H "Content-Type: application/json" \
+  -d '{"email": "you@example.com", "new_password": "<a password>"}'
+```
+
+> **Claiming cannot be undone.** No endpoint clears a password, so a deployment
+> that has been claimed cannot be put back to signing in with the master key.
+> The sign-in screen switches to asking for the address and password, and the
+> master key goes on authenticating the whole management API, so nothing becomes
+> unreachable. It is simply a one-way step.
+
+Three more things to know before you do it:
+
+- **The master key stops being accepted at the sign-in screen**, and stays the
+  credential for everything else. Scripts, CI jobs, and the `curl` examples in
+  these docs are unaffected.
+- **You cannot lock yourself out of the API.** If you forget the password, run
+  the same command again with the master key and a new one; no
+  `current_password` is needed when the master key is in the header.
+- **It signs out every browser holding a session for that identity**, including
+  the one you claimed from if you claimed with `curl`.
+
+Password reset by email, signup, and OAuth and passkey sign-in are the rest of
+this track and are not here yet, so today only the operator identity can hold a
+password. See [Access control](access-control.md#dashboard-sessions-and-identity)
+for the full picture.
+
+### 6. Add a provider
 
 Open **Providers** from the sidebar and add a provider (for example OpenAI),
 pasting its API key. Stored keys are encrypted at rest with `OTARI_SECRET_KEY`,
@@ -117,7 +158,7 @@ plaintext key is write-only. Providers configured in `config.yml` also appear
 here, marked `config` and read-only; keys you add in the UI are marked `stored`
 and can be edited, tested, and deleted.
 
-### 6. Test the connection
+### 7. Test the connection
 
 On the Providers page, use **Test the connection** for the provider you just
 added. Otari makes a live call to confirm the credential works before you route
@@ -133,7 +174,7 @@ config edit or restart: the Models page offers **Price a model** in the warning
 it shows for a provider without discovery, and in its empty state when a search
 finds nothing.
 
-### 7. Send your first request
+### 8. Send your first request
 
 The Providers page includes a "Send your first request" snippet you can copy.
 Point any OpenAI-compatible client at the gateway using an Otari API key or the
@@ -141,7 +182,7 @@ master key, and select a model in `provider:model` form (for example
 `openai:gpt-4o`). See the [Quickstart](quickstart.md) for a full end-to-end
 example.
 
-### 8. (Optional) Set up keys, users, and budgets
+### 9. (Optional) Set up keys, users, and budgets
 
 For multi-user or multi-app deployments, hand out scoped API keys from
 **Access** on the workspace rail, then define users and attach budgets on the
@@ -435,12 +476,15 @@ exactly one, provisioned on first boot: a self-hosted gateway is one tenant with
 several people in it, not several tenants, so it can be renamed but not created,
 switched between, or deleted.
 
-Standalone Otari has no sign-in of its own yet, so the master key is the
-bootstrap credential: the first authenticated request provisions the
-organization, one default workspace, and one owner identity, and every later
-request resolves that same operator. Members added after that hold a role and
-can be placed in workspaces, but cannot sign in until a per-user sign-in flow
-lands: the address they are added by is the handle it will claim them with.
+The master key is the bootstrap credential: the first authenticated request
+provisions the organization, one default workspace, and one owner identity, and
+every later request resolves that same operator. Giving that operator an email
+address and a password is what turns it into a sign-in rather than a label, and
+what retires the master key as the dashboard login (step 5 of the walkthrough
+above). Members added after that hold a role and can be placed in workspaces, but
+cannot sign in yet: nothing here sets a password for someone else, and the
+signup and reset flows that would are still to come. The address they are added
+by is the handle those flows will match them on.
 
 ### People & access
 
@@ -520,20 +564,22 @@ put it behind HTTPS, as the security notes below describe.
 ## Security notes
 
 - **The master key is an admin credential.** Anyone who has it can read and
-  change gateway configuration through the management API. Rotate it if you
+  change gateway configuration through the management API, and can set the
+  operator's dashboard password without knowing the old one. Rotate it if you
   suspect it leaked.
 - **Use HTTPS for anything but local access.** The `http://localhost:8000/`
   examples here assume you are on the same machine (loopback). The master key
-  authorizes every management request and must never travel over cleartext HTTP,
-  so put the gateway behind HTTPS or a trusted reverse proxy before signing in
-  from another host.
-- **A session cookie, not a stored key.** The dashboard trades your master key
-  for an HttpOnly cookie (`SameSite=Strict`, and `Secure` whenever the request
-  arrives over HTTPS), so the key itself is never kept in the browser and script
-  on the page cannot read the cookie. Signing out revokes the session on the
-  server, expires the cookie, and clears any cached admin data. Rotating the
-  master key revokes every session and re-mints the one you are using, so other
-  signed-in browsers are logged out.
+  authorizes every management request, and a sign-in password travels in the same
+  request bodies, so neither must ever cross cleartext HTTP: put the gateway
+  behind HTTPS or a trusted reverse proxy before signing in from another host.
+- **A session cookie, not a stored credential.** The dashboard trades whichever
+  credential you signed in with for an HttpOnly cookie (`SameSite=Strict`, and
+  `Secure` whenever the request arrives over HTTPS), so neither the master key
+  nor your password is ever written to browser storage, and script on the page
+  cannot read the cookie that replaces them. Signing out revokes the session on the server, expires the cookie,
+  and clears any cached admin data. Rotating the master key revokes every session
+  and re-mints the one you are using, so other signed-in browsers are logged out;
+  changing a password does the same for that identity's own sessions.
 - **A session is signed in as someone.** It names the operator identity it was
   minted for, which is what the Organization pages scope themselves to; see
   [Access control](access-control.md#dashboard-sessions-and-identity). Deleting
@@ -543,7 +589,8 @@ put it behind HTTPS, as the security notes below describe.
   `dashboard_session_ttl_hours` with no idle timeout, so an unattended browser
   stays signed in until the cookie expires. Use **Log out** when you are done on
   a shared or public machine, or shorten `dashboard_session_ttl_hours`. Rotating
-  the master key is the way to revoke a session you can no longer reach.
+  the master key, or setting a new password with it, is the way to revoke a
+  session you can no longer reach.
 - **Provider keys are write-only over the API.** Once stored, the plaintext is
   never returned; the UI shows only the last four characters. Losing
   `OTARI_SECRET_KEY` makes stored keys undecryptable, so back it up separately

@@ -100,7 +100,7 @@ describe("createSession", () => {
       return Promise.resolve(new Response("{}", { status: 200 }))
     })
 
-    await createSession("test-key")
+    await createSession({ masterKey: "test-key" })
 
     expect(seen[0]).toBeInstanceOf(AbortSignal)
   })
@@ -110,9 +110,67 @@ describe("createSession", () => {
       new DOMException("timed out", "TimeoutError"),
     )
 
-    await expect(createSession("test-key")).rejects.toMatchObject({
+    await expect(
+      createSession({ masterKey: "test-key" }),
+    ).rejects.toMatchObject({
       status: 0,
       message: expect.stringContaining("did not respond within 30s"),
+    })
+  })
+})
+
+describe("createSession credentials", () => {
+  it("posts a password credential as email and password, not as a master key", async () => {
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(new Response("{}", { status: 200 }))
+
+    const result = await createSession({
+      email: "operator@example.com",
+      password: "a-real-password",
+    })
+
+    expect(result).toEqual({ ok: true })
+    expect(fetchMock.mock.calls[0][1]?.body).toBe(
+      JSON.stringify({
+        email: "operator@example.com",
+        password: "a-real-password",
+      }),
+    )
+  })
+
+  it("returns the gateway's message on a refusal rather than a bare false", async () => {
+    // 401 and 403 both mean "not signed in" but not the same thing, and the
+    // sign-in screen can only say which if the message survives the call.
+    for (const [status, detail] of [
+      [401, "Incorrect email or password"],
+      [403, "Master-key sign-in is retired on this deployment"],
+    ] as const) {
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(JSON.stringify({ detail }), {
+          status,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+
+      await expect(createSession({ masterKey: "k" })).resolves.toEqual({
+        ok: false,
+        message: detail,
+      })
+    }
+  })
+
+  it("throws rather than reporting a refusal when the gateway errors", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ detail: "Database error" }), {
+        status: 500,
+        headers: { "Content-Type": "application/json" },
+      }),
+    )
+
+    await expect(createSession({ masterKey: "k" })).rejects.toMatchObject({
+      status: 500,
+      message: "Database error",
     })
   })
 })

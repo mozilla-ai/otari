@@ -114,6 +114,10 @@ POST /v1/auth/session                           # dashboard-only
 # it exists for a browser deciding what to render. An SDK already knows.
 GET /v1/bootstrap                               # dashboard-only
 DELETE /v1/auth/session                         # dashboard-only
+# Setting the dashboard sign-in password: the other half of the same browser
+# flow. An SDK authenticates with the master key or an API key and never holds
+# a password, so there is nothing here for one to wrap.
+PUT /v1/auth/password                           # dashboard-only
 # OTLP ingest: OpenTelemetry collector receivers, not an SDK surface.
 POST /v1/logs                                   # otel ingest
 POST /v1/traces                                 # otel ingest

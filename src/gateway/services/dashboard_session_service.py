@@ -136,6 +136,27 @@ async def revoke_all_dashboard_sessions(db: AsyncSession) -> None:
     await db.execute(delete(DashboardSession))
 
 
+async def revoke_user_dashboard_sessions(
+    db: AsyncSession, user_id: uuid.UUID, *, keep_token_hash: str | None = None
+) -> None:
+    """Stage removal of one identity's sessions, optionally sparing one.
+
+    A password change ends the sessions minted under the old password, the way
+    master-key rotation ends the ones minted under the old key. It is scoped to
+    the one identity rather than to the table, because another person's session
+    was not minted under this password and signing them out would be collateral.
+
+    ``keep_token_hash`` spares the caller's own session so changing a password
+    does not sign the caller out of the page they changed it on. A caller with
+    no session of their own (the master key in a header) passes nothing, and
+    every session for that identity ends. The caller commits.
+    """
+    statement = delete(DashboardSession).where(DashboardSession.user_id == user_id)
+    if keep_token_hash is not None:
+        statement = statement.where(DashboardSession.token_hash != keep_token_hash)
+    await db.execute(statement)
+
+
 async def record_session_key_marker(db: AsyncSession, key_hash: str) -> None:
     """Stage the marker naming the master key sessions are minted under.
 

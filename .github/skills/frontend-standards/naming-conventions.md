@@ -80,10 +80,11 @@ A nav entry may gate on all three and they compose as AND. Calling a surface a c
 variable name is how the two vocabularies start merging, which is exactly what the M5
 convergence has to avoid (see [web/AGENTS.md](../../../web/AGENTS.md)).
 
-Similarly: the credential an operator pastes into the sign-in screen is the **master key**;
-the credentials the gateway stores for upstream providers are **provider credentials**; the
-keys the gateway issues to callers are **API keys**. The UI, the tests, and these docs use
-those three names and no synonyms.
+Similarly: the credential an operator pastes into the sign-in screen is the **master key**
+until the deployment is claimed and an **email** and **password** after it (`sign_in_methods`
+in the deployment bootstrap says which); the credentials the gateway stores for upstream
+providers are **provider credentials**; the keys the gateway issues to callers are **API
+keys**. The UI, the tests, and these docs use those names and no synonyms.
 
 ## Array work reads declaratively
 

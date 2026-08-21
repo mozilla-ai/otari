@@ -66,9 +66,9 @@ from gateway.repositories.users_repository import (
     get_or_create_attribution_user,
     live_attribution_user_ids,
 )
-from gateway.services.mail import Mailer, normalized_address
+from gateway.services.mail import Mailer
+from gateway.services.tenancy.email_address import validated_email as _validated_email
 from gateway.services.tenancy.errors import (
-    InvalidEmailError,
     InvitationAlreadyPendingError,
     InvitationAlreadyUsedError,
     InvitationExpiredError,
@@ -96,18 +96,6 @@ def _validated_organization_name(name: str | None) -> str:
     if not trimmed:
         raise OrganizationNameRequiredError
     return trimmed
-
-
-def _validated_email(email: str) -> str:
-    """Normalize an address to lower case, refusing one that cannot be a handle.
-
-    The shape check is the mail package's, since "an address Otari would deliver
-    to" is one question whether it is being invited or emailed.
-    """
-    candidate = normalized_address(email)
-    if candidate is None:
-        raise InvalidEmailError(email)
-    return candidate
 
 
 def _hash_invitation_token(token: str) -> str:

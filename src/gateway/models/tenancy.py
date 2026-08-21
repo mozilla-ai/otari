@@ -43,9 +43,12 @@ Three deliberate departures from the platform's models, applied on arrival:
   (``hashed_password``, ``oauth_provider``, ``email_verification_token``,
   ``email_verified_at``, ``terms_accepted_at``) were held back while
   otari-ai#1716 was open and now join them: that issue settled that the master
-  key stays the API credential while sessions become the dashboard login, so the
-  columns land here ahead of the flow that reads them, which gives otari-ai#1644
-  one target schema instead of two. Nothing in this edition reads them yet.
+  key stays the API credential while sessions become the dashboard login, which
+  gives otari-ai#1644 one target schema instead of two. Two of them are read in
+  this edition: ``hashed_password`` backs the dashboard password sign-in and
+  ``email_verified_at`` is stamped when an operator claims a deployment
+  (`gateway.services.tenancy.user_service`). ``oauth_provider`` and
+  ``email_verification_token`` are still carried for the hosted edition alone.
   Purely hosted CRM and onboarding columns are the third case and are simply
   not part of the reconciled schema.
 
@@ -244,12 +247,15 @@ class User(UserBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
     __tablename__ = "user"
 
     email: str | None = Field(default=None, unique=True, index=True, max_length=255)
-    # The credential columns, in the platform's own order. All nullable, none
-    # read anywhere in this tree: they land ahead of the session flow
-    # (otari-ai#1716) so the re-parenting migration (otari-ai#1644) has one
-    # target schema rather than one per edition. A row with every one of them
-    # null is the normal standalone state, not an unmigrated one, because the
-    # master key remains the API credential.
+    # The credential columns, in the platform's own order. All nullable. Two of
+    # them are read here: ``hashed_password`` is the dashboard password sign-in
+    # and ``email_verified_at`` is stamped when an operator claims a deployment
+    # (`gateway.services.tenancy.user_service`). The other three land ahead of
+    # the flows that read them (otari-ai#1716) so the re-parenting migration
+    # (otari-ai#1644) has one target schema rather than one per edition. A row
+    # with every one of them null is the normal standalone state, not an
+    # unmigrated one: it is a deployment nobody has claimed yet, and the master
+    # key remains the API credential either way.
     #
     # Unbounded, matching the platform's ``AutoString()``: a hash carries its own
     # algorithm and cost parameters, so a length ceiling here would be a bet on
