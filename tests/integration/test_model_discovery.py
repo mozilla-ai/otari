@@ -1,20 +1,16 @@
 """Integration tests for model auto-discovery in the GET /v1/models endpoint."""
 
-import asyncio
-from collections.abc import AsyncGenerator, Generator
+from collections.abc import Generator
 from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from gateway.core.config import API_KEY_HEADER, GatewayConfig
-from gateway.db import Base, get_db
-from gateway.main import create_app
 from gateway.services.model_discovery_service import get_model_cache
 
-from .conftest import _run_alembic_migrations, _to_async_url
+from .conftest import build_test_client
 
 
 def _make_openai_model(model_id: str, owned_by: str = "openai", created: int = 1700000000) -> dict[str, Any]:
@@ -51,48 +47,19 @@ def no_discovery_config(postgres_url: str) -> GatewayConfig:
     )
 
 
-def _make_client(config: GatewayConfig) -> Generator[TestClient]:
-    _run_alembic_migrations(config.database_url)
-
-    from sqlalchemy import create_engine, text
-
-    engine = create_engine(config.database_url, pool_pre_ping=True)
-    async_engine = create_async_engine(_to_async_url(config.database_url), pool_pre_ping=True)
-    async_session_factory = async_sessionmaker(async_engine, expire_on_commit=False)
-    app = create_app(config)
-
-    async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
-        async with async_session_factory() as session:
-            yield session
-
-    app.dependency_overrides[get_db] = override_get_db
-
-    try:
-        with TestClient(app) as test_client:
-            yield test_client
-    finally:
-        # Dispose the async engine to avoid leaking connections/tasks.
-        asyncio.run(async_engine.dispose())
-        Base.metadata.drop_all(bind=engine)
-        with engine.connect() as conn:
-            conn.execute(text("DROP TABLE IF EXISTS alembic_version CASCADE"))
-            conn.commit()
-        engine.dispose()
-
-
 @pytest.fixture
 def discovery_client(discovery_config: GatewayConfig) -> Generator[TestClient]:
     """Test client with model discovery enabled."""
     # Clear the module-level model cache before each test.
     get_model_cache().clear()
-    yield from _make_client(discovery_config)
+    yield from build_test_client(discovery_config)
 
 
 @pytest.fixture
 def no_discovery_client(no_discovery_config: GatewayConfig) -> Generator[TestClient]:
     """Test client with model discovery disabled."""
     get_model_cache().clear()
-    yield from _make_client(no_discovery_config)
+    yield from build_test_client(no_discovery_config)
 
 
 @pytest.fixture
@@ -173,7 +140,7 @@ def test_list_models_excludes_env_only_provider(
         return []
 
     get_model_cache().clear()
-    client_gen = _make_client(config)
+    client_gen = build_test_client(config)
     client = next(client_gen)
     try:
         with (
@@ -220,7 +187,7 @@ def test_list_models_includes_keyless_local_provider(
         return []
 
     get_model_cache().clear()
-    client_gen = _make_client(config)
+    client_gen = build_test_client(config)
     client = next(client_gen)
     try:
         with (
@@ -558,7 +525,7 @@ def two_provider_config(postgres_url: str) -> GatewayConfig:
 @pytest.fixture
 def two_provider_client(two_provider_config: GatewayConfig) -> Generator[TestClient]:
     get_model_cache().clear()
-    yield from _make_client(two_provider_config)
+    yield from build_test_client(two_provider_config)
 
 
 def _alist_models_per_provider(**kwargs: Any) -> list[Any]:
@@ -656,7 +623,7 @@ def test_discoverable_falls_back_to_declared_models(
         },
     )
 
-    client_gen = _make_client(config)
+    client_gen = build_test_client(config)
     client = next(client_gen)
     try:
         with patch(
@@ -960,7 +927,7 @@ def cached_discovery_client(postgres_url: str) -> Generator[TestClient]:
     ``_no_background_refresh`` fixture in conftest.
     """
     get_model_cache().clear()
-    yield from _make_client(
+    yield from build_test_client(
         GatewayConfig(
             database_url=postgres_url,
             master_key="test-master-key",
@@ -1080,7 +1047,7 @@ def test_provider_health_read_serves_an_expired_cache_without_dialing(
 def uncached_discovery_client(postgres_url: str) -> Generator[TestClient]:
     """A client with discovery caching disabled (`model_cache_ttl_seconds = 0`)."""
     get_model_cache().clear()
-    yield from _make_client(
+    yield from build_test_client(
         GatewayConfig(
             database_url=postgres_url,
             master_key="test-master-key",

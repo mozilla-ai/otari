@@ -7,20 +7,15 @@ rejections (404/403) take precedence over the missing-pricing rejection (402),
 i.e. budget is reserved before the pricing gate is enforced.
 """
 
-import asyncio
-from collections.abc import AsyncGenerator, Generator
+from collections.abc import Generator
 from typing import Any
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from gateway.core.config import API_KEY_HEADER, GatewayConfig
-from gateway.db import Base, get_db
-from gateway.main import create_app
 
-from .conftest import _run_alembic_migrations, _to_async_url
+from .conftest import build_test_client
 
 _MASTER_HEADER = {API_KEY_HEADER: "Bearer test-master-key"}
 _MESSAGES = [{"role": "user", "content": "hi"}]
@@ -43,32 +38,7 @@ def strict_pricing_client(postgres_url: str) -> Generator[TestClient]:
         require_pricing=True,
         default_pricing=False,
     )
-    _run_alembic_migrations(postgres_url)
-    engine = create_engine(postgres_url, pool_pre_ping=True)
-    async_engine = create_async_engine(_to_async_url(postgres_url), pool_pre_ping=True)
-    async_session_factory = async_sessionmaker(async_engine, expire_on_commit=False)
-    app = create_app(config)
-
-    async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
-        async with async_session_factory() as session:
-            yield session
-
-    app.dependency_overrides[get_db] = override_get_db
-
-    try:
-        with TestClient(app) as test_client:
-            yield test_client
-    finally:
-        Base.metadata.drop_all(bind=engine)
-        with engine.connect() as conn:
-            conn.execute(text("DROP TABLE IF EXISTS alembic_version CASCADE"))
-            conn.commit()
-        try:
-            asyncio.run(async_engine.dispose())
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            loop.run_until_complete(async_engine.dispose())
-            loop.close()
+    yield from build_test_client(config)
 
 
 def _chat(client: TestClient, *, model: str, user: str) -> int:

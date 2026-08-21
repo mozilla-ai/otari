@@ -66,9 +66,12 @@ From the repo root:
   split it while iterating.
 
 Integration tests need PostgreSQL: `TEST_DATABASE_URL` when set, otherwise a Testcontainers
-`postgres:17`. With no Docker, point `TEST_DATABASE_URL` at any reachable instance; SQLite is not
-a fallback, because teardown uses `DROP TABLE ... CASCADE`. Two tests make a real outbound call
-and report a status mismatch with no network egress
+`postgres:17`. Whichever it is, it is a *server* URL: each xdist worker creates a database of its
+own on it (`postgres` becomes `postgres_gw0`, and so on) and drops it at the end of the session,
+so the credentials need `CREATE DATABASE` and a `postgres` database to connect through. With no
+Docker, point `TEST_DATABASE_URL` at any reachable instance; SQLite is not a fallback, because
+none of that is available there. Two tests make a real outbound call and report a status mismatch
+with no network egress
 (`test_error_detail_leakage.py::test_provider_error_does_not_leak_details`,
 `test_streaming_error_event.py::test_streaming_creation_error_returns_http_error`): that is
 environment noise, not a regression, so confirm the change against the rest of the suite.
@@ -154,8 +157,9 @@ tool, `isolation: "worktree"`), each executing the cycle above.
   fixes back to the original agents with `SendMessage` (their worktree and context are intact)
   rather than starting fresh ones.
 - **Resource note.** Each agent running the integration suite boots its own Testcontainers
-  Postgres, so stagger them or point them all at one `TEST_DATABASE_URL` instead of paying for a
-  container per agent.
+  Postgres. Stagger them rather than sharing one `TEST_DATABASE_URL`: two suites running at once
+  against one server pick the same worker database names and drop each other's database out from
+  under the run. Sharing a server is only safe if each agent gets a distinct database in the URL.
 
 ## Merging (when asked to merge)
 

@@ -11,13 +11,10 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text
 
 from gateway.core.config import API_KEY_HEADER, GatewayConfig
-from gateway.db import Base, get_db
-from gateway.main import create_app
 
-from .conftest import _run_alembic_migrations, build_async_session_override
+from .conftest import build_test_client
 
 ALIASES = "/v1/aliases"
 HEADERS = {API_KEY_HEADER: "Bearer test-master-key"}
@@ -43,27 +40,9 @@ def alias_config(postgres_url: str) -> GatewayConfig:
     )
 
 
-def _build_client(config: GatewayConfig) -> Generator[TestClient]:
-    _run_alembic_migrations(config.database_url)
-    engine = create_engine(config.database_url, pool_pre_ping=True)
-    app = create_app(config)
-    override_get_db, dispose_override = build_async_session_override(config.database_url)
-    app.dependency_overrides[get_db] = override_get_db
-    try:
-        with TestClient(app) as test_client:
-            yield test_client
-    finally:
-        dispose_override()
-        Base.metadata.drop_all(bind=engine)
-        with engine.connect() as conn:
-            conn.execute(text("DROP TABLE IF EXISTS alembic_version CASCADE"))
-            conn.commit()
-        engine.dispose()
-
-
 @pytest.fixture
 def client(alias_config: GatewayConfig) -> Generator[TestClient]:
-    yield from _build_client(alias_config)
+    yield from build_test_client(alias_config)
 
 
 @pytest.fixture
@@ -77,7 +56,7 @@ def lenient_client(alias_config: GatewayConfig) -> Generator[TestClient]:
     identity to resolve aliases against.
     """
     alias_config.reject_user_mismatch = False
-    yield from _build_client(alias_config)
+    yield from build_test_client(alias_config)
 
 
 def _create(client: TestClient, name: str, target: str, user_id: str | None = None) -> None:

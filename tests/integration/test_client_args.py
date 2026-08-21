@@ -1,18 +1,13 @@
-import asyncio
-from collections.abc import AsyncGenerator, Generator
+from collections.abc import Generator
 from typing import Any
 from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from gateway.core.config import API_KEY_HEADER, GatewayConfig
-from gateway.db import get_db
-from gateway.main import create_app
 
-from .conftest import _run_alembic_migrations, _to_async_url
+from .conftest import build_test_client
 
 
 class MockCompletionError(Exception):
@@ -45,36 +40,7 @@ def config_with_client_args(postgres_url: str) -> GatewayConfig:
 @pytest.fixture
 def client_with_client_args(config_with_client_args: GatewayConfig) -> Generator[TestClient]:
     """Create a test client with client_args configured."""
-    from sqlalchemy import text
-
-    from gateway.db import Base
-
-    _run_alembic_migrations(config_with_client_args.database_url)
-    engine = create_engine(config_with_client_args.database_url, pool_pre_ping=True)
-    async_engine = create_async_engine(_to_async_url(config_with_client_args.database_url), pool_pre_ping=True)
-    async_session_factory = async_sessionmaker(async_engine, expire_on_commit=False)
-    app = create_app(config_with_client_args)
-
-    async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
-        async with async_session_factory() as session:
-            yield session
-
-    app.dependency_overrides[get_db] = override_get_db
-
-    try:
-        with TestClient(app) as test_client:
-            yield test_client
-    finally:
-        Base.metadata.drop_all(bind=engine)
-        with engine.connect() as conn:
-            conn.execute(text("DROP TABLE IF EXISTS alembic_version CASCADE"))
-            conn.commit()
-        try:
-            asyncio.run(async_engine.dispose())
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            loop.run_until_complete(async_engine.dispose())
-            loop.close()
+    yield from build_test_client(config_with_client_args)
 
 
 @pytest.mark.asyncio

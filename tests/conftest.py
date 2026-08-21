@@ -50,9 +50,9 @@ def _reset_default_workspace() -> None:
 
     ``workspace_scope`` memoizes each key's workspace, because a usage row is
     written on the hot path and must not pay a lookup for something immutable.
-    Immutable within one database: every test builds a fresh one, so an id cached
-    by the previous test names a workspace that no longer exists and the next
-    insert fails its foreign key. Same reason the alias and provider caches have
+    Immutable within one database, and every test empties its own, so an id
+    cached by the previous test can name a row that is gone and the next insert
+    then fails its foreign key. Same reason the alias and provider caches have
     resets.
     """
     from gateway.services.workspace_scope import reset_key_workspace_cache

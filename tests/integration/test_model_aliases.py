@@ -27,11 +27,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import create_engine, text
 
 from gateway.core.config import API_KEY_HEADER, GatewayConfig
-from gateway.db import Base, get_db
-from gateway.main import create_app
 from gateway.types.moderation import ModerationResponse, ModerationResult
 
-from .conftest import _run_alembic_migrations, build_async_session_override
+from .conftest import build_test_client
 
 
 class _MockCompletionError(Exception):
@@ -65,33 +63,15 @@ def alias_config(postgres_url: str) -> GatewayConfig:
     )
 
 
-def _build_client(config: GatewayConfig) -> Generator[TestClient]:
-    _run_alembic_migrations(config.database_url)
-    engine = create_engine(config.database_url, pool_pre_ping=True)
-    app = create_app(config)
-    override_get_db, dispose_override = build_async_session_override(config.database_url)
-    app.dependency_overrides[get_db] = override_get_db
-    try:
-        with TestClient(app) as test_client:
-            yield test_client
-    finally:
-        dispose_override()
-        Base.metadata.drop_all(bind=engine)
-        with engine.connect() as conn:
-            conn.execute(text("DROP TABLE IF EXISTS alembic_version CASCADE"))
-            conn.commit()
-        engine.dispose()
-
-
 @pytest.fixture
 def client(alias_config: GatewayConfig) -> Generator[TestClient]:
-    yield from _build_client(alias_config)
+    yield from build_test_client(alias_config)
 
 
 @pytest.fixture
 def default_priced_client(alias_config: GatewayConfig) -> Generator[TestClient]:
     """A gateway that meters unpriced models off the genai-prices fallback."""
-    yield from _build_client(alias_config.model_copy(update={"default_pricing": True}))
+    yield from build_test_client(alias_config.model_copy(update={"default_pricing": True}))
 
 
 HEADERS = {API_KEY_HEADER: "Bearer test-master-key"}
@@ -352,7 +332,7 @@ def test_discovered_alias_target_is_hidden_from_the_listing(alias_config: Gatewa
 
     discovered = [("anthropic", Model(id="claude-opus-4", created=1_700_000_000, object="model", owned_by="anthropic"))]
     with patch("gateway.api.routes.models.discover_all_models", new=AsyncMock(return_value=discovered)):
-        client_gen = _build_client(alias_config.model_copy(update={"model_discovery": True}))
+        client_gen = build_test_client(alias_config.model_copy(update={"model_discovery": True}))
         discovery_client = next(client_gen)
         try:
             resp = discovery_client.get("/v1/models", headers=HEADERS)

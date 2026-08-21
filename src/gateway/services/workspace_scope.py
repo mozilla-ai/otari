@@ -63,9 +63,9 @@ _workspace_organization: dict[uuid.UUID, uuid.UUID] = {}
 def reset_key_workspace_cache() -> None:
     """Drop the cached key workspaces and workspace organizations.
 
-    Called between tests that swap databases. Both caches are keyed on ids that a
-    fresh database re-mints, so leaving either behind would hand the next test a
-    workspace or organization that does not exist in it.
+    Called between tests, which empty the database they share. Both caches are
+    keyed on ids a test can delete, so leaving either behind would hand the next
+    one a workspace or organization that no longer exists.
     """
     _key_workspace.clear()
     _workspace_organization.clear()

@@ -15,8 +15,9 @@ import uvicorn
 from alembic import command
 from alembic.config import Config
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
+from sqlalchemy import Engine, create_engine, inspect, text
+from sqlalchemy.engine import make_url
+from sqlalchemy.ext.asyncio import AsyncEngine, AsyncSession, async_sessionmaker, create_async_engine
 from sqlalchemy.orm import Session, sessionmaker
 from testcontainers.postgres import PostgresContainer
 
@@ -28,20 +29,98 @@ if "gateway" in sys.modules:
     del sys.modules["gateway"]
 
 from gateway.core.config import API_KEY_HEADER, GatewayConfig
-from gateway.db import Base, get_db
+from gateway.db import get_db
 from gateway.main import create_app
 
 MODEL_NAME = "gemini:gemini-2.5-flash"
 
 
+def alembic_config(database_url: str) -> Config:
+    """An Alembic config pointed at a test database."""
+    config = Config()
+    config.set_main_option("script_location", str(Path(__file__).parent.parent.parent / "alembic"))
+    config.set_main_option("sqlalchemy.url", database_url)
+    config.attributes["configure_logger"] = False
+    return config
+
+
+@dataclass(frozen=True)
+class _ResetPlan:
+    """What it takes to put a migrated database back the way the migrations left it."""
+
+    truncate: str
+    seeds: tuple[tuple[str, tuple[dict[str, Any], ...]], ...]
+
+
+_SCHEMA_READY: set[str] = set()
+_RESET_PLANS: dict[str, _ResetPlan] = {}
+_RESET_ENGINES: dict[str, Engine] = {}
+
+
+def _reset_engine(database_url: str) -> Engine:
+    """One sync engine per database, kept for the whole session.
+
+    Every test resets its database, so the alternative is building and disposing
+    an engine (and its connection) once per test for statements that take
+    milliseconds. Sync only: an async engine belongs to the event loop that
+    opened its connections, and each test runs in a new one.
+    """
+    engine = _RESET_ENGINES.get(database_url)
+    if engine is None:
+        engine = create_engine(database_url, pool_pre_ping=True)
+        _RESET_ENGINES[database_url] = engine
+    return engine
+
+
+def _build_reset_plan(database_url: str) -> _ResetPlan:
+    """Record the schema's tables, and whatever the migrations seeded into them."""
+    with _reset_engine(database_url).connect() as conn:
+        tables = [name for name in inspect(conn).get_table_names() if name != "alembic_version"]
+        seeds = tuple(
+            (table, rows)
+            for table in tables
+            if (rows := tuple(dict(row) for row in conn.execute(text(f'SELECT * FROM "{table}"')).mappings()))
+        )
+    return _ResetPlan(truncate=", ".join(f'"{table}"' for table in tables), seeds=seeds)
+
+
 def _run_alembic_migrations(database_url: str) -> None:
-    """Run Alembic migrations for test database."""
-    alembic_cfg = Config()
-    alembic_dir = Path(__file__).parent.parent.parent / "alembic"
-    alembic_cfg.set_main_option("script_location", str(alembic_dir))
-    alembic_cfg.set_main_option("sqlalchemy.url", database_url)
-    alembic_cfg.attributes["configure_logger"] = False
-    command.upgrade(alembic_cfg, "head")
+    """Build the test schema, once per database per session.
+
+    Every test wants the same schema, and building it is what this suite mostly
+    spends its time on. Each xdist worker owns its own database (see
+    ``postgres_url``), so "already migrated" is a fact this process can hold on
+    to; ``reset_database`` is what hands every test an empty one.
+
+    Still called by the modules that build a client on a config of their own, so
+    that a module run by itself gets its schema; the calls after the first are
+    the short-circuit.
+    """
+    if database_url in _SCHEMA_READY:
+        return
+    command.upgrade(alembic_config(database_url), "head")
+    _SCHEMA_READY.add(database_url)
+    _RESET_PLANS[database_url] = _build_reset_plan(database_url)
+
+
+def reset_database(database_url: str) -> None:
+    """Empty every table and put the migration-seeded rows back.
+
+    ``CASCADE`` frees TRUNCATE from foreign-key order and ``RESTART IDENTITY``
+    puts the sequences back where a freshly built schema would have them, so a
+    test cannot tell this from a database created a moment ago.
+    """
+    plan = _RESET_PLANS[database_url]
+    with _reset_engine(database_url).begin() as conn:
+        conn.execute(text(f"TRUNCATE {plan.truncate} RESTART IDENTITY CASCADE"))
+        for table, rows in plan.seeds:
+            columns = list(rows[0])
+            column_list = ", ".join(f'"{column}"' for column in columns)
+            placeholders = ", ".join(f":{column}" for column in columns)
+            conn.execute(
+                text(f'INSERT INTO "{table}" ({column_list}) VALUES ({placeholders})'),
+                [dict(row) for row in rows],
+            )
 
 
 def _to_async_url(database_url: str) -> str:
@@ -72,26 +151,65 @@ def build_async_session_override(
     return override_get_db, dispose
 
 
+def _worker_database_url(server_url: str) -> Generator[str]:
+    """Give this xdist worker a database of its own on ``server_url``.
+
+    The schema outlives each test, so two workers sharing one database would be
+    resetting it out from under each other. Under ``-n auto`` without
+    ``TEST_DATABASE_URL`` each worker gets its own Postgres container anyway; a
+    worker-suffixed database extends the same isolation to a shared server, which
+    is the arrangement AGENTS.md points at when Docker is unavailable.
+
+    One suite per server, though: a second one starting up picks the same names
+    and drops these databases mid-run.
+    """
+    worker = os.getenv("PYTEST_XDIST_WORKER", "master")
+    url = make_url(server_url)
+    database = f"{url.database or 'postgres'}_{worker}"
+    admin = create_engine(url.set(database="postgres"), isolation_level="AUTOCOMMIT")
+    try:
+        with admin.connect() as conn:
+            conn.execute(text(f'DROP DATABASE IF EXISTS "{database}" WITH (FORCE)'))
+            conn.execute(text(f'CREATE DATABASE "{database}"'))
+        yield url.set(database=database).render_as_string(hide_password=False)
+    finally:
+        for engine in _RESET_ENGINES.values():
+            engine.dispose()
+        with admin.connect() as conn:
+            conn.execute(text(f'DROP DATABASE IF EXISTS "{database}" WITH (FORCE)'))
+        admin.dispose()
+
+
 @pytest.fixture(scope="session")
 def postgres_url() -> Generator[str]:
     """Get PostgreSQL URL from environment or start temporary container."""
     if url := os.getenv("TEST_DATABASE_URL"):
-        yield url
+        yield from _worker_database_url(url)
     else:
         postgres = PostgresContainer("postgres:17", username="test", password="test", dbname="test_db")  # noqa: S106
         postgres.start()
         try:
-            yield postgres.get_connection_url()
+            yield from _worker_database_url(postgres.get_connection_url())
         finally:
             postgres.stop()
 
 
+@pytest.fixture(autouse=True)
+def clean_database(postgres_url: str) -> None:
+    """Hand every test the empty, migrated database the suite promises.
+
+    Autouse and at setup rather than teardown, so it also covers the modules that
+    build a client on a config of their own, and so a test that dies mid-way
+    cannot leave its rows for the next one.
+    """
+    _run_alembic_migrations(postgres_url)
+    reset_database(postgres_url)
+
+
 @pytest.fixture
-def test_db(postgres_url: str) -> Generator[Session]:
+def test_db(postgres_url: str, clean_database: None) -> Generator[Session]:
     """Create a test database session."""
     engine = create_engine(postgres_url, pool_pre_ping=True)
-    _run_alembic_migrations(postgres_url)
-
     testing_session_local = sessionmaker(autocommit=False, autoflush=False, bind=engine)
     db = testing_session_local()
 
@@ -99,16 +217,12 @@ def test_db(postgres_url: str) -> Generator[Session]:
         yield db
     finally:
         db.close()
-        Base.metadata.drop_all(bind=engine)
-        with engine.connect() as conn:
-            conn.execute(text("DROP TABLE IF EXISTS alembic_version CASCADE"))
-            conn.commit()
+        engine.dispose()
 
 
 @pytest_asyncio.fixture
-async def async_db(postgres_url: str) -> AsyncGenerator[AsyncSession, None]:
+async def async_db(postgres_url: str, clean_database: None) -> AsyncGenerator[AsyncSession, None]:
     """Create an async test database session."""
-    _run_alembic_migrations(postgres_url)
     async_engine = create_async_engine(_to_async_url(postgres_url), pool_pre_ping=True)
     async_session_factory = async_sessionmaker(async_engine, expire_on_commit=False)
 
@@ -117,12 +231,6 @@ async def async_db(postgres_url: str) -> AsyncGenerator[AsyncSession, None]:
             yield session
     finally:
         await async_engine.dispose()
-        engine = create_engine(postgres_url, pool_pre_ping=True)
-        Base.metadata.drop_all(bind=engine)
-        with engine.connect() as conn:
-            conn.execute(text("DROP TABLE IF EXISTS alembic_version CASCADE"))
-            conn.commit()
-        engine.dispose()
 
 
 @pytest.fixture
@@ -176,14 +284,30 @@ def test_config(postgres_url: str) -> GatewayConfig:
     )
 
 
-@pytest.fixture
-def client(test_config: GatewayConfig) -> Generator[TestClient]:
-    """Create a test client for the FastAPI app."""
-    _run_alembic_migrations(test_config.database_url)
-    engine = create_engine(test_config.database_url, pool_pre_ping=True)
-    async_engine = create_async_engine(_to_async_url(test_config.database_url), pool_pre_ping=True)
+def dispose_async_engine(async_engine: AsyncEngine) -> None:
+    """Close an async engine's connections from synchronous teardown."""
+    try:
+        asyncio.run(async_engine.dispose())
+    except RuntimeError:
+        loop = asyncio.new_event_loop()
+        loop.run_until_complete(async_engine.dispose())
+        loop.close()
+
+
+def build_test_client(config: GatewayConfig) -> Generator[TestClient]:
+    """Boot an app on the worker's database and hand back a client for it.
+
+    Where a test client that owns its database lifecycle is assembled: the schema
+    is already built and ``clean_database`` has already emptied it, which is why
+    nothing here migrates or drops. Modules that need a client on a config of
+    their own ``yield from`` this rather than restating it. A handful still build
+    an app inline through ``build_async_session_override``; those never touched
+    the schema, so they were left alone.
+    """
+    _run_alembic_migrations(config.database_url)
+    async_engine = create_async_engine(_to_async_url(config.database_url), pool_pre_ping=True)
     async_session_factory = async_sessionmaker(async_engine, expire_on_commit=False)
-    app = create_app(test_config)
+    app = create_app(config)
 
     async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
         async with async_session_factory() as session:
@@ -195,16 +319,13 @@ def client(test_config: GatewayConfig) -> Generator[TestClient]:
         with TestClient(app) as test_client:
             yield test_client
     finally:
-        Base.metadata.drop_all(bind=engine)
-        with engine.connect() as conn:
-            conn.execute(text("DROP TABLE IF EXISTS alembic_version CASCADE"))
-            conn.commit()
-        try:
-            asyncio.run(async_engine.dispose())
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            loop.run_until_complete(async_engine.dispose())
-            loop.close()
+        dispose_async_engine(async_engine)
+
+
+@pytest.fixture
+def client(test_config: GatewayConfig, clean_database: None) -> Generator[TestClient]:
+    """Create a test client for the FastAPI app."""
+    yield from build_test_client(test_config)
 
 
 @pytest.fixture

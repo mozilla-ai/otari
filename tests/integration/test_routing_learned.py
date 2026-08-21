@@ -24,14 +24,12 @@ from any_llm.types.completion import (
     CompletionUsage,
 )
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text
 
 from gateway.core.config import API_KEY_HEADER, GatewayConfig, PricingConfig
-from gateway.db import Base, get_db
 from gateway.main import create_app
 from gateway.models.routing import RoutingConfig
 
-from .conftest import _run_alembic_migrations, build_async_session_override
+from .conftest import build_test_client
 
 HEADERS = {API_KEY_HEADER: "Bearer test-master-key"}
 
@@ -168,22 +166,14 @@ def learned_config(postgres_url: str) -> GatewayConfig:
 
 @pytest.fixture
 def client(learned_config: GatewayConfig) -> Generator[TestClient]:
-    _run_alembic_migrations(learned_config.database_url)
-    engine = create_engine(learned_config.database_url, pool_pre_ping=True)
-    app = create_app(learned_config)
-    override_get_db, dispose_override = build_async_session_override(learned_config.database_url)
-    app.dependency_overrides[get_db] = override_get_db
-    try:
-        with patch("gateway.services.routing.knn.aembedding", new=_fake_aembedding), TestClient(app) as test_client:
+    with patch("gateway.services.routing.knn.aembedding", new=_fake_aembedding):
+        client_gen = build_test_client(learned_config)
+        test_client = next(client_gen)
+        try:
             _create_user(test_client)
             yield test_client
-    finally:
-        dispose_override()
-        Base.metadata.drop_all(bind=engine)
-        with engine.connect() as conn:
-            conn.execute(text("DROP TABLE IF EXISTS alembic_version CASCADE"))
-            conn.commit()
-        engine.dispose()
+        finally:
+            client_gen.close()
 
 
 # -- helpers ---------------------------------------------------------------
@@ -735,13 +725,10 @@ def test_eviction_keeps_the_store_bounded_without_a_giant_in_list(
     drives it through the real endpoint and asserts the store is actually trimmed.
     """
     learned_config.router_max_records_per_user = 3
-    _run_alembic_migrations(learned_config.database_url)
-    engine = create_engine(learned_config.database_url, pool_pre_ping=True)
-    app = create_app(learned_config)
-    override_get_db, dispose_override = build_async_session_override(learned_config.database_url)
-    app.dependency_overrides[get_db] = override_get_db
-    try:
-        with patch("gateway.services.routing.knn.aembedding", new=_fake_aembedding), TestClient(app) as client:
+    with patch("gateway.services.routing.knn.aembedding", new=_fake_aembedding):
+        client_gen = build_test_client(learned_config)
+        client = next(client_gen)
+        try:
             _create_user(client)
             resp = client.post(
                 "/v1/routing/preferences/rank",
@@ -759,13 +746,8 @@ def test_eviction_keeps_the_store_bounded_without_a_giant_in_list(
             # Six written, cap of three: the oldest are gone rather than the write
             # failing or the store growing unbounded.
             assert _status(client)["default_pool"]["records"] <= 3
-    finally:
-        dispose_override()
-        Base.metadata.drop_all(bind=engine)
-        with engine.connect() as conn:
-            conn.execute(text("DROP TABLE IF EXISTS alembic_version CASCADE"))
-            conn.commit()
-        engine.dispose()
+        finally:
+            client_gen.close()
 
 
 def test_rank_rejects_an_empty_batch(client: TestClient) -> None:

@@ -7,14 +7,11 @@ from unittest.mock import patch
 import pytest
 from any_llm import LLMProvider
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text
 
 from gateway.core.config import API_KEY_HEADER, GatewayConfig
-from gateway.db import Base, get_db
-from gateway.main import create_app
 from gateway.services.provider_kwargs import get_provider_kwargs
 
-from .conftest import _run_alembic_migrations, build_async_session_override
+from .conftest import build_test_client
 
 
 class _MockCompletionError(Exception):
@@ -43,21 +40,7 @@ def config_with_model_in_provider(postgres_url: str) -> GatewayConfig:
 @pytest.fixture
 def client_with_model_in_provider(config_with_model_in_provider: GatewayConfig) -> Generator[TestClient]:
     """Create a test client whose provider config contains a conflicting 'model' key."""
-    _run_alembic_migrations(config_with_model_in_provider.database_url)
-    engine = create_engine(config_with_model_in_provider.database_url, pool_pre_ping=True)
-    app = create_app(config_with_model_in_provider)
-    override_get_db, dispose_override = build_async_session_override(config_with_model_in_provider.database_url)
-    app.dependency_overrides[get_db] = override_get_db
-
-    try:
-        with TestClient(app) as test_client:
-            yield test_client
-    finally:
-        dispose_override()
-        Base.metadata.drop_all(bind=engine)
-        with engine.connect() as conn:
-            conn.execute(text("DROP TABLE IF EXISTS alembic_version CASCADE"))
-            conn.commit()
+    yield from build_test_client(config_with_model_in_provider)
 
 
 def test_provider_kwargs_do_not_contain_model() -> None:

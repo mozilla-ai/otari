@@ -1,21 +1,16 @@
 """Tests for Prometheus metrics instrumentation."""
 
-import asyncio
-from collections.abc import AsyncGenerator, Generator
+from collections.abc import Generator
 from typing import Any
 from unittest.mock import patch
 
 import pytest
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text
-from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from gateway.core.config import API_KEY_HEADER, GatewayConfig
-from gateway.db import Base, get_db
-from gateway.main import create_app
 from gateway.metrics import REGISTRY
 
-from .conftest import _run_alembic_migrations, _to_async_url
+from .conftest import build_test_client
 
 
 def _sample(name: str, labels: dict[str, str] | None = None) -> float:
@@ -39,32 +34,7 @@ def _make_metrics_client(
         enable_metrics=enable_metrics,
         rate_limit_rpm=rate_limit_rpm,
     )
-    _run_alembic_migrations(postgres_url)
-    engine = create_engine(postgres_url, pool_pre_ping=True)
-    async_engine = create_async_engine(_to_async_url(postgres_url), pool_pre_ping=True)
-    async_session_factory = async_sessionmaker(async_engine, expire_on_commit=False)
-    app = create_app(config)
-
-    async def override_get_db() -> AsyncGenerator[AsyncSession, None]:
-        async with async_session_factory() as session:
-            yield session
-
-    app.dependency_overrides[get_db] = override_get_db
-
-    try:
-        with TestClient(app) as test_client:
-            yield test_client
-    finally:
-        Base.metadata.drop_all(bind=engine)
-        with engine.connect() as conn:
-            conn.execute(text("DROP TABLE IF EXISTS alembic_version CASCADE"))
-            conn.commit()
-        try:
-            asyncio.run(async_engine.dispose())
-        except RuntimeError:
-            loop = asyncio.new_event_loop()
-            loop.run_until_complete(async_engine.dispose())
-            loop.close()
+    yield from build_test_client(config)
 
 
 @pytest.fixture

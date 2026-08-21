@@ -40,15 +40,12 @@ from any_llm.types.completion import (
     CompletionUsage,
 )
 from fastapi.testclient import TestClient
-from sqlalchemy import create_engine, text
 
 from gateway.core.config import API_KEY_HEADER, GatewayConfig
-from gateway.db import Base, get_db
-from gateway.main import create_app
 from gateway.models.routing import RoutingConfig
 from gateway.services.routing.weighted import WeightedRouterBackend
 
-from .conftest import _run_alembic_migrations, build_async_session_override
+from .conftest import build_test_client
 
 HEADERS = {API_KEY_HEADER: "Bearer test-master-key"}
 USER = "test-user"
@@ -118,34 +115,23 @@ def weighted_config(postgres_url: str) -> GatewayConfig:
 
 @pytest.fixture
 def client(weighted_config: GatewayConfig) -> Generator[TestClient]:
-    _run_alembic_migrations(weighted_config.database_url)
-    engine = create_engine(weighted_config.database_url, pool_pre_ping=True)
-    app = create_app(weighted_config)
-    override_get_db, dispose_override = build_async_session_override(weighted_config.database_url)
-    app.dependency_overrides[get_db] = override_get_db
-    try:
-        # The registry builds a fresh backend per request (it is stateless), so the
-        # seeded stream has to be shared across those instances: handing each one its
-        # own `Random(11)` would replay the same first draw on every request and every
-        # request would land on the same provider.
-        stream = random.Random(11)
-        with (
-            patch(
-                "gateway.services.routing.weighted.WeightedRouterBackend",
-                new=lambda: WeightedRouterBackend(stream),
-            ),
-            TestClient(app) as test_client,
-        ):
+    # The registry builds a fresh backend per request (it is stateless), so the
+    # seeded stream has to be shared across those instances: handing each one its
+    # own `Random(11)` would replay the same first draw on every request and every
+    # request would land on the same provider.
+    stream = random.Random(11)
+    with patch(
+        "gateway.services.routing.weighted.WeightedRouterBackend",
+        new=lambda: WeightedRouterBackend(stream),
+    ):
+        client_gen = build_test_client(weighted_config)
+        test_client = next(client_gen)
+        try:
             resp = test_client.post("/v1/users", json={"user_id": USER}, headers=HEADERS)
             assert resp.status_code == 200, resp.text
             yield test_client
-    finally:
-        dispose_override()
-        Base.metadata.drop_all(bind=engine)
-        with engine.connect() as conn:
-            conn.execute(text("DROP TABLE IF EXISTS alembic_version CASCADE"))
-            conn.commit()
-        engine.dispose()
+        finally:
+            client_gen.close()
 
 
 def _chat(
