@@ -990,10 +990,11 @@ function OnboardingPanel({
             works and see how many models it serves.
           </Step>
           <Step n={3} title="Send your first request">
-            Once a provider exists, the <strong>Overview</strong> page hands you
-            an API key and the exact call to make, and waits for it to arrive.
-            Or point your app at <code>/v1</code> on this gateway with the key
-            printed in the server logs (<code>gw-…</code>). See the{" "}
+            Once a provider exists, the <strong>Overview</strong> page usually
+            offers a setup guide that hands you an API key and the call to make.
+            Either way, point your app at <code>/v1</code> on this gateway with
+            an API key (the one printed in the server logs starts{" "}
+            <code>gw-…</code>). See the{" "}
             {/* /welcome is served by the gateway itself, not by a client route, so this
                 stays a plain path anchor: a router Link would resolve to /#/welcome, which
                 the catch-all route sends back to the overview. It leaves the SPA, so open a

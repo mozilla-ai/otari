@@ -26,7 +26,7 @@ _ACTIVATION_REVISION = "c8e2a4f6b0d3"
 _BEFORE_ACTIVATION = "a7c3e5d9b1f4"
 
 _TABLE = "workspace_activation_state"
-_USAGE_INDEX = "ix_usage_logs_workspace_status_timestamp"
+_USAGE_INDEX = "ix_usage_logs_workspace_source_status_timestamp"
 
 
 def _alembic_config(database_url: str) -> Config:
@@ -83,7 +83,12 @@ def test_the_usage_index_the_guide_reads_through_exists(sqlite_at_head: tuple[Co
 
     indexes = {index["name"]: list(index["column_names"]) for index in inspect(engine).get_indexes("usage_logs")}
 
-    assert indexes[_USAGE_INDEX] == ["workspace_id", "status", "timestamp"]
+    assert indexes[_USAGE_INDEX] == [
+        "workspace_id",
+        "source",
+        "status",
+        "timestamp",
+    ]
 
 
 def test_the_revision_round_trips(sqlite_at_head: tuple[Config, Engine]) -> None:

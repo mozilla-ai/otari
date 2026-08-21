@@ -547,11 +547,19 @@ class UsageLog(Base):
         Index("ix_usage_logs_status_timestamp", "status", "timestamp"),
         # Supports the setup guide's two questions about one workspace: has any
         # request in it ever succeeded (oldest first), and what did the last one
-        # do (newest first). Both filter a workspace and a status and order by
-        # time, which the workspace-only and status-first indexes above can each
-        # answer only halfway: on a deployment with real traffic the guide would
-        # otherwise scan every row of the workspace on every dashboard load.
-        Index("ix_usage_logs_workspace_status_timestamp", "workspace_id", "status", "timestamp"),
+        # do (newest first). Both filter a workspace, a source and a status and
+        # then order by time, which the workspace-only and status-first indexes
+        # above can each answer only halfway: on a deployment with real traffic
+        # the guide would otherwise scan the workspace's rows on every dashboard
+        # load, and where usage is imported as well most of those rows are the
+        # wrong source anyway. Equality columns first, the ordering column last.
+        Index(
+            "ix_usage_logs_workspace_source_status_timestamp",
+            "workspace_id",
+            "source",
+            "status",
+            "timestamp",
+        ),
         # Idempotency for imported usage: re-submitting the same (source,
         # source_event_id) must not create a second row. Gateway-originated rows
         # keep source_event_id NULL, and SQL treats NULLs as distinct on both

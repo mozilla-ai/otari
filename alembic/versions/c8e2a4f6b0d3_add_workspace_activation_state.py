@@ -5,7 +5,10 @@ dashboard's first-request setup guide last handed out an API key, which key that
 was, and whether someone dismissed it. Whether a workspace has activated is not
 a column here, because ``usage_logs`` already records it (the first successful
 gateway request in the workspace), so this migration adds the composite index
-that makes that lookup a seek rather than a scan of the workspace's traffic.
+that makes that lookup a seek rather than a scan of the workspace's traffic. It
+covers ``source`` as well as ``status``, because imported usage is excluded from
+the question, and on a deployment that imports, most of a workspace's rows are
+the wrong source.
 
 ``api_key_id`` is ``SET NULL`` rather than cascade: deleting the guide's key from
 the Keys page is a legitimate thing to do and must not take the dismissal with
@@ -27,7 +30,7 @@ down_revision: str | Sequence[str] | None = "a7c3e5d9b1f4"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
-_USAGE_INDEX = "ix_usage_logs_workspace_status_timestamp"
+_USAGE_INDEX = "ix_usage_logs_workspace_source_status_timestamp"
 
 
 def upgrade() -> None:
@@ -49,7 +52,7 @@ def upgrade() -> None:
         "workspace_activation_state",
         ["api_key_id"],
     )
-    op.create_index(_USAGE_INDEX, "usage_logs", ["workspace_id", "status", "timestamp"])
+    op.create_index(_USAGE_INDEX, "usage_logs", ["workspace_id", "source", "status", "timestamp"])
 
 
 def downgrade() -> None:

@@ -295,6 +295,27 @@ async def test_issuing_the_key_twice_rotates_one_row_rather_than_collecting_two(
     assert state.first_presented_at <= state.last_presented_at
 
 
+async def test_rotating_the_key_moves_its_owner_to_whoever_asked_last(async_db: AsyncSession) -> None:
+    """The only live plaintext belongs to the last caller, so the row's owner does too.
+
+    Otherwise a second manager's requests would bill against the first issuer's
+    per-member ceilings, on a key the first issuer can no longer use.
+    """
+    organization = await _organization(async_db, slug="acme-rotate-owner")
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    admin = await _member(async_db, organization, role="admin", full_name="Admin")
+    workspace = await _workspace(async_db, organization, name="Engineering", owner=owner)
+
+    service = WorkspaceActivationService(async_db, _config())
+    first = await service.issue_api_key(user=owner, workspace_id=workspace.id)
+    second = await service.issue_api_key(user=admin, workspace_id=workspace.id)
+
+    assert first.key_id == second.key_id
+    keys = await _keys_in(async_db, workspace.id)
+    assert len(keys) == 1
+    assert keys[0].user_id == str(admin.id)
+
+
 async def test_issuing_the_key_is_refused_once_the_workspace_has_activated(async_db: AsyncSession) -> None:
     owner, workspace = await _setup(async_db, slug="acme-retired")
     await _usage(async_db, workspace.id)

@@ -2,7 +2,11 @@ import { Button, Card } from "@heroui/react"
 import { Link, useNavigate } from "@tanstack/react-router"
 import { useRef, useState } from "react"
 
-import type { ActivationApiKey, ActivationAttempt } from "@/client"
+import type {
+  ActivationApiKey,
+  ActivationAttempt,
+  WorkspaceActivation,
+} from "@/client"
 import { setupFailureCopy } from "@/features/onboarding/setupFailureCopy"
 import {
   useCreateActivationKey,
@@ -67,35 +71,80 @@ export function SetupGuideCard({
     workspaceId,
     surfaces("workspaces") && hasProviders,
   )
+
+  if (!workspaceId || !activation.data) {
+    return null
+  }
+
+  return (
+    // Keyed on the workspace, which is what discards the guide's own state when
+    // the switcher moves: the issued key belongs to one workspace, and so do
+    // "this session saw the offer" and "the operator dismissed the payoff".
+    // Without the key, switching workspaces would leave workspace A's key on
+    // screen under workspace B's heading.
+    <SetupGuide
+      key={workspaceId}
+      workspaceId={workspaceId}
+      workspaceName={selected?.name}
+      activation={activation.data}
+      checkFailed={activation.isError}
+      onCheckNow={() => activation.refetch()}
+    />
+  )
+}
+
+function SetupGuide({
+  workspaceId,
+  workspaceName,
+  activation: data,
+  checkFailed,
+  onCheckNow,
+}: {
+  workspaceId: string
+  workspaceName?: string
+  activation: WorkspaceActivation
+  checkFailed: boolean
+  /** Resolves when the re-check lands, so the button can report it. */
+  onCheckNow: () => Promise<unknown>
+}) {
   const createKey = useCreateActivationKey()
   const dismiss = useDismissActivation()
   const [issued, setIssued] = useState<ActivationApiKey>()
   const [finished, setFinished] = useState(false)
+  // Only a press the operator made, never the background poll: `isFetching`
+  // would put the button in its pending state every few seconds on its own.
+  const [isChecking, setIsChecking] = useState(false)
   // The card only celebrates a first request it was present for. Without this
   // latch, an operator who never opened the guide would be congratulated on the
   // traffic they already had, on the next page load after it arrived.
   const wasOffered = useRef(false)
 
-  const data = activation.data
-  if (data?.experience_eligible) {
+  if (data.experience_eligible) {
     wasOffered.current = true
   }
-  const activated = data?.status === "activated"
-  const showing = Boolean(data) && (data?.experience_eligible || activated)
+  const activated = data.status === "activated"
 
   // Nothing at all rather than an explanation: the guide is an offer, and a
-  // workspace that is set up (or one whose check failed) is better served by the
-  // page it came for.
-  if (!workspaceId || !showing || finished) {
+  // workspace that is set up is better served by the page it came for.
+  if (finished || !(data.experience_eligible || activated)) {
     return null
   }
   if (activated) {
     return wasOffered.current ? (
       <SetupComplete
-        attempt={data?.activation_attempt ?? undefined}
+        attempt={data.activation_attempt ?? undefined}
         onDone={() => setFinished(true)}
       />
     ) : null
+  }
+
+  const checkNow = async () => {
+    setIsChecking(true)
+    try {
+      await onCheckNow()
+    } finally {
+      setIsChecking(false)
+    }
   }
 
   return (
@@ -110,7 +159,7 @@ export function SetupGuideCard({
           <p className="text-sm text-muted">
             It lands in{" "}
             <span className="font-medium text-foreground">
-              {selected?.name ?? "this workspace"}
+              {workspaceName ?? "this workspace"}
             </span>
             . Usage, spend and the activity log stay empty until one does, so
             this guide watches for it and finishes here.
@@ -142,13 +191,13 @@ export function SetupGuideCard({
 
         <ListeningRow
           attempt={
-            data?.status === "failed"
+            data.status === "failed"
               ? (data.latest_attempt ?? undefined)
               : undefined
           }
-          isChecking={activation.isFetching}
-          checkFailed={activation.isError}
-          onCheckNow={() => void activation.refetch()}
+          isChecking={isChecking}
+          checkFailed={checkFailed}
+          onCheckNow={() => void checkNow()}
         />
 
         <ErrorBanner error={dismiss.error} />

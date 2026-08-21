@@ -5,7 +5,10 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { WorkspaceActivation } from "@/client"
 import { SetupGuideCard } from "@/features/onboarding/SetupGuideCard"
-import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
+import {
+  SelectedWorkspaceProvider,
+  useSelectedWorkspace,
+} from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import {
   activationAttempt,
@@ -17,9 +20,13 @@ import { renderWithRouter } from "@/tests/router"
 
 const WORKSPACE = "44444444-4444-4444-4444-444444444444"
 const KEY = "gw-setup-guide-key"
+const OTHER_KEY = "gw-other-workspace-key"
+
+const OTHER_WORKSPACE = "55555555-5555-5555-5555-555555555555"
 
 const MEMBERSHIPS = [
   { workspace_id: WORKSPACE, name: "Default Workspace", role: "owner" },
+  { workspace_id: OTHER_WORKSPACE, name: "Research", role: "owner" },
 ]
 
 interface ApiOptions {
@@ -44,10 +51,13 @@ function mockApi({
       const url = String(input)
       const method = init?.method ?? "GET"
       if (url.includes("/activation/key")) {
+        // Distinct per workspace, so a key left over from another one is
+        // recognizable rather than indistinguishable.
+        const key = url.includes(OTHER_WORKSPACE) ? OTHER_KEY : KEY
         return Response.json({
-          key: KEY,
+          key,
           key_id: "88888888-8888-8888-8888-888888888888",
-          key_prefix: KEY.slice(0, 10),
+          key_prefix: key.slice(0, 10),
           key_name: "Setup guide",
         })
       }
@@ -78,6 +88,27 @@ function mockApi({
     })
 }
 
+/** Stands in for the shell's workspace switcher. */
+function Switcher() {
+  const { memberships, select } = useSelectedWorkspace()
+  return (
+    <>
+      {MEMBERSHIPS.map((membership) => (
+        <button
+          key={membership.workspace_id}
+          type="button"
+          // Disabled until the organization context resolves, which is what the
+          // real switcher does with a list it does not have yet.
+          disabled={memberships.length === 0}
+          onClick={() => select(membership.workspace_id)}
+        >
+          switch to {membership.name}
+        </button>
+      ))}
+    </>
+  )
+}
+
 function renderCard(hasProviders = true) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
@@ -87,6 +118,7 @@ function renderCard(hasProviders = true) {
       <DeploymentProvider value={bootstrap()}>
         <SelectedWorkspaceProvider>
           <SetupGuideCard hasProviders={hasProviders} />
+          <Switcher />
         </SelectedWorkspaceProvider>
       </DeploymentProvider>
     </QueryClientProvider>,
@@ -253,6 +285,40 @@ describe("SetupGuideCard", () => {
         }),
       ).not.toBeInTheDocument()
     })
+  })
+
+  it("drops the issued key when the operator switches workspaces", async () => {
+    // The key belongs to one workspace, and leaving it on screen under another
+    // workspace's heading would offer a credential that bills somewhere else.
+    // The return leg is the one that matters: by then both workspaces are in the
+    // query cache, so the answer arrives synchronously and nothing unmounts on
+    // its own. Only the guide being keyed on the workspace resets it.
+    mockApi()
+    const user = userEvent.setup()
+    await renderCard()
+
+    await user.click(
+      await screen.findByRole("button", { name: "Create a setup key" }),
+    )
+    expect(await screen.findByDisplayValue(KEY)).toBeInTheDocument()
+
+    await user.click(screen.getByRole("button", { name: "switch to Research" }))
+    expect(await screen.findByText("Research")).toBeInTheDocument()
+    expect(screen.queryByDisplayValue(KEY)).not.toBeInTheDocument()
+    await user.click(
+      await screen.findByRole("button", { name: "Create a setup key" }),
+    )
+    expect(await screen.findByDisplayValue(OTHER_KEY)).toBeInTheDocument()
+
+    await user.click(
+      screen.getByRole("button", { name: "switch to Default Workspace" }),
+    )
+
+    expect(await screen.findByText("Default Workspace")).toBeInTheDocument()
+    expect(screen.queryByDisplayValue(OTHER_KEY)).not.toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Create a setup key" }),
+    ).toBeInTheDocument()
   })
 
   it("skipping dismisses the guide for the workspace and takes the card away", async () => {
