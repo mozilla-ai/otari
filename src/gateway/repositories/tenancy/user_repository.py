@@ -119,6 +119,23 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         result = await self.db.execute(select(User).where(col(User.password_reset_token_hash) == token_hash))
         return result.scalars().first()
 
+    async def lock(self, user_id: uuid.UUID) -> None:
+        """Take a row lock on the identity, serializing its token redemption.
+
+        Same shape as ``OrganizationRepository.lock``: verification and reset
+        are read-then-write on a token-hash column with no unique index to
+        lose to, so two concurrent redemptions of the same token can each read
+        it live and each proceed. Locking the row before re-resolving by the
+        token hash is what makes the second caller through the lock see the
+        first caller's clear.
+
+        ``FOR UPDATE`` is a no-op on SQLite, which has no row locks. That
+        engine admits one writer at a time for the whole database, so the same
+        pair of transactions serializes there anyway; PostgreSQL is where the
+        lock is load-bearing.
+        """
+        await self.db.execute(select(col(User.id)).where(col(User.id) == user_id).with_for_update())
+
     async def set_active_organization(self, user: User, organization_id: uuid.UUID) -> User:
         """Stage a change of the identity's active organization."""
         user.active_organization_id = organization_id
