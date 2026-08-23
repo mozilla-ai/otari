@@ -159,6 +159,51 @@ def test_inject_purpose_hints_extends_existing_system() -> None:
     assert out[0]["role"] == "system"
     assert "be helpful" in out[0]["content"]
     assert "cal" in out[0]["content"]
+    # regression: string content behaves exactly as today (existing text kept ahead of the hint block)
+    assert out[0]["content"] == "be helpful\n\nYou have access to the following tools:\n- cal: use it"
+
+
+def test_inject_purpose_hints_no_system_inserts_at_front() -> None:
+    """Regression: with no system message present, one is still inserted at index 0."""
+    msgs = [{"role": "user", "content": "hi"}]
+    out = inject_purpose_hints(msgs, [("cal", "for scheduling")])
+    assert len(out) == 2
+    assert out[0] == {"role": "system", "content": "You have access to the following tools:\n- cal: for scheduling"}
+    assert out[1] == {"role": "user", "content": "hi"}
+
+
+def test_inject_purpose_hints_preserves_list_shaped_system_content() -> None:
+    """List-shaped system content (Anthropic-style cache_control parts) must not be stringified into a repr."""
+    msgs = [
+        {"role": "system", "content": [{"type": "text", "text": "be helpful"}]},
+        {"role": "user", "content": "hi"},
+    ]
+    out = inject_purpose_hints(msgs, [("cal", "for scheduling")])
+    assert out[0]["role"] == "system"
+    content = out[0]["content"]
+    assert isinstance(content, list)
+    # the hint block is prepended as its own text part; the original part survives untouched.
+    assert content[0] == {"type": "text", "text": "You have access to the following tools:\n- cal: for scheduling"}
+    assert content[1] == {"type": "text", "text": "be helpful"}
+    # no repr() debris anywhere in the output.
+    assert "{'type'" not in str(content[0]["text"])
+    assert "{'type'" not in str(content[1]["text"])
+    assert len([m for m in out if m.get("role") == "system"]) == 1
+
+
+def test_inject_purpose_hints_developer_then_system_extends_the_system_message() -> None:
+    """A developer message ahead of system must not cause a second system message to be inserted."""
+    msgs = [
+        {"role": "developer", "content": "dev preamble"},
+        {"role": "system", "content": "be helpful"},
+        {"role": "user", "content": "hi"},
+    ]
+    out = inject_purpose_hints(msgs, [("cal", "for scheduling")])
+    system_messages = [m for m in out if m.get("role") == "system"]
+    assert len(system_messages) == 1
+    assert [m["role"] for m in out] == ["developer", "system", "user"]
+    assert "be helpful" in out[1]["content"]
+    assert "cal" in out[1]["content"]
 
 
 def test_finalize_tool_calls_orders_by_index() -> None:

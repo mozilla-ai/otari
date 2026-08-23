@@ -86,11 +86,21 @@ def inject_purpose_hints(
     block = "\n".join(lines)
 
     out = list(messages)
-    if out and out[0].get("role") == "system":
-        existing = out[0].get("content") or ""
-        out[0] = {**out[0], "content": f"{existing}\n\n{block}" if existing else block}
-    else:
+    system_idx = next((i for i, m in enumerate(out) if m.get("role") == "system"), None)
+    if system_idx is None:
         out.insert(0, {"role": "system", "content": block})
+        return out
+
+    existing = out[system_idx].get("content")
+    if existing is None:
+        new_content: Any = block
+    elif isinstance(existing, str):
+        new_content = f"{existing}\n\n{block}" if existing else block
+    elif isinstance(existing, list):
+        new_content = [{"type": "text", "text": block}, *existing]
+    else:
+        new_content = block
+    out[system_idx] = {**out[system_idx], "content": new_content}
     return out
 
 
