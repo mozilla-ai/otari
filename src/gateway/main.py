@@ -14,6 +14,7 @@ from typing_extensions import override
 
 from gateway.api.deps import set_config
 from gateway.api.main import register_routers
+from gateway.container import build_container
 from gateway.core.config import API_KEY_HEADER, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import create_session, init_db
 from gateway.dashboard import DASHBOARD_PACKAGE_PATH, get_dashboard_build_id, get_dashboard_dir
@@ -647,6 +648,13 @@ def create_app(config: GatewayConfig) -> FastAPI:
 
     app.state.config = config
     app.state.gateway_mode = config.effective_mode
+
+    # The composition root, built before the routers because a bootstrap may
+    # contribute some of them. Per app rather than module-global, for the same
+    # reason config is: two apps in one process must not share one. A bootstrap
+    # that cannot be loaded raises here, so a deployment that named one and got
+    # it wrong fails to start instead of quietly running the plain build.
+    app.state.container = build_container(config.bootstrap)
 
     register_routers(app, config)
     app.add_exception_handler(TenancyError, _tenancy_error_handler)

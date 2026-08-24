@@ -184,6 +184,39 @@ Note the `require_pricing` interaction: it defaults to `true` (fail-closed), so 
 | `OTARI_PORT` | Server bind port |
 | `OTARI_AUTO_MIGRATE` | Auto-run migrations on startup |
 | `OTARI_BOOTSTRAP_API_KEY` | Create first-use API key |
+| `OTARI_BOOTSTRAP` | Composition-root bootstrap for a build that layers its own adapters onto Otari, as a `module:callable` selector. Unrelated to `OTARI_BOOTSTRAP_API_KEY`; see [Extending Otari with a bootstrap module](#extending-otari-with-a-bootstrap-module). |
+
+### Extending Otari with a bootstrap module
+
+Most deployments never set this. It exists for a build that layers its own
+implementations onto Otari (an in-process **overlay**, in the vocabulary of
+[ARCHITECTURE.md](../ARCHITECTURE.md)) without forking or editing Otari's source.
+
+`OTARI_BOOTSTRAP=my_overlay.bootstrap:register` names a module and a callable in
+it. Otari imports the module once at startup, after binding its own default
+implementation for every port, and calls it with the composition-root container.
+The callable can rebind a port to its own implementation and contribute routers
+of its own, each mounted behind the capability it names:
+
+```python
+from gateway.container import Container, RouterContribution
+from gateway.ports.billing_port import BillingPort
+
+
+def register(container: Container) -> None:
+    container.bind(BillingPort, _wallet_billing_adapter)
+    container.contribute_router(RouterContribution(capability="billing", router=wallet_router))
+```
+
+Leave it unset and nothing is imported: Otari's own defaults stand and the
+gateway behaves exactly as it does today. Set it to something that cannot be
+imported and the gateway refuses to start, rather than quietly running the plain
+build, since a deployment that meant to load an overlay should not serve traffic
+without it. The module has to be importable by the gateway process, so install it
+into the same environment or put it on `PYTHONPATH`.
+
+The interfaces this exposes are not frozen while Otari is pre-1.0. Pin a released
+tag and expect the shapes to move.
 
 ### Mail
 

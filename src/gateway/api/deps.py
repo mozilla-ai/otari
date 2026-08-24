@@ -1,5 +1,5 @@
 import secrets
-from collections.abc import AsyncGenerator
+from collections.abc import AsyncGenerator, Awaitable, Callable
 from datetime import UTC, datetime
 from typing import Annotated
 
@@ -9,12 +9,17 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.auth.models import hash_key
+from gateway.container import Container
 from gateway.core.config import API_KEY_HEADER, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import create_session, get_db
 from gateway.log_config import logger
 from gateway.metrics import record_auth_failure
 from gateway.models.entities import APIKey
 from gateway.models.tenancy import User as TenancyUser
+from gateway.ports.billing_port import BillingPort
+from gateway.ports.entitlement_port import EntitlementPort
+from gateway.ports.growth_signal_port import GrowthSignalPort
+from gateway.ports.model_provider_port import ModelProviderPort
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, resolve_dashboard_session
 from gateway.services.file_store import FileStore
 from gateway.services.log_writer import LogWriter
@@ -421,6 +426,77 @@ async def get_current_identity(
 CurrentIdentity = Annotated[TenancyUser, Depends(get_current_identity)]
 
 
+# =============================================================================
+# Composition root
+# =============================================================================
+#
+# Every port is resolved here and nowhere else: a dependency names the port and
+# asks the container for whichever adapter this build bound to it, so no route
+# or service ever names a concrete adapter (ARCHITECTURE.md, rule 5).
+
+
+def get_container(request: Request) -> Container:
+    """Return the composition-root container this app was built with."""
+    container: Container | None = getattr(request.app.state, "container", None)
+    if container is None:
+        msg = "Composition root not initialized"
+        raise RuntimeError(msg)
+    return container
+
+
+ContainerDep = Annotated[Container, Depends(get_container)]
+# ``get_db_if_needed`` and not ``get_db``: hybrid mode runs with no local
+# database at all, so a port resolved on a hybrid request gets ``None`` rather
+# than a session that cannot be opened. Every core adapter ignores it.
+PortSessionDep = Annotated[AsyncSession | None, Depends(get_db_if_needed)]
+
+
+def get_billing_port(db: PortSessionDep, container: ContainerDep) -> BillingPort:
+    """Resolve the billing adapter this build bound at startup."""
+    return container.resolve(BillingPort, db)
+
+
+def get_entitlement_port(db: PortSessionDep, container: ContainerDep) -> EntitlementPort:
+    """Resolve the entitlement adapter this build bound at startup."""
+    return container.resolve(EntitlementPort, db)
+
+
+def get_growth_signal_port(db: PortSessionDep, container: ContainerDep) -> GrowthSignalPort:
+    """Resolve the growth-signal adapter this build bound at startup."""
+    return container.resolve(GrowthSignalPort, db)
+
+
+def get_model_provider_port(db: PortSessionDep, container: ContainerDep) -> ModelProviderPort:
+    """Resolve the model-provider adapter this build bound at startup."""
+    return container.resolve(ModelProviderPort, db)
+
+
+BillingPortDep = Annotated[BillingPort, Depends(get_billing_port)]
+EntitlementPortDep = Annotated[EntitlementPort, Depends(get_entitlement_port)]
+GrowthSignalPortDep = Annotated[GrowthSignalPort, Depends(get_growth_signal_port)]
+ModelProviderPortDep = Annotated[ModelProviderPort, Depends(get_model_provider_port)]
+
+
+def require_capability(capability: str) -> Callable[[EntitlementPort], Awaitable[None]]:
+    """Build a dependency that refuses a request unless the deployment is entitled.
+
+    The gate every contributed router is mounted behind. A refusal carries the
+    same status and body as a request for a path nothing serves (404 with the
+    framework's wording), so the response alone does not reveal whether the
+    surface exists. The surface itself stays mounted: it appears in the OpenAPI
+    document, and a request with an unsupported method meets the router's 405
+    before this gate. The refusal is logged, so an operator can tell "not
+    entitled" from "not mounted" where the client cannot.
+    """
+
+    async def _require(entitlements: EntitlementPortDep) -> None:
+        if capability not in await entitlements.entitlements():
+            logger.warning("Refused a request to a surface gated on capability %r: not entitled", capability)
+            raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="Not Found")
+
+    return _require
+
+
 def get_log_writer(request: Request) -> LogWriter:
     writer: LogWriter = request.app.state.log_writer
     return writer
@@ -433,8 +509,14 @@ def get_file_store(request: Request) -> FileStore:
 
 
 __all__ = [
+    "BillingPortDep",
+    "ContainerDep",
     "CurrentIdentity",
+    "EntitlementPortDep",
+    "GrowthSignalPortDep",
+    "ModelProviderPortDep",
     "get_config",
+    "get_container",
     "get_current_identity",
     "get_db",
     "get_session_identity",
@@ -444,6 +526,7 @@ __all__ = [
     "get_file_store",
     "get_log_writer",
     "is_valid_master_key",
+    "require_capability",
     "verify_api_key",
     "verify_api_key_or_master_key",
     "verify_master_key",

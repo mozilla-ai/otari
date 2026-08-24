@@ -54,21 +54,18 @@ def test_relative_import_above_src_root_is_ignored(tmp_path: Path) -> None:
     assert check.check_file(file_path, tmp_path) == []
 
 
-def test_nested_and_enclosing_layer_rules_both_apply(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    # A broader gateway/api rule declared first must neither shadow the nested
-    # routes rule nor stop applying to files under it, whatever the order.
-    broadened = {
-        "gateway/api": {"allowed": [], "forbidden": ["gateway.db"], "description": "API"},
-        **check.RULES,
-    }
-    monkeypatch.setattr(check, "RULES", broadened)
+def test_nested_and_enclosing_layer_rules_both_apply(tmp_path: Path) -> None:
+    # The real rules already have the shape this guards: gateway/api is declared
+    # before the nested gateway/api/routes, and a route file must answer to
+    # both. Declaring one first must neither shadow the nested rule nor stop
+    # applying to files under it.
     file_path = _write(
         tmp_path,
         "gateway/api/routes/users.py",
-        "from gateway.db import engine\nfrom sqlalchemy.orm import Session\n",
+        "from gateway.adapters.billing_adapter import NullBillingAdapter\nfrom sqlalchemy.orm import Session\n",
     )
     assert check.check_file(file_path, tmp_path) == [
-        (1, "gateway.db", "Forbidden import in API"),
+        (1, "gateway.adapters.billing_adapter", "Forbidden import in API layer"),
         (2, "sqlalchemy.orm", "Forbidden import in API routes"),
     ]
 
@@ -115,11 +112,67 @@ def test_api_route_may_import_repositories(tmp_path: Path) -> None:
     assert check.check_file(file_path, tmp_path) == []
 
 
-def test_ports_and_adapters_scaffolding_is_noop(tmp_path: Path) -> None:
-    ports_file = _write(tmp_path, "gateway/ports/billing.py", "from gateway.api.routes import chat\n")
-    adapters_file = _write(tmp_path, "gateway/adapters/null_billing.py", "from gateway.api.routes import chat\n")
-    assert check.check_file(ports_file, tmp_path) == []
-    assert check.check_file(adapters_file, tmp_path) == []
+@pytest.mark.parametrize(
+    "forbidden",
+    ["gateway.api.deps", "gateway.services.budget_service", "gateway.adapters.billing_adapter"],
+)
+def test_port_may_not_import_a_caller_or_an_adapter(tmp_path: Path, forbidden: str) -> None:
+    # A port is the interface its callers depend on, so it sits below them, and
+    # naming an adapter would name the implementation it exists to keep unnamed.
+    file_path = _write(tmp_path, "gateway/ports/billing_port.py", f"from {forbidden} import thing\n")
+    assert check.check_file(file_path, tmp_path) == [(1, forbidden, "Forbidden import in Ports")]
+
+
+def test_port_may_describe_the_domain(tmp_path: Path) -> None:
+    file_path = _write(
+        tmp_path,
+        "gateway/ports/billing_port.py",
+        "from gateway.models.money import USD\nfrom gateway.core.config import GatewayConfig\n",
+    )
+    assert check.check_file(file_path, tmp_path) == []
+
+
+def test_adapter_may_not_import_the_api_layer(tmp_path: Path) -> None:
+    file_path = _write(tmp_path, "gateway/adapters/billing_adapter.py", "from gateway.api.deps import get_db\n")
+    assert check.check_file(file_path, tmp_path) == [(1, "gateway.api.deps", "Forbidden import in Adapters")]
+
+
+def test_adapter_may_use_the_layers_below_it(tmp_path: Path) -> None:
+    file_path = _write(
+        tmp_path,
+        "gateway/adapters/billing_adapter.py",
+        "from gateway.ports.billing_port import BillingPort\nfrom gateway.services.budget_service import reserve\n",
+    )
+    assert check.check_file(file_path, tmp_path) == []
+
+
+def test_service_may_not_name_a_concrete_adapter(tmp_path: Path) -> None:
+    # Only the composition root binds a concrete adapter; a service depends on
+    # the port and takes whatever the container resolved.
+    file_path = _write(
+        tmp_path,
+        "gateway/services/thing.py",
+        "from gateway.adapters.billing_adapter import NullBillingAdapter\n",
+    )
+    assert check.check_file(file_path, tmp_path) == [
+        (1, "gateway.adapters.billing_adapter", "Forbidden import in Services")
+    ]
+
+
+def test_service_may_import_a_port(tmp_path: Path) -> None:
+    file_path = _write(tmp_path, "gateway/services/thing.py", "from gateway.ports.billing_port import BillingPort\n")
+    assert check.check_file(file_path, tmp_path) == []
+
+
+def test_the_composition_root_may_name_a_concrete_adapter(tmp_path: Path) -> None:
+    # gateway/container.py answers only to the gateway root rule, which is what
+    # leaves it the one file allowed to name an adapter.
+    file_path = _write(
+        tmp_path,
+        "gateway/container.py",
+        "from gateway.adapters.billing_adapter import NullBillingAdapter\n",
+    )
+    assert check.check_file(file_path, tmp_path) == []
 
 
 def test_shared_types_may_not_import_other_gateway_layers(tmp_path: Path) -> None:
@@ -206,9 +259,7 @@ def test_test_suite_importing_the_overlay_is_flagged(tmp_path: Path) -> None:
     ]
 
 
-def test_main_discovers_tests_root_and_fails_on_overlay_import(
-    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
-) -> None:
+def test_main_discovers_tests_root_and_fails_on_overlay_import(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # Unlike the check_file() tests above, this exercises main() itself: that
     # it walks TESTS_ROOT (not just GATEWAY_ROOT) and resolves those paths
     # against REPO_ROOT, using the gateway-composed overlay spelling.

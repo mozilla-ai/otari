@@ -1,5 +1,6 @@
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 
+from gateway.api.deps import require_capability
 from gateway.api.routes import (
     agent_telemetry,
     aliases,
@@ -47,10 +48,34 @@ from gateway.api.routes import (
     workspace_member_budget_policies,
     workspaces,
 )
+from gateway.container import Container
 from gateway.core.config import GatewayConfig
 
 
 def register_routers(app: FastAPI, config: GatewayConfig) -> None:
+    """Mount Otari's own routers, then whatever the bootstrap contributed."""
+    _register_core_routers(app, config)
+    _register_contributed_routers(app)
+
+
+def _register_contributed_routers(app: FastAPI) -> None:
+    """Mount the routers this build's bootstrap contributed, each behind its gate.
+
+    The additive half of the extension seam: an overlay records a router on the
+    container and Otari mounts it, gated on the capability it names. Mounted in
+    both modes, because an overlay may extend the data plane as readily as the
+    management plane. With no bootstrap configured there are none, so this is a
+    no-op for the plain build.
+    """
+    container: Container = app.state.container
+    for contribution in container.router_contributions():
+        app.include_router(
+            contribution.router,
+            dependencies=[Depends(require_capability(contribution.capability))],
+        )
+
+
+def _register_core_routers(app: FastAPI, config: GatewayConfig) -> None:
     app.include_router(chat.router)
     app.include_router(health.router)
     # Registered in both modes on purpose: the deployment bootstrap is how a

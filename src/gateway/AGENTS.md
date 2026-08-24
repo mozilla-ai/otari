@@ -9,6 +9,11 @@ layering, the budget/reservation lifecycle, migrations, config/logging), read
 The two runtime modes and the OSS/enterprise seam are in the root `AGENTS.md`;
 read that first if a change touches mode selection.
 
+## Ports, container, bootstrap
+`ports/` holds the domain-named `Protocol` interfaces the core depends on, `adapters/` holds Otari's own implementation of each, and `container.py` is the composition root that binds them, built once per app in `create_app` and read through the port dependencies in `api/deps.py`. `OTARI_BOOTSTRAP=module:callable` points at an overlay's register function, imported after the defaults are bound; unset, nothing is imported. Why the seam is shaped this way, and the rules for keeping it, are in [../../ARCHITECTURE.md](../../ARCHITECTURE.md); `scripts/check_architecture.py` enforces them.
+
+Two local consequences worth knowing before you use it. A port factory receives `AsyncSession | None`, because hybrid mode runs with no local database and an adapter resolved on a hybrid request has to say what it does without one. And nothing on the request path calls a port yet: the four that exist are the mechanism, and a capability earns its port when a second implementation is real, not before.
+
 ## Request lifecycle (chat completions)
 Read these together before changing request behavior, the flow spans several files.
 

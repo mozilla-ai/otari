@@ -542,6 +542,15 @@ class GatewayConfig(BaseSettings):
         default=True,
         description="Create a first-use API key on startup when no API keys exist",
     )
+    bootstrap: str | None = Field(
+        default=None,
+        description=(
+            "Composition-root bootstrap, as a 'module:callable' selector (OTARI_BOOTSTRAP). "
+            "Imported once at startup after the core adapters are bound, and called with the "
+            "container so an overlay can rebind ports and contribute routers. Unset means "
+            "nothing is imported. Unrelated to bootstrap_api_key."
+        ),
+    )
     log_writer_strategy: str = Field(
         default="single",
         description="How usage log rows are written: 'single' (inline) or 'batch' (background).",

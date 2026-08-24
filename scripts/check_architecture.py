@@ -7,6 +7,8 @@ Enforces:
 3. Repository boundaries: repositories must not import services or the API layer.
 4. Naming conventions: repository modules end in _repository.py.
 5. OSS/enterprise boundary: OSS code must not import the enterprise overlay.
+6. Port boundaries: a port may describe the domain but not import a caller or an adapter.
+7. Composition root: only gateway/container.py may name a concrete adapter.
 
 Usage:
     uv run python scripts/check_architecture.py
@@ -63,9 +65,28 @@ RULES: dict[str, LayerRule] = {
         "description": "OSS test suite",
     },
     "gateway/services": {
-        "allowed": ["gateway.repositories", "gateway.models", "gateway.core", "gateway.auth"],
-        "forbidden": ["gateway.api"],
+        "allowed": ["gateway.repositories", "gateway.models", "gateway.core", "gateway.auth", "gateway.ports"],
+        # A service depends on the port and gets its adapter from the container;
+        # naming a concrete adapter would pin the capability to one
+        # implementation and defeat the seam (ARCHITECTURE.md, rule 5).
+        "forbidden": ["gateway.api", "gateway.adapters"],
         "description": "Services",
+    },
+    # The API layer resolves a port through the container in deps.py; only the
+    # composition root (gateway/container.py) may name a concrete adapter.
+    "gateway/api": {
+        "allowed": [
+            "gateway.api",
+            "gateway.container",
+            "gateway.ports",
+            "gateway.services",
+            "gateway.repositories",
+            "gateway.models",
+            "gateway.core",
+            "gateway.auth",
+        ],
+        "forbidden": ["gateway.adapters"],
+        "description": "API layer",
     },
     "gateway/api/routes": {
         # Routes reuse repository helpers (e.g. get_active_user) per the
@@ -84,7 +105,7 @@ RULES: dict[str, LayerRule] = {
     },
     "gateway/repositories": {
         "allowed": ["gateway.models"],
-        "forbidden": ["gateway.services", "gateway.api"],
+        "forbidden": ["gateway.services", "gateway.api", "gateway.adapters"],
         "description": "Repositories",
     },
     # Leaf data types shared across layers (e.g. the routing Attempt, which
@@ -94,22 +115,26 @@ RULES: dict[str, LayerRule] = {
     # merely wants the shape.
     "gateway/types": {
         "allowed": [],
-        "forbidden": ["gateway.api", "gateway.services", "gateway.repositories", "gateway.core"],
+        "forbidden": ["gateway.api", "gateway.services", "gateway.repositories", "gateway.core", "gateway.adapters"],
         "description": "Shared types",
     },
-    # Open-core boundary scaffolding. Ports (domain-named interfaces) and their
-    # adapters get their own layers so future boundary rules have a place to
-    # land (see ARCHITECTURE.md). Intentionally no-op until the first port
-    # arrives: with empty "forbidden" lists nothing is enforced and the check
-    # stays green.
+    # Open-core boundary. A port is a domain-named interface the core depends
+    # on, so it sits below every layer that resolves one: it may describe the
+    # domain (models, exceptions, core) and nothing else. Reaching into services
+    # or the API would make the interface depend on one of its own callers, and
+    # reaching for an adapter would name the implementation the port exists to
+    # keep unnamed.
     "gateway/ports": {
-        "allowed": [],
-        "forbidden": [],
+        "allowed": ["gateway.models", "gateway.exceptions", "gateway.core"],
+        "forbidden": ["gateway.api", "gateway.services", "gateway.repositories", "gateway.adapters"],
         "description": "Ports",
     },
+    # An adapter implements a port and may use the layers below it to do so, but
+    # it is driven, never driving: the API layer reaches it through the
+    # container, not the other way round.
     "gateway/adapters": {
-        "allowed": [],
-        "forbidden": [],
+        "allowed": ["gateway.ports", "gateway.services", "gateway.repositories", "gateway.models", "gateway.core"],
+        "forbidden": ["gateway.api"],
         "description": "Adapters",
     },
 }
