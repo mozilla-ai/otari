@@ -10,6 +10,7 @@ import {
 } from "@/shared/api/hooks"
 import { Field } from "@/shared/components/Field"
 import {
+  Checkbox,
   ErrorBanner,
   errorMessage,
   FilterSelect,
@@ -27,8 +28,19 @@ import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 // a toggle: a workspace can be allowed, blocked, or carry no policy at all.
 // "Deployment default" is the last of those and is a delete, not a saved
 // `enabled: true`.
+//
+// The image and tool controls are built from `allowed_images` and
+// `available_tools` on the policy itself rather than from constants here. The
+// image list is the operator's supply-chain allow-list and the server refuses
+// anything outside it, so a free-text field would be offering what the write
+// rejects; when the operator has curated nothing, the picker is replaced by a
+// line saying so.
 
 type Stance = "default" | "allowed" | "blocked"
+
+// The sentinel for "no workspace image", which is a real choice and not an
+// absent one: the workspace runs whatever the deployment runs.
+const DEPLOYMENT_IMAGE = ""
 
 // The server's own ceilings (`workspace_code_execution_policy_service`): a value
 // above either could never take effect, so it is refused rather than stored.
@@ -72,6 +84,11 @@ export function WorkspaceCodeExecutionPolicyCard({
   const [hint, setHint] = useState("")
   const [maxIterations, setMaxIterations] = useState("")
   const [execTimeout, setExecTimeout] = useState("")
+  const [image, setImage] = useState(DEPLOYMENT_IMAGE)
+  // `null` is "narrow nothing", which is not the same as an empty selection:
+  // the server refuses an empty list, so unticking the last tool restores the
+  // unnarrowed state rather than saving one nothing can run.
+  const [tools, setTools] = useState<string[] | null>(null)
   const [error, setError] = useState("")
 
   const policy = query.data
@@ -89,6 +106,8 @@ export function WorkspaceCodeExecutionPolicyCard({
     setExecTimeout(
       policy.exec_timeout_s !== null ? String(policy.exec_timeout_s) : "",
     )
+    setImage(policy.image ?? DEPLOYMENT_IMAGE)
+    setTools(policy.tools)
   }, [policy])
 
   if (!selected) {
@@ -113,6 +132,20 @@ export function WorkspaceCodeExecutionPolicyCard({
   // Disabled while the policy is in flight, so a save cannot race the load that
   // would overwrite the form under it.
   const busy = setPolicy.isPending || clearPolicy.isPending || query.isLoading
+  const allowedImages = policy?.allowed_images ?? []
+  const availableTools = policy?.available_tools ?? []
+
+  // An unset list ticks every box, because that is what it means: the workspace
+  // gets whatever the backend serves. Unticking one from there is therefore a
+  // narrowing from the full set, not from nothing, and unticking the last one
+  // goes back to unset rather than saving a list the server would refuse.
+  const toggleTool = (tool: string, isSelected: boolean) => {
+    const current = tools ?? availableTools
+    const next = isSelected
+      ? availableTools.filter((name) => current.includes(name) || name === tool)
+      : current.filter((name) => name !== tool)
+    setTools(next.length === 0 ? null : next)
+  }
 
   const save = () => {
     setError("")
@@ -149,6 +182,8 @@ export function WorkspaceCodeExecutionPolicyCard({
           default_purpose_hint: hint.trim() === "" ? null : hint.trim(),
           max_iterations: iterations.value,
           exec_timeout_s: timeout.value,
+          image: image === DEPLOYMENT_IMAGE ? null : image,
+          tools: tools && tools.length > 0 ? tools : null,
         },
       },
       {
@@ -221,6 +256,55 @@ export function WorkspaceCodeExecutionPolicyCard({
             placeholder={`Blank for the deployment's ${MAX_EXEC_TIMEOUT_S}s`}
             description="Lowers how long one execution may run. It never raises it."
           />
+
+          {allowedImages.length > 0 ? (
+            <div className="flex flex-col gap-1">
+              <FilterSelect
+                label="Sandbox image"
+                value={image}
+                onChange={setImage}
+                options={[
+                  { value: DEPLOYMENT_IMAGE, label: "Deployment default" },
+                  ...allowedImages.map((allowed) => ({
+                    value: allowed,
+                    label: allowed,
+                  })),
+                ]}
+                disabled={busy}
+              />
+              <p className="text-xs text-muted">
+                The image this workspace's code runs in, from the list the
+                operator has approved.
+              </p>
+            </div>
+          ) : (
+            <p className="text-xs text-muted">
+              This deployment has approved no sandbox images, so this workspace
+              runs whatever the sandbox runs. An operator adds them with
+              sandbox_allowed_images.
+            </p>
+          )}
+
+          <fieldset className="flex flex-col gap-2">
+            <legend className="text-xs font-medium text-muted">
+              Code-execution tools
+            </legend>
+            <p className="text-xs text-muted">
+              Which tools this workspace may use. Unticking them all leaves the
+              workspace with whatever the sandbox offers; use Blocked above to
+              refuse code execution outright.
+            </p>
+            {availableTools.map((tool) => (
+              <Checkbox
+                key={tool}
+                isSelected={tools === null || tools.includes(tool)}
+                isDisabled={busy}
+                onChange={(isSelected) => toggleTool(tool, isSelected)}
+              >
+                {tool}
+              </Checkbox>
+            ))}
+          </fieldset>
 
           {error ? (
             <p role="alert" className="text-sm text-danger">

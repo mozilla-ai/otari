@@ -6053,7 +6053,7 @@
               },
               "raw": "{\n  \"enabled\": false\n}"
             },
-            "description": "Set a workspace's code-execution policy, replacing any existing one.\n\nAn organization owner/admin, or an owner/admin of this workspace, may\nwrite it. The policy can only narrow what the deployment permits: turning\ncode execution off for the workspace, and lowering the loop and execution\nceilings. It never turns a sandbox the deployment has not configured on.",
+            "description": "Set a workspace's code-execution policy, replacing any existing one.\n\nAn organization owner/admin, or an owner/admin of this workspace, may\nwrite it. The policy can only narrow what the deployment permits: turning\ncode execution off for the workspace, lowering the loop and execution\nceilings, and removing tool kinds from what the sandbox backend serves. It\nnever turns a sandbox the deployment has not configured on, and ``image``\nmay only name one the operator curated (``allowed_images`` on the response\nreports the set); anything else is refused with 400.",
             "header": [
               {
                 "key": "Content-Type",

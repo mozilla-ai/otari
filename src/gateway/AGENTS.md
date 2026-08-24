@@ -126,8 +126,13 @@ narrowing rule rather than of the exception. `workspace_code_execution_policies`
 the role-gated CRUD and the identity-free `resolve_workspace_code_execution_policy`
 that `prepare_gateway_tools` calls. The row carries no URL and no credential: the
 sandbox stays deployment-scoped on `/v1/tool-settings`, and the row only refuses it,
-lowers its two ceilings, or supplies a hint the request omitted. No row means no
-narrowing.
+lowers its two ceilings, supplies a hint the request omitted, removes tool kinds
+from what the backend serves, or pins an image from a list the operator curated
+(`sandbox_allowed_images`, deliberately config-only rather than dashboard-editable,
+because it is a supply-chain gate and not a tool setting). No row means no
+narrowing. The image guard is enforced twice on purpose, at the write and again at
+admission: an operator can shrink the curated list after a workspace pinned from it,
+and a stale pin refuses the request rather than quietly falling back.
 
 Web search is the third (#656), and the one whose narrowing is not just a number.
 `workspace_web_search_configs` (`models/entities.py`) holds one row per workspace

@@ -524,7 +524,14 @@ deployment-wide backend. **Tools** on the sidebar expands to:
   acceptable too, which is what lets a client like Claude Code reach your search
   backend without knowing Otari's own tool name. See
   [Web-search interception](tools.md#web-search-interception).
-- **Code execution**: the sandbox backend that runs generated code.
+- **Code execution**: the sandbox backend that runs generated code, including
+  the image to ask it for. Below the deployment settings, **This workspace** is
+  the selected workspace's own policy over that sandbox: whether it may run code
+  at all, its loop and timeout ceilings, which tool kinds it may use, and which
+  of the images you approved it runs in. A policy can only narrow the settings
+  above it, and a workspace can pin an image only if you listed one in
+  `sandbox_allowed_images`. See
+  [Per-workspace policy](tools.md#per-workspace-policy).
 - **MCP servers**: the MCP endpoints the selected workspace has registered, which
   a request reaches by naming their ids in `mcp_server_ids` instead of carrying a
   URL and a token of its own. Adding, editing, and deleting one takes an

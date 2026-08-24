@@ -180,3 +180,24 @@ def test_tool_settings_not_mounted_in_hybrid_mode(tmp_path: Path, _hybrid_env: N
     with TestClient(create_app(config)) as client:
         # Standalone-only: the management route is not registered in hybrid mode.
         assert client.get("/v1/tool-settings", headers=AUTH).status_code == 404
+
+
+def test_patch_persists_the_sandbox_image(tmp_path: Path) -> None:
+    """The deployment's own image is an operator setting like the URL beside it (#740).
+
+    The workspace allow-list is deliberately *not* one: it is the supply-chain
+    gate a workspace policy is checked against, so it stays config/env-only and
+    a PATCH naming it is rejected rather than quietly ignored.
+    """
+    with _client(tmp_path) as client:
+        patched = client.patch(
+            "/v1/tool-settings",
+            json={"sandbox_image": "mzdotai/otari-sandbox-container:latest"},
+            headers=AUTH,
+        )
+        assert patched.status_code == 200, patched.text
+        fields = _fields(client.get("/v1/tool-settings", headers=AUTH).json())
+
+    assert fields["sandbox_image"]["value"] == "mzdotai/otari-sandbox-container:latest"
+    assert fields["sandbox_image"]["service"] == "sandbox"
+    assert "sandbox_allowed_images" not in fields

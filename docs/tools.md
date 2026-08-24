@@ -172,7 +172,9 @@ curl -H "Otari-Key: Bearer $OTARI_MASTER_KEY" \
 # Turn it off for this workspace, or narrow the limits
 curl -X PUT -H "Otari-Key: Bearer $OTARI_MASTER_KEY" \
   -H "Content-Type: application/json" \
-  -d '{"enabled": true, "max_iterations": 3, "exec_timeout_s": 20}' \
+  -d '{"enabled": true, "max_iterations": 3, "exec_timeout_s": 20,
+       "image": "mzdotai/otari-sandbox-container:latest",
+       "tools": ["code_execution"]}' \
   http://localhost:8000/v1/workspaces/$WORKSPACE_ID/code-execution-policy
 
 # Drop the policy, returning the workspace to the deployment default
@@ -189,6 +191,28 @@ A policy can only narrow what the deployment already permits:
   stored, since it could never take effect.
 - `default_purpose_hint` is used only when a request declares
   `otari_code_execution` without a hint of its own.
+- `tools` names which code-execution tool kinds the workspace may use, from
+  `code_execution`, `bash_code_execution` and `text_editor_code_execution`. It
+  intersects with what the sandbox backend actually serves, so it only ever
+  removes one; a list leaving nothing runnable refuses the request with a 403
+  rather than handing the model a sandbox with no tools in it. Null exposes
+  whatever the backend serves, which is what a workspace has without a policy.
+- `image` names the sandbox image the workspace's code runs in, and is the one
+  field an operator has to enable before a workspace can use it. A
+  workspace-settable image is a supply-chain surface, so a workspace may only
+  name an image the operator curated into `sandbox_allowed_images` (or the
+  deployment's own `sandbox_image`); anything else is refused with a 400, and
+  the allowed set is reported as `allowed_images` on the policy itself. It is
+  re-checked when a request arrives, so shrinking the list refuses a workspace
+  still pinning what it dropped rather than silently running the deployment's
+  image instead.
+
+A deployment that names no images at all is unaffected: with
+`sandbox_allowed_images` and `sandbox_image` both unset, no workspace can pin
+one and Otari asks the backend for nothing, exactly as before. Otari sends the
+image as an optional field on the session it leases
+([the code-execution protocol](code-execution-protocol.md)); a backend that
+leases from a fixed pre-baked pool ignores it.
 
 A workspace with no policy is not narrowed, so a deployment that configures none
 behaves exactly as it did. The workspace comes from the API key that

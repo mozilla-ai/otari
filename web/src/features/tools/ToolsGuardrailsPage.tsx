@@ -75,7 +75,7 @@ const SERVICES: {
       "Backend for otari_code_execution tools (the sandbox that runs generated code).",
     pricingKey: "otari:code_execution",
     toolId: "otari_code_execution",
-    order: ["sandbox_url", "sandbox_purpose_hint"],
+    order: ["sandbox_url", "sandbox_image", "sandbox_purpose_hint"],
   },
   {
     key: "guardrails",

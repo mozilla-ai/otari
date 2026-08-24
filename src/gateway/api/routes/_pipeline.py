@@ -247,6 +247,14 @@ WEB_SEARCH_CONFLICT_DETAIL = (
 )
 WEB_SEARCH_NOT_ENABLED_DETAIL = "web search is not enabled for this workspace"
 SANDBOX_NOT_ENABLED_DETAIL = "code execution is not enabled for this workspace"
+SANDBOX_TOOLS_EXCLUDED_DETAIL = (
+    "code execution is not available to this workspace: its policy's tool list excludes "
+    "every tool kind this gateway's sandbox serves."
+)
+SANDBOX_IMAGE_NOT_ALLOWED_DETAIL = (
+    "This workspace's code-execution policy pins a sandbox image this deployment no longer "
+    "allows. Restore it to sandbox_allowed_images, or change the workspace's policy."
+)
 MALFORMED_CODE_EXEC_POLICY_DETAIL = "Authorization service returned a malformed code-execution policy"
 CODE_EXEC_POLICY_UNRESOLVABLE_DETAIL = "Code execution policy could not be resolved for this request"
 WEB_SEARCH_CONFIG_UNRESOLVABLE_DETAIL = "Web search configuration could not be resolved for this request"
@@ -1515,6 +1523,8 @@ class ToolContext:
         sandbox_url: str | None,
         sandbox_auth_token: str | None,
         sandbox_exec_timeout_s: int | None = None,
+        sandbox_image: str | None = None,
+        sandbox_allowed_tools: frozenset[str] | None = None,
         use_web_search: bool,
         web_search_tool_entry: dict[str, Any] | None,
         web_search_url: str | None,
@@ -1534,6 +1544,12 @@ class ToolContext:
         # lower it, so the deployment's default is the ceiling rather than a value
         # a policy replaces.
         self.sandbox_timeout_s = min(DEFAULT_EXEC_TIMEOUT_S, float(sandbox_exec_timeout_s or DEFAULT_EXEC_TIMEOUT_S))
+        # The image the sandbox session is leased against (the workspace's pin,
+        # else the deployment's, else nothing) and the tool kinds the backend may
+        # expose (None for "whatever it serves"). Both are resolved at admission,
+        # where the request's session is live, and read again at dispatch.
+        self.sandbox_image = sandbox_image
+        self.sandbox_allowed_tools = sandbox_allowed_tools
         self.use_web_search = use_web_search
         self.web_search_tool_entry = web_search_tool_entry
         self.web_search_url = web_search_url
@@ -1899,6 +1915,11 @@ async def prepare_gateway_tools(
         sandbox_auth_token: str | None = None
         sandbox_max_iterations: int | None = None
         sandbox_exec_timeout_s: int | None = None
+        # The image the session is leased against, and the tool kinds the backend
+        # may expose. Both start at the deployment's own answer and are only ever
+        # replaced by a *narrower* workspace one below.
+        sandbox_image: str | None = ctx.config.effective_sandbox_image()
+        sandbox_allowed_tools: frozenset[str] | None = None
         if use_sandbox and ctx.hybrid_mode:
             assert ctx.user_token is not None  # guaranteed by the hybrid-mode preamble
             assert sandbox_tool_entry is not None  # use_sandbox implies the entry is present
@@ -1959,6 +1980,25 @@ async def prepare_gateway_tools(
                     sandbox_tool_entry["purpose_hint"] = workspace_policy.default_purpose_hint
                 sandbox_max_iterations = workspace_policy.max_iterations
                 sandbox_exec_timeout_s = workspace_policy.exec_timeout_s
+                if workspace_policy.tools is not None:
+                    # An intersection, so it only ever removes. Nothing left to run
+                    # is refused here rather than handed to a backend advertising an
+                    # empty tool list, which the model would answer by not calling
+                    # the tool at all: an unusable-but-successful request is the
+                    # failure mode a policy exists to make loud.
+                    if CODE_EXECUTION_TOOL_NAME not in workspace_policy.tools:
+                        raise adapter.error(403, SANDBOX_TOOLS_EXCLUDED_DETAIL, ErrorKind.PERMISSION)
+                    sandbox_allowed_tools = workspace_policy.tools
+                if workspace_policy.image is not None:
+                    # Re-checked against the operator's list, which the write
+                    # already checked once: an operator may shrink that list after
+                    # a workspace pinned from it, and running the un-curated image
+                    # anyway is precisely the supply-chain hole the column is
+                    # guarded for. Refuse rather than quietly serve the deployment
+                    # default, so the workspace learns its pin is dead.
+                    if workspace_policy.image not in ctx.config.pinnable_sandbox_images():
+                        raise adapter.error(403, SANDBOX_IMAGE_NOT_ALLOWED_DETAIL, ErrorKind.PERMISSION)
+                    sandbox_image = workspace_policy.image
 
         web_search_url: str | None = ctx.config.web_search_url or otari_env("WEB_SEARCH_URL") or None
         # Interception (claiming the provider-named web_search keywords) is opt-in and
@@ -2109,6 +2149,8 @@ async def prepare_gateway_tools(
         sandbox_url=sandbox_url,
         sandbox_auth_token=sandbox_auth_token,
         sandbox_exec_timeout_s=sandbox_exec_timeout_s,
+        sandbox_image=sandbox_image,
+        sandbox_allowed_tools=sandbox_allowed_tools,
         use_web_search=use_web_search,
         web_search_tool_entry=web_search_tool_entry,
         web_search_url=web_search_url,
@@ -2665,6 +2707,8 @@ async def dispatch_non_stream(
             purpose_hint=sandbox_hint,
             timeout_s=tool_ctx.sandbox_timeout_s,
             auth_token=tool_ctx.sandbox_auth_token,
+            image=tool_ctx.sandbox_image,
+            allowed_tools=tool_ctx.sandbox_allowed_tools,
             tally=tool_ctx.tally,
         ) as backend:
             kwargs = adapter.inject_hints(call_kwargs, backend.purpose_hints(), header=tool_ctx.tools_header)
@@ -2756,6 +2800,8 @@ async def open_stream(
             purpose_hint=sandbox_hint,
             timeout_s=tool_ctx.sandbox_timeout_s,
             auth_token=tool_ctx.sandbox_auth_token,
+            image=tool_ctx.sandbox_image,
+            allowed_tools=tool_ctx.sandbox_allowed_tools,
             tally=tool_ctx.tally,
         )
         await sandbox_backend.__aenter__()  # may raise SandboxNotReachableError

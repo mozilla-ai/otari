@@ -808,6 +808,16 @@ class OrganizationGuardrailLimitReachedError(TenancyValidationError):
         super().__init__(f"This organization already configures the maximum of {limit} guardrails")
 
 
+class SandboxImageNotAllowedError(TenancyValidationError):
+    """A workspace code-execution policy named a sandbox image the operator has not curated.
+
+    A 400 rather than a 403: the caller has the role to set the policy, and the
+    value they sent is the thing being refused. The message names the allowed
+    set, which is not a disclosure worth withholding, because that set is
+    already reported on the policy itself so the dashboard can offer it.
+    """
+
+
 __all__ = [
     "CurrentPasswordIncorrectError",
     "CurrentPasswordRequiredError",
@@ -858,6 +868,7 @@ __all__ = [
     "PasswordNotSetError",
     "PasswordPolicyError",
     "ResetTokenInvalidError",
+    "SandboxImageNotAllowedError",
     "SecretBoxUnavailableTenancyError",
     "SignInAddressRequiredError",
     "TenancyConflictError",
@@ -867,9 +878,9 @@ __all__ = [
     "TenancyValidationError",
     "UnmodifiedPasswordError",
     "VerificationTokenInvalidError",
-    "WorkspaceAlreadyExistsError",
     "WorkspaceActivationUnavailableError",
     "WorkspaceAlreadyActivatedError",
+    "WorkspaceAlreadyExistsError",
     "WorkspaceBudgetDefaultAlreadyExistsError",
     "WorkspaceBudgetDefaultBudgetNotFoundError",
     "WorkspaceBudgetDefaultNotFoundError",

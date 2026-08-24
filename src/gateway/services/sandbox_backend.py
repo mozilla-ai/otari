@@ -12,7 +12,9 @@ the shapes it returns are typed in :mod:`gateway.types.code_execution`. The
 three operations used here:
 
 * ``POST /sessions``         → creates a session, returns a handle carrying
-                              ``session_id``
+                              ``session_id``. Carries ``{image: "…"}`` when a
+                              workspace policy or the deployment names one, and
+                              an empty body otherwise
 * ``POST /sessions/{id}/exec``  with ``{tool: "code_execution",
                                         input: {code: "…"},
                                         timeout_seconds: int}``
@@ -52,6 +54,18 @@ logger = logging.getLogger(__name__)
 tracer = trace.get_tracer(__name__)
 
 CODE_EXECUTION_TOOL_NAME = "code_execution"
+# The code-execution tool kinds a policy may name, which is the vocabulary the
+# hosted ``CodeExecutionConfig.tools`` uses and the one the protocol's ``tool``
+# field carries on the wire. This backend serves the first of them and no more,
+# so a workspace allow-list intersects down to ``code_execution`` or to nothing;
+# the other two are here so a policy written today keeps meaning the same thing
+# on the day a backend serves them, rather than being refused as unknown now and
+# silently ungated later.
+CODE_EXECUTION_TOOL_NAMES: tuple[str, ...] = (
+    CODE_EXECUTION_TOOL_NAME,
+    "bash_code_execution",
+    "text_editor_code_execution",
+)
 # The execution budget one call gets when nothing narrows it. Public because a
 # workspace code-execution policy floors its own ceiling against this value
 # rather than carrying a second idea of the default (see
@@ -144,6 +158,8 @@ class SandboxBackend:
         purpose_hint: str | None = None,
         timeout_s: float = DEFAULT_EXEC_TIMEOUT_S,
         auth_token: str | None = None,
+        image: str | None = None,
+        allowed_tools: frozenset[str] | None = None,
         tally: ToolUsageTally | None = None,
     ) -> None:
         self._sandbox_url = sandbox_url.rstrip("/")
@@ -158,6 +174,18 @@ class SandboxBackend:
         # the request and derives tenancy from it. Unset (and unsent) when the
         # backend is a standalone exec-service that needs no auth.
         self._auth_token = auth_token
+        # The sandbox image this session asks for: the workspace's pinned image,
+        # else the deployment's, else nothing. Sent as an additive field on
+        # ``CreateSession`` (see ``docs/code-execution-protocol.md``), so a
+        # backend that leases from a fixed pre-baked pool ignores it and the
+        # request is byte-for-byte what it was before this existed.
+        self._image = image
+        # The tool kinds this backend may expose, or None for "no narrowing".
+        # An allow-list can only take one away: the intersection with what the
+        # backend actually serves is what ``openai_tools`` advertises and what
+        # ``owns_tool`` claims, so a name outside it is never offered to the
+        # model and never dispatched if the model invents it anyway.
+        self._allowed_tools = allowed_tools
         self._client: httpx.AsyncClient | None = None
         self._session_id: str | None = None
         self._stack: AsyncExitStack = AsyncExitStack()
@@ -168,7 +196,8 @@ class SandboxBackend:
             self._client = await self._stack.enter_async_context(
                 httpx.AsyncClient(timeout=self._timeout_s, headers=headers)
             )
-            response = await self._client.post(f"{self._sandbox_url}/sessions", json={})
+            payload = {"image": self._image} if self._image else {}
+            response = await self._client.post(f"{self._sandbox_url}/sessions", json=payload)
             response.raise_for_status()
             self._session_id = SessionHandle.model_validate(response.json()).session_id
         except ValidationError as exc:
@@ -198,13 +227,24 @@ class SandboxBackend:
 
     @property
     def openai_tools(self) -> list[dict[str, Any]]:
-        return [code_execution_tool_definition()]
+        return [code_execution_tool_definition()] if self._serves_code_execution else []
 
     def owns_tool(self, name: str) -> bool:
-        return name == CODE_EXECUTION_TOOL_NAME
+        return name == CODE_EXECUTION_TOOL_NAME and self._serves_code_execution
 
     def purpose_hints(self) -> list[tuple[str, str]]:
-        return [(CODE_EXECUTION_TOOL_NAME, self._purpose_hint)]
+        return [(CODE_EXECUTION_TOOL_NAME, self._purpose_hint)] if self._serves_code_execution else []
+
+    @property
+    def _serves_code_execution(self) -> bool:
+        """Whether the one tool this backend implements survives the allow-list.
+
+        Callers are expected to have refused the request already when it does
+        not (``prepare_gateway_tools`` answers 403 rather than opening a backend
+        with nothing in it). This is the backend's own half of that: it advertises
+        and dispatches the same set, so the two cannot disagree.
+        """
+        return self._allowed_tools is None or CODE_EXECUTION_TOOL_NAME in self._allowed_tools
 
     async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
         """Execute code and record the call on the request's tally.
@@ -212,7 +252,7 @@ class SandboxBackend:
         See :class:`gateway.services.tool_usage.ToolUsageTally`: a result carrying
         the ``[tool error]`` sentinel is counted and never billed.
         """
-        if name != CODE_EXECUTION_TOOL_NAME:
+        if not self.owns_tool(name):
             raise KeyError(f"SandboxBackend does not own tool {name!r}")
         try:
             result = await self._exec_tool(arguments)

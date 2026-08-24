@@ -3345,8 +3345,11 @@ export interface paths {
          *
          *     An organization owner/admin, or an owner/admin of this workspace, may
          *     write it. The policy can only narrow what the deployment permits: turning
-         *     code execution off for the workspace, and lowering the loop and execution
-         *     ceilings. It never turns a sandbox the deployment has not configured on.
+         *     code execution off for the workspace, lowering the loop and execution
+         *     ceilings, and removing tool kinds from what the sandbox backend serves. It
+         *     never turns a sandbox the deployment has not configured on, and ``image``
+         *     may only name one the operator curated (``allowed_images`` on the response
+         *     reports the set); anything else is refused with 400.
          */
         put: operations["set_workspace_code_execution_policy_v1_workspaces__workspace_id__code_execution_policy_put"];
         post?: never;
@@ -7986,6 +7989,8 @@ export interface components {
         UpdateToolSettingsRequest: {
             /** Guardrails Url */
             guardrails_url?: string | null;
+            /** Sandbox Image */
+            sandbox_image?: string | null;
             /** Sandbox Purpose Hint */
             sandbox_purpose_hint?: string | null;
             /** Sandbox Url */
@@ -8690,6 +8695,10 @@ export interface components {
          * @description A workspace's policy, or the unconfigured policy it has without one.
          */
         WorkspaceCodeExecutionPolicyPublic: {
+            /** Allowed Images */
+            allowed_images: string[];
+            /** Available Tools */
+            available_tools: string[];
             /** Configured */
             configured: boolean;
             /** Created At */
@@ -8700,10 +8709,14 @@ export interface components {
             enabled: boolean;
             /** Exec Timeout S */
             exec_timeout_s: number | null;
+            /** Image */
+            image: string | null;
             /** Max Iterations */
             max_iterations: number | null;
             /** Sandbox Configured */
             sandbox_configured: boolean;
+            /** Tools */
+            tools: string[] | null;
             /** Updated At */
             updated_at: string | null;
             /**
@@ -8737,10 +8750,20 @@ export interface components {
              */
             exec_timeout_s?: number | null;
             /**
+             * Image
+             * @description Sandbox image this workspace's code runs in. Must be one the operator curated into sandbox_allowed_images (or the deployment's own sandbox_image); null uses the deployment's
+             */
+            image?: string | null;
+            /**
              * Max Iterations
              * @description Ceiling on tool-loop iterations; only ever lowers the effective limit, so at most 25
              */
             max_iterations?: number | null;
+            /**
+             * Tools
+             * @description Code-execution tool kinds this workspace may use, from code_execution, bash_code_execution, text_editor_code_execution. Only ever removes one the backend serves; null exposes whatever it serves
+             */
+            tools?: string[] | null;
         };
         /** WorkspaceCreate */
         WorkspaceCreate: {

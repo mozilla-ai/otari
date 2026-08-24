@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_valid
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from gateway.core.addresses import normalized_address
+from gateway.core.env import otari_env
 from gateway.log_config import logger
 from gateway.models.routing import RoutingConfig
 
@@ -74,6 +75,8 @@ ENV_BRIDGED_FIELDS = (
     "guardrails_url",
     "tools_header",
     "sandbox_purpose_hint",
+    "sandbox_image",
+    "sandbox_allowed_images",
     "web_search_url",
     "web_search_purpose_hint",
     "web_search_engines",
@@ -874,6 +877,26 @@ class GatewayConfig(BaseSettings):
             "tool entry does not supply its own."
         ),
     )
+    sandbox_image: str | None = Field(
+        default=None,
+        max_length=255,
+        description=(
+            "Sandbox image this deployment asks the code-execution backend to run "
+            "(e.g. 'mzdotai/otari-sandbox-container:latest'). When unset, nothing is asked for and "
+            "the backend runs whatever it runs by default. A workspace policy may name a different "
+            "image only if sandbox_allowed_images lists it."
+        ),
+    )
+    sandbox_allowed_images: str | None = Field(
+        default=None,
+        description=(
+            "Comma-separated sandbox images a workspace's code-execution policy may pin "
+            "(e.g. 'mzdotai/otari-sandbox-container:latest,ghcr.io/acme/sandbox:2'). Deliberately "
+            "not editable from the dashboard: it is the operator's supply-chain allow-list, and "
+            "sandbox_image is always pinnable whether or not it appears here. When unset, a "
+            "workspace may not pin an image at all."
+        ),
+    )
     web_search_url: str | None = Field(
         default=None,
         description=(
@@ -1495,6 +1518,39 @@ class GatewayConfig(BaseSettings):
             and str(entry.get("provider") or name) in SEARCH_PROVIDERS_REQUIRING_API_BASE
             and not entry.get("api_base")
         ]
+
+    def effective_sandbox_image(self) -> str | None:
+        """The image this deployment asks a sandbox session for, or ``None``.
+
+        Resolved the way every other tool field is: the config value (which a
+        dashboard override has already been written onto) and then the env var,
+        because clearing an override sets the attribute to ``None`` and the
+        deployment should fall back to what it was configured with rather than
+        to nothing (``services/tool_settings_service``).
+        """
+        return (self.sandbox_image or "").strip() or otari_env("SANDBOX_IMAGE") or None
+
+    def pinnable_sandbox_images(self) -> tuple[str, ...]:
+        """The sandbox images a workspace's code-execution policy may name.
+
+        The operator's curated list, plus this deployment's own
+        ``sandbox_image``: a workspace naming the image every request already
+        gets is asking for nothing it did not already have, so refusing it would
+        only be confusing. Order is the operator's, with the deployment image
+        first, and duplicates collapse.
+
+        Empty is the meaningful default. An operator who has curated nothing has
+        not vetted anything for a workspace to pin, and a workspace-settable
+        image is a supply-chain surface rather than a string, so the answer to
+        "which images may they choose from" is *none* until one is named.
+        """
+        curated = self.sandbox_allowed_images or otari_env("SANDBOX_ALLOWED_IMAGES") or ""
+        images: list[str] = []
+        for candidate in (self.effective_sandbox_image(), *curated.split(",")):
+            image = (candidate or "").strip()
+            if image and image not in images:
+                images.append(image)
+        return tuple(images)
 
     def validate_search_tools(self) -> None:
         """Validate the ``search_tools`` map at startup so misconfig fails fast.

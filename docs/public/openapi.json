@@ -9634,6 +9634,17 @@
             ],
             "title": "Guardrails Url"
           },
+          "sandbox_image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sandbox Image"
+          },
           "sandbox_purpose_hint": {
             "anyOf": [
               {
@@ -11591,6 +11602,20 @@
       "WorkspaceCodeExecutionPolicyPublic": {
         "description": "A workspace's policy, or the unconfigured policy it has without one.",
         "properties": {
+          "allowed_images": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Images",
+            "type": "array"
+          },
+          "available_tools": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Available Tools",
+            "type": "array"
+          },
           "configured": {
             "title": "Configured",
             "type": "boolean"
@@ -11632,6 +11657,17 @@
             ],
             "title": "Exec Timeout S"
           },
+          "image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image"
+          },
           "max_iterations": {
             "anyOf": [
               {
@@ -11646,6 +11682,20 @@
           "sandbox_configured": {
             "title": "Sandbox Configured",
             "type": "boolean"
+          },
+          "tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tools"
           },
           "updated_at": {
             "anyOf": [
@@ -11668,10 +11718,14 @@
           "workspace_id",
           "configured",
           "sandbox_configured",
+          "allowed_images",
+          "available_tools",
           "enabled",
           "default_purpose_hint",
           "max_iterations",
           "exec_timeout_s",
+          "image",
+          "tools",
           "created_at",
           "updated_at"
         ],
@@ -11713,6 +11767,19 @@
             "description": "Ceiling on one execution's runtime in seconds; only ever lowers the effective limit, so at most 60",
             "title": "Exec Timeout S"
           },
+          "image": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Sandbox image this workspace's code runs in. Must be one the operator curated into sandbox_allowed_images (or the deployment's own sandbox_image); null uses the deployment's",
+            "title": "Image"
+          },
           "max_iterations": {
             "anyOf": [
               {
@@ -11726,6 +11793,21 @@
             ],
             "description": "Ceiling on tool-loop iterations; only ever lowers the effective limit, so at most 25",
             "title": "Max Iterations"
+          },
+          "tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Code-execution tool kinds this workspace may use, from code_execution, bash_code_execution, text_editor_code_execution. Only ever removes one the backend serves; null exposes whatever it serves",
+            "title": "Tools"
           }
         },
         "required": [
@@ -22892,7 +22974,7 @@
         ]
       },
       "put": {
-        "description": "Set a workspace's code-execution policy, replacing any existing one.\n\nAn organization owner/admin, or an owner/admin of this workspace, may\nwrite it. The policy can only narrow what the deployment permits: turning\ncode execution off for the workspace, and lowering the loop and execution\nceilings. It never turns a sandbox the deployment has not configured on.",
+        "description": "Set a workspace's code-execution policy, replacing any existing one.\n\nAn organization owner/admin, or an owner/admin of this workspace, may\nwrite it. The policy can only narrow what the deployment permits: turning\ncode execution off for the workspace, lowering the loop and execution\nceilings, and removing tool kinds from what the sandbox backend serves. It\nnever turns a sandbox the deployment has not configured on, and ``image``\nmay only name one the operator curated (``allowed_images`` on the response\nreports the set); anything else is refused with 400.",
         "operationId": "set_workspace_code_execution_policy_v1_workspaces__workspace_id__code_execution_policy_put",
         "parameters": [
           {

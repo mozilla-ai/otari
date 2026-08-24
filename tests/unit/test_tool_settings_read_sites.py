@@ -51,6 +51,21 @@ def test_resolve_purpose_hints_from_config() -> None:
     assert _resolve_web_search_purpose_hint(None, config) == "ws"
 
 
+def test_sandbox_image_reads_config_first() -> None:
+    config = GatewayConfig(sandbox_image="ghcr.io/acme/sandbox:2")
+    assert config.effective_sandbox_image() == "ghcr.io/acme/sandbox:2"
+
+
+def test_sandbox_image_falls_back_to_env_when_the_override_is_cleared(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Clearing a dashboard override must land on the configured value, not on nothing."""
+    monkeypatch.setenv("OTARI_SANDBOX_IMAGE", "mzdotai/otari-sandbox-container:latest")
+    config = GatewayConfig()
+    config.sandbox_image = None
+    assert config.effective_sandbox_image() == "mzdotai/otari-sandbox-container:latest"
+    # And the cleared value is still what a workspace may pin.
+    assert config.pinnable_sandbox_images() == ("mzdotai/otari-sandbox-container:latest",)
+
+
 @pytest.mark.asyncio
 async def test_apply_input_guardrails_uses_config_url(monkeypatch: pytest.MonkeyPatch) -> None:
     from fastapi import Response

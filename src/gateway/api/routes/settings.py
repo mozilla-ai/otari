@@ -113,6 +113,8 @@ _CONFIG_VIEW: tuple[tuple[str, tuple[str, ...]], ...] = (
             "guardrails_url",
             "tools_header",
             "sandbox_purpose_hint",
+            "sandbox_image",
+            "sandbox_allowed_images",
             "web_search_url",
             "web_search_purpose_hint",
             "web_search_engines",

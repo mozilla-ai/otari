@@ -1493,11 +1493,13 @@ class WorkspaceCodeExecutionPolicy(Base):
     with ``CASCADE``, like ``workspace_budget_defaults``: nothing else names
     the row, so it rides the workspace's own delete.
 
-    There is deliberately no per-tool allow-list, which the hosted policy
-    carries as ``tools``: the gateway's own sandbox backend exposes exactly one
-    tool (``code_execution``), so a list here would be either a no-op or a
-    second spelling of ``enabled``. The hosted proxy, which fronts more than
-    one, keeps enforcing its own.
+    ``image`` and ``tools`` are the two the hosted ``CodeExecutionConfig``
+    carries and this row did not (#740). Neither breaks the rule above:
+    ``image`` may only name something the deployment's operator has already
+    curated into ``sandbox_allowed_images``, so a workspace picks from an
+    operator's shelf rather than pointing the gateway at an image of its own,
+    and ``tools`` may only remove tool kinds from what the sandbox backend
+    already serves.
     """
 
     __tablename__ = "workspace_code_execution_policies"
@@ -1529,6 +1531,18 @@ class WorkspaceCodeExecutionPolicy(Base):
     # nothing rather than raising it.
     max_iterations: Mapped[int | None] = mapped_column(default=None)
     exec_timeout_s: Mapped[int | None] = mapped_column(default=None)
+    # NULL means "no workspace image": whatever the deployment names in
+    # ``sandbox_image``, and failing that whatever the sandbox backend runs by
+    # default, which is what every request got before this column existed.
+    # ``String(255)`` rather than ``Text`` to match the hosted column's own
+    # bound; an image reference that long is already pathological.
+    image: Mapped[str | None] = mapped_column(String(255), default=None)
+    # NULL means "no workspace tool allow-list": the backend offers what it
+    # offers. A stored list is an intersection, never a union, so it can only
+    # take tool kinds away. JSON rather than a child table for the same reason
+    # ``WorkspaceWebSearchConfig`` stores its domain lists that way: short, read
+    # whole, and nothing queries into it.
+    tools: Mapped[list[str] | None] = mapped_column(JSON, default=None)
     # ``UtcDateTime`` for the same reason ``WorkspaceBudgetDefault`` uses it:
     # these are serialized with ``.isoformat()`` for the dashboard, and a plain
     # ``DateTime(timezone=True)`` round-trips naive on SQLite.

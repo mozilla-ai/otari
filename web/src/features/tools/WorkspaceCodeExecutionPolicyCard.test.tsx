@@ -119,7 +119,109 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
       default_purpose_hint: null,
       max_iterations: 4,
       exec_timeout_s: null,
+      image: null,
+      tools: null,
     })
+  })
+
+  it("offers only the images the operator approved, plus the deployment default", async () => {
+    mockApi({
+      policy: workspaceCodeExecutionPolicy({
+        workspace_id: ALPHA,
+        allowed_images: ["mzdotai/otari-sandbox-container:latest"],
+      }),
+    })
+    await renderLoaded()
+
+    const select = screen.getByLabelText("Sandbox image") as HTMLSelectElement
+    expect([...select.options].map((option) => option.value)).toEqual([
+      "",
+      "mzdotai/otari-sandbox-container:latest",
+    ])
+  })
+
+  it("says so rather than showing a picker when the operator approved no images", async () => {
+    mockApi()
+    await renderLoaded()
+
+    expect(screen.queryByLabelText("Sandbox image")).not.toBeInTheDocument()
+    expect(screen.getByText(/approved no sandbox images/i)).toBeInTheDocument()
+  })
+
+  it("saves the image and the tool set the operator chose", async () => {
+    const calls = mockApi({
+      policy: workspaceCodeExecutionPolicy({
+        workspace_id: ALPHA,
+        allowed_images: ["mzdotai/otari-sandbox-container:latest"],
+      }),
+    })
+    const user = userEvent.setup()
+    await renderLoaded()
+
+    await user.selectOptions(screen.getByLabelText("Code execution"), "allowed")
+    await user.selectOptions(
+      screen.getByLabelText("Sandbox image"),
+      "mzdotai/otari-sandbox-container:latest",
+    )
+    await user.click(
+      screen.getByRole("checkbox", { name: "bash_code_execution" }),
+    )
+    await user.click(
+      screen.getByRole("checkbox", { name: "text_editor_code_execution" }),
+    )
+    await user.click(screen.getByRole("button", { name: "Save" }))
+
+    const put = calls.find((call) => call.method === "PUT")
+    expect(put?.body).toMatchObject({
+      image: "mzdotai/otari-sandbox-container:latest",
+      tools: ["code_execution"],
+    })
+  })
+
+  it("sends no tool list when the operator unticks every tool", async () => {
+    // An empty list is refused by the server: `null` is how a policy narrows
+    // nothing, and Blocked is how it refuses. Unticking the last box therefore
+    // returns to the unnarrowed state rather than saving one nothing can run.
+    const calls = mockApi()
+    const user = userEvent.setup()
+    await renderLoaded()
+
+    await user.selectOptions(screen.getByLabelText("Code execution"), "allowed")
+    for (const name of [
+      "code_execution",
+      "bash_code_execution",
+      "text_editor_code_execution",
+    ]) {
+      await user.click(screen.getByRole("checkbox", { name }))
+    }
+    await user.click(screen.getByRole("button", { name: "Save" }))
+
+    const put = calls.find((call) => call.method === "PUT")
+    expect(put?.body).toMatchObject({ tools: null })
+  })
+
+  it("shows a stored image and tool set", async () => {
+    mockApi({
+      policy: workspaceCodeExecutionPolicy({
+        workspace_id: ALPHA,
+        configured: true,
+        enabled: true,
+        allowed_images: ["ghcr.io/acme/sandbox:2"],
+        image: "ghcr.io/acme/sandbox:2",
+        tools: ["code_execution"],
+      }),
+    })
+    await renderLoaded()
+
+    expect(screen.getByLabelText("Sandbox image")).toHaveValue(
+      "ghcr.io/acme/sandbox:2",
+    )
+    expect(
+      screen.getByRole("checkbox", { name: "code_execution" }),
+    ).toBeChecked()
+    expect(
+      screen.getByRole("checkbox", { name: "bash_code_execution" }),
+    ).not.toBeChecked()
   })
 
   it("clears the policy rather than storing one when set back to the deployment default", async () => {

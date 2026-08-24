@@ -794,3 +794,79 @@ async def test_structured_values_in_render_only_fields_keep_the_signal(
         result = await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "1"})
 
     assert result == expected
+
+
+# ---------------------------------------------------------------------------
+# The sandbox image and the exposed tool set (#740)
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.asyncio
+async def test_create_session_omits_image_when_none_is_pinned(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A deployment that names no image sends the body it always sent.
+
+    The whole compatibility claim for the additive ``image`` field rests on
+    this: a backend built before the field existed must see an empty object.
+    """
+    transport = _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "sbx_abc"}),
+            ("DELETE", "/sessions/sbx_abc"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+
+    async with SandboxBackend(sandbox_url="http://sandbox:8080"):
+        pass
+
+    create = next(r for r in transport.captured if r.method == "POST")
+    assert json.loads(create.content) == {}
+
+
+@pytest.mark.asyncio
+async def test_create_session_sends_the_pinned_image(monkeypatch: pytest.MonkeyPatch) -> None:
+    transport = _patched_async_client(
+        {
+            ("POST", "/sessions"): httpx.Response(200, json={"session_id": "sbx_abc"}),
+            ("DELETE", "/sessions/sbx_abc"): httpx.Response(204),
+        },
+        monkeypatch,
+    )
+
+    async with SandboxBackend(sandbox_url="http://sandbox:8080", image="mzdotai/otari-sandbox-container:latest"):
+        pass
+
+    create = next(r for r in transport.captured if r.method == "POST")
+    assert json.loads(create.content) == {"image": "mzdotai/otari-sandbox-container:latest"}
+
+
+@pytest.mark.asyncio
+async def test_allowed_tools_including_code_execution_changes_nothing() -> None:
+    backend = SandboxBackend(
+        sandbox_url="http://sandbox:8080",
+        allowed_tools=frozenset({CODE_EXECUTION_TOOL_NAME, "bash_code_execution"}),
+    )
+    assert backend.owns_tool(CODE_EXECUTION_TOOL_NAME)
+    assert [tool["function"]["name"] for tool in backend.openai_tools] == [CODE_EXECUTION_TOOL_NAME]
+    assert backend.purpose_hints()
+
+
+@pytest.mark.asyncio
+async def test_allowed_tools_excluding_code_execution_offers_nothing() -> None:
+    """An allow-list the backend's one tool is not in leaves it with nothing to offer.
+
+    Admission refuses this case before a backend is built, so the assertion is
+    about the two halves agreeing rather than about a path a request takes: what
+    is advertised and what is dispatched come from one predicate, so a future
+    caller that skips the 403 still cannot have the tool run.
+    """
+    backend = SandboxBackend(
+        sandbox_url="http://sandbox:8080",
+        allowed_tools=frozenset({"bash_code_execution"}),
+    )
+    assert not backend.owns_tool(CODE_EXECUTION_TOOL_NAME)
+    assert backend.openai_tools == []
+    assert backend.purpose_hints() == []
+
+    with pytest.raises(KeyError):
+        await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "1"})

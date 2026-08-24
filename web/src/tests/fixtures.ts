@@ -401,10 +401,20 @@ export function workspaceCodeExecutionPolicy(
     // policy: nothing configured, nothing narrowed.
     configured: false,
     sandbox_configured: true,
+    // The default deployment has curated no images, so a workspace may pin
+    // none; the tool vocabulary is fixed and always reported.
+    allowed_images: [],
+    available_tools: [
+      "code_execution",
+      "bash_code_execution",
+      "text_editor_code_execution",
+    ],
     enabled: true,
     default_purpose_hint: null,
     max_iterations: null,
     exec_timeout_s: null,
+    image: null,
+    tools: null,
     created_at: null,
     updated_at: null,
     ...overrides,
