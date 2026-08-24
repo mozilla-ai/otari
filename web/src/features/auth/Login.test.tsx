@@ -220,7 +220,12 @@ describe("Login", () => {
     expect(stored).not.toContain("operator@example.com")
   })
 
-  it("keeps the submit button disabled until both halves of the credential are typed", async () => {
+  it("names the empty box on submit rather than posting a half credential", async () => {
+    // The button used to be disabled until both halves were typed, which made
+    // white on the brand tint at 1.95:1 the resting state of the whole screen.
+    // It is enabled from the start now, so the guard has to hold here: an empty
+    // box is refused locally, and the operator is told which one to fill.
+    const fetchMock = vi.spyOn(globalThis, "fetch")
     const user = userEvent.setup()
 
     render(
@@ -229,11 +234,83 @@ describe("Login", () => {
       </Mounted>,
     )
 
-    expect(screen.getByRole("button", { name: "Sign in" })).toBeDisabled()
+    const submitButton = screen.getByRole("button", { name: "Sign in" })
+    expect(submitButton).toBeEnabled()
+
+    await user.click(submitButton)
+    expect(await screen.findByText("Enter your email.")).toBeInTheDocument()
+    expect(fetchMock).not.toHaveBeenCalled()
+
     await user.type(screen.getByLabelText("Email"), "operator@example.com")
-    expect(screen.getByRole("button", { name: "Sign in" })).toBeDisabled()
+    await user.click(screen.getByRole("button", { name: "Sign in" }))
+    expect(await screen.findByText("Enter your password.")).toBeInTheDocument()
+    expect(fetchMock).not.toHaveBeenCalled()
+
+    // Only once both halves are there does anything reach the gateway.
+    fetchMock.mockResolvedValue(
+      jsonResponse({ expires_at: "2026-07-30T00:00:00Z" }),
+    )
     await user.type(screen.getByLabelText("Password"), "a-real-password")
-    expect(screen.getByRole("button", { name: "Sign in" })).toBeEnabled()
+    await user.click(screen.getByRole("button", { name: "Sign in" }))
+
+    expect(await screen.findByText("SIGNED IN")).toBeInTheDocument()
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("/v1/auth/session")
+  })
+
+  it("refuses an empty master key without posting it", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+    const user = userEvent.setup()
+
+    render(
+      <Mounted>
+        <Harness />
+      </Mounted>,
+    )
+
+    // Whitespace is not a credential either: the read trims before it decides.
+    await user.type(screen.getByLabelText("Master key"), "   ")
+    await user.click(screen.getByRole("button", { name: "Sign in" }))
+
+    expect(
+      await screen.findByText("Enter your master key."),
+    ).toBeInTheDocument()
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it("reveals the master key on request so a pasted one can be checked", async () => {
+    const user = userEvent.setup()
+
+    render(
+      <Mounted>
+        <Harness />
+      </Mounted>,
+    )
+
+    expect(screen.getByLabelText("Master key")).toHaveAttribute(
+      "type",
+      "password",
+    )
+
+    await user.click(screen.getByRole("button", { name: "Show master key" }))
+    expect(screen.getByLabelText("Master key")).toHaveAttribute("type", "text")
+
+    await user.click(screen.getByRole("button", { name: "Hide master key" }))
+    expect(screen.getByLabelText("Master key")).toHaveAttribute(
+      "type",
+      "password",
+    )
+  })
+
+  it("keeps the credential inputs unfocused on mount", () => {
+    // autoFocus here raised the soft keyboard over half a phone screen on every
+    // page load, and made a focus ring the screen's resting state.
+    render(
+      <Mounted>
+        <Harness />
+      </Mounted>,
+    )
+
+    expect(screen.getByLabelText("Master key")).not.toHaveFocus()
   })
 
   it("shows the gateway's own wording when a password is rejected", async () => {
