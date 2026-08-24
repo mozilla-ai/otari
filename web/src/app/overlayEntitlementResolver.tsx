@@ -17,8 +17,8 @@ import type { ReactNode } from "react"
  * the context default in `useEntitlements.tsx`, which is `BASE_CAPABILITIES`.
  * Rendering `EntitlementProvider` with that same constant would look equivalent
  * and is not, because a provider shadows whatever is above it: a superset build
- * that wrapped the app in its own provider, and every test that does exactly
- * that today, would get the empty base answer back from this line.
+ * that wrapped the app in its own provider, and every test that does that
+ * today, would get the empty base answer back from this line.
  *
  * One export, and its shape is the contract: a component named
  * `EntitlementResolver` taking `{ children }`. A replacement fetches
@@ -38,6 +38,15 @@ import type { ReactNode } from "react"
  * replacement that instead renders nothing until its query settles blanks the
  * whole dashboard on every load, which is why the shell takes the state rather
  * than making each replacement work around it.
+ *
+ * **A resolve that fails settles to an answer; it does not stay loading.** The
+ * shell reads `isLoading` as "nothing can be said yet", so a replacement that
+ * leaves it set after a refused or errored query turns a gated route's panel
+ * into a pending state that never ends, which is worse than the wrong answer it
+ * was replacing. Report the capabilities resolved so far (`BASE_CAPABILITIES`,
+ * for a resolver with nothing else to fall back on) and let the gate say the
+ * page is not served here, which is the same thing this build says and is at
+ * least a state a person can act on.
  *
  * **Why a seam and not a probe in the base.** The alternative is for this
  * repository to request `/v1/entitlements` itself and fall back to the constant

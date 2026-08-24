@@ -410,7 +410,7 @@ function AppShellChrome() {
   // knows while the entitlement axis is still resolving. Always settled in this
   // build, where `useEntitlements` answers from a constant, so this is a branch
   // a superset build's asynchronous resolver takes and the base never does.
-  // `EntitlementGate` has had a `loading` state for exactly this reason since it
+  // `EntitlementGate` has had a `loading` state for precisely this reason since it
   // was written; the rail needs none, because a row that appears late is not a
   // row that told anyone it was missing.
   const { isLoading: entitlementsResolving } = useEntitlements()
