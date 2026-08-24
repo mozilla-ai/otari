@@ -7,6 +7,7 @@ running app) is in ``tests/integration/test_bootstrap_overlay.py``.
 """
 
 import sys
+from collections.abc import Generator
 from pathlib import Path
 from typing import Protocol, cast
 
@@ -45,11 +46,35 @@ class _ReboundBilling(NullBillingAdapter):
     """Stands in for an overlay's own billing adapter."""
 
 
+# Every module name _write_bootstrap has handed out this test, so the autouse
+# fixture below can take each back out of sys.modules afterwards.
+_WRITTEN: set[str] = set()
+
+
+@pytest.fixture(autouse=True)
+def _forget_written_bootstraps() -> Generator[None]:
+    """Leave ``sys.modules`` as the test found it.
+
+    A written bootstrap is imported from ``tmp_path``, which is gone by the next
+    test, so the module object must not outlive the test that wrote it.
+    ``monkeypatch.delitem(..., raising=False)`` does not manage this on its own:
+    on a name that is absent it records no undo entry (see ``MonkeyPatch``), so
+    teardown restores whichever module the *first* such test left behind instead
+    of clearing it, and that stale module is what survives the suite.
+    """
+    _WRITTEN.clear()
+    yield
+    for name in _WRITTEN:
+        sys.modules.pop(name, None)
+    _WRITTEN.clear()
+
+
 def _write_bootstrap(tmp_path: Path, monkeypatch: pytest.MonkeyPatch, name: str, body: str) -> None:
     """Write an importable bootstrap module and put it on ``sys.path``."""
     (tmp_path / f"{name}.py").write_text(body)
     monkeypatch.syspath_prepend(str(tmp_path))
-    monkeypatch.delitem(sys.modules, name, raising=False)
+    sys.modules.pop(name, None)
+    _WRITTEN.add(name)
 
 
 def test_core_defaults_are_bound_for_every_port() -> None:
@@ -210,6 +235,26 @@ def test_a_bootstrap_attribute_that_is_not_callable_is_refused(tmp_path: Path, m
 
     with pytest.raises(BootstrapError, match="is not callable"):
         build_container("value_bootstrap:register")
+
+
+def test_an_async_bootstrap_is_refused_rather_than_silently_dropped(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # An ``async def register`` is callable, so without an explicit check it
+    # passes every guard and the container calls it, gets a coroutine nobody
+    # awaits, and boots the plain build with the selector's bindings silently
+    # discarded. That is the failure this path exists to refuse, and every port
+    # method being async makes it the easy mistake to make.
+    _write_bootstrap(
+        tmp_path,
+        monkeypatch,
+        "async_bootstrap",
+        "from gateway.ports.billing_port import BillingPort\n\n\n"
+        "async def register(container):\n    container.bind(BillingPort, _ReboundBilling)\n",
+    )
+
+    with pytest.raises(BootstrapError, match="is async"):
+        build_container("async_bootstrap:register")
 
 
 def test_router_contributions_keep_their_order() -> None:

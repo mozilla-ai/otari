@@ -21,6 +21,7 @@ contribute routers of its own. Unset, the defaults stand.
 """
 
 import importlib
+import inspect
 from collections.abc import Callable, ItemsView
 from dataclasses import dataclass
 from typing import Any, TypeVar, cast
@@ -67,6 +68,18 @@ class RouterContribution:
     ``EntitlementPort``, because hiding a link in a dashboard is not
     authorization and a route mounted into this process has to refuse for
     itself.
+
+    **Entitlement is not authentication, and the mount point adds none.**
+    ``capability`` answers "is this build licensed for this surface", a
+    deployment-wide question that names no caller, so on an entitled deployment
+    a contributed route is reachable by anyone unless the router says otherwise.
+    Declare the credential each route needs on the route, the way Otari's own
+    routers do (``verify_master_key`` or ``verify_api_key_or_master_key`` per
+    route in ``gateway.api.routes``); Otari mounts no router-level default here
+    because there is no single right answer to mount. The choice differs per
+    route, a contributed route may be deliberately public, and
+    ``verify_api_key_or_master_key`` resolves ``get_db``, which has no session
+    to open in hybrid mode.
     """
 
     capability: str
@@ -173,7 +186,8 @@ def _load_register(selector: str) -> Register:
 
     Raises:
         BootstrapError: If the selector is malformed, its module or attribute
-            cannot be imported, or the attribute is not callable.
+            cannot be imported, or the attribute is not callable or is a
+            coroutine function.
 
     """
     module_path, separator, attribute = selector.strip().partition(":")
@@ -202,6 +216,16 @@ def _load_register(selector: str) -> Register:
         raise BootstrapError(msg)
     if not callable(register):
         msg = f"Bootstrap {selector!r} is not callable"
+        raise BootstrapError(msg)
+    if inspect.iscoroutinefunction(register):
+        # An ``async def register`` is callable, so it passes the check above,
+        # and calling it only builds a coroutine nobody awaits: every bind and
+        # every contribution in it is silently dropped and the gateway serves
+        # the plain build. That is the one outcome this whole path exists to
+        # prevent, and it is an easy mistake to make when every port method is
+        # async, so it is refused by name rather than left to a stray
+        # "coroutine was never awaited" warning in the startup log.
+        msg = f"Bootstrap {selector!r} is async; the container is built synchronously, so register must be a plain def"
         raise BootstrapError(msg)
 
     return cast(Register, register)
