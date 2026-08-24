@@ -208,8 +208,12 @@ async def run_input_guardrails(
     even though it isn't evaluated yet. This intentionally preserves the
     coverage the removed parse-time Pydantic validator had (see
     :mod:`gateway.models.guardrails`): when output enforcement is built, its
-    code path can assume the URL was already validated instead of needing to
-    remember to add the check itself.
+    code path can assume a *caller's* URL was already validated instead of
+    needing to remember to add the check itself. A ``mandated`` entry's failure
+    is the exception, because it is not an outright rejection: it is held until
+    the per-entry loop below reaches that profile, so an output-only mandate's
+    failure has nowhere to land yet and is dropped. Output enforcement has to
+    consume it the way the input loop does rather than assume it never happened.
 
     Failure handling depends on the guardrail's ``mode`` and its
     ``on_unavailable``:
@@ -306,14 +310,21 @@ async def run_input_guardrails(
                     input_text=input_text,
                     credential=credentials.get(cfg.profile),
                 )
-            except GuardrailsNotReachableError:
+            except GuardrailsNotReachableError as exc:
                 if cfg.mode == "block" and cfg.on_unavailable == "block":
                     raise  # fail closed: an enforcing guardrail must not be skipped
+                # The reason belongs here and nowhere else: the fail-closed arm
+                # above hands its message to `apply_input_guardrails`, which logs
+                # it, but this arm serves the request, so this line is the only
+                # record that a check an organization mandated did not run. It
+                # names the endpoint for the same reason that one does, and for
+                # the same audience.
                 logger.warning(
-                    "guardrail %r could not be evaluated (mode=%s on_unavailable=%s); failing open",
+                    "guardrail %r could not be evaluated (mode=%s on_unavailable=%s); failing open: %s",
                     cfg.profile,
                     cfg.mode,
                     cfg.on_unavailable,
+                    exc,
                 )
                 results.append(
                     GuardrailResult(

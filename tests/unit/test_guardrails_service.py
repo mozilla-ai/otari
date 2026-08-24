@@ -6,6 +6,7 @@ Stubs the guardrails service ``POST /validate`` contract with an
 
 from __future__ import annotations
 
+import ipaddress
 import json
 from collections.abc import Callable
 
@@ -380,6 +381,40 @@ async def test_a_mandated_endpoint_failure_is_not_named_to_the_caller(monkeypatc
     assert "guardrails.internal.corp.example" in str(exc.value), "the log still gets the endpoint"
     assert "guardrails.internal.corp.example" not in exc.value.public_detail
     assert exc.value.public_detail == "guardrail profile 'pi' could not be evaluated"
+
+
+@pytest.mark.asyncio
+async def test_a_mandated_endpoint_in_a_private_range_is_never_contacted(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The safety property the mode handling must not weaken.
+
+    A resolvable but unsafe endpoint takes the same path as an unresolvable one,
+    so a `monitor` entry serves the request. What it must never do is call the
+    endpoint anyway, which is what the check was there to prevent.
+    """
+    from gateway.services import url_safety
+
+    async def _private(_host: str) -> list[object]:
+        return [ipaddress.ip_address("10.1.2.3")]
+
+    monkeypatch.setattr(url_safety, "_resolve_all_async", _private)
+    called = False
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal called
+        called = True
+        return httpx.Response(200, json={"profile": "pi", "result": {"valid": True}})
+
+    _patch_transport(monkeypatch, handler)
+    verdict = await run_input_guardrails(
+        [GuardrailConfig(profile="pi", url=_STORED_URL, mode="monitor", on_unavailable="monitor")],
+        "x",
+        default_url=_URL,
+        mandated={"pi"},
+    )
+
+    assert verdict.blocked is False
+    assert verdict.results[0].valid is None
+    assert called is False, "the private-range endpoint must never be contacted"
 
 
 @pytest.mark.asyncio

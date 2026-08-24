@@ -305,7 +305,9 @@ async def test_empty_plan_is_a_500_that_leaks_nothing() -> None:
         raise AssertionError("must not be called")
 
     with pytest.raises(HTTPException) as exc_info:
-        await walk_attempts(attempts=[], base_request_fields={}, run_attempt=run_attempt, max_tool_iterations=10)
+        await walk_attempts(
+            attempts=[], base_request_fields={}, run_attempt=run_attempt, max_tool_iterations=10
+        )
 
     assert exc_info.value.status_code == 500
     assert exc_info.value.detail == EMPTY_PLAN_DETAIL
@@ -399,7 +401,9 @@ def _request_context(plan: Any) -> Any:
 def _ctx_with_guardrails(*guardrails: Any) -> Any:
     from gateway.services.routing import CompiledPlan
 
-    return _request_context(CompiledPlan(policy_name="p", attempts=[_attempt(1, "m")], guardrails=list(guardrails)))
+    return _request_context(
+        CompiledPlan(policy_name="p", attempts=[_attempt(1, "m")], guardrails=list(guardrails))
+    )
 
 
 def _guardrail(

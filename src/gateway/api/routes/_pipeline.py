@@ -1679,9 +1679,10 @@ def merge_guardrail_layers(
     secret on would be sending it somewhere it was never meant for.
 
     Returns the caller's own list unchanged, `None` included, when no layer
-    mandated anything, alongside an empty credential map and an empty mandated set: that is the shape
-    `apply_input_guardrails` treats as "no guardrails ran", and it is what keeps
-    a deployment that configures nothing behaving exactly as it did.
+    mandated anything, alongside an empty credential map and an empty mandated
+    set: that is the shape `apply_input_guardrails` treats as "no guardrails
+    ran", and it is what keeps a deployment that configures nothing behaving
+    exactly as it did.
     """
     policy = ctx.plan.guardrails if ctx.plan is not None else []
     if not organization and not policy:

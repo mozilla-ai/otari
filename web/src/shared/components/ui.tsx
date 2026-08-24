@@ -201,7 +201,7 @@ export function StatCard({
   )
   // min-w-0 (not a fixed min) so the tile fits its grid track: with
   // grid-cols-2's minmax(0,1fr) columns, a larger min-width would overflow the
-  // track and overlap the neighbouring tile on narrow (mobile) viewports.
+  // track and overlap the neighboring tile on narrow (mobile) viewports.
   const cardClass = `flex-1 min-w-0 p-0 ${accent}`
   if (to) {
     return (

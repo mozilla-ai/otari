@@ -300,10 +300,11 @@ async def apply_input_guardrails(
     Raises:
         HTTPException: ``400`` when a *caller-supplied* guardrail's ``url``
             fails the SSRF/scheme safety check (a mandated entry's failure is a
-            502 or a recorded inconclusive instead, per its own settings); ``403`` when a ``block`` guardrail flags
-            the input; ``502`` when a ``block`` guardrail that fails closed can't
-            be evaluated. The 502 body names the profile and not the endpoint,
-            which goes to the log instead.
+            502 or a recorded inconclusive instead, per its own settings);
+            ``403`` when a ``block`` guardrail flags the input; ``502`` when a
+            ``block`` guardrail that fails closed can't be evaluated. The 502
+            body names the profile and not the endpoint, which goes to the log
+            instead.
     """
     if not guardrails:
         return
@@ -352,5 +353,8 @@ async def apply_input_guardrails(
         # Non-blocking: surface the verdict for observability (monitor mode, or
         # a passing block-mode check). Header value is kept compact and free of
         # the freeform `explanation` to avoid oversized / non-ASCII headers.
-        summary = [{"profile": r.profile, "mode": r.mode, "valid": r.valid, "score": r.score} for r in verdict.results]
+        summary = [
+            {"profile": r.profile, "mode": r.mode, "valid": r.valid, "score": r.score}
+            for r in verdict.results
+        ]
         response.headers[GUARDRAILS_RESULT_HEADER] = json.dumps(summary, separators=(",", ":"))

@@ -552,7 +552,7 @@ def test_a_price_aimed_at_a_user_scoped_policy_is_refused_without_naming_candida
 
 
 def test_a_static_policy_resolves_on_a_non_completion_endpoint(client: TestClient) -> None:
-    """ "An alias is a one-target policy" has to be true everywhere, not just on
+    """"An alias is a one-target policy" has to be true everywhere, not just on
     the completion routes, or the two concepts are not actually the same thing.
     """
     _create_user(client)
@@ -952,7 +952,9 @@ def test_still_under_the_cap_is_a_usable_threshold(client: TestClient) -> None:
 def test_a_stored_policy_may_not_point_at_an_alias(client: TestClient) -> None:
     alias = client.post("/v1/aliases", json={"name": "cheap", "target": "openai:gpt-5-nano"}, headers=HEADERS)
     assert alias.status_code == 200, alias.text
-    resp = client.post("/v1/routing/policies", json={"name": "chained", "spec": _spec("cheap:x")}, headers=HEADERS)
+    resp = client.post(
+        "/v1/routing/policies", json={"name": "chained", "spec": _spec("cheap:x")}, headers=HEADERS
+    )
     assert resp.status_code == 400
     assert "chaining" in resp.json()["detail"]
 
@@ -985,9 +987,12 @@ def test_policy_management_requires_the_master_key(client: TestClient) -> None:
     # Only an operator may decide which models a name reaches; otherwise a caller
     # could widen their own access by writing a policy.
     assert client.get("/v1/routing/policies", headers=caller).status_code in (401, 403)
-    assert client.post(
-        "/v1/routing/policies", json={"name": "sneaky", "spec": _spec("openai:gpt-5-mini")}, headers=caller
-    ).status_code in (401, 403)
+    assert (
+        client.post(
+            "/v1/routing/policies", json={"name": "sneaky", "spec": _spec("openai:gpt-5-mini")}, headers=caller
+        ).status_code
+        in (401, 403)
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -1203,7 +1208,9 @@ def guarded_client(routing_config: GatewayConfig) -> Generator[TestClient]:
                     "policies": {
                         "guarded": {
                             "select": [{"default": "openai:gpt-5-mini"}],
-                            "guardrails": [{"profile": "prompt-injection", "mode": "block", "on_unavailable": "block"}],
+                            "guardrails": [
+                                {"profile": "prompt-injection", "mode": "block", "on_unavailable": "block"}
+                            ],
                         }
                     }
                 }
