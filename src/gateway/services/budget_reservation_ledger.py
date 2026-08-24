@@ -207,6 +207,33 @@ async def try_terminate(db: AsyncSession, reservation_id: str | None, status: st
     return bool(getattr(result, "rowcount", 0))
 
 
+async def try_settle_reclaimed(db: AsyncSession, reservation_id: str | None) -> bool:
+    """Claim EXPIRED -> SETTLED for a request that outlived its own hold.
+
+    The sweep reclaims a hold on the assumption that its request is gone, and it
+    is sometimes wrong: a request slower than the TTL finishes afterwards and
+    still owes what it spent. Its hold is already back, so there is nothing to
+    release, but ``users.spend`` is the sum of that user's rows and dropping the
+    cost would leave the counter a 403 is decided against permanently short.
+
+    Same CAS as :func:`try_terminate`, one state further along, so only the first
+    late settlement records the spend and a second is still a no-op.
+    """
+    if reservation_id is None:
+        return False
+    result = await db.execute(
+        update(BudgetReservation)
+        .where(
+            BudgetReservation.id == reservation_id,
+            BudgetReservation.status == RESERVATION_EXPIRED,
+        )
+        .values(status=RESERVATION_SETTLED)
+        .execution_options(synchronize_session=False)
+    )
+    await db.commit()
+    return bool(getattr(result, "rowcount", 0))
+
+
 async def _release_holds(db: AsyncSession, reservation: BudgetReservation) -> None:
     """Return every hold one reclaimed row placed, on both mechanisms.
 
@@ -365,5 +392,6 @@ __all__ = [
     "run_reservation_sweeper",
     "release_reserved_expression",
     "sweep_expired",
+    "try_settle_reclaimed",
     "try_terminate",
 ]

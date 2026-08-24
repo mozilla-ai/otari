@@ -243,10 +243,19 @@ async def test_settling_a_reclaimed_hold_does_not_release_it_twice(
     user = await _user(async_db, tenancy.user_id)
     assert user.reserved == Decimal("0.000000")
 
-    # The late reconcile loses the claim, so it neither releases again nor
-    # records spend against a hold that is no longer there.
+    # The late reconcile records the spend it owes (users.spend is the sum of that
+    # user's rows, and the request really did cost this) but releases nothing: the
+    # sweep already gave the hold back.
     await reconcile_reservation(async_db, handle, 1.0)
     user = await _user(async_db, tenancy.user_id)
+    assert user.spend == Decimal("1.000000")
+    assert user.reserved == Decimal("0.000000")
+    assert await _status(async_db, handle.reservation_id) == ledger.RESERVATION_SETTLED
+
+    # And a second late settlement is still a no-op.
+    await reconcile_reservation(async_db, handle, 1.0)
+    user = await _user(async_db, tenancy.user_id)
+    assert user.spend == Decimal("1.000000")
     assert user.reserved == Decimal("0.000000")
 
 

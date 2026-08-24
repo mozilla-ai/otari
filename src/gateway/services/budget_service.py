@@ -555,7 +555,9 @@ async def reconcile_reservation(db: AsyncSession, handle: ReservationHandle, act
 
     Idempotent by reservation identity: the first caller to claim the ledger row
     does the work and any later one is a no-op, so two settlement sites firing for
-    one request (or a settle racing the TTL sweep) cannot release the hold twice.
+    one request cannot release the hold twice. A request that outlived its own TTL
+    is the one exception: the sweep has already returned its hold, so this records
+    the spend it still owes and releases nothing.
 
     This is the single authority for writing ``users.spend`` on the billable
     path — the usage-log writer no longer touches spend, so reconciliation must
@@ -573,8 +575,23 @@ async def reconcile_reservation(db: AsyncSession, handle: ReservationHandle, act
     # for one request would subtract the hold again, and because the release
     # expression clamps at zero that would pass silently as an under-count of
     # live holds rather than fail.
+    reclaimed_early = False
     if not await ledger.try_terminate(db, handle.reservation_id, ledger.RESERVATION_SETTLED):
-        return
+        # Losing that claim has two causes and they settle differently. Another
+        # settlement site for this request already ran, and there is nothing left
+        # to do; or the TTL sweep reclaimed the hold while the request was still
+        # alive, in which case the hold is gone but the spend it went on to incur
+        # is still owed. Dropping it would leave ``users.spend`` permanently short
+        # of the sum of that user's rows, which is the counter a 403 is decided
+        # against.
+        if not await ledger.try_settle_reclaimed(db, handle.reservation_id):
+            return
+        reclaimed_early = True
+        logger.warning(
+            "Reservation %s was reclaimed as leaked before its request settled; recording the spend "
+            "without releasing a hold. Raise budget_reservation_ttl_sec above the slowest request served.",
+            handle.reservation_id,
+        )
 
     spent = max(to_usd(actual_cost), ZERO)
     values: dict[str, object] = {}
@@ -584,7 +601,9 @@ async def reconcile_reservation(db: AsyncSession, handle: ReservationHandle, act
     # handle safe at every reconcile site.
     if spent and handle.counts_toward_budget:
         values["spend"] = User.spend + spent
-    if handle.reserved:
+    # Nothing to give back when the reclaim already did it: subtracting a second
+    # time is the double release the ledger exists to prevent.
+    if handle.reserved and not reclaimed_early:
         values["reserved"] = _release_reserved(handle.estimate)
     # Every scoped ceiling the reservation held against has to be unwound too, or
     # the hold outlives the request and permanently shrinks that ceiling.
@@ -592,7 +611,7 @@ async def reconcile_reservation(db: AsyncSession, handle: ReservationHandle, act
         db,
         handle.scoped_budget_ids,
         actual_cost=spent,
-        held=handle.scoped_estimate,
+        held=ZERO if reclaimed_early else handle.scoped_estimate,
         counts_toward_budget=handle.counts_toward_budget,
     )
     if not values:

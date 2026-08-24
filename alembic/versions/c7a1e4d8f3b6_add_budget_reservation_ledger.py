@@ -56,8 +56,8 @@ def upgrade() -> None:
         sa.Column("counts_toward_budget", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("status", sa.String(), nullable=False, server_default="active"),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=True),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=True),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
         sa.ForeignKeyConstraint(["user_id"], ["users.user_id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
