@@ -38,7 +38,14 @@ WORKSPACE_ID = uuid.UUID("22222222-2222-2222-2222-222222222222")
 
 # Every provider these tests name; cleared so a developer's own shell key cannot
 # make `credential_ladder_exhausted` answer False and quietly skip the port.
-_PROVIDER_ENV_VARS = ("OPENAI_API_KEY", "TOGETHER_API_KEY")
+_PROVIDER_ENV_VARS = (
+    "OPENAI_API_KEY",
+    "TOGETHER_API_KEY",
+    "VLLM_API_KEY",
+    "LM_STUDIO_API_KEY",
+    "CASCADIA_API_KEY",
+    "OTARI_API_KEY",
+)
 
 
 @pytest.fixture(autouse=True)
@@ -208,12 +215,30 @@ async def test_provider_sdk_env_var_is_not_asked_about(monkeypatch: pytest.Monke
     assert port.calls == []
 
 
-@pytest.mark.parametrize("selector", ["ollama:llama3", "llamacpp:local", "vertexai:gemini-2.5-pro"])
+@pytest.mark.parametrize(
+    "selector",
+    [
+        "ollama:llama3",
+        "llamacpp:local",
+        "vertexai:gemini-2.5-pro",
+        # These four declare a credential env var that any-llm never insists on,
+        # so the declaration alone cannot tell them apart from a keyed provider.
+        "vllm:my-model",
+        "lmstudio:my-model",
+        "cascadia:my-model",
+        "otari:my-model",
+        # Ambient cloud credentials this gateway cannot see: an instance profile
+        # or SSO session serves these with nothing configured in otari at all.
+        "bedrock:anthropic.claude-sonnet-4-20250514-v1:0",
+        "sagemaker:my-endpoint",
+    ],
+)
 @pytest.mark.asyncio
 async def test_a_provider_needing_no_credential_is_not_asked_about(selector: str) -> None:
     """any-llm calls these without a key, so an empty kwargs is not a missing one.
 
-    A bare ``ollama:llama3`` works today against a local backend. Reporting it as
+    A bare ``ollama:llama3`` works today against a local backend, and a bare
+    ``bedrock:...`` works today off an EC2 instance profile. Reporting either as
     unserved would hand a working request to a fleet that might answer it from
     somewhere else, and self-hosting is a first-class path *upstream* of this
     port (``ports/model_provider_port.py``).
@@ -363,6 +388,28 @@ async def test_access_denied_becomes_a_403_that_names_no_adapter(monkeypatch: py
     assert [row["status_code"] for row in rejections] == [403]
     assert rejections[0]["provider"] == "openai"
     assert rejections[0]["detail"] == detail
+
+
+@pytest.mark.asyncio
+async def test_a_refused_alias_does_not_spell_its_target(monkeypatch: pytest.MonkeyPatch) -> None:
+    """An alias hides its target, and a refusal is not an exception to that."""
+    _capture_settlement(monkeypatch)
+    config = GatewayConfig(aliases={"fast": "openai:gpt-4o"})
+    resolved = resolve_provider_selector(config, "fast")
+    port = RecordingPort(error=HostedAccessDeniedError("AcmeHostedAdapter: not entitled"))
+
+    with pytest.raises(HTTPException) as exc_info:
+        await pipeline.resolve_dispatch_provider(
+            _ctx(resolved_provider=resolved),
+            config,
+            "fast",
+            adapter=chat._ADAPTER,
+            model_provider=port,
+        )
+
+    detail = str(exc_info.value.detail)
+    assert "fast" in detail
+    assert "openai:gpt-4o" not in detail
 
 
 @pytest.mark.asyncio

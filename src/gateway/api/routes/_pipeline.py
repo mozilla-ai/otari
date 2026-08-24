@@ -831,7 +831,12 @@ async def _serve_from_hosted_credential(
             exc.workspace_id,
             exc,
         )
-        denied_detail = model_not_allowed_detail(f"{resolved.instance}:{resolved.model}")
+        # Named to the caller the way every other ``model_not_allowed_detail``
+        # site names it: the selector they wrote. For an alias that is the alias,
+        # because keeping its target out of what a caller can see is the whole
+        # point of one (``docs/models.md``, "Target-hiding"); the log line above
+        # carries the resolved target for the operator.
+        denied_detail = model_not_allowed_detail(resolved.alias or f"{resolved.instance}:{resolved.model}")
         await release_reservation(ctx)
         await log_gateway_rejection(
             db=ctx.db,

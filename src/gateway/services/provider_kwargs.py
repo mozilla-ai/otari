@@ -53,6 +53,33 @@ _INSTANCE_META_KEYS = ("provider_type", "models")
 # tolerance (mozilla-ai/any-llm#1198).
 _KEYLESS_PLACEHOLDER_API_KEY = "otari-no-key-required"
 
+# Two sets of providers any-llm calls without an otari-visible credential, even
+# though each *declares* a credential environment variable.
+# ``provider_credential_env_names`` sees only the declaration, so it cannot tell
+# them from a keyed provider the way it can ollama/llamacpp/llamafile (which
+# declare the literal ``"None"``) or Vertex AI (which declares an empty name).
+# Both are written out by hand and both are drift-guarded in
+# ``tests/unit/test_provider_instances.py``.
+#
+# Local and LAN backends that never require a key: each overrides
+# ``_verify_and_set_api_key`` to return without raising and defaults to a
+# localhost or LAN base URL, so a bare ``vllm:my-model`` reaches a self-hosted
+# server today with nothing configured in otari at all.
+_KEYLESS_SELF_HOSTED_PROVIDERS = frozenset({"vllm", "lmstudio", "cascadia", "otari"})
+# Providers authenticating from cloud SDK credentials this gateway cannot see:
+# an EC2 instance profile, an SSO session, or an ambient boto3 chain. They are
+# the same category as Vertex AI's application default credentials, which
+# ``docs/configuration.md`` already groups with Bedrock, and they only reach here
+# with nothing configured, which is precisely the ambient case. Splitting the
+# category on whether any-llm happens to declare a variable name would be an
+# accident of upstream spelling rather than a difference in kind.
+#
+# Deliberately *not* here: gemini (raises ``MissingApiKeyError`` outright when no
+# key resolves, so it genuinely needs one) and azure/azureopenai (an Entra ID
+# deployment still needs an endpoint from config, so an empty ``kwargs`` means
+# nothing is configured and nothing can serve it anyway).
+_AMBIENT_CREDENTIAL_PROVIDERS = frozenset({"bedrock", "sagemaker"})
+
 
 def _provider_env_key_present(provider: LLMProvider) -> bool:
     """Whether the provider's native API-key env var (e.g. OPENAI_API_KEY) is set.
@@ -96,12 +123,14 @@ def credential_ladder_exhausted(provider: LLMProvider, kwargs: dict[str, Any]) -
     counts as a credential already in hand.
 
     **Was needed** excludes the providers any-llm calls with no credential at
-    all: the keyless local backends (ollama, llamacpp, llamafile) and Vertex AI,
-    which authenticates through the cloud SDK. They declare no credential
-    variable, so an empty ``kwargs`` for one of them is not a missing key, and
+    all, because an empty ``kwargs`` for one of those is not a missing key, and
     reporting it as exhausted would hand a request that already works to a
     caller that might serve it from somewhere else. A deployment pointing at its
-    own backends is served upstream of anything reading this.
+    own backends is served upstream of anything reading this. They come in two
+    shapes: those declaring no credential variable at all (the keyless local
+    backends ollama, llamacpp and llamafile, and Vertex AI, which authenticates
+    through the cloud SDK), and those declaring one any-llm does not insist on
+    (``_KEYLESS_SELF_HOSTED_PROVIDERS`` and ``_AMBIENT_CREDENTIAL_PROVIDERS``).
 
     ``provider_credential_env_names`` returns ``None`` rather than ``()`` for a
     provider it cannot inspect at all, and that stays exhausted: nothing is known
@@ -109,6 +138,8 @@ def credential_ladder_exhausted(provider: LLMProvider, kwargs: dict[str, Any]) -
     with a declared variable is in.
     """
     if kwargs:
+        return False
+    if provider.value in _KEYLESS_SELF_HOSTED_PROVIDERS or provider.value in _AMBIENT_CREDENTIAL_PROVIDERS:
         return False
     if provider_credential_env_names(provider.value) == ():
         return False
@@ -305,9 +336,7 @@ def resolve_provider_selector(
     )
 
 
-def resolve_static_policy_target(
-    config: GatewayConfig, model_selector: str, user_id: str | None = None
-) -> str | None:
+def resolve_static_policy_target(config: GatewayConfig, model_selector: str, user_id: str | None = None) -> str | None:
     """The single target of a static routing policy, or ``None``.
 
     ``None`` for a name that is not a policy, for a dynamic policy (whose target

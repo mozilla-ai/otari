@@ -62,7 +62,7 @@ class _MockCompletionError(Exception):
 @pytest.fixture(autouse=True)
 def _no_ambient_provider_keys(monkeypatch: pytest.MonkeyPatch) -> None:
     """A developer's own shell keys would credential the ladder and skip the port."""
-    for name in ("OPENAI_API_KEY", "MISTRAL_API_KEY", "TOGETHER_API_KEY"):
+    for name in ("OPENAI_API_KEY", "MISTRAL_API_KEY", "TOGETHER_API_KEY", "VLLM_API_KEY"):
         monkeypatch.delenv(name, raising=False)
 
 
@@ -170,6 +170,24 @@ def test_a_keyless_local_backend_is_not_claimed_by_the_fleet(overlay_client: Tes
     assert captured, "the provider call was never made"
     assert "api_key" not in captured
     assert captured["model"] == "ollama:llama3"
+
+
+def test_a_self_hosted_backend_declaring_a_key_is_not_claimed_by_the_fleet(overlay_client: TestClient) -> None:
+    """``vllm`` declares ``VLLM_API_KEY`` but any-llm never insists on it.
+
+    The same invariant as the case above, for the half of the keyless set the
+    declaration cannot identify: a bare ``vllm:my-model`` reaches a local vLLM at
+    any-llm's default ``http://localhost:8000/v1`` with nothing configured here,
+    so the fleet must not be asked about it.
+    """
+    _create_user(overlay_client)
+
+    captured, _ = _post_chat_capture(overlay_client, "vllm:my-model")
+
+    assert captured, "the provider call was never made"
+    assert "api_key" not in captured
+    assert "api_base" not in captured
+    assert captured["model"] == "vllm:my-model"
 
 
 def test_a_refused_upstream_answers_403_without_naming_the_adapter(overlay_client: TestClient) -> None:
