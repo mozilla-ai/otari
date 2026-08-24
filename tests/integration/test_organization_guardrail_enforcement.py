@@ -216,6 +216,36 @@ def test_an_entry_for_every_workspace_reaches_one_created_after_it(
     assert guardrails.profiles == ["prompt-injection"]
 
 
+def test_a_request_whose_tenancy_will_not_resolve_is_refused_rather_than_unchecked(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The fail-closed arm, on the one input that proves the tenancy is unresolvable.
+
+    Unreachable today, since `resolve_workspace_id` always answers and falls
+    back to the default workspace. Pinned because what it guards is an
+    enforcement decision: falling through would serve a request its organization
+    requires a blocking guardrail on, unchecked, with nothing to notice.
+    """
+    monkeypatch.setenv("OTARI_GUARDRAILS_URL", _DEPLOYMENT_URL)
+    _mandate(client, master_key_header, profile="prompt-injection", mode="block", applies_to_all_workspaces=True)
+
+    async def no_workspace(*_args: Any, **_kwargs: Any) -> None:
+        return None
+
+    monkeypatch.setattr("gateway.api.routes._pipeline.resolve_workspace_id", no_workspace)
+    guardrails = _Guardrails(valid=True)
+
+    response = _post(client, api_key_header, _REQUEST, guardrails, monkeypatch)
+
+    assert response.status_code == 500
+    detail = response.json()["detail"]
+    assert detail["error"]["message"] == "Organization guardrails could not be resolved for this request"
+    assert guardrails.calls == [], "and the provider was never reached either"
+
+
 def test_a_monitor_entry_annotates_the_response_and_serves_it(
     client: TestClient,
     api_key_header: dict[str, str],

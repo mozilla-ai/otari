@@ -6026,18 +6026,23 @@ export interface components {
          *     A guardrail *vendor's* own key is not this: the guardrails service builds
          *     its guardrails from the operator's YAML and holds those itself.
          *
-         *     The https requirement that `validate_mcp_url` puts on a credential-carrying
-         *     URL therefore applies to ``url`` and not to the deployment's
-         *     ``guardrails_url`` fallback, which is deliberate rather than an oversight:
-         *     the shipped compose file points that at ``http://anyguardrails:8000``, a
-         *     same-host sidecar, so enforcing it there would make an organization
-         *     credential unusable on the standard deployment while protecting a hop that
-         *     does not leave the host.
+         *     A credential therefore requires ``url``. The deployment's ``guardrails_url``
+         *     is not necessarily encrypted (the shipped compose file makes it a same-host
+         *     ``http://`` sidecar) and this row cannot see what it is set to, so an entry
+         *     that fell back to it could not promise the bearer was sent over https. See
+         *     `_require_url_for_credential`.
          *
          *     ``on`` is not offered. This plane mandates input-direction checks, which is
          *     the only direction the request path enforces
          *     (`services.guardrails.run_input_guardrails`); an organization that could
          *     store an output-direction mandate would be storing one nothing runs.
+         * @example {
+         *       "applies_to_all_workspaces": true,
+         *       "credential": "sk-guardrails-...",
+         *       "mode": "block",
+         *       "profile": "prompt-injection",
+         *       "url": "https://guardrails.internal.example/validate"
+         *     }
          */
         OrganizationGuardrailCreate: {
             /**
@@ -6048,7 +6053,7 @@ export interface components {
             applies_to_all_workspaces: boolean;
             /**
              * Credential
-             * @description Bearer credential for the endpoint this entry is sent to. An entry that names its own url must then use https; one that falls back to the deployment's guardrails_url is sent wherever the operator pointed that, which is commonly a same-host http sidecar. Encrypted at rest, never returned
+             * @description Bearer credential for this entry's endpoint. Requires url to be set, and https: an entry with no endpoint of its own falls back to the deployment's guardrails_url, which is commonly a same-host http sidecar. Encrypted at rest, never returned
              */
             credential?: string | null;
             /**
@@ -6147,6 +6152,11 @@ export interface components {
          *     credential it was never shown.
          *
          *     ``workspace_ids`` replaces the scope whole when sent; ``[]`` clears it.
+         * @example {
+         *       "credential": "sk-guardrails-...",
+         *       "mode": "monitor",
+         *       "url": "https://guardrails.internal.example/validate"
+         *     }
          */
         OrganizationGuardrailUpdate: {
             /** Applies To All Workspaces */

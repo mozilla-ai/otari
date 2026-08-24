@@ -20,7 +20,7 @@ The deployment-wide ``guardrails_url`` is untouched and stays in
 as it did before this migration.
 
 Revision ID: d8b3f1c6a4e9
-Revises: d8b3e5c1f7a2
+Revises: e9b3d7f1a5c2
 Create Date: 2026-08-24
 """
 
@@ -30,7 +30,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "d8b3f1c6a4e9"
-down_revision: str | Sequence[str] | None = "d8b3e5c1f7a2"
+down_revision: str | Sequence[str] | None = "e9b3d7f1a5c2"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 

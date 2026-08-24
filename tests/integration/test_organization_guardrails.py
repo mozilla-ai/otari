@@ -32,6 +32,7 @@ from gateway.services.secret_box import decrypt_secret, generate_secret_key
 from gateway.services.tenancy.errors import (
     NotAuthorizedError,
     OrganizationGuardrailAlreadyExistsError,
+    OrganizationGuardrailCredentialNeedsUrlError,
     OrganizationGuardrailLimitReachedError,
     OrganizationGuardrailNotFoundError,
     OrganizationGuardrailScopeConflictError,
@@ -242,6 +243,62 @@ async def test_an_unsafe_endpoint_is_refused_at_the_write(async_db: AsyncSession
         await service.create_guardrail(
             user=owner, request=_create(url="http://93.184.216.34/guardrails", credential="s3cret")
         )
+
+
+async def test_a_credential_needs_an_endpoint_of_its_own(async_db: AsyncSession) -> None:
+    """Without one the bearer would ride to the deployment url, which may be plain http."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = OrganizationGuardrailService(async_db)
+
+    with pytest.raises(OrganizationGuardrailCredentialNeedsUrlError):
+        await service.create_guardrail(user=owner, request=_create(credential="s3cret"))
+
+
+async def test_a_credential_cannot_be_added_to_an_entry_that_has_no_endpoint(async_db: AsyncSession) -> None:
+    """The likelier way in: the entry is stored first and the credential arrives later."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = OrganizationGuardrailService(async_db)
+    created = await service.create_guardrail(user=owner, request=_create())
+
+    with pytest.raises(OrganizationGuardrailCredentialNeedsUrlError):
+        await service.update_guardrail(
+            user=owner, guardrail_id=created.id, request=OrganizationGuardrailUpdate(credential="s3cret")
+        )
+
+
+async def test_clearing_the_endpoint_of_a_credentialed_entry_is_refused(async_db: AsyncSession) -> None:
+    """The other half of the same rule, reached by editing the url rather than the credential."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = OrganizationGuardrailService(async_db)
+    created = await service.create_guardrail(user=owner, request=_create(url=PUBLIC_URL, credential="s3cret"))
+
+    with pytest.raises(OrganizationGuardrailCredentialNeedsUrlError):
+        await service.update_guardrail(user=owner, guardrail_id=created.id, request=OrganizationGuardrailUpdate(url=""))
+
+
+async def test_a_profile_of_only_whitespace_is_refused_rather_than_stored_empty(
+    async_db: AsyncSession,
+) -> None:
+    """Stored blank it would fail `GuardrailConfig` on the request path, after the budget hold.
+
+    That failure is neither an `HTTPException` nor a `SQLAlchemyError`, so it
+    escapes the release arm in `prepare_gateway_tools` and strands the
+    reservation. Refused at the schema instead.
+    """
+    with pytest.raises(ValidationError):
+        _create(profile="   ")
+    with pytest.raises(ValidationError):
+        OrganizationGuardrailUpdate(profile="  ")
+
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    stored = await OrganizationGuardrailService(async_db).create_guardrail(
+        user=owner, request=_create(profile="  pii  ")
+    )
+    assert stored.profile == "pii", "and a padded one is stored trimmed"
 
 
 async def test_adding_a_credential_rechecks_a_url_the_update_never_mentioned(async_db: AsyncSession) -> None:

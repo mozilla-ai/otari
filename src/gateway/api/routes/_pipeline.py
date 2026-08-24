@@ -1702,18 +1702,22 @@ async def _resolve_organization_guardrails(
     be a mandate. The cost is one indexed query on a table an organization edits
     by hand.
 
-    A workspace always has an organization (``workspace.organization_id`` is not
-    nullable), so a `None` here means the preamble resolved no workspace row at
-    all, and there is no organization plane above such a request to consult.
+    All three of the standalone preconditions fail closed together, and
+    ``organization_id`` belongs with the other two rather than beside them.
+    ``workspace.organization_id`` is not nullable, so
+    ``organization_for_workspace_id`` answers ``None`` only when the workspace
+    row itself is missing; such a request still carries a non-``None``
+    ``ctx.workspace_id``, so treating that case as "no organization plane to
+    consult" would skip every mandate silently on the one input that proves the
+    tenancy could not be resolved. All three are invariants today, which is why
+    they refuse rather than fall through: what this guards is an *enforcement*
+    decision, and the day one of them stops holding is the day a request its
+    organization requires a blocking guardrail on would otherwise be served
+    unchecked.
     """
-    if ctx.hybrid_mode or ctx.organization_id is None:
+    if ctx.hybrid_mode:
         return []
-    if ctx.db is None or ctx.workspace_id is None:
-        # Fail closed, for the reason the code-execution arm below does and more
-        # sharply: both are invariants on this path today, and what this guards
-        # is an *enforcement* decision. Falling through would serve a request
-        # its organization requires a blocking guardrail on, unchecked and
-        # silently, on the day one of those invariants stops holding.
+    if ctx.db is None or ctx.workspace_id is None or ctx.organization_id is None:
         raise adapter.error(500, ORGANIZATION_GUARDRAILS_UNRESOLVABLE_DETAIL, ErrorKind.API)
     try:
         return await resolve_organization_guardrails(

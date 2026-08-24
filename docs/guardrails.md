@@ -71,7 +71,7 @@ organization owner or admin), and each one carries:
 | `profile` | The profile on the guardrails service. One entry per profile per organization. |
 | `mode`, `on_unavailable` | The same two settings a request-body entry has, with the same meanings. |
 | `url` | An endpoint of the organization's own. Omit it to use the deployment's `guardrails_url`. |
-| `credential` | Sent to that endpoint as `Authorization: Bearer`. Encrypted at rest, never returned. |
+| `credential` | Sent to that endpoint as `Authorization: Bearer`. Requires `url`, which must then be `https`, so the credential is never sent to the deployment URL, which may be a plain-http sidecar. Encrypted at rest, never returned. |
 | `validate_kwargs` | Forwarded to the guardrails service `/validate` call. |
 | `enabled` | `false` stops the guardrail everywhere without discarding the entry. |
 | `applies_to_all_workspaces` | `true` runs it in every workspace, including any created later. |

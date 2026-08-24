@@ -238,6 +238,37 @@ describe("OrganizationGuardrailsCard", () => {
     ).not.toHaveProperty("url")
   })
 
+  it("keeps one row's unsaved edits when another row is saved", async () => {
+    // Passes with either dependency list: TanStack Query's structural sharing
+    // hands the untouched row back its previous object, so the refetch a save
+    // triggers does not re-run its effect. Kept as the property worth holding
+    // rather than as a regression test for the dependency array.
+    mockApi({
+      guardrails: [
+        organizationGuardrail({
+          profile: "pii",
+          applies_to_all_workspaces: true,
+        }),
+        organizationGuardrail({
+          id: "66666666-6666-6666-6666-666666666666",
+          profile: "prompt-injection",
+          applies_to_all_workspaces: true,
+        }),
+      ],
+    })
+    renderCard()
+
+    const edited = await screen.findByLabelText("Endpoint for prompt-injection")
+    await userEvent.type(edited, "https://half-typed.example")
+    await userEvent.click(screen.getByRole("button", { name: "Save pii" }))
+
+    await waitFor(() =>
+      expect(
+        screen.getByLabelText("Endpoint for prompt-injection"),
+      ).toHaveValue("https://half-typed.example"),
+    )
+  })
+
   it("mandates a new guardrail from the add form", async () => {
     const calls = mockApi()
     renderCard()

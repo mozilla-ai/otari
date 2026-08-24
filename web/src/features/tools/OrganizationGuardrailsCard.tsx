@@ -12,10 +12,12 @@ import {
   useWorkspaces,
 } from "@/shared/api/hooks"
 import {
+  Badge,
   ConfirmButton,
   ErrorBanner,
   errorMessage,
   FilterSelect,
+  INPUT_CLASS,
   InfoBanner,
 } from "@/shared/components/ui"
 
@@ -30,9 +32,6 @@ import {
 // and a credential of its own where the workspace code-execution policy below
 // may not. See `src/gateway/AGENTS.md`.
 
-const INPUT_CLASS =
-  "rounded-md border border-border bg-surface px-2 py-1 text-sm focus:border-accent focus:outline-none disabled:opacity-50"
-
 type Mode = "block" | "monitor"
 
 const MODE_OPTIONS = [
@@ -44,26 +43,6 @@ const UNAVAILABLE_OPTIONS = [
   { value: "block", label: "Refuse the request" },
   { value: "monitor", label: "Serve it unchecked" },
 ]
-
-function Badge({
-  tone,
-  children,
-}: {
-  tone: "muted" | "warn"
-  children: string
-}) {
-  const className =
-    tone === "warn"
-      ? "border-warning bg-warning-subtle text-warning"
-      : "border-border bg-surface text-muted"
-  return (
-    <span
-      className={`rounded-full border px-2 py-0.5 text-xs font-medium ${className}`}
-    >
-      {children}
-    </span>
-  )
-}
 
 /** What an entry's scope reads as, without making the reader count rows. */
 function scopeLabel(
@@ -170,14 +149,32 @@ function GuardrailRow({
 
   // Rehydrate from whatever the server last said, so the row never drifts from
   // the stored entry after a save.
+  //
+  // Keyed on the stored values and not on the `guardrail` object, which is what
+  // `SearchToolsCard` does. Every row mutation invalidates the whole list, so a
+  // refetch re-renders every row; TanStack Query's structural sharing is what
+  // keeps an untouched row's object identity stable through that, and depending
+  // on the values rather than the reference means a half-typed edit in one row
+  // does not hang on that behavior staying true.
+  const storedScope = guardrail.workspace_ids.join(",")
   useEffect(() => {
     setMode(guardrail.mode as Mode)
     setOnUnavailable(guardrail.on_unavailable as Mode)
     setEnabled(guardrail.enabled)
     setEverywhere(guardrail.applies_to_all_workspaces)
-    setScope([...guardrail.workspace_ids])
+    // Rebuilt from the joined form rather than read off the row, so the effect
+    // depends on the scope's *value*: the array is rebuilt by every fetch, and
+    // depending on it would put object identity back in the dependency list.
+    setScope(storedScope === "" ? [] : storedScope.split(","))
     setUrl(guardrail.url ?? "")
-  }, [guardrail])
+  }, [
+    guardrail.mode,
+    guardrail.on_unavailable,
+    guardrail.enabled,
+    guardrail.applies_to_all_workspaces,
+    guardrail.url,
+    storedScope,
+  ])
 
   const busy = update.isPending || remove.isPending
 
@@ -401,7 +398,7 @@ function AddGuardrailForm({
           aria-label="Guardrail credential"
           value={credential}
           disabled={create.isPending}
-          placeholder="credential (optional)"
+          placeholder="credential (needs an https endpoint)"
           onChange={(event) => setCredential(event.target.value)}
           className={`w-full sm:w-52 ${INPUT_CLASS}`}
         />
@@ -433,8 +430,10 @@ function AddGuardrailForm({
       </div>
       <span className="text-xs text-muted">
         The profile has to exist on the guardrails service. A caller can tighten
-        a mandated guardrail but never weaken it, and storing a credential needs{" "}
-        <code className="font-mono">OTARI_SECRET_KEY</code> set on the gateway.
+        a mandated guardrail but never weaken it. A credential needs an https
+        endpoint of its own, since the URL above may be a plain-http sidecar,
+        and <code className="font-mono">OTARI_SECRET_KEY</code> set on the
+        gateway.
       </span>
       {error ? (
         <span className="break-words text-xs text-danger">{error}</span>

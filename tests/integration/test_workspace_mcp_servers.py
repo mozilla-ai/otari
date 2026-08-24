@@ -563,8 +563,16 @@ async def test_deleting_a_workspace_takes_its_servers(async_db: AsyncSession) ->
 # --------------------------------------------------------------------------- #
 
 
-def _request_context(db: AsyncSession, workspace_id: uuid.UUID) -> RequestContext:
-    """A standalone request context of the shape the completion preamble builds."""
+def _request_context(
+    db: AsyncSession, workspace_id: uuid.UUID, organization_id: uuid.UUID | None = None
+) -> RequestContext:
+    """A standalone request context of the shape the completion preamble builds.
+
+    ``organization_id`` is part of that shape: the preamble derives it from the
+    same workspace it resolves, and every gate in `prepare_gateway_tools` now
+    fails closed without it (otari#654), so a context missing it would be
+    refused before reaching what these cases are about.
+    """
     return RequestContext(
         config=GatewayConfig(),
         db=db,
@@ -578,6 +586,7 @@ def _request_context(db: AsyncSession, workspace_id: uuid.UUID) -> RequestContex
         reservation=None,
         started_at=time.monotonic(),
         workspace_id=workspace_id,
+        organization_id=organization_id or uuid.uuid4(),
     )
 
 
@@ -600,7 +609,7 @@ async def test_prepare_gateway_tools_hands_the_tool_loop_the_workspaces_servers(
 
     tool_ctx = await prepare_gateway_tools(
         adapter=chat._ADAPTER,
-        ctx=_request_context(async_db, workspace.id),
+        ctx=_request_context(async_db, workspace.id, organization.id),
         response=Response(),
         guardrails=None,
         guardrail_text="",
@@ -627,7 +636,7 @@ async def test_prepare_gateway_tools_merges_stored_servers_after_inline_ones(asy
 
     tool_ctx = await prepare_gateway_tools(
         adapter=chat._ADAPTER,
-        ctx=_request_context(async_db, workspace.id),
+        ctx=_request_context(async_db, workspace.id, organization.id),
         response=Response(),
         guardrails=None,
         guardrail_text="",
@@ -655,7 +664,7 @@ async def test_prepare_gateway_tools_is_unchanged_when_nothing_is_configured(asy
 
     tool_ctx = await prepare_gateway_tools(
         adapter=chat._ADAPTER,
-        ctx=_request_context(async_db, workspace.id),
+        ctx=_request_context(async_db, workspace.id, organization.id),
         response=Response(),
         guardrails=None,
         guardrail_text="",
@@ -678,7 +687,7 @@ async def test_prepare_gateway_tools_refuses_an_unknown_id(async_db: AsyncSessio
     with pytest.raises(HTTPException) as exc_info:
         await prepare_gateway_tools(
             adapter=chat._ADAPTER,
-            ctx=_request_context(async_db, workspace.id),
+            ctx=_request_context(async_db, workspace.id, organization.id),
             response=Response(),
             guardrails=None,
             guardrail_text="",

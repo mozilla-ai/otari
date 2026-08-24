@@ -573,6 +573,15 @@ def test_an_unresolvable_workspace_refuses_rather_than_searching(
         return None
 
     monkeypatch.setattr("gateway.api.routes._pipeline.resolve_workspace_id", no_workspace)
+    # The organization-guardrail resolve (otari#654) fails closed on the same
+    # condition and runs first, so without this the request would be refused
+    # before the arm under test. Neutralized rather than asserted around,
+    # because this case is about the web-search veto; the guardrail gate has its
+    # own coverage in `test_organization_guardrail_enforcement.py`.
+    monkeypatch.setattr(
+        "gateway.api.routes._pipeline._resolve_organization_guardrails",
+        AsyncMock(return_value=[]),
+    )
 
     response, seen = _post_with_search_patched(client, api_key_header, _REQUEST)
 

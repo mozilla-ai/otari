@@ -2399,7 +2399,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"profile\": \"string\"\n}"
+              "raw": "{\n  \"applies_to_all_workspaces\": true,\n  \"credential\": \"sk-guardrails-...\",\n  \"mode\": \"block\",\n  \"profile\": \"prompt-injection\",\n  \"url\": \"https://guardrails.internal.example/validate\"\n}"
             },
             "description": "Mandate a guardrail across the organization. Organization owners and admins only.\n\nThe guardrail runs on every request from the workspaces it is scoped to, in\naddition to whatever the caller asked for, with the stricter of the two\nsettings applying to a profile both name. Set\n``applies_to_all_workspaces`` for it to cover workspaces created later;\notherwise a new workspace inherits nothing and the entry runs only in the\nworkspaces ``workspace_ids`` lists.",
             "header": [
@@ -2433,7 +2433,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"applies_to_all_workspaces\": false,\n  \"credential\": \"string\",\n  \"enabled\": false,\n  \"mode\": \"block\",\n  \"on_unavailable\": \"block\",\n  \"profile\": \"string\",\n  \"url\": \"string\",\n  \"validate_kwargs\": {},\n  \"workspace_ids\": [\n    \"00000000-0000-0000-0000-000000000000\"\n  ]\n}"
+              "raw": "{\n  \"credential\": \"sk-guardrails-...\",\n  \"mode\": \"monitor\",\n  \"url\": \"https://guardrails.internal.example/validate\"\n}"
             },
             "description": "Change a guardrail's profile, endpoint, credential, modes, or scope.\n\nOrganization owners and admins only. Omitted fields are left as they are;\n``workspace_ids`` replaces the scope whole when sent, and ``url`` and\n``credential`` are cleared by sending an empty string rather than null.",
             "header": [

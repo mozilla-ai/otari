@@ -53,7 +53,7 @@ import uuid
 from dataclasses import dataclass
 from typing import Annotated, Any, Literal
 
-from pydantic import BaseModel, Field, model_validator
+from pydantic import BaseModel, ConfigDict, Field, StringConstraints, model_validator
 from pydantic.json_schema import SkipJsonSchema
 from sqlalchemy import and_, delete, func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -70,6 +70,7 @@ from gateway.services.secret_box import (
 )
 from gateway.services.tenancy.errors import (
     OrganizationGuardrailAlreadyExistsError,
+    OrganizationGuardrailCredentialNeedsUrlError,
     OrganizationGuardrailLimitReachedError,
     OrganizationGuardrailNotFoundError,
     OrganizationGuardrailScopeConflictError,
@@ -82,9 +83,19 @@ from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 
 # What one organization may mandate. Every guardrail in scope for a workspace is
 # one more call the request waits on before the provider is reached, and
-# `run_input_guardrails` runs them one after another, so this bounds latency an
-# organization spends on every request rather than only rows it stores.
-MAX_GUARDRAILS_PER_ORGANIZATION = 25
+# `run_input_guardrails` awaits them one after another with a 30s timeout each,
+# so the number is a fan-out bound and *not* the latency bound an earlier
+# comment here claimed: entries that fail open (monitor, or block with
+# `on_unavailable="monitor"`) each spend their timeout before the next one
+# starts. A fail-closed entry raises on the first failure, so the bad case needs
+# a scope full of observing entries pointed at something unreachable.
+#
+# Chosen to sit near the 8 a single request may carry in its own `guardrails`
+# field, since that is the fan-out this path was already built to absorb. The
+# real fix for the worst case is one admission deadline across the whole set,
+# which would change the shared execution path rather than this plane, so it is
+# deliberately not in otari#654.
+MAX_GUARDRAILS_PER_ORGANIZATION = 10
 
 # The scope list is written whole on every create and update, so without a bound
 # it is the one way to put an unbounded value in this surface's request body.
@@ -110,13 +121,11 @@ class OrganizationGuardrailCreate(BaseModel):
     A guardrail *vendor's* own key is not this: the guardrails service builds
     its guardrails from the operator's YAML and holds those itself.
 
-    The https requirement that `validate_mcp_url` puts on a credential-carrying
-    URL therefore applies to ``url`` and not to the deployment's
-    ``guardrails_url`` fallback, which is deliberate rather than an oversight:
-    the shipped compose file points that at ``http://anyguardrails:8000``, a
-    same-host sidecar, so enforcing it there would make an organization
-    credential unusable on the standard deployment while protecting a hop that
-    does not leave the host.
+    A credential therefore requires ``url``. The deployment's ``guardrails_url``
+    is not necessarily encrypted (the shipped compose file makes it a same-host
+    ``http://`` sidecar) and this row cannot see what it is set to, so an entry
+    that fell back to it could not promise the bearer was sent over https. See
+    `_require_url_for_credential`.
 
     ``on`` is not offered. This plane mandates input-direction checks, which is
     the only direction the request path enforces
@@ -124,9 +133,24 @@ class OrganizationGuardrailCreate(BaseModel):
     store an output-direction mandate would be storing one nothing runs.
     """
 
-    profile: str = Field(
-        min_length=1,
-        max_length=128,
+    # A body that would actually be accepted, which the derived one is not: the
+    # generator fills every string with "string", and this schema refuses that
+    # for `url` (`CreateSearchToolRequest` carries one for the same reason).
+    # Generated samples reach a reader through the OpenAPI spec and the Postman
+    # collection, so an example that fails validation teaches the wrong shape.
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "profile": "prompt-injection",
+                "mode": "block",
+                "url": "https://guardrails.internal.example/validate",
+                "credential": "sk-guardrails-...",
+                "applies_to_all_workspaces": True,
+            }
+        }
+    )
+
+    profile: Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)] = Field(
         description="Profile name configured on the guardrails service, unique within the organization",
     )
     url: str | None = Field(
@@ -138,10 +162,9 @@ class OrganizationGuardrailCreate(BaseModel):
         default=None,
         max_length=8192,
         description=(
-            "Bearer credential for the endpoint this entry is sent to. An entry that names its own "
-            "url must then use https; one that falls back to the deployment's guardrails_url is sent "
-            "wherever the operator pointed that, which is commonly a same-host http sidecar. "
-            "Encrypted at rest, never returned"
+            "Bearer credential for this entry's endpoint. Requires url to be set, and https: "
+            "an entry with no endpoint of its own falls back to the deployment's guardrails_url, "
+            "which is commonly a same-host http sidecar. Encrypted at rest, never returned"
         ),
     )
     mode: Literal["block", "monitor"] = Field(
@@ -196,12 +219,26 @@ class OrganizationGuardrailUpdate(BaseModel):
     ``workspace_ids`` replaces the scope whole when sent; ``[]`` clears it.
     """
 
+    # Same reason as the create body above: a credential requires an https
+    # endpoint, so the derived `"url": "string"` sample would be refused.
+    model_config = ConfigDict(
+        json_schema_extra={
+            "example": {
+                "mode": "monitor",
+                "url": "https://guardrails.internal.example/validate",
+                "credential": "sk-guardrails-...",
+            }
+        }
+    )
+
     # ``SkipJsonSchema[None]`` on the fields backing NOT NULL columns: ``None``
     # is this schema's "not sent" marker and the validator below refuses it as a
     # value, so the published schema must not advertise ``null`` as accepted.
     # Without it the OpenAPI spec and the generated TypeScript client tell a
     # client that ``{"profile": null}`` is valid and the server answers 422.
-    profile: Annotated[str, Field(min_length=1, max_length=128)] | SkipJsonSchema[None] = None
+    profile: (
+        Annotated[str, StringConstraints(strip_whitespace=True, min_length=1, max_length=128)] | SkipJsonSchema[None]
+    ) = None
     url: str | None = Field(default=None, max_length=2048)
     credential: str | None = Field(default=None, max_length=8192)
     mode: Literal["block", "monitor"] | SkipJsonSchema[None] = None
@@ -369,6 +406,25 @@ def _stored_mode(value: str) -> Literal["block", "monitor"]:
     a security control must not have.
     """
     return "monitor" if value == "monitor" else "block"
+
+
+def _require_url_for_credential(url: str | None, has_credential: bool) -> None:
+    """Refuse a credential on an entry that names no endpoint of its own.
+
+    The entry would then be sent to the deployment's ``guardrails_url``, which
+    this repository's own compose file makes ``http://anyguardrails:8000``, so
+    the bearer would cross the wire in clear. Naming the endpoint is what routes
+    it through :func:`_validate_url`, whose ``has_authorization_token`` arm
+    refuses ``http`` outright; requiring one here is what makes the field's
+    "sent over https" contract true rather than conditional on how the operator
+    happened to configure a setting this row cannot see.
+
+    The cost is that an operator wanting to authenticate to the deployment's own
+    guardrails service has to name it here as well. That is a URL they already
+    have, and it has to be https either way, so nothing reachable is lost.
+    """
+    if has_credential and url is None:
+        raise OrganizationGuardrailCredentialNeedsUrlError()
 
 
 async def _validate_url(url: str, *, has_credential: bool) -> None:
@@ -539,6 +595,7 @@ class OrganizationGuardrailService:
 
         url = _blank_to_none(request.url)
         credential = _blank_to_none(request.credential)
+        _require_url_for_credential(url, credential is not None)
         if url is not None:
             await _validate_url(url, has_credential=credential is not None)
         workspace_ids = await self._require_workspaces_in_organization(
@@ -547,7 +604,7 @@ class OrganizationGuardrailService:
 
         guardrail = OrganizationGuardrail(
             organization_id=organization_id,
-            profile=request.profile.strip(),
+            profile=request.profile,
             url=url,
             encrypted_credential=_encrypted(credential) if credential else None,
             mode=request.mode,
@@ -561,7 +618,7 @@ class OrganizationGuardrailService:
             await self.db.flush()
         except IntegrityError as exc:
             await self.db.rollback()
-            raise OrganizationGuardrailAlreadyExistsError(request.profile.strip()) from exc
+            raise OrganizationGuardrailAlreadyExistsError(request.profile) from exc
 
         await self._replace_scope(guardrail.id, workspace_ids)
         await self._commit()
@@ -590,6 +647,10 @@ class OrganizationGuardrailService:
         if "url" in fields and request.url is not None:
             new_url = _blank_to_none(request.url)
         effective_url = new_url if new_url is not _UNSET else guardrail.url
+        # Checked against the *pair* rather than either half, so the two ways in
+        # are both closed: adding a credential to an entry that has no endpoint,
+        # and clearing the endpoint from one that keeps its credential.
+        _require_url_for_credential(effective_url, effective_has_credential)
         if effective_url is not None:
             await _validate_url(effective_url, has_credential=effective_has_credential)
 
@@ -616,7 +677,7 @@ class OrganizationGuardrailService:
         if new_credential is not _UNSET:
             guardrail.encrypted_credential = _encrypted(new_credential) if new_credential else None
         if request.profile is not None:
-            guardrail.profile = request.profile.strip()
+            guardrail.profile = request.profile
         if request.mode is not None:
             guardrail.mode = request.mode
         if request.on_unavailable is not None:

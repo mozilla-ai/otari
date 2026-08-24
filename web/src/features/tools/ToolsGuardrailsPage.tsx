@@ -22,6 +22,7 @@ import {
   ErrorBanner,
   errorMessage,
   FilterSelect,
+  INPUT_CLASS,
   PageHeader,
   PageLoading,
 } from "@/shared/components/ui"
@@ -124,9 +125,6 @@ function SaveToast({ message }: { message: string | null }) {
     </div>
   )
 }
-
-const INPUT_CLASS =
-  "rounded-md border border-border bg-surface px-2 py-1 text-sm focus:border-accent focus:outline-none disabled:opacity-50"
 
 // Every field renders as one grid row with three fixed-width tracks:
 // label | input (16rem) | actions (10rem). Because the input and action tracks
