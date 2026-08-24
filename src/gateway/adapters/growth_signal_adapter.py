@@ -7,7 +7,9 @@ ever reached for want of a growth or support integration.
 """
 
 import uuid
+from collections.abc import Mapping
 from datetime import datetime
+from typing import Any
 
 from fastapi import BackgroundTasks
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -44,6 +46,17 @@ class NullGrowthSignalAdapter:
         event: GrowthActivationEvent,
         user_id: uuid.UUID,
         email: str,
+    ) -> None:
+        return None
+
+    async def record_onboarding_completed(
+        self,
+        *,
+        background_tasks: BackgroundTasks,
+        user_id: uuid.UUID,
+        email: str,
+        answers: Mapping[str, Any],
+        full_name: str | None,
     ) -> None:
         return None
 

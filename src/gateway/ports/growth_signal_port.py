@@ -1,8 +1,8 @@
 """Lifecycle notifications for whichever CRM or support messenger a build runs.
 
 The seam between the core and whichever build tells an outside vendor about a
-user's lifecycle: signup, activation milestones, profile edits, and account
-deletion. The core has no growth-marketing or support-messaging vendor of its
+user's lifecycle: signup, activation milestones, onboarding, profile edits, and
+account deletion. The core has no growth-marketing or support-messaging vendor of its
 own, and that is the point: an operator running Otari serves their own users on
 their own channels, and nothing about those users' lifecycle should reach a
 vendor the deployment never chose. So the core adapter is a Null Object, and an
@@ -22,9 +22,10 @@ shape to move.
 """
 
 import uuid
+from collections.abc import Mapping
 from datetime import datetime
 from enum import StrEnum
-from typing import Protocol
+from typing import Any, Protocol
 
 from fastapi import BackgroundTasks
 
@@ -72,6 +73,33 @@ class GrowthSignalPort(Protocol):
         Callers detect first occurrence themselves, as they already must to
         decide whether to call this at all; an adapter may additionally
         de-duplicate on its own end, so a redundant call is safe.
+        """
+        ...
+
+    async def record_onboarding_completed(
+        self,
+        *,
+        background_tasks: BackgroundTasks,
+        user_id: uuid.UUID,
+        email: str,
+        answers: Mapping[str, Any],
+        full_name: str | None,
+    ) -> None:
+        """Notify that a user completed onboarding, with their raw answers.
+
+        ``answers`` are the validated onboarding answers keyed by question key.
+        The port carries no vendor property mapping: turning an answer into a
+        vendor's object model (a CRM contact property, say) is the adapter's
+        job, so a caller never builds a vendor-shaped property dict itself.
+        That split is the whole reason the answers cross the seam in domain
+        terms.
+
+        Nothing calls this yet, because the questions and the answers they
+        produce are not in this tree: the reconciled tenancy schema carries no
+        onboarding columns (see ``gateway.models.tenancy``). The method is
+        here because the seam is where the split belongs whenever they arrive,
+        and because the answers are an argument rather than a column read, so
+        the port does not wait on the schema.
         """
         ...
 
