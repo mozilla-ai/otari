@@ -3268,6 +3268,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{workspace_id}/web-search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Workspace Web Search Config
+         * @description Read a workspace's web-search configuration.
+         *
+         *     Takes the same role as setting it (an organization owner/admin, or an
+         *     owner/admin of this workspace), because the row describes the workspace's
+         *     posture rather than one member's allowance. A workspace with no row answers
+         *     with the unconfigured shape (``configured: false``), which is the
+         *     deployment's own behavior described in the same shape rather than a 404.
+         */
+        get: operations["get_workspace_web_search_config_v1_workspaces__workspace_id__web_search_get"];
+        /**
+         * Set Workspace Web Search Config
+         * @description Set a workspace's web-search configuration, replacing any existing one.
+         *
+         *     An organization owner/admin, or an owner/admin of this workspace, may write
+         *     it. The configuration can only narrow what the deployment permits: turning
+         *     web search off for the workspace, lowering the result ceiling, and adding to
+         *     the domains a search may not reach. It never turns on a backend the
+         *     deployment has not configured, and it carries no credential.
+         */
+        put: operations["set_workspace_web_search_config_v1_workspaces__workspace_id__web_search_put"];
+        post?: never;
+        /**
+         * Clear Workspace Web Search Config
+         * @description Drop a workspace's configuration, returning it to the deployment's behavior.
+         *
+         *     Idempotent: a workspace that has no configuration is already in the state
+         *     this asks for, so it answers with the unconfigured shape rather than a 404.
+         */
+        delete: operations["clear_workspace_web_search_config_v1_workspaces__workspace_id__web_search_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -8253,6 +8296,81 @@ export interface components {
             description?: string | null;
             /** Name */
             name?: string | null;
+        };
+        /**
+         * WorkspaceWebSearchConfigPublic
+         * @description A workspace's web-search configuration, or the unconfigured one it has without a row.
+         */
+        WorkspaceWebSearchConfigPublic: {
+            /** Allowed Domains */
+            allowed_domains: string[] | null;
+            /** Blocked Domains */
+            blocked_domains: string[] | null;
+            /** Configured */
+            configured: boolean;
+            /** Created At */
+            created_at: string | null;
+            /** Enabled */
+            enabled: boolean;
+            /** Max Results */
+            max_results: number | null;
+            /** Provider Options */
+            provider_options: {
+                [key: string]: unknown;
+            } | null;
+            /** Purpose Hint */
+            purpose_hint: string | null;
+            /** Updated At */
+            updated_at: string | null;
+            /** Web Search Configured */
+            web_search_configured: boolean;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+        };
+        /**
+         * WorkspaceWebSearchConfigUpdate
+         * @description The configuration to store for a workspace, as a whole.
+         *
+         *     ``PUT`` semantics, ported from the hosted ``WorkspaceWebSearchConfigUpdate``:
+         *     what is sent is what the workspace has afterwards, so an omitted field is
+         *     cleared rather than left as it was.
+         */
+        WorkspaceWebSearchConfigUpdate: {
+            /**
+             * Allowed Domains
+             * @description Results are kept only from these domains; intersected with any list the request sends
+             */
+            allowed_domains?: string[] | null;
+            /**
+             * Blocked Domains
+             * @description Results from these domains are dropped; added to any list the request sends
+             */
+            blocked_domains?: string[] | null;
+            /**
+             * Enabled
+             * @description False refuses web search for this workspace
+             */
+            enabled: boolean;
+            /**
+             * Max Results
+             * @description Ceiling on results one search returns; only ever lowers the effective limit, so at most 20
+             */
+            max_results?: number | null;
+            /**
+             * Provider Options
+             * @description Provider-specific knobs forwarded to the search backend; a request's own keys win
+             */
+            provider_options?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Purpose Hint
+             * @description Hint used when a request declares otari_web_search without one of its own
+             */
+            purpose_hint?: string | null;
         };
         /** WorkspacesPublic */
         WorkspacesPublic: {
@@ -13707,6 +13825,103 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Message"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_workspace_web_search_config_v1_workspaces__workspace_id__web_search_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceWebSearchConfigPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_workspace_web_search_config_v1_workspaces__workspace_id__web_search_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceWebSearchConfigUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceWebSearchConfigPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_workspace_web_search_config_v1_workspaces__workspace_id__web_search_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceWebSearchConfigPublic"];
                 };
             };
             /** @description Validation Error */

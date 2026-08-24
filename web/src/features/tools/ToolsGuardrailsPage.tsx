@@ -8,6 +8,7 @@ import type {
 } from "@/client"
 import { SearchToolsCard } from "@/features/tools/SearchToolsCard"
 import { WorkspaceCodeExecutionPolicyCard } from "@/features/tools/WorkspaceCodeExecutionPolicyCard"
+import { WorkspaceWebSearchCard } from "@/features/tools/WorkspaceWebSearchCard"
 import {
   usePricing,
   useSetPricing,
@@ -781,8 +782,14 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
               {/* Directly below the in-loop web-search settings, because a searxng
                 search tool that declares no backend URL of its own inherits the
                 one set just above it. */}
+              {/* The workspace card goes below both, because it narrows the
+                backend set above it and the /v1/search tools beside it: a
+                workspace switched off may use neither. */}
               {service.key === "web_search" ? (
-                <SearchToolsCard onSaved={showToast} />
+                <>
+                  <SearchToolsCard onSaved={showToast} />
+                  <WorkspaceWebSearchCard onSaved={showToast} />
+                </>
               ) : null}
               {/* And directly below the sandbox settings, for the same reason:
                 the workspace policy narrows the deployment-wide sandbox set

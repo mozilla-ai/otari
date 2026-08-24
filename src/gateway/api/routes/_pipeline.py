@@ -94,6 +94,7 @@ from gateway.api.routes._tools import (
     _resolve_sandbox_purpose_hint,
     _web_search_intercept_enabled,
     declares_native_web_search,
+    web_search_max_results_baseline,
 )
 from gateway.core.config import GatewayConfig
 from gateway.core.env import otari_env
@@ -159,12 +160,19 @@ from gateway.services.sandbox_backend import (
 )
 from gateway.services.scoped_budget_service import BudgetScopeRequest
 from gateway.services.secret_box import SecretBoxUnavailableError, SecretDecryptionError
-from gateway.services.tenancy.errors import WorkspaceMcpServerNotFoundError
+from gateway.services.tenancy.errors import (
+    WorkspaceMcpServerNotFoundError,
+    WorkspaceWebSearchDomainsExcludedError,
+)
 from gateway.services.tenancy.org_provider_key_service import cached_org_model_restriction
 from gateway.services.tenancy.workspace_code_execution_policy_service import (
     resolve_workspace_code_execution_policy,
 )
 from gateway.services.tenancy.workspace_mcp_server_service import resolve_workspace_mcp_servers
+from gateway.services.tenancy.workspace_web_search_service import (
+    narrow_web_search_tool_entry,
+    resolve_workspace_web_search_config,
+)
 from gateway.services.tool_usage import (
     MAX_TOOL_NAMES,
     OVERFLOW_TOOL_NAME,
@@ -236,6 +244,7 @@ WEB_SEARCH_NOT_ENABLED_DETAIL = "web search is not enabled for this workspace"
 SANDBOX_NOT_ENABLED_DETAIL = "code execution is not enabled for this workspace"
 MALFORMED_CODE_EXEC_POLICY_DETAIL = "Authorization service returned a malformed code-execution policy"
 CODE_EXEC_POLICY_UNRESOLVABLE_DETAIL = "Code execution policy could not be resolved for this request"
+WEB_SEARCH_CONFIG_UNRESOLVABLE_DETAIL = "Web search configuration could not be resolved for this request"
 SANDBOX_UNREACHABLE_DETAIL = (
     "code_execution sandbox unreachable. Check the sandbox URL in the dashboard's "
     "Tools settings, or OTARI_SANDBOX_URL, and that the container is running."
@@ -1831,10 +1840,14 @@ async def prepare_gateway_tools(
                 raise adapter.error(400, WEB_SEARCH_CONFLICT_DETAIL, ErrorKind.INVALID_REQUEST)
             use_web_search = True
 
-            # Hybrid mode owns the per-workspace web-search policy (whether it's
-            # enabled at all, plus workspace-default max_results / domain filters /
-            # purpose hint / provider_options). Mirrors the mcp_server_ids resolve
-            # above. Precedence is "per-request overrides workspace default":
+            # Both modes carry a per-workspace web-search configuration (whether
+            # it is enabled at all, plus the result ceiling, the domain filters,
+            # the purpose hint and the provider options); they differ only in
+            # where it is read and how it composes with the request.
+            #
+            # Hybrid asks otari.ai, which owns the policy, and applies the
+            # platform's own precedence, "per-request overrides workspace
+            # default":
             #  * top-level keys are applied only when the request didn't supply a
             #    meaningful (truthy) value of its own. An empty list / empty string
             #    reads as "no preference" and falls back to the workspace value
@@ -1843,7 +1856,12 @@ async def prepare_gateway_tools(
             #  * provider_options is shallow-merged so workspace defaults fill the
             #    keys the request omitted while per-request keys still win (rather
             #    than the request's dict replacing the workspace dict wholesale).
-            # Standalone mode has no platform to consult.
+            #
+            # Standalone reads the row from this deployment's own database and
+            # *narrows* with it instead, per the seam settled in #655/#678: the
+            # ceiling is floored, the block-list is added to, and the allow-list
+            # is intersected, so no request can shed a guardrail its workspace
+            # set. `workspace_web_search_service` says why the two differ.
             if ctx.hybrid_mode:
                 assert ctx.user_token is not None  # guaranteed by the hybrid-mode preamble
                 # Forward the platform token only when the search backend IS the
@@ -1871,6 +1889,47 @@ async def prepare_gateway_tools(
                         if isinstance(request_options, dict)
                         else workspace_options
                     )
+            else:
+                # Standalone's counterpart to the resolve above: the configuration
+                # is a row in this deployment's own database, read here at
+                # admission because this is where the request's session is live
+                # and where the values it carries still have somewhere to land.
+                # The workspace comes off the key that authenticated the request,
+                # never off a header; a master-key request resolves to the
+                # deployment's default workspace, so an operator who has narrowed
+                # that workspace is narrowed by it too
+                # (`services/workspace_scope.py`).
+                #
+                # No row means no narrowing, which is what keeps a deployment that
+                # has configured nothing per-workspace behaving exactly as it did.
+                # A row may only narrow: it refuses the tool, lowers the result
+                # ceiling, and adds to the domains a search may not reach. It can
+                # never turn on a backend the deployment has not configured, which
+                # the missing-URL 400 above already settled.
+                if ctx.db is None or ctx.workspace_id is None:
+                    # Fail closed, for the reason the code-execution arm above
+                    # does: both are invariants on this path today, so this is
+                    # unreachable, which is exactly why it refuses rather than
+                    # falling through. What it guards is a *veto*, and skipping
+                    # the read would serve web search to a workspace whose row
+                    # says `enabled=False`, silently, on the day one of those
+                    # invariants stops holding.
+                    raise adapter.error(500, WEB_SEARCH_CONFIG_UNRESOLVABLE_DETAIL, ErrorKind.API)
+                workspace_search = await resolve_workspace_web_search_config(ctx.db, ctx.workspace_id)
+                if workspace_search is not None:
+                    if not workspace_search.enabled:
+                        raise adapter.error(403, WEB_SEARCH_NOT_ENABLED_DETAIL, ErrorKind.PERMISSION)
+                    try:
+                        web_search_tool_entry = narrow_web_search_tool_entry(
+                            web_search_tool_entry,
+                            workspace_search,
+                            # What the request would get with no row at all, so
+                            # a workspace ceiling above the operator's own
+                            # narrows nothing rather than raising it.
+                            baseline_max_results=web_search_max_results_baseline(ctx.config),
+                        )
+                    except WorkspaceWebSearchDomainsExcludedError as exc:
+                        raise adapter.error(403, exc.message, ErrorKind.PERMISSION) from exc
 
         # Inside the try so a rejection releases the budget reservation the
         # request already took, like every other admission failure here.
@@ -1879,9 +1938,10 @@ async def prepare_gateway_tools(
         await release_reservation(ctx)
         raise
     except SQLAlchemyError:
-        # Three reads in this block touch the database (the workspace MCP servers
-        # and the workspace code-execution policy above, and
-        # `_require_tool_pricing`), and a failure in any of them is not an
+        # Four reads in this block touch the database (the workspace MCP servers,
+        # the workspace code-execution policy and the workspace web-search
+        # configuration above, and `_require_tool_pricing`), and a failure in any
+        # of them is not an
         # `HTTPException`, so without this arm it would leave `users.reserved`
         # holding the estimate until the budget's next reset, or forever for a
         # budget with no reset period. The rollback comes first because a failed

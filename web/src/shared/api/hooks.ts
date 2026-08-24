@@ -88,6 +88,7 @@ import type {
   UpdateWorkspaceBudgetDefaultRequest,
   UpdateWorkspaceCodeExecutionPolicyRequest,
   UpdateWorkspaceRequest,
+  UpdateWorkspaceWebSearchConfigRequest,
   UsageBucket,
   UsageCount,
   UsageDeleteResult,
@@ -107,6 +108,7 @@ import type {
   WorkspaceCodeExecutionPolicy,
   WorkspaceMember,
   WorkspaceMemberRole,
+  WorkspaceWebSearchConfig,
 } from "@/client"
 import { ApiError, apiFetch, longRequestSignal } from "@/shared/api/client"
 import { isoAgo } from "@/shared/helpers/timeRange"
@@ -2186,6 +2188,63 @@ export function useClearWorkspaceCodeExecutionPolicy() {
     onSuccess: (_data, { workspaceId }) => {
       void queryClient.invalidateQueries({
         queryKey: [WORKSPACES, workspaceId, "code-execution-policy"],
+      })
+    },
+  })
+}
+
+// A workspace's web-search configuration over the deployment-wide backend. One
+// object or none, so it is a plain read rather than a paged list, and it is
+// nested under the workspaces key for the same reason the code-execution policy
+// next door is.
+export function useWorkspaceWebSearchConfig(workspaceId: string | null) {
+  return useQuery({
+    queryKey: [WORKSPACES, workspaceId, "web-search"],
+    queryFn: () =>
+      apiFetch<WorkspaceWebSearchConfig>(
+        `/v1/workspaces/${encodeURIComponent(workspaceId as string)}/web-search`,
+      ),
+    enabled: workspaceId !== null,
+    staleTime: 60_000,
+  })
+}
+
+export function useSetWorkspaceWebSearchConfig() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      body,
+    }: {
+      workspaceId: string
+      body: UpdateWorkspaceWebSearchConfigRequest
+    }) =>
+      apiFetch<WorkspaceWebSearchConfig>(
+        `/v1/workspaces/${encodeURIComponent(workspaceId)}/web-search`,
+        { method: "PUT", body: JSON.stringify(body) },
+      ),
+    onSuccess: (_data, { workspaceId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: [WORKSPACES, workspaceId, "web-search"],
+      })
+    },
+  })
+}
+
+// Drops the row, which returns the workspace to the deployment's own behavior.
+// Not the same as saving `enabled: true`: that is a stored decision not to
+// narrow, while this is no decision at all.
+export function useClearWorkspaceWebSearchConfig() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ workspaceId }: { workspaceId: string }) =>
+      apiFetch<WorkspaceWebSearchConfig>(
+        `/v1/workspaces/${encodeURIComponent(workspaceId)}/web-search`,
+        { method: "DELETE" },
+      ),
+    onSuccess: (_data, { workspaceId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: [WORKSPACES, workspaceId, "web-search"],
       })
     },
   })

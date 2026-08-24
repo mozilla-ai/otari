@@ -11794,6 +11794,212 @@
         "title": "WorkspaceUpdate",
         "type": "object"
       },
+      "WorkspaceWebSearchConfigPublic": {
+        "description": "A workspace's web-search configuration, or the unconfigured one it has without a row.",
+        "properties": {
+          "allowed_domains": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Domains"
+          },
+          "blocked_domains": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocked Domains"
+          },
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "max_results": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Results"
+          },
+          "provider_options": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Options"
+          },
+          "purpose_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purpose Hint"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "web_search_configured": {
+            "title": "Web Search Configured",
+            "type": "boolean"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace_id",
+          "configured",
+          "web_search_configured",
+          "enabled",
+          "max_results",
+          "purpose_hint",
+          "allowed_domains",
+          "blocked_domains",
+          "provider_options",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "WorkspaceWebSearchConfigPublic",
+        "type": "object"
+      },
+      "WorkspaceWebSearchConfigUpdate": {
+        "description": "The configuration to store for a workspace, as a whole.\n\n``PUT`` semantics, ported from the hosted ``WorkspaceWebSearchConfigUpdate``:\nwhat is sent is what the workspace has afterwards, so an omitted field is\ncleared rather than left as it was.",
+        "properties": {
+          "allowed_domains": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Results are kept only from these domains; intersected with any list the request sends",
+            "title": "Allowed Domains"
+          },
+          "blocked_domains": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Results from these domains are dropped; added to any list the request sends",
+            "title": "Blocked Domains"
+          },
+          "enabled": {
+            "description": "False refuses web search for this workspace",
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "max_results": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 20.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Ceiling on results one search returns; only ever lowers the effective limit, so at most 20",
+            "title": "Max Results"
+          },
+          "provider_options": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Provider-specific knobs forwarded to the search backend; a request's own keys win",
+            "title": "Provider Options"
+          },
+          "purpose_hint": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Hint used when a request declares otari_web_search without one of its own",
+            "title": "Purpose Hint"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "WorkspaceWebSearchConfigUpdate",
+        "type": "object"
+      },
       "WorkspacesPublic": {
         "properties": {
           "count": {
@@ -22556,6 +22762,168 @@
         "summary": "Remove Workspace Provider Key Model Restriction",
         "tags": [
           "provider-keys"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/web-search": {
+      "delete": {
+        "description": "Drop a workspace's configuration, returning it to the deployment's behavior.\n\nIdempotent: a workspace that has no configuration is already in the state\nthis asks for, so it answers with the unconfigured shape rather than a 404.",
+        "operationId": "clear_workspace_web_search_config_v1_workspaces__workspace_id__web_search_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceWebSearchConfigPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Clear Workspace Web Search Config",
+        "tags": [
+          "workspace-web-search"
+        ]
+      },
+      "get": {
+        "description": "Read a workspace's web-search configuration.\n\nTakes the same role as setting it (an organization owner/admin, or an\nowner/admin of this workspace), because the row describes the workspace's\nposture rather than one member's allowance. A workspace with no row answers\nwith the unconfigured shape (``configured: false``), which is the\ndeployment's own behavior described in the same shape rather than a 404.",
+        "operationId": "get_workspace_web_search_config_v1_workspaces__workspace_id__web_search_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceWebSearchConfigPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Workspace Web Search Config",
+        "tags": [
+          "workspace-web-search"
+        ]
+      },
+      "put": {
+        "description": "Set a workspace's web-search configuration, replacing any existing one.\n\nAn organization owner/admin, or an owner/admin of this workspace, may write\nit. The configuration can only narrow what the deployment permits: turning\nweb search off for the workspace, lowering the result ceiling, and adding to\nthe domains a search may not reach. It never turns on a backend the\ndeployment has not configured, and it carries no credential.",
+        "operationId": "set_workspace_web_search_config_v1_workspaces__workspace_id__web_search_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceWebSearchConfigUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceWebSearchConfigPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Set Workspace Web Search Config",
+        "tags": [
+          "workspace-web-search"
         ]
       }
     }

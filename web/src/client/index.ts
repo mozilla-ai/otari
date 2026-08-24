@@ -436,4 +436,10 @@ export type WorkspaceCodeExecutionPolicy =
 export type UpdateWorkspaceCodeExecutionPolicyRequest =
   Schemas["WorkspaceCodeExecutionPolicyUpdate"]
 
+// The per-workspace web-search configuration over the deployment-wide backend;
+// see `src/gateway/services/tenancy/workspace_web_search_service.py`.
+export type WorkspaceWebSearchConfig = Schemas["WorkspaceWebSearchConfigPublic"]
+export type UpdateWorkspaceWebSearchConfigRequest =
+  Schemas["WorkspaceWebSearchConfigUpdate"]
+
 export type * from "./local"

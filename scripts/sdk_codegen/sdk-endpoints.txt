@@ -229,6 +229,14 @@ POST /v1/workspaces/{workspace_id}/activation/dismiss       # dashboard-only
 GET /v1/workspaces/{workspace_id}/code-execution-policy                  # dashboard-only
 PUT /v1/workspaces/{workspace_id}/code-execution-policy                  # dashboard-only
 DELETE /v1/workspaces/{workspace_id}/code-execution-policy               # dashboard-only
+# The workspace's web-search configuration (otari#656) is the same shape of
+# surface for the same reason: whoever administers the workspace decides whether
+# it may search and how far, not the key-holder searching inside it. An SDK
+# caller sees its effect on `otari_web_search` and on `POST /v1/search` (a 403, a
+# lower result ceiling, a domain filter), never the row.
+GET /v1/workspaces/{workspace_id}/web-search                            # dashboard-only
+PUT /v1/workspaces/{workspace_id}/web-search                            # dashboard-only
+DELETE /v1/workspaces/{workspace_id}/web-search                         # dashboard-only
 # Organization-scoped provider keys (otari-ai#1748, otari#643): the same
 # tenancy-admin surface as the organization/workspace rows just above, and
 # excluded for the same reason. An SDK caller acts inside one workspace with a

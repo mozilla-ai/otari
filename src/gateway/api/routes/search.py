@@ -22,7 +22,8 @@ so one Activity filter covers every search regardless of how the tool was
 named.
 
 A request the gateway itself turns away (an unknown or ambiguous tool name, a
-tool the caller's key may not use) writes a usage row too, through the shared
+workspace that has web search switched off, a tool the caller's key may not use)
+writes a usage row too, through the shared
 :func:`gateway.api.routes._pipeline.log_gateway_rejection` the pass-through
 routes use: refused traffic is dropped traffic, and it should be visible in
 Activity and countable as a failure rather than invisible outside the caller's
@@ -54,6 +55,7 @@ from gateway.api.routes._passthrough import (
     resolve_passthrough_user_id,
 )
 from gateway.api.routes._pipeline import (
+    WEB_SEARCH_NOT_ENABLED_DETAIL,
     _elapsed_ms,
     failure_status_code,
     log_gateway_rejection,
@@ -79,6 +81,7 @@ from gateway.services.search_backend import (
     resolve_search_tool,
     run_search,
 )
+from gateway.services.tenancy.workspace_web_search_service import resolve_workspace_web_search_config
 from gateway.services.workspace_scope import organization_for_key_id, workspace_for_key_id
 
 router = APIRouter(prefix="/v1", tags=["search"])
@@ -288,6 +291,27 @@ async def _dispatch_search(
         )
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=tool_error_detail) from exc
 
+    # Resolved before the gates below rather than beside the usage row further
+    # down, because the first of them is a question about the workspace.
+    usage_workspace_id = await workspace_for_key_id(db, api_key_id)
+
+    # The workspace's own web-search switch, the same row `prepare_gateway_tools`
+    # reads before it will serve `otari_web_search`. Enforced here too because a
+    # workspace that has turned web search off has turned it off: leaving this
+    # endpoint open would leave the switch bypassable by any key in that
+    # workspace, which is a policy that fails open. Only the veto applies; the
+    # row's other fields shape the in-loop backend's own request and have no
+    # counterpart in this endpoint's provider adapters.
+    workspace_search = await resolve_workspace_web_search_config(db, usage_workspace_id)
+    if workspace_search is not None and not workspace_search.enabled:
+        await log_rejection(
+            WEB_SEARCH_NOT_ENABLED_DETAIL,
+            row_model=tool.name,
+            row_provider=tool.provider,
+            status_code=status.HTTP_403_FORBIDDEN,
+        )
+        raise HTTPException(status_code=status.HTTP_403_FORBIDDEN, detail=WEB_SEARCH_NOT_ENABLED_DETAIL)
+
     pricing_key = f"{tool.provider}:{tool.name}"
 
     # Model access control (per-key), keyed on the same <provider>:<tool> string
@@ -331,10 +355,6 @@ async def _dispatch_search(
         # so the scope carries the tool's provider as the narrowing axis.
         scope=BudgetScopeRequest(api_key=api_key, provider_instance=tool.provider),
     )
-
-    # Resolved here rather than in the closure below: the builder is
-    # synchronous, and the workspace is fixed for the whole request anyway.
-    usage_workspace_id = await workspace_for_key_id(db, api_key_id)
 
     def usage_row(**overrides: Any) -> UsageLog:
         """Build the row for a search that reached the provider.

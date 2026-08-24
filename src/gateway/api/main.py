@@ -45,6 +45,7 @@ from gateway.api.routes import (
     workspace_code_execution_policy,
     workspace_mcp_servers,
     workspace_member_budget_policies,
+    workspace_web_search,
     workspaces,
 )
 from gateway.core.config import GatewayConfig
@@ -90,6 +91,7 @@ def register_routers(app: FastAPI, config: GatewayConfig) -> None:
     app.include_router(workspace_activation.router)
     app.include_router(workspace_mcp_servers.router)
     app.include_router(workspace_code_execution_policy.router)
+    app.include_router(workspace_web_search.router)
     app.include_router(org_provider_keys.org_router)
     app.include_router(org_provider_keys.workspace_router)
     app.include_router(budgets.router)

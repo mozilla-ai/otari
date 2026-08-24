@@ -23,6 +23,7 @@ import type {
   WorkspaceBudgetDefault,
   WorkspaceCodeExecutionPolicy,
   WorkspaceMember,
+  WorkspaceWebSearchConfig,
 } from "@/client"
 
 export function usageTotals(overrides: Partial<UsageTotals> = {}): UsageTotals {
@@ -346,6 +347,27 @@ export function workspaceCodeExecutionPolicy(
     default_purpose_hint: null,
     max_iterations: null,
     exec_timeout_s: null,
+    created_at: null,
+    updated_at: null,
+    ...overrides,
+  }
+}
+
+export function workspaceWebSearchConfig(
+  overrides: Partial<WorkspaceWebSearchConfig> = {},
+): WorkspaceWebSearchConfig {
+  return {
+    workspace_id: "44444444-4444-4444-4444-444444444444",
+    // The zero-rows state, which is what a workspace has until somebody sets
+    // one: nothing configured, nothing narrowed.
+    configured: false,
+    web_search_configured: true,
+    enabled: true,
+    max_results: null,
+    purpose_hint: null,
+    allowed_domains: null,
+    blocked_domains: null,
+    provider_options: null,
     created_at: null,
     updated_at: null,
     ...overrides,
