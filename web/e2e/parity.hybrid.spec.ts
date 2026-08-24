@@ -45,6 +45,10 @@ test.describe("hybrid deployment", () => {
       // renders the landing page rather than a sign-in screen.
       sign_in_methods: [],
       management_url: MANAGEMENT_URL,
+      // Never frozen, because the freeze is on a sign-in this deployment does
+      // not serve: a hybrid gateway mints no session for maintenance mode to
+      // refuse. Its control plane owns that, as it owns the sign-in itself.
+      maintenance_mode: false,
       // Its control plane sends the mail that carries links back to it.
       mail_ready: false,
     })
