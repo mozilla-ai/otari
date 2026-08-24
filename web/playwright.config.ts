@@ -34,6 +34,12 @@ const SCREENSHOT_VIEWPORTS = {
 
 const SCREENSHOT_THEMES = ["light", "dark"] as const
 
+// The second gateway this suite boots, in hybrid mode (e2e/serve-hybrid.sh). The
+// port is e2e/otari.hybrid.yml's, and the host is 127.0.0.1 rather than
+// localhost so the page's own `window.location.origin` matches this string,
+// which the hybrid spec asserts against.
+const HYBRID_BASE_URL = "http://127.0.0.1:8010"
+
 // One project per cell. The theme reaches the app through localStorage (see
 // e2e/screenshots/fixtures.ts, which reads it back off the project name);
 // `colorScheme` here is the OS-level preference underneath it, set to match so
@@ -127,6 +133,8 @@ export default defineConfig({
   // serve.sh leaves behind (it asserts the first-run screens), so anything that
   // writes usage has to come after it; the parity specs in turn all read one
   // seeded fixture, so they hang off the seed rather than each re-creating it.
+  // A fourth, `hybrid`, stands apart from all three: it has a gateway of its own
+  // (see `webServer` below), so it shares neither the database nor the order.
   projects: [
     {
       name: "onboarding",
@@ -147,22 +155,61 @@ export default defineConfig({
       // dropped from the run silently, with no warning and a green exit.
       // The screenshot suite is excluded because it has its own six projects
       // below; without this it would also run here, once, unthemed.
-      testIgnore: [/dashboard\.spec\.ts/, /screenshots\//],
+      // The hybrid spec is excluded because it belongs to a different
+      // deployment: collected here it would run against the standalone gateway,
+      // where every one of its assertions is false.
+      testIgnore: [
+        /dashboard\.spec\.ts/,
+        /screenshots\//,
+        /parity\.hybrid\.spec\.ts/,
+      ],
       dependencies: ["seed"],
       use: { ...devices["Desktop Chrome"] },
     },
+    {
+      // The same dashboard bundle, served by a gateway attached to a control
+      // plane rather than owning its own data. What a hybrid deployment may
+      // show an operator is decided by the server, so asserting it needs a
+      // second deployment and not a second page: hence its own gateway, its own
+      // base URL, and no dependency on the three projects above (it has no
+      // database to seed and shares none of their state).
+      name: "hybrid",
+      testMatch: /parity\.hybrid\.spec\.ts/,
+      // Read-only, unlike the behavioral projects that mutate one shared
+      // database, so a retry is safe here for the same reason it is on the
+      // screenshot projects, and absorbs CI contention.
+      retries: process.env.CI ? 1 : 0,
+      use: { ...devices["Desktop Chrome"], baseURL: HYBRID_BASE_URL },
+    },
     ...screenshotProjects,
   ],
-  webServer: {
-    command: "bash e2e/serve.sh",
-    url: "http://127.0.0.1:8000/health",
-    // Opt-in only: by default always start a fresh gateway (serve.sh resets the
-    // DB), so a stray server already on :8000 can't silently skip the reset and
-    // leave the serial flows running against dirty state. Set
-    // PLAYWRIGHT_REUSE_SERVER=1 for fast local iteration against a running one.
-    reuseExistingServer: !!process.env.PLAYWRIGHT_REUSE_SERVER,
-    timeout: 120_000,
-    stdout: "pipe",
-    stderr: "pipe",
-  },
+  // Two gateways, both booted before any project runs. The hybrid one is up for
+  // the screenshot projects too, which never visit it; it opens no database and
+  // costs a process, which is cheaper than making its lifetime conditional on
+  // which projects were selected.
+  webServer: [
+    {
+      command: "bash e2e/serve.sh",
+      url: "http://127.0.0.1:8000/health",
+      // Opt-in only: by default always start a fresh gateway (serve.sh resets the
+      // DB), so a stray server already on :8000 can't silently skip the reset and
+      // leave the serial flows running against dirty state. Set
+      // PLAYWRIGHT_REUSE_SERVER=1 for fast local iteration against a running one.
+      reuseExistingServer: !!process.env.PLAYWRIGHT_REUSE_SERVER,
+      timeout: 120_000,
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+    {
+      command: "bash e2e/serve-hybrid.sh",
+      url: `${HYBRID_BASE_URL}/health`,
+      // Same opt-in as above, for consistency rather than for the reset: this
+      // gateway holds no state to leave dirty, but a stray process on :8010 in a
+      // mode of its own would be a confusing thing to run against.
+      reuseExistingServer: !!process.env.PLAYWRIGHT_REUSE_SERVER,
+      timeout: 120_000,
+      stdout: "pipe",
+      stderr: "pipe",
+    },
+  ],
 })

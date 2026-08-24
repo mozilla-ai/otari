@@ -1,0 +1,25 @@
+# Gateway config for the hybrid half of the Playwright E2E suite: a second
+# gateway, attached to a control plane, booted beside the standalone one (see
+# web/playwright.config.ts) and serving the same built bundle as its landing
+# page. What the `hybrid` project asserts against.
+#
+# No database_url and no master_key, because a hybrid gateway opens neither: it
+# holds no management state and issues no session. Leaving them out is part of
+# what is under test.
+mode: "hybrid"
+host: "127.0.0.1"
+port: 8010
+platform:
+  # The standalone gateway this suite already boots, standing in for otari.ai.
+  # Reachability is one HTTP GET that has to answer below 500 (see
+  # _check_platform_reachability), so a live gateway is a faithful stand-in and
+  # the landing page's connection row is asserted in its "Connected" state
+  # rather than only in its failure one.
+  base_url: "http://127.0.0.1:8000"
+  # Named explicitly rather than left to the default (otari.ai's
+  # /utils/health-check/), which this stand-in does not serve. It would still
+  # report reachable, since a 404 is below 500, so without this the assertion
+  # would pass for the wrong reason.
+  health_path: "/health"
+  # The link the landing page offers, and the value /v1/bootstrap publishes.
+  management_url: "https://otari.ai"
