@@ -36,6 +36,7 @@ import { TopBarActions } from "@/app/nav/TopBarActions"
 import type { NavItem, NavPath } from "@/app/nav/types"
 import { useNavVisibility } from "@/app/nav/useNavVisibility"
 import { WorkspaceSwitcher } from "@/app/nav/WorkspaceSwitcher"
+import { EntitlementResolver } from "@/app/overlayEntitlementResolver"
 import { TelemetryIdentity } from "@/app/TelemetryIdentity"
 import { UpdatePrompt } from "@/app/UpdatePrompt"
 import { PricingWarning } from "@/features/models/PricingWarning"
@@ -357,7 +358,34 @@ function NavGroup({
   )
 }
 
+/**
+ * The shell, with the entitlement axis resolved above it.
+ *
+ * Two components rather than one because a provider is invisible to the
+ * component that renders it: `AppShellChrome` reads the axis through
+ * `useNavVisibility`, so a resolver mounted inside its body would answer every
+ * consumer below it and none of the ones that decide the rail. Mounted here it
+ * sits above both halves the axis gates, the navigation and the `<Outlet>` the
+ * routes render into, which is what the seam is for. The base default renders
+ * its children unchanged, so this build's shell is the shell it was.
+ *
+ * Here rather than in `__root.tsx` or beside `DeploymentProvider` in `App.tsx`,
+ * because everything that reads the axis is inside the shell and because the
+ * resolver a superset build swaps in issues a query: it belongs behind the auth
+ * gate `App.tsx` puts the router behind, not in front of it. So the surfaces
+ * that render instead of the shell (the sign-in screen, the public auth pages,
+ * the hybrid landing) are deliberately outside it: none of them gates on a
+ * capability, and a visitor without a session has nothing to resolve one from.
+ */
 export function AppShell() {
+  return (
+    <EntitlementResolver>
+      <AppShellChrome />
+    </EntitlementResolver>
+  )
+}
+
+function AppShellChrome() {
   // Navigation is data: the shell renders whatever the registry declares and
   // decides visibility from the deployment and the entitlements,
   // rather than each page asking what it is running against.

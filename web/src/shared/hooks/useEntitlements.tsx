@@ -15,7 +15,10 @@
  * it grants every capability the base ships and reports every overlay-only one
  * as absent. An overlay, or a later release that resolves this from the server,
  * supplies its own answer by rendering `EntitlementProvider` above the shell;
- * nothing that reads a capability changes.
+ * nothing that reads a capability changes. `app/overlayEntitlementResolver.tsx`
+ * is where it does that: the seam the shell mounts above the navigation and the
+ * routes, whose base default renders its children unchanged so that everything
+ * below it falls through to the constant here.
  *
  * The hook returns `{ entitled, isLoading }` rather than a bare boolean,
  * matching `otari-ai/frontend/src/shared/hooks`, where it is a TanStack query.
