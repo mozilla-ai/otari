@@ -113,6 +113,7 @@ from gateway.models.entities import ModelPricing, UsageLog
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import McpServerConfig
 from gateway.models.money import to_usd
+from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
 from gateway.rate_limit import RateLimitInfo, check_rate_limit
 from gateway.services.budget_service import (
     ZERO,
@@ -142,7 +143,7 @@ from gateway.services.pricing_service import (
     price_tool_calls,
     pricing_required_but_missing,
 )
-from gateway.services.provider_kwargs import ResolvedProvider, resolve_provider_selector
+from gateway.services.provider_kwargs import ResolvedProvider, credential_ladder_exhausted, resolve_provider_selector
 from gateway.services.routing import (
     BudgetState,
     CompiledPlan,
@@ -254,6 +255,11 @@ ORGANIZATION_GUARDRAILS_UNRESOLVABLE_DETAIL = "Organization guardrails could not
 ORGANIZATION_GUARDRAIL_CREDENTIAL_UNREADABLE_DETAIL = (
     "A configured organization guardrail's credential could not be read"
 )
+# The bound ``ModelProviderPort`` adapter answered with an upstream any-llm has
+# no implementation for, so there is nothing to dispatch against. Deliberately
+# says nothing about hosted inference or about which adapter answered: that is a
+# defect in this build, not something a caller can act on.
+HOSTED_CREDENTIAL_UNUSABLE_DETAIL = "No upstream provider is available to serve this model"
 SANDBOX_UNREACHABLE_DETAIL = (
     "code_execution sandbox unreachable. Check the sandbox URL in the dashboard's "
     "Tools settings, or OTARI_SANDBOX_URL, and that the container is running."
@@ -701,6 +707,7 @@ async def resolve_dispatch_provider(
     model_selector: str,
     *,
     adapter: FormatAdapter[Any, Any],
+    model_provider: ModelProviderPort,
 ) -> ResolvedProvider:
     """Get the ``ResolvedProvider`` for dispatch, reusing the one computed for
     the pricing/budget gate (``ctx.resolved_provider``) instead of resolving
@@ -712,11 +719,16 @@ async def resolve_dispatch_provider(
     check couldn't parse the selector (an unparseable selector has no
     pricing, but dispatch still needs its own resolution attempt so any-llm's
     own error surfaces instead of a stale gate-check failure).
+
+    Whichever of the two produced it, the result then passes through
+    :func:`_serve_from_hosted_credential`, which is where ``model_provider`` is
+    asked to serve a candidate no stored credential could. That is the last rung
+    and never displaces an earlier one; see that function.
     """
     if ctx.resolved_provider is not None:
-        return ctx.resolved_provider
+        return await _serve_from_hosted_credential(ctx, ctx.resolved_provider, adapter=adapter, port=model_provider)
     try:
-        return resolve_provider_selector(config, model_selector, ctx.user_id, workspace_id=ctx.workspace_id)
+        resolved = resolve_provider_selector(config, model_selector, ctx.user_id, workspace_id=ctx.workspace_id)
     except (ValueError, AnyLLMError) as exc:
         # The preamble deliberately tolerated this selector, so a reservation is
         # already held: refund it, then record the drop. The hold is not always
@@ -750,6 +762,119 @@ async def resolve_dispatch_provider(
             started_at=ctx.started_at,
         )
         _raise_for_unresolvable_model(model_selector, exc)
+    return await _serve_from_hosted_credential(ctx, resolved, adapter=adapter, port=model_provider)
+
+
+async def _serve_from_hosted_credential(
+    ctx: RequestContext,
+    resolved: ResolvedProvider,
+    *,
+    adapter: FormatAdapter[Any, Any],
+    port: ModelProviderPort,
+) -> ResolvedProvider:
+    """Ask ``ModelProviderPort`` to serve a candidate no stored credential could.
+
+    The last rung of the credential ladder and only the last. An organization's
+    own key, a stored provider instance and a ``config.yml`` entry are all
+    resolved upstream of here (``services/provider_kwargs.py``), and a candidate
+    any of them served comes back untouched, so BYO precedence is unchanged: the
+    port is asked when the ladder is exhausted and never before it. The core
+    adapter answers ``None`` for every candidate, which is what makes a build
+    with no overlay behave exactly as it did, rung for rung.
+
+    On a resolved credential the dispatch is re-keyed onto
+    ``response_provider``, the upstream that usage and telemetry name (which the
+    port documents as possibly differing from the public name the caller asked
+    for), and carries that credential alone: the ladder produced nothing to
+    merge with.
+    """
+    if ctx.organization_id is None:
+        # The port keys its access decision on the organization alone, so a
+        # request with no organization (no workspace resolved for it) has
+        # nothing to ask about.
+        return resolved
+    if ctx.plan is not None and len(ctx.plan.attempts) > 1:
+        # A multi-candidate plan dispatches from ``ctx.plan.attempts``, whose
+        # kwargs the routing compiler built; what this function returns is not
+        # what those candidates are called with. Asking anyway would meter a
+        # resolve that never serves, so a routed chain keeps the ladder's own
+        # answer for now. Reaching the port from the compiler is separate work:
+        # the compiler is synchronous and documented as doing no I/O.
+        return resolved
+    if not credential_ladder_exhausted(resolved.provider, resolved.kwargs):
+        return resolved
+
+    try:
+        credential = await port.resolve_hosted_credential(
+            organization_id=ctx.organization_id,
+            workspace_id=ctx.workspace_id,
+            # The public name the caller addressed, which is the instance rather
+            # than the implementation; ``response_provider`` comes back naming
+            # whichever upstream actually serves it.
+            provider=resolved.instance,
+            model=resolved.model,
+        )
+    except HostedAccessDeniedError as exc:
+        # The port owns this refusal precisely so a caller need not name the
+        # adapter that raised it, and the adapter's own wording is internal, so
+        # the response carries the same detail an organization-scoped model
+        # restriction already uses. A reservation is held by this point, so it
+        # is released here exactly as the unresolvable-selector branch above
+        # does; nothing outside this function refunds for it.
+        logger.info(
+            "Hosted inference refused for %s:%s workspace=%s: %s",
+            resolved.instance,
+            resolved.model,
+            exc.workspace_id,
+            exc,
+        )
+        denied_detail = model_not_allowed_detail(f"{resolved.instance}:{resolved.model}")
+        await release_reservation(ctx)
+        await log_gateway_rejection(
+            db=ctx.db,
+            log_writer=ctx.log_writer,
+            api_key_id=ctx.api_key_id,
+            user_id=ctx.user_id,
+            model=resolved.model,
+            provider=resolved.instance,
+            endpoint=adapter.endpoint,
+            detail=denied_detail,
+            status_code=status.HTTP_403_FORBIDDEN,
+            started_at=ctx.started_at,
+        )
+        raise adapter.error(403, denied_detail, ErrorKind.PERMISSION) from exc
+
+    if credential is None:
+        # This build has no hosted path for the candidate. The candidate is
+        # genuinely unserved, which is what it already was, so it goes to
+        # any-llm uncredentialed and fails there exactly as it does today.
+        return resolved
+
+    try:
+        upstream = LLMProvider(credential.response_provider)
+    except ValueError as exc:
+        # The adapter named an upstream any-llm does not implement, so nothing
+        # can be dispatched. That is a defect in this build rather than caller
+        # input: log it in full, refund, and surface a non-leaky 502.
+        logger.error(
+            "ModelProviderPort returned unknown response_provider %r for %s:%s",
+            credential.response_provider,
+            resolved.instance,
+            resolved.model,
+        )
+        await release_reservation(ctx)
+        raise adapter.error(502, HOSTED_CREDENTIAL_UNUSABLE_DETAIL, ErrorKind.API) from exc
+
+    kwargs: dict[str, Any] = {"api_key": credential.api_key}
+    if credential.api_base is not None:
+        kwargs["api_base"] = credential.api_base
+    return ResolvedProvider(
+        instance=credential.response_provider,
+        provider=upstream,
+        model=resolved.model,
+        kwargs=kwargs,
+        alias=resolved.alias,
+    )
 
 
 async def _bill_vision_side_call(

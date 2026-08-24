@@ -121,7 +121,7 @@ flowchart LR
     SVC --> TP
 ```
 
-> **Where the ports are today.** `src/gateway/ports/` holds five of them, `ModelProviderPort`, `BillingPort`, `EntitlementPort`, `GrowthSignalPort` and `TelemetryStoragePort`, each with a working core adapter in `src/gateway/adapters/`. Only the last has core callers: the OTLP receiver, the telemetry read endpoints, and the purge paths all resolve it. The other four are still the seam's mechanism rather than its surface, so the choices they describe (which credential to use, when to meter) are made by the mode switch and the hand-wired dependencies described next. The remaining ports in the table above arrive as they gain callers.
+> **Where the ports are today.** `src/gateway/ports/` holds five of them, `ModelProviderPort`, `BillingPort`, `EntitlementPort`, `GrowthSignalPort` and `TelemetryStoragePort`, each with a working core adapter in `src/gateway/adapters/`. Two have core callers: `TelemetryStoragePort` is resolved by the OTLP receiver, the telemetry read endpoints and the purge paths, and `ModelProviderPort` is asked on the standalone dispatch path (`resolve_dispatch_provider` in `api/routes/_pipeline.py`) for a candidate the credential ladder could not serve, after an organization's key, a stored instance and `config.yml` have all missed. A routed multi-candidate chain does not reach it yet: those candidates are credentialed by the routing compiler, which is synchronous and does no I/O. The other three are still the seam's mechanism rather than its surface, so the choices they describe (which credential to use, when to meter) are made by the mode switch and the hand-wired dependencies described next. The remaining ports in the table above arrive as they gain callers.
 
 ## How a port is resolved
 

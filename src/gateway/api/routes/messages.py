@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import (
+    ModelProviderPortDep,
     get_config,
     get_db_if_needed,
     get_log_writer,
@@ -491,6 +492,7 @@ async def create_message(
     db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
+    model_provider: ModelProviderPortDep,
 ) -> dict[str, Any] | StreamingResponse:
     """Anthropic Messages API-compatible endpoint.
 
@@ -615,7 +617,9 @@ async def create_message(
                 raise_all_streaming_attempts_failed(_ADAPTER, exc, route)
 
         # Standalone: single attempt streaming.
-        resolved = await resolve_dispatch_provider(ctx, config, request.model, adapter=_ADAPTER)
+        resolved = await resolve_dispatch_provider(
+            ctx, config, request.model, adapter=_ADAPTER, model_provider=model_provider
+        )
         call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
         return await run_single_attempt_stream(
             adapter=_ADAPTER,
@@ -659,7 +663,9 @@ async def create_message(
         return result.model_dump(exclude_none=True)
 
     # Standalone non-stream path
-    resolved = await resolve_dispatch_provider(ctx, config, request.model, adapter=_ADAPTER)
+    resolved = await resolve_dispatch_provider(
+        ctx, config, request.model, adapter=_ADAPTER, model_provider=model_provider
+    )
     call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
     result = await run_standalone_non_stream(
         adapter=_ADAPTER,

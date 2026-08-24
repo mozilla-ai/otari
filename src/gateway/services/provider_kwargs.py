@@ -79,6 +79,22 @@ def keyless_placeholder_api_key(provider: LLMProvider, api_base: Any, api_key: A
     return None
 
 
+def credential_ladder_exhausted(provider: LLMProvider, kwargs: dict[str, Any]) -> bool:
+    """Whether nothing this gateway holds can credential a call to ``provider``.
+
+    True when :func:`get_provider_kwargs` produced nothing at all for the
+    candidate (no organization-scoped key, no stored instance, no ``config.yml``
+    entry, and so no keyless placeholder either) *and* the provider's own SDK
+    environment variable is unset, which any-llm would otherwise fall back to
+    before raising. The env check is the same one the keyless placeholder makes,
+    so both agree on what counts as a credential already in hand.
+
+    For a caller that has somewhere else to ask once every rung has missed; the
+    ladder itself is unchanged and still the only thing consulted first.
+    """
+    return not kwargs and not _provider_env_key_present(provider)
+
+
 def get_provider_kwargs(
     config: GatewayConfig,
     provider: LLMProvider,

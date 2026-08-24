@@ -12,7 +12,7 @@ These tests cover:
 - resolve_dispatch_provider returns cached provider when ctx.resolved_provider is set
 """
 
-from unittest.mock import MagicMock, patch
+from unittest.mock import AsyncMock, MagicMock, patch
 
 import pytest
 from any_llm.exceptions import AnyLLMError
@@ -71,7 +71,9 @@ async def test_resolve_dispatch_provider_returns_cached() -> None:
     cached = MagicMock()
     ctx = _make_ctx(resolved_provider=cached)
     with patch("gateway.api.routes._pipeline.resolve_provider_selector") as mock_rps:
-        result = await resolve_dispatch_provider(ctx, _make_config(), "openai:gpt-4o", adapter=MagicMock())
+        result = await resolve_dispatch_provider(
+            ctx, _make_config(), "openai:gpt-4o", adapter=MagicMock(), model_provider=AsyncMock()
+        )
     assert result is cached
     mock_rps.assert_not_called()
 
@@ -85,7 +87,9 @@ async def test_resolve_dispatch_provider_unparseable_raises_400() -> None:
         side_effect=ValueError("Invalid model format"),
     ):
         with pytest.raises(HTTPException) as exc_info:
-            await resolve_dispatch_provider(ctx, _make_config(), "nosuchmodel", adapter=MagicMock())
+            await resolve_dispatch_provider(
+                ctx, _make_config(), "nosuchmodel", adapter=MagicMock(), model_provider=AsyncMock()
+            )
     assert exc_info.value.status_code == 400
     assert "nosuchmodel" in exc_info.value.detail
 
@@ -99,7 +103,9 @@ async def test_resolve_dispatch_provider_unknown_provider_raises_400() -> None:
         side_effect=AnyLLMError("Unsupported provider"),
     ):
         with pytest.raises(HTTPException) as exc_info:
-            await resolve_dispatch_provider(ctx, _make_config(), "nobody:model", adapter=MagicMock())
+            await resolve_dispatch_provider(
+                ctx, _make_config(), "nobody:model", adapter=MagicMock(), model_provider=AsyncMock()
+            )
     assert exc_info.value.status_code == 400
     assert "nobody:model" in exc_info.value.detail
 
@@ -113,6 +119,8 @@ async def test_resolve_dispatch_provider_fresh_resolution_succeeds() -> None:
         "gateway.api.routes._pipeline.resolve_provider_selector",
         return_value=fresh,
     ) as mock_rps:
-        result = await resolve_dispatch_provider(ctx, _make_config(), "openai:gpt-4o", adapter=MagicMock())
+        result = await resolve_dispatch_provider(
+            ctx, _make_config(), "openai:gpt-4o", adapter=MagicMock(), model_provider=AsyncMock()
+        )
     assert result is fresh
     mock_rps.assert_called_once()
