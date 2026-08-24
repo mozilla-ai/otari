@@ -2,8 +2,12 @@ import { Button, Card, Input, Label, Link, TextField } from "@heroui/react"
 import { useState } from "react"
 import { useAuth } from "@/features/auth/AuthContext"
 import type { SignInCredential } from "@/shared/api/client"
-import { ApiError, createSession } from "@/shared/api/client"
+import { ApiError, createSession, signInWithPasskey } from "@/shared/api/client"
 import { errorMessage } from "@/shared/components/ui"
+import {
+  PasskeyCancelledError,
+  supportsPasskeys,
+} from "@/shared/helpers/webauthn"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 import {
   analyticsErrorCode,
@@ -237,8 +241,10 @@ function LabelRow({
  * case this screen does not serve: it offers the master-key box, and they sign
  * in by calling `POST /v1/auth/session` until the operator claims it.
  *
- * The OAuth buttons and the passkey affordances are still #651's and #652's,
- * and are absent rather than disabled: their backends have not landed.
+ * A passkey signs in beside the form rather than instead of it (otari#652),
+ * offered only when the gateway publishes `passkey` *and* this browser can run
+ * the ceremony. The OAuth buttons are still #651's, and are absent rather than
+ * disabled: that backend has not landed.
  *
  * Three decisions here are load-bearing rather than cosmetic, and each carries
  * its own note where it is made: the card is anchored instead of centered, a
@@ -266,6 +272,11 @@ export function Login() {
   // caller who needs a resend being left without one.
   const offersSignup = mail_ready
   const offersRecovery = mail_ready && usesPassword
+  // Two independent conditions, and both have to hold. The gateway publishes
+  // `passkey` only while some credential could actually answer, and a browser
+  // that cannot run the ceremony would turn the button into a dead end.
+  const offersPasskey =
+    sign_in_methods.includes("passkey") && supportsPasskeys()
 
   const [masterKey, setMasterKey] = useState("")
   const [isKeyVisible, setIsKeyVisible] = useState(false)
@@ -274,6 +285,11 @@ export function Login() {
   const [error, setError] = useState<unknown>(null)
   const [errorField, setErrorField] = useState<CredentialField | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  // Separate from `isSubmitting` because the two say different things while
+  // they are true: the form's button reads "Signing in…", and this one has to
+  // say the browser is waiting on an authenticator, which is a wait the person
+  // has to act on rather than one they watch.
+  const [isPasskeyPending, setIsPasskeyPending] = useState(false)
 
   const clearError = () => {
     if (error) {
@@ -326,6 +342,11 @@ export function Login() {
    */
   const authenticationMethod = (credential: SignInCredential) =>
     "masterKey" in credential ? "master_key" : "password"
+
+  // The third value the other two are drawn from `SignInCredential` for. A
+  // passkey sign-in carries no credential object to derive it from: the whole
+  // point is that nothing is typed, so the method is named rather than read.
+  const PASSKEY_METHOD = "passkey"
 
   const readCredential = (): SignInCredential | null => {
     if (usesPassword) {
@@ -414,6 +435,65 @@ export function Login() {
       setError(caught)
     } finally {
       setIsSubmitting(false)
+    }
+  }
+
+  /**
+   * Sign in with a passkey: options, the browser ceremony, then the assertion.
+   *
+   * A dismissed prompt clears back to the resting state and says nothing. It is
+   * not a refused credential, and the person who pressed Escape does not need
+   * the screen to tell them what they just did.
+   *
+   * A refusal lands on the credential row above the button, where the form's
+   * own refusals land, for the same reason: it is about the credential rather
+   * than about one box.
+   */
+  const submitPasskey = async () => {
+    if (isSubmitting || isSigningOut || isPasskeyPending) {
+      return
+    }
+    setError(null)
+    setErrorField(null)
+    setIsPasskeyPending(true)
+    try {
+      const result = await signInWithPasskey()
+      if (result.ok) {
+        recordEvent(TELEMETRY_EVENTS.LOGIN_SUCCESS, {
+          authentication_method: PASSKEY_METHOD,
+        })
+        login()
+      } else {
+        recordEvent(TELEMETRY_EVENTS.LOGIN_FAILED, {
+          authentication_method: PASSKEY_METHOD,
+          error_code: analyticsStatusCode(result.status),
+        })
+        fail(
+          usesPassword ? "password" : "masterKey",
+          result.message ?? "That passkey did not sign you in.",
+        )
+      }
+    } catch (caught) {
+      // A dismissed prompt is recorded as its own outcome rather than as a
+      // failure or not at all: it is the most common way this button ends, and
+      // counting it as a failure would make the passkey path look broken while
+      // dropping it would hide how often people back out of the sheet.
+      if (caught instanceof PasskeyCancelledError) {
+        recordEvent(TELEMETRY_EVENTS.LOGIN_FAILED, {
+          authentication_method: PASSKEY_METHOD,
+          error_code: "passkey_cancelled",
+        })
+        return
+      }
+      recordEvent(TELEMETRY_EVENTS.LOGIN_FAILED, {
+        authentication_method: PASSKEY_METHOD,
+        error_code: analyticsErrorCode(caught),
+        status: caught instanceof ApiError ? caught.status : undefined,
+      })
+      setErrorField(usesPassword ? "password" : "masterKey")
+      setError(caught)
+    } finally {
+      setIsPasskeyPending(false)
     }
   }
 
@@ -656,6 +736,34 @@ export function Login() {
                   : "Sign in"}
             </Button>
           </form>
+
+          {offersPasskey ? (
+            <div className="flex flex-col gap-3">
+              {/* A rule with the word on it, rather than a bare divider: the
+                  passkey is an alternative to the form above, not a second step
+                  of it, and an unlabeled line reads as the latter. */}
+              <div
+                className="flex items-center gap-3 text-xs text-muted"
+                aria-hidden
+              >
+                <span className="h-px flex-1 bg-border" />
+                or
+                <span className="h-px flex-1 bg-border" />
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                fullWidth
+                isDisabled={isSubmitting || isSigningOut}
+                onPress={() => void submitPasskey()}
+                className="h-11"
+              >
+                {isPasskeyPending
+                  ? "Waiting for your passkey…"
+                  : "Use a passkey"}
+              </Button>
+            </div>
+          ) : null}
 
           <div className="flex flex-col items-center gap-3">
             <p className="text-center text-xs text-balance text-muted">

@@ -5,6 +5,8 @@
 // POST /v1/auth/session, and is never written to browser storage: it lives in
 // the sign-in form's state until the request goes out and is gone on reload.
 
+import { getPasskeyAssertion } from "@/shared/helpers/webauthn"
+
 export class ApiError extends Error {
   status: number
 
@@ -145,6 +147,76 @@ export async function createSession(
     throw new ApiError(response.status, await extractErrorMessage(response))
   }
   return { ok: true }
+}
+
+// Sign in with a passkey: two calls with a browser ceremony between them.
+//
+// Hand-written here beside `createSession`, and for the same reason: `apiFetch`
+// treats a 401 as an expired session and bounces to the sign-in screen, which
+// is exactly wrong on the screen somebody is signing in *from*. A refused
+// passkey comes back as `ok: false` carrying the gateway's own message.
+//
+// A dismissed prompt is not a refusal and is not reported as one: the ceremony
+// throws `PasskeyCancelledError`, which the caller distinguishes.
+export async function signInWithPasskey(): Promise<SignInResult> {
+  const options = await publicPost("/v1/auth/webauthn/authenticate/options")
+  if (!options.ok) {
+    return { ok: false, message: options.message, status: options.status }
+  }
+  const assertion = await getPasskeyAssertion(
+    options.body as Parameters<typeof getPasskeyAssertion>[0],
+  )
+  const verified = await publicPost("/v1/auth/webauthn/authenticate", {
+    credential: assertion,
+  })
+  return verified.ok
+    ? { ok: true }
+    : { ok: false, message: verified.message, status: verified.status }
+}
+
+// One unauthenticated POST, with the sign-in screen's error handling: a 401 or
+// 403 is the gateway's answer rather than an exception, and anything else is a
+// failure the screen cannot explain away.
+async function publicPost(
+  path: string,
+  body?: unknown,
+): Promise<{
+  ok: boolean
+  message?: string
+  status?: number
+  body?: unknown
+}> {
+  let response: Response
+  try {
+    response = await fetch(path, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    })
+  } catch (error) {
+    if (isTimeout(error)) {
+      throw new ApiError(0, TIMEOUT_MESSAGE)
+    }
+    throw new ApiError(0, "Network error: could not reach the gateway.")
+  }
+  if (response.status === 401 || response.status === 403) {
+    // The status travels with the refusal for the reason `SignInResult.status`
+    // documents: the caller records which refusal happened without touching the
+    // message, which is the gateway's wording and the one part that must not be.
+    return {
+      ok: false,
+      message: await extractErrorMessage(response),
+      status: response.status,
+    }
+  }
+  if (!response.ok) {
+    throw new ApiError(response.status, await extractErrorMessage(response))
+  }
+  return { ok: true, body: await response.json() }
 }
 
 // Best-effort server-side sign-out: revokes the cookie's session and expires

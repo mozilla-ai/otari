@@ -44,6 +44,8 @@ import type {
   OrganizationContext,
   OrganizationMember,
   OrganizationPricingOverride,
+  Passkey,
+  PasskeysResponse,
   PasswordResponse,
   PricingRefreshPreview,
   PricingResponse,
@@ -52,6 +54,7 @@ import type {
   RankCandidatesRequest,
   RankCandidatesResponse,
   ReencryptProviderCredentialsResult,
+  RenamePasskeyRequest,
   RequestPasswordResetResponse,
   ResendVerificationResponse,
   ResetPasswordRequest,
@@ -113,6 +116,7 @@ import type {
 } from "@/client"
 import { ApiError, apiFetch, longRequestSignal } from "@/shared/api/client"
 import { isoAgo } from "@/shared/helpers/timeRange"
+import { createPasskey } from "@/shared/helpers/webauthn"
 
 const MODELS = "models"
 const PRICING = "pricing"
@@ -158,6 +162,10 @@ const WORKSPACES = "workspaces"
 // every one of those ticks invalidate (or be invalidated by) the workspace list
 // and its rosters.
 const ACTIVATION = "workspace-activation"
+// The signed-in identity's own passkeys. Its own key and not a child of any
+// organization key: a passkey belongs to a person, not to the organization they
+// happen to be acting in, and switching organizations does not change the list.
+const PASSKEYS = "passkeys"
 
 // How often an open tab asks whether the app it is running is still the one the
 // gateway serves. Cheap (a hash of one small file) and only while the tab is
@@ -712,6 +720,95 @@ export function useSetPassword() {
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_MEMBERS] })
+    },
+  })
+}
+
+/**
+ * The signed-in identity's own passkeys, for the account page.
+ *
+ * Only ever the caller's own: the endpoint scopes to the session's identity, so
+ * there is nothing to pass and nothing to filter here.
+ *
+ * `NO_RETRY` because the two ways this fails are both settled answers rather
+ * than blips: a deployment with no relying party configured refuses with a 503
+ * naming the setting, and that will refuse again on a retry.
+ */
+export function usePasskeys() {
+  return useQuery({
+    queryKey: [PASSKEYS],
+    queryFn: () => apiFetch<PasskeysResponse>("/v1/auth/webauthn/credentials"),
+    staleTime: 60_000,
+    ...NO_RETRY,
+  })
+}
+
+/**
+ * Register a passkey: two calls with a browser ceremony between them.
+ *
+ * The whole ceremony is one mutation rather than two hooks and a component
+ * holding the options in state. The options are useless on their own, they
+ * expire, and the challenge they carry is spent by the second call, so exposing
+ * the halves separately would let a component keep something that is already
+ * void.
+ *
+ * A dismissed prompt throws `PasskeyCancelledError` out of `createPasskey`, and
+ * is deliberately left to reach the caller: it is not a failed registration and
+ * the card says nothing about it.
+ *
+ * Registering the first passkey is also what makes the gateway start publishing
+ * `passkey` in `sign_in_methods`. That correction is not made here: the
+ * deployment bootstrap is a context rather than a query, so it is reported by
+ * the card through `useOfferPasskeySignIn`, exactly as claiming a deployment is
+ * reported through `useRetireMasterKeySignIn` from `PasswordCard`.
+ */
+export function useRegisterPasskey() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (name: string | undefined) => {
+      const options = await apiFetch<Record<string, unknown>>(
+        "/v1/auth/webauthn/register/options",
+        { method: "POST" },
+      )
+      const credential = await createPasskey(
+        options as Parameters<typeof createPasskey>[0],
+      )
+      return apiFetch<Passkey>("/v1/auth/webauthn/register", {
+        method: "POST",
+        body: JSON.stringify({ credential, name }),
+      })
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [PASSKEYS] })
+    },
+  })
+}
+
+/** Relabel one of the caller's passkeys, which is all that is editable. */
+export function useRenamePasskey() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      apiFetch<Passkey>(`/v1/auth/webauthn/credentials/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name } satisfies RenamePasskeyRequest),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [PASSKEYS] })
+    },
+  })
+}
+
+/** Remove one of the caller's passkeys. */
+export function useDeletePasskey() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<void>(`/v1/auth/webauthn/credentials/${id}`, {
+        method: "DELETE",
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [PASSKEYS] })
     },
   })
 }

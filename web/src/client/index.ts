@@ -86,6 +86,19 @@ export type RequestPasswordResetResponse =
 export type ResetPasswordRequest = Schemas["ResetPasswordRequest"]
 
 // ---------------------------------------------------------------------------
+// Passkeys (otari#652)
+//
+// The two ceremony payloads are deliberately absent. A ceremony's options and
+// the browser's answer are W3C shapes the gateway passes through as free-form
+// objects, and the only consumer is `navigator.credentials`, which types them
+// itself through the DOM lib. Naming a second, looser copy of them here would
+// make it possible to pass the wrong one.
+// ---------------------------------------------------------------------------
+export type Passkey = Schemas["WebAuthnCredentialPublic"]
+export type PasskeysResponse = Schemas["WebAuthnCredentialsPublic"]
+export type RenamePasskeyRequest = Schemas["WebAuthnCredentialUpdate"]
+
+// ---------------------------------------------------------------------------
 // Usage and analytics
 // ---------------------------------------------------------------------------
 export type UsageEntry = Schemas["UsageEntry"]

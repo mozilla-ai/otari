@@ -29,7 +29,7 @@ function Mounted({
   maintenanceMode = false,
 }: {
   children: React.ReactNode
-  signInMethods?: ("master_key" | "password")[]
+  signInMethods?: ("master_key" | "password" | "passkey")[]
   mailReady?: boolean
   maintenanceMode?: boolean
 }) {
@@ -747,5 +747,157 @@ describe("the telemetry the sign-in screen records", () => {
         error_code: "http_503",
       })
     })
+  })
+})
+describe("Login with a passkey", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+    // A successful sign-in is remembered in localStorage, so without this the
+    // next test in this block mounts already authenticated and renders no form
+    // at all. The block above clears it for the same reason.
+    window.localStorage.clear()
+  })
+
+  // A browser that can run the ceremony. `supportsPasskeys` is read on render,
+  // so this has to be stubbed before one.
+  function stubAuthenticator(get: ReturnType<typeof vi.fn>) {
+    vi.stubGlobal("PublicKeyCredential", function PublicKeyCredential() {})
+    vi.stubGlobal("navigator", {
+      ...globalThis.navigator,
+      credentials: { get },
+    })
+  }
+
+  function assertion() {
+    return {
+      id: "Y3JlZA",
+      rawId: new Uint8Array([1, 2, 3]).buffer,
+      type: "public-key",
+      response: {
+        clientDataJSON: new Uint8Array([4, 5]).buffer,
+        authenticatorData: new Uint8Array([6, 7]).buffer,
+        signature: new Uint8Array([8, 9]).buffer,
+        userHandle: null,
+      },
+      getClientExtensionResults: () => ({}),
+    }
+  }
+
+  function mockCeremony(verify: () => Response) {
+    return vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation((input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url === "/v1/auth/webauthn/authenticate/options") {
+          return Promise.resolve(jsonResponse({ challenge: "Y2hhbGxlbmdl" }))
+        }
+        if (url === "/v1/auth/webauthn/authenticate") {
+          return Promise.resolve(verify())
+        }
+        // Anything else the shell asks for (the build poll, say) answers
+        // benignly rather than throwing: a throw here surfaces as an unhandled
+        // rejection that fails whichever test happens to run next, which is a
+        // failure with nothing to do with the one being written.
+        return Promise.resolve(jsonResponse({}))
+      })
+  }
+
+  it("is not offered when the gateway does not publish the method", () => {
+    stubAuthenticator(vi.fn())
+    render(
+      <Mounted signInMethods={["password"]}>
+        <Harness />
+      </Mounted>,
+    )
+    expect(
+      screen.queryByRole("button", { name: "Use a passkey" }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("is not offered in a browser that cannot run the ceremony", () => {
+    vi.stubGlobal("PublicKeyCredential", undefined)
+    render(
+      <Mounted signInMethods={["password", "passkey"]}>
+        <Harness />
+      </Mounted>,
+    )
+    // Published by the gateway, but the button would be a dead end here.
+    expect(
+      screen.queryByRole("button", { name: "Use a passkey" }),
+    ).not.toBeInTheDocument()
+    // The form it sits beside is unaffected.
+    expect(screen.getByLabelText("Email")).toBeInTheDocument()
+  })
+
+  it("signs in and leaves the password form in place beside it", async () => {
+    const get = vi.fn().mockResolvedValue(assertion())
+    stubAuthenticator(get)
+    mockCeremony(() =>
+      jsonResponse({
+        expires_at: "2026-08-25T10:00:00Z",
+        user_id: "11111111-1111-1111-1111-111111111111",
+        active_organization_id: "22222222-2222-2222-2222-222222222222",
+      }),
+    )
+    const user = userEvent.setup()
+    render(
+      <Mounted signInMethods={["password", "passkey"]}>
+        <Harness />
+      </Mounted>,
+    )
+
+    // Additive: the passkey never replaces the credential form.
+    expect(screen.getByLabelText("Email")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Use a passkey" }))
+
+    expect(await screen.findByText("SIGNED IN")).toBeInTheDocument()
+    expect(get).toHaveBeenCalled()
+  })
+
+  it("reports the gateway's refusal without signing in", async () => {
+    stubAuthenticator(vi.fn().mockResolvedValue(assertion()))
+    mockCeremony(() =>
+      jsonResponse({ detail: "That passkey did not sign you in" }, 401),
+    )
+    const user = userEvent.setup()
+    render(
+      <Mounted signInMethods={["password", "passkey"]}>
+        <Harness />
+      </Mounted>,
+    )
+
+    await user.click(screen.getByRole("button", { name: "Use a passkey" }))
+
+    expect(
+      await screen.findByText("That passkey did not sign you in"),
+    ).toBeInTheDocument()
+    expect(screen.queryByText("SIGNED IN")).not.toBeInTheDocument()
+  })
+
+  it("says nothing when the prompt is dismissed", async () => {
+    const get = vi
+      .fn()
+      .mockRejectedValue(new DOMException("denied", "NotAllowedError"))
+    stubAuthenticator(get)
+    mockCeremony(() => jsonResponse({}, 200))
+    const user = userEvent.setup()
+    render(
+      <Mounted signInMethods={["password", "passkey"]}>
+        <Harness />
+      </Mounted>,
+    )
+
+    await user.click(screen.getByRole("button", { name: "Use a passkey" }))
+
+    await waitFor(() => expect(get).toHaveBeenCalled())
+    // Pressing Escape is a decision, not a refused credential, so the screen
+    // returns to its resting state with nothing said.
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Use a passkey" }),
+      ).toBeInTheDocument(),
+    )
+    expect(screen.queryByText(/did not sign you in/)).not.toBeInTheDocument()
   })
 })

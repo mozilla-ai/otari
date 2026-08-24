@@ -157,12 +157,18 @@ Three more things to know before you do it:
   the one you claimed from if you claimed with `curl`.
 
 Signup and password reset by email have since landed, so a member an admin adds
-by address can set a password of their own; OAuth and passkey sign-in are the
-rest of this track and are not here yet. Setting one claims that member's
+by address can set a password of their own. Setting one claims that member's
 account and not the deployment, so it does not retire master-key sign-in: only
-the operator identity's own password does that. See
+the operator identity's own password does that. **Account settings** also
+manages
+passkeys: sign in with your device instead of typing a password, once the
+deployment knows its own address (`public_base_url`, or `webauthn_rp_id`). A
+passkey is added to an identity that can already sign in rather than being a way
+in of its own, and it never replaces the password. OAuth sign-in is the rest of
+this track. See
 [Access control](access-control.md#dashboard-sessions-and-identity) for the full
-picture.
+picture, including why a passkey is bound to one domain and what happens if that
+domain changes.
 
 ### 6. Add a provider
 
