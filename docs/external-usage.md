@@ -232,6 +232,33 @@ cache-read and cache-write rates apply when configured. The result is an
 API-rate estimate, not an invoice or a subscription charge. Configure prices with
 `POST /v1/pricing` (set `effective_at` at or before the events you import).
 
+Organization rate overrides apply here too, resolved in the same order a live
+request resolves them: the importing key's organization first
+(`POST /v1/organizations/me/pricing`), then the deployment price list, then the
+default pricing dataset. The organization comes off the workspace the importing
+key belongs to, never off the request body. Because the timestamp that decides is
+the event's own, an override created today does not reprice usage from before its
+`effective_from`: backfill an old batch and it settles at whatever rate was in
+force when the usage happened.
+
+**Importing with the master key prices at the default workspace's organization.**
+The master key is not bound to a workspace, so an import made with it lands in
+the default workspace the same way any other deployment-wide write does, and it
+is that workspace's organization whose overrides apply. On a deployment running
+more than one organization, import each organization's usage with a key
+belonging to it; a master-key import of another organization's usage will price
+at the default organization's rates, not that organization's own.
+
+**A row's cost is settled by the import that created it.** Ingest is idempotent
+on `(source, source_event_id)`, so re-submitting a batch does not recost the rows
+already stored, and changing a rate afterwards does not reach back either. Rows
+imported before an override existed therefore keep the price they were imported
+at, and an organization that adds its first override can see two unit costs for
+one model in cost analytics: the old rows at the deployment rate, the new ones at
+its own. To bring the old rows into line, recost them with
+`POST /v1/usage/set-price`, which takes explicit per-1M rates and touches
+imported rows only.
+
 Pricing is **optional** for imported usage. `require_pricing` is a
 budget-enforcement safety gate, and imported usage is budget-exempt, so a model
 with no configured price is not rejected: the row lands with `cost: null` and you

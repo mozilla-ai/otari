@@ -25,6 +25,7 @@ from sqlmodel import SQLModel
 import gateway.models  # noqa: F401  (registers every table on the shared metadata)
 from gateway.models.entities import ModelPricing, OrganizationModelPricing
 from gateway.models.tenancy import Organization
+from gateway.services.external_usage_service import _load_pricing_index, _resolve_pricing
 from gateway.services.organization_pricing_service import (
     OrganizationPricingService,
     validate_period,
@@ -639,5 +640,271 @@ def test_the_deployment_price_list_also_prefers_the_canonical_tool_key() -> None
         # Both resolve the canonical row: 1_000_000 / 1e6 == $1.00 per call.
         assert gate.input_price_per_million == 1_000_000.0
         assert total == 1.0
+
+    _run(scenario)
+
+
+# =============================================================================
+# The import path (external usage ingest)
+#
+# `external_usage_service` resolves a batch's rates from a preloaded index rather
+# than one `find_model_pricing` per event, so it states the resolution order a
+# second time. These pin that the second statement is the same rule, and that it
+# reads the event's own timestamp rather than the import's.
+# =============================================================================
+
+
+async def _imported_rate(
+    session: AsyncSession,
+    organization_id: uuid.UUID | None,
+    as_of: datetime,
+    *,
+    provider: str = "openai",
+    model: str = "gpt-4o",
+) -> float | None:
+    """The input rate an event at ``as_of`` would be imported at."""
+    index = await _load_pricing_index(session, {(provider, model)}, organization_id)
+    pricing = _resolve_pricing(index, provider, model, as_of)
+    return None if pricing is None else float(pricing.input_price_per_million)
+
+
+async def _requested_rate(
+    session: AsyncSession,
+    organization_id: uuid.UUID | None,
+    as_of: datetime,
+    *,
+    provider: str = "openai",
+    model: str = "gpt-4o",
+) -> float | None:
+    """The input rate a live request at ``as_of`` would be billed at."""
+    pricing = await find_model_pricing(session, provider, model, as_of=as_of, organization_id=organization_id)
+    return None if pricing is None else float(pricing.input_price_per_million)
+
+
+def test_an_imported_event_prices_at_the_organization_rate() -> None:
+    """The definition of done: imported usage stops pricing at the global rate."""
+
+    async def scenario(session: AsyncSession) -> None:
+        organization_id = await _organization(session)
+        await _deployment_price(session)
+        await _override(session, organization_id)
+
+        assert await _imported_rate(session, organization_id, _NOW) == _OVERRIDE_INPUT_RATE
+
+    _run(scenario)
+
+
+def test_an_imported_event_without_an_override_prices_exactly_as_before() -> None:
+    """The unchanged half: no override, and the deployment list still decides."""
+
+    async def scenario(session: AsyncSession) -> None:
+        organization_id = await _organization(session)
+        await _deployment_price(session)
+
+        assert await _imported_rate(session, organization_id, _NOW) == _DEPLOYMENT_INPUT_RATE
+        # And the ``None`` guard: unreachable from ingest itself, since
+        # ``workspace.organization_id`` is NOT NULL, but it must never reach the
+        # override table for any caller that does pass it.
+        assert await _imported_rate(session, None, _NOW) == _DEPLOYMENT_INPUT_RATE
+
+    _run(scenario)
+
+
+def test_an_imported_event_prices_at_the_rate_effective_for_its_own_timestamp() -> None:
+    """A rate that changed between the event and its import uses the older one.
+
+    The line the platform's ingest retirement (mozilla-ai/otari-ai#1750) depends
+    on. Getting it wrong is silent: a backfill would land costed at whatever rate
+    happened to be in force on the day someone ran the import, with nothing
+    failing to say so and no second import to correct it (ingest is idempotent,
+    so a row's cost is settled by the import that created it).
+    """
+
+    async def scenario(session: AsyncSession) -> None:
+        organization_id = await _organization(session)
+        await _deployment_price(session)
+        changed_at = _NOW - timedelta(days=5)
+        await _override(
+            session,
+            organization_id,
+            rate=1.0,
+            effective_from=_NOW - timedelta(days=10),
+            effective_to=changed_at,
+        )
+        await _override(session, organization_id, rate=2.0, effective_from=changed_at)
+
+        # The event is a week old; the import is happening at _NOW, under the
+        # newer rate.
+        assert await _imported_rate(session, organization_id, _NOW - timedelta(days=7)) == 1.0
+        assert await _imported_rate(session, organization_id, _NOW) == 2.0
+        # Half-open, the same as everywhere else: the boundary instant belongs to
+        # the period that starts on it.
+        assert await _imported_rate(session, organization_id, changed_at) == 2.0
+        assert await _imported_rate(session, organization_id, changed_at - timedelta(seconds=1)) == 1.0
+
+    _run(scenario)
+
+
+def test_an_imported_event_after_the_last_period_ends_falls_back() -> None:
+    """``effective_to`` is exclusive, and here nothing succeeds the period it ends.
+
+    The adjacent-period case above cannot show this: when a later period starts on
+    the same instant, an inclusive and an exclusive ``effective_to`` both land on
+    the later period anyway. With no successor they differ, and an inclusive one
+    would keep charging a retired rate for the instant it retired.
+    """
+
+    async def scenario(session: AsyncSession) -> None:
+        organization_id = await _organization(session)
+        await _deployment_price(session)
+        ended_at = _NOW - timedelta(days=1)
+        await _override(
+            session,
+            organization_id,
+            effective_from=_NOW - timedelta(days=5),
+            effective_to=ended_at,
+        )
+
+        just_before = ended_at - timedelta(seconds=1)
+        assert await _imported_rate(session, organization_id, just_before) == _OVERRIDE_INPUT_RATE
+        assert await _imported_rate(session, organization_id, ended_at) == _DEPLOYMENT_INPUT_RATE
+        # And the request path agrees, which is the point of stating the rule twice.
+        assert await _requested_rate(session, organization_id, ended_at) == _DEPLOYMENT_INPUT_RATE
+
+    _run(scenario)
+
+
+def test_an_imported_event_predating_every_override_falls_back() -> None:
+    """Before the first period there is no override, not the earliest one."""
+
+    async def scenario(session: AsyncSession) -> None:
+        organization_id = await _organization(session)
+        await _deployment_price(session)
+        await _override(session, organization_id, effective_from=_NOW - timedelta(days=2))
+
+        assert await _imported_rate(session, organization_id, _NOW - timedelta(days=3)) == _DEPLOYMENT_INPUT_RATE
+
+    _run(scenario)
+
+
+def test_an_imported_event_does_not_price_at_another_organizations_rate() -> None:
+    """The tenant boundary holds on the import path too.
+
+    The organization is resolved from the workspace the importing key named, so
+    an importer cannot reach a rate it does not own; this covers the resolution
+    itself refusing an organization it was not given.
+    """
+
+    async def scenario(session: AsyncSession) -> None:
+        theirs = await _organization(session, "theirs")
+        mine = await _organization(session, "mine")
+        await _deployment_price(session)
+        await _override(session, theirs, rate=0.01)
+
+        assert await _imported_rate(session, mine, _NOW) == _DEPLOYMENT_INPUT_RATE
+
+    _run(scenario)
+
+
+def test_an_imported_event_resolves_an_override_on_the_legacy_slash_key() -> None:
+    """Both key spellings are candidates here, as they are in find_model_pricing."""
+
+    async def scenario(session: AsyncSession) -> None:
+        organization_id = await _organization(session)
+        await _deployment_price(session)
+        await _override(session, organization_id, model_key="openai/gpt-4o")
+
+        assert await _imported_rate(session, organization_id, _NOW) == _OVERRIDE_INPUT_RATE
+
+    _run(scenario)
+
+
+def test_an_override_on_either_spelling_outranks_the_deployment_row() -> None:
+    """Order is override-then-deployment, not per-key override-then-deployment.
+
+    ``find_model_pricing`` asks for an override across every candidate key at
+    once and only then reads the deployment list, so a legacy-spelled override
+    beats a canonically-spelled deployment row. Resolving key by key instead
+    would invert that, and the same event would price differently depending on
+    which path saw it.
+    """
+
+    async def scenario(session: AsyncSession) -> None:
+        organization_id = await _organization(session)
+        await _deployment_price(session)  # canonical `openai:gpt-4o`
+        await _override(session, organization_id, model_key="openai/gpt-4o")
+
+        assert await _imported_rate(session, organization_id, _NOW) == _OVERRIDE_INPUT_RATE
+        assert await _requested_rate(session, organization_id, _NOW) == _OVERRIDE_INPUT_RATE
+
+    _run(scenario)
+
+
+def test_the_canonical_override_wins_over_the_legacy_one_on_both_paths() -> None:
+    """Key preference, not whichever period happened to be written later."""
+
+    async def scenario(session: AsyncSession) -> None:
+        organization_id = await _organization(session)
+        await _deployment_price(session)
+        await _override(session, organization_id, rate=4.0, model_key="openai:gpt-4o")
+        await _override(session, organization_id, rate=9.0, model_key="openai/gpt-4o")
+
+        assert await _imported_rate(session, organization_id, _NOW) == 4.0
+        assert await _requested_rate(session, organization_id, _NOW) == 4.0
+
+    _run(scenario)
+
+
+@pytest.mark.parametrize("offset_days", [-3, -1, 0, 1, 3, 7])
+def test_the_import_path_and_the_request_path_agree_at_every_offset(offset_days: int) -> None:
+    """One event, two paths, one rate, whatever the timestamp.
+
+    The guard the second statement of the resolution order needs: the SQL form
+    (`_find_organization_override`) and the in-memory form
+    (`resolve_organization_override`) are different code, and only a test that
+    runs both over the same rows keeps them one rule.
+    """
+
+    async def scenario(session: AsyncSession) -> None:
+        organization_id = await _organization(session)
+        await _deployment_price(session)
+        await _override(
+            session,
+            organization_id,
+            rate=1.0,
+            effective_from=_NOW - timedelta(days=6),
+            effective_to=_NOW - timedelta(days=2),
+        )
+        await _override(session, organization_id, rate=2.0, effective_from=_NOW)
+
+        as_of = _NOW + timedelta(days=offset_days)
+        assert await _imported_rate(session, organization_id, as_of) == await _requested_rate(
+            session, organization_id, as_of
+        )
+
+    _run(scenario)
+
+
+def test_the_import_path_does_not_persist_a_resolved_override() -> None:
+    """The transient-``ModelPricing`` contract, on the path that writes rows.
+
+    Ingest builds ``UsageLog`` rows and commits them in the same session it
+    resolved pricing in, so an override that attached to the session would be
+    flushed into ``model_pricing`` as a deployment-wide price by that commit.
+    """
+
+    async def scenario(session: AsyncSession) -> None:
+        organization_id = await _organization(session)
+        await _override(session, organization_id)
+        await session.commit()
+
+        index = await _load_pricing_index(session, {("openai", "gpt-4o")}, organization_id)
+        pricing = _resolve_pricing(index, "openai", "gpt-4o", _NOW)
+        assert pricing is not None
+        assert pricing not in session
+        await session.commit()
+
+        stored = (await session.execute(ModelPricing.__table__.select())).all()
+        assert stored == []
 
     _run(scenario)

@@ -2,12 +2,13 @@
 
 Subscription-backed agents (e.g. Claude Code) never route through the gateway, so
 their usage is invisible to Otari. This service accepts normalized, content-free
-usage events, prices them at the effective configured rate for the event's
-timestamp, and records them as ``usage_logs`` rows with a ``source`` provenance
-tag. Imported rows are attributed to a user and carry their real (API-equivalent)
-cost, but are always ``counts_toward_budget=False``: retrospective usage cannot be
-reserved, so it is recorded and shown in cost analytics without ever gating or
-mutating ``users.spend``.
+usage events, prices them at the rate effective for the event's own timestamp
+(the importing workspace's organization override where it has one, otherwise the
+deployment price list), and records them as ``usage_logs`` rows with a ``source``
+provenance tag. Imported rows are attributed to a user and carry their real
+(API-equivalent) cost, but are always ``counts_toward_budget=False``:
+retrospective usage cannot be reserved, so it is recorded and shown in cost
+analytics without ever gating or mutating ``users.spend``.
 
 Idempotency: rows are keyed by ``(source, source_event_id)`` (a unique constraint).
 Re-submitting a batch counts already-present events as duplicates and never creates
@@ -18,6 +19,7 @@ completions, and tool payloads are rejected by the request schema, not stored.
 import uuid
 from datetime import datetime
 from decimal import Decimal
+from typing import NamedTuple
 
 from fastapi import HTTPException, status
 from pydantic import BaseModel, ConfigDict, Field, field_validator
@@ -29,11 +31,14 @@ from gateway.core.metered_pricing import BillableUsage, ChargeLine, billable_usa
 from gateway.log_config import logger
 from gateway.models.entities import APIKey, ModelPricing, UsageLog, User
 from gateway.services.pricing_service import (
+    OverridePeriod,
     default_model_pricing,
     default_pricing_enabled,
+    load_organization_override_index,
     normalize_effective_at,
+    resolve_organization_override,
 )
-from gateway.services.workspace_scope import resolve_workspace_id
+from gateway.services.workspace_scope import organization_for_workspace_id, resolve_workspace_id
 
 # Bounds. Batch size mirrors the /v1/usage list `limit` cap; the error list is
 # capped so one bad batch can't return an unbounded payload; the IN() list is
@@ -200,17 +205,39 @@ def _model_keys(provider: str, model: str) -> list[str]:
     return [f"{provider}:{model}", f"{provider}/{model}"]
 
 
+class BatchPricing(NamedTuple):
+    """Every rate a batch could resolve against, preloaded.
+
+    Two shapes because the two tables are two shapes: ``model_pricing`` is a
+    version series per key (the newest row effective at or before the timestamp
+    wins) and ``organization_model_pricing`` is a set of periods per key (the
+    period containing the timestamp wins). Both are kept whole rather than
+    collapsed to a rate, because a batch carries one timestamp per event.
+    """
+
+    deployment: dict[str, list[tuple[datetime, ModelPricing]]]
+    overrides: dict[str, list[OverridePeriod]]
+
+
 async def _load_pricing_index(
-    db: AsyncSession, pairs: set[tuple[str, str]]
-) -> dict[str, list[tuple[datetime, ModelPricing]]]:
-    """Load every stored pricing row for the batch's (provider, model) pairs in a
-    single query, so pricing is resolved in memory instead of once per event.
+    db: AsyncSession, pairs: set[tuple[str, str]], organization_id: uuid.UUID | None
+) -> BatchPricing:
+    """Load every stored rate for the batch's (provider, model) pairs up front, so
+    pricing is resolved in memory instead of once per event.
 
     A Claude Code batch carries a few models but a distinct timestamp per event, so
     a per-event ``find_model_pricing`` would issue ~one query per event (an N+1). We
-    instead pull the full effective-at history for every model key up front and pick
-    the effective row per timestamp below; the genai default fallback is memoized in
-    pricing_service and hits no database.
+    instead pull the full history for every model key in a fixed handful of queries
+    and pick what applies per timestamp below; the genai default fallback is
+    memoized in pricing_service and hits no database.
+
+    ``organization_id`` is the importing workspace's organization, resolved from
+    the authenticating key rather than from the request, exactly as the request
+    path resolves it. ``None`` skips the override query entirely, but that is a
+    guard rather than a common path: ``workspace.organization_id`` is NOT NULL
+    and a key's workspace is a RESTRICT foreign key, so an import that reaches
+    here has an organization and pays for the one extra indexed lookup whether or
+    not any override exists.
     """
     keys: set[str] = set()
     for provider, model in pairs:
@@ -227,35 +254,45 @@ async def _load_pricing_index(
             index.setdefault(row.model_key, []).append((normalize_effective_at(row.effective_at), row))
     for entries in index.values():
         entries.sort(key=lambda pair: pair[0])
-    return index
+    overrides: dict[str, list[OverridePeriod]] = {}
+    if organization_id is not None:
+        overrides = await load_organization_override_index(db, organization_id, keys)
+    return BatchPricing(deployment=index, overrides=overrides)
 
 
 def _resolve_pricing(
-    index: dict[str, list[tuple[datetime, ModelPricing]]],
+    index: BatchPricing,
     provider: str,
     model: str,
     timestamp: datetime,
 ) -> ModelPricing | None:
     """Effective pricing at the event timestamp, resolved from the preloaded index.
 
-    Mirrors ``find_model_pricing``: canonical key, then legacy key, then the genai
-    default (when enabled). Stored rows win over the default, and the newest row
-    effective at or before the timestamp is chosen, so historical rates are honored.
+    Mirrors ``find_model_pricing``, whole: the importing organization's own
+    override, then the canonical key, then the legacy key, then the genai default
+    (when enabled). Stored rows win over the default, and the newest row effective
+    at or before the timestamp is chosen, so historical rates are honored.
 
-    One deliberate divergence: per-organization rate overrides
-    (``organization_model_pricing``) are *not* consulted, so imported usage prices
-    against the deployment list even when the organization has overridden a model.
-    That is a known inconsistency, held back rather than missed. The overrides
-    carry interval periods where this index carries an effective-at series, so
-    honoring them here is a second resolution shape rather than one more lookup,
-    and which external-usage ingest survives the rehome at all is still an open
-    decision (otari-ai#1751, which folds in exactly this ingest question). Building
-    it into this path before that lands risks writing it twice.
+    **The timestamp is the event's own, not the import's.** Usage imported today
+    for last month prices at the rate that was in force last month, on both
+    layers, which is what makes an imported row comparable to a gateway row from
+    the same instant. Note this is about the *first* import of an event, not a
+    re-import: ingest is idempotent on ``(source, source_event_id)`` and never
+    updates a row, so a row's cost is settled once, by the rate table as it stood
+    when that row landed.
+
+    An override wins on either key spelling before the deployment list is
+    consulted on either, because that is the order ``find_model_pricing`` applies:
+    it asks ``_find_organization_override`` for all candidate keys at once and
+    only falls through to ``_find_by_model_key`` when that misses.
     """
     lookup = normalize_effective_at(timestamp)
+    override = resolve_organization_override(index.overrides, _model_keys(provider, model), lookup)
+    if override is not None:
+        return override
     for key in _model_keys(provider, model):
         match: ModelPricing | None = None
-        for effective_at, row in index.get(key, ()):
+        for effective_at, row in index.deployment.get(key, ()):
             if effective_at <= lookup:
                 match = row
             else:
@@ -447,7 +484,14 @@ async def ingest_external_events(
                 await db.execute(select(User.user_id).where(User.user_id.in_(chunk), User.deleted_at.is_(None)))
             ).scalars().all()
         )
-    pricing_index = await _load_pricing_index(db, {(e.provider, e.model) for e in request.events})
+    # The organization comes off the workspace the key named, never off the
+    # request: the organization decides what an event costs, so taking it from
+    # something the importer controls would let one import at another
+    # organization's negotiated rate.
+    pricing_organization_id = await organization_for_workspace_id(db, usage_workspace_id)
+    pricing_index = await _load_pricing_index(
+        db, {(e.provider, e.model) for e in request.events}, pricing_organization_id
+    )
 
     for index, event in enumerate(request.events):
         target_user, bind_error = _resolve_target_user(
