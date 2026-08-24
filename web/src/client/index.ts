@@ -477,4 +477,15 @@ export type CreateOrganizationGuardrailRequest = Defaulted<
 export type UpdateOrganizationGuardrailRequest =
   Schemas["OrganizationGuardrailUpdate"]
 
+// The MCP servers a workspace has registered, which a request names by id in
+// `mcp_server_ids`; see
+// `src/gateway/services/tenancy/workspace_mcp_server_service.py`. The stored
+// bearer token is write-only, so the public shape reports only `has_token`.
+export type WorkspaceMcpServer = Schemas["WorkspaceMcpServerPublic"]
+export type WorkspaceMcpServers = Schemas["WorkspaceMcpServersPublic"]
+export type CreateWorkspaceMcpServerRequest =
+  Schemas["WorkspaceMcpServerCreate"]
+export type UpdateWorkspaceMcpServerRequest =
+  Schemas["WorkspaceMcpServerUpdate"]
+
 export type * from "./local"

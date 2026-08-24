@@ -32,6 +32,14 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
   { route: "/usage", name: "usage", heading: /usage/i },
   { route: "/activity", name: "activity", heading: /activity/i },
   { route: "/tools", name: "tools", heading: /tools/i },
+  // The one Tools child with an entry of its own. The other two render the
+  // page above filtered to one service, so the entry covers them; this one is a
+  // page in its own right, with a table and two dialogs nothing else captures.
+  {
+    route: "/tools/mcp-servers",
+    name: "tools-mcp-servers",
+    heading: /mcp servers/i,
+  },
   { route: "/settings", name: "settings", heading: /settings/i },
   // Reached from the account menu rather than the rail, and covered here all
   // the same: what this matrix is for is how a page renders on a phone and in

@@ -27,6 +27,7 @@ import type {
   CreateStoredProviderRequest,
   CreateUserRequest,
   CreateWorkspaceBudgetDefaultRequest,
+  CreateWorkspaceMcpServerRequest,
   CreateWorkspaceRequest,
   DashboardBuild,
   DiscoverableModelsResponse,
@@ -98,6 +99,7 @@ import type {
   UpdateUserRequest,
   UpdateWorkspaceBudgetDefaultRequest,
   UpdateWorkspaceCodeExecutionPolicyRequest,
+  UpdateWorkspaceMcpServerRequest,
   UpdateWorkspaceRequest,
   UpdateWorkspaceWebSearchConfigRequest,
   UsageBucket,
@@ -117,6 +119,8 @@ import type {
   WorkspaceActivation,
   WorkspaceBudgetDefault,
   WorkspaceCodeExecutionPolicy,
+  WorkspaceMcpServer,
+  WorkspaceMcpServers,
   WorkspaceMember,
   WorkspaceMemberRole,
   WorkspaceWebSearchConfig,
@@ -2538,6 +2542,99 @@ export function useClearWorkspaceWebSearchConfig() {
     onSuccess: (_data, { workspaceId }) => {
       void queryClient.invalidateQueries({
         queryKey: [WORKSPACES, workspaceId, "web-search"],
+      })
+    },
+  })
+}
+
+// A workspace's MCP servers. A list rather than the single row the two config
+// planes beside it hold, and nested under the workspaces key for the same
+// reason they are.
+//
+// One request, at the endpoint's own documented ceiling, rather than a paged
+// walk: the service caps how many servers a workspace may hold well below this,
+// so a second page cannot exist. The ceiling is the route's (`le=1000`), not a
+// copy of that cap, so this stays right if the cap moves.
+const MCP_SERVERS_PAGE_SIZE = 1000
+
+export function useWorkspaceMcpServers(workspaceId: string | null) {
+  return useQuery({
+    queryKey: [WORKSPACES, workspaceId, "mcp-servers"],
+    queryFn: () =>
+      apiFetch<WorkspaceMcpServers>(
+        `/v1/workspaces/${encodeURIComponent(workspaceId as string)}/mcp-servers?limit=${MCP_SERVERS_PAGE_SIZE}`,
+      ),
+    enabled: workspaceId !== null,
+    staleTime: 60_000,
+  })
+}
+
+export function useCreateWorkspaceMcpServer() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      body,
+    }: {
+      workspaceId: string
+      body: CreateWorkspaceMcpServerRequest
+    }) =>
+      apiFetch<WorkspaceMcpServer>(
+        `/v1/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+    onSuccess: (_data, { workspaceId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: [WORKSPACES, workspaceId, "mcp-servers"],
+      })
+    },
+  })
+}
+
+// A partial update: the caller sends only the fields it means to change, which
+// is what keeps the write-only token's three states (leave, clear, rotate)
+// expressible. See `McpServerDialog` for how the form maps onto them.
+export function useUpdateWorkspaceMcpServer() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      serverId,
+      body,
+    }: {
+      workspaceId: string
+      serverId: string
+      body: UpdateWorkspaceMcpServerRequest
+    }) =>
+      apiFetch<WorkspaceMcpServer>(
+        `/v1/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers/${encodeURIComponent(serverId)}`,
+        { method: "PATCH", body: JSON.stringify(body) },
+      ),
+    onSuccess: (_data, { workspaceId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: [WORKSPACES, workspaceId, "mcp-servers"],
+      })
+    },
+  })
+}
+
+export function useDeleteWorkspaceMcpServer() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      serverId,
+    }: {
+      workspaceId: string
+      serverId: string
+    }) =>
+      apiFetch<void>(
+        `/v1/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers/${encodeURIComponent(serverId)}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: (_data, { workspaceId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: [WORKSPACES, workspaceId, "mcp-servers"],
       })
     },
   })

@@ -34,6 +34,7 @@ import { Route as OrganizationProviderKeysRouteImport } from './routes/organizat
 import { Route as ToolsIndexRouteImport } from './routes/tools.index'
 import { Route as ToolsCodeExecutionRouteImport } from './routes/tools.code-execution'
 import { Route as ToolsGuardrailsRouteImport } from './routes/tools.guardrails'
+import { Route as ToolsMcpServersRouteImport } from './routes/tools.mcp-servers'
 import { Route as ToolsWebSearchRouteImport } from './routes/tools.web-search'
 
 const IndexRoute = IndexRouteImport.update({
@@ -162,6 +163,11 @@ const ToolsGuardrailsRoute = ToolsGuardrailsRouteImport.update({
   path: '/guardrails',
   getParentRoute: () => ToolsRoute,
 } as any)
+const ToolsMcpServersRoute = ToolsMcpServersRouteImport.update({
+  id: '/mcp-servers',
+  path: '/mcp-servers',
+  getParentRoute: () => ToolsRoute,
+} as any)
 const ToolsWebSearchRoute = ToolsWebSearchRouteImport.update({
   id: '/web-search',
   path: '/web-search',
@@ -192,6 +198,7 @@ export interface FileRoutesByFullPath {
   '/organization/provider-keys': typeof OrganizationProviderKeysRoute
   '/tools/code-execution': typeof ToolsCodeExecutionRoute
   '/tools/guardrails': typeof ToolsGuardrailsRoute
+  '/tools/mcp-servers': typeof ToolsMcpServersRoute
   '/tools/web-search': typeof ToolsWebSearchRoute
   '/organization/': typeof OrganizationIndexRoute
   '/tools/': typeof ToolsIndexRoute
@@ -218,6 +225,7 @@ export interface FileRoutesByTo {
   '/organization/provider-keys': typeof OrganizationProviderKeysRoute
   '/tools/code-execution': typeof ToolsCodeExecutionRoute
   '/tools/guardrails': typeof ToolsGuardrailsRoute
+  '/tools/mcp-servers': typeof ToolsMcpServersRoute
   '/tools/web-search': typeof ToolsWebSearchRoute
   '/organization': typeof OrganizationIndexRoute
   '/tools': typeof ToolsIndexRoute
@@ -247,6 +255,7 @@ export interface FileRoutesById {
   '/organization/provider-keys': typeof OrganizationProviderKeysRoute
   '/tools/code-execution': typeof ToolsCodeExecutionRoute
   '/tools/guardrails': typeof ToolsGuardrailsRoute
+  '/tools/mcp-servers': typeof ToolsMcpServersRoute
   '/tools/web-search': typeof ToolsWebSearchRoute
   '/organization/': typeof OrganizationIndexRoute
   '/tools/': typeof ToolsIndexRoute
@@ -277,6 +286,7 @@ export interface FileRouteTypes {
     | '/organization/provider-keys'
     | '/tools/code-execution'
     | '/tools/guardrails'
+    | '/tools/mcp-servers'
     | '/tools/web-search'
     | '/organization/'
     | '/tools/'
@@ -303,6 +313,7 @@ export interface FileRouteTypes {
     | '/organization/provider-keys'
     | '/tools/code-execution'
     | '/tools/guardrails'
+    | '/tools/mcp-servers'
     | '/tools/web-search'
     | '/organization'
     | '/tools'
@@ -331,6 +342,7 @@ export interface FileRouteTypes {
     | '/organization/provider-keys'
     | '/tools/code-execution'
     | '/tools/guardrails'
+    | '/tools/mcp-servers'
     | '/tools/web-search'
     | '/organization/'
     | '/tools/'
@@ -533,6 +545,13 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof ToolsGuardrailsRouteImport
       parentRoute: typeof ToolsRoute
     }
+    '/tools/mcp-servers': {
+      id: '/tools/mcp-servers'
+      path: '/mcp-servers'
+      fullPath: '/tools/mcp-servers'
+      preLoaderRoute: typeof ToolsMcpServersRouteImport
+      parentRoute: typeof ToolsRoute
+    }
     '/tools/web-search': {
       id: '/tools/web-search'
       path: '/web-search'
@@ -566,6 +585,7 @@ const OrganizationRouteWithChildren = OrganizationRoute._addFileChildren(
 interface ToolsRouteChildren {
   ToolsCodeExecutionRoute: typeof ToolsCodeExecutionRoute
   ToolsGuardrailsRoute: typeof ToolsGuardrailsRoute
+  ToolsMcpServersRoute: typeof ToolsMcpServersRoute
   ToolsWebSearchRoute: typeof ToolsWebSearchRoute
   ToolsIndexRoute: typeof ToolsIndexRoute
 }
@@ -573,6 +593,7 @@ interface ToolsRouteChildren {
 const ToolsRouteChildren: ToolsRouteChildren = {
   ToolsCodeExecutionRoute: ToolsCodeExecutionRoute,
   ToolsGuardrailsRoute: ToolsGuardrailsRoute,
+  ToolsMcpServersRoute: ToolsMcpServersRoute,
   ToolsWebSearchRoute: ToolsWebSearchRoute,
   ToolsIndexRoute: ToolsIndexRoute,
 }

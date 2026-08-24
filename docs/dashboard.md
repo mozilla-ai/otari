@@ -510,8 +510,9 @@ dashboard shows that person as a member of the organization.
 
 ### Tools
 
-One page per service, each a filtered view of the same settings. **Tools** on
-the sidebar expands to:
+Mostly one page per service, each a filtered view of the same settings, plus
+MCP servers, which are a workspace's own registry rather than a view of a
+deployment-wide backend. **Tools** on the sidebar expands to:
 
 - **Web search**: the backend behind `otari_web_search`, plus the **Search
   tools** card that configures what
@@ -524,8 +525,16 @@ the sidebar expands to:
   backend without knowing Otari's own tool name. See
   [Web-search interception](tools.md#web-search-interception).
 - **Code execution**: the sandbox backend that runs generated code.
+- **MCP servers**: the MCP endpoints the selected workspace has registered, which
+  a request reaches by naming their ids in `mcp_server_ids` instead of carrying a
+  URL and a token of its own. Adding, editing, and deleting one takes an
+  owner or admin of the workspace or of the organization, and so does simply
+  listing them, because these rows name endpoints the gateway connects to. A
+  bearer token is stored encrypted and never shown again: a row reports only
+  whether one is set, and an edit that leaves the token box empty keeps the
+  stored token rather than clearing it. See [MCP](mcp.md).
 
-**Guardrails** is the third view, and it sits under Gateway → Routing rather
+**Guardrails** is the third settings view, and it sits under Gateway → Routing rather
 than here, because a guardrail decides what a request may do rather than adding
 a capability to it. Under the deployment-wide settings there, **Organization
 guardrails** is the layer above them: an entry runs on every request from the
@@ -534,7 +543,8 @@ marked for every workspace covers ones created later. It may name an https guard
 endpoint of its own, with a credential to authenticate to it, or leave both
 blank and use the URL set just above. See [Guardrails](guardrails.md#organization-guardrails).
 
-Two things are true of every one of these views:
+Two things are true of every one of the settings views (MCP servers configure no
+gateway-run tool, so neither applies there):
 
 - Each tool Otari runs itself carries a **price per call**. Those calls cost you
   money at a search provider or a sandbox, so they are billed onto the request

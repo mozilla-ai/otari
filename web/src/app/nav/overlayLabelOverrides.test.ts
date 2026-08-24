@@ -67,6 +67,7 @@ describe("a build that replaces the label-override module", () => {
     expect(tools?.children?.map((child) => child.label)).toEqual([
       "Web search",
       "Code execution",
+      "MCP servers",
     ])
     const routing = gateway()?.items.find((item) => item.to === "/routing")
     expect(routing?.children?.map((child) => child.surface)).toEqual([

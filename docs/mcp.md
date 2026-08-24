@@ -68,6 +68,10 @@ request.
 
 ### Configuring them (standalone)
 
+The dashboard manages them under **Tools → MCP servers**, which acts on the
+workspace the switcher has selected. Everything below is the same thing over the
+API.
+
 Manage a workspace's servers with the master key, under
 `/v1/workspaces/{workspace_id}/mcp-servers`:
 

@@ -9,6 +9,7 @@ import type {
 import { OrganizationGuardrailsCard } from "@/features/tools/OrganizationGuardrailsCard"
 import { SearchToolsCard } from "@/features/tools/SearchToolsCard"
 import { WorkspaceCodeExecutionPolicyCard } from "@/features/tools/WorkspaceCodeExecutionPolicyCard"
+import { WorkspaceMcpServersCard } from "@/features/tools/WorkspaceMcpServersCard"
 import { WorkspaceWebSearchCard } from "@/features/tools/WorkspaceWebSearchCard"
 import {
   usePricing,
@@ -806,6 +807,14 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
           )
         },
       )}
+
+      {/* MCP servers close the combined page rather than sitting under one of
+        the services above: nothing here configures a deployment-wide MCP
+        endpoint for a workspace's servers to narrow, so they are beside the
+        services and not inside one. Left out of every narrowed view, because
+        each of those is one service and MCP has its own destination
+        (`/tools/mcp-servers`, which renders the same card). */}
+      {only ? null : <WorkspaceMcpServersCard />}
 
       <SaveToast message={toast} />
     </div>
