@@ -27,7 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import get_config, get_db_if_needed
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
-from gateway.services.tenancy.user_service import has_password_identity
+from gateway.services.tenancy.user_service import operator_has_password
 
 router = APIRouter(prefix="/v1/bootstrap", tags=["bootstrap"])
 
@@ -35,10 +35,11 @@ DeploymentType = Literal["standalone", "hosted", "hybrid"]
 SessionType = Literal["local_operator", "hosted_user", "none"]
 # How a caller may sign in to this deployment. ``master_key`` is the first-boot
 # credential and ``password`` the steady-state one, and a standalone gateway
-# offers exactly one of them: the master key until an identity has a password,
-# and the password from then on (mozilla-ai/otari-ai#1716). A list rather than a
-# single value because #651 and #652 add methods that coexist with the password
-# rather than replacing it, and because a hybrid gateway offers none.
+# offers exactly one of them: the master key until the operator claims the
+# deployment with a password, and the password from then on
+# (mozilla-ai/otari-ai#1716). A list rather than a single value because #651 and
+# #652 add methods that coexist with the password rather than replacing it, and
+# because a hybrid gateway offers none.
 SignInMethod = Literal["master_key", "password"]
 
 # The management API groups a standalone gateway serves, one name per ``/v1/``
@@ -180,7 +181,7 @@ async def _sign_in_methods(db: AsyncSession) -> list[SignInMethod]:
     way, since minting one writes a row.
     """
     try:
-        claimed = await has_password_identity(db)
+        claimed = await operator_has_password(db)
     except SQLAlchemyError:
         logger.warning("Could not read which sign-in methods this deployment offers", exc_info=True)
         return []

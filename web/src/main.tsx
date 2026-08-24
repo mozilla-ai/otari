@@ -21,10 +21,10 @@ if (!container) {
 // this settles: a stalled gateway or proxy would otherwise hold a blank page for
 // half a minute before the error state appears. A refused connection fails fast
 // and never reaches this deadline; a healthy gateway answers immediately, since
-// the route reads configuration plus one `LIMIT 1` probe for whether any
-// identity holds a password (which credential the sign-in screen should ask
-// for). A database the gateway cannot reach answers "no sign-in methods"
-// instead of hanging, but a merely slow or pool-starved one does not: with
+// the route reads configuration plus two primary-key lookups for whether the
+// bootstrap operator holds a password (which credential the sign-in screen
+// should ask for). A database the gateway cannot reach answers "no sign-in
+// methods" instead of hanging, but a merely slow or pool-starved one does not: with
 // `db_pool_timeout` defaulting to 30s, waiting for a connection can outlast
 // this deadline, and then it is this timeout rather than the gateway that
 // decides. Both land on the same screen, which says the gateway is unreachable.

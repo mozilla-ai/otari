@@ -321,8 +321,8 @@ export interface paths {
          *     authenticated by the session cookie. The master key in a header is what
          *     excuses ``current_password``, which is how a forgotten password is
          *     recovered; it does not excuse ``email``, because an identity with no address
-         *     has nothing to sign in with whoever is asking. Setting a password for the
-         *     first time retires master-key sign-in on this deployment.
+         *     has nothing to sign in with whoever is asking. The operator setting a password
+         *     for the first time retires master-key sign-in on this deployment.
          *
          *     Every other session this identity holds ends, the caller's own excepted, so
          *     a cookie stolen before the change does not outlive it.
@@ -5889,7 +5889,7 @@ export interface components {
             email: string;
             /**
              * Master Key Sign In Retired
-             * @description Always true once this succeeds: some identity on this deployment now has a password, so POST /v1/auth/session no longer accepts the master key. It stays the credential for the management API.
+             * @description Whether POST /v1/auth/session has stopped accepting the master key as a dashboard login. True once the operator identity has a password, which is what claiming the deployment means; a member setting their own password leaves an unclaimed deployment on the master key. Either way the master key stays the credential for the management API.
              */
             master_key_sign_in_retired: boolean;
         };

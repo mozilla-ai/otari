@@ -224,9 +224,12 @@ function LabelRow({
  * bootstrap reports `mail_ready: false` rather than offered and then refused
  * with a 503, the way otari#648 already settled it for the invitation form.
  * Recovery is hidden on an unclaimed deployment as well: `master_key` is
- * published exactly while no identity holds a password, so there is nothing
- * yet for a reset link to reset, and the way back in is the master key against
- * `PUT /v1/auth/password` (see docs/access-control.md).
+ * published exactly while the operator identity holds no password (otari#702),
+ * so there is nothing yet for the operator to reset, and the way back in is the
+ * master key against `PUT /v1/auth/password` (see docs/access-control.md). A
+ * member who signed up on a deployment its operator never claimed is the one
+ * case this screen does not serve: it offers the master-key box, and they sign
+ * in by calling `POST /v1/auth/session` until the operator claims it.
  *
  * The OAuth buttons and the passkey affordances are still #651's and #652's,
  * and are absent rather than disabled: their backends have not landed.

@@ -67,7 +67,7 @@ def test_a_database_outage_reports_no_sign_in_rather_than_failing(
     async def _unavailable(_db: object) -> bool:
         raise SQLAlchemyError("database is down")
 
-    monkeypatch.setattr(bootstrap_route, "has_password_identity", _unavailable)
+    monkeypatch.setattr(bootstrap_route, "operator_has_password", _unavailable)
     app = create_app(_standalone(tmp_path))
 
     with TestClient(app) as client:

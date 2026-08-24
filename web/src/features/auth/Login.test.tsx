@@ -377,7 +377,7 @@ describe("Login", () => {
     // it (what this screen did before it could post a password) tells the
     // operator to retry the one thing that cannot work.
     const retired =
-      "Master-key sign-in is retired on this deployment: an identity here has a password."
+      "Master-key sign-in is retired on this deployment: it has been claimed with a password."
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
       jsonResponse({ detail: retired }, 403),
     )

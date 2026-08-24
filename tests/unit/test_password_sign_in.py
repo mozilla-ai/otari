@@ -12,6 +12,7 @@ Unit rather than integration: everything under test is route, service and
 identity behavior that runs unchanged on the SQLite file each test stands up.
 """
 
+import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
 
@@ -25,7 +26,7 @@ from gateway.core.config import GatewayConfig
 from gateway.main import create_app
 from gateway.models.entities import DashboardSession
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
-from gateway.services.password_service import MAX_PASSWORD_BYTES, MIN_PASSWORD_LENGTH
+from gateway.services.password_service import MAX_PASSWORD_BYTES, MIN_PASSWORD_LENGTH, hash_password
 from gateway.services.tenancy.user_service import _is_email_conflict
 
 MASTER_KEY = "sk-test-master"
@@ -733,3 +734,133 @@ def test_a_malformed_stored_address_is_not_reported_as_the_caller_s_mistake(tmp_
         detail = response.json()["detail"]
         assert "changing it is not supported" in detail, detail
         assert "legacy operator" not in detail, detail
+
+
+# =============================================================================
+# Whose password retires the master key (#702)
+# =============================================================================
+#
+# "The deployment has been claimed" is a fact about the *operator* identity, and
+# the switch is read off that identity alone. It used to be read off any row
+# holding a ``hashed_password``, which was the same answer only while claiming
+# was the sole writer of that column. #650 and the re-parenting backfill
+# (otari-ai#1644) are each another writer, and each pulls the two apart in a
+# different direction; both are pinned here.
+
+
+def _add_a_password(tmp_path: Path, email: str, password: str) -> None:
+    """Give an existing identity a usable password, the way signup does.
+
+    Written straight to the row rather than through ``POST /v1/auth/signup``,
+    which needs a configured mailer: what these tests are about is the column,
+    not the flow that fills it. ``email_verified_at`` is stamped alongside so
+    the identity can actually sign in, which is the state signup leaves it in
+    once the verification link is opened.
+    """
+    engine = create_engine(f"sqlite:///{tmp_path / 'password-test.db'}")
+    with engine.begin() as connection:
+        updated = connection.execute(
+            text(
+                'UPDATE "user" SET hashed_password = :hashed, email_verified_at = :verified '
+                "WHERE lower(email) = :email"
+            ),
+            {"hashed": hash_password(password), "verified": datetime.now(UTC), "email": email},
+        )
+    assert updated.rowcount == 1
+
+
+def test_a_member_s_password_leaves_an_unclaimed_deployment_on_the_master_key(tmp_path: Path) -> None:
+    """The #650 direction: somebody else's password is not the operator's claim.
+
+    Without this, the first member to complete signup retires the dashboard
+    login of an operator who never set a password, by an act of their own and
+    with no way back through the UI.
+    """
+    with _client(tmp_path) as client:
+        headers = {"Otari-Key": MASTER_KEY}
+        _sign_in_with_master_key(client)  # provisions the operator identity
+        added = client.post("/v1/organizations/me/members", json={"email": "member@example.com"}, headers=headers)
+        assert added.status_code == 201, added.text
+
+        _add_a_password(tmp_path, "member@example.com", PASSWORD)
+
+        assert client.get("/v1/bootstrap").json()["sign_in_methods"] == ["master_key"]
+        client.cookies.clear()
+        assert client.post("/v1/auth/session", json={"master_key": MASTER_KEY}).status_code == 200
+
+
+def test_a_member_changing_their_password_is_told_the_master_key_still_signs_in(tmp_path: Path) -> None:
+    """``master_key_sign_in_retired`` is read back, not asserted from the act.
+
+    The dashboard turns the master-key affordances off on this field alone
+    (`web/src/shared/hooks/useDeployment.tsx`), so a member changing their own
+    password on an unclaimed deployment must not be the thing that reports it.
+    """
+    with _client(tmp_path) as client:
+        headers = {"Otari-Key": MASTER_KEY}
+        _sign_in_with_master_key(client)
+        added = client.post("/v1/organizations/me/members", json={"email": "member@example.com"}, headers=headers)
+        assert added.status_code == 201, added.text
+        _add_a_password(tmp_path, "member@example.com", PASSWORD)
+
+        client.cookies.clear()
+        signed_in = client.post("/v1/auth/session", json={"email": "member@example.com", "password": PASSWORD})
+        assert signed_in.status_code == 200, signed_in.text
+
+        changed = client.put(
+            "/v1/auth/password",
+            json={"current_password": PASSWORD, "new_password": NEW_PASSWORD},
+        )
+
+        assert changed.status_code == 200, changed.text
+        assert changed.json() == {"email": "member@example.com", "master_key_sign_in_retired": False}
+
+
+def test_an_identity_that_arrived_with_a_password_does_not_claim_the_deployment(tmp_path: Path) -> None:
+    """The otari-ai#1644 direction: a re-parented database is not a claimed one.
+
+    Platform identities carry ``hashed_password`` already, so a backfilled
+    deployment would otherwise read as claimed before anyone had claimed it:
+    ``/v1/bootstrap`` would publish ``["password"]`` and the sign-in screen
+    would ask the operator holding the master key for credentials that are not
+    theirs.
+    """
+    with _client(tmp_path) as client:
+        # The shape a backfill leaves behind: rows this gateway never
+        # provisioned, so no ``tenancy_bootstrap_user_id`` marker names any of
+        # them, and the identity carries a password from the platform.
+        engine = create_engine(f"sqlite:///{tmp_path / 'password-test.db'}")
+        organization_id = uuid.uuid4()
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO organization (id, name, slug, created_at, updated_at) "
+                    "VALUES (:id, :name, :slug, :now, :now)"
+                ),
+                {"id": organization_id.hex, "name": "Acme", "slug": "acme-a1b2", "now": datetime.now(UTC)},
+            )
+            connection.execute(
+                text(
+                    'INSERT INTO "user" (id, email, hashed_password, is_active, is_superuser, '
+                    "active_organization_id, created_at, updated_at) "
+                    "VALUES (:id, :email, :hashed, 1, 0, :organization_id, :now, :now)"
+                ),
+                {
+                    "id": uuid.uuid4().hex,
+                    "email": "imported@example.com",
+                    "hashed": hash_password(PASSWORD),
+                    "organization_id": organization_id.hex,
+                    "now": datetime.now(UTC),
+                },
+            )
+
+        assert client.get("/v1/bootstrap").json()["sign_in_methods"] == ["master_key"]
+
+        # And the master key is not refused as a retired login. It cannot mint a
+        # session on this database either, but for the reason that actually
+        # applies: ``ForeignTenancyError``, whose 500 names the marker to point
+        # in the log rather than in the body. A 403 here would be the bug, since
+        # it would send an operator holding the only credential there is off to
+        # find a password.
+        refused = client.post("/v1/auth/session", json={"master_key": MASTER_KEY})
+        assert refused.status_code == 500

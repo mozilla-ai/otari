@@ -51,10 +51,8 @@ below is what gives it a way to sign in.
 
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
-from sqlmodel import col
 
 from gateway.core.config import GatewayConfig
 from gateway.models.tenancy import User
@@ -82,6 +80,7 @@ from gateway.services.tenancy.errors import (
     VerificationTokenInvalidError,
 )
 from gateway.services.tenancy.password_reset_email import render_password_reset_email
+from gateway.services.tenancy.provisioning_service import load_bootstrap_identity
 from gateway.services.tenancy.tokens import generate_token, hash_token
 from gateway.services.tenancy.verification_email import render_verification_email
 
@@ -449,18 +448,35 @@ async def reset_password(db: AsyncSession, *, token: str, new_password: str) -> 
     await db.commit()
 
 
-async def has_password_identity(db: AsyncSession) -> bool:
-    """Whether any identity on this deployment can sign in with a password.
+async def operator_has_password(db: AsyncSession) -> bool:
+    """Whether the bootstrap operator can sign in with a password.
 
     This is what "the deployment has been claimed" means, and it is the switch
     between the two sign-in credentials: while it is False the master key is
     still accepted as a dashboard login, and once it is True that login is
     retired and the master key is an API credential only (otari-ai#1716). Read
-    off the identities rather than a settings row, so it cannot disagree with
-    whether a password sign-in could actually succeed.
+    off the identity rather than a settings row recording the claim, so it
+    cannot disagree with whether that password sign-in could actually succeed.
+
+    Scoped to the one identity the master key resolves to, and not to "does any
+    row hold a password" (#702). The two answer the same on a deployment whose
+    only writer of ``hashed_password`` is the operator claiming it, and come
+    apart in both directions once anything else writes that column:
+
+    - A member who completes signup or a reset would otherwise retire an
+      operator's dashboard login by an act of their own, on a deployment the
+      operator never claimed, with no UI path back in (the way back is the
+      master key against ``PUT /v1/auth/password``).
+    - Identities arriving from the platform carry a password already
+      (otari-ai#1644's backfill), so a re-parented deployment would otherwise
+      read as claimed on first boot and ask the operator, at the sign-in
+      screen, for credentials they do not have.
+
+    No marked identity is not claimed: first boot has not run, so the master
+    key is the only credential there is.
     """
-    found = await db.execute(select(col(User.id)).where(col(User.hashed_password).is_not(None)).limit(1))
-    return found.first() is not None
+    operator = await load_bootstrap_identity(db)
+    return operator is not None and operator.hashed_password is not None
 
 
 def _validate_password(password: str) -> None:
@@ -515,7 +531,7 @@ async def _claimable_email(db: AsyncSession, identity: User, email: str) -> str:
 __all__ = [
     "authenticate",
     "create_user_for_signup",
-    "has_password_identity",
+    "operator_has_password",
     "request_password_reset",
     "resend_verification_email",
     "reset_password",

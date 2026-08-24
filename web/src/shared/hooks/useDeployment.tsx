@@ -17,10 +17,14 @@
  * (`PUT /v1/auth/password`, otari#649), which is the app changing the server's
  * answer rather than the server changing it underneath: `sign_in_methods` goes
  * from `["master_key"]` to `["password"]` the moment that call succeeds, and
- * the response says so. Every consumer of that fact has to move together, or
- * the tab that claimed keeps a sign-in screen offering the credential the
- * gateway now refuses, an account menu naming a session kind that ended, and a
- * password page that asks to claim a deployment already claimed. So the claim
+ * the response says so in `master_key_sign_in_retired`. That field is the
+ * server's own answer and not "this call succeeded": only the operator's
+ * password claims the deployment (otari#702), so a member changing theirs on an
+ * unclaimed one gets `false` and nothing here moves. Every consumer of that
+ * fact has to move together, or the tab that claimed keeps a sign-in screen
+ * offering the credential the gateway now refuses, an account menu naming a
+ * session kind that ended, and a password page that asks to claim a deployment
+ * already claimed. So the claim
  * reports itself through `useRetireMasterKeySignIn` and this provider serves
  * the corrected bootstrap from then on.
  */
@@ -33,7 +37,7 @@ import type { DeploymentBootstrap } from "@/client"
 const DeploymentContext = createContext<DeploymentBootstrap | null>(null)
 const RetireMasterKeySignInContext = createContext<(() => void) | null>(null)
 
-// What `_sign_in_methods` answers once any identity holds a password
+// What `_sign_in_methods` answers once the operator identity holds a password
 // (`api/routes/bootstrap.py`). Named rather than inlined so the override is
 // visibly the server's own value and not a shape invented here.
 const PASSWORD_ONLY: DeploymentBootstrap["sign_in_methods"] = ["password"]

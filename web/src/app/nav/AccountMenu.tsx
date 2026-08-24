@@ -73,9 +73,9 @@ const MENU_DIVIDER = "h-px shrink-0 bg-border"
 // instead of inventing an address.
 //
 // Which credential that is comes from the bootstrap, not from an assumption:
-// a deployment publishes `master_key` in `sign_in_methods` exactly while no
-// identity holds a password, so a claimed one (otari#649) signs in with an
-// address and would be mislabeled by "Master-key session".
+// a deployment publishes `master_key` in `sign_in_methods` exactly while its
+// operator identity holds no password, so a claimed one (otari#649) signs in
+// with an address and would be mislabeled by "Master-key session".
 function sessionIdentity(
   sessionType: string,
   signInMethods: readonly string[],

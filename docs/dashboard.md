@@ -114,11 +114,13 @@ the logs.
 
 ### 5. (Optional) Claim the deployment with an email and a password
 
-The master key signs you in because nobody here has a password yet. Giving the
-operator identity an address and a password makes that pair the sign-in from then
-on, which is what you want as soon as more than one person needs the dashboard,
-or as soon as you would rather not paste a deployment-wide credential into a
-browser.
+The master key signs you in because the operator identity has no password yet.
+Giving it an address and a password makes that pair the sign-in from then on,
+which is what you want as soon as more than one person needs the dashboard, or
+as soon as you would rather not paste a deployment-wide credential into a
+browser. Do it before you add anyone: until you claim, the sign-in screen offers
+the master key rather than the password form, so a member who has signed up
+cannot reach the dashboard from it.
 
 In the dashboard, open the account control at the foot of the sidebar and select
 **Account settings**. While the deployment is unclaimed that page asks for an

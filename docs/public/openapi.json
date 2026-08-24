@@ -5898,7 +5898,7 @@
             "type": "string"
           },
           "master_key_sign_in_retired": {
-            "description": "Always true once this succeeds: some identity on this deployment now has a password, so POST /v1/auth/session no longer accepts the master key. It stays the credential for the management API.",
+            "description": "Whether POST /v1/auth/session has stopped accepting the master key as a dashboard login. True once the operator identity has a password, which is what claiming the deployment means; a member setting their own password leaves an unclaimed deployment on the master key. Either way the master key stays the credential for the management API.",
             "title": "Master Key Sign In Retired",
             "type": "boolean"
           }
@@ -12743,7 +12743,7 @@
     },
     "/v1/auth/password": {
       "put": {
-        "description": "Set or change the password the caller signs in to the dashboard with.\n\nAlways the caller's own identity. Supply ``email`` when it has no sign-in\naddress yet, which is the state first boot leaves the operator in, and\n``current_password`` when it already has a password and the request is\nauthenticated by the session cookie. The master key in a header is what\nexcuses ``current_password``, which is how a forgotten password is\nrecovered; it does not excuse ``email``, because an identity with no address\nhas nothing to sign in with whoever is asking. Setting a password for the\nfirst time retires master-key sign-in on this deployment.\n\nEvery other session this identity holds ends, the caller's own excepted, so\na cookie stolen before the change does not outlive it.",
+        "description": "Set or change the password the caller signs in to the dashboard with.\n\nAlways the caller's own identity. Supply ``email`` when it has no sign-in\naddress yet, which is the state first boot leaves the operator in, and\n``current_password`` when it already has a password and the request is\nauthenticated by the session cookie. The master key in a header is what\nexcuses ``current_password``, which is how a forgotten password is\nrecovered; it does not excuse ``email``, because an identity with no address\nhas nothing to sign in with whoever is asking. The operator setting a password\nfor the first time retires master-key sign-in on this deployment.\n\nEvery other session this identity holds ends, the caller's own excepted, so\na cookie stolen before the change does not outlive it.",
         "operationId": "set_dashboard_password_v1_auth_password_put",
         "requestBody": {
           "content": {

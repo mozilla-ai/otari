@@ -72,7 +72,7 @@ async def ensure_bootstrap_identity(db: AsyncSession) -> User:
     the provisioning path run once per deployment. Commits, because it is the
     unit of work that has to be durable before any request reads it.
     """
-    existing = await _load_marked_identity(db)
+    existing = await load_bootstrap_identity(db)
     if existing is not None:
         return existing
 
@@ -85,7 +85,7 @@ async def ensure_bootstrap_identity(db: AsyncSession) -> User:
         # the slug and the marker are both unique, so exactly one provisioned.
         await db.rollback()
         logger.info("Concurrent first-boot tenancy provisioning; using the identity that won")
-        resolved = await _load_marked_identity(db)
+        resolved = await load_bootstrap_identity(db)
         if resolved is None:
             raise BootstrapIdentityUnavailableError from None
         return resolved
@@ -154,15 +154,29 @@ async def _refuse_to_shadow_existing_tenancy(db: AsyncSession) -> None:
     )
 
 
-async def _load_marked_identity(db: AsyncSession) -> User | None:
-    """Resolve the identity the marker names, or None if there is not one yet."""
+async def load_bootstrap_identity(db: AsyncSession) -> User | None:
+    """Resolve the identity the marker names, or None if there is not one yet.
+
+    The read half of ``ensure_bootstrap_identity``, and public because the
+    sign-in policy needs it too: ``user_service.operator_has_password`` asks
+    what *this* identity holds rather than what any identity holds, and it must
+    be able to ask that without provisioning anything.
+
+    A marker that does not resolve (an unreadable value, or one naming a row
+    that is gone) is reported as "no identity yet", which is what makes
+    ``ensure_bootstrap_identity`` provision one and what makes the deployment
+    read as unclaimed.
+    """
     marker = await db.get(RuntimeSetting, BOOTSTRAP_IDENTITY_KEY)
     if marker is None:
         return None
     try:
         user_id = uuid.UUID(marker.value)
     except ValueError:
-        logger.warning("Ignoring an unreadable %s marker; re-provisioning", BOOTSTRAP_IDENTITY_KEY)
+        logger.warning(
+            "Ignoring an unreadable %s marker; treating this deployment as unprovisioned",
+            BOOTSTRAP_IDENTITY_KEY,
+        )
         return None
     return await db.get(User, user_id)
 
@@ -214,7 +228,7 @@ async def _provision(db: AsyncSession) -> User:
 
     # Upsert rather than insert: a marker whose value no longer resolves (an
     # unreadable id, or one naming a row that is gone) is what
-    # ``_load_marked_identity`` reports as "no identity yet", and it says it will
+    # ``load_bootstrap_identity`` reports as "no identity yet", and it says it will
     # re-provision. Adding a second row with the same primary key would instead
     # raise, be swallowed as a lost race, and leave every later request answering
     # 500 with nothing able to clear it.
@@ -236,4 +250,5 @@ __all__ = [
     "DEFAULT_WORKSPACE_NAME",
     "BootstrapIdentityUnavailableError",
     "ensure_bootstrap_identity",
+    "load_bootstrap_identity",
 ]

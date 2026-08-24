@@ -74,8 +74,12 @@ function PasswordField({
  *   always cookie-authenticated, so that field is always required here.
  *
  * Which of the two applies is read from the bootstrap's `sign_in_methods`
- * rather than probed: `master_key` is published exactly while no identity on
- * this deployment holds a password. That context cannot be refetched, so a
+ * rather than probed: `master_key` is published exactly while this deployment's
+ * operator identity holds no password (otari#702). It is a fact about that
+ * identity and not about the reader, so a member signed in on an unclaimed
+ * deployment is shown the claim form and the server refuses it for the missing
+ * current password; the management API exposes no "who am I" route to ask a
+ * better question with. That context cannot be refetched, so a
  * successful claim reports itself through `useRetireMasterKeySignIn` and the
  * provider serves the corrected value from then on. This card therefore reads
  * the context on every render and keeps no mode of its own: the fact belongs to

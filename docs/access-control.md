@@ -128,14 +128,14 @@ Granting the `owner` role is an owner's to give. An admin manages members, works
 
 Signing in to the dashboard exchanges a credential for a session: an opaque token in an HttpOnly cookie, stored only as a SHA-256 hash, revocable server-side, expiring on `dashboard_session_ttl_hours`. Each session names the identity it was minted for, so a cookie-authenticated request resolves a user and, through that user's `active_organization_id`, the organization it is acting in. `POST /v1/auth/session` returns both ids alongside the expiry.
 
-**Which credential signs in depends on whether the deployment has been claimed.** A deployment where no identity has a password yet accepts the master key, which is what makes first boot work with nothing configured. The moment an identity has one, the master key stops being accepted at the sign-in endpoint and email and password is the login. `GET /v1/bootstrap` publishes which of the two applies right now, in `sign_in_methods`, so the sign-in page asks for the credential that will work:
+**Which credential signs in depends on whether the deployment has been claimed.** A deployment whose operator identity has no password yet accepts the master key, which is what makes first boot work with nothing configured. The moment that identity has one, the master key stops being accepted at the sign-in endpoint and email and password is the login. It is the operator's own password that decides this and nobody else's: a member who [signs up](#signup-claiming-a-roster-identity) or resets theirs claims their account, not the deployment, and an identity that arrived from a migration carrying a password has claimed nothing at all. `GET /v1/bootstrap` publishes which of the two applies right now, in `sign_in_methods`, so the sign-in page asks for the credential that will work:
 
 ```bash
 curl http://localhost:8000/v1/bootstrap        # no credential needed
 # {"deployment_type":"standalone", ..., "sign_in_methods":["master_key"]}
 ```
 
-Nothing schedules the switch and nothing expires. A deployment that never claims goes on signing in with the master key indefinitely, which is a reasonable end state for a single-operator gateway that only ever talks to itself.
+Nothing schedules the switch and nothing expires. A deployment that never claims goes on signing in with the master key indefinitely, which is a reasonable end state for a single-operator gateway that only ever talks to itself. One consequence is worth knowing: while a deployment is unclaimed, the sign-in screen offers the master key and not the password form, so a member who has signed up there signs in by calling `POST /v1/auth/session` directly until the operator claims it.
 
 #### Claiming the deployment
 
@@ -152,7 +152,7 @@ curl -X PUT http://localhost:8000/v1/auth/password \
 - The address is stored lower-cased and matched case-insensitively at sign-in. Claiming through the master key does not deliver to it or verify it: the master key is what proves the claim, and `email_verified_at` is stamped as a consequence rather than checked. A roster member proves their own address by [signing up](#signup-claiming-a-roster-identity) instead, which does send and check a verification link.
 - The same endpoint changes a password later, and the same **Account settings** page is where the dashboard does it. From a session it needs `current_password`; sent with the master key in a header it does not, which is the recovery path (see below) and the one form of this call the dashboard cannot make, since reaching the page needs a session. Changing the address afterwards is refused rather than half-supported.
 - Every other session that identity holds is revoked, so a cookie minted under the old password does not outlive it. The caller's own session is spared when the change came from the browser, and is not when it came from the master key, since a header caller has no session to keep.
-- **Claiming is one-way.** No endpoint clears a password, so a deployment that has been claimed cannot be returned to master-key sign-in. The sign-in screen follows `sign_in_methods` and asks for the address and password from then on, and the master key still authenticates the whole management API, so the step costs you nothing you cannot reach; it is simply not reversible. See the [Admin dashboard guide](dashboard.md).
+- **Claiming is one-way.** No endpoint clears a password, so a deployment whose operator has set one cannot be returned to master-key sign-in. The sign-in screen follows `sign_in_methods` and asks for the address and password from then on, and the master key still authenticates the whole management API, so the step costs you nothing you cannot reach; it is simply not reversible. See the [Admin dashboard guide](dashboard.md).
 
 After that, sign in with the address:
 
