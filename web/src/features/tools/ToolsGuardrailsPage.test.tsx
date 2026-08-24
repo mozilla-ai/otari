@@ -539,4 +539,22 @@ describe("ToolsGuardrailsPage how-to-call card", () => {
 
     await waitFor(() => expect(providerFetches()).toBeGreaterThan(before))
   })
+  it("carries the MCP servers section on the combined page and no narrowed one", async () => {
+    // The card has no service above it to be filtered with, so the `only` guard
+    // is the only thing keeping it off the per-service views. Asserted on the
+    // heading, which renders in every state of the card including the one a
+    // test harness with no selected workspace lands in.
+    mockApi()
+    const { unmount } = renderWithClient(<ToolsGuardrailsPage />)
+    expect(
+      await screen.findByRole("heading", { name: "MCP servers" }),
+    ).toBeInTheDocument()
+    unmount()
+
+    renderWithClient(<ToolsGuardrailsPage only="sandbox" />)
+    await screen.findByText(/Backend for otari_code_execution tools/)
+    expect(
+      screen.queryByRole("heading", { name: "MCP servers" }),
+    ).not.toBeInTheDocument()
+  })
 })

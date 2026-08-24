@@ -441,8 +441,9 @@ export function workspaceMcpServer(
     name: "github",
     url: "https://mcp.example.com/github",
     purpose_hint: null,
-    // Null rather than an empty list: the server reads a list as an allow-list,
-    // so `[]` would be a server exposing no tools at all.
+    // Null is how "no allow-list" is stored, which is the neutral state a
+    // builder wants. Not interchangeable with `[]` as a stored value, even
+    // though `mcp_client` happens to read both as "expose everything".
     allowed_tools: null,
     enabled: true,
     // The token is write-only, so this is all a response ever says about it.

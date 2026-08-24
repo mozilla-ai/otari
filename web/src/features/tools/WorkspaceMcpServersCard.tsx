@@ -54,7 +54,7 @@ export function WorkspaceMcpServersCard({
 }: {
   /** Suppressed on the page whose own title already says "MCP servers". */
   showHeading?: boolean
-} = {}) {
+}) {
   const { selected, isLoading: workspaceLoading } = useSelectedWorkspace()
   const context = useOrganizationContext()
   // The client half of the gate the service enforces, and it gates the *read*
@@ -105,14 +105,24 @@ export function WorkspaceMcpServersCard({
 
   const rows = query.data?.data ?? []
 
+  // Each opener clears the mutation it will render the error of. Without this a
+  // refused write leaves its banner up, so reopening the form shows the last
+  // 409 over a blank one. Same reset `PasskeysCard` does for the same reason.
   const openAdd = () => {
     setEditing(undefined)
+    create.reset()
     setDialogOpen(true)
   }
 
   const openEdit = (server: WorkspaceMcpServer) => {
     setEditing(server)
+    update.reset()
     setDialogOpen(true)
+  }
+
+  const openDelete = (server: WorkspaceMcpServer) => {
+    remove.reset()
+    setPendingDelete(server)
   }
 
   const submit = (draft: McpServerDraft) => {
@@ -180,11 +190,7 @@ export function WorkspaceMcpServersCard({
           <Button size="sm" variant="ghost" onPress={() => openEdit(row)}>
             Edit
           </Button>
-          <Button
-            size="sm"
-            variant="ghost"
-            onPress={() => setPendingDelete(row)}
-          >
+          <Button size="sm" variant="ghost" onPress={() => openDelete(row)}>
             Delete
           </Button>
         </div>

@@ -206,6 +206,61 @@ describe("WorkspaceMcpServersCard", () => {
     expect(patch?.body).toMatchObject({ authorization_token: "" })
   })
 
+  it("rotates the token when the operator types a replacement", async () => {
+    const servers = [workspaceMcpServer({ has_token: true })]
+    const calls = mockApi({ servers })
+    const user = userEvent.setup()
+    await renderLoaded(servers)
+
+    await user.click(screen.getByRole("button", { name: "Edit" }))
+    await user.type(screen.getByLabelText("Authorization token"), "ghp_rotated")
+    await user.click(screen.getByRole("button", { name: "Save server" }))
+
+    // The third of the three states, and the only one that writes a credential.
+    const patch = writes(calls).find((call) => call.method === "PATCH")
+    expect(patch?.body).toMatchObject({ authorization_token: "ghp_rotated" })
+  })
+
+  it("takes the tick off Remove when a replacement token is typed", async () => {
+    const servers = [workspaceMcpServer({ has_token: true })]
+    const calls = mockApi({ servers })
+    const user = userEvent.setup()
+    await renderLoaded(servers)
+
+    await user.click(screen.getByRole("button", { name: "Edit" }))
+    const remove = screen.getByRole("checkbox", {
+      name: "Remove the stored token",
+    })
+    await user.click(remove)
+    expect(remove).toBeChecked()
+
+    // Clearing and rotating say opposite things, so the later instruction wins
+    // rather than both being held and one silently losing at submit.
+    await user.type(screen.getByLabelText("Authorization token"), "ghp_new")
+    expect(remove).not.toBeChecked()
+
+    await user.click(screen.getByRole("button", { name: "Save server" }))
+    const patch = writes(calls).find((call) => call.method === "PATCH")
+    expect(patch?.body).toMatchObject({ authorization_token: "ghp_new" })
+  })
+
+  it("does not show a refused write's banner over the next blank form", async () => {
+    mockApi({ writeStatus: 409, writeDetail: "already taken" })
+    const user = userEvent.setup()
+    await renderLoaded()
+
+    await user.click(screen.getByRole("button", { name: "Add MCP server" }))
+    await user.type(screen.getByLabelText("Name"), "github")
+    await user.type(screen.getByLabelText("URL"), "https://mcp.example.com")
+    await user.click(screen.getByRole("button", { name: "Add server" }))
+    expect(await screen.findByText("already taken")).toBeVisible()
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    await user.click(screen.getByRole("button", { name: "Add MCP server" }))
+
+    expect(screen.queryByText("already taken")).not.toBeInTheDocument()
+  })
+
   it("refuses an http URL carrying a token before asking the server", async () => {
     const calls = mockApi()
     const user = userEvent.setup()

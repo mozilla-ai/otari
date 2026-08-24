@@ -31,9 +31,12 @@ export interface McpServerDraft {
   authorization_token: string | undefined
 }
 
-// Comma-separated in the form, a list on the wire, and null for "expose every
-// tool this server offers" (which an empty list would not say: the server reads
-// a list as an allow-list, so an empty one would be a server with no tools).
+// Comma-separated in the form, a list on the wire, and null rather than `[]`
+// for "expose every tool this server offers". Both reach that behavior today,
+// because `mcp_client` reads a falsy allow-list as no allow-list at all, but
+// null is what the column stores for the absent case and what the endpoint's
+// own description names, so sending `[]` would only add a second spelling of
+// one state.
 function parseAllowedTools(raw: string): string[] | null {
   const names = raw
     .split(",")
