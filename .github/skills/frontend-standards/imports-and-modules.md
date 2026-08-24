@@ -36,6 +36,14 @@ directly, so the day the generator renames something there is one file to fix.
 the current directory rather than climbing with `../../`. A relative `./Sibling` for a
 tightly-coupled file in the same directory is clearer than the alias, and is fine.
 
+**An overlay seam module is the exception, and it is not a style call.** The modules listed in
+`src/overlaySeams.test.ts` (`app/nav/overlaySections.ts`, `overlayLabelOverrides.ts`,
+`overlayWalletSlot.tsx`) each ship an inert default that a superset build replaces by aliasing
+its `@/…` specifier. A relative import of one resolves to a path that alias never sees, so the
+overlay's contribution vanishes with no error and the build renders the empty default it was
+going to render anyway. Reach a seam by `@/…` even from the same directory; that test fails on a
+relative one, and on a seam nothing imports. See [web/AGENTS.md](../../../web/AGENTS.md).
+
 ## The layer boundary is a lint error, not a review note
 
 `web/biome.jsonc` enforces three rules, each with the alias form and the relative form spelled

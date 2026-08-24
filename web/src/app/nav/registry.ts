@@ -18,11 +18,11 @@ import {
   FiTool,
   FiUsers,
 } from "react-icons/fi"
-import { OVERLAY_NAV_LABEL_OVERRIDES } from "./overlayLabelOverrides"
+import { OVERLAY_NAV_LABEL_OVERRIDES } from "@/app/nav/overlayLabelOverrides"
 import {
   OVERLAY_NAV_SECTIONS,
   OVERLAY_ORG_NAV_SECTIONS,
-} from "./overlaySections"
+} from "@/app/nav/overlaySections"
 import type { NavItem, NavLabelOverride, NavSection } from "./types"
 
 /**
