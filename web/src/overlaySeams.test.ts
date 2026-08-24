@@ -10,6 +10,9 @@ const SRC = join(process.cwd(), "src")
 // The name `architecture.test.ts` plants its throwaway modules under.
 const PROBE_DIR = "__boundary_probe__"
 
+// Both suffixes `vitest.config` collects.
+const TEST_FILE = /\.(test|spec)\.tsx?$/
+
 /**
  * The base modules a superset build replaces, by their path under `src/`.
  *
@@ -49,9 +52,14 @@ function walkSrc(): string[] {
 
 const allFiles = walkSrc()
 
-/** Sources only: a test may reach a seam either way, and one deliberately does. */
+/**
+ * Sources only: a test may reach a seam either way, and one deliberately does.
+ *
+ * `.spec` as well as `.test`, because `vitest.config` collects both and a spec
+ * exempted here but collected there would be held to a rule its siblings are not.
+ */
 const sourceFiles = allFiles
-  .filter((name) => /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name))
+  .filter((name) => /\.tsx?$/.test(name) && !TEST_FILE.test(name))
   .map((name) => join(SRC, name))
 
 // `from "x"`, a bare `import "x"`, and a dynamic `import("x")`. Biome formats to
@@ -102,15 +110,27 @@ describe("overlay seam modules", () => {
     // The assertion above catches a deleted seam. This one catches a forgotten
     // one, which is the drift that actually happened: #584 and #644 each added a
     // seam, both were reachable only relatively, and nothing said so until this
-    // file existed. A seam is named `overlay*` by convention here and in
-    // otari-ai, so the convention can be the discovery rule.
+    // file existed.
+    //
+    // The discovery rule is the naming convention, which both this repository
+    // and otari-ai already follow. Be clear about what that does and does not
+    // buy: it makes the convention enforceable, not the seam set provable. A
+    // seam named for what it does rather than `overlay<Capital>` is invisible
+    // here, so naming one that way is the way to end up unguarded again. That is
+    // the trade for having any automated check at all, since nothing else on
+    // this side distinguishes a seam from an ordinary module.
     const discovered = allFiles
-      .filter((name) => !/\.test\.tsx?$/.test(name))
+      .filter((name) => !TEST_FILE.test(name))
       .map(posixName)
       .filter((name) => /(^|\/)overlay[A-Z][^/]*\.tsx?$/.test(name))
       .sort()
 
-    expect(discovered).toEqual([...SEAM_MODULES].sort())
+    expect(
+      discovered,
+      "every module named `overlay<Capital>` under src/ is treated as an overlay " +
+        "seam and must be listed in SEAM_MODULES. Add it there if it is one; " +
+        "rename it if it is not (the name is what this file discovers by).",
+    ).toEqual([...SEAM_MODULES].sort())
   })
 
   it.each(SEAM_MODULES)("%s is reached by its @/… specifier", (module) => {

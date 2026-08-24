@@ -30,17 +30,23 @@
  *   `OVERLAY_MODULE_OVERRIDES` entry keyed on that shorter path matches nothing
  *   and leaves this empty default in place.
  * - **The slot inherits the cluster's `hidden … md:flex`, so a contributed chip
- *   is desktop-only**, as the balance is in otari.ai's own navbar. That is known
- *   scope rather than an oversight, and it does mean a phone reaches no
- *   add-funds affordance through this seam; giving it one is another seam, not
- *   an edit to the top bar.
+ *   is desktop-only.** So is otari.ai's own balance: `WalletBalance` renders at
+ *   `frontend/src/app/Navbar.tsx:118`, inside a `hidden md:flex` cluster. That
+ *   makes this known scope rather than an oversight, and it does mean a phone
+ *   reaches no add-funds affordance through this seam; giving it one is another
+ *   seam, not an edit to the top bar.
  *
- * One export, where the reference in #736 describes two. Its no-op
- * `useRefreshWallet` exists because the platform handles the post-checkout
- * return in `src/routes/_layout.tsx`, a base file. There is no such call site
- * here and this slot renders on every page of the shell, so the replacing
- * component can own that effect itself; a no-op hook with no base caller would
- * read as wired while reaching nothing.
+ * One export, where #736 describes the reference as pairing the slot with a
+ * no-op `useRefreshWallet`. That pairing is not arbitrary and it does not
+ * transfer. In otari-ai the hook is real (`frontend/src/features/wallet/hooks/
+ * useWallet.ts:81`) and its caller is `frontend/src/routes/_layout.tsx:53`,
+ * which reads a `?wallet=success` or `?wallet=cancelled` return from Stripe: a
+ * base file, so the platform needs a no-op there for a build without the
+ * wallet. Nothing here has that shape. There is no checkout to return from and
+ * no equivalent call site, and this slot renders on every page of the shell, so
+ * the replacing component can own that effect itself. A no-op hook with no base
+ * caller would read as wired while reaching nothing, which is what the comment
+ * this module replaced was warning about.
  */
 export function WalletNavSlot() {
   return null
