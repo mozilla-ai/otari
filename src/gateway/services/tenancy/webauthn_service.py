@@ -310,7 +310,15 @@ async def finish_registration(
     challenge names its identity, and a response carrying somebody else's is
     refused here rather than silently attributing their ceremony to this caller.
 
-    The caller commits.
+    The caller commits, and that commit is what actually retires the challenge.
+    Every refusal below therefore leaves it spendable, including the duplicate
+    conflict at the end, whose explicit rollback restores the row along with the
+    credential it could not write. That is deliberate and it is the same rule
+    ``finish_authentication`` follows: a ceremony that did not complete has not
+    used its challenge up, so the retry the caller is about to make does not
+    need a fresh options round trip. What single use means here is that a
+    ceremony which *succeeds* can never be replayed, and the commit is what
+    guarantees it.
     """
     relying_party = require_relying_party(config)
     challenge = _challenge_of(response)

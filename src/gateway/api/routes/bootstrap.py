@@ -134,6 +134,16 @@ class DeploymentBootstrap(BaseModel):
             "the data plane are unaffected. False for a hybrid gateway, which issues no session."
         )
     )
+    passkeys_ready: bool = Field(
+        description=(
+            "Whether this deployment can run a passkey ceremony at all: it has a relying-party ID "
+            "(webauthn_rp_id, or derived from public_base_url) and an origin to serve one from. "
+            "Distinct from 'passkey' in sign_in_methods, which is narrower and answers whether a "
+            "registered passkey could sign somebody in *right now*: an operator with none yet needs "
+            "this one, or the page that registers the first would be hidden from them. False for a "
+            "hybrid gateway, which issues no session of its own."
+        )
+    )
     mail_ready: bool = Field(
         description=(
             "Whether this deployment can deliver a message carrying a link back to itself "
@@ -173,6 +183,7 @@ async def get_bootstrap(
             sign_in_methods=[],
             management_url=config.platform_management_url,
             maintenance_mode=False,
+            passkeys_ready=False,
             mail_ready=False,
         )
     assert db is not None  # get_db_if_needed yields a session outside hybrid mode
@@ -183,6 +194,7 @@ async def get_bootstrap(
         sign_in_methods=await _sign_in_methods(db, config),
         management_url=None,
         maintenance_mode=await _maintenance_mode(db),
+        passkeys_ready=config.webauthn_enabled,
         mail_ready=config.mail_ready,
     )
 

@@ -133,6 +133,23 @@ def test_an_id_that_is_not_a_bare_domain_is_refused_with_the_right_suggestion(
     assert repr(suggested) in str(refusal.value)
 
 
+def test_a_scheme_less_origin_is_refused_by_naming_the_scheme() -> None:
+    """The refusal has to blame the right setting.
+
+    A bare domain fails the coverage check too, but 'otari.example.com' really
+    is a subdomain of 'example.com', so the coverage message would send an
+    operator to widen ``webauthn_rp_id``, which is not what is wrong.
+    """
+    config = _config(
+        public_base_url="https://example.com",
+        webauthn_rp_id="example.com",
+        webauthn_allowed_origins=["otari.example.com"],
+    )
+    with pytest.raises(ValueError, match="missing a scheme") as refusal:
+        config.validate_webauthn_relying_party()
+    assert "webauthn_rp_id" not in str(refusal.value)
+
+
 def test_an_origin_the_id_cannot_cover_is_refused_at_startup() -> None:
     """The plausible-looking pair that can never complete a ceremony."""
     config = _config(

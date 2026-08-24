@@ -48,10 +48,10 @@ const LIST = "GET /v1/auth/webauthn/credentials"
 const OPTIONS = "POST /v1/auth/webauthn/register/options"
 const REGISTER = "POST /v1/auth/webauthn/register"
 
-function renderCard() {
+function renderCard(passkeysReady = true) {
   return render(
     <AppProviders>
-      <DeploymentProvider value={bootstrap()}>
+      <DeploymentProvider value={bootstrap({ passkeys_ready: passkeysReady })}>
         <PasskeysCard />
       </DeploymentProvider>
     </AppProviders>,
@@ -129,6 +129,35 @@ describe("PasskeysCard", () => {
 
     expect(await screen.findByText("Work laptop")).toBeInTheDocument()
     expect(screen.getByText(/can no longer sign you in/)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument()
+  })
+
+  it("says what to configure, and offers nothing, on a deployment with no relying party", async () => {
+    // otari#648's rule: a surface with no fallback is absent rather than
+    // offered and then refused. The reason is still named, because this is the
+    // operator's own settings page and the fix is one setting away.
+    mockApi({ [LIST]: () => jsonResponse({ data: [], count: 0 }) })
+    renderCard(false)
+
+    expect(
+      await screen.findByText(/not set up for passkeys yet/),
+    ).toBeInTheDocument()
+    expect(screen.getByText("public_base_url")).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Add a passkey" }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("still lists and deletes an orphan on a deployment with no relying party", async () => {
+    // The case that makes the gate safe to apply: registration is off, but
+    // whatever was registered before the ID went away stays manageable.
+    mockApi({
+      [LIST]: () =>
+        jsonResponse({ data: [{ ...PASSKEY, is_usable: false }], count: 1 }),
+    })
+    renderCard(false)
+
+    expect(await screen.findByText("Work laptop")).toBeInTheDocument()
     expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument()
   })
 

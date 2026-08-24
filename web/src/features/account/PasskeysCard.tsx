@@ -25,7 +25,10 @@ import {
   PasskeyCancelledError,
   supportsPasskeys,
 } from "@/shared/helpers/webauthn"
-import { useOfferPasskeySignIn } from "@/shared/hooks/useDeployment"
+import {
+  useDeployment,
+  useOfferPasskeySignIn,
+} from "@/shared/hooks/useDeployment"
 
 /**
  * One registered passkey: what it is called, what kind it is, and when it was
@@ -133,6 +136,14 @@ function PasskeyRow({
  *   broke.
  */
 export function PasskeysCard() {
+  // Two independent conditions, and the card says something different for each.
+  // `passkeys_ready` is the deployment's (it has a relying-party ID at all),
+  // read off the bootstrap rather than discovered from a 503, which is the same
+  // rule otari#648 settled for mail-dependent surfaces. Deliberately not
+  // `sign_in_methods.includes("passkey")`: that one is narrower and also
+  // requires a passkey to already exist, so gating on it would hide this card
+  // from the person about to register the first one.
+  const { passkeys_ready } = useDeployment()
   const canUsePasskeys = supportsPasskeys()
   const passkeys = usePasskeys()
   const register = useRegisterPasskey()
@@ -213,7 +224,13 @@ export function PasskeysCard() {
             in with. Your password still works.
           </p>
 
-          {!canUsePasskeys ? (
+          {!passkeys_ready ? (
+            <p className="text-sm text-muted">
+              This gateway is not set up for passkeys yet. An operator needs to
+              set <code className="font-mono text-xs">public_base_url</code> to
+              the address this dashboard is served on, and restart.
+            </p>
+          ) : !canUsePasskeys ? (
             <p className="text-sm text-muted">
               This browser cannot use passkeys. They need a recent browser on a
               secure (HTTPS) connection.
@@ -249,14 +266,15 @@ export function PasskeysCard() {
                 />
               ))}
             </ul>
-          ) : passkeys.isSuccess ? (
+          ) : passkeys.isSuccess && passkeys_ready ? (
             <p className="text-sm text-muted">You have no passkeys yet.</p>
           ) : null}
 
-          {/* Registration needs a ceremony, so it is the one action gated on
-              this browser being able to run one. Listing, renaming and deleting
-              are not: an orphaned passkey has to stay manageable. */}
-          {canUsePasskeys && !passkeys.isError ? (
+          {/* Registration is the one action that needs a live ceremony, so it
+              is the only one gated. Listing, renaming and deleting stay
+              available either way: a deployment that lost its relying-party ID
+              is exactly when somebody has orphans to clear out. */}
+          {passkeys_ready && canUsePasskeys && !passkeys.isError ? (
             <form
               className="flex flex-col gap-3 sm:flex-row sm:items-end"
               onSubmit={(event) => {

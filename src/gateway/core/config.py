@@ -1657,6 +1657,20 @@ class GatewayConfig(BaseSettings):
                 )
                 raise ValueError(msg)
             return
+        # Checked before coverage, because a scheme-less entry fails coverage
+        # too and the coverage message would name the wrong setting:
+        # 'otari.example.com' really is a subdomain of 'example.com', so telling
+        # the operator to widen webauthn_rp_id would send them to fix something
+        # that is not broken. An origin is a scheme and a host, and this is the
+        # one that is missing.
+        schemeless = [origin for origin in relying_party.origins if "://" not in origin]
+        if schemeless:
+            msg = (
+                f"webauthn_allowed_origins entries {schemeless} are missing a scheme. "
+                "An origin is a scheme and a host, so write 'https://otari.example.com' rather "
+                "than 'otari.example.com'."
+            )
+            raise ValueError(msg)
         stray = [origin for origin in relying_party.origins if not relying_party.covers(origin)]
         if stray:
             msg = (

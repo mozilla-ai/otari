@@ -2965,6 +2965,11 @@
             "description": "Where the authoritative control plane lives when it is not this deployment. Set for a hybrid gateway so its landing page can link to otari.ai; null otherwise.",
             "title": "Management Url"
           },
+          "passkeys_ready": {
+            "description": "Whether this deployment can run a passkey ceremony at all: it has a relying-party ID (webauthn_rp_id, or derived from public_base_url) and an origin to serve one from. Distinct from 'passkey' in sign_in_methods, which is narrower and answers whether a registered passkey could sign somebody in *right now*: an operator with none yet needs this one, or the page that registers the first would be hidden from them. False for a hybrid gateway, which issues no session of its own.",
+            "title": "Passkeys Ready",
+            "type": "boolean"
+          },
           "session_type": {
             "description": "The kind of session this deployment issues, not whether the caller holds one. 'local_operator' is the standalone operator sign-in (see sign_in_methods for which credential it currently accepts), 'hosted_user' an otari.ai account, and 'none' a deployment that issues no management session at all.",
             "enum": [
@@ -3004,6 +3009,7 @@
           "management_url",
           "sign_in_methods",
           "maintenance_mode",
+          "passkeys_ready",
           "mail_ready"
         ],
         "title": "DeploymentBootstrap",

@@ -52,6 +52,7 @@ def test_standalone_reports_a_local_operator_and_the_full_surface_set(tmp_path: 
         "sign_in_methods": ["master_key"],
         "management_url": None,
         "maintenance_mode": False,
+        "passkeys_ready": False,
         "mail_ready": False,
     }
 
@@ -98,6 +99,38 @@ def test_bootstrap_needs_no_credential(tmp_path: Path) -> None:
     # Unauthenticated but not cacheable: the answer describes this gateway's
     # configuration, and a shared cache must not serve one gateway's to another.
     assert anonymous.headers["Cache-Control"] == "private, no-store, no-cache"
+
+
+def test_passkeys_ready_turns_on_with_an_address_alone(tmp_path: Path) -> None:
+    """What the account page gates its "add a passkey" form on.
+
+    Distinct from ``passkey`` in ``sign_in_methods``, which is narrower: that
+    one also requires a passkey to exist, so gating the card on it would hide
+    the form from the operator about to register the first one. This answers the
+    prior question, whether a ceremony could run here at all.
+    """
+    unconfigured = _standalone(tmp_path)
+
+    with TestClient(create_app(unconfigured)) as client:
+        answered = client.get("/v1/bootstrap").json()
+        assert answered["passkeys_ready"] is False
+        assert "passkey" not in answered["sign_in_methods"]
+
+    reset_config()
+    reset_db()
+
+    # An address is the whole requirement: the relying-party ID derives from it.
+    ready = _standalone(tmp_path)
+    ready.public_base_url = "https://otari.example.com"
+
+    with TestClient(create_app(ready)) as client:
+        answered = client.get("/v1/bootstrap").json()
+        assert answered["passkeys_ready"] is True
+        # Still no registered passkey, so it is not offered as a sign-in yet.
+        assert "passkey" not in answered["sign_in_methods"]
+
+    reset_config()
+    reset_db()
 
 
 def test_mail_ready_turns_on_only_with_a_transport_and_a_public_url(tmp_path: Path) -> None:
@@ -155,6 +188,7 @@ def test_hybrid_reports_no_session_no_surfaces_and_the_hosted_url(monkeypatch: p
         "sign_in_methods": [],
         "management_url": "https://otari.ai",
         "maintenance_mode": False,
+        "passkeys_ready": False,
         "mail_ready": False,
     }
 

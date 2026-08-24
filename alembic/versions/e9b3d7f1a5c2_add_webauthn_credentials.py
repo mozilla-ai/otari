@@ -26,7 +26,7 @@ leaving a credential that asserts to a row that is gone.
 Purely additive, so there is no data step and the downgrade is a pair of drops.
 
 Revision ID: e9b3d7f1a5c2
-Revises: c4d7f2a9b6e1
+Revises: d8b3e5c1f7a2
 Create Date: 2026-08-24 00:00:00.000000
 
 """
@@ -38,7 +38,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "e9b3d7f1a5c2"
-down_revision: str | Sequence[str] | None = "c4d7f2a9b6e1"
+down_revision: str | Sequence[str] | None = "d8b3e5c1f7a2"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
