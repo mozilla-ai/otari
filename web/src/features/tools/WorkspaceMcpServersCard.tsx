@@ -23,11 +23,10 @@ import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 // naming their ids in `mcp_server_ids` (see docs/mcp.md).
 //
 // A list, where the two workspace config planes beside it on this page hold one
-// row each, and that difference is the whole shape of this card: there is no
-// deployment-wide MCP server for a workspace row to narrow, so a row here is
-// the configuration rather than a narrowing of one. Nothing on this card can
-// therefore say "deployment default", and there is no third stance: a server is
+// row each, and that difference is the whole shape of this card: nothing here
+// can say "deployment default", and there is no third stance. A server is
 // registered or it is not, and `enabled` decides whether requests reach it.
+// `web/AGENTS.md` says why this plane differs from the two beside it.
 //
 // **No client-side copy of the server's cap.** A workspace may hold only so
 // many servers, and that number lives in the service
@@ -132,11 +131,9 @@ export function WorkspaceMcpServersCard({
         {
           workspaceId: selected.workspace_id,
           serverId: editing.id,
-          // `authorization_token` is `undefined` unless the operator typed one
-          // or asked to remove it, and `JSON.stringify` drops an undefined
-          // value, so the request omits the field and the stored token is left
-          // alone. That is the endpoint's own "not sent" state, and the reason
-          // an edit can restate every other field safely.
+          // The token's states ride on `authorization_token` being absent,
+          // which `JSON.stringify` does for `undefined`. That is what lets an
+          // edit restate every other field safely; see `McpServerDialog`.
           body: draft,
         },
         onDone,

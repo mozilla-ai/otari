@@ -2591,9 +2591,8 @@ export function useCreateWorkspaceMcpServer() {
   })
 }
 
-// A partial update: the caller sends only the fields it means to change, which
-// is what keeps the write-only token's three states (leave, clear, rotate)
-// expressible. See `McpServerDialog` for how the form maps onto them.
+// A partial update, which is what keeps the write-only token's three states
+// expressible. See `McpServerDialog` for the rule and how the form maps onto it.
 export function useUpdateWorkspaceMcpServer() {
   const queryClient = useQueryClient()
   return useMutation({

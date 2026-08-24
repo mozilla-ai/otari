@@ -4,12 +4,9 @@ import { PageHeader } from "@/shared/components/ui"
 /**
  * The selected workspace's MCP servers, as a destination of their own.
  *
- * A sibling of the Tools group's other children, and the one that is not a view
- * of `ToolsGuardrailsPage`: the other two narrow a deployment-wide backend this
- * gateway configures, while MCP has no deployment-wide server list, so these
- * rows are the configuration rather than a narrowing of one. The same card
- * renders at the foot of `/tools`, which is the combined page; the heading is
- * suppressed here because the title below already says it.
+ * The one Tools child that is not a filtered view of `ToolsGuardrailsPage`;
+ * `web/AGENTS.md` says why. The same card renders at the foot of `/tools`, with
+ * its heading suppressed here because the title above already carries it.
  */
 export function McpServersPage() {
   return (

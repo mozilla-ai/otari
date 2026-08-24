@@ -24,10 +24,7 @@ export interface McpServerDraft {
   purpose_hint: string | null
   allowed_tools: string[] | null
   enabled: boolean
-  /**
-   * The three states, as the endpoint reads them: `undefined` omits the field
-   * and keeps whatever is stored, `""` clears it, and a value rotates it.
-   */
+  /** `undefined` keeps the stored token, `""` clears it, a value rotates it. */
   authorization_token: string | undefined
 }
 

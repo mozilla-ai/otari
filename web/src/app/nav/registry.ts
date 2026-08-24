@@ -120,10 +120,9 @@ const BASE_NAV_SECTIONS = [
         icon: FiTool,
         // Two of the three services the page configures, plus MCP servers;
         // Guardrails is grouped under Routing, where the prototype puts it.
-        // MCP is the row here that is not a tool-service view: a workspace
-        // registers its own servers (`workspace_mcp_server_service.py`) and
-        // there is no deployment-wide list for that to narrow, so it has a
-        // page of its own rather than a filter over the settings page.
+        // MCP is the row that is not a tool-service view, so it has a page of
+        // its own rather than a filter over the settings page; web/AGENTS.md
+        // says why.
         //
         // `to` gates and names the group; it is not somewhere the rail
         // navigates. A group with more than one visible child is a disclosure
