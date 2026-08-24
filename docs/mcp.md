@@ -96,7 +96,12 @@ owner/admin or an owner/admin of that workspace.
 - `enabled: false` keeps the row and its token but takes the server out of
   every request that names it.
 - The URL is checked for SSRF safety when it is stored as well as when a
-  request uses it, and must be `https://` when a token is set.
+  request uses it, and must be `https://` when a token is set. A stored URL that
+  passes the first check and fails the second, because the host it resolves to
+  moved, refuses the request with a `500`: the endpoint is a workspace setting
+  the caller cannot see or fix, so the reason goes to the log rather than into
+  the response. A URL sent in the request body is yours to fix and still fails
+  with a `400` naming what was wrong with it.
 - A workspace may configure up to 50 servers.
 
 In hybrid mode these routes are not mounted: the servers live in otari.ai and

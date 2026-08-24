@@ -210,6 +210,7 @@ API_KEY_VALIDATION_FAILED_DETAIL = "API key validation failed"
 API_KEY_NO_USER_DETAIL = "API key has no associated user"
 MCP_SERVER_IDS_UNAVAILABLE_DETAIL = "mcp_server_ids is unavailable for this request"
 MCP_SERVER_TOKEN_UNREADABLE_DETAIL = "A configured MCP server's authorization token could not be read"
+MCP_SERVER_URL_UNSAFE_DETAIL = "A configured MCP server's URL failed its safety check"
 NO_RESOLVABLE_PROVIDER_DETAIL = "Authorization service returned no resolvable provider"
 PROVIDER_ERROR_DETAIL = "LLM provider error"
 PROVIDER_TIMEOUT_DETAIL = "LLM provider timeout"
@@ -1586,11 +1587,32 @@ class ToolContext:
         return bool(self.mcp_server_configs) or self.use_sandbox or self.use_web_search
 
 
-async def _validate_mcp_server_urls(adapter: FormatAdapter[Any, Any], mcp_servers: list[McpServerConfig]) -> None:
-    """SSRF/scheme safety check for every MCP server URL in this request.
+async def _validate_mcp_server_urls(
+    adapter: FormatAdapter[Any, Any],
+    mcp_servers: list[McpServerConfig],
+    *,
+    stored: bool = False,
+    workspace_id: uuid.UUID | None = None,
+) -> None:
+    """SSRF/scheme safety check for the MCP server URLs in this request.
 
-    Covers both request-body-supplied servers and platform-resolved ones
-    (``mcp_server_ids``): both land in the same merged list before this runs.
+    Called once per source rather than over the merged list, because a failure
+    means different things for the two and the caller is owed a different
+    answer:
+
+    * A **request-body** server is the caller's own, so a rejection is their
+      malformed request and the reason travels back to them, naming the URL they
+      sent. That is the pre-existing behavior.
+    * A **stored** server (resolved from ``mcp_server_ids``) is workspace
+      configuration the caller can neither see nor fix, and the rejection names
+      the host and the range it resolved into. ``routes/workspace_mcp_servers``
+      gates even the *read* of those rows behind the master key, on the grounds
+      that they name the endpoints this gateway connects to, so echoing one to
+      any key holder gives away what that gate is there to withhold. It answers
+      the way an unreadable stored token already does: a fixed 500 detail, with
+      the reason and the workspace in the log, since a stored endpoint that
+      fails its check is the operator's problem and not the caller's.
+
     Runs concurrently since each check does an independent DNS lookup;
     ``asyncio.gather`` (default ``return_exceptions=False``) propagates the
     first ``UnsafeURLError`` it sees as soon as it's raised. Note this does
@@ -1613,7 +1635,10 @@ async def _validate_mcp_server_urls(adapter: FormatAdapter[Any, Any], mcp_server
             )
         )
     except UnsafeURLError as exc:
-        raise adapter.error(400, str(exc), ErrorKind.INVALID_REQUEST) from exc
+        if not stored:
+            raise adapter.error(400, str(exc), ErrorKind.INVALID_REQUEST) from exc
+        logger.error("Configured MCP server URL failed its safety check for workspace %s: %s", workspace_id, exc)
+        raise adapter.error(500, MCP_SERVER_URL_UNSAFE_DETAIL, ErrorKind.API) from exc
 
 
 def _overlay_mandate(merged: dict[str, GuardrailConfig], mandated: Iterable[GuardrailConfig]) -> None:
@@ -1840,11 +1865,17 @@ async def prepare_gateway_tools(
             mandated=effective.mandated,
         )
 
-        if mcp_server_ids:
-            mcp_servers = (mcp_servers or []) + await _resolve_mcp_server_ids(adapter, ctx, mcp_server_ids)
-
+        # Checked per source, not over the merged list: see
+        # `_validate_mcp_server_urls` for why a stored server's rejection cannot
+        # carry the same body a caller's own does.
         if mcp_servers:
             await _validate_mcp_server_urls(adapter, mcp_servers)
+        if mcp_server_ids:
+            stored_servers = await _resolve_mcp_server_ids(adapter, ctx, mcp_server_ids)
+            await _validate_mcp_server_urls(
+                adapter, stored_servers, stored=True, workspace_id=ctx.workspace_id
+            )
+            mcp_servers = (mcp_servers or []) + stored_servers
 
         sandbox_tool_entry, tools_after_sandbox = _extract_code_execution_tool(tools)
         # Read the effective config value (dashboard override / env / YAML), falling
