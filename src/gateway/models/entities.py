@@ -1643,7 +1643,7 @@ class OrganizationGuardrail(Base):
     # and the scope rows below are not consulted. False means it runs only in
     # the workspaces named there, and a new workspace inherits nothing.
     applies_to_all_workspaces: Mapped[bool] = mapped_column(default=False, nullable=False)
-    # ``UtcDateTime`` for the reason its neighbours use it: these are serialized
+    # ``UtcDateTime`` for the reason its neighbors use it: these are serialized
     # with ``.isoformat()`` for the dashboard, and a plain ``DateTime(timezone=True)``
     # round-trips naive on SQLite.
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))

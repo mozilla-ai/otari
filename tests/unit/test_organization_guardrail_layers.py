@@ -79,65 +79,70 @@ def test_no_layer_asked_for_anything_leaves_the_request_exactly_as_it_was() -> N
     """The zero-rows requirement: no organization entries, no policy, no change."""
     caller = [_guardrail("pii", mode="monitor")]
 
-    assert merge_guardrail_layers(_ctx(), caller, []) == (caller, {})
-    assert merge_guardrail_layers(_ctx(), None, []) == (None, {})
+    unrouted = merge_guardrail_layers(_ctx(), caller, [])
+    assert unrouted.configs is caller
+    assert unrouted.credentials == {} and unrouted.mandated == frozenset()
+
+    empty = merge_guardrail_layers(_ctx(), None, [])
+    assert empty.configs is None
+    assert empty.credentials == {} and empty.mandated == frozenset()
 
 
 def test_an_organization_guardrail_runs_when_the_caller_asked_for_nothing() -> None:
-    effective, credentials = merge_guardrail_layers(_ctx(), None, [_organization(_guardrail("prompt-injection"))])
+    merged = merge_guardrail_layers(_ctx(), None, [_organization(_guardrail("prompt-injection"))])
 
-    assert effective is not None
-    assert [g.profile for g in effective] == ["prompt-injection"]
-    assert effective[0].mode == "block"
-    assert credentials == {}
+    assert merged.configs is not None
+    assert [g.profile for g in merged.configs] == ["prompt-injection"]
+    assert merged.configs[0].mode == "block"
+    assert merged.credentials == {}
 
 
 def test_a_caller_cannot_weaken_what_the_organization_mandated() -> None:
-    effective, _ = merge_guardrail_layers(
+    merged = merge_guardrail_layers(
         _ctx(),
         [_guardrail("prompt-injection", mode="monitor", on_unavailable="monitor")],
         [_organization(_guardrail("prompt-injection", mode="block", on_unavailable="block"))],
     )
 
-    assert effective is not None and len(effective) == 1
-    assert effective[0].mode == "block"
-    assert effective[0].on_unavailable == "block"
+    assert merged.configs is not None and len(merged.configs) == 1
+    assert merged.configs[0].mode == "block"
+    assert merged.configs[0].on_unavailable == "block"
 
 
 def test_a_caller_may_tighten_what_the_organization_mandated() -> None:
-    effective, _ = merge_guardrail_layers(
+    merged = merge_guardrail_layers(
         _ctx(),
         [_guardrail("prompt-injection", mode="block", on_unavailable="block")],
         [_organization(_guardrail("prompt-injection", mode="monitor", on_unavailable="monitor"))],
     )
 
-    assert effective is not None
-    assert effective[0].mode == "block"
-    assert effective[0].on_unavailable == "block"
+    assert merged.configs is not None
+    assert merged.configs[0].mode == "block"
+    assert merged.configs[0].on_unavailable == "block"
 
 
 def test_a_caller_may_add_their_own_guardrails_alongside_an_organization_mandate() -> None:
-    effective, _ = merge_guardrail_layers(
+    merged = merge_guardrail_layers(
         _ctx(),
         [_guardrail("pii", mode="monitor")],
         [_organization(_guardrail("prompt-injection"))],
     )
 
-    assert effective is not None
-    assert sorted(g.profile for g in effective) == ["pii", "prompt-injection"]
+    assert merged.configs is not None
+    assert sorted(g.profile for g in merged.configs) == ["pii", "prompt-injection"]
 
 
 def test_the_organization_owns_the_endpoint_for_a_profile_the_caller_also_named() -> None:
     """A caller cannot point a mandated check at a service of their choosing."""
-    effective, credentials = merge_guardrail_layers(
+    merged = merge_guardrail_layers(
         _ctx(),
         [_guardrail("prompt-injection", url="https://caller.example/guardrails")],
         [_organization(_guardrail("prompt-injection", url="https://org.example/guardrails"), credential="s3cret")],
     )
 
-    assert effective is not None
-    assert effective[0].url == "https://org.example/guardrails"
-    assert credentials == {"prompt-injection": "s3cret"}
+    assert merged.configs is not None
+    assert merged.configs[0].url == "https://org.example/guardrails"
+    assert merged.credentials == {"prompt-injection": "s3cret"}
 
 
 def test_the_policy_layer_is_outermost_and_takes_the_endpoint_from_the_organization() -> None:
@@ -147,36 +152,36 @@ def test_the_policy_layer_is_outermost_and_takes_the_endpoint_from_the_organizat
     policy's URL has replaced it, carrying the secret along would be sending it
     somewhere it was never meant for.
     """
-    effective, credentials = merge_guardrail_layers(
+    merged = merge_guardrail_layers(
         _ctx(_guardrail("prompt-injection", url="https://operator.example/guardrails")),
         None,
         [_organization(_guardrail("prompt-injection", url="https://org.example/guardrails"), credential="s3cret")],
     )
 
-    assert effective is not None and len(effective) == 1
-    assert effective[0].url == "https://operator.example/guardrails"
-    assert credentials == {}
+    assert merged.configs is not None and len(merged.configs) == 1
+    assert merged.configs[0].url == "https://operator.example/guardrails"
+    assert merged.credentials == {}
 
 
 def test_a_credential_survives_a_policy_that_mandates_a_different_profile() -> None:
-    effective, credentials = merge_guardrail_layers(
+    merged = merge_guardrail_layers(
         _ctx(_guardrail("pii")),
         None,
         [_organization(_guardrail("prompt-injection"), credential="s3cret")],
     )
 
-    assert effective is not None
-    assert sorted(g.profile for g in effective) == ["pii", "prompt-injection"]
-    assert credentials == {"prompt-injection": "s3cret"}
+    assert merged.configs is not None
+    assert sorted(g.profile for g in merged.configs) == ["pii", "prompt-injection"]
+    assert merged.credentials == {"prompt-injection": "s3cret"}
 
 
 def test_the_strictest_of_all_three_layers_wins() -> None:
-    effective, _ = merge_guardrail_layers(
+    merged = merge_guardrail_layers(
         _ctx(_guardrail("prompt-injection", mode="monitor", on_unavailable="monitor")),
         [_guardrail("prompt-injection", mode="monitor", on_unavailable="block")],
         [_organization(_guardrail("prompt-injection", mode="block", on_unavailable="monitor"))],
     )
 
-    assert effective is not None and len(effective) == 1
-    assert effective[0].mode == "block", "the organization's block survives two monitor layers"
-    assert effective[0].on_unavailable == "block", "and so does the caller's own"
+    assert merged.configs is not None and len(merged.configs) == 1
+    assert merged.configs[0].mode == "block", "the organization's block survives two monitor layers"
+    assert merged.configs[0].on_unavailable == "block", "and so does the caller's own"

@@ -1643,11 +1643,27 @@ def _overlay_mandate(merged: dict[str, GuardrailConfig], mandated: Iterable[Guar
         )
 
 
+@dataclass(frozen=True)
+class EffectiveGuardrails:
+    """The guardrails a request runs, and what the runner needs to know about them.
+
+    Three fields rather than a list, because two of the three answer questions
+    the list cannot: which entries carry a credential, and which came from a
+    layer the caller does not control. The second decides how a URL that fails
+    its safety check is reported, so it has to survive the merge rather than be
+    re-derived from a config the merge has already flattened.
+    """
+
+    configs: list[GuardrailConfig] | None
+    credentials: dict[str, str]
+    mandated: frozenset[str]
+
+
 def merge_guardrail_layers(
     ctx: RequestContext,
     requested: list[GuardrailConfig] | None,
     organization: Sequence[ResolvedOrganizationGuardrail],
-) -> tuple[list[GuardrailConfig] | None, dict[str, str]]:
+) -> EffectiveGuardrails:
     """The effective guardrails for this request, and the credentials they need.
 
     Three layers fold in one order, each able to add a check or tighten one and
@@ -1663,26 +1679,29 @@ def merge_guardrail_layers(
     secret on would be sending it somewhere it was never meant for.
 
     Returns the caller's own list unchanged, `None` included, when no layer
-    mandated anything, alongside an empty credential map: that is the shape
+    mandated anything, alongside an empty credential map and an empty mandated set: that is the shape
     `apply_input_guardrails` treats as "no guardrails ran", and it is what keeps
     a deployment that configures nothing behaving exactly as it did.
     """
-    mandated = ctx.plan.guardrails if ctx.plan is not None else []
-    if not organization and not mandated:
-        return requested, {}
+    policy = ctx.plan.guardrails if ctx.plan is not None else []
+    if not organization and not policy:
+        return EffectiveGuardrails(requested, {}, frozenset())
 
     # Caller entries first, so a mandating layer of the same profile overwrites them.
     merged: dict[str, GuardrailConfig] = {guardrail.profile: guardrail for guardrail in requested or []}
     credentials: dict[str, str] = {}
+    mandated: set[str] = set()
     for entry in organization:
         _overlay_mandate(merged, (entry.config,))
+        mandated.add(entry.config.profile)
         if entry.credential:
             credentials[entry.config.profile] = entry.credential
-    if mandated:
-        _overlay_mandate(merged, mandated)
-        for guardrail in mandated:
+    if policy:
+        _overlay_mandate(merged, policy)
+        for guardrail in policy:
+            mandated.add(guardrail.profile)
             credentials.pop(guardrail.profile, None)
-    return list(merged.values()), credentials
+    return EffectiveGuardrails(list(merged.values()), credentials, frozenset(mandated))
 
 
 async def _resolve_organization_guardrails(
@@ -1810,15 +1829,14 @@ async def prepare_gateway_tools(
         # rather than at each route, so every completion endpoint enforces a
         # mandate identically and none can forget to. `guardrails` as passed is
         # the caller's own list.
-        effective_guardrails, guardrail_credentials = merge_guardrail_layers(
-            ctx, guardrails, await _resolve_organization_guardrails(adapter, ctx)
-        )
+        effective = merge_guardrail_layers(ctx, guardrails, await _resolve_organization_guardrails(adapter, ctx))
         await apply_input_guardrails(
-            effective_guardrails,
+            effective.configs,
             guardrail_text,
             response=response,
             config=ctx.config,
-            credentials=guardrail_credentials,
+            credentials=effective.credentials,
+            mandated=effective.mandated,
         )
 
         if mcp_server_ids:
@@ -2032,10 +2050,10 @@ async def prepare_gateway_tools(
         await release_reservation(ctx)
         raise
     except SQLAlchemyError:
-        # Four reads in this block touch the database (the workspace MCP servers,
-        # the workspace code-execution policy and the workspace web-search
-        # configuration above, and `_require_tool_pricing`), and a failure in any
-        # of them is not an
+        # Five reads in this block touch the database (the organization's
+        # guardrails, the workspace MCP servers, the workspace code-execution
+        # policy and the workspace web-search configuration above, and
+        # `_require_tool_pricing`), and a failure in any of them is not an
         # `HTTPException`, so without this arm it would leave `users.reserved`
         # holding the estimate until the budget's next reset, or forever for a
         # budget with no reset period. The rollback comes first because a failed

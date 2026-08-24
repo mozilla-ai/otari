@@ -756,7 +756,7 @@ export const INPUT_CLASS =
  *
  * Two tones and no more: `muted` states a fact about the row (which provider,
  * which scope, whether a credential is set), `warn` says the row is not doing
- * what its neighbours are. Lives here rather than in a feature folder because
+ * what its neighbors are. Lives here rather than in a feature folder because
  * the Tools cards each grew an identical copy.
  */
 export function Badge({

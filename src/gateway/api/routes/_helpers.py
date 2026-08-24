@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Mapping, Sequence
+from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException, Request, Response, status
@@ -262,6 +262,7 @@ async def apply_input_guardrails(
     response: Response,
     config: GatewayConfig | None = None,
     credentials: Mapping[str, str] | None = None,
+    mandated: Collection[str] | None = None,
 ) -> None:
     """Enforce the input guardrails for a request before the provider call.
 
@@ -271,7 +272,11 @@ async def apply_input_guardrails(
     the merge happens so every completion endpoint enforces a mandate alike).
     ``credentials`` carries the bearer credential an organization entry stores
     for the endpoint it names, keyed by profile; it never comes from the request
-    body.
+    body. ``mandated`` names the profiles a layer above the caller supplied,
+    which is what decides whether a URL that fails its safety check is the
+    caller's malformed request (a 400 naming their own URL) or a stored entry
+    being unevaluable (governed by its ``mode`` / ``on_unavailable``, with the
+    endpoint kept out of the response).
 
     No-op when ``guardrails`` is empty/None (zero overhead for the common
     case). On a ``block``-mode flag, raises ``403`` and the provider is never
@@ -293,8 +298,9 @@ async def apply_input_guardrails(
         bytes are streamed).
 
     Raises:
-        HTTPException: ``400`` when a guardrail's ``url`` override fails the
-            SSRF/scheme safety check; ``403`` when a ``block`` guardrail flags
+        HTTPException: ``400`` when a *caller-supplied* guardrail's ``url``
+            fails the SSRF/scheme safety check (a mandated entry's failure is a
+            502 or a recorded inconclusive instead, per its own settings); ``403`` when a ``block`` guardrail flags
             the input; ``502`` when a ``block`` guardrail that fails closed can't
             be evaluated. The 502 body names the profile and not the endpoint,
             which goes to the log instead.
@@ -307,7 +313,13 @@ async def apply_input_guardrails(
     # override mutates config, so it hot-applies on the next request.
     default_url = (config.guardrails_url if config is not None else None) or otari_env("GUARDRAILS_URL") or None
     try:
-        verdict = await run_input_guardrails(guardrails, input_text, default_url=default_url, credentials=credentials)
+        verdict = await run_input_guardrails(
+            guardrails,
+            input_text,
+            default_url=default_url,
+            credentials=credentials,
+            mandated=mandated,
+        )
     except UnsafeURLError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except GuardrailsNotReachableError as exc:
@@ -340,8 +352,5 @@ async def apply_input_guardrails(
         # Non-blocking: surface the verdict for observability (monitor mode, or
         # a passing block-mode check). Header value is kept compact and free of
         # the freeform `explanation` to avoid oversized / non-ASCII headers.
-        summary = [
-            {"profile": r.profile, "mode": r.mode, "valid": r.valid, "score": r.score}
-            for r in verdict.results
-        ]
+        summary = [{"profile": r.profile, "mode": r.mode, "valid": r.valid, "score": r.score} for r in verdict.results]
         response.headers[GUARDRAILS_RESULT_HEADER] = json.dumps(summary, separators=(",", ":"))

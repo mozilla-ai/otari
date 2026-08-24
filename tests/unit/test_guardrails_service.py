@@ -319,3 +319,78 @@ async def test_the_no_url_message_survives_whole(monkeypatch: pytest.MonkeyPatch
         await run_input_guardrails([GuardrailConfig(profile="prompt-injection", mode="block")], "x", default_url=None)
 
     assert "OTARI_GUARDRAILS_URL" in exc.value.public_detail
+
+
+def _unresolvable(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Make every hostname fail to resolve, which `validate_mcp_url` refuses."""
+    from gateway.services import url_safety
+
+    async def _fails(_host: str) -> list[object]:
+        return []
+
+    monkeypatch.setattr(url_safety, "_resolve_all_async", _fails)
+
+
+_STORED_URL = "https://guardrails.internal.corp.example/validate"
+
+
+@pytest.mark.asyncio
+async def test_a_mandated_endpoint_that_will_not_resolve_honors_its_own_fail_open(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A DNS blip on an organization's endpoint must not refuse the request it was told to serve.
+
+    The URL check runs ahead of the per-entry loop, so before otari#654 threaded
+    `mandated` through, an `UnsafeURLError` bypassed `mode` / `on_unavailable`
+    entirely and every request from every scoped workspace got a 400.
+    """
+    _unresolvable(monkeypatch)
+    called = False
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        nonlocal called
+        called = True
+        return httpx.Response(200, json={"profile": "pi", "result": {"valid": True}})
+
+    _patch_transport(monkeypatch, handler)
+    verdict = await run_input_guardrails(
+        [GuardrailConfig(profile="pi", url=_STORED_URL, mode="monitor", on_unavailable="monitor")],
+        "x",
+        default_url=_URL,
+        mandated={"pi"},
+    )
+
+    assert verdict.blocked is False
+    assert verdict.results[0].valid is None, "recorded as inconclusive, not as a pass"
+    assert called is False, "and the endpoint that failed the check is never contacted"
+
+
+@pytest.mark.asyncio
+async def test_a_mandated_endpoint_failure_is_not_named_to_the_caller(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Fail-closed still refuses, without disclosing an endpoint the caller never chose."""
+    _unresolvable(monkeypatch)
+    with pytest.raises(GuardrailsNotReachableError) as exc:
+        await run_input_guardrails(
+            [GuardrailConfig(profile="pi", url=_STORED_URL, mode="block", on_unavailable="block")],
+            "x",
+            default_url=_URL,
+            mandated={"pi"},
+        )
+
+    assert "guardrails.internal.corp.example" in str(exc.value), "the log still gets the endpoint"
+    assert "guardrails.internal.corp.example" not in exc.value.public_detail
+    assert exc.value.public_detail == "guardrail profile 'pi' could not be evaluated"
+
+
+@pytest.mark.asyncio
+async def test_a_callers_own_bad_url_is_still_their_malformed_request(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Unchanged for the request-body case: they chose the URL, so they are told about it."""
+    _unresolvable(monkeypatch)
+    with pytest.raises(UnsafeURLError) as exc:
+        await run_input_guardrails(
+            [GuardrailConfig(profile="pi", url=_STORED_URL, mode="monitor", on_unavailable="monitor")],
+            "x",
+            default_url=_URL,
+        )
+
+    assert "guardrails.internal.corp.example" in str(exc.value)

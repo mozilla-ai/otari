@@ -730,14 +730,12 @@ class OrganizationGuardrailService:
         `workspace_code_execution_policy_service._commit`: SQLAlchemy leaves a
         session with a failed flush unusable, so a caller that skips the
         rollback gets ``PendingRollbackError`` from the next statement instead
-        of the error that actually happened. ``IntegrityError`` is re-raised for
-        the unique-profile handling above, after the rollback.
+        of the error that actually happened. Everything is re-raised after the
+        rollback, ``IntegrityError`` included, which is what the unique-profile
+        handling above catches.
         """
         try:
             await self.db.commit()
-        except IntegrityError:
-            await self.db.rollback()
-            raise
         except Exception:
             await self.db.rollback()
             raise

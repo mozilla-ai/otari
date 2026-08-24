@@ -10,6 +10,7 @@ all, what it was sent, and what the verdict did to the request.
 
 from __future__ import annotations
 
+import ipaddress
 import json
 from collections.abc import Iterator
 from typing import Any, cast
@@ -244,6 +245,53 @@ def test_a_request_whose_tenancy_will_not_resolve_is_refused_rather_than_uncheck
     detail = response.json()["detail"]
     assert detail["error"]["message"] == "Organization guardrails could not be resolved for this request"
     assert guardrails.calls == [], "and the provider was never reached either"
+
+
+def test_an_endpoint_that_stops_resolving_honors_the_entrys_own_fail_open(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A DNS blip on the organization's endpoint must not refuse every scoped request.
+
+    The URL safety check runs ahead of the per-entry loop, so an entry set to
+    serve unchecked when its service is unreachable was refusing the request
+    anyway, with a 400 that named the endpoint. Both halves are asserted here:
+    the configured fail-open holds, and nothing about the endpoint reaches the
+    caller.
+    """
+    monkeypatch.setenv("OTARI_GUARDRAILS_URL", _DEPLOYMENT_URL)
+
+    # A hostname rather than the IP literal the other cases use, because the
+    # literal never reaches a resolver. Resolvable when the entry is stored and
+    # not when the request arrives, which is the ordinary shape of this: an
+    # endpoint that was fine at configuration time and is not fine now.
+    async def resolves(_host: str) -> list[Any]:
+        return [ipaddress.ip_address("93.184.216.34")]
+
+    monkeypatch.setattr("gateway.services.url_safety._resolve_all_async", resolves)
+    _mandate(
+        client,
+        master_key_header,
+        profile="prompt-injection",
+        mode="monitor",
+        on_unavailable="monitor",
+        url="https://guardrails.internal.corp.example/validate",
+        applies_to_all_workspaces=True,
+    )
+
+    async def unresolvable(_host: str) -> list[Any]:
+        return []
+
+    monkeypatch.setattr("gateway.services.url_safety._resolve_all_async", unresolvable)
+    guardrails = _Guardrails(valid=True)
+
+    response = _post(client, api_key_header, _REQUEST, guardrails, monkeypatch)
+
+    assert response.status_code == 200, response.text
+    assert guardrails.calls == [], "and the endpoint that failed the check is never contacted"
+    assert "guardrails.internal.corp.example" not in response.text
 
 
 def test_a_monitor_entry_annotates_the_response_and_serves_it(
