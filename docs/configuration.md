@@ -215,6 +215,20 @@ build, since a deployment that meant to load an overlay should not serve traffic
 without it. The module has to be importable by the gateway process, so install it
 into the same environment or put it on `PYTHONPATH`.
 
+A contributed router is mounted behind its capability gate and nothing else.
+That gate answers "is this deployment licensed for this surface", which names no
+caller, so **authentication is the contribution's own job**: declare the
+credential each route needs on the route, the way Otari's own routers do. Otari
+mounts no router-level default, because the right answer differs per route, a
+contributed route may be deliberately public, and the header check needs a
+database session a hybrid gateway does not have.
+
+Treat this like a credential rather than a feature flag: naming a module here
+runs that module's code inside the gateway process at startup. It is read only
+from the environment or `config.yml`, never from the dashboard, so whoever can
+set it already owns the process; keep it under the same control as
+`OTARI_SECRET_KEY` and `OTARI_MASTER_KEY`.
+
 The interfaces this exposes are not frozen while Otari is pre-1.0. Pin a released
 tag and expect the shapes to move.
 

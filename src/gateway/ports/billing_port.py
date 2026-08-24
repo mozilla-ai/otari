@@ -13,7 +13,9 @@ whether real billing exists anywhere.
 
 Every method joins the caller's unit of work and commits nothing, so a hold,
 the charge that consumes it, and whatever record the caller keeps of them
-either all land or none do.
+either all land or none do. That holds only where the caller's session is the
+one the port was resolved against; see ``PortSessionDep`` in
+``gateway.api.deps`` for which routes share it and which do not.
 
 Each gate is a decision, not a reading: it either returns or raises
 :class:`InsufficientFundsError`. Callers get no funding amounts to interpret,

@@ -448,6 +448,14 @@ ContainerDep = Annotated[Container, Depends(get_container)]
 # ``get_db_if_needed`` and not ``get_db``: hybrid mode runs with no local
 # database at all, so a port resolved on a hybrid request gets ``None`` rather
 # than a session that cannot be opened. Every core adapter ignores it.
+#
+# The consequence to know before an adapter writes anything: FastAPI caches a
+# dependency per callable, so this shares one session with a route that also
+# takes ``get_db_if_needed`` (the data-plane routes do) and opens a *second,
+# independent* one for a route that takes ``get_db`` (the management-plane
+# routes do). A port's "joins the caller's unit of work" therefore holds only
+# for the first kind. A route that means to commit a port's writes with its own
+# must take its session from ``get_db_if_needed`` too.
 PortSessionDep = Annotated[AsyncSession | None, Depends(get_db_if_needed)]
 
 

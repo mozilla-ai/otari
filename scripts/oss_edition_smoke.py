@@ -87,8 +87,8 @@ WORKING_PREFIX = "/working"
 # hybrid mode (GatewayConfig.effective_mode) and quietly turn the gate into a
 # check of the other edition; OTARI_DATABASE_URL or the CLI's DATABASE_URL would
 # point the run at a database nobody meant to smoke. OTARI_BOOTSTRAP, the overlay
-# selector ARCHITECTURE.md describes, is covered by the same sweep on the day it
-# exists.
+# selector, is covered by the same sweep, which is what keeps this a gate on the
+# plain build rather than on whatever overlay a developer had exported.
 SCRUBBED_ENV_PREFIXES = ("OTARI_",)
 SCRUBBED_ENV_VARS = frozenset({"DATABASE_URL"})
 
