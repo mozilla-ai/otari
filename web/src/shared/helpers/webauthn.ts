@@ -23,13 +23,23 @@
  */
 export const MAX_PASSKEY_NAME_LENGTH = 255
 
-/** Whether this browser can do a passkey ceremony at all. */
+/**
+ * Whether this browser can do a passkey ceremony at all.
+ *
+ * Both halves are needed, and the second is the one that is easy to leave out.
+ * `PublicKeyCredential` and `navigator.credentials` are *present* in an
+ * insecure context and throw a `SecurityError` on use, so checking only for
+ * the API offers a button whose one possible outcome is a failure. A gateway
+ * served over plain HTTP on a LAN address is exactly that case, and it is a
+ * deployment this project supports. `isSecureContext` is what the browser
+ * itself gates the API on: HTTPS, plus localhost and the loopback addresses,
+ * which is what keeps this working in local development.
+ */
 export function supportsPasskeys(): boolean {
   return (
     typeof window !== "undefined" &&
+    window.isSecureContext === true &&
     typeof window.PublicKeyCredential === "function" &&
-    // `navigator.credentials` exists in insecure contexts and throws on use, so
-    // the check is for the API surface rather than for the object.
     typeof navigator !== "undefined" &&
     navigator.credentials != null
   )

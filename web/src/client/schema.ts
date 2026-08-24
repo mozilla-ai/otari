@@ -562,6 +562,13 @@ export interface paths {
         /**
          * List Passkeys
          * @description The caller's own passkeys. Never anybody else's, and never key material.
+         *
+         *     Deliberately *not* behind ``require_passkey_support``, and not filtered to
+         *     the current relying-party ID. A deployment that has changed or lost that ID
+         *     still holds the rows registered under the old one, and refusing to list them
+         *     would leave somebody looking at an empty page with no way to clean up and no
+         *     hint as to why. Each row carries ``is_usable`` instead, so an orphan is
+         *     visible, explained, and deletable.
          */
         get: operations["list_passkeys_v1_auth_webauthn_credentials_get"];
         put?: never;
@@ -596,6 +603,9 @@ export interface paths {
         /**
          * Rename Passkey
          * @description Relabel one of the caller's passkeys, which is all that is editable.
+         *
+         *     Ungated like the list, and for the same reason: naming an orphan before
+         *     deleting it is not something a lost relying-party ID should prevent.
          */
         patch: operations["rename_passkey_v1_auth_webauthn_credentials__credential_id__patch"];
         trace?: never;
@@ -8197,6 +8207,8 @@ export interface components {
              * Format: uuid
              */
             id: string;
+            /** Is Usable */
+            is_usable: boolean;
             /** Last Used At */
             last_used_at: string | null;
             /** Name */

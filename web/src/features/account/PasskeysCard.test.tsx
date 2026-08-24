@@ -14,6 +14,7 @@ const PASSKEY = {
   rp_id: "otari.example.com",
   transports: ["internal"],
   backed_up: true,
+  is_usable: true,
   created_at: "2026-08-01T10:00:00Z",
   last_used_at: null,
 }
@@ -61,6 +62,9 @@ function renderCard() {
 // that reaches the register button needs this; `supportsPasskeys` is read on
 // render, so it is stubbed before one.
 function stubAuthenticator(create: ReturnType<typeof vi.fn>) {
+  // A secure context as well as the API: `supportsPasskeys` gates on both, and
+  // jsdom reports `isSecureContext` false by default.
+  vi.stubGlobal("isSecureContext", true)
   vi.stubGlobal("PublicKeyCredential", function PublicKeyCredential() {})
   vi.stubGlobal("navigator", {
     ...globalThis.navigator,
@@ -112,6 +116,20 @@ describe("PasskeysCard", () => {
     expect(
       await screen.findByText("You have no passkeys yet."),
     ).toBeInTheDocument()
+  })
+
+  it("marks a passkey the deployment can no longer assert, and still offers to delete it", async () => {
+    // Registered before the relying-party ID moved. Hiding it would leave the
+    // operator with an unexplained empty list and no way to clean up.
+    mockApi({
+      [LIST]: () =>
+        jsonResponse({ data: [{ ...PASSKEY, is_usable: false }], count: 1 }),
+    })
+    renderCard()
+
+    expect(await screen.findByText("Work laptop")).toBeInTheDocument()
+    expect(screen.getByText(/can no longer sign you in/)).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument()
   })
 
   it("registers a passkey through the browser ceremony", async () => {

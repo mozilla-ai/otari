@@ -73,6 +73,17 @@ function PasskeyRow({
               ? `Last used ${formatDateTime(passkey.last_used_at)}`
               : "Never used"}
           </p>
+          {/* An orphan: registered under a relying-party ID this deployment no
+              longer uses, so it cannot sign anybody in and nothing but deleting
+              it will help. Said on the row rather than hidden, because a list
+              that quietly dropped it would leave the operator with no
+              explanation and no way to clean up. */}
+          {passkey.is_usable ? null : (
+            <p className="text-xs text-warning">
+              Registered for a different address than this dashboard now uses,
+              so it can no longer sign you in. Delete it and add a new one.
+            </p>
+          )}
         </div>
       </div>
       <RowActions>
@@ -236,6 +247,9 @@ export function PasskeysCard() {
             <p className="text-sm text-muted">You have no passkeys yet.</p>
           ) : null}
 
+          {/* Registration needs a ceremony, so it is the one action gated on
+              this browser being able to run one. Listing, renaming and deleting
+              are not: an orphaned passkey has to stay manageable. */}
           {canUsePasskeys && !passkeys.isError ? (
             <form
               className="flex flex-col gap-3 sm:flex-row sm:items-end"

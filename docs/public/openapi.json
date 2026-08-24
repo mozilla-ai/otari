@@ -11005,6 +11005,10 @@
             "title": "Id",
             "type": "string"
           },
+          "is_usable": {
+            "title": "Is Usable",
+            "type": "boolean"
+          },
           "last_used_at": {
             "anyOf": [
               {
@@ -11039,6 +11043,7 @@
           "id",
           "credential_id",
           "rp_id",
+          "is_usable",
           "transports",
           "backed_up",
           "created_at",
@@ -13539,7 +13544,7 @@
     },
     "/v1/auth/webauthn/credentials": {
       "get": {
-        "description": "The caller's own passkeys. Never anybody else's, and never key material.",
+        "description": "The caller's own passkeys. Never anybody else's, and never key material.\n\nDeliberately *not* behind ``require_passkey_support``, and not filtered to\nthe current relying-party ID. A deployment that has changed or lost that ID\nstill holds the rows registered under the old one, and refusing to list them\nwould leave somebody looking at an empty page with no way to clean up and no\nhint as to why. Each row carries ``is_usable`` instead, so an orphan is\nvisible, explained, and deletable.",
         "operationId": "list_passkeys_v1_auth_webauthn_credentials_get",
         "responses": {
           "200": {
@@ -13612,7 +13617,7 @@
         ]
       },
       "patch": {
-        "description": "Relabel one of the caller's passkeys, which is all that is editable.",
+        "description": "Relabel one of the caller's passkeys, which is all that is editable.\n\nUngated like the list, and for the same reason: naming an orphan before\ndeleting it is not something a lost relying-party ID should prevent.",
         "operationId": "rename_passkey_v1_auth_webauthn_credentials__credential_id__patch",
         "parameters": [
           {

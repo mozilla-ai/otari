@@ -95,6 +95,7 @@ def test_a_passkey_registers_and_then_signs_in(
     assert passkey["credential_id"] == authenticator.credential_id_b64
     assert passkey["transports"] == ["internal"]
     assert passkey["last_used_at"] is None
+    assert passkey["is_usable"] is True
     # Key material never crosses the wire, in either direction.
     assert "public_key" not in passkey
 
@@ -124,6 +125,12 @@ def test_passkeys_are_unavailable_when_the_deployment_has_no_address(
     options = client.post("/v1/auth/webauthn/register/options", headers=master_key_header)
     assert options.status_code == 503, options.text
     assert "public_base_url" in options.json()["detail"]
+
+    # Listing is deliberately not gated: a deployment that lost its relying
+    # party still has to let somebody see and remove what it left behind.
+    listed = client.get("/v1/auth/webauthn/credentials", headers=master_key_header)
+    assert listed.status_code == 200, listed.text
+    assert listed.json()["count"] == 0
 
 
 def test_an_explicit_rp_id_overrides_the_derived_one(
@@ -250,18 +257,41 @@ def test_a_credential_registered_under_another_relying_party_is_inert(
     """Moving the relying-party ID orphans existing passkeys, visibly.
 
     This is otari-ai#1716's standing constraint in miniature: a row is bound to
-    the ID it was registered under, so a deployment that moves loses them. The
-    list stops offering it rather than showing a passkey that cannot work.
+    the ID it was registered under, so a deployment that moves loses them.
+
+    The orphan stays *listed*, marked unusable. Hiding it would leave somebody
+    looking at an empty page with no explanation, and would withhold the id they
+    need in order to delete the row.
     """
-    _register(client, master_key_header, authenticator)
-    assert client.get("/v1/auth/webauthn/credentials", headers=master_key_header).json()["count"] == 1
+    passkey = _register(client, master_key_header, authenticator)
+    assert passkey["is_usable"] is True
 
     monkeypatch.setattr(test_config, "webauthn_rp_id", "moved.testserver")
     monkeypatch.setattr(test_config, "public_base_url", "http://moved.testserver")
 
     listed = client.get("/v1/auth/webauthn/credentials", headers=master_key_header)
     assert listed.status_code == 200, listed.text
-    assert listed.json()["count"] == 0
+    assert listed.json()["count"] == 1
+    assert listed.json()["data"][0]["is_usable"] is False
+
+    # And the one action left for it still works.
+    assert (
+        client.delete(f"/v1/auth/webauthn/credentials/{passkey['id']}", headers=master_key_header).status_code == 204
+    )
+
+
+def test_a_passkey_cannot_assert_under_a_relying_party_it_was_not_registered_for(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    authenticator: SoftwareAuthenticator,
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
+    passkeys_configured: None,
+) -> None:
+    """Even holding the same key pair, the row is scoped to the old ID."""
+    _register(client, master_key_header, authenticator)
+    monkeypatch.setattr(test_config, "webauthn_rp_id", "moved.testserver")
+    monkeypatch.setattr(test_config, "public_base_url", "http://moved.testserver")
 
     moved = SoftwareAuthenticator(
         rp_id="moved.testserver",

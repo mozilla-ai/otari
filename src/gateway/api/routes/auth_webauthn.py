@@ -117,9 +117,10 @@ def require_passkey_support(config: Annotated[GatewayConfig, Depends(get_config)
     this one, where the missing setting is exactly what the operator needs to
     read.
 
-    Not applied to renaming or deleting a passkey. Those need no ceremony, and a
-    deployment whose relying-party ID was changed or lost is precisely when
-    somebody needs to be able to clear out the rows it orphaned.
+    Applied to the four ceremony endpoints only. Listing, renaming and deleting
+    a passkey need no ceremony, and a deployment whose relying-party ID was
+    changed or lost is precisely when somebody needs to see the rows it orphaned
+    and clear them out.
     """
     try:
         webauthn_service.require_relying_party(config)
@@ -177,7 +178,7 @@ async def register_passkey(
     """Verify a registration ceremony and store the passkey it produced."""
     credential = await webauthn_service.finish_registration(db, config, identity, body.credential, body.name)
     await _commit(db, "store a registered passkey")
-    return webauthn_service.to_public(credential)
+    return webauthn_service.to_public(credential, relying_party_id=credential.rp_id)
 
 
 @router.post(
@@ -239,17 +240,27 @@ async def authenticate_passkey(
     )
 
 
-@router.get(
-    "/credentials", response_model=WebAuthnCredentialsPublic, dependencies=[Depends(require_passkey_support)]
-)
+@router.get("/credentials", response_model=WebAuthnCredentialsPublic)
 async def list_passkeys(
     identity: CurrentIdentity,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> Any:
-    """The caller's own passkeys. Never anybody else's, and never key material."""
-    credentials = await webauthn_service.list_credentials(db, config, identity.id)
-    data = [webauthn_service.to_public(credential) for credential in credentials]
+    """The caller's own passkeys. Never anybody else's, and never key material.
+
+    Deliberately *not* behind ``require_passkey_support``, and not filtered to
+    the current relying-party ID. A deployment that has changed or lost that ID
+    still holds the rows registered under the old one, and refusing to list them
+    would leave somebody looking at an empty page with no way to clean up and no
+    hint as to why. Each row carries ``is_usable`` instead, so an orphan is
+    visible, explained, and deletable.
+    """
+    relying_party = config.webauthn_relying_party
+    credentials = await webauthn_service.list_credentials(db, identity.id)
+    data = [
+        webauthn_service.to_public(credential, relying_party_id=relying_party.rp_id if relying_party else None)
+        for credential in credentials
+    ]
     return WebAuthnCredentialsPublic(data=data, count=len(data))
 
 
@@ -259,11 +270,17 @@ async def rename_passkey(
     body: WebAuthnCredentialUpdate,
     identity: CurrentIdentity,
     db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> Any:
-    """Relabel one of the caller's passkeys, which is all that is editable."""
+    """Relabel one of the caller's passkeys, which is all that is editable.
+
+    Ungated like the list, and for the same reason: naming an orphan before
+    deleting it is not something a lost relying-party ID should prevent.
+    """
     credential = await webauthn_service.rename_credential(db, identity.id, credential_id, body.name)
     await _commit(db, "rename a passkey")
-    return webauthn_service.to_public(credential)
+    relying_party = config.webauthn_relying_party
+    return webauthn_service.to_public(credential, relying_party_id=relying_party.rp_id if relying_party else None)
 
 
 @router.delete("/credentials/{credential_id}", status_code=status.HTTP_204_NO_CONTENT)

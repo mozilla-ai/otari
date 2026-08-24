@@ -1630,9 +1630,16 @@ class GatewayConfig(BaseSettings):
         """
         configured_id = (self.webauthn_rp_id or "").strip()
         if configured_id and _host_of(f"//{configured_id}") != configured_id.lower():
+            # Two spellings reach here and neither parses under one form. A value
+            # carrying a scheme ('https://example.com') needs to be read as the
+            # URL it is; one carrying only a port ('localhost:8000') parses as a
+            # scheme and a path unless '//' is prepended first. So both are
+            # tried, in that order, and the placeholder is the last resort
+            # rather than the answer to the commonest mistake.
+            suggestion = _host_of(configured_id) or _host_of(f"//{configured_id}") or "otari.example.com"
             msg = (
                 f"webauthn_rp_id must be a bare domain with no scheme, port or path, got {configured_id!r}. "
-                f"Use {_host_of(configured_id) or 'otari.example.com'!r}."
+                f"Use {suggestion!r}."
             )
             raise ValueError(msg)
         relying_party = self.webauthn_relying_party

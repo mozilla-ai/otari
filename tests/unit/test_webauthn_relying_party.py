@@ -94,16 +94,25 @@ def test_which_origins_a_relying_party_id_covers(rp_id: str, origin: str, covere
     assert RelyingParty(rp_id=rp_id, name="otari", origins=()).covers(origin) is covered
 
 
-def test_an_id_written_as_a_url_is_refused_at_startup() -> None:
-    config = _config(public_base_url="https://example.com", webauthn_rp_id="https://example.com")
-    with pytest.raises(ValueError, match="bare domain"):
+@pytest.mark.parametrize(
+    ("written", "suggested"),
+    [
+        ("https://example.com", "example.com"),
+        # The commonest mistake, and the one a naive parse gets wrong: without
+        # the "//" this reads as a scheme and a path, not a host and a port.
+        ("localhost:8000", "localhost"),
+        ("example.com/path", "example.com"),
+        ("https://otari.example.com:8443/", "otari.example.com"),
+    ],
+)
+def test_an_id_that_is_not_a_bare_domain_is_refused_with_the_right_suggestion(
+    written: str, suggested: str
+) -> None:
+    """The refusal has to name the value to use, or it is a puzzle rather than a fix."""
+    config = _config(public_base_url="https://example.com", webauthn_rp_id=written)
+    with pytest.raises(ValueError, match="bare domain") as refusal:
         config.validate_webauthn_relying_party()
-
-
-def test_an_id_with_a_port_is_refused_at_startup() -> None:
-    config = _config(public_base_url="http://localhost:8000", webauthn_rp_id="localhost:8000")
-    with pytest.raises(ValueError, match="bare domain"):
-        config.validate_webauthn_relying_party()
+    assert repr(suggested) in str(refusal.value)
 
 
 def test_an_origin_the_id_cannot_cover_is_refused_at_startup() -> None:

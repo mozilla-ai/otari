@@ -50,12 +50,28 @@ describe("supportsPasskeys", () => {
     vi.unstubAllGlobals()
   })
 
+  function secure(value: boolean) {
+    vi.stubGlobal("isSecureContext", value)
+  }
+
   it("is false without PublicKeyCredential", () => {
+    secure(true)
     vi.stubGlobal("PublicKeyCredential", undefined)
     expect(supportsPasskeys()).toBe(false)
   })
 
-  it("is true when the API is present", () => {
+  it("is false in an insecure context, where the API is present and throws", () => {
+    // Plain HTTP on a LAN address: `PublicKeyCredential` exists, and calling
+    // into it raises a SecurityError. Offering the button here would guarantee
+    // a failure.
+    secure(false)
+    vi.stubGlobal("PublicKeyCredential", function PublicKeyCredential() {})
+    vi.stubGlobal("navigator", { credentials: {} })
+    expect(supportsPasskeys()).toBe(false)
+  })
+
+  it("is true when the API is present in a secure context", () => {
+    secure(true)
     vi.stubGlobal("PublicKeyCredential", function PublicKeyCredential() {})
     vi.stubGlobal("navigator", { credentials: {} })
     expect(supportsPasskeys()).toBe(true)

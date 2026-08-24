@@ -734,7 +734,7 @@
         {
           "name": "List Passkeys",
           "request": {
-            "description": "The caller's own passkeys. Never anybody else's, and never key material.",
+            "description": "The caller's own passkeys. Never anybody else's, and never key material.\n\nDeliberately *not* behind ``require_passkey_support``, and not filtered to\nthe current relying-party ID. A deployment that has changed or lost that ID\nstill holds the rows registered under the old one, and refusing to list them\nwould leave somebody looking at an empty page with no way to clean up and no\nhint as to why. Each row carries ``is_usable`` instead, so an orphan is\nvisible, explained, and deletable.",
             "header": [],
             "method": "GET",
             "url": {
@@ -763,7 +763,7 @@
               },
               "raw": "{\n  \"name\": \"string\"\n}"
             },
-            "description": "Relabel one of the caller's passkeys, which is all that is editable.",
+            "description": "Relabel one of the caller's passkeys, which is all that is editable.\n\nUngated like the list, and for the same reason: naming an orphan before\ndeleting it is not something a lost relying-party ID should prevent.",
             "header": [
               {
                 "key": "Content-Type",

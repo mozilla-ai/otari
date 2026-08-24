@@ -762,6 +762,9 @@ describe("Login with a passkey", () => {
   // A browser that can run the ceremony. `supportsPasskeys` is read on render,
   // so this has to be stubbed before one.
   function stubAuthenticator(get: ReturnType<typeof vi.fn>) {
+    // A secure context as well as the API: `supportsPasskeys` gates on both, and
+    // jsdom reports `isSecureContext` false by default.
+    vi.stubGlobal("isSecureContext", true)
     vi.stubGlobal("PublicKeyCredential", function PublicKeyCredential() {})
     vi.stubGlobal("navigator", {
       ...globalThis.navigator,

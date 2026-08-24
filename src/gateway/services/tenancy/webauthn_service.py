@@ -478,16 +478,27 @@ async def finish_authentication(db: AsyncSession, config: GatewayConfig, respons
     return identity
 
 
-async def list_credentials(db: AsyncSession, config: GatewayConfig, user_id: uuid.UUID) -> list[WebAuthnCredential]:
-    """One identity's passkeys, newest last, for the settings page.
+async def list_credentials(db: AsyncSession, user_id: uuid.UUID) -> list[WebAuthnCredential]:
+    """Every passkey this identity holds, newest last, for the settings page.
 
-    Listed under the current relying-party ID only, matching what the ceremonies
-    will actually accept: a row this deployment can no longer assert is not a
-    passkey the person still has, and showing it would offer a Delete button for
-    the only symptom while hiding the cause.
+    **Not filtered by relying-party ID, unlike the ceremonies.** An earlier
+    version hid the rows the current configuration cannot assert, which was the
+    wrong call twice over: a person whose deployment moved its relying-party ID
+    saw an empty list with no explanation, and the rows they could no longer see
+    were exactly the ones they needed the id of in order to delete. Each row
+    says whether it is still usable instead (``WebAuthnCredentialPublic``), so
+    the page can show an orphan and offer the one action left for it.
+
+    Takes no config for the same reason the route no longer requires one: a
+    deployment that has stopped being configured for passkeys still has to let
+    somebody clean up after it.
     """
-    relying_party = require_relying_party(config)
-    return await _credentials_for(db, user_id, relying_party.rp_id)
+    result = await db.execute(
+        select(WebAuthnCredential)
+        .where(col(WebAuthnCredential.user_id) == user_id)
+        .order_by(col(WebAuthnCredential.created_at))
+    )
+    return list(result.scalars().all())
 
 
 async def rename_credential(
@@ -577,13 +588,19 @@ async def has_any_credential(db: AsyncSession, config: GatewayConfig) -> bool:
     return found is not None
 
 
-def to_public(credential: WebAuthnCredential) -> WebAuthnCredentialPublic:
-    """The wire shape of a passkey. Carries no key material; see the model."""
+def to_public(credential: WebAuthnCredential, *, relying_party_id: str | None) -> WebAuthnCredentialPublic:
+    """The wire shape of a passkey. Carries no key material; see the model.
+
+    ``relying_party_id`` is this deployment's current one, or None when it has
+    none, and is what decides ``is_usable``. Passed in rather than read from a
+    config here so this stays a pure projection.
+    """
     return WebAuthnCredentialPublic(
         id=credential.id,
         name=credential.name,
         credential_id=credential.credential_id,
         rp_id=credential.rp_id,
+        is_usable=relying_party_id is not None and credential.rp_id == relying_party_id,
         transports=list(credential.transports),
         backed_up=credential.backed_up,
         created_at=credential.created_at,

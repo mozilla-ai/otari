@@ -910,6 +910,14 @@ class WebAuthnCredentialPublic(WebAuthnCredentialBase):
     id: uuid.UUID
     credential_id: str
     rp_id: str
+    # Whether this row can still answer a ceremony on this deployment *right
+    # now*, which is not something the client could work out for itself: it
+    # would need the deployment's current relying-party ID, and publishing that
+    # to say "no" would be a worse trade than answering the question here. False
+    # means the passkey is orphaned, by the ID having moved or by the deployment
+    # no longer being configured for passkeys at all, and the only thing left to
+    # do with it is delete it.
+    is_usable: bool
     transports: list[str]
     backed_up: bool
     created_at: datetime
