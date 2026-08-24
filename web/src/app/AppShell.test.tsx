@@ -22,7 +22,7 @@ import { recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
 // stand-in.
 vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
   const { telemetrySpy } = await import("@/tests/telemetry")
-  return { useTelemetry: () => telemetrySpy }
+  return { useTelemetry: vi.fn(() => telemetrySpy) }
 })
 
 // jsdom has no layout engine, so `md:hidden` / responsive classes never take
@@ -1033,7 +1033,7 @@ describe("the telemetry the sidebar records", () => {
 
     expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.TAB_CHANGED, {
       tab_name: "providers",
-      context: "workspace",
+      context: "workspace_sidebar",
     })
   })
 
@@ -1049,7 +1049,7 @@ describe("the telemetry the sidebar records", () => {
 
     expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.TAB_CHANGED, {
       tab_name: "pricing",
-      context: "organization",
+      context: "organization_settings",
     })
   })
 
@@ -1073,7 +1073,36 @@ describe("the telemetry the sidebar records", () => {
 
     expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.TAB_CHANGED, {
       tab_name: "index",
-      context: "workspace",
+      context: "workspace_sidebar",
+    })
+  })
+
+  it("records entering the organization rail from the footer row", async () => {
+    // The row that crosses into the other rail does not go through
+    // `NavRowLink`, so tracking the rows alone left every entry to and exit
+    // from that rail unrecorded while every row inside it was recorded.
+    mockMatchMedia(false)
+    const user = userEvent.setup()
+    await renderShell()
+
+    await user.click(screen.getByRole("link", { name: "Organization" }))
+
+    expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.TAB_CHANGED, {
+      tab_name: "members",
+      context: "organization_settings",
+    })
+  })
+
+  it("records leaving it by the way back", async () => {
+    mockMatchMedia(false)
+    const user = userEvent.setup()
+    await renderShell(bootstrap(), { url: "/organization/members" })
+
+    await user.click(screen.getByRole("link", { name: /^Back to/ }))
+
+    expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.TAB_CHANGED, {
+      tab_name: "index",
+      context: "workspace_sidebar",
     })
   })
 })

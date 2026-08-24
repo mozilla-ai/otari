@@ -212,9 +212,13 @@ describe("createSession credentials", () => {
         }),
       )
 
+      // The status rides along with the message so a caller can tell the two
+      // refusals apart without re-reading the wording, which is the one part of
+      // a refusal that must not be recorded anywhere.
       await expect(createSession({ masterKey: "k" })).resolves.toEqual({
         ok: false,
         message: detail,
+        status,
       })
     }
   })

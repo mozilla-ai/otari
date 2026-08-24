@@ -24,12 +24,15 @@ import type {
  * ```ts
  * vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
  *   const { telemetrySpy } = await import("@/tests/telemetry")
- *   return { useTelemetry: () => telemetrySpy }
+ *   return { useTelemetry: vi.fn(() => telemetrySpy) }
  * })
  * ```
  *
  * Mocked by the `@/…` specifier, which is the one a build-time override
  * replaces, so the test exercises the same resolution the superset build does.
+ * The hook is wrapped in `vi.fn()` rather than handed over as a bare arrow, so
+ * it keeps a function identity lint and the React tooling can follow; see
+ * "Test mocking" in `.github/skills/frontend-standards/imports-and-modules.md`.
  */
 
 export const recordEvent =

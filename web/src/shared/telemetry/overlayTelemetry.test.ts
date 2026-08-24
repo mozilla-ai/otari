@@ -141,13 +141,19 @@ describe("the event catalog", () => {
   })
 })
 
-/** Every non-test source file under `web/src`, as a path/contents pair. */
+/**
+ * Every non-test source file under `web/src`, as a path/contents pair.
+ *
+ * `src/tests/` is excluded along with the `.test.` files: it is the harness
+ * directory, so a spy there naming an event would otherwise satisfy "fired from
+ * a base source file" without any base code firing it.
+ */
 function baseSources(directory: string): { path: string; source: string }[] {
   const found: { path: string; source: string }[] = []
   for (const entry of readdirSync(directory, { withFileTypes: true })) {
     // `architecture.test.ts` plants and deletes files in these while this runs,
     // and Vitest runs the two together, so reading one is a race.
-    if (entry.name === "__boundary_probe__") {
+    if (entry.name === "__boundary_probe__" || entry.name === "tests") {
       continue
     }
     const path = join(directory, entry.name)

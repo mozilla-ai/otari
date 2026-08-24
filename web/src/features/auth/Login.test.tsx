@@ -15,7 +15,7 @@ import { recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
 // observable through a stand-in.
 vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
   const { telemetrySpy } = await import("@/tests/telemetry")
-  return { useTelemetry: () => telemetrySpy }
+  return { useTelemetry: vi.fn(() => telemetrySpy) }
 })
 
 // The sign-in screen picks its form from the bootstrap, so every render here
@@ -602,7 +602,7 @@ describe("the telemetry the sign-in screen records", () => {
     await waitFor(() => {
       expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.LOGIN_FAILED, {
         authentication_method: "master_key",
-        error_code: "credential_rejected",
+        error_code: "http_401",
       })
     })
     // Nothing typed into the form reaches an event: not the key, and not the
@@ -628,7 +628,7 @@ describe("the telemetry the sign-in screen records", () => {
     await waitFor(() => {
       expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.LOGIN_FAILED, {
         authentication_method: "master_key",
-        error_code: "request_failed",
+        error_code: "http_503",
         status: 503,
       })
     })
@@ -680,5 +680,44 @@ describe("the telemetry the sign-in screen records", () => {
       TELEMETRY_EVENTS.FORM_VALIDATION_FAILED,
       { form_name: "login", errors: ["master_key_required"] },
     )
+  })
+
+  it("names a missing password, the one reason with no coverage before", async () => {
+    render(
+      <Mounted signInMethods={["password"]}>
+        <Harness />
+      </Mounted>,
+    )
+    await userEvent.type(screen.getByLabelText("Email"), "ops@example.com")
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }))
+
+    expect(recordEvent).toHaveBeenCalledWith(
+      TELEMETRY_EVENTS.FORM_VALIDATION_FAILED,
+      { form_name: "login", errors: ["password_required"] },
+    )
+  })
+
+  it("separates a retired master key from a wrong one", async () => {
+    // 401 is a wrong credential and 403 is a master key presented to a
+    // deployment that has retired it, a distinction this screen already calls
+    // load-bearing. One bucket for both would throw it away.
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ detail: "Master-key sign-in has been retired." }, 403),
+    )
+
+    render(
+      <Mounted>
+        <Harness />
+      </Mounted>,
+    )
+    await userEvent.type(screen.getByLabelText("Master key"), "otari-mk-old")
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }))
+
+    await waitFor(() => {
+      expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.LOGIN_FAILED, {
+        authentication_method: "master_key",
+        error_code: "http_403",
+      })
+    })
   })
 })

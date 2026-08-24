@@ -90,6 +90,51 @@ function tabNameForPath(to: NavPath): string {
 }
 
 /**
+ * Which rail a `TAB_CHANGED` belongs to, in the platform's own vocabulary.
+ *
+ * `otari-ai/frontend/src/app/nav/registry.ts` sends `"workspace_sidebar"` and
+ * `"organization_settings"` for this property, so those are the values sent
+ * here. A value used as a breakdown is as much a shared vocabulary as the event
+ * name over it: `context: "workspace"` beside a historical
+ * `context: "workspace_sidebar"` splits one funnel exactly the way a renamed
+ * event would.
+ */
+function navTrackContext(to: NavPath): string {
+  return navContextForPath(to) === "organization"
+    ? "organization_settings"
+    : "workspace_sidebar"
+}
+
+/**
+ * Records a move between sidebar destinations.
+ *
+ * A hook rather than a call inside `NavRowLink`, because the rows inside a rail
+ * are not the only way to move within the sidebar: the two footer rows that
+ * cross between the rails navigate to a registry destination without going
+ * through `NavRowLink` at all, and tracking only the rows meant every entry to
+ * and exit from the organization rail went unrecorded while every row inside it
+ * was recorded.
+ */
+function useRecordNavigation(): (to: NavPath, isActive: boolean) => void {
+  const { recordEvent } = useTelemetry()
+
+  return (to, isActive) => {
+    // Only a move: clicking the row you are already on is not a navigation, and
+    // counting it would inflate whichever page people sit on longest.
+    if (isActive) {
+      return
+    }
+    // The context is read from the destination rather than from the rail that
+    // was showing, so a row that crosses between the two is recorded where it
+    // landed.
+    recordEvent(TELEMETRY_EVENTS.TAB_CHANGED, {
+      tab_name: tabNameForPath(to),
+      context: navTrackContext(to),
+    })
+  }
+}
+
+/**
  * One row of the rail, pointing at one destination.
  *
  * Shared by the leaves, a group's children, and a group that has collapsed to a
@@ -117,7 +162,7 @@ function NavRowLink({
   nested?: boolean
   onNavigate: () => void
 }) {
-  const { recordEvent } = useTelemetry()
+  const recordNavigation = useRecordNavigation()
 
   return (
     <Link
@@ -126,17 +171,7 @@ function NavRowLink({
       // that leaves `aria-current` on "Organization" as well as on the child.
       activeOptions={{ exact: true }}
       onClick={() => {
-        // Only a move: clicking the row you are already on is not a navigation,
-        // and counting it would inflate whichever page people sit on longest.
-        // The context is read from the destination rather than from the rail
-        // that was showing, so a row that crosses between the two is recorded
-        // where it landed.
-        if (!isActive) {
-          recordEvent(TELEMETRY_EVENTS.TAB_CHANGED, {
-            tab_name: tabNameForPath(to),
-            context: navContextForPath(to),
-          })
-        }
+        recordNavigation(to, isActive)
         onNavigate()
       }}
       className={navRowClass({ isActive, collapsed, nested })}
@@ -327,6 +362,7 @@ export function AppShell() {
   // decides visibility from the deployment and the entitlements,
   // rather than each page asking what it is running against.
   const isVisible = useNavVisibility()
+  const recordNavigation = useRecordNavigation()
   const { pathname } = useLocation()
   // A gated-off destination is still reachable by bookmark or shared URL, so the
   // shell answers those with a panel instead of a page whose every request the
@@ -609,7 +645,13 @@ export function AppShell() {
               {inOrganization ? (
                 <Link
                   to={workspaceLanding?.to ?? "/"}
-                  onClick={closeMobileNav}
+                  onClick={() => {
+                    // Leaving the organization rail is a sidebar move like any
+                    // other; it just does not go through `NavRowLink`.
+                    const to = workspaceLanding?.to ?? "/"
+                    recordNavigation(to, pathname === to)
+                    closeMobileNav()
+                  }}
                   className={navRowClass({ collapsed: effectiveCollapsed })}
                   aria-label={effectiveCollapsed ? backLabel : undefined}
                   title={effectiveCollapsed ? backLabel : undefined}
@@ -760,6 +802,11 @@ export function AppShell() {
               ) : (
                 <Link
                   to={organizationLanding?.to ?? "/organization/members"}
+                  onClick={() => {
+                    const to =
+                      organizationLanding?.to ?? "/organization/members"
+                    recordNavigation(to, pathname === to)
+                  }}
                   className={navRowClass({ collapsed: effectiveCollapsed })}
                   aria-label={effectiveCollapsed ? "Organization" : undefined}
                   title={

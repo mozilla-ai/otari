@@ -74,6 +74,12 @@ export type SignInCredential =
 export interface SignInResult {
   ok: boolean
   message?: string
+  /**
+   * The refusal's status, on a refusal. Present so a caller can tell the two
+   * apart without re-reading the message: the wording is the gateway's and is
+   * the one part of a refusal that must not be recorded anywhere.
+   */
+  status?: number
 }
 
 // Exchange a credential for a server-issued session: the gateway verifies it and
@@ -109,7 +115,11 @@ export async function createSession(
     throw new ApiError(0, "Network error: could not reach the gateway.")
   }
   if (response.status === 401 || response.status === 403) {
-    return { ok: false, message: await extractErrorMessage(response) }
+    return {
+      ok: false,
+      message: await extractErrorMessage(response),
+      status: response.status,
+    }
   }
   // 503 is maintenance mode, and a refusal the gateway wrote belongs with the
   // other two rather than on the throw path: it is a deliberate answer, in

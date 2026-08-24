@@ -63,10 +63,26 @@ export interface TelemetryIdentity {
   role: string
 }
 
-/** The tracker a call site reaches, whichever build supplied it. */
+/**
+ * The tracker a call site reaches, whichever build supplied it.
+ *
+ * **Which half of the consent check is whose.** The base checks consent for
+ * `identify` and not for `recordEvent`, and the split is deliberate rather than
+ * an oversight: an identity is the one call that hands a tracker something
+ * durable about a person, so `TelemetryIdentity` withholds it here, while every
+ * `recordEvent` call site fires unconditionally and a replacement owns that
+ * gate. That is where the platform's own gate lives (`trackEvent` in
+ * `otari-ai/frontend/src/shared/helpers/mixpanel.ts` checks `hasConsent`
+ * itself), and it is why `consent` is on this interface at all: an
+ * implementation cannot gate what it is never told.
+ */
 export interface Telemetry {
   /** The stored decision, for a caller that must not assume one. */
   readonly consent: TelemetryConsent
+  /**
+   * Record one event. **Not consent-gated by the base**: a replacement must
+   * check `consent` itself before sending anything anywhere.
+   */
   readonly recordEvent: (
     event: TelemetryEventName,
     properties?: TelemetryProperties,

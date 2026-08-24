@@ -20,7 +20,7 @@ vi.mock("@/shared/api/client", async (importOriginal) => {
 // stand-in.
 vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
   const { telemetrySpy } = await import("@/tests/telemetry")
-  return { useTelemetry: () => telemetrySpy }
+  return { useTelemetry: vi.fn(() => telemetrySpy) }
 })
 
 function renderPage() {

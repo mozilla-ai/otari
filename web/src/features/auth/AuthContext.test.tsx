@@ -12,7 +12,7 @@ import { identify, recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
 // genuine no-op.
 vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
   const { telemetrySpy } = await import("@/tests/telemetry")
-  return { useTelemetry: () => telemetrySpy }
+  return { useTelemetry: vi.fn(() => telemetrySpy) }
 })
 
 function Harness() {
@@ -208,5 +208,75 @@ describe("the telemetry a sign-out records", () => {
     // The other half: without it the next session in this tab is attributed to
     // the identity that just left.
     expect(identify).toHaveBeenCalledWith(null)
+  })
+
+  it("records one sign-out however many times logout runs", async () => {
+    // The 401 handler is `logout` itself, so a session that expires with
+    // several requests in flight reaches it once per refusal, and a manual
+    // sign-out can race one of those. That is one sign-out in the funnel, not
+    // three: the provider already counts the revocations it starts for the same
+    // reason.
+    window.localStorage.setItem("otari.dashboard.hasSession", "1")
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null))
+
+    render(
+      <AppProviders>
+        <RepeatableLogoutHarness />
+      </AppProviders>,
+    )
+    const trigger = screen.getByRole("button", { name: "Trigger logout" })
+    await userEvent.click(trigger)
+    await userEvent.click(trigger)
+    await userEvent.click(trigger)
+
+    expect(
+      recordEvent.mock.calls.filter(
+        ([name]) => name === TELEMETRY_EVENTS.LOGOUT,
+      ),
+    ).toHaveLength(1)
+    expect(identify).toHaveBeenCalledTimes(1)
+  })
+
+  it("records one sign-out per session, not one per concurrent call", async () => {
+    // `logout` is deliberately re-entrant: a manual sign-out can race a
+    // 401-triggered one, and an expired session calls it once per in-flight
+    // request. One session ending is one event.
+    window.localStorage.setItem("otari.dashboard.hasSession", "1")
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null))
+
+    render(
+      <AppProviders>
+        <RepeatableLogoutHarness />
+      </AppProviders>,
+    )
+    const trigger = screen.getByRole("button", { name: "Trigger logout" })
+    await userEvent.click(trigger)
+    await userEvent.click(trigger)
+    await userEvent.click(trigger)
+
+    expect(
+      recordEvent.mock.calls.filter(
+        ([event]) => event === TELEMETRY_EVENTS.LOGOUT,
+      ),
+    ).toHaveLength(1)
+    expect(identify.mock.calls).toEqual([[null]])
+  })
+
+  it("records nothing when a 401 arrives with no session open", async () => {
+    // No stored marker, so nothing was signed in: a refusal arriving here would
+    // otherwise invent an ending that never happened.
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null))
+
+    render(
+      <AppProviders>
+        <RepeatableLogoutHarness />
+      </AppProviders>,
+    )
+    await userEvent.click(
+      screen.getByRole("button", { name: "Trigger logout" }),
+    )
+
+    expect(recordEvent).not.toHaveBeenCalled()
+    expect(identify).not.toHaveBeenCalled()
   })
 })

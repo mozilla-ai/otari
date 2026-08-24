@@ -16,7 +16,7 @@ import {
 // so this exercises the resolution that build performs.
 vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
   const { telemetrySpy } = await import("@/tests/telemetry")
-  return { useTelemetry: () => telemetrySpy }
+  return { useTelemetry: vi.fn(() => telemetrySpy) }
 })
 
 function renderIdentity(
@@ -140,5 +140,44 @@ describe("TelemetryIdentity", () => {
       expect(identify).toHaveBeenCalled()
     })
     expect(container).toBeEmptyDOMElement()
+  })
+
+  it("forgets an identity it sent once consent is withdrawn", async () => {
+    // The case an early return alone would miss: a decision withdrawn *after*
+    // an identity was sent leaves the tracker holding an actor it no longer has
+    // permission to hold.
+    setTelemetryConsent("granted")
+
+    const { rerender } = renderIdentity()
+    await waitFor(() => {
+      expect(identify).toHaveBeenCalledTimes(1)
+    })
+
+    setTelemetryConsent("denied")
+    rerender(
+      <Provider>
+        <DeploymentProvider value={bootstrap()}>
+          <TelemetryIdentity />
+        </DeploymentProvider>
+      </Provider>,
+    )
+
+    await waitFor(() => {
+      expect(identify).toHaveBeenCalledWith(null)
+    })
+  })
+
+  it("does not forget an identity it never sent", async () => {
+    // No spurious `identify(null)` on a browser that simply never consented:
+    // that is the sign-out signal, and inventing one on every mount would tell
+    // a tracker to forget an actor it was never given.
+    setTelemetryConsent("unknown")
+
+    renderIdentity()
+
+    await waitFor(() => {
+      expect(globalThis.fetch).toHaveBeenCalled()
+    })
+    expect(identify).not.toHaveBeenCalled()
   })
 })
