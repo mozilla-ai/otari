@@ -36,17 +36,22 @@ describe("AccountMenu", () => {
     expect(link).toHaveAttribute("href", "/account")
   })
 
-  it("names the master key while the deployment is still unclaimed", async () => {
+  it("reports the deployment as unclaimed rather than naming a credential", async () => {
+    // `sign_in_methods` says whether the operator has claimed, not how this
+    // caller signed in, and on an unclaimed deployment both a master-key
+    // session and a signed-up member's password session are possible
+    // (otari#702). Naming either would name the other one wrongly.
     await openMenu(["master_key"])
 
-    expect(await screen.findByText("Master-key session")).toBeInTheDocument()
+    expect(await screen.findByText("Unclaimed deployment")).toBeInTheDocument()
+    expect(screen.queryByText("Master-key session")).not.toBeInTheDocument()
   })
 
-  it("stops naming the master key once an operator has claimed the deployment", async () => {
+  it("names the password sign-in once an operator has claimed the deployment", async () => {
     await openMenu(["password"])
 
     expect(await screen.findByText("Password sign-in")).toBeInTheDocument()
-    expect(screen.queryByText("Master-key session")).not.toBeInTheDocument()
+    expect(screen.queryByText("Unclaimed deployment")).not.toBeInTheDocument()
   })
 })
 
@@ -84,7 +89,7 @@ describe("AccountMenu after a claim", () => {
     )
 
     await user.click(screen.getByRole("button", { name: "Account" }))
-    expect(await screen.findByText("Master-key session")).toBeInTheDocument()
+    expect(await screen.findByText("Unclaimed deployment")).toBeInTheDocument()
     await user.keyboard("{Escape}")
 
     await user.type(screen.getByLabelText("Email"), "operator@example.com")
@@ -98,6 +103,6 @@ describe("AccountMenu after a claim", () => {
 
     await user.click(screen.getByRole("button", { name: "Account" }))
     expect(await screen.findByText("Password sign-in")).toBeInTheDocument()
-    expect(screen.queryByText("Master-key session")).not.toBeInTheDocument()
+    expect(screen.queryByText("Unclaimed deployment")).not.toBeInTheDocument()
   })
 })

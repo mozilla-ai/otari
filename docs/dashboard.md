@@ -156,10 +156,13 @@ Three more things to know before you do it:
 - **It signs out every browser holding a session for that identity**, including
   the one you claimed from if you claimed with `curl`.
 
-Password reset by email, signup, and OAuth and passkey sign-in are the rest of
-this track and are not here yet, so today only the operator identity can hold a
-password. See [Access control](access-control.md#dashboard-sessions-and-identity)
-for the full picture.
+Signup and password reset by email have since landed, so a member an admin adds
+by address can set a password of their own; OAuth and passkey sign-in are the
+rest of this track and are not here yet. Setting one claims that member's
+account and not the deployment, so it does not retire master-key sign-in: only
+the operator identity's own password does that. See
+[Access control](access-control.md#dashboard-sessions-and-identity) for the full
+picture.
 
 ### 6. Add a provider
 

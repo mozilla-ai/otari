@@ -75,11 +75,18 @@ function PasswordField({
  *
  * Which of the two applies is read from the bootstrap's `sign_in_methods`
  * rather than probed: `master_key` is published exactly while this deployment's
- * operator identity holds no password (otari#702). It is a fact about that
- * identity and not about the reader, so a member signed in on an unclaimed
- * deployment is shown the claim form and the server refuses it for the missing
- * current password; the management API exposes no "who am I" route to ask a
- * better question with. That context cannot be refetched, so a
+ * operator identity holds no password (otari#702).
+ *
+ * That is a fact about the operator and not about the reader, and the gap shows
+ * here: a member who signed up on a deployment its operator never claimed is
+ * shown the claim form, and no input to it can succeed (their own address wants
+ * a `current_password` the form does not render; any other address is refused
+ * as a change). The copy below says so up front rather than letting them find
+ * out by submitting, which is as far as this can go without a route for asking
+ * what the *signed-in* identity holds; the management API has none, and
+ * inferring it from a refusal would be guessing at a 400. Reaching this state
+ * at all means having gone around the sign-in screen, which offers such a
+ * member no password form either. That context cannot be refetched, so a
  * successful claim reports itself through `useRetireMasterKeySignIn` and the
  * provider serves the corrected value from then on. This card therefore reads
  * the context on every render and keeps no mode of its own: the fact belongs to
@@ -175,7 +182,7 @@ export function PasswordCard() {
           <p className="max-w-3xl text-sm text-muted">
             {isClaimed
               ? "The password you sign in to this dashboard with. Changing it ends every other session this identity holds; this one stays signed in."
-              : "This gateway still signs in with its master key. Set an address and a password to sign in as yourself from now on. The master key stays the credential for the management API, and it can still reset this password if you forget it."}
+              : "This gateway still signs in with its master key. Set an address and a password to sign in as yourself from now on. The master key stays the credential for the management API, and it can still reset this password if you forget it. Claiming is the operator's to do: if your own account already has a password, this form will refuse it, and your password changes once they have claimed."}
           </p>
 
           {outcome ? (

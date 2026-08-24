@@ -47,7 +47,8 @@ from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash
 from gateway.services.password_service import MIN_PASSWORD_LENGTH
 from gateway.services.tenancy.email_address import MAX_EMAIL_LENGTH, validated_email
 from gateway.services.tenancy.errors import CurrentPasswordRequiredError, EmailChangeNotSupportedError
-from gateway.services.tenancy.user_service import operator_has_password, set_password, update_password
+from gateway.services.tenancy.provisioning_service import load_bootstrap_identity
+from gateway.services.tenancy.user_service import set_password, update_password
 
 # Auth is declared on the router rather than left to arrive through
 # ``CurrentIdentity``, matching `organizations.py`: the credential check is then
@@ -188,6 +189,17 @@ async def set_dashboard_password(
         if validated_email(body.email) != identity.email.strip().lower():
             raise EmailChangeNotSupportedError
         body = body.model_copy(update={"email": None})
+    # Resolved *before* the write, not read back after it. ``set_password`` and
+    # ``update_password`` each commit, so a read placed after that commit can
+    # fail on its own and turn a change that already landed into a 500; the
+    # caller would then retry with a ``current_password`` that is no longer the
+    # current one. Nothing about the answer needs the write to have happened:
+    # the operator either already holds a password, or this very call is the one
+    # giving them one, and no other identity's password moves the switch (#702).
+    operator = await load_bootstrap_identity(db)
+    claims_the_deployment = operator is not None and operator.id == identity.id
+    was_already_claimed = operator is not None and operator.hashed_password is not None
+
     if identity.hashed_password is not None and not by_master_key:
         if body.current_password is None:
             raise CurrentPasswordRequiredError
@@ -207,12 +219,15 @@ async def set_dashboard_password(
             keep_session_token_hash=keep_session,
         )
     assert identity.email is not None  # guaranteed by set_password
-    # Read back rather than hardcoded True: this route acts on the caller's own
+    # Derived rather than hardcoded True: this route acts on the caller's own
     # identity, and only the operator's password retires master-key sign-in
     # (#702). A member changing theirs on an unclaimed deployment answers False,
     # which is what stops the dashboard telling them it retired a login that is
     # still the only one their operator has.
-    return PasswordResponse(email=identity.email, master_key_sign_in_retired=await operator_has_password(db))
+    return PasswordResponse(
+        email=identity.email,
+        master_key_sign_in_retired=was_already_claimed or claims_the_deployment,
+    )
 
 
 def _caller_session_hash(request: Request, *, by_master_key: bool) -> str | None:

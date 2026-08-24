@@ -12,6 +12,7 @@ Unit rather than integration: everything under test is route, service and
 identity behavior that runs unchanged on the SQLite file each test stands up.
 """
 
+import logging
 import uuid
 from datetime import UTC, datetime, timedelta
 from pathlib import Path
@@ -23,10 +24,12 @@ from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import sessionmaker
 
 from gateway.core.config import GatewayConfig
+from gateway.log_config import logger as gateway_logger
 from gateway.main import create_app
 from gateway.models.entities import DashboardSession
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
 from gateway.services.password_service import MAX_PASSWORD_BYTES, MIN_PASSWORD_LENGTH, hash_password
+from gateway.services.tenancy.provisioning_service import BOOTSTRAP_IDENTITY_KEY
 from gateway.services.tenancy.user_service import _is_email_conflict
 
 MASTER_KEY = "sk-test-master"
@@ -816,7 +819,9 @@ def test_a_member_changing_their_password_is_told_the_master_key_still_signs_in(
         assert changed.json() == {"email": "member@example.com", "master_key_sign_in_retired": False}
 
 
-def test_an_identity_that_arrived_with_a_password_does_not_claim_the_deployment(tmp_path: Path) -> None:
+def test_an_identity_that_arrived_with_a_password_does_not_claim_the_deployment(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
     """The otari-ai#1644 direction: a re-parented database is not a claimed one.
 
     Platform identities carry ``hashed_password`` already, so a backfilled
@@ -858,9 +863,24 @@ def test_an_identity_that_arrived_with_a_password_does_not_claim_the_deployment(
 
         # And the master key is not refused as a retired login. It cannot mint a
         # session on this database either, but for the reason that actually
-        # applies: ``ForeignTenancyError``, whose 500 names the marker to point
-        # in the log rather than in the body. A 403 here would be the bug, since
-        # it would send an operator holding the only credential there is off to
-        # find a password.
-        refused = client.post("/v1/auth/session", json={"master_key": MASTER_KEY})
+        # applies: ``ForeignTenancyError``, which names the marker to point.
+        # A 403 here would be the bug, since it would send an operator holding
+        # the only credential there is off to find a password.
+        #
+        # Pinned through the log and not the body: ``_tenancy_error_handler``
+        # renders every 5xx tenancy error as a bare "Internal server error", so
+        # the status alone would pass for a broken fixture or any unrelated 500.
+        # The ``gateway`` logger does not propagate, hence the handler.
+        gateway_logger.addHandler(caplog.handler)
+        caplog.set_level(logging.ERROR, logger="gateway")
+        try:
+            refused = client.post("/v1/auth/session", json={"master_key": MASTER_KEY})
+        finally:
+            gateway_logger.removeHandler(caplog.handler)
+
         assert refused.status_code == 500
+        assert refused.json() == {"detail": "Internal server error"}
+        failure = "\n".join(record.getMessage() for record in caplog.records)
+        assert "Tenancy request failed" in failure, failure
+        assert BOOTSTRAP_IDENTITY_KEY in failure, failure
+        assert "acme-a1b2" in failure, failure

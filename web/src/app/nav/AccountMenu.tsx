@@ -72,10 +72,17 @@ const MENU_DIVIDER = "h-px shrink-0 bg-border"
 // there is no email to read here, so the second line names that credential
 // instead of inventing an address.
 //
-// Which credential that is comes from the bootstrap, not from an assumption:
-// a deployment publishes `master_key` in `sign_in_methods` exactly while its
-// operator identity holds no password, so a claimed one (otari#649) signs in
-// with an address and would be mislabeled by "Master-key session".
+// Which credential that is comes from the bootstrap, and the bootstrap answers
+// a question about the deployment rather than about this caller: `master_key`
+// is published exactly while the operator identity holds no password
+// (otari#702). On a claimed deployment that settles it, since the master key is
+// no longer accepted at all and every session is a password one. On an
+// unclaimed one it does not: the session is almost certainly the operator's,
+// but a member who signed up and signed in by calling `POST /v1/auth/session`
+// directly holds one too, and naming a credential here would name theirs
+// wrongly. So the unclaimed case reports the deployment's state, which is the
+// part this actually knows, and the operator reads it as the standing
+// invitation to claim that it is.
 function sessionIdentity(
   sessionType: string,
   signInMethods: readonly string[],
@@ -89,7 +96,7 @@ function sessionIdentity(
       name: "Operator",
       initials: "OP",
       detail: signInMethods.includes("master_key")
-        ? "Master-key session"
+        ? "Unclaimed deployment"
         : "Password sign-in",
     }
   }
