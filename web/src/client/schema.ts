@@ -521,6 +521,13 @@ export interface paths {
          *     unlike a password there is no legitimate caller here whose correct
          *     credential must never be blocked (a passkey ceremony is one round trip a
          *     browser drives, not something a person retries by hand).
+         *
+         *     **Maintenance mode freezes this the way it freezes the password sign-in.**
+         *     The freeze is on starting a session, not on a credential, so a passkey has
+         *     to answer to it or the switch is bypassable by anybody holding one, which is
+         *     the whole population it exists to hold off during a redeploy. Refused before
+         *     the assertion is verified, so a frozen deployment does no crypto and counts
+         *     no auth failure: nobody failed to authenticate, the gateway declined to try.
          */
         post: operations["authenticate_passkey_v1_auth_webauthn_authenticate_post"];
         delete?: never;
