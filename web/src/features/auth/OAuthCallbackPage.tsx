@@ -11,7 +11,11 @@ import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 
 import { oauthProviderLabel } from "./oauthProviders"
-import { PublicAuthLayout, PublicAuthLink } from "./PublicAuthLayout"
+import {
+  goToPublicAuthPage,
+  PublicAuthLayout,
+  PublicAuthLink,
+} from "./PublicAuthLayout"
 
 /**
  * Where the CSRF `state` waits while the browser is away at the provider.
@@ -60,6 +64,12 @@ function takeOAuthState(): string | null {
  * Not a form and not retryable: an authorization code is single-use, so a
  * failure sends the person back to the sign-in screen to start again rather
  * than offering a button that would spend a spent code.
+ *
+ * Both endings leave this page, and both have to: `DeploymentRoot` picks a
+ * public auth path off the hash ahead of the auth gate, so this page keeps
+ * rendering until the hash changes, whether or not a session was minted. The
+ * failure ending offers a link; the success ending changes the hash itself,
+ * since there is nothing left for the person to read.
  */
 export function OAuthCallbackPage({
   provider,
@@ -134,6 +144,14 @@ export function OAuthCallbackPage({
             authentication_method: provider,
           })
           login()
+          // Signing in is not enough to stop this page rendering, and leaving
+          // the hash alone strands the person here. `DeploymentRoot` matches a
+          // public auth path *before* the auth gate, so an unchanged hash keeps
+          // re-selecting this page, whose effect has already run: the pending
+          // panel would sit there with no way out, and a reload would report a
+          // state mismatch because the stored state is spent. So this hands the
+          // tab back the way `AcceptInvitationPage` does when it is finished.
+          goToPublicAuthPage("#/")
           return
         }
         recordEvent(TELEMETRY_EVENTS.LOGIN_FAILED, {

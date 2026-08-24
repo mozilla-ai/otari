@@ -50,6 +50,7 @@ test("the deployment bootstrap is served unauthenticated", async ({
     // Distinct from `passkey` in sign_in_methods above, which additionally
     // needs a registered passkey; see docs/access-control.md.
     passkeys_ready: false,
+    oauth_providers: [],
     // No SMTP configured in this e2e environment, so invitations are
     // creatable but not emailed; see docs/configuration.md#mail.
     mail_ready: false,

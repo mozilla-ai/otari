@@ -12,6 +12,8 @@ provider accepts. ``tests/integration/test_oauth_live_provider.py`` is that
 check, behind an opt-in flag.
 """
 
+import logging
+from collections.abc import Generator
 from types import SimpleNamespace
 from typing import Any
 from urllib.parse import parse_qs, urlsplit
@@ -21,6 +23,7 @@ from apron_auth.providers import github as apron_github
 from apron_auth.providers import google as apron_google
 
 from gateway.core.config import OAUTH_PROVIDERS, GatewayConfig
+from gateway.log_config import logger as gateway_logger
 from gateway.services import oauth_service
 from gateway.services.tenancy.errors import OAuthExchangeError, OAuthNotConfiguredError
 
@@ -78,6 +81,71 @@ class TestWhichProvidersAreOnOffer:
         assert set(oauth_service._PROVIDERS) == set(OAUTH_PROVIDERS)
 
 
+class TestHalfConfiguredOAuthIsAnnounced:
+    """A provider set up incompletely is otherwise entirely silent.
+
+    It is absent from the bootstrap and absent from the sign-in screen, which is
+    the correct behavior and also indistinguishable from never having been
+    configured. The warning is the only thing that tells an operator which of
+    the three settings they missed.
+    """
+
+    @pytest.fixture(autouse=True)
+    def _capture_gateway_logs(self, caplog: pytest.LogCaptureFixture) -> Generator[None]:
+        """Attach caplog to the gateway logger, which does not propagate.
+
+        ``log_config`` sets ``propagate = False``, so caplog's root handler
+        never sees these records; ``test_signup_api`` attaches the handler the
+        same way for the same reason.
+        """
+        gateway_logger.addHandler(caplog.handler)
+        try:
+            yield
+        finally:
+            gateway_logger.removeHandler(caplog.handler)
+
+    def test_a_missing_public_base_url_is_named(self, caplog: pytest.LogCaptureFixture) -> None:
+        config = GatewayConfig(
+            oauth_google_client_id="google-id",
+            oauth_google_client_secret="google-secret",  # noqa: S106
+        )
+
+        with caplog.at_level(logging.WARNING, logger="gateway"):
+            config.warn_about_half_configured_oauth()
+
+        assert "public_base_url" in caplog.text
+        assert "google" in caplog.text
+
+    def test_a_missing_secret_is_named(self, caplog: pytest.LogCaptureFixture) -> None:
+        config = GatewayConfig(
+            public_base_url="https://otari.example.com",
+            oauth_github_client_id="github-id",
+        )
+
+        with caplog.at_level(logging.WARNING, logger="gateway"):
+            config.warn_about_half_configured_oauth()
+
+        assert "oauth_github_client_secret" in caplog.text
+
+    def test_a_deployment_that_configured_nothing_says_nothing(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        # The ordinary state, not a mistake: warning here would put a line in
+        # every default deployment's startup log.
+        with caplog.at_level(logging.WARNING, logger="gateway"):
+            GatewayConfig().warn_about_half_configured_oauth()
+
+        assert caplog.text == ""
+
+    def test_a_fully_configured_deployment_says_nothing(
+        self, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        with caplog.at_level(logging.WARNING, logger="gateway"):
+            configured().warn_about_half_configured_oauth()
+
+        assert caplog.text == ""
+
+
 class TestRedirectUri:
     @pytest.mark.parametrize("provider", OAUTH_PROVIDERS)
     def test_carries_no_fragment_so_a_provider_will_accept_it(self, provider: str) -> None:
@@ -96,6 +164,27 @@ class TestRedirectUri:
         assert (
             oauth_service.redirect_uri(configured(), "github")
             == "https://otari.example.com/auth/github/callback"
+        )
+
+    def test_a_path_prefix_on_the_base_url_is_kept(self) -> None:
+        # A gateway served under a prefix is a supported shape (``Mailer.link``
+        # builds its links the same way), and a root-absolute answer would send
+        # the callback to the wrong path on the right origin.
+        config = configured(public_base_url="https://example.com/otari")
+
+        assert (
+            oauth_service.redirect_uri(config, "google")
+            == "https://example.com/otari/auth/google/callback"
+        )
+        assert oauth_service.callback_landing_target(config, "google", "code=x") == (
+            "https://example.com/otari/#/auth/google/callback?code=x"
+        )
+
+    def test_the_landing_target_carries_the_query_or_nothing(self) -> None:
+        config = configured()
+
+        assert oauth_service.callback_landing_target(config, "github", "") == (
+            "https://otari.example.com/#/auth/github/callback"
         )
 
     def test_a_trailing_slash_on_the_base_url_does_not_double_up(self) -> None:
@@ -128,6 +217,31 @@ class TestAuthorizationUrl:
         assert urlsplit(url).netloc == "github.com"
         assert query["scope"] == ["read:user user:email"]
         assert query["client_id"] == ["github-id"]
+
+    @pytest.mark.parametrize("provider", OAUTH_PROVIDERS)
+    def test_no_offline_access_is_requested(self, provider: str) -> None:
+        # Offline access exists to obtain a refresh token and nothing here
+        # stores one, so asking would have Google mint a durable credential
+        # this deployment discards and nobody revokes. A deliberate departure
+        # from both the platform's URL and apron-auth's own preset, which set
+        # access_type=offline (and the preset prompt=consent too).
+        query = parse_qs(urlsplit(oauth_service.authorization_url(configured(), provider, state="s")).query)
+
+        assert "access_type" not in query
+        assert "prompt" not in query
+
+    @pytest.mark.parametrize("provider", OAUTH_PROVIDERS)
+    def test_the_google_preset_would_have_asked_for_offline_access(self, provider: str) -> None:
+        # The half that keeps the assertion above from passing vacuously: the
+        # parameter really is one apron-auth's preset sets, so not sending it is
+        # a choice this module makes rather than a default it inherits.
+        provider_config, _ = apron_google.preset(
+            client_id="id",
+            client_secret="secret",  # noqa: S106
+            scopes=["openid"],
+        )
+
+        assert provider_config.extra_params.get("access_type") == "offline"
 
     @pytest.mark.parametrize("provider", OAUTH_PROVIDERS)
     def test_no_code_challenge_is_sent(self, provider: str) -> None:

@@ -115,6 +115,15 @@ environments = [
 # apron-auth's own >=1.6.12 because authlib has a dense advisory history,
 # including a signature-verification bypass fixed in 1.6.9. Matches the floor
 # the platform sets for the same dependency (otari-ai backend/pyproject.toml).
+#
+# **This binds uv, not every installer.** It governs `uv lock` and `uv sync`, so
+# it covers `uv.lock`, CI, and the Docker image, which is every way Otari is
+# actually built here. It does *not* reach a plain `pip install gateway`, where
+# apron-auth's own `>=1.6.12` is the only floor. That is accepted rather than
+# overlooked: promoting authlib to a direct dependency would claim an import
+# this tree does not have, and the advisory is in a transitive dependency whose
+# own maintainer sets the real floor. Revisit if Otari is ever published as a
+# wheel people pip-install directly.
 constraint-dependencies = ["authlib>=1.7.2"]
 
 [tool.setuptools]

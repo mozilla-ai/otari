@@ -55,6 +55,7 @@ test.describe("hybrid deployment", () => {
       maintenance_mode: false,
       // No session of its own to protect, so no ceremony to run either.
       passkeys_ready: false,
+      oauth_providers: [],
       // Its control plane sends the mail that carries links back to it.
       mail_ready: false,
     })

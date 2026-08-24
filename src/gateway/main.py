@@ -2,7 +2,7 @@ import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any, Callable
-from urllib.parse import quote, urlsplit
+from urllib.parse import urlsplit
 
 from fastapi import FastAPI, Request, Response, status
 from fastapi.exceptions import RequestValidationError
@@ -36,6 +36,7 @@ from gateway.services.model_discovery_service import (
     reset_discovery_cache,
     run_discovery_refresher,
 )
+from gateway.services.oauth_service import callback_landing_target
 from gateway.services.policy_store import (
     load_policies_at_startup,
     reset_policy_cache,
@@ -569,11 +570,14 @@ def create_app(config: GatewayConfig) -> FastAPI:
             being built. A person is here because a provider sent them, and
             landing on the dashboard's own "that did not work" panel beats a
             bare 404 from a path they never typed.
+
+            The target is built from ``public_base_url`` rather than as a
+            root-absolute path, so a gateway served under a path prefix
+            (``https://example.com/otari``) sends the browser to its own
+            dashboard rather than to the origin's root.
             """
-            query = request.url.query
-            target = f"/#/auth/{quote(provider, safe='')}/callback"
             return RedirectResponse(
-                url=f"{target}?{query}" if query else target,
+                url=callback_landing_target(config, provider, request.url.query),
                 status_code=status.HTTP_303_SEE_OTHER,
             )
 

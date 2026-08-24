@@ -33,7 +33,7 @@ anything. See ``web/src/features/auth/OAuthCallbackPage.tsx``.
 
 import secrets
 from dataclasses import dataclass
-from urllib.parse import urlencode
+from urllib.parse import quote, urlencode
 
 from apron_auth import OAuthClient, ProviderConfig
 from apron_auth.providers import github as apron_github
@@ -51,10 +51,15 @@ from gateway.services.tenancy.errors import OAuthExchangeError, OAuthNotConfigur
 # so a provider config's scope set is a superset of what the authorization URL
 # asks for.
 #
-# ``extra_params`` is what an authorization URL carries beyond the four the
-# protocol requires. Google's ``access_type=offline`` is the platform's own and
-# is kept for parity of the consent screen a person sees; nothing here stores a
-# refresh token.
+# **No ``access_type=offline``**, and no other extra parameter. The platform's
+# own hand-built URL sends it and apron-auth's Google preset sets
+# ``{"access_type": "offline", "prompt": "consent"}``, so this is a deliberate
+# departure from both rather than an oversight. Offline access exists to obtain
+# a refresh token, and nothing here stores one: a sign-in reads an identity once
+# and mints Otari's own session, so a refresh token would be a durable
+# credential Google issued, this deployment discarded, and nobody ever revoked.
+# Not asking for it also keeps the consent screen from telling a person about
+# access this gateway does not want.
 _GOOGLE_AUTHORIZE_URL = "https://accounts.google.com/o/oauth2/v2/auth"
 _GITHUB_AUTHORIZE_URL = "https://github.com/login/oauth/authorize"
 
@@ -66,7 +71,6 @@ class _Provider:
     label: str
     authorize_url: str
     scopes: tuple[str, ...]
-    extra_authorize_params: tuple[tuple[str, str], ...] = ()
 
 
 _PROVIDERS: dict[str, _Provider] = {
@@ -74,7 +78,6 @@ _PROVIDERS: dict[str, _Provider] = {
         label="Google",
         authorize_url=_GOOGLE_AUTHORIZE_URL,
         scopes=("openid", "email", "profile"),
-        extra_authorize_params=(("access_type", "offline"),),
     ),
     "github": _Provider(
         label="GitHub",
@@ -129,7 +132,35 @@ def redirect_uri(config: GatewayConfig, provider: str) -> str:
     outright). So this names an ordinary path, which ``gateway.main`` serves
     with a redirect into the hash route that finishes the sign-in.
     """
-    return f"{(config.public_base_url or '').rstrip('/')}/auth/{provider}/callback"
+    return f"{base_url(config)}/auth/{provider}/callback"
+
+
+def base_url(config: GatewayConfig) -> str:
+    """This deployment's own address with no trailing slash, or an empty string.
+
+    One reading of ``public_base_url`` for everything OAuth derives from it, so
+    the authorization request, the exchange, and the redirect that lands a
+    browser back all agree. It may carry a **path prefix**: a gateway served at
+    ``https://example.com/otari`` is a supported shape, and ``Mailer.link``
+    already builds its links that way, so a root-absolute answer here would send
+    such a deployment's callback to the wrong origin path.
+    """
+    return (config.public_base_url or "").rstrip("/")
+
+
+def callback_landing_target(config: GatewayConfig, provider: str, query: str) -> str:
+    """Where ``/auth/{provider}/callback`` sends the browser to finish signing in.
+
+    The dashboard's own hash route, carrying whatever query the provider
+    appended. Built here rather than in the route so it reads the same
+    ``public_base_url`` the redirect URI does, path prefix included.
+
+    Relative to that base rather than to the request, because the request's path
+    is what a reverse proxy may already have rewritten, and this has to name a
+    URL in the browser's address bar rather than in this process.
+    """
+    target = f"{base_url(config)}/#/auth/{quote(provider, safe='')}/callback"
+    return f"{target}?{query}" if query else target
 
 
 def new_state() -> str:
@@ -156,7 +187,6 @@ def authorization_url(config: GatewayConfig, provider: str, *, state: str) -> st
         "response_type": "code",
         "scope": " ".join(known.scopes),
         "state": state,
-        **dict(known.extra_authorize_params),
     }
     return f"{known.authorize_url}?{urlencode(params)}"
 
@@ -260,6 +290,8 @@ def _without_pkce(provider_config: ProviderConfig) -> ProviderConfig:
 __all__ = [
     "OAuthIdentity",
     "authorization_url",
+    "base_url",
+    "callback_landing_target",
     "exchange_code",
     "new_state",
     "provider_label",

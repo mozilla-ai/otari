@@ -1785,6 +1785,46 @@ class GatewayConfig(BaseSettings):
             msg = f"mail_from_email is not a valid email address: {self.mail_from_email!r}"
             raise ValueError(msg)
 
+    def warn_about_half_configured_oauth(self) -> None:
+        """Say so when OAuth client credentials were set but cannot be used.
+
+        A warning rather than a refusal, unlike
+        :meth:`validate_webauthn_relying_party`: nothing here is *wrong*, and
+        refusing to boot would take a gateway offline over a sign-in method
+        that is optional. But the failure is otherwise completely silent. The
+        provider is absent from ``GET /v1/bootstrap``, the sign-in screen simply
+        does not draw its button, and an operator who set two of the three
+        settings has nothing anywhere telling them why the button they
+        configured never appeared.
+
+        A deployment that configured nothing says nothing, for the reason
+        ``validate_webauthn_relying_party`` gives about its own absent case:
+        that is the ordinary state, not a mistake.
+        """
+        for provider in OAUTH_PROVIDERS:
+            client_id = getattr(self, f"oauth_{provider}_client_id", None)
+            client_secret = getattr(self, f"oauth_{provider}_client_secret", None)
+            if not client_id and not client_secret:
+                continue
+            missing = [
+                name
+                for name, value in (
+                    (f"oauth_{provider}_client_id", client_id),
+                    (f"oauth_{provider}_client_secret", client_secret),
+                    ("public_base_url", self.public_base_url),
+                )
+                if not value
+            ]
+            if missing:
+                logger.warning(
+                    "%s sign-in is configured but will not be offered: %s %s not set. "
+                    "The sign-in screen shows no %s button until it is.",
+                    provider,
+                    ", ".join(missing),
+                    "is" if len(missing) == 1 else "are",
+                    provider,
+                )
+
     def validate_webauthn_relying_party(self) -> None:
         """Refuse a passkey configuration a browser would reject anyway.
 
@@ -1963,6 +2003,7 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     config.validate_search_tools()
     config.validate_mail_transport()
     config.validate_webauthn_relying_party()
+    config.warn_about_half_configured_oauth()
     _bridge_yaml_fields_to_env(config, yaml_bridged_fields)
     return config
 

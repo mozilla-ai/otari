@@ -23,7 +23,18 @@ function jsonResponse(body: unknown, status = 200): Response {
   })
 }
 
-/** Mounted the way `DeploymentRoot` mounts it: ahead of the auth gate. */
+/**
+ * The page in isolation, with a signed-in marker to assert against.
+ *
+ * Deliberately **not** the way `DeploymentRoot` mounts it, and the comment that
+ * once claimed otherwise is what let a real bug through: the app matches a
+ * public auth path *ahead* of the auth gate, so signing in does not stop this
+ * page rendering. This harness has the gate first, which makes `login()` look
+ * like a navigation. That is fine for the assertions here, which are about what
+ * the page sends and refuses; the navigation itself is pinned against the real
+ * `App` tree in `src/app/App.test.tsx` ("sends a completed OAuth sign-in on to
+ * the dashboard"), which is the only place the true ordering exists.
+ */
 function Harness({ hash }: { hash: string }) {
   const { isAuthenticated } = useAuth()
   return isAuthenticated ? (
@@ -54,6 +65,9 @@ afterEach(() => {
   vi.restoreAllMocks()
   window.sessionStorage.clear()
   window.localStorage.clear()
+  // The success path now hands the tab back to "#/", so a test that signs in
+  // would otherwise leave that hash set for the next one.
+  window.location.hash = ""
 })
 
 describe("OAuthCallbackPage", () => {

@@ -144,6 +144,39 @@ describe("App", () => {
     ).toBeNull()
   })
 
+  it("sends a completed OAuth sign-in on to the dashboard rather than leaving it on the callback page", async () => {
+    // The ordering this file's own "ahead of the sign-in screen" test pins is
+    // what makes this a hazard: `publicAuthPath(hash)` is matched *before* the
+    // auth gate, so signing in does not by itself stop the callback page from
+    // being the thing that renders. The page has to change the hash, the way
+    // `AcceptInvitationPage` does when it is finished. Without that the person
+    // is signed in and stuck on "Checking with the gateway…", which has no way
+    // out, and a reload then reports a state mismatch because the stored state
+    // was already spent.
+    //
+    // Rendered through the real `App` rather than a local harness on purpose:
+    // a harness that puts the callback page behind the gate makes `login()`
+    // look like a navigation and cannot see this at all.
+    window.sessionStorage.setItem("otari.oauth.state", "the-state")
+    vi.mocked(apiFetch).mockResolvedValue([] as never)
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify({ expires_at: "2026-09-01T00:00:00Z" }), {
+        status: 200,
+        headers: { "Content-Type": "application/json" },
+      }),
+    )
+    window.location.hash =
+      "#/auth/google/callback?code=the-code&state=the-state"
+
+    renderApp(bootstrap({ oauth_providers: ["google"] }))
+
+    expect(
+      await screen.findByText("Lazy overview", undefined, { timeout: 3000 }),
+    ).toBeInTheDocument()
+    expect(window.location.hash).toBe("#/")
+    expect(screen.queryByText("Checking with the gateway…")).toBeNull()
+  })
+
   it("answers a mail-gated public auth path with a panel, not a form", () => {
     // The default fixture reports mail_ready: false, which is what hides the
     // link on the sign-in screen; the URL is still reachable from a bookmark.
