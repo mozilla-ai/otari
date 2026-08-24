@@ -960,14 +960,18 @@ h6 {
 .otari-bulk-bar {
   animation: otari-bulk-bar-in 160ms ease-out;
 }
+/* Animates `translate`, not `transform`: the bar centers itself with Tailwind's
+ * `-translate-x-1/2`, which under Tailwind v4 sets the `translate` property, and
+ * a `transform` here would compose with it into a -100% offset for the length of
+ * the animation, so the bar slid in from half its width to the left. */
 @keyframes otari-bulk-bar-in {
   from {
     opacity: 0;
-    transform: translate(-50%, 0.5rem);
+    translate: -50% 0.5rem;
   }
   to {
     opacity: 1;
-    transform: translate(-50%, 0);
+    translate: -50% 0;
   }
 }
 
