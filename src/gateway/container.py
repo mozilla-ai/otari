@@ -278,7 +278,20 @@ def build_container(bootstrap_selector: str | None = None) -> Container:
         raise BootstrapError(msg)
 
     defaults = dict(container.bindings())
-    _load_register(bootstrap_selector)(container)
+    outcome = _load_register(bootstrap_selector)(container)
+    if inspect.isawaitable(outcome):
+        # The same silent drop the ``iscoroutinefunction`` guard refuses, by the
+        # route that guard cannot see: a callable *object* whose ``__call__`` is
+        # ``async def`` is not a coroutine function, so it passes every check
+        # above and its body never runs until awaited. Closing the coroutine
+        # keeps the refusal from also emitting "was never awaited" at whatever
+        # point the garbage collector gets to it.
+        outcome.close()
+        msg = (
+            f"Bootstrap {bootstrap_selector!r} returned an awaitable; the container is built "
+            "synchronously, so register must run to completion when called"
+        )
+        raise BootstrapError(msg)
     rebound = sorted(_port_name(port) for port, factory in container.bindings() if defaults.get(port) is not factory)
     container.summary = f"{bootstrap_selector} rebound {', '.join(rebound) or 'no ports'}"
     contributed = ", ".join(contribution.capability for contribution in container.router_contributions())

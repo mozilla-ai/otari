@@ -257,6 +257,27 @@ def test_an_async_bootstrap_is_refused_rather_than_silently_dropped(
         build_container("async_bootstrap:register")
 
 
+def test_an_async_callable_object_bootstrap_is_refused_too(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # The hole the iscoroutinefunction guard alone leaves: an instance whose
+    # __call__ is async is callable and is *not* a coroutine function, so it
+    # passes every guard, gets called, and returns a coroutine whose body never
+    # ran. Same silent drop, different route in, so it is refused at the result
+    # instead of at the callable.
+    _write_bootstrap(
+        tmp_path,
+        monkeypatch,
+        "async_callable_bootstrap",
+        "class Register:\n"
+        "    async def __call__(self, container):\n"
+        "        raise AssertionError('the body must never run')\n"
+        "\n\n"
+        "register = Register()\n",
+    )
+
+    with pytest.raises(BootstrapError, match="returned an awaitable"):
+        build_container("async_callable_bootstrap:register")
+
+
 def test_router_contributions_keep_their_order() -> None:
     container = Container()
     first = RouterContribution(capability="one", router=APIRouter())
