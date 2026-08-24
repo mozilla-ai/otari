@@ -3,6 +3,8 @@ import { useState } from "react"
 
 import { useResendVerification } from "@/shared/api/hooks"
 import { ErrorBanner } from "@/shared/components/ui"
+import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
+import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 
 import { AuthEmailField } from "./AuthFields"
 import {
@@ -25,6 +27,7 @@ import {
  */
 export function ResendVerificationPage() {
   const resend = useResendVerification()
+  const { recordEvent } = useTelemetry()
   const [email, setEmail] = useState("")
 
   // A refusal describes a call that is no longer the one being made, so typing
@@ -43,7 +46,13 @@ export function ResendVerificationPage() {
       return
     }
     resend.mutate(email.trim(), {
-      onSuccess: () => goToPublicAuthPage("#/check-email?type=resend"),
+      onSuccess: () => {
+        // On the send rather than on the click, so a request the gateway
+        // refused is not counted as a link somebody was sent. Enumeration-safe
+        // like signup, so there is nothing in the response to read.
+        recordEvent(TELEMETRY_EVENTS.RESEND_VERIFICATION_CLICKED)
+        goToPublicAuthPage("#/check-email?type=resend")
+      },
     })
   }
 

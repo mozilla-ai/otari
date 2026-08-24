@@ -5,10 +5,20 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { VerifyEmailPage } from "@/features/auth/VerifyEmailPage"
 import { ApiError, apiFetch } from "@/shared/api/client"
+import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
+import { recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
 
 vi.mock("@/shared/api/client", async (importOriginal) => {
   const actual = await importOriginal<typeof import("@/shared/api/client")>()
   return { ...actual, apiFetch: vi.fn() }
+})
+
+// The telemetry seam, replaced the way a superset build's alias replaces it: the
+// base module records nothing, so the outcome this page reports is only
+// observable through a stand-in.
+vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
+  const { telemetrySpy } = await import("@/tests/telemetry")
+  return { useTelemetry: () => telemetrySpy }
 })
 
 function renderPage(hash: string) {
@@ -27,6 +37,7 @@ function renderPage(hash: string) {
 
 beforeEach(() => {
   vi.clearAllMocks()
+  resetTelemetrySpy()
 })
 
 afterEach(() => {
@@ -126,4 +137,65 @@ describe("VerifyEmailPage", () => {
       expect(apiFetch).not.toHaveBeenCalled()
     },
   )
+})
+
+describe("the telemetry the verification page records", () => {
+  it("records a confirmed address", async () => {
+    vi.mocked(apiFetch).mockResolvedValue({ email: "ada@example.com" } as never)
+
+    renderPage("#/verify-email?token=abc123")
+
+    await screen.findByRole("heading", { name: "Email verified" })
+    expect(recordEvent).toHaveBeenCalledWith(
+      TELEMETRY_EVENTS.EMAIL_VERIFICATION_SUCCESS,
+    )
+  })
+
+  it("records a refused token under its status, not its message", async () => {
+    vi.mocked(apiFetch).mockRejectedValue(
+      new ApiError(400, "This verification link has expired."),
+    )
+
+    renderPage("#/verify-email?token=spent")
+
+    await screen.findByRole("heading", { name: "Verification failed" })
+    expect(recordEvent).toHaveBeenCalledWith(
+      TELEMETRY_EVENTS.EMAIL_VERIFICATION_FAILED,
+      { error_code: "verification_rejected", status: 400 },
+    )
+  })
+
+  it("records nothing for a link that carries no token", async () => {
+    // Nothing was verified and nothing was refused: the page never asked.
+    renderPage("#/verify-email")
+
+    await screen.findByRole("heading", { name: "Verify your email" })
+    expect(recordEvent).not.toHaveBeenCalled()
+  })
+
+  it("records the outcome once, even under StrictMode", async () => {
+    // The same hazard the single-use token has, one layer up: StrictMode's
+    // development mount/unmount/mount runs the effect twice against a cache
+    // that has already settled, and a funnel counted twice in development is a
+    // funnel nobody can read.
+    vi.mocked(apiFetch).mockResolvedValue({ email: "ada@example.com" } as never)
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+
+    render(
+      <StrictMode>
+        <QueryClientProvider client={client}>
+          <VerifyEmailPage hash="#/verify-email?token=abc123" />
+        </QueryClientProvider>
+      </StrictMode>,
+    )
+
+    await screen.findByRole("heading", { name: "Email verified" })
+    expect(
+      recordEvent.mock.calls.filter(
+        ([event]) => event === TELEMETRY_EVENTS.EMAIL_VERIFICATION_SUCCESS,
+      ),
+    ).toHaveLength(1)
+  })
 })

@@ -1,12 +1,22 @@
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useAuth } from "@/features/auth/AuthContext"
 import { Login } from "@/features/auth/Login"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
+import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { bootstrap } from "@/tests/fixtures"
 import { AppProviders } from "@/tests/providers"
+import { recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
+
+// The telemetry seam, replaced the way a superset build's alias replaces it.
+// The base module records nothing, so the funnel this screen fires is only
+// observable through a stand-in.
+vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
+  const { telemetrySpy } = await import("@/tests/telemetry")
+  return { useTelemetry: () => telemetrySpy }
+})
 
 // The sign-in screen picks its form from the bootstrap, so every render here
 // goes through a DeploymentProvider. Unclaimed (master key) is the default
@@ -520,5 +530,155 @@ describe("Login", () => {
       ([, init]) => init?.method === "POST",
     )
     expect(postCall?.[1]?.body).toBe(JSON.stringify({ master_key: "sk-new" }))
+  })
+})
+
+describe("the telemetry the sign-in screen records", () => {
+  beforeEach(() => {
+    resetTelemetrySpy()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    window.localStorage.clear()
+  })
+
+  it("records a master-key sign-in under the credential it used", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ expires_at: "2026-07-30T00:00:00Z" }),
+    )
+
+    render(
+      <Mounted>
+        <Harness />
+      </Mounted>,
+    )
+    await userEvent.type(screen.getByLabelText("Master key"), "otari-mk-secret")
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }))
+
+    await waitFor(() => {
+      expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.LOGIN_SUCCESS, {
+        authentication_method: "master_key",
+      })
+    })
+  })
+
+  it("separates a password sign-in from a master-key one", async () => {
+    // The two credentials a deployment can offer are one funnel with two paths,
+    // and a claim (otari#649) moves every later sign-in from one to the other.
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ expires_at: "2026-07-30T00:00:00Z" }),
+    )
+
+    render(
+      <Mounted signInMethods={["password"]}>
+        <Harness />
+      </Mounted>,
+    )
+    await userEvent.type(screen.getByLabelText("Email"), "ops@example.com")
+    await userEvent.type(screen.getByLabelText("Password"), "hunter22")
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }))
+
+    await waitFor(() => {
+      expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.LOGIN_SUCCESS, {
+        authentication_method: "password",
+      })
+    })
+  })
+
+  it("records a refused credential without recording the credential", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ detail: "Invalid master key." }, 401),
+    )
+
+    render(
+      <Mounted>
+        <Harness />
+      </Mounted>,
+    )
+    await userEvent.type(screen.getByLabelText("Master key"), "wrong-key")
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }))
+
+    await waitFor(() => {
+      expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.LOGIN_FAILED, {
+        authentication_method: "master_key",
+        error_code: "credential_rejected",
+      })
+    })
+    // Nothing typed into the form reaches an event: not the key, and not the
+    // gateway's own sentence about it.
+    for (const [, properties] of recordEvent.mock.calls) {
+      expect(JSON.stringify(properties ?? {})).not.toContain("wrong-key")
+    }
+  })
+
+  it("records a failed request under its status rather than its message", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ detail: "Gateway is unwell." }, 503),
+    )
+
+    render(
+      <Mounted>
+        <Harness />
+      </Mounted>,
+    )
+    await userEvent.type(screen.getByLabelText("Master key"), "otari-mk-secret")
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }))
+
+    await waitFor(() => {
+      expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.LOGIN_FAILED, {
+        authentication_method: "master_key",
+        error_code: "request_failed",
+        status: 503,
+      })
+    })
+  })
+
+  it("records a refusal the form made itself, before any request", async () => {
+    // This screen deliberately leaves its button enabled on an empty box and
+    // validates on submit, which is the moment there is something to record.
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+
+    render(
+      <Mounted signInMethods={["password"]}>
+        <Harness />
+      </Mounted>,
+    )
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }))
+
+    expect(recordEvent).toHaveBeenCalledWith(
+      TELEMETRY_EVENTS.FORM_VALIDATION_FAILED,
+      { form_name: "login", errors: ["email_required"] },
+    )
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it("names a malformed address as a different refusal from a missing one", async () => {
+    render(
+      <Mounted signInMethods={["password"]}>
+        <Harness />
+      </Mounted>,
+    )
+    await userEvent.type(screen.getByLabelText("Email"), "not-an-address")
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }))
+
+    expect(recordEvent).toHaveBeenCalledWith(
+      TELEMETRY_EVENTS.FORM_VALIDATION_FAILED,
+      { form_name: "login", errors: ["email_invalid_format"] },
+    )
+  })
+
+  it("names an empty master key on the unclaimed form", async () => {
+    render(
+      <Mounted>
+        <Harness />
+      </Mounted>,
+    )
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }))
+
+    expect(recordEvent).toHaveBeenCalledWith(
+      TELEMETRY_EVENTS.FORM_VALIDATION_FAILED,
+      { form_name: "login", errors: ["master_key_required"] },
+    )
   })
 })

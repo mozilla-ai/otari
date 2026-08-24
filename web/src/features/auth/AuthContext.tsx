@@ -11,6 +11,8 @@ import {
 } from "react"
 
 import { deleteSession, setUnauthorizedHandler } from "@/shared/api/client"
+import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
+import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 
 // Non-secret marker that a session cookie was minted for this browser. The
 // credential itself is an HttpOnly cookie the page cannot read, so this flag is
@@ -43,6 +45,7 @@ function readStoredMarker(): boolean {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient()
+  const { recordEvent, identify } = useTelemetry()
 
   const [isAuthenticated, setAuthenticated] =
     useState<boolean>(readStoredMarker)
@@ -56,6 +59,13 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   const pendingSignOutsRef = useRef(0)
 
   const logout = useCallback(() => {
+    // Recorded before anything is torn down, and from here rather than from the
+    // account menu, because this is also the path a 401 takes: a session that
+    // expired or was revoked ends the same funnel a deliberate sign-out does.
+    // `identify(null)` is the other half of it, and it is what stops the next
+    // session in this tab from being attributed to the identity that just left.
+    recordEvent(TELEMETRY_EVENTS.LOGOUT)
+    identify(null)
     // Local sign-out is unconditional and synchronous, exactly as before:
     // the UI returns to the sign-in screen at once regardless of how the
     // server-side revocation below turns out.
@@ -79,7 +89,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setSigningOut(false)
       }
     })
-  }, [queryClient])
+  }, [queryClient, recordEvent, identify])
 
   // Called after POST /v1/auth/session succeeded, i.e. the browser already
   // holds the session cookie; this only flips the rendered state.

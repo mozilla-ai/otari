@@ -36,12 +36,15 @@ import { TopBarActions } from "@/app/nav/TopBarActions"
 import type { NavItem, NavPath } from "@/app/nav/types"
 import { useNavVisibility } from "@/app/nav/useNavVisibility"
 import { WorkspaceSwitcher } from "@/app/nav/WorkspaceSwitcher"
+import { TelemetryIdentity } from "@/app/TelemetryIdentity"
 import { UpdatePrompt } from "@/app/UpdatePrompt"
 import { PricingWarning } from "@/features/models/PricingWarning"
 import { canManage } from "@/features/organization/roles"
 import { useOrganizationContext } from "@/shared/api/hooks"
 import { EmptyState } from "@/shared/components/ui"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
+import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
+import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 
 // One width, not a range. The rail used to be draggable between 200 and 480px
 // and to remember where it was left; it is now the design's 264px, or 72px
@@ -75,6 +78,18 @@ function readStoredCollapsed(): boolean {
 }
 
 /**
+ * What a destination is called in `TAB_CHANGED`.
+ *
+ * The last segment of the path, which is the derivation
+ * `otari-ai/frontend/src/app/SidebarItems.tsx` already uses, so a page that
+ * exists in both rails is reported under one name. The index has no segment to
+ * take and is named rather than reported as an empty string.
+ */
+function tabNameForPath(to: NavPath): string {
+  return to.split("/").filter(Boolean).pop() ?? "index"
+}
+
+/**
  * One row of the rail, pointing at one destination.
  *
  * Shared by the leaves, a group's children, and a group that has collapsed to a
@@ -102,13 +117,28 @@ function NavRowLink({
   nested?: boolean
   onNavigate: () => void
 }) {
+  const { recordEvent } = useTelemetry()
+
   return (
     <Link
       to={to}
       // Exact, because the default is a prefix match: on /organization/members
       // that leaves `aria-current` on "Organization" as well as on the child.
       activeOptions={{ exact: true }}
-      onClick={onNavigate}
+      onClick={() => {
+        // Only a move: clicking the row you are already on is not a navigation,
+        // and counting it would inflate whichever page people sit on longest.
+        // The context is read from the destination rather than from the rail
+        // that was showing, so a row that crosses between the two is recorded
+        // where it landed.
+        if (!isActive) {
+          recordEvent(TELEMETRY_EVENTS.TAB_CHANGED, {
+            tab_name: tabNameForPath(to),
+            context: navContextForPath(to),
+          })
+        }
+        onNavigate()
+      }}
       className={navRowClass({ isActive, collapsed, nested })}
       aria-label={collapsed ? label : undefined}
       title={collapsed ? label : undefined}
@@ -515,6 +545,10 @@ export function AppShell() {
       >
         Skip to main content
       </button>
+      {/* Renders nothing. Mounted here rather than at the root because it names
+          the actor a session belongs to, and this shell is what a session gets
+          you; the pages in front of one have no actor to name. */}
+      <TelemetryIdentity />
       <UpdatePrompt />
       <ConnectionStatus />
       <PricingWarning />

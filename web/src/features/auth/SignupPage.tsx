@@ -1,6 +1,7 @@
 import { Button } from "@heroui/react"
 import { useState } from "react"
 
+import { ApiError } from "@/shared/api/client"
 import { useSignup } from "@/shared/api/hooks"
 import { ErrorBanner } from "@/shared/components/ui"
 import {
@@ -8,6 +9,8 @@ import {
   MIN_PASSWORD_LENGTH,
   newPasswordProblem,
 } from "@/shared/helpers/password"
+import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
+import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 
 import { AuthEmailField, AuthPasswordField, AuthTextField } from "./AuthFields"
 import {
@@ -42,6 +45,7 @@ import {
  */
 export function SignupPage() {
   const signup = useSignup()
+  const { recordEvent } = useTelemetry()
   const [email, setEmail] = useState("")
   const [fullName, setFullName] = useState("")
   const [password, setPassword] = useState("")
@@ -67,13 +71,37 @@ export function SignupPage() {
     if (!canSubmit || signup.isPending) {
       return
     }
+    // The attempt, recorded before the request rather than alongside its
+    // outcome, so a claim that never comes back is still a step in the funnel.
+    // `password` is the only method this form offers: the platform's Google and
+    // GitHub buttons wait on otari#651.
+    recordEvent(TELEMETRY_EVENTS.SIGNUP_STARTED, {
+      authentication_method: "password",
+    })
     signup.mutate(
       {
         email: email.trim(),
         password,
         full_name: fullName.trim() || null,
       },
-      { onSuccess: () => goToPublicAuthPage("#/check-email?type=signup") },
+      {
+        onSuccess: () => {
+          // Always verification-bound, and not a reading of the response: this
+          // endpoint is enumeration-safe and says nothing about the address, so
+          // the page navigates to check-email whatever came back.
+          recordEvent(TELEMETRY_EVENTS.SIGNUP_SUCCESS, {
+            authentication_method: "password",
+            requires_verification: true,
+          })
+          goToPublicAuthPage("#/check-email?type=signup")
+        },
+        onError: (error) => {
+          recordEvent(TELEMETRY_EVENTS.SIGNUP_FAILED, {
+            authentication_method: "password",
+            status: error instanceof ApiError ? error.status : undefined,
+          })
+        },
+      },
     )
   }
 

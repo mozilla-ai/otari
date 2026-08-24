@@ -1,6 +1,6 @@
 import { act, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { AppShell } from "@/app/AppShell"
 import { Provider } from "@/app/provider"
@@ -12,8 +12,18 @@ import {
   BASE_CAPABILITIES,
   EntitlementProvider,
 } from "@/shared/hooks/useEntitlements"
+import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { bootstrap, organizationContext } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
+import { recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
+
+// The telemetry seam, replaced the way a superset build's alias replaces it: the
+// base module records nothing, so a navigation is only observable through a
+// stand-in.
+vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
+  const { telemetrySpy } = await import("@/tests/telemetry")
+  return { useTelemetry: () => telemetrySpy }
+})
 
 // jsdom has no layout engine, so `md:hidden` / responsive classes never take
 // effect. The mobile-vs-desktop branch keys off window.matchMedia instead, which
@@ -1000,5 +1010,70 @@ describe("AppShell entitlement gating", () => {
       .filter((link) => link.getAttribute("aria-current") === "page")
       .map((link) => link.textContent)
     expect(current).toEqual(["Members & roles"])
+  })
+})
+
+describe("the telemetry the sidebar records", () => {
+  beforeEach(() => {
+    resetTelemetrySpy()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+    window.localStorage.clear()
+  })
+
+  it("records a move to another destination", async () => {
+    mockMatchMedia(false)
+    const user = userEvent.setup()
+    await renderShell()
+
+    await user.click(screen.getByRole("link", { name: "Providers" }))
+
+    expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.TAB_CHANGED, {
+      tab_name: "providers",
+      context: "workspace",
+    })
+  })
+
+  it("names the rail the destination belongs to, not the one on screen", async () => {
+    // The organization rail is a context switch rather than a section, and the
+    // row that crosses into it is on the workspace rail. Reading the context
+    // from the destination is what puts that move on the rail it landed on.
+    mockMatchMedia(false)
+    const user = userEvent.setup()
+    await renderShell(bootstrap(), { url: "/organization/members" })
+
+    await user.click(screen.getByRole("link", { name: "Model pricing" }))
+
+    expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.TAB_CHANGED, {
+      tab_name: "pricing",
+      context: "organization",
+    })
+  })
+
+  it("does not record a click on the row you are already on", async () => {
+    // Counting those would inflate whichever page people sit on longest.
+    mockMatchMedia(false)
+    const user = userEvent.setup()
+    await renderShell(bootstrap(), { url: "/providers" })
+
+    await user.click(screen.getByRole("link", { name: "Providers" }))
+
+    expect(recordEvent).not.toHaveBeenCalled()
+  })
+
+  it("names the index rather than reporting it as an empty string", async () => {
+    mockMatchMedia(false)
+    const user = userEvent.setup()
+    await renderShell(bootstrap(), { url: "/providers" })
+
+    await user.click(screen.getByRole("link", { name: "Overview" }))
+
+    expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.TAB_CHANGED, {
+      tab_name: "index",
+      context: "workspace",
+    })
   })
 })

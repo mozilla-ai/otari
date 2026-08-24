@@ -1,9 +1,19 @@
 import { act, render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useAuth } from "@/features/auth/AuthContext"
+import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { AppProviders } from "@/tests/providers"
+import { identify, recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
+
+// The telemetry seam, replaced the way a superset build's alias replaces it, so
+// the sign-out this provider records is observable at all: the base module is a
+// genuine no-op.
+vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
+  const { telemetrySpy } = await import("@/tests/telemetry")
+  return { useTelemetry: () => telemetrySpy }
+})
 
 function Harness() {
   const { isAuthenticated, isSigningOut, logout } = useAuth()
@@ -33,6 +43,10 @@ function RepeatableLogoutHarness() {
 }
 
 describe("AuthProvider", () => {
+  beforeEach(() => {
+    resetTelemetrySpy()
+  })
+
   afterEach(() => {
     vi.restoreAllMocks()
     window.localStorage.clear()
@@ -166,5 +180,33 @@ describe("AuthProvider", () => {
     await waitFor(() => {
       expect(screen.getByText("IDLE")).toBeInTheDocument()
     })
+  })
+})
+
+describe("the telemetry a sign-out records", () => {
+  beforeEach(() => {
+    resetTelemetrySpy()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    window.localStorage.clear()
+  })
+
+  it("records the sign-out and forgets the actor", async () => {
+    window.localStorage.setItem("otari.dashboard.hasSession", "1")
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(new Response(null))
+
+    render(
+      <AppProviders>
+        <Harness />
+      </AppProviders>,
+    )
+    await userEvent.click(screen.getByRole("button", { name: "Sign out" }))
+
+    expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.LOGOUT)
+    // The other half: without it the next session in this tab is attributed to
+    // the identity that just left.
+    expect(identify).toHaveBeenCalledWith(null)
   })
 })
