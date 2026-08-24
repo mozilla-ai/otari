@@ -2,8 +2,9 @@ import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
+import type { DeploymentBootstrap } from "@/client"
 import { PasskeysCard } from "@/features/account/PasskeysCard"
-import { DeploymentProvider } from "@/shared/hooks/useDeployment"
+import { DeploymentProvider, useDeployment } from "@/shared/hooks/useDeployment"
 import { bootstrap } from "@/tests/fixtures"
 import { AppProviders } from "@/tests/providers"
 
@@ -55,6 +56,41 @@ function renderCard(passkeysReady = true) {
         <PasskeysCard />
       </DeploymentProvider>
     </AppProviders>,
+  )
+}
+
+/**
+ * Renders the card beside a readout of `sign_in_methods`.
+ *
+ * The card reports a first registration or a last deletion into the deployment
+ * context rather than refetching it, so the only way to assert it did the right
+ * thing is to read the context back. Kept out of `renderCard` because every
+ * other test here is about the card's own DOM.
+ */
+function SignInMethodsProbe() {
+  const { sign_in_methods } = useDeployment()
+  return <output>{sign_in_methods.join(",")}</output>
+}
+
+function renderCardWithProbe(methods: DeploymentBootstrap["sign_in_methods"]) {
+  return render(
+    <AppProviders>
+      <DeploymentProvider
+        value={bootstrap({ passkeys_ready: true, sign_in_methods: methods })}
+      >
+        <PasskeysCard />
+        <SignInMethodsProbe />
+      </DeploymentProvider>
+    </AppProviders>,
+  )
+}
+
+async function deleteFirstPasskey(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(screen.getAllByRole("button", { name: "Delete" })[0])
+  await user.click(
+    within(screen.getByRole("alertdialog")).getByRole("button", {
+      name: "Delete",
+    }),
   )
 }
 
@@ -347,5 +383,82 @@ describe("PasskeysCard", () => {
         ),
       ).toBe(true)
     })
+  })
+
+  it("stops offering passkey sign-in once the last usable one is deleted", async () => {
+    mockApi({
+      [LIST]: () => jsonResponse({ data: [PASSKEY], count: 1 }),
+      [`DELETE /v1/auth/webauthn/credentials/${PASSKEY.id}`]: () =>
+        new Response(null, { status: 204 }),
+    })
+    const user = userEvent.setup()
+    renderCardWithProbe(["passkey", "password"])
+
+    await screen.findByText("Work laptop")
+    await deleteFirstPasskey(user)
+
+    // The gateway would stop publishing `passkey`, and this tab has to agree
+    // now rather than at the next reload, or the sign-in screen it lands on
+    // offers a button nothing can answer.
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent("password"),
+    )
+    expect(screen.getByRole("status")).not.toHaveTextContent("passkey")
+  })
+
+  it("keeps offering passkey sign-in when an unusable one is all that goes", async () => {
+    // An orphan and a working passkey. Deleting the orphan changes nothing the
+    // gateway counts, because `has_any_credential` never counted it.
+    const orphan = {
+      ...PASSKEY,
+      id: "22222222-2222-2222-2222-222222222222",
+      name: "Old laptop",
+      rp_id: "old.example.com",
+      is_usable: false,
+    }
+    mockApi({
+      // Newest first, so the orphan is the first Delete button on the page.
+      [LIST]: () => jsonResponse({ data: [orphan, PASSKEY], count: 2 }),
+      [`DELETE /v1/auth/webauthn/credentials/${orphan.id}`]: () =>
+        new Response(null, { status: 204 }),
+    })
+    const user = userEvent.setup()
+    renderCardWithProbe(["passkey", "password"])
+
+    await screen.findByText("Old laptop")
+    await deleteFirstPasskey(user)
+
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent("passkey"),
+    )
+  })
+
+  it("stops offering passkey sign-in when the last usable one goes beside an orphan", async () => {
+    // The case a row count gets wrong: two rows, one usable. Deleting the
+    // usable one leaves nothing the gateway would count, so the offer has to be
+    // withdrawn even though a row remains.
+    const orphan = {
+      ...PASSKEY,
+      id: "22222222-2222-2222-2222-222222222222",
+      name: "Old laptop",
+      rp_id: "old.example.com",
+      is_usable: false,
+    }
+    mockApi({
+      // PASSKEY first this time, so the usable one is the button that is clicked.
+      [LIST]: () => jsonResponse({ data: [PASSKEY, orphan], count: 2 }),
+      [`DELETE /v1/auth/webauthn/credentials/${PASSKEY.id}`]: () =>
+        new Response(null, { status: 204 }),
+    })
+    const user = userEvent.setup()
+    renderCardWithProbe(["passkey", "password"])
+
+    await screen.findByText("Work laptop")
+    await deleteFirstPasskey(user)
+
+    await waitFor(() =>
+      expect(screen.getByRole("status")).toHaveTextContent("password"),
+    )
+    expect(screen.getByRole("status")).not.toHaveTextContent("passkey")
   })
 })

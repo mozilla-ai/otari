@@ -66,11 +66,21 @@ def test_an_unknown_challenge_is_refused(tmp_path: Path) -> None:
     asyncio.run(_run())
 
 
-def test_a_challenge_is_spent_even_when_the_wrong_ceremony_claims_it(tmp_path: Path) -> None:
-    """Answering a registration challenge as a sign-in burns it.
+def test_the_wrong_ceremony_is_refused_and_the_challenge_survives_it(tmp_path: Path) -> None:
+    """Answering a registration challenge as a sign-in is refused, and does not burn it.
 
-    Refusing without spending it would leave the challenge live for a second
-    attempt the other way round, which is the opposite of single use.
+    This pins what the routes actually do rather than what "single use" sounds
+    like it should mean. The delete is staged on the caller's transaction and no
+    route commits on a refusal, so the challenge is still there afterwards and
+    dies on its TTL instead.
+
+    The previous version of this test asserted the opposite and passed only
+    because it committed by hand between the two calls, which no caller does. If
+    this ever needs to become "spent either way", the change belongs in the
+    routes' transaction handling, not here: committing inside ``_spend_challenge``
+    would commit whatever else the request had staged, which is the hazard
+    ``dashboard_session_service._revoke_deactivated_identity_sessions`` documents
+    for the same reason.
     """
 
     async def _run() -> None:
@@ -79,12 +89,18 @@ def test_a_challenge_is_spent_even_when_the_wrong_ceremony_claims_it(tmp_path: P
             await webauthn_service._issue_challenge(db, CHALLENGE, ceremony="registration", user_id=None)
             await db.commit()
 
+        # A refusal, and then a rollback: exactly what a route does with one.
         async with factory() as db:
             with pytest.raises(PasskeyCeremonyError):
                 await webauthn_service._spend_challenge(db, CHALLENGE, ceremony="authentication")
-            # The refusal rolled back nothing here, so commit what the delete staged.
+            await db.rollback()
+
+        # Still live, and still answerable by the ceremony it was issued for.
+        async with factory() as db:
+            assert await webauthn_service._spend_challenge(db, CHALLENGE, ceremony="registration") is None
             await db.commit()
 
+        # And now it is gone, because that one completed.
         async with factory() as db:
             with pytest.raises(PasskeyCeremonyError):
                 await webauthn_service._spend_challenge(db, CHALLENGE, ceremony="registration")

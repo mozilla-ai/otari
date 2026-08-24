@@ -201,10 +201,26 @@ export function PasskeysCard() {
     if (!deleting || remove.isPending) {
       return
     }
-    remove.mutate(deleting.id, {
+    const id = deleting.id
+    remove.mutate(id, {
       onSuccess: () => {
-        // Deleting the last one stops the deployment offering the method.
-        if (rows.length <= 1) {
+        // Deleting the last *usable* one stops the deployment offering the
+        // method, which is not the same as deleting the last row. The gateway
+        // publishes `passkey` off `has_any_credential`, which counts only
+        // credentials registered under the current relying-party ID, so a row
+        // the list shows with `is_usable: false` is one the server has already
+        // stopped counting. Comparing row totals instead would disagree with it
+        // in exactly the case orphans exist: delete the one working passkey
+        // beside an orphan and the sign-in screen would keep offering a button
+        // the gateway will not answer until the next reload.
+        //
+        // Filtering the deleted row out by id rather than trusting the list to
+        // have refetched: this runs in the mutation's own onSuccess, before the
+        // invalidated query has come back.
+        const usableLeft = rows.filter(
+          (row) => row.is_usable && row.id !== id,
+        ).length
+        if (usableLeft === 0) {
           offerPasskeySignIn(false)
         }
         setDeleting(null)

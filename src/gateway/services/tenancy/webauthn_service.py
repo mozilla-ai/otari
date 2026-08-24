@@ -160,12 +160,24 @@ async def _spend_challenge(db: AsyncSession, challenge: bytes, *, ceremony: str)
     The delete is staged on the caller's transaction, so a verification that
     fails afterwards rolls it back and the challenge survives for the retry the
     caller is about to make; only a ceremony that completes actually retires one.
+    **That applies to every refusal below, including the wrong-ceremony one.**
+    No route commits on a refusal, so a challenge answered with the wrong
+    ceremony stays live until its TTL rather than being burned by the attempt.
+
+    That is worth stating rather than leaving to be inferred, because the
+    obvious reading of "single use" says the opposite. It is safe for two
+    reasons that have to hold together. A challenge is a nonce and not a
+    credential, so holding one gains nobody anything on its own: spending it
+    still needs an attestation or an assertion over it, and the second of those
+    needs a registered credential's private key. And the window is
+    ``WEBAUTHN_CHALLENGE_TTL_SECONDS``, after which the row is gone whatever
+    happened to it. What single use does buy is that a *completed* ceremony can
+    never be replayed, and that is what the commit on the success path
+    guarantees.
 
     ``ceremony`` is compared after the fact rather than added to the WHERE
-    clause. A challenge answered with the wrong ceremony is spent either way:
-    it is a challenge this server issued, somebody has just used it, and leaving
-    it live so it can be tried again the other way is the opposite of what
-    single-use means.
+    clause, so the refusal can say which ceremony the challenge was actually
+    issued for instead of collapsing into "unknown challenge".
     """
     encoded = bytes_to_base64url(challenge)
     row = (
