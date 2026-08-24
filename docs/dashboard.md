@@ -664,9 +664,11 @@ password. Configure mail before you expect members to sign in.
   tab you flipped it in, and it does not touch the API, so keys and completions
   carry on serving. The switch is stored rather than held in memory, so one
   toggle freezes every replica at once and the freeze survives a restart. The
-  way back out is always open: the master key still authenticates the management
-  API through the header, so you can turn it off from a fresh browser even
-  while sign-ins are frozen.
+  way back out does not depend on signing in: the master key still authenticates
+  the management API through the header, so you can turn it off from a fresh
+  browser even while sign-ins are frozen. Keep that key to hand before you set
+  this, because it is what lifts the freeze once your own session is gone;
+  without it the recovery is setting `OTARI_MASTER_KEY` and restarting.
 
 ## Install it on your phone
 

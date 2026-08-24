@@ -1,5 +1,7 @@
 /**
- * The settings page's boolean control.
+ * The settings page's boolean control. `role="switch"` so it reads correctly to
+ * assistive tech and can be targeted by its accessible name (a config key, or
+ * the maintenance-mode switch's own label).
  *
  * Its own file because two things on the page render one: every settable `bool`
  * config field, and the maintenance-mode switch, which is not a config field at

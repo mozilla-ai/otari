@@ -25,9 +25,10 @@ Nothing here touches the data plane. A frozen deployment still serves
 ``/v1/chat/completions`` and the rest of the management API to a caller
 presenting the master key or an API key through the header; what stops is the
 dashboard sign-in that mints a cookie. That boundary is what lets an operator
-turn the freeze back off: ``PATCH /v1/settings/maintenance-mode`` is
-master-key gated and reachable through the header, which never passes through
-the door the freeze closes.
+turn the freeze back off without signing in: ``PATCH /v1/settings/maintenance-mode``
+is master-key gated and reachable through the header, which never passes through
+the door the freeze closes. It does presuppose the operator still holds that key;
+one who does not recovers by setting ``OTARI_MASTER_KEY`` and restarting.
 """
 
 from sqlalchemy import select

@@ -52,8 +52,6 @@ export function fieldMatches(field: ConfigField, query: string): boolean {
     .every((term) => haystack.includes(term) || isSubsequence(term, key))
 }
 
-// A small on/off switch. role="switch" so it reads correctly to assistive tech
-// and can be targeted by its accessible name (the config key).
 // A numeric setting (int or float) with an explicit Save, so a mistyped value is
 // not applied on every keystroke. The draft resyncs whenever the committed value
 // changes (after a save round-trip).

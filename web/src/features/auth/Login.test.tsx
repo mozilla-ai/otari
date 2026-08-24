@@ -437,17 +437,15 @@ describe("Login", () => {
   it("renders the gateway's own 503 wording for a tab that was open before the freeze", async () => {
     // This tab loaded its bootstrap while sign-ins were still open, so it has
     // the form. The refusal has to arrive as a refusal and not as a fault.
-    const fetchMock = vi
-      .spyOn(globalThis, "fetch")
-      .mockResolvedValue(
-        jsonResponse(
-          {
-            detail:
-              "This gateway is in maintenance mode and is not starting new dashboard sessions right now.",
-          },
-          503,
-        ),
-      )
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse(
+        {
+          detail:
+            "This gateway is in maintenance mode and is not starting new dashboard sessions right now.",
+        },
+        503,
+      ),
+    )
     const user = userEvent.setup()
 
     render(

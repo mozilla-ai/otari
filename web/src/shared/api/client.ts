@@ -93,6 +93,12 @@ export async function createSession(
   // one. The sign-in screen normally renders a notice instead of the form on a
   // frozen deployment (it reads the same flag from the bootstrap); this is the
   // tab that was already open when the freeze started.
+  //
+  // It catches any 503, not only ours, so a proxy's own during the redeploy
+  // this feature exists for lands on the label row as "Service Unavailable"
+  // rather than as a fault. That is the better of the two readings: both mean
+  // "this gateway is not signing anyone in right now", which is what the
+  // person at the form needs to know.
   if (
     response.status === 401 ||
     response.status === 403 ||

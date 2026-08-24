@@ -288,13 +288,19 @@ async def create_session(
     verification per attempt and the refusal is not about the credential
     anyway; both, because the way back out is the master key against
     ``PATCH /v1/settings/maintenance-mode`` through the header, which never
-    passes through this door. That is what keeps the switch from locking out
-    its own operator, and it is why no identity needs an exemption here. It
+    passes through this door. That is what keeps the way back out off the
+    frozen path, and it is why no identity needs an exemption here (an operator
+    who no longer holds the master key recovers by setting ``OTARI_MASTER_KEY``
+    and restarting, which is a restart rather than a click). It
     leaks nothing either: ``GET /v1/bootstrap`` already publishes the same flag
     unauthenticated, so the sign-in screen can render the right page.
     """
     if await is_maintenance_mode(db):
-        record_auth_failure("maintenance_mode")
+        # Deliberately not counted in ``AUTH_FAILURES``: nobody failed to
+        # authenticate here, because the check runs before either credential is
+        # verified and the gateway declined to try. Counting it would also put a
+        # maintenance window's worth of refusals into the metric an operator
+        # alerts on for credential attacks, and page them for their own redeploy.
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=MAINTENANCE_MODE_REFUSAL,

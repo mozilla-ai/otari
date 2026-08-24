@@ -350,6 +350,33 @@ export function Login() {
     }
   }
 
+  if (signInUnavailable) {
+    return (
+      <div className={PAGE_FLAT}>
+        <Card className="w-full max-w-md">
+          <Card.Content className={CARD_FLAT}>
+            {/* Grouped so the mark sits 16px from the heading it belongs to,
+                the way it does on the form. alt="" because the <h1> under it
+                already names the product. */}
+            <div className="flex flex-col items-center gap-4">
+              <img src="/favicon.svg" alt="" className="h-10 w-11" />
+              <h1 className={HEADING}>Otari sign-in is unavailable</h1>
+            </div>
+            <p className="text-sm text-muted">
+              This gateway cannot start a session at the moment, which usually
+              means it cannot reach its database. It reports which credentials
+              it accepts once it recovers, so reload this page to try again.
+            </p>
+            <p className="text-sm text-muted">
+              The management API is unaffected by this screen and still accepts
+              the master key.
+            </p>
+          </Card.Content>
+        </Card>
+      </div>
+    )
+  }
+
   // An operator has frozen sign-ins to redeploy this gateway. Rendering the
   // form instead would offer a credential whose only outcome is a 503, and one
   // whose refusal reads as "wrong key" to anyone who does not already know a
@@ -379,33 +406,6 @@ export function Login() {
             <p className="text-sm text-muted">
               The API is unaffected by this screen and still serves requests,
               and the management API still accepts the master key.
-            </p>
-          </Card.Content>
-        </Card>
-      </div>
-    )
-  }
-
-  if (signInUnavailable) {
-    return (
-      <div className={PAGE_FLAT}>
-        <Card className="w-full max-w-md">
-          <Card.Content className={CARD_FLAT}>
-            {/* Grouped so the mark sits 16px from the heading it belongs to,
-                the way it does on the form. alt="" because the <h1> under it
-                already names the product. */}
-            <div className="flex flex-col items-center gap-4">
-              <img src="/favicon.svg" alt="" className="h-10 w-11" />
-              <h1 className={HEADING}>Otari sign-in is unavailable</h1>
-            </div>
-            <p className="text-sm text-muted">
-              This gateway cannot start a session at the moment, which usually
-              means it cannot reach its database. It reports which credentials
-              it accepts once it recovers, so reload this page to try again.
-            </p>
-            <p className="text-sm text-muted">
-              The management API is unaffected by this screen and still accepts
-              the master key.
             </p>
           </Card.Content>
         </Card>

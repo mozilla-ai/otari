@@ -141,8 +141,10 @@ def test_the_master_key_in_the_header_is_never_frozen(tmp_path: Path) -> None:
     """The way back out, and why no identity needs an exemption on sign-in.
 
     A fresh client holds no cookie, so this is the state an operator is in after
-    closing the browser: the switch is still reachable, which is what keeps it
-    from being able to lock its own operator out.
+    closing the browser: the switch is still reachable, which is what keeps the
+    way back out off the path the freeze closes. It presupposes the operator
+    still holds the key; one who does not recovers by setting
+    ``OTARI_MASTER_KEY`` and restarting.
     """
     with _client(tmp_path) as client:
         _freeze(client)
