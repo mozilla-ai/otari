@@ -20,15 +20,24 @@ import type { ReactNode } from "react"
  * that wrapped the app in its own provider, and every test that does exactly
  * that today, would get the empty base answer back from this line.
  *
- * A replacement fetches `GET /v1/entitlements` (the superset serves it, resolved
- * through `EntitlementPort` per request; nothing in this repository serves that
- * path) and renders `EntitlementProvider` with what came back, `isLoading` and
- * all. It does not need to hold the answer back while it resolves:
- * `EntitlementGate` already renders a `loading` state, and `useNavVisibility`
- * treats a still-resolving answer as no capabilities, so a rail draws its base
- * rows first and the contributed ones when they arrive. A replacement that
- * would rather not have that flicker can render nothing until its query settles,
- * which is a choice this seam leaves to it rather than one the base makes for it.
+ * One export, and its shape is the contract: a component named
+ * `EntitlementResolver` taking `{ children }`. A replacement fetches
+ * `GET /v1/entitlements` (the superset serves it, resolved through
+ * `EntitlementPort` per request; nothing in this repository serves that path)
+ * and renders `EntitlementProvider` with what came back.
+ *
+ * **It should report `isLoading` rather than hold its children back**, and the
+ * shell is built to be told. The two halves the axis gates read that state
+ * differently, which is worth knowing before choosing: the rail is forgiving,
+ * since `useNavVisibility` reads capabilities only, so a still-resolving answer
+ * draws the base rows first and the contributed ones when they arrive. The route
+ * gate is a predicate with no `loading` prop to pass, unlike `EntitlementGate`,
+ * so it is `AppShell` that carries the branch: while `isLoading` is set it
+ * renders the router's pending copy instead of the panel asserting the
+ * deployment does not serve the page, which is a claim nothing can make yet. A
+ * replacement that instead renders nothing until its query settles blanks the
+ * whole dashboard on every load, which is why the shell takes the state rather
+ * than making each replacement work around it.
  *
  * **Why a seam and not a probe in the base.** The alternative is for this
  * repository to request `/v1/entitlements` itself and fall back to the constant

@@ -16,10 +16,23 @@ import {
 import { bootstrap, organizationContext } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
 
-// The capability under test. Overlay-only by ARCHITECTURE.md's table, so no
-// build of this repository grants it and nothing else in the suite can be
-// supplying it.
-const OVERLAY_CAPABILITY = "billing"
+// Through `vi.hoisted`, because a `vi.mock` factory is hoisted above every
+// ordinary declaration in the file and would see a plain `const` in its temporal
+// dead zone. That is also what lets a test vary the answer: the factory reads
+// `.value` when it renders rather than closing over what it was at import.
+const { OVERLAY_CAPABILITY, ENTITLED, resolved } = vi.hoisted(() => {
+  // Overlay-only by ARCHITECTURE.md's table, so no build of this repository
+  // grants it and nothing else in the suite can be supplying it.
+  const capability = "billing"
+  const entitled = { capabilities: [capability], isLoading: false }
+  return {
+    OVERLAY_CAPABILITY: capability,
+    ENTITLED: entitled,
+    resolved: {
+      value: entitled as { capabilities: string[]; isLoading: boolean },
+    },
+  }
+})
 
 // The seam, replaced the way a superset build's alias replaces it: a resolver
 // that answers from somewhere this build cannot reach. Mocked by its `@/…`
@@ -31,9 +44,7 @@ vi.mock("@/app/overlayEntitlementResolver", async () => {
   )
   return {
     EntitlementResolver: ({ children }: { children: ReactNode }) => (
-      <Provide value={{ capabilities: ["billing"], isLoading: false }}>
-        {children}
-      </Provide>
+      <Provide value={resolved.value}>{children}</Provide>
     ),
   }
 })
@@ -55,7 +66,7 @@ vi.mock("@/app/nav/overlayNavItems", async () => {
             to: "/aliases",
             label: "Billing",
             icon: FiCreditCard,
-            capability: "billing",
+            capability: OVERLAY_CAPABILITY,
           },
         ],
       },
@@ -132,6 +143,7 @@ describe("the base entitlement resolver", () => {
 
 describe("the shell's mount point", () => {
   afterEach(() => {
+    resolved.value = ENTITLED
     vi.restoreAllMocks()
     window.localStorage.clear()
   })
@@ -143,13 +155,14 @@ describe("the shell's mount point", () => {
    * only answer available is the one the seam resolves, so a provider here would
    * be the test supplying what it is meant to be observing.
    */
-  async function renderShell(page: ReactElement) {
+  async function renderShell(page: ReactElement, url?: string) {
     // The shell reads the organization context for its switcher and for the way
     // into the organization rail.
     vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
       Response.json(organizationContext()),
     )
     return renderWithRouter(page, {
+      url,
       shell: (
         <Provider>
           <DeploymentProvider value={bootstrap()}>
@@ -188,5 +201,21 @@ describe("the shell's mount point", () => {
 
     expect(await screen.findByText("BILLING PAGE")).toBeInTheDocument()
     expect(screen.queryByText("NOT AVAILABLE")).not.toBeInTheDocument()
+  })
+
+  it("does not claim a route is unserved while the answer is resolving", async () => {
+    // The base resolves synchronously, so this is the branch only a superset
+    // build's asynchronous resolver reaches, and it is the one place the axis
+    // going async is visible to a person rather than only to a rail: the route
+    // gate is a predicate with no `loading` prop to pass, unlike
+    // `EntitlementGate`, so before this it answered a still-unknown entitlement
+    // by asserting the deployment does not serve the page. An entitled visitor
+    // deep-linking to an overlay page was told it did not exist here, and then
+    // shown it.
+    resolved.value = { capabilities: [], isLoading: true }
+    await renderShell(<p>BILLING PAGE</p>, "/aliases")
+
+    expect(screen.queryByText(/is not available here/)).not.toBeInTheDocument()
+    expect(await screen.findByRole("status")).toBeInTheDocument()
   })
 })

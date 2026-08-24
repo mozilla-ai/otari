@@ -44,6 +44,7 @@ import { canManage } from "@/features/organization/roles"
 import { useOrganizationContext } from "@/shared/api/hooks"
 import { EmptyState } from "@/shared/components/ui"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
+import { useEntitlements } from "@/shared/hooks/useEntitlements"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 
@@ -402,6 +403,17 @@ function AppShellChrome() {
   // differently: whichever way the nested case resolves, both read it from one
   // place.
   const routeIsGatedOff = !isPathVisible(pathname, isVisible)
+  // Kept beside that answer rather than folded into it, because the two are
+  // different claims: "gated off" decides whether the page renders, and this
+  // decides whether the shell may yet say *why*. The panel below asserts that
+  // this deployment does not serve the page, which is not something the shell
+  // knows while the entitlement axis is still resolving. Always settled in this
+  // build, where `useEntitlements` answers from a constant, so this is a branch
+  // a superset build's asynchronous resolver takes and the base never does.
+  // `EntitlementGate` has had a `loading` state for exactly this reason since it
+  // was written; the rail needs none, because a row that appears late is not a
+  // row that told anyone it was missing.
+  const { isLoading: entitlementsResolving } = useEntitlements()
   // Which of the two sidebars this path belongs under. The organization context
   // is a separate rail reached from the footer, not a section inside the
   // workspace one, so the two never render together.
@@ -922,7 +934,13 @@ function AppShellChrome() {
             className="flex-1 overflow-y-auto focus:outline-none"
           >
             <div className="mx-auto flex max-w-[1800px] flex-col gap-6 px-4 py-5 md:px-6 md:py-6">
-              {routeIsGatedOff ? (
+              {routeIsGatedOff && entitlementsResolving ? (
+                // The router's own pending copy, so a route waiting on the
+                // entitlement answer reads as the same kind of wait as a route
+                // waiting on its chunk (`defaultPendingComponent` in
+                // `app/router.tsx`).
+                <div role="status">Loading page…</div>
+              ) : routeIsGatedOff ? (
                 <EmptyState
                   // The leaf's name, not the group's: someone who followed a
                   // link to Guardrails should not be told "Routing" is missing.
