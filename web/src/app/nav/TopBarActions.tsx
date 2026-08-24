@@ -1,8 +1,7 @@
 import { Link } from "@tanstack/react-router"
 
-// Reached by its `@/…` specifier and not as `./overlayWalletSlot`, because that
-// specifier is what a superset build's build-time alias replaces; the module
-// itself says why a relative import would silently keep the empty default.
+// By its `@/…` specifier, never as `./overlayWalletSlot`: that specifier is the
+// seam's alias key, and the module says what a relative import would cost.
 import { WalletNavSlot } from "@/app/nav/overlayWalletSlot"
 import { EntitlementGate } from "@/shared/components/EntitlementGate"
 import { useDeployment } from "@/shared/hooks/useDeployment"

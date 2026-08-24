@@ -7,18 +7,15 @@ import { describe, expect, it } from "vitest"
 // jsdom environment reports as an http URL. Same reason as src/routes.test.ts.
 const SRC = join(process.cwd(), "src")
 
+// The name `architecture.test.ts` plants its throwaway modules under.
+const PROBE_DIR = "__boundary_probe__"
+
 /**
  * The base modules a superset build replaces, by their path under `src/`.
  *
- * Each ships an inert default here (an empty contribution or a component that
- * renders nothing) and is swapped at build time by an alias keyed on its `@/…`
- * specifier, the technique GitLab documents as `ee_else_ce`. The alias table
- * itself belongs to the superset build's config in `otari-ai`, not here: its
- * replacements resolve against an overlay tree that this repository has none of
- * and is not meant to grow one of (see AGENTS.md). What this repository owes the
- * mechanism is the other half, and it is the half this file checks.
- *
- * Add a module here when you add a seam.
+ * Each ships an inert default here and is swapped at build time by an alias
+ * keyed on its `@/…` specifier. The list is checked for completeness below, so
+ * a new seam fails this file until it is added rather than going unguarded.
  */
 const SEAM_MODULES = [
   "app/nav/overlaySections.ts",
@@ -29,20 +26,32 @@ const SEAM_MODULES = [
 const seamPaths = new Set(SEAM_MODULES.map((module) => join(SRC, module)))
 
 /**
- * Every source file under `src/`, tests excluded: a test may reach a seam either
- * way, and one deliberately does (see `overlayWalletSlot.test.tsx`).
+ * Every file under `src/`, retried once if the walk loses a race.
  *
  * `architecture.test.ts` plants throwaway modules under `__boundary_probe__` to
- * ask Biome what the real config says about a real path, and deletes each one an
- * assertion later. Vitest runs the two files in parallel, so a probe that exists
- * when this list is built may be gone by the time it is read. Skipping the
- * directory by name is what keeps that from being a coin flip; it holds nothing
- * this file has an opinion about either way.
+ * ask Biome what the real config says about a real path, and `rmSync`s each one
+ * an assertion later. Vitest runs the two files in parallel, so a directory can
+ * vanish between the parent listing and the recursion into it, which throws
+ * rather than yielding a short list. Skipping the probe directory by name keeps
+ * its files from being read; the retry covers the walk itself.
  */
-const sourceFiles = readdirSync(SRC, { recursive: true })
-  .map(String)
+function walkSrc(): string[] {
+  for (let attempt = 0; ; attempt++) {
+    try {
+      return readdirSync(SRC, { recursive: true })
+        .map(String)
+        .filter((name) => !name.split(sep).includes(PROBE_DIR))
+    } catch (error) {
+      if (attempt > 0) throw error
+    }
+  }
+}
+
+const allFiles = walkSrc()
+
+/** Sources only: a test may reach a seam either way, and one deliberately does. */
+const sourceFiles = allFiles
   .filter((name) => /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name))
-  .filter((name) => !name.split(sep).includes("__boundary_probe__"))
   .map((name) => join(SRC, name))
 
 // `from "x"`, a bare `import "x"`, and a dynamic `import("x")`. Biome formats to
@@ -64,6 +73,8 @@ function specifiersIn(file: string): string[] {
 }
 
 const posix = (file: string) => relative(SRC, file).split(sep).join("/")
+/** The same spelling `SEAM_MODULES` uses, for a path already relative to `src/`. */
+const posixName = (name: string) => name.split(sep).join("/")
 
 /**
  * A seam module has to be reached by its `@/…` specifier and never relatively.
@@ -75,7 +86,7 @@ const posix = (file: string) => relative(SRC, file).split(sep).join("/")
  * this repository's own build can notice, which is why it is asserted here
  * rather than left to a review note; the general rule in the frontend-standards
  * skill (a same-directory sibling is clearer as `./Sibling`) has its exception
- * exactly here.
+ * precisely here.
  */
 describe("overlay seam modules", () => {
   it("are all present", () => {
@@ -85,6 +96,21 @@ describe("overlay seam modules", () => {
     for (const module of SEAM_MODULES) {
       expect(existsSync(join(SRC, module)), `${module} is missing`).toBe(true)
     }
+  })
+
+  it("are the whole of what the list claims to cover", () => {
+    // The assertion above catches a deleted seam. This one catches a forgotten
+    // one, which is the drift that actually happened: #584 and #644 each added a
+    // seam, both were reachable only relatively, and nothing said so until this
+    // file existed. A seam is named `overlay*` by convention here and in
+    // otari-ai, so the convention can be the discovery rule.
+    const discovered = allFiles
+      .filter((name) => !/\.test\.tsx?$/.test(name))
+      .map(posixName)
+      .filter((name) => /(^|\/)overlay[A-Z][^/]*\.tsx?$/.test(name))
+      .sort()
+
+    expect(discovered).toEqual([...SEAM_MODULES].sort())
   })
 
   it.each(SEAM_MODULES)("%s is reached by its @/… specifier", (module) => {

@@ -15,21 +15,32 @@
  * contributed from nowhere else (ARCHITECTURE.md, "cardinal rules for
  * contributors", rule 6).
  *
- * **`TopBarActions.tsx` must reach this by its `@/app/nav/overlayWalletSlot`
- * specifier, not relatively.** That specifier is the key a superset build's
- * alias matches; a relative `./overlayWalletSlot` resolves to a file path the
- * alias never sees, so the contribution would vanish with no error, in a build
- * whose only symptom is the empty default it wanted anyway. `overlaySeams.test.ts`
- * fails on a seam module reached relatively, so that mistake lands on the
- * contributor rather than on a release.
+ * **Reached by its `@/app/nav/overlayWalletSlot` specifier and never
+ * relatively**, which is the seam rule and not a style call; `overlaySeams.test.ts`
+ * enforces it and web/AGENTS.md says why.
  *
- * Same name and same shape as `otari-ai/frontend`'s, so the two compose when the
- * control-plane UI converges at M5. One deliberate difference: the platform's
- * base module pairs the slot with a no-op `useRefreshWallet`, because its
- * post-checkout return is handled in `src/routes/_layout.tsx`, a base file.
- * There is no such call site here, and the slot renders on every page of the
- * shell, so the overlay's own component can own that effect. A no-op hook with
- * no base caller would read as wired while reaching nothing.
+ * Two things a build writing the replacing half needs to know, because both are
+ * places this seam can disappoint quietly rather than fail:
+ *
+ * - **The alias key is `@/app/nav/overlayWalletSlot`.** `otari-ai/frontend` has
+ *   no counterpart to this module today: its three live seams are all under
+ *   `src/app/nav/` (`overlaySections.ts`, `overlayLabelOverrides.ts`,
+ *   `overlayAdminTabs.ts`), which is why this one is there too, but issue #736
+ *   describes the reference as `src/app/overlayWalletSlot.tsx`. An
+ *   `OVERLAY_MODULE_OVERRIDES` entry keyed on that shorter path matches nothing
+ *   and leaves this empty default in place.
+ * - **The slot inherits the cluster's `hidden … md:flex`, so a contributed chip
+ *   is desktop-only**, as the balance is in otari.ai's own navbar. That is known
+ *   scope rather than an oversight, and it does mean a phone reaches no
+ *   add-funds affordance through this seam; giving it one is another seam, not
+ *   an edit to the top bar.
+ *
+ * One export, where the reference in #736 describes two. Its no-op
+ * `useRefreshWallet` exists because the platform handles the post-checkout
+ * return in `src/routes/_layout.tsx`, a base file. There is no such call site
+ * here and this slot renders on every page of the shell, so the replacing
+ * component can own that effect itself; a no-op hook with no base caller would
+ * read as wired while reaching nothing.
  */
 export function WalletNavSlot() {
   return null
