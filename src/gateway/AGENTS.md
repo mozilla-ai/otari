@@ -94,16 +94,11 @@ wired into the lifespan, standalone-only.
 
 Their pages are in [../../web/AGENTS.md](../../web/AGENTS.md).
 
-Below both of them is one more rung, and it is deliberately last. When a candidate's
-credentials come back empty from `services/provider_kwargs.py` (no organization-scoped key,
-no stored instance, no `config.yml` entry, and no provider SDK environment variable),
-`resolve_dispatch_provider` asks `ModelProviderPort` whether this build can serve it from a
-deployment-owned fleet. The core adapter answers `None` for everything, so a build with no
-overlay behaves exactly as it did. Nothing here may move above BYO: an organization's own key
-is resolved first and is never displaced, and a resolved hosted credential re-keys usage and
-telemetry onto the credential's `response_provider`. A routed multi-candidate plan does not
-reach the port, because the routing compiler builds those candidates' kwargs synchronously
-and does no I/O.
+Below both stores is one more rung, deliberately last: when a candidate needed a credential
+and none of them had one, `resolve_dispatch_provider` asks `ModelProviderPort` whether this
+build serves it from a deployment-owned fleet. `_serve_from_hosted_credential` in
+`api/routes/_pipeline.py` is the whole of it and says why on each branch. Nothing here may
+move above BYO.
 
 Neither store becomes workspace-keyed. Per-tenant tool configuration (web search, code
 execution, MCP servers, guardrails) is resolved at admission in `prepare_gateway_tools`

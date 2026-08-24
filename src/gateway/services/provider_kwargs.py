@@ -80,19 +80,39 @@ def keyless_placeholder_api_key(provider: LLMProvider, api_base: Any, api_key: A
 
 
 def credential_ladder_exhausted(provider: LLMProvider, kwargs: dict[str, Any]) -> bool:
-    """Whether nothing this gateway holds can credential a call to ``provider``.
-
-    True when :func:`get_provider_kwargs` produced nothing at all for the
-    candidate (no organization-scoped key, no stored instance, no ``config.yml``
-    entry, and so no keyless placeholder either) *and* the provider's own SDK
-    environment variable is unset, which any-llm would otherwise fall back to
-    before raising. The env check is the same one the keyless placeholder makes,
-    so both agree on what counts as a credential already in hand.
+    """Whether a credential was needed for ``provider`` and none was found.
 
     For a caller that has somewhere else to ask once every rung has missed; the
     ladder itself is unchanged and still the only thing consulted first.
+
+    Both halves of that sentence are load-bearing. **None was found** means
+    :func:`get_provider_kwargs` produced nothing at all for the candidate: no
+    organization-scoped key, no stored instance, no credential from a
+    ``config.yml`` entry (an instance declaring only ``provider_type``/``models``
+    leaves nothing behind once the meta keys are stripped), and so no keyless
+    placeholder either, *and* the provider's own SDK environment variable is
+    unset, which any-llm would otherwise fall back to before raising. That env
+    check is the same one the keyless placeholder makes, so both agree on what
+    counts as a credential already in hand.
+
+    **Was needed** excludes the providers any-llm calls with no credential at
+    all: the keyless local backends (ollama, llamacpp, llamafile) and Vertex AI,
+    which authenticates through the cloud SDK. They declare no credential
+    variable, so an empty ``kwargs`` for one of them is not a missing key, and
+    reporting it as exhausted would hand a request that already works to a
+    caller that might serve it from somewhere else. A deployment pointing at its
+    own backends is served upstream of anything reading this.
+
+    ``provider_credential_env_names`` returns ``None`` rather than ``()`` for a
+    provider it cannot inspect at all, and that stays exhausted: nothing is known
+    to serve the candidate, which is the same position an uncredentialed provider
+    with a declared variable is in.
     """
-    return not kwargs and not _provider_env_key_present(provider)
+    if kwargs:
+        return False
+    if provider_credential_env_names(provider.value) == ():
+        return False
+    return not _provider_env_key_present(provider)
 
 
 def get_provider_kwargs(

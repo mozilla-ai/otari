@@ -808,9 +808,12 @@ async def _serve_from_hosted_credential(
         credential = await port.resolve_hosted_credential(
             organization_id=ctx.organization_id,
             workspace_id=ctx.workspace_id,
-            # The public name the caller addressed, which is the instance rather
-            # than the implementation; ``response_provider`` comes back naming
-            # whichever upstream actually serves it.
+            # The instance rather than the implementation: that is the name
+            # pricing, budgets and usage key on, and for a bare selector it is
+            # the one the caller wrote. (An alias resolves to its target first,
+            # so an aliased request names the target's instance here, never the
+            # alias.) ``response_provider`` comes back naming whichever upstream
+            # actually serves it.
             provider=resolved.instance,
             model=resolved.model,
         )
@@ -863,8 +866,34 @@ async def _serve_from_hosted_credential(
             resolved.model,
         )
         await release_reservation(ctx)
+        # Logged like the 400 and 403 refusals beside it: an operator watching
+        # the activity log during an overlay rollout would otherwise see dropped
+        # traffic as nothing at all.
+        await log_gateway_rejection(
+            db=ctx.db,
+            log_writer=ctx.log_writer,
+            api_key_id=ctx.api_key_id,
+            user_id=ctx.user_id,
+            model=resolved.model,
+            provider=resolved.instance,
+            endpoint=adapter.endpoint,
+            detail=HOSTED_CREDENTIAL_UNUSABLE_DETAIL,
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            started_at=ctx.started_at,
+        )
         raise adapter.error(502, HOSTED_CREDENTIAL_UNUSABLE_DETAIL, ErrorKind.API) from exc
 
+    # Re-keying moves what settlement prices on. The pricing and budget gates
+    # ran in the preamble against the name the caller asked for, and settlement
+    # reprices on ``instance``, so an overlay owes a pricing row for every
+    # ``response_provider`` it returns: without one the row's cost is NULL and
+    # the request settles free, which is `require_pricing` bypassed rather than
+    # enforced. A routed fallover to a differently priced candidate has an
+    # explicit guard for the same hazard (`top_up_reservation_for_attempt`
+    # refuses an unpriced candidate with a 402); this path has none, because the
+    # substitution is the adapter's decision rather than a plan's and refusing it
+    # here would make a build's own fleet unusable until it were priced. An
+    # overlay binding this port owns that.
     kwargs: dict[str, Any] = {"api_key": credential.api_key}
     if credential.api_base is not None:
         kwargs["api_base"] = credential.api_base

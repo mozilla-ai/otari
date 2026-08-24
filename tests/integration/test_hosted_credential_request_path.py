@@ -156,6 +156,22 @@ def test_a_configured_provider_key_is_not_displaced_by_the_fleet(overlay_client:
     assert captured["model"] == "anthropic:claude-opus-4"
 
 
+def test_a_keyless_local_backend_is_not_claimed_by_the_fleet(overlay_client: TestClient) -> None:
+    """Self-hosting stays a first-class path upstream of the port, even with an overlay bound.
+
+    ``ollama:llama3`` needs no credential at all, so an empty kwargs is not a
+    missing key and the fleet is never asked. Without this, a self-hoster's local
+    traffic would silently start being served (and metered) from somewhere else.
+    """
+    _create_user(overlay_client)
+
+    captured, _ = _post_chat_capture(overlay_client, "ollama:llama3")
+
+    assert captured, "the provider call was never made"
+    assert "api_key" not in captured
+    assert captured["model"] == "ollama:llama3"
+
+
 def test_a_refused_upstream_answers_403_without_naming_the_adapter(overlay_client: TestClient) -> None:
     _create_user(overlay_client)
 

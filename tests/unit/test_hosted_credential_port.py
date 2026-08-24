@@ -208,6 +208,24 @@ async def test_provider_sdk_env_var_is_not_asked_about(monkeypatch: pytest.Monke
     assert port.calls == []
 
 
+@pytest.mark.parametrize("selector", ["ollama:llama3", "llamacpp:local", "vertexai:gemini-2.5-pro"])
+@pytest.mark.asyncio
+async def test_a_provider_needing_no_credential_is_not_asked_about(selector: str) -> None:
+    """any-llm calls these without a key, so an empty kwargs is not a missing one.
+
+    A bare ``ollama:llama3`` works today against a local backend. Reporting it as
+    unserved would hand a working request to a fleet that might answer it from
+    somewhere else, and self-hosting is a first-class path *upstream* of this
+    port (``ports/model_provider_port.py``).
+    """
+    port = RecordingPort(credential=HostedCredential(api_key="hosted", api_base=None, response_provider="openai"))
+    resolved = resolve_provider_selector(GatewayConfig(), selector)
+    assert resolved.kwargs == {}
+    result = await _dispatch(_ctx(resolved_provider=resolved), port, selector=selector)
+    assert result is resolved
+    assert port.calls == []
+
+
 @pytest.mark.asyncio
 async def test_request_without_an_organization_is_not_asked_about() -> None:
     """The port keys its access decision on the organization, so there is nothing to ask."""
@@ -267,9 +285,7 @@ async def test_overlay_adapter_serves_the_candidate() -> None:
 
 @pytest.mark.asyncio
 async def test_overlay_adapter_without_an_api_base_omits_it() -> None:
-    port = RecordingPort(
-        credential=HostedCredential(api_key="hosted-key", api_base=None, response_provider="openai")
-    )
+    port = RecordingPort(credential=HostedCredential(api_key="hosted-key", api_base=None, response_provider="openai"))
     result = await _dispatch(_ctx(resolved_provider=_uncredentialed()), port)
     assert result.kwargs == {"api_key": "hosted-key"}
     assert result.instance == "openai"
@@ -291,9 +307,7 @@ async def test_alias_relabeling_survives_a_hosted_credential() -> None:
     config = GatewayConfig(aliases={"fast": "openai:gpt-4o"})
     resolved = resolve_provider_selector(config, "fast")
     assert resolved.alias == "fast"
-    port = RecordingPort(
-        credential=HostedCredential(api_key="hosted-key", api_base=None, response_provider="together")
-    )
+    port = RecordingPort(credential=HostedCredential(api_key="hosted-key", api_base=None, response_provider="together"))
     result = await pipeline.resolve_dispatch_provider(
         _ctx(resolved_provider=resolved),
         config,
@@ -310,14 +324,25 @@ async def test_alias_relabeling_survives_a_hosted_credential() -> None:
 # ---------------------------------------------------------------------------
 
 
-@pytest.mark.asyncio
-async def test_access_denied_becomes_a_403_that_names_no_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
+def _capture_settlement(monkeypatch: pytest.MonkeyPatch) -> tuple[list[object], list[dict[str, Any]]]:
+    """Record the refund and the activity-log row a refusal owes, without a database."""
     released: list[object] = []
+    rejections: list[dict[str, Any]] = []
 
     async def _record_release(ctx: pipeline.RequestContext) -> None:
         released.append(ctx)
 
+    async def _record_rejection(**kwargs: Any) -> None:
+        rejections.append(kwargs)
+
     monkeypatch.setattr(pipeline, "release_reservation", _record_release)
+    monkeypatch.setattr(pipeline, "log_gateway_rejection", _record_rejection)
+    return released, rejections
+
+
+@pytest.mark.asyncio
+async def test_access_denied_becomes_a_403_that_names_no_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
+    released, rejections = _capture_settlement(monkeypatch)
     port = RecordingPort(
         error=HostedAccessDeniedError(
             "AcmeHostedAdapter: organization is not entitled to together",
@@ -332,18 +357,17 @@ async def test_access_denied_becomes_a_403_that_names_no_adapter(monkeypatch: py
     detail = str(exc_info.value.detail)
     assert "openai:gpt-4o" in detail
     assert "AcmeHostedAdapter" not in detail
-    # The hold taken by the preamble is refunded before the refusal surfaces.
+    # The hold taken by the preamble is refunded before the refusal surfaces,
+    # and the drop is countable in the activity log rather than invisible.
     assert len(released) == 1
+    assert [row["status_code"] for row in rejections] == [403]
+    assert rejections[0]["provider"] == "openai"
+    assert rejections[0]["detail"] == detail
 
 
 @pytest.mark.asyncio
 async def test_unknown_response_provider_becomes_a_502(monkeypatch: pytest.MonkeyPatch) -> None:
-    released: list[object] = []
-
-    async def _record_release(ctx: pipeline.RequestContext) -> None:
-        released.append(ctx)
-
-    monkeypatch.setattr(pipeline, "release_reservation", _record_release)
+    released, rejections = _capture_settlement(monkeypatch)
     port = RecordingPort(
         credential=HostedCredential(api_key="hosted-key", api_base=None, response_provider="not-a-provider")
     )
@@ -355,6 +379,7 @@ async def test_unknown_response_provider_becomes_a_502(monkeypatch: pytest.Monke
     assert pipeline.HOSTED_CREDENTIAL_UNUSABLE_DETAIL in str(exc_info.value.detail)
     assert "not-a-provider" not in str(exc_info.value.detail)
     assert len(released) == 1
+    assert [row["status_code"] for row in rejections] == [502]
 
 
 # ---------------------------------------------------------------------------
@@ -365,9 +390,7 @@ async def test_unknown_response_provider_becomes_a_502(monkeypatch: pytest.Monke
 @pytest.mark.asyncio
 async def test_fresh_resolution_also_reaches_the_port() -> None:
     """``ctx.resolved_provider`` unset (the gate could not parse the selector) still asks."""
-    port = RecordingPort(
-        credential=HostedCredential(api_key="hosted-key", api_base=None, response_provider="openai")
-    )
+    port = RecordingPort(credential=HostedCredential(api_key="hosted-key", api_base=None, response_provider="openai"))
     result = await _dispatch(_ctx(resolved_provider=None), port)
     assert result.kwargs == {"api_key": "hosted-key"}
     assert len(port.calls) == 1
