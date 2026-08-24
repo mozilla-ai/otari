@@ -13,10 +13,13 @@ on:
       # drift check below cannot fire on the PR it exists to catch: a backend PR
       # that regenerates the spec and leaves web/src/client/schema.ts stale.
       - 'docs/public/openapi.json'
-      # Frontend paths only. The gateway side of serving the bundle is covered by
-      # otari-dashboard-serving.yml, which is triggered by src/gateway/** and runs
-      # the pytest half; these two jobs (vitest, and Playwright against a built
-      # bundle) test web/ and would only add runtime to a backend PR.
+      # Frontend paths only, because everything below is a check on web/ that a
+      # Python change cannot affect. The two halves that a backend change can
+      # break live in workflows triggered by src/gateway/**:
+      # otari-dashboard-serving.yml (pytest, the gateway serving the bundle) and
+      # otari-dashboard-parity.yml (Playwright, the flows the served bundle
+      # walks). A path filter applies to a whole workflow, which is why those are
+      # separate files rather than jobs here.
       - '.github/workflows/otari-dashboard.yml'
   pull_request:
     branches: [ main ]
@@ -30,10 +33,13 @@ on:
       # drift check below cannot fire on the PR it exists to catch: a backend PR
       # that regenerates the spec and leaves web/src/client/schema.ts stale.
       - 'docs/public/openapi.json'
-      # Frontend paths only. The gateway side of serving the bundle is covered by
-      # otari-dashboard-serving.yml, which is triggered by src/gateway/** and runs
-      # the pytest half; these two jobs (vitest, and Playwright against a built
-      # bundle) test web/ and would only add runtime to a backend PR.
+      # Frontend paths only, because everything below is a check on web/ that a
+      # Python change cannot affect. The two halves that a backend change can
+      # break live in workflows triggered by src/gateway/**:
+      # otari-dashboard-serving.yml (pytest, the gateway serving the bundle) and
+      # otari-dashboard-parity.yml (Playwright, the flows the served bundle
+      # walks). A path filter applies to a whole workflow, which is why those are
+      # separate files rather than jobs here.
       - '.github/workflows/otari-dashboard.yml'
   workflow_dispatch:
 
@@ -103,73 +109,6 @@ jobs:
     # copy and pass while the committed one described a different API.
     - name: Check the committed API client is up to date
       run: git diff --exit-code -- src/client/schema.ts
-
-  e2e:
-    # Browser end-to-end smoke: boot the gateway serving the freshly built bundle
-    # (Playwright's webServer, see web/playwright.config.ts) and walk the core
-    # multi-page flows a real operator does.
-    #
-    # Scoped to this workflow's web/** paths. A change elsewhere in src/gateway that
-    # breaks a dashboard-served flow is not caught here; the pytest half of that
-    # coverage lives in otari-dashboard-serving.yml, which src/gateway/** triggers.
-    runs-on: ubuntu-latest
-    permissions:
-      contents: read
-
-    steps:
-    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-      with:
-        persist-credentials: false
-
-    - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
-      with:
-        python-version: "3.14"
-
-    - name: Install Python deps
-      run: uv sync --dev --frozen
-
-    # Installs the pnpm that web/package.json's `packageManager` field pins, so
-    # the version is declared once for CI, the Docker image and a laptop. It has
-    # to precede setup-node, whose `cache: pnpm` shells out to pnpm for the store
-    # path; `package_json_file` is needed because the pin is in web/, not at the
-    # repository root.
-    - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
-      with:
-        package_json_file: web/package.json
-
-    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
-      with:
-        node-version: 22
-        cache: pnpm
-        cache-dependency-path: web/pnpm-lock.yaml
-
-    - name: Install web deps
-      working-directory: web
-      run: pnpm install --frozen-lockfile
-
-    - name: Install Playwright Chromium
-      working-directory: web
-      run: pnpm exec playwright install --with-deps chromium
-
-    # `pnpm run e2e` builds the bundle first (see web/package.json), so a local run
-    # and CI serve the same freshly built dashboard.
-    - name: Run end-to-end tests
-      working-directory: web
-      run: pnpm run e2e
-
-    # The suite writes a Playwright trace for any test that fails
-    # (`trace: "retain-on-failure"`), which is the only way to see what the browser
-    # was actually doing on a failure nobody can reproduce locally. Without this
-    # step the runner deletes it and the trace might as well not exist. Failures
-    # only, so a green run uploads nothing.
-    - name: Upload Playwright traces
-      if: failure()
-      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
-      with:
-        name: playwright-traces
-        path: web/test-results/
-        retention-days: 7
-        if-no-files-found: ignore
 
   screenshots:
     # Visual regression: every screenshot spec captured at three viewports in

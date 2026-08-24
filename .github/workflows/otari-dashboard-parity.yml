@@ -1,0 +1,105 @@
+name: Otari Dashboard Parity
+
+# The browser suite: boot a gateway serving the freshly built bundle (Playwright's
+# webServer, see web/playwright.config.ts), walk the multi-page flows a real
+# operator does, and assert on a second, hybrid gateway that a deployment whose
+# control plane is elsewhere shows a status page and nothing more.
+#
+# In its own workflow rather than in otari-dashboard.yml because of the path
+# filter, which applies to a whole workflow and not to a job. These flows are
+# gateway-served end to end: they sign in, they read tenancy, they resolve a
+# deployment bootstrap, so a change under src/gateway can break one with nothing
+# under web/ touched. Widening otari-dashboard.yml's paths to catch that would
+# also run vitest, tsc and a bundle build on every backend PR, none of which a
+# Python change can affect. Splitting it is the same move otari-dashboard-serving.yml
+# already made for the pytest half of serving the bundle.
+
+on:
+  push:
+    branches: [ main, develop ]
+    paths:
+      - 'web/**'
+      # The gateway that serves the bundle and answers every request these flows
+      # make, tenancy, auth, usage and the deployment bootstrap included.
+      - 'src/gateway/**'
+      # The dashboard bundles this guide (web/src/features/docs/DocsPage.tsx), so a
+      # change to it changes the built app.
+      - 'docs/dashboard.md'
+      # The suite boots the gateway through `uv run otari serve`, so its
+      # dependency resolution is part of what has to still work.
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/otari-dashboard-parity.yml'
+  pull_request:
+    branches: [ main ]
+    paths:
+      - 'web/**'
+      - 'src/gateway/**'
+      - 'docs/dashboard.md'
+      - 'pyproject.toml'
+      - 'uv.lock'
+      - '.github/workflows/otari-dashboard-parity.yml'
+  workflow_dispatch:
+
+jobs:
+  e2e:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+
+    steps:
+    - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      with:
+        persist-credentials: false
+
+    - uses: astral-sh/setup-uv@20cfd1bf945f4377ade1205e4dbc17946fc9a30d # v10.0.1
+      with:
+        python-version: "3.14"
+
+    - name: Install Python deps
+      run: uv sync --dev --frozen
+
+    # Installs the pnpm that web/package.json's `packageManager` field pins, so
+    # the version is declared once for CI, the Docker image and a laptop. It has
+    # to precede setup-node, whose `cache: pnpm` shells out to pnpm for the store
+    # path; `package_json_file` is needed because the pin is in web/, not at the
+    # repository root.
+    - uses: pnpm/action-setup@0977fd99725f1db4007ccb2928dbb4e90d06cc86 # v6.0.10
+      with:
+        package_json_file: web/package.json
+
+    - uses: actions/setup-node@820762786026740c76f36085b0efc47a31fe5020 # v7.0.0
+      with:
+        node-version: 22
+        cache: pnpm
+        cache-dependency-path: web/pnpm-lock.yaml
+
+    - name: Install web deps
+      working-directory: web
+      run: pnpm install --frozen-lockfile
+
+    - name: Install Playwright Chromium
+      working-directory: web
+      run: pnpm exec playwright install --with-deps chromium
+
+    # `pnpm run e2e` builds the bundle first (see web/package.json), so a local run
+    # and CI serve the same freshly built dashboard. It boots two gateways, one
+    # standalone and one hybrid, and names every project it runs: a project left
+    # out of that list is silently dropped from the run.
+    - name: Run end-to-end tests
+      working-directory: web
+      run: pnpm run e2e
+
+    # The suite writes a Playwright trace for any test that fails
+    # (`trace: "retain-on-failure"`), which is the only way to see what the browser
+    # was actually doing on a failure nobody can reproduce locally. Without this
+    # step the runner deletes it and the trace might as well not exist. Failures
+    # only, so a green run uploads nothing.
+    - name: Upload Playwright traces
+      if: failure()
+      uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+      with:
+        name: playwright-traces
+        path: web/test-results/
+        retention-days: 7
+        if-no-files-found: ignore

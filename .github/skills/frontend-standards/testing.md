@@ -85,6 +85,17 @@ itself to the rows it owns rather than to a global count, and an open react-aria
 popover `aria-hidden`s the rest of the page, so `dismissComboBox` runs before asserting
 anything outside it. `playwright.config.ts` carries the rest.
 
+A fourth project, `hybrid`, runs against a second gateway booted in hybrid mode
+(`e2e/serve-hybrid.sh`), because a deployment attached to a control plane elsewhere is a
+different shape rather than a different page, and only a server can put the browser in one.
+It shares no state with the three above. Two mechanical rules come with adding any spec here:
+a file collected by no project's `testMatch`/`testIgnore` is dropped from the run with a green
+exit, and `package.json`'s `e2e` script names each project it runs, so a project missing from
+that list never runs in CI (`src/e2eProjects.test.ts` fails on that half). The gate is
+`otari-dashboard-parity.yml`, triggered by `src/gateway/**` as well as `web/**`: these flows
+are gateway-served end to end, so a backend change can break one with no file under `web/`
+touched.
+
 ## Playwright: screenshots
 
 `e2e/screenshots/` is the visual-regression suite. Each spec is captured by six projects,

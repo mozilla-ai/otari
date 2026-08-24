@@ -12,7 +12,7 @@
     "typecheck": "tsc -b --noEmit",
     "test": "pnpm run client:generate && vitest run",
     "test:watch": "vitest",
-    "e2e": "pnpm run build && playwright test --project=onboarding --project=seed --project=parity",
+    "e2e": "pnpm run build && playwright test --project=onboarding --project=seed --project=parity --project=hybrid",
     "e2e:screenshots": "pnpm run build && playwright test --project=screenshots-desktop-large-light --project=screenshots-desktop-large-dark --project=screenshots-desktop-small-light --project=screenshots-desktop-small-dark --project=screenshots-mobile-light --project=screenshots-mobile-dark",
     "e2e:screenshots:update": "pnpm run e2e:screenshots --update-snapshots=changed",
     "e2e:install": "playwright install chromium",
