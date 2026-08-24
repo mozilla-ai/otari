@@ -15,8 +15,8 @@ import type { NavItemContribution } from "./types"
  * it belongs under "Cost & billing" beside `/budgets` and
  * `/organization/pricing`), with Gateways the same shape under the organization
  * rail's "Gateway" heading. Contributing either as a section of its own would
- * put a second "Cost & billing" on the rail; contributing it here puts the row
- * where the navigation design draws it, and neither costs an edit to a base
+ * put a second heading of that name on the rail; contributing it here puts the
+ * row where the navigation design draws it, and neither costs an edit to a base
  * source file (ARCHITECTURE.md, "cardinal rules for contributors", rule 6).
  *
  * One list for both rails, as `OVERLAY_NAV_LABEL_OVERRIDES` is: `sectionId` is

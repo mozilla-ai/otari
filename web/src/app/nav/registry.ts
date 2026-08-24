@@ -17,11 +17,11 @@ import {
   FiUsers,
 } from "react-icons/fi"
 import { OVERLAY_NAV_LABEL_OVERRIDES } from "@/app/nav/overlayLabelOverrides"
+import { OVERLAY_NAV_ITEMS } from "@/app/nav/overlayNavItems"
 import {
   OVERLAY_NAV_SECTIONS,
   OVERLAY_ORG_NAV_SECTIONS,
 } from "@/app/nav/overlaySections"
-import { OVERLAY_NAV_ITEMS } from "./overlayNavItems"
 import type {
   NavItem,
   NavItemContribution,
@@ -199,9 +199,9 @@ const BASE_NAV_SECTIONS = [
  * base route file at a path the overlay also serves is not shadowed by the
  * overlay's, it collides with it. The generator refuses the pair ("Conflicting
  * configuration paths were found") instead of choosing between them, so the
- * composed tree is never written: the Vite plugin logs that error and builds on
- * against the tree already on disk, where the overlay's page has no route at
- * all, and a step that generates the tree on its own fails outright.
+ * composed tree is never written: the Vite plugin logs that error and keeps
+ * building against the tree already on disk, where the overlay's page has no
+ * route at all, and a step that generates the tree on its own fails outright.
  *
  * The surface axis rather than the capability one, and that is a constraint
  * rather than a preference: `registry.test.ts` requires every capability a base

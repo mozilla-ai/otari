@@ -23,7 +23,7 @@ export const OVERLAY_NAV_SECTIONS: readonly NavSection[] = []
  * register one, which rule 6 rules out.
  *
  * A whole section is the coarser of the two contribution seams, and suits a
- * destination an overlay owns outright. A destination with base neighbours goes
+ * destination an overlay owns outright. A destination with base neighbors goes
  * through `overlayNavItems.ts` instead: Billing sits inside "Cost & billing" and
  * Gateways inside "Gateway", so contributing either as a section of its own
  * would put a second heading of that name on the rail (otari#737).

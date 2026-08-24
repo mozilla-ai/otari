@@ -22,6 +22,7 @@ const TEST_FILE = /\.(test|spec)\.tsx?$/
  */
 const SEAM_MODULES = [
   "app/nav/overlaySections.ts",
+  "app/nav/overlayNavItems.ts",
   "app/nav/overlayLabelOverrides.ts",
   "app/nav/overlayWalletSlot.tsx",
 ] as const

@@ -292,8 +292,9 @@ describe("nav registry", () => {
   })
 
   it("keeps section ids unique across the two rails", () => {
-    // What lets one override list address both rails: an id that appeared on
-    // each would rename two sections from one entry.
+    // What lets one override list and one contribution list address both
+    // rails: an id that appeared on each would rename two sections, or land one
+    // contribution's rows twice, from a single entry.
     const ids = [...NAV_SECTIONS, ...ORG_NAV_SECTIONS].map(
       (section) => section.id,
     )
