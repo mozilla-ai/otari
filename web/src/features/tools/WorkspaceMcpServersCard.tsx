@@ -208,11 +208,11 @@ export function WorkspaceMcpServersCard({
       </div>
 
       <p className="text-sm text-muted">
-        Endpoints requests billed to {selected.name} can use by naming their ids
-        in <code className="font-mono">mcp_server_ids</code>. A request may
-        still pass its own servers inline; these are the ones it does not have
-        to carry a URL or a token for. Tokens are stored encrypted and are never
-        shown again.
+        Endpoints that requests billed to {selected.name} can use by naming
+        their ids in <code className="font-mono">mcp_server_ids</code>. A
+        request may still pass its own servers inline; these are the ones it
+        does not have to carry a URL or a token for. Tokens are stored encrypted
+        and are never shown again.
       </p>
 
       <ErrorBanner error={query.error} />
