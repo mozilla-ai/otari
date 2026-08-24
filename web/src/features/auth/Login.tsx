@@ -21,6 +21,14 @@ type CredentialField = "email" | "password" | "masterKey"
  */
 const VALIDATION = "aria" as const
 
+const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
+
+const ERROR_IDS: Record<CredentialField, string> = {
+  email: "login-email-error",
+  password: "login-password-error",
+  masterKey: "login-master-key-error",
+}
+
 /**
  * The page frame: optically centered, and stable while the card grows.
  *
@@ -149,15 +157,24 @@ function DisclosureCaret() {
  * The row above a credential box: label and required marker grouped left, the
  * field's refusal right, both on the label's existing 20px line. This is where
  * an `<ErrorBanner>` used to go, between the last field and the button, and it
- * inserted about 46px right where the pointer already was. On the label's line
- * a refusal costs no height at all for the messages that fit; one long enough
- * not to fit wraps to its own line rather than being clipped, which the
- * gateway's master-key retirement notice does.
+ * inserted about 46px right where the pointer already was. The row stays one
+ * line high so a refusal cannot move the submit button. Sighted users get a
+ * truncated message, while assistive technology retains the complete detail.
  */
-function LabelRow({ label, error }: { label: string; error: unknown }) {
+function LabelRow({
+  label,
+  error,
+  errorId,
+}: {
+  label: string
+  error: unknown
+  errorId: string
+}) {
+  const message = error ? errorMessage(error) : null
+
   return (
-    <div className="flex min-h-5 flex-wrap items-center justify-between gap-x-3">
-      <span className="flex items-center">
+    <div className="flex h-5 items-center justify-between gap-x-3">
+      <span className="flex shrink-0 items-center">
         {/* `text-foreground` holds the label at its resting ink while the field
             is invalid: HeroUI turns any `.label` under `[data-invalid]` red, and
             a red label beside a red message says the same thing twice. */}
@@ -173,13 +190,19 @@ function LabelRow({ label, error }: { label: string; error: unknown }) {
           *
         </span>
       </span>
-      {error ? (
+      {message ? (
         <span
+          id={errorId}
           role="alert"
-          className="flex items-center gap-1 text-sm text-danger"
+          className="flex min-w-0 flex-1 items-center justify-end gap-1 text-sm text-danger"
         >
           <AlertIcon />
-          <span>{errorMessage(error)}</span>
+          <span
+            aria-hidden="true"
+            data-message={message}
+            className="min-w-0 truncate after:content-[attr(data-message)]"
+          />
+          <span className="sr-only">{message}</span>
         </span>
       ) : null}
     </div>
@@ -269,6 +292,10 @@ export function Login() {
         fail("email", "Enter your email.")
         return null
       }
+      if (!EMAIL_PATTERN.test(email.trim())) {
+        fail("email", "Enter a valid email address.")
+        return null
+      }
       if (!password) {
         fail("password", "Enter your password.")
         return null
@@ -329,12 +356,10 @@ export function Login() {
           <Card.Content className={CARD_FLAT}>
             {/* Grouped so the mark sits 16px from the heading it belongs to,
                 the way it does on the form. alt="" because the <h1> under it
-                already names the product: a screen reader announcing "Otari,
-                heading Sign-in is unavailable" reads the mark as a word of the
-                sentence. */}
+                already names the product. */}
             <div className="flex flex-col items-center gap-4">
               <img src="/favicon.svg" alt="" className="h-10 w-11" />
-              <h1 className={HEADING}>Sign-in is unavailable</h1>
+              <h1 className={HEADING}>Otari sign-in is unavailable</h1>
             </div>
             <p className="text-sm text-muted">
               This gateway cannot start a session at the moment, which usually
@@ -375,6 +400,7 @@ export function Login() {
               password branch has no such row and spaces at the full 24px. */}
           <form
             className={`flex flex-col ${usesPassword ? "gap-6" : "gap-3"}`}
+            noValidate
             onSubmit={(event) => {
               event.preventDefault()
               void submit()
@@ -397,6 +423,7 @@ export function Login() {
                   <LabelRow
                     label="Email"
                     error={errorField === "email" ? error : null}
+                    errorId={ERROR_IDS.email}
                   />
                   {/* 16px, not the 14px HeroUI drops to from `sm:` up: under
                       16px iOS Safari zooms the page on focus. No autoFocus,
@@ -405,6 +432,9 @@ export function Login() {
                   <Input
                     placeholder="you@example.com"
                     autoComplete="username"
+                    aria-describedby={
+                      errorField === "email" ? ERROR_IDS.email : undefined
+                    }
                     className="h-11 text-base"
                   />
                 </TextField>
@@ -423,9 +453,13 @@ export function Login() {
                   <LabelRow
                     label="Password"
                     error={errorField === "password" ? error : null}
+                    errorId={ERROR_IDS.password}
                   />
                   <Input
                     autoComplete="current-password"
+                    aria-describedby={
+                      errorField === "password" ? ERROR_IDS.password : undefined
+                    }
                     className="h-11 text-base"
                   />
                 </TextField>
@@ -447,11 +481,17 @@ export function Login() {
                   <LabelRow
                     label="Master key"
                     error={errorField === "masterKey" ? error : null}
+                    errorId={ERROR_IDS.masterKey}
                   />
                   <div className="relative">
                     <Input
                       placeholder="otari-mk-…"
                       autoComplete="off"
+                      aria-describedby={
+                        errorField === "masterKey"
+                          ? ERROR_IDS.masterKey
+                          : undefined
+                      }
                       fullWidth
                       className="h-11 pr-11 font-mono text-base"
                     />

@@ -239,11 +239,20 @@ describe("Login", () => {
 
     await user.click(submitButton)
     expect(await screen.findByText("Enter your email.")).toBeInTheDocument()
+    expect(screen.getByLabelText("Email")).toHaveAttribute(
+      "aria-describedby",
+      "login-email-error",
+    )
+    expect(screen.getByRole("alert")).toHaveAttribute("id", "login-email-error")
     expect(fetchMock).not.toHaveBeenCalled()
 
     await user.type(screen.getByLabelText("Email"), "operator@example.com")
     await user.click(screen.getByRole("button", { name: "Sign in" }))
     expect(await screen.findByText("Enter your password.")).toBeInTheDocument()
+    expect(screen.getByLabelText("Password")).toHaveAttribute(
+      "aria-describedby",
+      "login-password-error",
+    )
     expect(fetchMock).not.toHaveBeenCalled()
 
     // Only once both halves are there does anything reach the gateway.
@@ -255,6 +264,30 @@ describe("Login", () => {
 
     expect(await screen.findByText("SIGNED IN")).toBeInTheDocument()
     expect(fetchMock.mock.calls[0]?.[0]).toBe("/v1/auth/session")
+  })
+
+  it("reports a malformed email locally instead of using browser validation", async () => {
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+    const user = userEvent.setup()
+
+    render(
+      <Mounted signInMethods={["password"]}>
+        <Harness />
+      </Mounted>,
+    )
+
+    await user.type(screen.getByLabelText("Email"), "not-an-email")
+    await user.type(screen.getByLabelText("Password"), "a-real-password")
+    await user.click(screen.getByRole("button", { name: "Sign in" }))
+
+    expect(
+      await screen.findByText("Enter a valid email address."),
+    ).toBeInTheDocument()
+    expect(screen.getByLabelText("Email")).toHaveAttribute(
+      "aria-describedby",
+      "login-email-error",
+    )
+    expect(fetchMock).not.toHaveBeenCalled()
   })
 
   it("refuses an empty master key without posting it", async () => {
@@ -274,6 +307,10 @@ describe("Login", () => {
     expect(
       await screen.findByText("Enter your master key."),
     ).toBeInTheDocument()
+    expect(screen.getByLabelText("Master key")).toHaveAttribute(
+      "aria-describedby",
+      "login-master-key-error",
+    )
     expect(fetchMock).not.toHaveBeenCalled()
   })
 
@@ -369,7 +406,7 @@ describe("Login", () => {
       </Mounted>,
     )
 
-    expect(screen.getByText("Sign-in is unavailable")).toBeInTheDocument()
+    expect(screen.getByText("Otari sign-in is unavailable")).toBeInTheDocument()
     expect(screen.queryByLabelText("Master key")).not.toBeInTheDocument()
     expect(screen.queryByLabelText("Email")).not.toBeInTheDocument()
     expect(
