@@ -117,6 +117,8 @@ const PRICING = "pricing"
 const SETTINGS = "settings"
 const MAIL_SETTINGS = "mail-settings"
 const MAINTENANCE_MODE = "maintenance-mode"
+// One indexed single-row read, and only while the settings page is mounted.
+const MAINTENANCE_MODE_POLL_MS = 30_000
 const TOOL_SETTINGS = "tool-settings"
 const TOOLS = "tools"
 const SEARCH_TOOLS = "search-tools"
@@ -634,7 +636,17 @@ export function useMaintenanceMode() {
   return useQuery({
     queryKey: [MAINTENANCE_MODE],
     queryFn: () => apiFetch<MaintenanceMode>("/v1/settings/maintenance-mode"),
-    staleTime: 60_000,
+    // Polled and refreshed on focus, unlike every other settings read here.
+    // A `staleTime` alone schedules nothing, and this app turns
+    // `refetchOnWindowFocus` off globally, so a card left open would keep
+    // showing whatever it fetched on mount. That is the one wrong answer this
+    // card can give: another operator or an API client can flip the freeze, and
+    // reporting a deployment open when it is frozen (or frozen when it is back)
+    // is worse than a moment's blank. Same treatment as `useDashboardBuild`,
+    // for the same reason: the value changes underneath the tab.
+    refetchInterval: MAINTENANCE_MODE_POLL_MS,
+    refetchOnWindowFocus: true,
+    staleTime: 0,
   })
 }
 

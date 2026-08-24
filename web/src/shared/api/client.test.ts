@@ -135,12 +135,34 @@ describe("createSession", () => {
     })
   })
 
+  it("throws a 503 the gateway did not write rather than blaming the credential", async () => {
+    // The redeploy maintenance mode exists for is exactly when a proxy with no
+    // healthy upstream answers 503 itself. That body carries no `detail`, and
+    // rendering its status text on a credential's label row would say the
+    // credential was rejected by a gateway that never saw it.
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response("<html>502 Bad Gateway</html>", {
+        status: 503,
+        statusText: "Service Unavailable",
+        headers: { "Content-Type": "text/html" },
+      }),
+    )
+
+    await expect(
+      createSession({ masterKey: "test-key" }),
+    ).rejects.toMatchObject({
+      status: 503,
+      message: "Service Unavailable",
+    })
+  })
+
   it.each([401, 403, 503])(
     "returns %i as a refusal carrying the gateway's own wording",
     async (status) => {
       // 503 is maintenance mode. It belongs with the other two rather than on
       // the throw path: the gateway is deliberately refusing this sign-in, in
-      // wording written for the person reading it.
+      // wording written for the person reading it. The body carrying `detail`
+      // is what says the gateway wrote it.
       vi.spyOn(globalThis, "fetch").mockResolvedValue(
         new Response(JSON.stringify({ detail: "refused, and here is why" }), {
           status,

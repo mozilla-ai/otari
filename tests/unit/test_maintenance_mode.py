@@ -23,6 +23,7 @@ from pathlib import Path
 
 from fastapi.testclient import TestClient
 
+import gateway.api.routes as routes_package
 from gateway.core.config import GatewayConfig
 from gateway.main import create_app
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME
@@ -205,3 +206,55 @@ def test_the_switch_is_master_key_gated(tmp_path: Path) -> None:
 def test_the_switch_refuses_a_body_that_names_no_state(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
         assert client.patch("/v1/settings/maintenance-mode", json={}, headers=HEADER).status_code == 422
+
+
+# =============================================================================
+# The rule a future sign-in route has to remember
+# =============================================================================
+
+# A route module that mints a dashboard session but deliberately closes no door,
+# with the reason. Anything else calling ``create_dashboard_session`` has to
+# check the freeze, and the test below is what says so: it enumerates the call
+# sites rather than naming the ones that exist today, because "every way in is
+# frozen" is a cross-cutting rule and a new sign-in path is exactly the change
+# that forgets one. WebAuthn and OAuth (#651, #652) each end by minting a
+# session, so each will land here.
+SESSION_MINTING_EXEMPT = {
+    "settings.py": (
+        "Master-key rotation re-mints the caller's own session so the tab that rotated stays "
+        "signed in as who it was. It starts no sign-in: a caller who authenticated with a header "
+        "key has no session identity and is handed nothing, so there is no door here to close."
+    ),
+}
+
+
+def test_every_session_minting_route_checks_the_freeze() -> None:
+    """No route may mint a dashboard session without consulting maintenance mode.
+
+    Deliberately a scan rather than two assertions about the two call sites that
+    exist now. The freeze is only as good as its least-remembered door, and the
+    cost of forgetting is silent: the new route works, its own tests pass, and
+    the gateway simply keeps signing people in through it during a redeploy.
+    """
+    routes_dir = Path(routes_package.__file__).parent
+    minting = {
+        path.name: path.read_text(encoding="utf-8")
+        for path in sorted(routes_dir.glob("*.py"))
+        if "create_dashboard_session(" in path.read_text(encoding="utf-8")
+    }
+
+    # If this trips, the scan stopped finding anything and is no longer a gate.
+    assert "auth_session.py" in minting, (
+        "The sign-in route no longer appears to mint a session; this scan has gone blind."
+    )
+
+    unguarded = sorted(
+        name
+        for name, source in minting.items()
+        if "is_maintenance_mode" not in source and name not in SESSION_MINTING_EXEMPT
+    )
+    assert not unguarded, (
+        f"{unguarded} mint a dashboard session without checking maintenance mode. "
+        "Call is_maintenance_mode before minting, or add the module to "
+        "SESSION_MINTING_EXEMPT with the reason it closes no door."
+    )

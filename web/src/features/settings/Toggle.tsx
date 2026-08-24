@@ -26,7 +26,12 @@ export function Toggle({
       aria-label={label}
       disabled={disabled}
       onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
+      // The visible track stays 24px, which is what the settings rows are drawn
+      // around, while `before` carries the 44px touch floor the phone viewport
+      // requires past it (responsiveness.md). Absolutely positioned on a
+      // `relative` button, so it grows the hit area without moving a row. Same
+      // device the master-key reveal toggle uses on the sign-in screen.
+      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full outline-none transition-colors before:absolute before:-inset-y-2.5 before:inset-x-0 focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50 ${
         checked ? "bg-accent" : "bg-surface-subtle"
       }`}
     >

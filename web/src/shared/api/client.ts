@@ -23,19 +23,37 @@ export function setUnauthorizedHandler(handler: (() => void) | null): void {
   unauthorizedHandler = handler
 }
 
-async function extractErrorMessage(response: Response): Promise<string> {
+// Reads the body once and reports both what to show and who wrote it. `detail`
+// is non-null only when the body is JSON carrying a string `detail`, which is
+// the shape every refusal this gateway writes has and the shape an intermediary
+// answering for it does not. Callers that only need something to display take
+// `message`; the one caller that has to tell a gateway refusal from a proxy's
+// own status takes `detail`.
+async function readRefusal(
+  response: Response,
+): Promise<{ detail: string | null; message: string }> {
+  let detail: string | null = null
+  let message: string | null = null
   try {
-    const data = (await response.json()) as { detail?: unknown }
+    const data = JSON.parse(await response.text()) as { detail?: unknown }
     if (typeof data.detail === "string") {
-      return data.detail
-    }
-    if (data.detail != null) {
-      return JSON.stringify(data.detail)
+      detail = data.detail
+      message = data.detail
+    } else if (data.detail != null) {
+      message = JSON.stringify(data.detail)
     }
   } catch {
     // Body was not JSON; fall through to the status text.
   }
-  return response.statusText || `Request failed (${response.status})`
+  return {
+    detail,
+    message:
+      message ?? (response.statusText || `Request failed (${response.status})`),
+  }
+}
+
+async function extractErrorMessage(response: Response): Promise<string> {
+  return (await readRefusal(response)).message
 }
 
 // The credentials POST /v1/auth/session accepts. Exactly one form per request:
@@ -61,8 +79,11 @@ export interface SignInResult {
 // Exchange a credential for a server-issued session: the gateway verifies it and
 // answers with an HttpOnly cookie holding an opaque session token, so the
 // credential itself never needs to be stored (or even kept in memory)
-// afterwards. Refusals (401/403/503) come back as `ok: false` with the gateway's
-// message; network and other failures throw ApiError so the UI can explain them.
+// afterwards. Refusals come back as `ok: false` with the gateway's message:
+// 401 and 403 always, and 503 when the gateway wrote the body (maintenance
+// mode) rather than an intermediary answering for it. Network faults, an
+// unreachable gateway, and other failures throw ApiError so the UI can explain
+// them.
 export async function createSession(
   credential: SignInCredential,
 ): Promise<SignInResult> {
@@ -87,24 +108,28 @@ export async function createSession(
     }
     throw new ApiError(0, "Network error: could not reach the gateway.")
   }
-  // 503 is maintenance mode, and it belongs with the other two rather than on
-  // the throw path: it is the gateway deliberately refusing this sign-in, with
-  // wording written for the person reading it, not a fault to be surfaced as
-  // one. The sign-in screen normally renders a notice instead of the form on a
-  // frozen deployment (it reads the same flag from the bootstrap); this is the
-  // tab that was already open when the freeze started.
-  //
-  // It catches any 503, not only ours, so a proxy's own during the redeploy
-  // this feature exists for lands on the label row as "Service Unavailable"
-  // rather than as a fault. That is the better of the two readings: both mean
-  // "this gateway is not signing anyone in right now", which is what the
-  // person at the form needs to know.
-  if (
-    response.status === 401 ||
-    response.status === 403 ||
-    response.status === 503
-  ) {
+  if (response.status === 401 || response.status === 403) {
     return { ok: false, message: await extractErrorMessage(response) }
+  }
+  // 503 is maintenance mode, and a refusal the gateway wrote belongs with the
+  // other two rather than on the throw path: it is a deliberate answer, in
+  // wording meant for the person reading it, not a fault. The sign-in screen
+  // normally renders a notice instead of the form on a frozen deployment (it
+  // reads the same flag from the bootstrap); this is the tab that was already
+  // open when the freeze started.
+  //
+  // Gated on the gateway having written it, not on the status alone. The
+  // redeploy this feature exists for is exactly when a proxy with no healthy
+  // upstream answers 503 itself, and that body carries no `detail`. Treating it
+  // as a refusal would render "Service Unavailable" on a credential's label
+  // row, which says the credential was rejected by a gateway that never saw it.
+  // Those take the ApiError path and are explained as the fault they are.
+  if (response.status === 503) {
+    const refusal = await readRefusal(response)
+    if (refusal.detail !== null) {
+      return { ok: false, message: refusal.detail }
+    }
+    throw new ApiError(response.status, refusal.message)
   }
   if (!response.ok) {
     throw new ApiError(response.status, await extractErrorMessage(response))

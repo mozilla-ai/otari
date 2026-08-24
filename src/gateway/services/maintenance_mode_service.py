@@ -21,6 +21,13 @@ invisible to that service and cannot be applied to the config by accident. The
 value encoding ("true"/"false") is deliberately the same one it uses for a bool,
 so the table holds one vocabulary rather than two.
 
+**Every door has to close, and a scan is what keeps that true.** The freeze is
+only as good as its least-remembered sign-in path, so
+``tests/unit/test_maintenance_mode.py`` enumerates the routes that call
+``create_dashboard_session`` and fails on one that neither checks this flag nor
+declares why it closes no door. WebAuthn and OAuth (#651, #652) each end by
+minting a session, so each will answer to it.
+
 Nothing here touches the data plane. A frozen deployment still serves
 ``/v1/chat/completions`` and the rest of the management API to a caller
 presenting the master key or an API key through the header; what stops is the
