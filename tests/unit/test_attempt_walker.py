@@ -417,9 +417,9 @@ def _guardrail(
 
 
 def test_a_mandated_guardrail_is_applied_when_the_caller_asked_for_nothing() -> None:
-    from gateway.api.routes._pipeline import merge_policy_guardrails
+    from gateway.api.routes._pipeline import merge_guardrail_layers
 
-    merged = merge_policy_guardrails(_ctx_with_guardrails(_guardrail("prompt-injection")), None)
+    merged, _ = merge_guardrail_layers(_ctx_with_guardrails(_guardrail("prompt-injection")), None, [])
 
     assert merged is not None
     assert [g.profile for g in merged] == ["prompt-injection"]
@@ -427,11 +427,12 @@ def test_a_mandated_guardrail_is_applied_when_the_caller_asked_for_nothing() -> 
 
 
 def test_a_caller_cannot_weaken_a_mandated_guardrail() -> None:
-    from gateway.api.routes._pipeline import merge_policy_guardrails
+    from gateway.api.routes._pipeline import merge_guardrail_layers
 
-    merged = merge_policy_guardrails(
+    merged, _ = merge_guardrail_layers(
         _ctx_with_guardrails(_guardrail("prompt-injection", mode="block", on_unavailable="block")),
         [_guardrail("prompt-injection", mode="monitor", on_unavailable="monitor")],
+        [],
     )
 
     assert merged is not None and len(merged) == 1
@@ -440,11 +441,12 @@ def test_a_caller_cannot_weaken_a_mandated_guardrail() -> None:
 
 
 def test_a_caller_may_tighten_a_mandated_guardrail() -> None:
-    from gateway.api.routes._pipeline import merge_policy_guardrails
+    from gateway.api.routes._pipeline import merge_guardrail_layers
 
-    merged = merge_policy_guardrails(
+    merged, _ = merge_guardrail_layers(
         _ctx_with_guardrails(_guardrail("prompt-injection", mode="monitor", on_unavailable="monitor")),
         [_guardrail("prompt-injection", mode="block", on_unavailable="block")],
+        [],
     )
 
     assert merged is not None
@@ -453,11 +455,12 @@ def test_a_caller_may_tighten_a_mandated_guardrail() -> None:
 
 
 def test_a_caller_may_add_their_own_guardrails_alongside_a_mandate() -> None:
-    from gateway.api.routes._pipeline import merge_policy_guardrails
+    from gateway.api.routes._pipeline import merge_guardrail_layers
 
-    merged = merge_policy_guardrails(
+    merged, _ = merge_guardrail_layers(
         _ctx_with_guardrails(_guardrail("prompt-injection")),
         [_guardrail("pii", mode="monitor")],
+        [],
     )
 
     assert merged is not None
@@ -465,9 +468,9 @@ def test_a_caller_may_add_their_own_guardrails_alongside_a_mandate() -> None:
 
 
 def test_an_unrouted_request_keeps_exactly_the_callers_guardrails() -> None:
-    from gateway.api.routes._pipeline import merge_policy_guardrails
+    from gateway.api.routes._pipeline import merge_guardrail_layers
 
     unrouted = _request_context(None)
     caller = [_guardrail("pii", mode="monitor")]
-    assert merge_policy_guardrails(unrouted, caller) is caller
-    assert merge_policy_guardrails(unrouted, None) is None
+    assert merge_guardrail_layers(unrouted, caller, []) == (caller, {})
+    assert merge_guardrail_layers(unrouted, None, []) == (None, {})

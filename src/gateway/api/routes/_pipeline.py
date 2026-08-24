@@ -36,7 +36,7 @@ import asyncio
 import contextlib
 import time
 import uuid
-from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
+from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Iterable, Sequence
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, replace
 from datetime import UTC, datetime
@@ -165,6 +165,10 @@ from gateway.services.tenancy.errors import (
     WorkspaceWebSearchDomainsExcludedError,
 )
 from gateway.services.tenancy.org_provider_key_service import cached_org_model_restriction
+from gateway.services.tenancy.organization_guardrail_service import (
+    ResolvedOrganizationGuardrail,
+    resolve_organization_guardrails,
+)
 from gateway.services.tenancy.workspace_code_execution_policy_service import (
     resolve_workspace_code_execution_policy,
 )
@@ -245,6 +249,10 @@ SANDBOX_NOT_ENABLED_DETAIL = "code execution is not enabled for this workspace"
 MALFORMED_CODE_EXEC_POLICY_DETAIL = "Authorization service returned a malformed code-execution policy"
 CODE_EXEC_POLICY_UNRESOLVABLE_DETAIL = "Code execution policy could not be resolved for this request"
 WEB_SEARCH_CONFIG_UNRESOLVABLE_DETAIL = "Web search configuration could not be resolved for this request"
+ORGANIZATION_GUARDRAILS_UNRESOLVABLE_DETAIL = "Organization guardrails could not be resolved for this request"
+ORGANIZATION_GUARDRAIL_CREDENTIAL_UNREADABLE_DETAIL = (
+    "A configured organization guardrail's credential could not be read"
+)
 SANDBOX_UNREACHABLE_DETAIL = (
     "code_execution sandbox unreachable. Check the sandbox URL in the dashboard's "
     "Tools settings, or OTARI_SANDBOX_URL, and that the container is running."
@@ -1608,44 +1616,118 @@ async def _validate_mcp_server_urls(adapter: FormatAdapter[Any, Any], mcp_server
         raise adapter.error(400, str(exc), ErrorKind.INVALID_REQUEST) from exc
 
 
-def merge_policy_guardrails(
-    ctx: RequestContext, requested: list[GuardrailConfig] | None
-) -> list[GuardrailConfig] | None:
-    """Combine a policy's mandated guardrails with the caller's own.
+def _overlay_mandate(merged: dict[str, GuardrailConfig], mandated: Iterable[GuardrailConfig]) -> None:
+    """Fold one mandated layer over the effective guardrail set, in place.
 
-    Union by profile, with the stricter setting winning on every axis: a caller
-    may *add* guardrails and may tighten one, but can never weaken what the
-    operator mandated. `block` beats `monitor` for both `mode` and
+    Union by profile, with the stricter setting winning on every axis: a layer
+    below may *add* guardrails and may tighten one, but can never weaken what a
+    layer above mandated. `block` beats `monitor` for both `mode` and
     `on_unavailable`, since each is a choice between enforcing and observing.
 
-    The operator's entry also owns the URL and the validate kwargs for a profile
-    it mandates, so a caller cannot point a mandated check at a service of their
+    The mandating entry also owns the URL and the validate kwargs for a profile
+    it names, so a caller cannot point a mandated check at a service of their
     choosing.
-
-    Returns `None` when neither side asked for anything, which is the shape
-    `apply_input_guardrails` treats as "no guardrails ran".
     """
-    mandated = ctx.plan.guardrails if ctx.plan is not None else []
-    if not mandated:
-        return requested
-    merged: dict[str, GuardrailConfig] = {}
-    # Caller entries first so a mandated profile of the same name overwrites them.
-    for guardrail in requested or []:
-        merged[guardrail.profile] = guardrail
     for guardrail in mandated:
-        caller = merged.get(guardrail.profile)
-        if caller is None:
+        below = merged.get(guardrail.profile)
+        if below is None:
             merged[guardrail.profile] = guardrail
             continue
         merged[guardrail.profile] = guardrail.model_copy(
             update={
-                "mode": "block" if "block" in (guardrail.mode, caller.mode) else "monitor",
+                "mode": "block" if "block" in (guardrail.mode, below.mode) else "monitor",
                 "on_unavailable": (
-                    "block" if "block" in (guardrail.on_unavailable, caller.on_unavailable) else "monitor"
+                    "block" if "block" in (guardrail.on_unavailable, below.on_unavailable) else "monitor"
                 ),
             }
         )
-    return list(merged.values())
+
+
+def merge_guardrail_layers(
+    ctx: RequestContext,
+    requested: list[GuardrailConfig] | None,
+    organization: Sequence[ResolvedOrganizationGuardrail],
+) -> tuple[list[GuardrailConfig] | None, dict[str, str]]:
+    """The effective guardrails for this request, and the credentials they need.
+
+    Three layers fold in one order, each able to add a check or tighten one and
+    none able to weaken what is already there: the caller's own request, then
+    what the caller's organization mandates for this workspace (otari#654), then
+    what the deployment's routing policy mandates. The operator's layer is last
+    because it is the outermost one: where a policy and an organization name the
+    same profile, the operator's entry owns the endpoint the check is sent to.
+
+    That last point is also why a profile the policy layer claims loses its
+    organization credential here. The credential was stored for the endpoint the
+    organization named; once the policy's URL has replaced it, sending the
+    secret on would be sending it somewhere it was never meant for.
+
+    Returns the caller's own list unchanged, `None` included, when no layer
+    mandated anything, alongside an empty credential map: that is the shape
+    `apply_input_guardrails` treats as "no guardrails ran", and it is what keeps
+    a deployment that configures nothing behaving exactly as it did.
+    """
+    mandated = ctx.plan.guardrails if ctx.plan is not None else []
+    if not organization and not mandated:
+        return requested, {}
+
+    # Caller entries first, so a mandating layer of the same profile overwrites them.
+    merged: dict[str, GuardrailConfig] = {guardrail.profile: guardrail for guardrail in requested or []}
+    credentials: dict[str, str] = {}
+    for entry in organization:
+        _overlay_mandate(merged, (entry.config,))
+        if entry.credential:
+            credentials[entry.config.profile] = entry.credential
+    if mandated:
+        _overlay_mandate(merged, mandated)
+        for guardrail in mandated:
+            credentials.pop(guardrail.profile, None)
+    return list(merged.values()), credentials
+
+
+async def _resolve_organization_guardrails(
+    adapter: FormatAdapter[Any, Any], ctx: RequestContext
+) -> list[ResolvedOrganizationGuardrail]:
+    """The guardrails the request's organization mandates for its workspace.
+
+    Standalone only. Hybrid mode's tenancy lives on the platform, which has no
+    guardrail resolve endpoint of its own (its guardrail enforcement was
+    reachable only through its own completion route), so a hybrid request is
+    checked exactly as it was before this plane existed.
+
+    One read per request rather than a cached overlay, per the seam #655 settled
+    and #678 wrote down. Unlike the MCP and code-execution resolves beside it,
+    this one is unconditional: those run only when a request opts into the
+    feature, and a mandate that only ran when the caller asked for it would not
+    be a mandate. The cost is one indexed query on a table an organization edits
+    by hand.
+
+    A workspace always has an organization (``workspace.organization_id`` is not
+    nullable), so a `None` here means the preamble resolved no workspace row at
+    all, and there is no organization plane above such a request to consult.
+    """
+    if ctx.hybrid_mode or ctx.organization_id is None:
+        return []
+    if ctx.db is None or ctx.workspace_id is None:
+        # Fail closed, for the reason the code-execution arm below does and more
+        # sharply: both are invariants on this path today, and what this guards
+        # is an *enforcement* decision. Falling through would serve a request
+        # its organization requires a blocking guardrail on, unchecked and
+        # silently, on the day one of those invariants stops holding.
+        raise adapter.error(500, ORGANIZATION_GUARDRAILS_UNRESOLVABLE_DETAIL, ErrorKind.API)
+    try:
+        return await resolve_organization_guardrails(
+            ctx.db, organization_id=ctx.organization_id, workspace_id=ctx.workspace_id
+        )
+    except (SecretBoxUnavailableError, SecretDecryptionError) as exc:
+        # The operator's problem, not the caller's, and the underlying message
+        # names the environment variable, so it stays in the log.
+        logger.error(
+            "Organization guardrail credential could not be decrypted for organization %s: %s",
+            ctx.organization_id,
+            exc,
+        )
+        raise adapter.error(500, ORGANIZATION_GUARDRAIL_CREDENTIAL_UNREADABLE_DETAIL, ErrorKind.API) from exc
 
 
 async def _resolve_mcp_server_ids(
@@ -1720,11 +1802,19 @@ async def prepare_gateway_tools(
     reservation taken by :func:`resolve_request_context` before propagating.
     """
     try:
-        # A policy's guardrails are merged in here rather than at each route, so
-        # every completion endpoint enforces a mandate identically and none can
-        # forget to. `guardrails` as passed is the caller's own list.
+        # The organization's and the policy's guardrails are merged in here
+        # rather than at each route, so every completion endpoint enforces a
+        # mandate identically and none can forget to. `guardrails` as passed is
+        # the caller's own list.
+        effective_guardrails, guardrail_credentials = merge_guardrail_layers(
+            ctx, guardrails, await _resolve_organization_guardrails(adapter, ctx)
+        )
         await apply_input_guardrails(
-            merge_policy_guardrails(ctx, guardrails), guardrail_text, response=response, config=ctx.config
+            effective_guardrails,
+            guardrail_text,
+            response=response,
+            config=ctx.config,
+            credentials=guardrail_credentials,
         )
 
         if mcp_server_ids:

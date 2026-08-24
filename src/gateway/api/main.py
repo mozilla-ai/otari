@@ -27,6 +27,7 @@ from gateway.api.routes import (
     models,
     moderations,
     org_provider_keys,
+    organization_guardrails,
     organization_pricing,
     organizations,
     otlp,
@@ -127,6 +128,7 @@ def _register_core_routers(app: FastAPI, config: GatewayConfig) -> None:
     app.include_router(users.router)
     app.include_router(organizations.router)
     app.include_router(organization_pricing.router)
+    app.include_router(organization_guardrails.router)
     app.include_router(workspaces.router)
     app.include_router(invitations.router)
     app.include_router(workspace_member_budget_policies.router)

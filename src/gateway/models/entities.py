@@ -1585,3 +1585,97 @@ class WorkspaceWebSearchConfig(Base):
         onupdate=lambda: datetime.now(UTC),
         server_default=func.now(),
     )
+
+
+class OrganizationGuardrail(Base):
+    """A guardrail an organization runs over the requests of its workspaces.
+
+    The plane *above* the deployment-wide guardrail settings, not a replacement
+    for them: ``guardrails_url`` stays in ``runtime_settings`` and a deployment
+    that configures no organization guardrails behaves exactly as it did
+    (otari#654). A row here is a check the organization mandates; it is merged
+    into the effective guardrail list at admission by ``prepare_gateway_tools``
+    the same way a routing policy's mandate already is, so an organization can
+    only ever add a check or tighten one a caller asked for.
+
+    That is what keeps this inside the rule ``src/gateway/AGENTS.md`` records
+    from #655/#678: a mandated guardrail can only make *fewer* requests succeed,
+    never more, whichever endpoint it names. Which is also why the entry may
+    carry its own ``url`` and credential where a workspace code-execution policy
+    may not: the sandbox is a capability a workspace would be acquiring, and a
+    guardrail is a restriction the organization is accepting. A caller can
+    already point a request-body guardrail at a URL of their own
+    (``models/guardrails.GuardrailConfig.url``, SSRF-checked on the request
+    path), so storing one here grants nothing that was not already reachable.
+
+    ``profile`` is unique per organization rather than a nickname being unique,
+    which is where this parts company with the hosted
+    ``organization_guardrail_key`` (unique on ``(organization_id, nickname)``,
+    so one profile may be configured twice). The effective guardrail set on this
+    request path is keyed by profile, because ``merge_guardrail_layers`` has
+    always merged that way; two rows of one profile could therefore never both
+    run, and one would silently win.
+    """
+
+    __tablename__ = "organization_guardrails"
+    __table_args__ = (UniqueConstraint("organization_id", "profile", name="uq_organization_guardrails_org_profile"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("organization.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    profile: Mapped[str] = mapped_column(nullable=False)
+    # NULL means "use the deployment's guardrails_url", which is the ordinary
+    # case: an organization that runs its own any-guardrail deployment names it
+    # here, and then the credential below is what authenticates to it.
+    url: Mapped[str | None] = mapped_column(default=None)
+    encrypted_credential: Mapped[str | None] = mapped_column(Text, default=None)
+    mode: Mapped[str] = mapped_column(default="monitor", nullable=False)
+    on_unavailable: Mapped[str] = mapped_column(default="block", nullable=False)
+    validate_kwargs: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    # The organization's own kill switch. A disabled entry runs nowhere,
+    # whatever its scope says, so an organization can stop a guardrail without
+    # losing the credential and the workspace list it took to set up.
+    enabled: Mapped[bool] = mapped_column(default=True, nullable=False)
+    # The inheritance rule otari#654 asks for, and the hosted plane's
+    # ``is_org_default`` under a name that says what it does: true means every
+    # workspace of the organization runs this, including one created tomorrow,
+    # and the scope rows below are not consulted. False means it runs only in
+    # the workspaces named there, and a new workspace inherits nothing.
+    applies_to_all_workspaces: Mapped[bool] = mapped_column(default=False, nullable=False)
+    # ``UtcDateTime`` for the reason its neighbours use it: these are serialized
+    # with ``.isoformat()`` for the dashboard, and a plain ``DateTime(timezone=True)``
+    # round-trips naive on SQLite.
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+
+class OrganizationGuardrailWorkspace(Base):
+    """One workspace an organization guardrail is scoped to.
+
+    Membership only: a row means "this guardrail runs in this workspace", and
+    its absence means it does not. The hosted plane instead carries a
+    ``disabled`` flag on the equivalent row and admits three states, two of
+    which resolve to off; there is nothing here for a third state to record,
+    because the scope is the organization's to set and a workspace has no veto
+    over it (a veto would widen what succeeds, which #655/#678 does not allow).
+
+    Ignored entirely when the guardrail's ``applies_to_all_workspaces`` is set,
+    so rows left behind by flipping that on are inert rather than contradictory.
+
+    Both sides cascade: the pairing has no meaning once either end is gone.
+    """
+
+    __tablename__ = "organization_guardrail_workspaces"
+
+    organization_guardrail_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("organization_guardrails.id", ondelete="CASCADE"), primary_key=True
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), primary_key=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))

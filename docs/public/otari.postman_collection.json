@@ -2356,6 +2356,149 @@
     {
       "item": [
         {
+          "name": "List Organization Guardrails",
+          "request": {
+            "description": "List the guardrails the caller's organization mandates.\n\nOrganization owners and admins only, unlike the pricing overrides next door\nthat any member may read: these rows name the endpoints this gateway\nconnects to and say which of them carry a credential. A credential is never\nreturned, only whether one is set.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "guardrails"
+              ],
+              "query": [
+                {
+                  "description": "Number of records to skip",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "Maximum number of records to return",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/guardrails?skip=&limit="
+            }
+          }
+        },
+        {
+          "name": "Create Organization Guardrail",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"profile\": \"string\"\n}"
+            },
+            "description": "Mandate a guardrail across the organization. Organization owners and admins only.\n\nThe guardrail runs on every request from the workspaces it is scoped to, in\naddition to whatever the caller asked for, with the stricter of the two\nsettings applying to a profile both name. Set\n``applies_to_all_workspaces`` for it to cover workspaces created later;\notherwise a new workspace inherits nothing and the entry runs only in the\nworkspaces ``workspace_ids`` lists.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "guardrails"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/guardrails"
+            }
+          }
+        },
+        {
+          "name": "Update Organization Guardrail",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"applies_to_all_workspaces\": false,\n  \"credential\": \"string\",\n  \"enabled\": false,\n  \"mode\": \"block\",\n  \"on_unavailable\": \"block\",\n  \"profile\": \"string\",\n  \"url\": \"string\",\n  \"validate_kwargs\": {},\n  \"workspace_ids\": [\n    \"00000000-0000-0000-0000-000000000000\"\n  ]\n}"
+            },
+            "description": "Change a guardrail's profile, endpoint, credential, modes, or scope.\n\nOrganization owners and admins only. Omitted fields are left as they are;\n``workspace_ids`` replaces the scope whole when sent, and ``url`` and\n``credential`` are cleared by sending an empty string rather than null.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "guardrails",
+                ":guardrail_id"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/guardrails/:guardrail_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "guardrail_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Organization Guardrail",
+          "request": {
+            "description": "Stop mandating a guardrail, discarding its credential and scope.\n\nOrganization owners and admins only. Use ``enabled: false`` instead to stop\nit everywhere while keeping both.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "guardrails",
+                ":guardrail_id"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/guardrails/:guardrail_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "guardrail_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "organization-guardrails"
+    },
+    {
+      "item": [
+        {
           "name": "List Organization Pricing",
           "request": {
             "description": "List the organization's rate overrides.\n\nReadable by any member: these rates decide what the caller's own requests\ncost, so they are not withheld from the people billed at them. Writing needs\nan owner or admin.\n\nPaged on the same bounds the rest of the tenancy surface uses, because the\ntable grows a row per model per period. ``count`` is the total, so a client\nknows whether another page is owed.",

@@ -16,6 +16,7 @@ import type {
   CreateBudgetRequest,
   CreateKeyRequest,
   CreateKeyResponse,
+  CreateOrganizationGuardrailRequest,
   CreateOrganizationMemberRequest,
   CreateOrganizationMemberResult,
   CreateOrganizationPricingOverride,
@@ -42,6 +43,7 @@ import type {
   ModelListResponse,
   ModelMetadataResponse,
   OrganizationContext,
+  OrganizationGuardrail,
   OrganizationMember,
   OrganizationPricingOverride,
   Passkey,
@@ -80,6 +82,7 @@ import type {
   ToolsResponse,
   UpdateBudgetRequest,
   UpdateKeyRequest,
+  UpdateOrganizationGuardrailRequest,
   UpdateOrganizationMemberRequest,
   UpdateOrganizationPricingOverride,
   UpdateOrganizationRequest,
@@ -156,6 +159,7 @@ const ORGANIZATION_MEMBERS = "organization-members"
 // key is: the organization context is read on nearly every page, and a rate
 // edit should not make all of them refetch.
 const ORGANIZATION_PRICING = "organization-pricing"
+const ORGANIZATION_GUARDRAILS = "organization-guardrails"
 const WORKSPACES = "workspaces"
 // The first-request setup guide's state. Its own key rather than a child of
 // WORKSPACES: the guide polls while it is on screen, and nesting it would make
@@ -2280,6 +2284,74 @@ export function useDeleteWorkspaceBudgetDefault() {
     onSuccess: (_data, { workspaceId }) => {
       void queryClient.invalidateQueries({
         queryKey: [WORKSPACES, workspaceId, "budget-defaults"],
+      })
+    },
+  })
+}
+
+// The guardrails the caller's organization mandates over its workspaces. A
+// small hand-edited list rather than a growing table, but paged through like
+// the rest of the tenancy surface so a backend that ignored `skip` cannot spin
+// this either.
+export function useOrganizationGuardrails(enabled = true) {
+  return useQuery({
+    queryKey: [ORGANIZATION_GUARDRAILS],
+    queryFn: () =>
+      fetchAllPaged<OrganizationGuardrail>("/v1/organizations/me/guardrails"),
+    staleTime: 60_000,
+    enabled,
+  })
+}
+
+export function useCreateOrganizationGuardrail() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: CreateOrganizationGuardrailRequest) =>
+      apiFetch<OrganizationGuardrail>("/v1/organizations/me/guardrails", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: [ORGANIZATION_GUARDRAILS],
+      })
+    },
+  })
+}
+
+export function useUpdateOrganizationGuardrail() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      guardrailId,
+      body,
+    }: {
+      guardrailId: string
+      body: UpdateOrganizationGuardrailRequest
+    }) =>
+      apiFetch<OrganizationGuardrail>(
+        `/v1/organizations/me/guardrails/${encodeURIComponent(guardrailId)}`,
+        { method: "PATCH", body: JSON.stringify(body) },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: [ORGANIZATION_GUARDRAILS],
+      })
+    },
+  })
+}
+
+export function useDeleteOrganizationGuardrail() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (guardrailId: string) =>
+      apiFetch<{ message: string }>(
+        `/v1/organizations/me/guardrails/${encodeURIComponent(guardrailId)}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: [ORGANIZATION_GUARDRAILS],
       })
     },
   })

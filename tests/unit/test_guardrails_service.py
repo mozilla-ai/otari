@@ -6,6 +6,7 @@ Stubs the guardrails service ``POST /validate`` contract with an
 
 from __future__ import annotations
 
+import json
 from collections.abc import Callable
 
 import httpx
@@ -257,3 +258,33 @@ async def test_safe_url_override_is_used_instead_of_default(monkeypatch: pytest.
     )
     assert verdict.blocked is False
     assert captured["host"] == "override.example.com"
+
+
+@pytest.mark.asyncio
+async def test_a_credential_is_sent_as_a_bearer_header_for_its_own_profile_only(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An organization guardrail's credential authenticates its own check and no other.
+
+    The credential arrives keyed by profile rather than on `GuardrailConfig`
+    (otari#654): that model is parsed from the request body, so a field there
+    would be one a caller could set. This asserts the routing that keying is
+    for, since the two checks in one request go out on one client.
+    """
+    seen: dict[str, str | None] = {}
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        profile = json.loads(request.content)["profile"]
+        seen[profile] = request.headers.get("authorization")
+        return httpx.Response(200, json={"profile": profile, "result": {"valid": True}})
+
+    _patch_transport(monkeypatch, handler)
+    verdict = await run_input_guardrails(
+        [GuardrailConfig(profile="prompt-injection"), GuardrailConfig(profile="pii")],
+        "x",
+        default_url=_URL,
+        credentials={"prompt-injection": "s3cret"},
+    )
+
+    assert verdict.blocked is False
+    assert seen == {"prompt-injection": "Bearer s3cret", "pii": None}

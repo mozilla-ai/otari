@@ -5501,6 +5501,309 @@
         "title": "OrgProviderKeysPublic",
         "type": "object"
       },
+      "OrganizationGuardrailCreate": {
+        "description": "Request body for mandating a guardrail across an organization.\n\n``credential`` is never stored as sent: it is encrypted with\n``OTARI_SECRET_KEY`` and only the ciphertext is kept, the same convention\n`entities.WorkspaceMcpServer` and `entities.ProviderCredential` use. It is\nsent to the endpoint as ``Authorization: Bearer`` when the guardrail runs,\nso it authenticates this gateway to the guardrails service the entry names.\nA guardrail *vendor's* own key is not this: the guardrails service builds\nits guardrails from the operator's YAML and holds those itself.\n\n``on`` is not offered. This plane mandates input-direction checks, which is\nthe only direction the request path enforces\n(`services.guardrails.run_input_guardrails`); an organization that could\nstore an output-direction mandate would be storing one nothing runs.",
+        "properties": {
+          "applies_to_all_workspaces": {
+            "default": false,
+            "description": "True runs this in every workspace of the organization, including one created later; false runs it only in the workspaces named by workspace_ids",
+            "title": "Applies To All Workspaces",
+            "type": "boolean"
+          },
+          "credential": {
+            "anyOf": [
+              {
+                "maxLength": 8192,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Bearer credential for that endpoint; requires an https URL. Encrypted at rest, never returned",
+            "title": "Credential"
+          },
+          "enabled": {
+            "default": true,
+            "description": "False stops the guardrail everywhere without discarding it",
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "mode": {
+            "default": "monitor",
+            "description": "block rejects a flagged request with 403; monitor annotates the response and forwards it",
+            "enum": [
+              "block",
+              "monitor"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "on_unavailable": {
+            "default": "block",
+            "description": "What a block-mode entry does when the guardrails service cannot be reached at all",
+            "enum": [
+              "block",
+              "monitor"
+            ],
+            "title": "On Unavailable",
+            "type": "string"
+          },
+          "profile": {
+            "description": "Profile name configured on the guardrails service, unique within the organization",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Profile",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Guardrails endpoint for this entry; null uses the deployment's guardrails_url",
+            "title": "Url"
+          },
+          "validate_kwargs": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Extra kwargs forwarded to the guardrails service /validate call",
+            "title": "Validate Kwargs"
+          },
+          "workspace_ids": {
+            "description": "Workspaces this guardrail runs in. Must be empty when applies_to_all_workspaces is true",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 500,
+            "title": "Workspace Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "profile"
+        ],
+        "title": "OrganizationGuardrailCreate",
+        "type": "object"
+      },
+      "OrganizationGuardrailPublic": {
+        "description": "The API-facing shape. Never carries the credential, only whether one is set.",
+        "properties": {
+          "applies_to_all_workspaces": {
+            "title": "Applies To All Workspaces",
+            "type": "boolean"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "has_credential": {
+            "title": "Has Credential",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "mode": {
+            "title": "Mode",
+            "type": "string"
+          },
+          "on_unavailable": {
+            "title": "On Unavailable",
+            "type": "string"
+          },
+          "organization_id": {
+            "format": "uuid",
+            "title": "Organization Id",
+            "type": "string"
+          },
+          "profile": {
+            "title": "Profile",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "validate_kwargs": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validate Kwargs"
+          },
+          "workspace_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Workspace Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "organization_id",
+          "profile",
+          "url",
+          "has_credential",
+          "mode",
+          "on_unavailable",
+          "validate_kwargs",
+          "enabled",
+          "applies_to_all_workspaces",
+          "workspace_ids",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "OrganizationGuardrailPublic",
+        "type": "object"
+      },
+      "OrganizationGuardrailUpdate": {
+        "description": "Partial update. Only the fields the caller sets are applied.\n\n``credential`` and ``url`` have three states rather than two, which is what\na write-only field and its nullable partner need: omit to leave the stored\nvalue alone, send ``\"\"`` to clear it, send a value to replace it. An\nexplicit ``null`` also leaves them alone, matching\n`WorkspaceMcpServerUpdate`: a client that serializes its whole form back,\nwith an empty credential box it never filled in, must not destroy a\ncredential it was never shown.\n\n``workspace_ids`` replaces the scope whole when sent; ``[]`` clears it.",
+        "properties": {
+          "applies_to_all_workspaces": {
+            "title": "Applies To All Workspaces",
+            "type": "boolean"
+          },
+          "credential": {
+            "anyOf": [
+              {
+                "maxLength": 8192,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credential"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "mode": {
+            "enum": [
+              "block",
+              "monitor"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "on_unavailable": {
+            "enum": [
+              "block",
+              "monitor"
+            ],
+            "title": "On Unavailable",
+            "type": "string"
+          },
+          "profile": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Profile",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "validate_kwargs": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validate Kwargs"
+          },
+          "workspace_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "maxItems": 500,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Ids"
+          }
+        },
+        "title": "OrganizationGuardrailUpdate",
+        "type": "object"
+      },
+      "OrganizationGuardrailsPublic": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/OrganizationGuardrailPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "OrganizationGuardrailsPublic",
+        "type": "object"
+      },
       "OrganizationMembershipContextPublic": {
         "description": "An organization plus the caller's standing in it.\n\nWhat every tenancy page reads first: which organization it is looking at,\nand what the caller may do there.",
         "properties": {
@@ -15831,6 +16134,235 @@
         "summary": "Update Active Organization",
         "tags": [
           "organizations"
+        ]
+      }
+    },
+    "/v1/organizations/me/guardrails": {
+      "get": {
+        "description": "List the guardrails the caller's organization mandates.\n\nOrganization owners and admins only, unlike the pricing overrides next door\nthat any member may read: these rows name the endpoints this gateway\nconnects to and say which of them carry a credential. A credential is never\nreturned, only whether one is set.",
+        "operationId": "list_organization_guardrails_v1_organizations_me_guardrails_get",
+        "parameters": [
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of records to return",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationGuardrailsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Organization Guardrails",
+        "tags": [
+          "organization-guardrails"
+        ]
+      },
+      "post": {
+        "description": "Mandate a guardrail across the organization. Organization owners and admins only.\n\nThe guardrail runs on every request from the workspaces it is scoped to, in\naddition to whatever the caller asked for, with the stricter of the two\nsettings applying to a profile both name. Set\n``applies_to_all_workspaces`` for it to cover workspaces created later;\notherwise a new workspace inherits nothing and the entry runs only in the\nworkspaces ``workspace_ids`` lists.",
+        "operationId": "create_organization_guardrail_v1_organizations_me_guardrails_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationGuardrailCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationGuardrailPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Organization Guardrail",
+        "tags": [
+          "organization-guardrails"
+        ]
+      }
+    },
+    "/v1/organizations/me/guardrails/{guardrail_id}": {
+      "delete": {
+        "description": "Stop mandating a guardrail, discarding its credential and scope.\n\nOrganization owners and admins only. Use ``enabled: false`` instead to stop\nit everywhere while keeping both.",
+        "operationId": "delete_organization_guardrail_v1_organizations_me_guardrails__guardrail_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "guardrail_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Guardrail Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Organization Guardrail",
+        "tags": [
+          "organization-guardrails"
+        ]
+      },
+      "patch": {
+        "description": "Change a guardrail's profile, endpoint, credential, modes, or scope.\n\nOrganization owners and admins only. Omitted fields are left as they are;\n``workspace_ids`` replaces the scope whole when sent, and ``url`` and\n``credential`` are cleared by sending an empty string rather than null.",
+        "operationId": "update_organization_guardrail_v1_organizations_me_guardrails__guardrail_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "guardrail_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Guardrail Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationGuardrailUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationGuardrailPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Organization Guardrail",
+        "tags": [
+          "organization-guardrails"
         ]
       }
     },

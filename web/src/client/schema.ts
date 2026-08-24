@@ -1405,6 +1405,73 @@ export interface paths {
         patch: operations["update_active_organization_v1_organizations_me_patch"];
         trace?: never;
     };
+    "/v1/organizations/me/guardrails": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Organization Guardrails
+         * @description List the guardrails the caller's organization mandates.
+         *
+         *     Organization owners and admins only, unlike the pricing overrides next door
+         *     that any member may read: these rows name the endpoints this gateway
+         *     connects to and say which of them carry a credential. A credential is never
+         *     returned, only whether one is set.
+         */
+        get: operations["list_organization_guardrails_v1_organizations_me_guardrails_get"];
+        put?: never;
+        /**
+         * Create Organization Guardrail
+         * @description Mandate a guardrail across the organization. Organization owners and admins only.
+         *
+         *     The guardrail runs on every request from the workspaces it is scoped to, in
+         *     addition to whatever the caller asked for, with the stricter of the two
+         *     settings applying to a profile both name. Set
+         *     ``applies_to_all_workspaces`` for it to cover workspaces created later;
+         *     otherwise a new workspace inherits nothing and the entry runs only in the
+         *     workspaces ``workspace_ids`` lists.
+         */
+        post: operations["create_organization_guardrail_v1_organizations_me_guardrails_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/organizations/me/guardrails/{guardrail_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Organization Guardrail
+         * @description Stop mandating a guardrail, discarding its credential and scope.
+         *
+         *     Organization owners and admins only. Use ``enabled: false`` instead to stop
+         *     it everywhere while keeping both.
+         */
+        delete: operations["delete_organization_guardrail_v1_organizations_me_guardrails__guardrail_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Organization Guardrail
+         * @description Change a guardrail's profile, endpoint, credential, modes, or scope.
+         *
+         *     Organization owners and admins only. Omitted fields are left as they are;
+         *     ``workspace_ids`` replaces the scope whole when sent, and ``url`` and
+         *     ``credential`` are cleared by sending an empty string rather than null.
+         */
+        patch: operations["update_organization_guardrail_v1_organizations_me_guardrails__guardrail_id__patch"];
+        trace?: never;
+    };
     "/v1/organizations/me/member-invitations": {
         parameters: {
             query?: never;
@@ -5946,6 +6013,167 @@ export interface components {
             count: number;
             /** Data */
             data: components["schemas"]["OrgProviderKeyPublic"][];
+        };
+        /**
+         * OrganizationGuardrailCreate
+         * @description Request body for mandating a guardrail across an organization.
+         *
+         *     ``credential`` is never stored as sent: it is encrypted with
+         *     ``OTARI_SECRET_KEY`` and only the ciphertext is kept, the same convention
+         *     `entities.WorkspaceMcpServer` and `entities.ProviderCredential` use. It is
+         *     sent to the endpoint as ``Authorization: Bearer`` when the guardrail runs,
+         *     so it authenticates this gateway to the guardrails service the entry names.
+         *     A guardrail *vendor's* own key is not this: the guardrails service builds
+         *     its guardrails from the operator's YAML and holds those itself.
+         *
+         *     ``on`` is not offered. This plane mandates input-direction checks, which is
+         *     the only direction the request path enforces
+         *     (`services.guardrails.run_input_guardrails`); an organization that could
+         *     store an output-direction mandate would be storing one nothing runs.
+         */
+        OrganizationGuardrailCreate: {
+            /**
+             * Applies To All Workspaces
+             * @description True runs this in every workspace of the organization, including one created later; false runs it only in the workspaces named by workspace_ids
+             * @default false
+             */
+            applies_to_all_workspaces: boolean;
+            /**
+             * Credential
+             * @description Bearer credential for that endpoint; requires an https URL. Encrypted at rest, never returned
+             */
+            credential?: string | null;
+            /**
+             * Enabled
+             * @description False stops the guardrail everywhere without discarding it
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Mode
+             * @description block rejects a flagged request with 403; monitor annotates the response and forwards it
+             * @default monitor
+             * @enum {string}
+             */
+            mode: "block" | "monitor";
+            /**
+             * On Unavailable
+             * @description What a block-mode entry does when the guardrails service cannot be reached at all
+             * @default block
+             * @enum {string}
+             */
+            on_unavailable: "block" | "monitor";
+            /**
+             * Profile
+             * @description Profile name configured on the guardrails service, unique within the organization
+             */
+            profile: string;
+            /**
+             * Url
+             * @description Guardrails endpoint for this entry; null uses the deployment's guardrails_url
+             */
+            url?: string | null;
+            /**
+             * Validate Kwargs
+             * @description Extra kwargs forwarded to the guardrails service /validate call
+             */
+            validate_kwargs?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Workspace Ids
+             * @description Workspaces this guardrail runs in. Must be empty when applies_to_all_workspaces is true
+             */
+            workspace_ids?: string[];
+        };
+        /**
+         * OrganizationGuardrailPublic
+         * @description The API-facing shape. Never carries the credential, only whether one is set.
+         */
+        OrganizationGuardrailPublic: {
+            /** Applies To All Workspaces */
+            applies_to_all_workspaces: boolean;
+            /** Created At */
+            created_at: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Has Credential */
+            has_credential: boolean;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Mode */
+            mode: string;
+            /** On Unavailable */
+            on_unavailable: string;
+            /**
+             * Organization Id
+             * Format: uuid
+             */
+            organization_id: string;
+            /** Profile */
+            profile: string;
+            /** Updated At */
+            updated_at: string;
+            /** Url */
+            url: string | null;
+            /** Validate Kwargs */
+            validate_kwargs: {
+                [key: string]: unknown;
+            } | null;
+            /** Workspace Ids */
+            workspace_ids: string[];
+        };
+        /**
+         * OrganizationGuardrailUpdate
+         * @description Partial update. Only the fields the caller sets are applied.
+         *
+         *     ``credential`` and ``url`` have three states rather than two, which is what
+         *     a write-only field and its nullable partner need: omit to leave the stored
+         *     value alone, send ``""`` to clear it, send a value to replace it. An
+         *     explicit ``null`` also leaves them alone, matching
+         *     `WorkspaceMcpServerUpdate`: a client that serializes its whole form back,
+         *     with an empty credential box it never filled in, must not destroy a
+         *     credential it was never shown.
+         *
+         *     ``workspace_ids`` replaces the scope whole when sent; ``[]`` clears it.
+         */
+        OrganizationGuardrailUpdate: {
+            /** Applies To All Workspaces */
+            applies_to_all_workspaces?: boolean;
+            /** Credential */
+            credential?: string | null;
+            /** Enabled */
+            enabled?: boolean;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode?: "block" | "monitor";
+            /**
+             * On Unavailable
+             * @enum {string}
+             */
+            on_unavailable?: "block" | "monitor";
+            /** Profile */
+            profile?: string;
+            /** Url */
+            url?: string | null;
+            /** Validate Kwargs */
+            validate_kwargs?: {
+                [key: string]: unknown;
+            } | null;
+            /** Workspace Ids */
+            workspace_ids?: string[] | null;
+        };
+        /** OrganizationGuardrailsPublic */
+        OrganizationGuardrailsPublic: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["OrganizationGuardrailPublic"][];
         };
         /**
          * OrganizationMembershipContextPublic
@@ -10800,6 +11028,139 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OrganizationMembershipContextPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_organization_guardrails_v1_organizations_me_guardrails_get: {
+        parameters: {
+            query?: {
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationGuardrailsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_organization_guardrail_v1_organizations_me_guardrails_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrganizationGuardrailCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationGuardrailPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_organization_guardrail_v1_organizations_me_guardrails__guardrail_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                guardrail_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Message"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_organization_guardrail_v1_organizations_me_guardrails__guardrail_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                guardrail_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrganizationGuardrailUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationGuardrailPublic"];
                 };
             };
             /** @description Validation Error */

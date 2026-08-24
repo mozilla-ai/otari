@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 import httpx
@@ -86,12 +87,19 @@ async def _validate_one(
     base_url: str,
     cfg: GuardrailConfig,
     input_text: str,
+    credential: str | None = None,
 ) -> GuardrailResult:
     payload: dict[str, object] = {"profile": cfg.profile, "input_text": input_text}
     if cfg.validate_kwargs:
         payload["validate_kwargs"] = cfg.validate_kwargs
+    # An organization guardrail may carry a credential for the endpoint it names
+    # (otari#654). It goes in the header rather than the body: `/validate` forbids
+    # unknown body fields, and a guardrail's *vendor* key is not this in any case;
+    # the guardrails service constructs its guardrails from the operator's own
+    # config and holds those itself. Never logged, here or by the caller.
+    headers = {"Authorization": f"Bearer {credential}"} if credential else None
     try:
-        response = await client.post(f"{base_url}/validate", json=payload)
+        response = await client.post(f"{base_url}/validate", json=payload, headers=headers)
         response.raise_for_status()
         body = response.json()
         result = body["result"]
@@ -137,8 +145,17 @@ async def run_input_guardrails(
     input_text: str,
     *,
     default_url: str | None,
+    credentials: Mapping[str, str] | None = None,
 ) -> GuardrailVerdict:
     """Run every input-direction guardrail and return the aggregate verdict.
+
+    ``credentials`` maps a profile name to the bearer credential its entry
+    carries, and is populated only for guardrails an organization mandates
+    (`services/tenancy/organization_guardrail_service.py`). It is a separate
+    argument rather than a field on :class:`GuardrailConfig` because that model
+    is parsed from the request body: a credential field there would be one a
+    caller could set, which would turn the guardrail list into a way to make
+    this gateway send a secret to an endpoint of the caller's choosing.
 
     Only guardrails with ``"input"`` in :attr:`GuardrailConfig.on` are
     *evaluated* here (``"output"`` is accepted but not yet enforced — see the
@@ -188,9 +205,14 @@ async def run_input_guardrails(
     # (mode-independent) via UnsafeURLError, which this function
     # deliberately does not catch; the caller (apply_input_guardrails)
     # maps it to a 400.
+    credentials = credentials or {}
     if guardrails:
         await asyncio.gather(
-            *(validate_mcp_url(g.url, has_authorization_token=False) for g in guardrails if g.url is not None)
+            *(
+                validate_mcp_url(g.url, has_authorization_token=bool(credentials.get(g.profile)))
+                for g in guardrails
+                if g.url is not None
+            )
         )
 
     input_guardrails = [g for g in guardrails if "input" in g.on]
@@ -208,7 +230,13 @@ async def run_input_guardrails(
                         "configured. Set OTARI_GUARDRAILS_URL on the gateway or pass `url` on the "
                         "guardrail entry."
                     )
-                result = await _validate_one(client, base_url=base_url, cfg=cfg, input_text=input_text)
+                result = await _validate_one(
+                    client,
+                    base_url=base_url,
+                    cfg=cfg,
+                    input_text=input_text,
+                    credential=credentials.get(cfg.profile),
+                )
             except GuardrailsNotReachableError:
                 if cfg.mode == "block" and cfg.on_unavailable == "block":
                     raise  # fail closed: an enforcing guardrail must not be skipped

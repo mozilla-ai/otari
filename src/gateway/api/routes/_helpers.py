@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 import json
-from collections.abc import Sequence
+from collections.abc import Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException, Request, Response, status
@@ -260,13 +260,17 @@ async def apply_input_guardrails(
     *,
     response: Response,
     config: GatewayConfig | None = None,
+    credentials: Mapping[str, str] | None = None,
 ) -> None:
     """Enforce the input guardrails for a request before the provider call.
 
-    ``guardrails`` is the effective list: the caller's own, merged with any a
-    routing policy mandates (see
-    :func:`gateway.api.routes._pipeline.merge_policy_guardrails`, which is where
+    ``guardrails`` is the effective list: the caller's own, merged with any the
+    caller's organization mandates and any a routing policy mandates (see
+    :func:`gateway.api.routes._pipeline.merge_guardrail_layers`, which is where
     the merge happens so every completion endpoint enforces a mandate alike).
+    ``credentials`` carries the bearer credential an organization entry stores
+    for the endpoint it names, keyed by profile; it never comes from the request
+    body.
 
     No-op when ``guardrails`` is empty/None (zero overhead for the common
     case). On a ``block``-mode flag, raises ``403`` and the provider is never
@@ -301,7 +305,7 @@ async def apply_input_guardrails(
     # override mutates config, so it hot-applies on the next request.
     default_url = (config.guardrails_url if config is not None else None) or otari_env("GUARDRAILS_URL") or None
     try:
-        verdict = await run_input_guardrails(guardrails, input_text, default_url=default_url)
+        verdict = await run_input_guardrails(guardrails, input_text, default_url=default_url, credentials=credentials)
     except UnsafeURLError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except GuardrailsNotReachableError as exc:

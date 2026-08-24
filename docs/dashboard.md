@@ -521,7 +521,12 @@ the sidebar expands to:
 
 **Guardrails** is the third view, and it sits under Gateway → Routing rather
 than here, because a guardrail decides what a request may do rather than adding
-a capability to it.
+a capability to it. Under the deployment-wide settings there, **Organization
+guardrails** is the layer above them: an entry runs on every request from the
+workspaces you scope it to whether the caller asked for it or not, and an entry
+marked for every workspace covers ones created later. It may name a guardrails
+endpoint and a credential of its own, or leave both blank and use the URL set
+just above. See [Guardrails](guardrails.md#organization-guardrails).
 
 Two things are true of every one of these views:
 

@@ -12,6 +12,7 @@ import type {
   DeploymentBootstrap,
   Organization,
   OrganizationContext,
+  OrganizationGuardrail,
   OrganizationMember,
   PricingResponse,
   ScopedBudget,
@@ -339,6 +340,29 @@ export function workspaceActivation(
     latest_attempt: null,
     experience_eligible: true,
     dismissed: false,
+    ...overrides,
+  }
+}
+
+export function organizationGuardrail(
+  overrides: Partial<OrganizationGuardrail> = {},
+): OrganizationGuardrail {
+  return {
+    id: "55555555-5555-5555-5555-555555555555",
+    organization_id: "11111111-1111-1111-1111-111111111111",
+    profile: "prompt-injection",
+    // The ordinary entry: no endpoint of its own, so it is sent to the
+    // deployment's guardrails URL, and no credential to authenticate with.
+    url: null,
+    has_credential: false,
+    mode: "monitor",
+    on_unavailable: "block",
+    validate_kwargs: null,
+    enabled: true,
+    applies_to_all_workspaces: false,
+    workspace_ids: [],
+    created_at: "2026-08-24T00:00:00+00:00",
+    updated_at: "2026-08-24T00:00:00+00:00",
     ...overrides,
   }
 }

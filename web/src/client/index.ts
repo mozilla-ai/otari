@@ -457,5 +457,12 @@ export type UpdateWorkspaceCodeExecutionPolicyRequest =
 export type WorkspaceWebSearchConfig = Schemas["WorkspaceWebSearchConfigPublic"]
 export type UpdateWorkspaceWebSearchConfigRequest =
   Schemas["WorkspaceWebSearchConfigUpdate"]
+// The organization-level guardrail plane above the deployment-wide guardrail
+// settings; see `src/gateway/services/tenancy/organization_guardrail_service.py`.
+export type OrganizationGuardrail = Schemas["OrganizationGuardrailPublic"]
+export type CreateOrganizationGuardrailRequest =
+  Schemas["OrganizationGuardrailCreate"]
+export type UpdateOrganizationGuardrailRequest =
+  Schemas["OrganizationGuardrailUpdate"]
 
 export type * from "./local"
