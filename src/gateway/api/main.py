@@ -56,6 +56,15 @@ def register_routers(app: FastAPI, config: GatewayConfig) -> None:
     """Mount Otari's own routers, then whatever the bootstrap contributed."""
     _register_core_routers(app, config)
     _register_contributed_routers(app)
+    if config.is_hybrid_mode:
+        # Last, and after the contributed routers on purpose. These are
+        # ``{path:path}`` catch-alls over whole management prefixes
+        # (/v1/organizations, /v1/usage, ...), and FastAPI serves the first
+        # route that matches, so registering them earlier would swallow an
+        # overlay route under any of those prefixes and answer "manage this via
+        # the platform UI" instead. They are a fallback for a path nothing else
+        # serves, so they are mounted like one.
+        app.include_router(hybrid_mode.router)
 
 
 def _register_contributed_routers(app: FastAPI) -> None:
@@ -66,6 +75,10 @@ def _register_contributed_routers(app: FastAPI) -> None:
     both modes, because an overlay may extend the data plane as readily as the
     management plane. With no bootstrap configured there are none, so this is a
     no-op for the plain build.
+
+    Mounted after Otari's own routers and before the hybrid stubs, so a
+    contribution cannot take a path the core already serves and the hybrid
+    stubs' catch-alls cannot take one the contribution serves.
     """
     container: Container = app.state.container
     for contribution in container.router_contributions():
@@ -88,7 +101,8 @@ def _register_core_routers(app: FastAPI, config: GatewayConfig) -> None:
     app.include_router(responses.router)
 
     if config.is_hybrid_mode:
-        app.include_router(hybrid_mode.router)
+        # The hybrid stub router is mounted by register_routers, after the
+        # contributed routers; see the note there.
         return  # Remaining routers (including batches) are standalone-mode only
 
     app.include_router(auth_session.router)

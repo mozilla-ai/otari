@@ -16,8 +16,11 @@ from pathlib import Path
 import pytest
 from fastapi.testclient import TestClient
 
+from gateway.api.deps import reset_config
 from gateway.container import Container
 from gateway.core.config import GatewayConfig
+from gateway.core.database import reset_db
+from gateway.main import create_app
 
 from .conftest import build_test_client
 
@@ -46,6 +49,13 @@ async def overlay_withheld() -> dict[str, str]:
     return {"source": "overlay"}
 
 
+# Under a prefix the hybrid stub router claims with a ``{path:path}`` catch-all,
+# so mounting order decides which one answers.
+@granted_router.get("/v1/organizations/overlay-probe")
+async def overlay_probe_under_a_stub_prefix() -> dict[str, str]:
+    return {"source": "overlay"}
+
+
 class ProbeEntitlementAdapter:
     """Grants one capability, so the other contributed router stays refused."""
 
@@ -64,12 +74,21 @@ def register(container: Container) -> None:
 
 
 @pytest.fixture
-def overlay_on_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> str:
-    """Write the overlay module somewhere importable and return its dotted path."""
+def overlay_on_path(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Generator[str]:
+    """Write the overlay module somewhere importable and return its dotted path.
+
+    Dropped from ``sys.modules`` on the way in, so this test's file is what
+    loads, and again on the way out, so the module object does not outlive the
+    ``tmp_path`` it was imported from. ``monkeypatch.delitem(..., raising=False)``
+    does not manage the second: on a name that is absent it records no undo
+    entry, so teardown would restore the first such test's module rather than
+    clearing it.
+    """
     (tmp_path / "otari_test_overlay.py").write_text(OVERLAY_MODULE)
     monkeypatch.syspath_prepend(str(tmp_path))
-    monkeypatch.delitem(sys.modules, "otari_test_overlay", raising=False)
-    return "otari_test_overlay"
+    sys.modules.pop("otari_test_overlay", None)
+    yield "otari_test_overlay"
+    sys.modules.pop("otari_test_overlay", None)
 
 
 @pytest.fixture
@@ -125,3 +144,34 @@ def test_nothing_is_mounted_or_rebound_without_a_selector(client: TestClient) ->
     container: Container = client.app.state.container  # type: ignore[attr-defined]
     assert container.router_contributions() == ()
     assert container.summary.startswith("no bootstrap, core defaults for ")
+
+
+def test_a_contributed_route_wins_over_the_hybrid_stub_catch_all(
+    overlay_on_path: str, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # The hybrid stubs are ``{path:path}`` catch-alls over whole management
+    # prefixes, and FastAPI serves the first matching route, so a contributed
+    # route under one of them is only reachable if the stubs are mounted last.
+    # Mounted earlier it would silently answer "manage this via the platform
+    # UI" and the overlay's handler would never run.
+    monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
+    config = GatewayConfig(
+        mode="hybrid",
+        platform={"base_url": "http://localhost:8100/api/v1"},
+        bootstrap=f"{overlay_on_path}:register",
+    )
+    app = create_app(config)
+
+    try:
+        with TestClient(app) as client:
+            response = client.get("/v1/organizations/overlay-probe")
+            # The stub still answers a path the overlay does not serve.
+            stub_response = client.get("/v1/organizations/something-else")
+    finally:
+        reset_config()
+        reset_db()
+
+    assert response.status_code == 200
+    assert response.json() == {"source": "overlay"}
+    assert stub_response.status_code == 404
+    assert stub_response.json()["detail"].startswith("This endpoint is not available in hybrid mode")
