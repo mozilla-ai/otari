@@ -54,15 +54,32 @@ function parseCeiling(
   return { value: parsed, valid: true }
 }
 
+// Anything that means the entry is not a bare host. The server compares each
+// entry against a result URL's hostname, so a scheme, port or path matches
+// nothing at all: on a block-list that is a guardrail that reads as configured
+// and blocks nothing. Refused here as well as server-side so the message lands
+// on the field rather than arriving as a 422 banner.
+const NOT_IN_A_HOSTNAME = /[/:@?#*\\\s]/
+
 // Comma-separated in the form, a list on the wire. Blank entries are dropped
-// rather than sent, so a trailing comma is not a domain named "".
-function parseDomains(raw: string): { value: string[] | null; valid: boolean } {
+// rather than sent, so a trailing comma is not a domain named "". A leading dot
+// is stripped, matching the server: an entry already covers its subdomains, so
+// `.example.com` is the same rule in cookie syntax.
+function parseDomains(raw: string): {
+  value: string[] | null
+  invalid: string | null
+  tooMany: boolean
+} {
   const hosts = raw
     .split(",")
-    .map((host) => host.trim().toLowerCase())
+    .map((host) => host.trim().toLowerCase().replace(/^\.+/, ""))
     .filter((host) => host !== "")
-  if (hosts.length > MAX_DOMAINS) return { value: null, valid: false }
-  return { value: hosts.length > 0 ? hosts : null, valid: true }
+  const invalid = hosts.find((host) => NOT_IN_A_HOSTNAME.test(host)) ?? null
+  return {
+    value: hosts.length > 0 ? hosts : null,
+    invalid,
+    tooMany: hosts.length > MAX_DOMAINS,
+  }
 }
 
 export function WorkspaceWebSearchCard({
@@ -123,8 +140,17 @@ export function WorkspaceWebSearchCard({
   }
 
   // Disabled while the row is in flight, so a save cannot race the load that
-  // would overwrite the form under it.
-  const busy = setConfig.isPending || clearConfig.isPending || query.isLoading
+  // would overwrite the form under it, and disabled outright until the read has
+  // succeeded. Without that last part a failed GET leaves `isLoading` false and
+  // `config` undefined, so the form sits at its initial "Deployment default"
+  // stance over a workspace that may well have a stored row, and one click on
+  // an apparently harmless Save issues the DELETE that drops it.
+  const busy =
+    setConfig.isPending ||
+    clearConfig.isPending ||
+    query.isLoading ||
+    query.isError ||
+    !config
 
   const save = () => {
     setError("")
@@ -146,8 +172,15 @@ export function WorkspaceWebSearchCard({
     }
     const allowed = parseDomains(allowedDomains)
     const blocked = parseDomains(blockedDomains)
-    if (!allowed.valid || !blocked.valid) {
+    if (allowed.tooMany || blocked.tooMany) {
       setError(`A domain list may name at most ${MAX_DOMAINS} domains.`)
+      return
+    }
+    const malformed = allowed.invalid ?? blocked.invalid
+    if (malformed !== null) {
+      setError(
+        `"${malformed}" is not a bare hostname. Give a domain such as example.com, with no scheme, port or path.`,
+      )
       return
     }
     setConfig.mutate(
@@ -207,7 +240,10 @@ export function WorkspaceWebSearchCard({
               options={[
                 { value: "default", label: "Deployment default" },
                 { value: "allowed", label: "Allowed" },
-                { value: "blocked", label: "Blocked" },
+                // Named for what it covers: an admin choosing this is also
+                // switching off the workspace's POST /v1/search calls, which
+                // "Blocked" alone would not have told them.
+                { value: "blocked", label: "Blocked (tool and /v1/search)" },
               ]}
               disabled={busy}
             />

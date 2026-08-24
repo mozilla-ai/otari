@@ -11949,7 +11949,7 @@
             "title": "Blocked Domains"
           },
           "enabled": {
-            "description": "False refuses web search for this workspace",
+            "description": "False refuses web search for this workspace, both the otari_web_search tool and POST /v1/search. The fields below narrow the tool only.",
             "title": "Enabled",
             "type": "boolean"
           },

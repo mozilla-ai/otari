@@ -97,8 +97,9 @@ workspace row is a veto and a refinement and never a grant, and no row means no 
 (MCP, which has no deployment-level server list to narrow, is the stated exception). The
 question is [#655](https://github.com/mozilla-ai/otari/issues/655) and the reasoning is in
 the PR that answered it,
-[#678](https://github.com/mozilla-ai/otari/pull/678). Read both before building
-#654, which settles its own surface under the rule above.
+[#678](https://github.com/mozilla-ai/otari/pull/678). Read both before building the
+remaining guardrails surface ([#654](https://github.com/mozilla-ai/otari/issues/654)),
+which settles its own surface under the rule above.
 
 MCP's own surface is the one that has landed (#658). `workspace_mcp_servers`
 (`models/entities.py`) holds a workspace's configured servers, with the bearer token

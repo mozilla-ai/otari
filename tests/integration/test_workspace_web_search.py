@@ -282,6 +282,30 @@ async def test_a_ceiling_above_what_the_backend_honors_is_refused(async_db: Asyn
         WorkspaceWebSearchConfigUpdate(enabled=True, max_results=0)
 
 
+@pytest.mark.parametrize(
+    "entry",
+    ["https://evil.example", "evil.example/path", "evil.example:8080", "user@evil.example", "ev il.example"],
+)
+async def test_an_entry_that_is_not_a_bare_hostname_is_refused(async_db: AsyncSession, entry: str) -> None:
+    """The silent-fail-open case: the backend matches entries against a URL's hostname.
+
+    Stored verbatim, none of these can equal a hostname or suffix-match one, so
+    a block-list holding one reads as configured on the dashboard and in the GET
+    while blocking nothing at all.
+    """
+    with pytest.raises(ValueError):
+        WorkspaceWebSearchConfigUpdate(enabled=True, blocked_domains=[entry])
+    with pytest.raises(ValueError):
+        WorkspaceWebSearchConfigUpdate(enabled=True, allowed_domains=[entry])
+
+
+async def test_a_leading_dot_is_stripped_rather_than_refused(async_db: AsyncSession) -> None:
+    """`.example.com` has one reading, and an entry already covers its subdomains."""
+    stored = WorkspaceWebSearchConfigUpdate(enabled=True, blocked_domains=[".example.com", "example.com"])
+
+    assert stored.blocked_domains == ["example.com"]
+
+
 async def test_oversized_lists_and_option_bags_are_refused(async_db: AsyncSession) -> None:
     """One workspace's row cannot grow without limit."""
     with pytest.raises(ValueError):

@@ -80,24 +80,46 @@ _MAX_PROVIDER_OPTIONS_BYTES = 4096
 _MAX_DOMAIN_LENGTH = 253
 
 
-def _normalize_domains(value: list[str] | None) -> list[str] | None:
-    """Lower-case, strip, drop empties, and de-duplicate a domain list.
+# Characters that mean the entry is not a bare host. The backend compares each
+# entry against ``urlparse(url).hostname``, so anything carrying a scheme, a
+# port, a path, userinfo or a wildcard can never equal one or suffix-match one.
+_NOT_IN_A_HOSTNAME = ("/", ":", "@", "?", "#", "*", "\\")
 
-    Ported from the hosted model's validator. An all-blank list normalizes to
-    ``None`` rather than ``[]``, because an empty list here would read as "an
-    allow-list permitting nothing" to a reader and as "no allow-list" to
-    :func:`narrow_web_search_tool_entry`, and only one of those is what a
-    cleared form means.
+
+def _normalize_domains(value: list[str] | None) -> list[str] | None:
+    """Lower-case, strip, drop empties, de-duplicate and shape-check a domain list.
+
+    Ported from the hosted model's validator, with the shape check added. An
+    all-blank list normalizes to ``None`` rather than ``[]``, because an empty
+    list here would read as "an allow-list permitting nothing" to a reader and
+    as "no allow-list" to :func:`narrow_web_search_tool_entry`, and only one of
+    those is what a cleared form means.
+
+    The check is the point rather than tidiness. ``WebSearchBackend`` matches an
+    entry against ``urlparse(url).hostname``, so ``https://evil.example`` and
+    ``evil.example/path`` match nothing at all: stored on ``blocked_domains``
+    they read as configured on the dashboard and in the ``GET`` while blocking
+    nothing, which is the silent-fail-open shape this whole surface exists to
+    avoid. Refused at the write, where the person who typed it is still looking.
+
+    A leading dot is stripped rather than refused: ``.example.com`` has exactly
+    one reading, and an entry here already covers its subdomains, so it is the
+    same rule written in cookie syntax.
     """
     if value is None:
         return None
     seen: dict[str, None] = {}
     for raw in value:
-        host = raw.strip().lower()
+        host = raw.strip().lower().lstrip(".")
         if not host:
             continue
         if len(host) > _MAX_DOMAIN_LENGTH:
             raise ValueError(f"a domain may be at most {_MAX_DOMAIN_LENGTH} characters")
+        if any(char in host for char in _NOT_IN_A_HOSTNAME) or any(char.isspace() for char in host):
+            raise ValueError(
+                f"{raw.strip()!r} is not a bare hostname; give a domain such as 'example.com', "
+                "with no scheme, port or path, or it would match nothing"
+            )
         seen.setdefault(host, None)
     cleaned = list(seen)
     if len(cleaned) > _MAX_DOMAINS:
@@ -132,7 +154,12 @@ class WorkspaceWebSearchConfigUpdate(BaseModel):
     # for the reason `WorkspaceCodeExecutionPolicyUpdate.enabled` is: there, no
     # row means disabled, so an omitted flag and the stored default agree. Here
     # no row means *unnarrowed*, so either default would surprise somebody.
-    enabled: bool = Field(description="False refuses web search for this workspace")
+    enabled: bool = Field(
+        description=(
+            "False refuses web search for this workspace, both the otari_web_search tool "
+            "and POST /v1/search. The fields below narrow the tool only."
+        )
+    )
     max_results: int | None = Field(
         default=None,
         gt=0,

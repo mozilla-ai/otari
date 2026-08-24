@@ -183,6 +183,54 @@ describe("WorkspaceWebSearchCard", () => {
     expect(calls.some((call) => call.method === "PUT")).toBe(false)
   })
 
+  it("refuses a domain that is not a bare hostname without asking the server", async () => {
+    // The server matches an entry against a result URL's hostname, so a scheme
+    // or a path matches nothing: on a block-list that is a guardrail that reads
+    // as set and blocks nothing.
+    const calls = mockApi()
+    const user = userEvent.setup()
+    await renderLoaded()
+
+    await user.selectOptions(screen.getByLabelText("Web search"), "allowed")
+    await user.type(
+      screen.getByLabelText("Blocked domains"),
+      "https://evil.example",
+    )
+    await user.click(screen.getByRole("button", { name: "Save" }))
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "is not a bare hostname",
+    )
+    expect(calls.some((call) => call.method === "PUT")).toBe(false)
+  })
+
+  it("keeps Save disabled when the initial read failed, so a click cannot drop a stored row", async () => {
+    // A failed GET leaves isLoading false and config undefined, so the form sits
+    // at its initial "Deployment default" stance over a workspace that may have
+    // a row. Saving from there would DELETE it.
+    const calls: { url: string; method: string }[] = []
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+      const url = String(input)
+      if (url.includes("/web-search")) {
+        calls.push({ url, method: init?.method ?? "GET" })
+        return new Response("boom", { status: 500 })
+      }
+      return Response.json(
+        organizationContext({
+          workspace_memberships: [
+            { workspace_id: ALPHA, name: "Alpha", role: "admin" },
+          ],
+        }),
+      )
+    })
+    renderCard()
+
+    await waitFor(() =>
+      expect(screen.getByRole("button", { name: "Save" })).toBeDisabled(),
+    )
+    expect(calls.some((call) => call.method === "DELETE")).toBe(false)
+  })
+
   it("says the in-loop tool is unavailable when the deployment has no backend, and that blocking still bites", async () => {
     mockApi({
       config: workspaceWebSearchConfig({

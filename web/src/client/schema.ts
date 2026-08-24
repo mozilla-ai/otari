@@ -8351,7 +8351,7 @@ export interface components {
             blocked_domains?: string[] | null;
             /**
              * Enabled
-             * @description False refuses web search for this workspace
+             * @description False refuses web search for this workspace, both the otari_web_search tool and POST /v1/search. The fields below narrow the tool only.
              */
             enabled: boolean;
             /**
