@@ -136,30 +136,54 @@ async def _issue_challenge(
     )
 
 
-async def _spend_challenge(db: AsyncSession, challenge: bytes, *, ceremony: str) -> WebAuthnChallenge:
+async def _spend_challenge(db: AsyncSession, challenge: bytes, *, ceremony: str) -> uuid.UUID | None:
     """Consume a challenge, or refuse: unknown, expired, or the wrong ceremony.
 
-    Deleted as it is read, which is what makes it single-use: a replayed
-    assertion carrying a challenge that was already spent finds no row. The
-    delete is staged on the caller's transaction, so a verification that fails
-    afterwards rolls it back and the challenge survives for the retry the caller
-    is about to make; only a ceremony that completes actually retires one.
+    Returns the identity the challenge was issued to, which is null for an
+    authentication ceremony.
 
-    ``ceremony`` is checked rather than assumed. Without it a registration
-    challenge could be answered with an assertion, which is a ceremony the
-    caller chooses rather than the server.
+    **One conditional DELETE, not a SELECT and then a delete.** Single use is
+    the whole security property of a challenge, and a read-then-write cannot
+    provide it: two requests replaying one assertion would both find the row,
+    both verify, and both be handed a session. Deleting by primary key and
+    reading what came back means exactly one of them gets the row, because the
+    loser blocks on the winner's lock and then matches nothing. This is the same
+    no-check-then-act rule the budget reservation follows, applied to a nonce.
+
+    The delete is staged on the caller's transaction, so a verification that
+    fails afterwards rolls it back and the challenge survives for the retry the
+    caller is about to make; only a ceremony that completes actually retires one.
+
+    ``ceremony`` is compared after the fact rather than added to the WHERE
+    clause. A challenge answered with the wrong ceremony is spent either way:
+    it is a challenge this server issued, somebody has just used it, and leaving
+    it live so it can be tried again the other way is the opposite of what
+    single-use means.
     """
     encoded = bytes_to_base64url(challenge)
     row = (
-        await db.execute(select(WebAuthnChallenge).where(col(WebAuthnChallenge.challenge) == encoded))
-    ).scalar_one_or_none()
-    if row is None or row.ceremony != ceremony:
+        await db.execute(
+            delete(WebAuthnChallenge)
+            .where(col(WebAuthnChallenge.challenge) == encoded)
+            .returning(
+                col(WebAuthnChallenge.ceremony),
+                col(WebAuthnChallenge.user_id),
+                col(WebAuthnChallenge.expires_at),
+            )
+        )
+    ).first()
+    if row is None:
         raise PasskeyCeremonyError
-    expires_at = row.expires_at if row.expires_at.tzinfo is not None else row.expires_at.replace(tzinfo=UTC)
-    if expires_at < datetime.now(UTC):
+    spent_ceremony: str = row[0]
+    issued_to: uuid.UUID | None = row[1]
+    expires_at: datetime = row[2]
+    if spent_ceremony != ceremony:
         raise PasskeyCeremonyError
-    await db.delete(row)
-    return row
+    # SQLite hands the timestamp back naive, as the rest of this schema's
+    # readers already handle (``dashboard_session_service._as_utc``).
+    if (expires_at if expires_at.tzinfo is not None else expires_at.replace(tzinfo=UTC)) < datetime.now(UTC):
+        raise PasskeyCeremonyError
+    return issued_to
 
 
 def _challenge_of(response: dict[str, Any]) -> bytes:
@@ -219,6 +243,12 @@ async def begin_registration(db: AsyncSession, config: GatewayConfig, identity: 
     """
     relying_party = require_relying_party(config)
     existing = await _credentials_for(db, identity.id, relying_party.rp_id)
+    # Refused here as well as after verification. The check on the way back is
+    # the one that actually holds (two ceremonies can start at once), but making
+    # somebody touch their security key and *then* be told no is the worse way
+    # to say it.
+    if len(existing) >= MAX_PASSKEYS_PER_IDENTITY:
+        raise PasskeyLimitReachedError(MAX_PASSKEYS_PER_IDENTITY)
     options = generate_registration_options(
         rp_id=relying_party.rp_id,
         rp_name=relying_party.name,
@@ -262,8 +292,8 @@ async def finish_registration(
     """
     relying_party = require_relying_party(config)
     challenge = _challenge_of(response)
-    row = await _spend_challenge(db, challenge, ceremony="registration")
-    if row.user_id != identity.id:
+    issued_to = await _spend_challenge(db, challenge, ceremony="registration")
+    if issued_to != identity.id:
         raise PasskeyCeremonyError
 
     try:
@@ -320,7 +350,12 @@ def _transports_of(response: dict[str, Any]) -> list[str]:
     raw = response.get("response", {}).get("transports") if isinstance(response.get("response"), dict) else None
     if not isinstance(raw, list):
         return []
-    return [item for item in raw if isinstance(item, str)][:8]
+    # Bounded in both directions, because this is the one field on the row that
+    # is stored as the client sent it rather than as the verifier derived it.
+    # The vocabulary's longest member is "smart-card", so 32 is already generous
+    # and an authenticator inventing a longer name loses a hint rather than a
+    # registration.
+    return [item for item in raw if isinstance(item, str) and len(item) <= 32][:8]
 
 
 def _unique_name(requested: str | None, existing: list[WebAuthnCredential]) -> str:
