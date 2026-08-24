@@ -1,4 +1,5 @@
 import { render, screen, waitFor } from "@testing-library/react"
+import { StrictMode } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useAuth } from "@/features/auth/AuthContext"
@@ -7,7 +8,7 @@ import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { bootstrap } from "@/tests/fixtures"
 import { AppProviders } from "@/tests/providers"
-import { recordEvent } from "@/tests/telemetry"
+import { recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
 
 vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
   const { telemetrySpy } = await import("@/tests/telemetry")
@@ -55,6 +56,11 @@ function renderCallback(hash: string) {
 }
 
 beforeEach(() => {
+  // The telemetry spy is one module-level `vi.fn()` shared by every test that
+  // mocks the seam, so it accumulates across this file's tests unless it is
+  // cleared. Without this a test asserting "exactly one outcome" counts the
+  // refusals every earlier test recorded.
+  resetTelemetrySpy()
   window.sessionStorage.clear()
   // `AuthContext` keeps a "there is a session" marker in localStorage, so a
   // test that signs in would leave every later one already signed in.
@@ -194,25 +200,47 @@ describe("OAuthCallbackPage", () => {
     expect(screen.queryByText("SIGNED IN")).toBeNull()
   })
 
-  it("posts the code once, even though an effect may mount twice", async () => {
-    // A code is single-use, so a second post would refuse a sign-in the first
-    // one completed. StrictMode's double mount is the shape that produces it.
+  it("spends the code once under StrictMode, which mounts every effect twice", async () => {
+    // `main.tsx` renders the app inside StrictMode, so in development every
+    // effect body runs twice on mount. A code is single-use, so without the
+    // guard the second pass turns a sign-in the first pass completed into a
+    // refusal.
+    //
+    // The assertion is the outcome, not the fetch count, and that distinction
+    // is the whole test. `takeOAuthState` clears the stored state on the first
+    // pass, so an unguarded second pass exits early on `invalid_state` and
+    // never fetches: a count of one would pass with no guard at all. What only
+    // the guard produces is a single recorded outcome with no `invalid_state`
+    // beside it.
     window.sessionStorage.setItem(STATE_KEY, "the-state")
     const fetchMock = vi
       .spyOn(globalThis, "fetch")
       .mockResolvedValue(jsonResponse({ expires_at: "2026-09-01T00:00:00Z" }))
-    const { rerender } = renderCallback(
-      "#/auth/google/callback?code=the-code&state=the-state",
-    )
 
-    rerender(
-      <AppProviders>
-        <DeploymentProvider value={bootstrap({ oauth_providers: ["google"] })}>
-          <Harness hash="#/auth/google/callback?code=the-code&state=the-state" />
-        </DeploymentProvider>
-      </AppProviders>,
+    render(
+      <StrictMode>
+        <AppProviders>
+          <DeploymentProvider
+            value={bootstrap({ oauth_providers: ["google"] })}
+          >
+            <Harness hash="#/auth/google/callback?code=the-code&state=the-state" />
+          </DeploymentProvider>
+        </AppProviders>
+      </StrictMode>,
     )
 
     await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+    await waitFor(() =>
+      expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.LOGIN_SUCCESS, {
+        authentication_method: "google",
+      }),
+    )
+    expect(recordEvent).not.toHaveBeenCalledWith(
+      TELEMETRY_EVENTS.LOGIN_FAILED,
+      expect.objectContaining({ error_code: "invalid_state" }),
+    )
+    // One outcome in total, so the second pass produced neither a second
+    // sign-in nor a refusal.
+    expect(recordEvent).toHaveBeenCalledTimes(1)
   })
 })

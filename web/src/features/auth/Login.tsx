@@ -411,7 +411,12 @@ export function Login() {
     // in flight has the system sheet open over this page, but the form is still
     // live behind it and Enter still submits, so without this a passkey and a
     // password sign-in race and whichever cookie lands second wins.
-    if (isSubmitting || isSigningOut || isPasskeyPending) {
+    // `pendingProvider` blocks this for the same reason `isPasskeyPending`
+    // does, and it matters more: an OAuth attempt ends in a navigation away
+    // from this page, so a credential submitted while one is in flight can
+    // mint a session that the provider's callback then replaces with a
+    // session for whichever identity that account resolves to.
+    if (isSubmitting || isSigningOut || isPasskeyPending || pendingProvider) {
       return
     }
     setError(null)
@@ -478,7 +483,7 @@ export function Login() {
    * than about one box.
    */
   const submitPasskey = async () => {
-    if (isSubmitting || isSigningOut || isPasskeyPending) {
+    if (isSubmitting || isSigningOut || isPasskeyPending || pendingProvider) {
       return
     }
     setError(null)
@@ -797,13 +802,19 @@ export function Login() {
                 </details>
               </>
             )}
-            {/* Disabled only while a prior sign-out is still revoking (#557).
-                Never for an empty box: see readCredential. */}
+            {/* Disabled only while a prior sign-out is still revoking (#557),
+                or while another credential is already mid-flight. Never for an
+                empty box: see readCredential. */}
             <Button
               type="submit"
               variant="primary"
               fullWidth
-              isDisabled={isSubmitting || isSigningOut || isPasskeyPending}
+              isDisabled={
+                isSubmitting ||
+                isSigningOut ||
+                isPasskeyPending ||
+                pendingProvider !== null
+              }
               className="h-11"
             >
               {isSigningOut

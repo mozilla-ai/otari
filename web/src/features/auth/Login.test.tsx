@@ -1126,6 +1126,57 @@ describe("Login with a passkey", () => {
       )
     })
 
+    it("does not let a password submit while an OAuth redirect is still in flight", async () => {
+      // The same hazard the passkey guard exists for (#557, from the other
+      // direction), and worse here: an OAuth attempt ends by leaving the page,
+      // so a password accepted meanwhile mints a session the provider's
+      // callback then replaces with a session for whichever identity that
+      // account resolves to.
+      //
+      // This pins the pair, not either half. The disabled submit button is what
+      // actually stops the Enter below, since a browser will not submit a form
+      // whose submit control is disabled; `submit()`'s own `pendingProvider`
+      // check is belt-and-braces for a submit that does not go through the
+      // button. Reverting one still passes here, which is worth knowing before
+      // reading a green run as proof of the guard alone.
+      const assign = stubNavigation()
+      let releaseAuthorize: (value: Response) => void = () => {}
+      const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(
+        () =>
+          new Promise<Response>((resolve) => {
+            releaseAuthorize = resolve
+          }),
+      )
+      const user = userEvent.setup()
+
+      render(
+        <Mounted signInMethods={["password"]} oauthProviders={["google"]}>
+          <Harness />
+        </Mounted>,
+      )
+      await user.click(
+        screen.getByRole("button", { name: "Sign in with Google" }),
+      )
+      await waitFor(() => expect(fetchMock).toHaveBeenCalledTimes(1))
+
+      // The redirect has not happened yet. Fill the form and submit it anyway.
+      await user.type(screen.getByLabelText("Email"), "operator@example.com")
+      await user.type(screen.getByLabelText("Password"), "a-real-password")
+      expect(screen.getByRole("button", { name: /Sign in$/ })).toBeDisabled()
+      await user.keyboard("{Enter}")
+
+      expect(
+        fetchMock.mock.calls.some(
+          ([url]) => String(url) === "/v1/auth/session",
+        ),
+      ).toBe(false)
+      expect(assign).not.toHaveBeenCalled()
+
+      releaseAuthorize(
+        jsonResponse({ authorization_url: "https://example.test", state: "s" }),
+      )
+    })
+
     it("renders the gateway's refusal beside the form, and does not navigate", async () => {
       const assign = stubNavigation()
       vi.spyOn(globalThis, "fetch").mockResolvedValue(

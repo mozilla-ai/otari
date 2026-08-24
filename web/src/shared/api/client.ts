@@ -5,6 +5,7 @@
 // POST /v1/auth/session, and is never written to browser storage: it lives in
 // the sign-in form's state until the request goes out and is gone on reload.
 
+import type { OAuthAuthorizeResponse, OAuthCallbackRequest } from "@/client"
 import { getPasskeyAssertion } from "@/shared/helpers/webauthn"
 
 export class ApiError extends Error {
@@ -205,7 +206,11 @@ export async function startOAuthSignIn(
   if (!started.ok) {
     return { ok: false, message: started.message, status: started.status }
   }
-  const body = started.body as { authorization_url?: unknown; state?: unknown }
+  // Typed from the spec, but still checked at runtime: the type says what the
+  // gateway promises, and this call is unauthenticated and reached before the
+  // app trusts anything, so a proxy or an error page answering in its place
+  // must not flow into a navigation as `undefined`.
+  const body = started.body as Partial<OAuthAuthorizeResponse>
   if (
     typeof body.authorization_url !== "string" ||
     typeof body.state !== "string"
@@ -229,9 +234,10 @@ export async function completeOAuthSignIn(
   provider: string,
   code: string,
 ): Promise<SignInResult> {
+  const payload: OAuthCallbackRequest = { code }
   const finished = await publicPost(
     `/v1/auth/oauth/${encodeURIComponent(provider)}/callback`,
-    { code },
+    payload,
   )
   return finished.ok
     ? { ok: true }

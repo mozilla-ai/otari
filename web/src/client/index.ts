@@ -488,4 +488,10 @@ export type CreateWorkspaceMcpServerRequest =
 export type UpdateWorkspaceMcpServerRequest =
   Schemas["WorkspaceMcpServerUpdate"]
 
+// The OAuth sign-in pair; see `src/gateway/api/routes/auth_oauth.py`. Named
+// here rather than hand-written at the call site so the authorization response
+// and the callback body cannot drift from the spec without a type error.
+export type OAuthAuthorizeResponse = Schemas["AuthorizeResponse"]
+export type OAuthCallbackRequest = Schemas["OAuthCallbackRequest"]
+
 export type * from "./local"
