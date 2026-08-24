@@ -1250,6 +1250,27 @@
         "title": "AuthenticatePasskeyRequest",
         "type": "object"
       },
+      "AuthorizeResponse": {
+        "description": "Where to send the browser, and the state to check when it comes back.",
+        "properties": {
+          "authorization_url": {
+            "description": "The provider consent screen to navigate to.",
+            "title": "Authorization Url",
+            "type": "string"
+          },
+          "state": {
+            "description": "An opaque CSRF value to keep for the length of the redirect and compare against the 'state' the provider returns. It is not stored on this deployment, so a callback whose state does not match the one held by the browser that started the flow must be abandoned by the client rather than sent here.",
+            "title": "State",
+            "type": "string"
+          }
+        },
+        "required": [
+          "authorization_url",
+          "state"
+        ],
+        "title": "AuthorizeResponse",
+        "type": "object"
+      },
       "BatchRequestItem": {
         "properties": {
           "body": {
@@ -3032,6 +3053,14 @@
             "description": "Where the authoritative control plane lives when it is not this deployment. Set for a hybrid gateway so its landing page can link to otari.ai; null otherwise.",
             "title": "Management Url"
           },
+          "oauth_providers": {
+            "description": "OAuth providers this deployment can sign somebody in with, sorted, one entry per provider with a client ID, a client secret and a public_base_url to build a redirect URI from. The sign-in screen renders a button per entry and none at all when the list is empty, so a provider nobody configured is absent rather than offered and then refused. Additive to sign_in_methods rather than part of it: an OAuth sign-in coexists with whichever typed credential is current, the way a passkey does. Empty for a hybrid gateway, which issues no session.",
+            "items": {
+              "type": "string"
+            },
+            "title": "Oauth Providers",
+            "type": "array"
+          },
           "passkeys_ready": {
             "description": "Whether this deployment can run a passkey ceremony at all: it has a relying-party ID (webauthn_rp_id, or derived from public_base_url) and an origin to serve one from. Distinct from 'passkey' in sign_in_methods, which is narrower and answers whether a registered passkey could sign somebody in *right now*: an operator with none yet needs this one, or the page that registers the first would be hidden from them. False for a hybrid gateway, which issues no session of its own.",
             "title": "Passkeys Ready",
@@ -3078,6 +3107,7 @@
           "sign_in_methods",
           "maintenance_mode",
           "passkeys_ready",
+          "oauth_providers",
           "mail_ready"
         ],
         "title": "DeploymentBootstrap",
@@ -5336,6 +5366,52 @@
           "flagged"
         ],
         "title": "ModerationResult",
+        "type": "object"
+      },
+      "OAuthCallbackRequest": {
+        "description": "The authorization code a provider handed the browser.\n\nNo ``redirect_uri``: this deployment derives its own from ``public_base_url``\nso the URI used to build the authorization request and the one sent with the\nexchange are the same string by construction, and a browser cannot choose\nwhat this server sends to a provider.\n\nNo ``state`` either, and that is not an omission. The state is checked in the\nbrowser, against the value that browser stored when it started the flow;\nsending it here would let this deployment compare a value to itself, which\nproves nothing without somewhere to have kept the original.",
+        "properties": {
+          "code": {
+            "description": "The authorization code from the provider's redirect.",
+            "maxLength": 2048,
+            "title": "Code",
+            "type": "string"
+          }
+        },
+        "required": [
+          "code"
+        ],
+        "title": "OAuthCallbackRequest",
+        "type": "object"
+      },
+      "OAuthSessionResponse": {
+        "description": "A dashboard session minted by an OAuth sign-in (the token travels only in the cookie).\n\nThe same three fields ``POST /v1/auth/session`` answers, deliberately: the\ndashboard's sign-in path does not care which credential got it here.",
+        "properties": {
+          "active_organization_id": {
+            "description": "The organization that identity is acting in, which scopes every tenancy surface.",
+            "format": "uuid",
+            "title": "Active Organization Id",
+            "type": "string"
+          },
+          "expires_at": {
+            "description": "When the session cookie stops being accepted.",
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "user_id": {
+            "description": "The identity this session speaks for.",
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expires_at",
+          "user_id",
+          "active_organization_id"
+        ],
+        "title": "OAuthSessionResponse",
         "type": "object"
       },
       "OrgProviderKeyCreateRequest": {
@@ -13681,6 +13757,108 @@
         "summary": "Create Transcription",
         "tags": [
           "audio"
+        ]
+      }
+    },
+    "/v1/auth/oauth/{provider}/authorize": {
+      "get": {
+        "description": "Start an OAuth sign-in: where to send the browser, and the state to keep.\n\nA GET, and safe: it reads configuration and mints a random value, writing\nnothing. Repeating it simply produces another state, and only the one the\nbrowser kept is the one it will compare against.",
+        "operationId": "authorize_v1_auth_oauth__provider__authorize_get",
+        "parameters": [
+          {
+            "description": "Which OAuth provider to sign in with.",
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "description": "Which OAuth provider to sign in with.",
+              "pattern": "^(github|google)$",
+              "title": "Provider",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/AuthorizeResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Authorize",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/oauth/{provider}/callback": {
+      "post": {
+        "description": "Exchange an authorization code and set the HttpOnly session cookie.\n\nThe session is bound to the identity the provider's account resolves to,\nexactly as a password sign-in binds one to the identity that authenticated,\nso every request it later authenticates resolves the same caller.\n\nA refusal is counted like the other sign-in failures\n(``record_auth_failure``) and rendered by the tenancy error handler. Like\nthe passkey route there is no separate post-failure throttle: this route is\nthrottled unconditionally on the way in, because there is no legitimate\ncaller here whose correct credential must never be blocked. An authorization\ncode is single-use and minted by a redirect, not something a person retries\nby hand.\n\n**Maintenance mode freezes this the way it freezes the other two sign-ins.**\nThe freeze is on starting a session, not on a credential, so an OAuth sign-in\nhas to answer to it or the switch is bypassable by anybody holding a Google\naccount. Refused before the exchange, so a frozen deployment makes no\noutbound call, spends nobody's authorization code, and counts no auth\nfailure: nobody failed to authenticate, the gateway declined to try.",
+        "operationId": "callback_v1_auth_oauth__provider__callback_post",
+        "parameters": [
+          {
+            "description": "Which OAuth provider to sign in with.",
+            "in": "path",
+            "name": "provider",
+            "required": true,
+            "schema": {
+              "description": "Which OAuth provider to sign in with.",
+              "pattern": "^(github|google)$",
+              "title": "Provider",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OAuthCallbackRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OAuthSessionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Callback",
+        "tags": [
+          "auth"
         ]
       }
     },

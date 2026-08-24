@@ -33,6 +33,18 @@ PROVIDER_TYPE_ALIASES = {
     "anthropic_compatible": "anthropic",
 }
 X_API_KEY_HEADER = "x-api-key"  # Anthropic-native clients send credentials here (no Bearer prefix).
+
+# The OAuth providers a deployment may configure dashboard sign-in with, in the
+# spelling that appears in a config key (``oauth_google_client_id``), on the
+# wire (``GET /v1/bootstrap``'s ``oauth_providers``, the route path segment),
+# and in the ``user.oauth_provider`` column. One vocabulary rather than four,
+# and it lives here because the config fields are what make a provider real on
+# a deployment; ``services.oauth_service`` holds what each one means.
+#
+# Not an enum: the column stores a plain string so an overlay binding its own
+# ``IdentityProviderPort`` can record a connection this tuple never named, and
+# a closed enum here would make that value unrepresentable.
+OAUTH_PROVIDERS: tuple[str, ...] = ("github", "google")
 # Per-request opt-out for a policy's learned router: "off" serves the policy's
 # default target and skips the router entirely. There is no "force on": the
 # router is enabled by the policy, not by the caller.
@@ -456,6 +468,32 @@ class GatewayConfig(BaseSettings):
             "relying-party ID; every entry must be the relying-party ID or a subdomain of it, "
             "which is checked at startup."
         ),
+    )
+    oauth_google_client_id: str | None = Field(
+        default=None,
+        description=(
+            "The Google OAuth client ID dashboard sign-in uses. Set this and "
+            "oauth_google_client_secret to offer 'Sign in with Google'; with either missing, the "
+            "provider is absent from the sign-in screen rather than offered and then refused. "
+            "public_base_url has to be set too, because the redirect URI is derived from it."
+        ),
+    )
+    oauth_google_client_secret: str | None = Field(
+        default=None,
+        description="The Google OAuth client secret paired with oauth_google_client_id.",
+    )
+    oauth_github_client_id: str | None = Field(
+        default=None,
+        description=(
+            "The GitHub OAuth client ID dashboard sign-in uses. Set this and "
+            "oauth_github_client_secret to offer 'Sign in with GitHub'; with either missing, the "
+            "provider is absent from the sign-in screen rather than offered and then refused. "
+            "public_base_url has to be set too, because the redirect URI is derived from it."
+        ),
+    )
+    oauth_github_client_secret: str | None = Field(
+        default=None,
+        description="The GitHub OAuth client secret paired with oauth_github_client_id.",
     )
     mail_transport: str = Field(
         default="auto",
@@ -1142,6 +1180,39 @@ class GatewayConfig(BaseSettings):
         if not self.public_base_url:
             missing.append("public_base_url")
         return tuple(missing)
+
+    def oauth_client_credentials(self, provider: str) -> tuple[str, str] | None:
+        """The client ID and secret configured for ``provider``, or None.
+
+        None is a deployment that did not configure this provider, which is a
+        setting and not a failure: the sign-in screen simply does not offer it
+        (``GET /v1/bootstrap``'s ``oauth_providers``).
+
+        ``public_base_url`` is part of being configured rather than a separate
+        check, because the redirect URI is derived from it
+        (``services.oauth_service.redirect_uri``) and a provider whose
+        authorization URL cannot be built is not on offer. Half a pair (an ID
+        with no secret) reads as unconfigured for the same reason: the exchange
+        would fail at the provider, and offering the button would be a promise
+        this deployment cannot keep.
+        """
+        if not self.public_base_url:
+            return None
+        client_id = getattr(self, f"oauth_{provider}_client_id", None)
+        client_secret = getattr(self, f"oauth_{provider}_client_secret", None)
+        if not client_id or not client_secret:
+            return None
+        return client_id, client_secret
+
+    @property
+    def oauth_providers(self) -> tuple[str, ...]:
+        """Which OAuth providers this deployment can sign somebody in with, sorted.
+
+        Empty on a deployment that configured none, which is the default, and
+        which is why the sign-in screen carries no OAuth affordance out of the
+        box rather than a pair of dead buttons.
+        """
+        return tuple(sorted(name for name in OAUTH_PROVIDERS if self.oauth_client_credentials(name) is not None))
 
     @property
     def webauthn_relying_party(self) -> RelyingParty | None:

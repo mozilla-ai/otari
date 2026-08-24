@@ -2,7 +2,12 @@ import { Button, Card, Input, Label, Link, TextField } from "@heroui/react"
 import { useState } from "react"
 import { useAuth } from "@/features/auth/AuthContext"
 import type { SignInCredential } from "@/shared/api/client"
-import { ApiError, createSession, signInWithPasskey } from "@/shared/api/client"
+import {
+  ApiError,
+  createSession,
+  signInWithPasskey,
+  startOAuthSignIn,
+} from "@/shared/api/client"
 import { errorMessage } from "@/shared/components/ui"
 import {
   PasskeyCancelledError,
@@ -16,6 +21,12 @@ import {
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 
+import { rememberOAuthState } from "./OAuthCallbackPage"
+import {
+  OAUTH_PROVIDER_ICONS,
+  oauthProviderLabel,
+  renderableOAuthProviders,
+} from "./oauthProviders"
 import { PublicAuthLink } from "./PublicAuthLayout"
 
 /** Which box an error belongs beside. */
@@ -243,8 +254,10 @@ function LabelRow({
  *
  * A passkey signs in beside the form rather than instead of it (otari#652),
  * offered only when the gateway publishes `passkey` *and* this browser can run
- * the ceremony. The OAuth buttons are still #651's, and are absent rather than
- * disabled: that backend has not landed.
+ * the ceremony. OAuth sits beside both (otari#651), one button per provider in
+ * the bootstrap's `oauth_providers`, which lists only the providers an operator
+ * configured: a provider nobody set up is absent rather than rendered disabled,
+ * and a deployment that configured none carries no OAuth affordance at all.
  *
  * Three decisions here are load-bearing rather than cosmetic, and each carries
  * its own note where it is made: the card is anchored instead of centered, a
@@ -255,7 +268,8 @@ function LabelRow({
 export function Login() {
   const { login, isSigningOut } = useAuth()
   const { recordEvent } = useTelemetry()
-  const { sign_in_methods, mail_ready, maintenance_mode } = useDeployment()
+  const { sign_in_methods, mail_ready, maintenance_mode, oauth_providers } =
+    useDeployment()
   const usesPassword = sign_in_methods.includes("password")
   // An empty list is the gateway saying it cannot mint a session at all right
   // now, which is what `/v1/bootstrap` answers when it cannot reach its
@@ -277,6 +291,11 @@ export function Login() {
   // that cannot run the ceremony would turn the button into a dead end.
   const offersPasskey =
     sign_in_methods.includes("passkey") && supportsPasskeys()
+  // Narrowed rather than rendered straight from the bootstrap: the gateway's
+  // provider vocabulary is open (an overlay may bind an adapter for a
+  // connection this build never named), and a provider with no label here would
+  // become a button with no name.
+  const oauthProviders = renderableOAuthProviders(oauth_providers)
 
   const [masterKey, setMasterKey] = useState("")
   const [isKeyVisible, setIsKeyVisible] = useState(false)
@@ -290,6 +309,10 @@ export function Login() {
   // say the browser is waiting on an authenticator, which is a wait the person
   // has to act on rather than one they watch.
   const [isPasskeyPending, setIsPasskeyPending] = useState(false)
+  // Which provider button was pressed, so only that one reads "Redirecting…".
+  // The navigation that follows leaves this page, so this is never cleared on
+  // success; it clears on the refusal path, where the person stays here.
+  const [pendingProvider, setPendingProvider] = useState<string | null>(null)
 
   const clearError = () => {
     if (error) {
@@ -499,6 +522,55 @@ export function Login() {
       setError(caught)
     } finally {
       setIsPasskeyPending(false)
+    }
+  }
+
+  /**
+   * Start an OAuth sign-in: ask the gateway for a consent URL, then leave.
+   *
+   * The `state` the gateway mints is stored before the navigation and compared
+   * on the way back, in `OAuthCallbackPage`. That is the CSRF check, and it
+   * happens in the browser because this deployment keeps nothing between the
+   * two requests; see `src/gateway/services/oauth_service.py`.
+   *
+   * `window.location.assign` rather than a router navigation, because the
+   * destination is the provider's own origin: this really is leaving the app.
+   * No success telemetry is recorded here. Nothing has succeeded yet, and the
+   * callback page records the outcome once there is one.
+   */
+  const submitOAuth = async (provider: string) => {
+    if (isSubmitting || isSigningOut || isPasskeyPending || pendingProvider) {
+      return
+    }
+    setError(null)
+    setErrorField(null)
+    setPendingProvider(provider)
+    try {
+      const started = await startOAuthSignIn(provider)
+      if (!started.ok) {
+        recordEvent(TELEMETRY_EVENTS.LOGIN_FAILED, {
+          authentication_method: provider,
+          error_code: analyticsStatusCode(started.status),
+        })
+        fail(
+          usesPassword ? "password" : "masterKey",
+          started.message ??
+            `${oauthProviderLabel(provider)} sign-in is not available on this gateway.`,
+        )
+        setPendingProvider(null)
+        return
+      }
+      rememberOAuthState(started.state)
+      window.location.assign(started.authorizationUrl)
+    } catch (caught) {
+      recordEvent(TELEMETRY_EVENTS.LOGIN_FAILED, {
+        authentication_method: provider,
+        error_code: analyticsErrorCode(caught),
+        status: caught instanceof ApiError ? caught.status : undefined,
+      })
+      setErrorField(usesPassword ? "password" : "masterKey")
+      setError(caught)
+      setPendingProvider(null)
     }
   }
 
@@ -742,11 +814,13 @@ export function Login() {
             </Button>
           </form>
 
-          {offersPasskey ? (
+          {offersPasskey || oauthProviders.length > 0 ? (
             <div className="flex flex-col gap-3">
-              {/* A rule with the word on it, rather than a bare divider: the
-                  passkey is an alternative to the form above, not a second step
-                  of it, and an unlabeled line reads as the latter. */}
+              {/* A rule with the word on it, rather than a bare divider: these
+                  are alternatives to the form above, not a second step of it,
+                  and an unlabeled line reads as the latter. One rule for both
+                  groups, however many buttons follow it, because they are all
+                  the same alternative: another way to prove the same thing. */}
               <div
                 className="flex items-center gap-3 text-xs text-muted"
                 aria-hidden
@@ -755,18 +829,54 @@ export function Login() {
                 or
                 <span className="h-px flex-1 bg-border" />
               </div>
-              <Button
-                type="button"
-                variant="secondary"
-                fullWidth
-                isDisabled={isSubmitting || isSigningOut}
-                onPress={() => void submitPasskey()}
-                className="h-11"
-              >
-                {isPasskeyPending
-                  ? "Waiting for your passkey…"
-                  : "Use a passkey"}
-              </Button>
+              {offersPasskey ? (
+                <Button
+                  type="button"
+                  variant="secondary"
+                  fullWidth
+                  isDisabled={
+                    isSubmitting || isSigningOut || pendingProvider !== null
+                  }
+                  onPress={() => void submitPasskey()}
+                  className="h-11"
+                >
+                  {isPasskeyPending
+                    ? "Waiting for your passkey…"
+                    : "Use a passkey"}
+                </Button>
+              ) : null}
+              {oauthProviders.map((provider) => {
+                const Mark = OAUTH_PROVIDER_ICONS[provider]
+                const isRedirecting = pendingProvider === provider
+                return (
+                  <Button
+                    key={provider}
+                    type="button"
+                    variant="secondary"
+                    fullWidth
+                    isDisabled={
+                      isSubmitting ||
+                      isSigningOut ||
+                      isPasskeyPending ||
+                      pendingProvider !== null
+                    }
+                    onPress={() => void submitOAuth(provider)}
+                    className="h-11"
+                  >
+                    {/* The mark is decorative: the label beside it already
+                        names the provider, so announcing it again would read
+                        the button's own text twice. Dropped while redirecting,
+                        so the row does not keep a logo beside a label that no
+                        longer names a provider to press. */}
+                    {isRedirecting ? null : (
+                      <Mark className="text-xl" aria-hidden />
+                    )}
+                    {isRedirecting
+                      ? "Redirecting…"
+                      : `Sign in with ${oauthProviderLabel(provider)}`}
+                  </Button>
+                )
+              })}
             </div>
           ) : null}
 

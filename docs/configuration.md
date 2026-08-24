@@ -62,11 +62,15 @@ pricing:
 | `host` | string | `0.0.0.0` | Server bind host |
 | `port` | int | `8000` | Server bind port |
 | `master_key` | string | none | Master key for management endpoints |
-| `public_base_url` | string | none | This deployment's own externally-reachable URL, no trailing slash. Needed to put an absolute link in outgoing email (see [Mail](#mail)), and to derive the relying-party ID passkeys are bound to (see [Access control](access-control.md#passkeys)). |
+| `public_base_url` | string | none | This deployment's own externally-reachable URL, no trailing slash. Needed to put an absolute link in outgoing email (see [Mail](#mail)), to derive the relying-party ID passkeys are bound to (see [Access control](access-control.md#passkeys)), and to derive the OAuth redirect URI (see [OAuth sign-in](access-control.md#oauth-sign-in-google-and-github)). |
 | `docs_url` | string | none | Where this deployment's documentation lives, as an absolute `http(s)` URL. Unset, the dashboard's **Documentation** links open the operator guide bundled with the gateway at `/#/docs`. See [Documentation links](#documentation-links). |
 | `webauthn_rp_id` | string | host of `public_base_url` | The domain passkeys are bound to: bare, with no scheme, port or path. An override rather than an alternative to `public_base_url`, which is still needed as the origin a ceremony runs from. Changing it orphans every passkey already registered. |
 | `webauthn_rp_name` | string | `otari` | The name an authenticator shows while a passkey is created, and files it under. Cosmetic; nothing verifies it. |
 | `webauthn_allowed_origins` | list | `[public_base_url]` | Origins a ceremony may run from, each with a scheme. Set only when several origins serve one dashboard under one relying-party ID; every entry must be that ID or a subdomain of it, checked at startup. |
+| `oauth_google_client_id` | string | none | Google OAuth client ID for dashboard sign-in. Google is offered only with this, its secret, and `public_base_url` all set; otherwise the sign-in screen omits it. See [OAuth sign-in](access-control.md#oauth-sign-in-google-and-github). |
+| `oauth_google_client_secret` | string | none | The secret paired with `oauth_google_client_id`. |
+| `oauth_github_client_id` | string | none | GitHub OAuth client ID for dashboard sign-in, on the same all-or-nothing terms as the Google pair. |
+| `oauth_github_client_secret` | string | none | The secret paired with `oauth_github_client_id`. |
 | `mail_transport` | string | `auto` | Which transport delivers outgoing mail: `auto`, `smtp`, `console`, or `none`. See [Mail](#mail). |
 | `smtp_host` | string | none | SMTP server host for outgoing mail. Unset disables mail entirely under the default `auto` transport. |
 | `smtp_port` | int | `587` | SMTP server port |

@@ -27,11 +27,13 @@ function Mounted({
   signInMethods = ["master_key"],
   mailReady = false,
   maintenanceMode = false,
+  oauthProviders = [],
 }: {
   children: React.ReactNode
   signInMethods?: ("master_key" | "password" | "passkey")[]
   mailReady?: boolean
   maintenanceMode?: boolean
+  oauthProviders?: string[]
 }) {
   return (
     <AppProviders>
@@ -40,6 +42,7 @@ function Mounted({
           sign_in_methods: signInMethods,
           mail_ready: mailReady,
           maintenance_mode: maintenanceMode,
+          oauth_providers: oauthProviders,
         })}
       >
         {children}
@@ -1019,6 +1022,137 @@ describe("Login with a passkey", () => {
           {
             authentication_method: "passkey",
             error_code: "passkey_cancelled",
+          },
+        ),
+      )
+    })
+  })
+
+  describe("OAuth sign-in", () => {
+    // `window.location.assign` is not implemented in jsdom, and the whole point
+    // of the success path is that it leaves the page, so it is stubbed and
+    // asserted on rather than allowed to run.
+    function stubNavigation() {
+      const assign = vi.fn()
+      Object.defineProperty(window, "location", {
+        configurable: true,
+        value: { ...window.location, assign, hash: "" },
+      })
+      return assign
+    }
+
+    afterEach(() => {
+      window.sessionStorage.clear()
+    })
+
+    it("offers one button per provider the gateway publishes, and none otherwise", () => {
+      const { rerender } = render(
+        <Mounted signInMethods={["password"]}>
+          <Harness />
+        </Mounted>,
+      )
+      // A deployment that registered no OAuth client carries no affordance at
+      // all: absent rather than disabled.
+      expect(
+        screen.queryByRole("button", { name: /Sign in with/ }),
+      ).not.toBeInTheDocument()
+
+      rerender(
+        <Mounted signInMethods={["password"]} oauthProviders={["google"]}>
+          <Harness />
+        </Mounted>,
+      )
+      expect(
+        screen.getByRole("button", { name: "Sign in with Google" }),
+      ).toBeInTheDocument()
+      // GitHub is configured on some deployment, just not this one.
+      expect(
+        screen.queryByRole("button", { name: "Sign in with GitHub" }),
+      ).not.toBeInTheDocument()
+    })
+
+    it("skips a provider this dashboard has no name for", () => {
+      // The gateway's provider vocabulary is open, so a bootstrap may carry a
+      // connection an overlay bound. Rendering it would produce a button with
+      // no label rather than a sign-in.
+      render(
+        <Mounted
+          signInMethods={["password"]}
+          oauthProviders={["google", "acme-oidc"]}
+        >
+          <Harness />
+        </Mounted>,
+      )
+      expect(
+        screen.getAllByRole("button", { name: /Sign in with/ }),
+      ).toHaveLength(1)
+    })
+
+    it("stores the state the gateway minted, then leaves for the provider", async () => {
+      const assign = stubNavigation()
+      const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        jsonResponse({
+          authorization_url: "https://accounts.google.com/o/oauth2/v2/auth?x=1",
+          state: "the-state",
+        }),
+      )
+      const user = userEvent.setup()
+
+      render(
+        <Mounted signInMethods={["password"]} oauthProviders={["google"]}>
+          <Harness />
+        </Mounted>,
+      )
+      await user.click(
+        screen.getByRole("button", { name: "Sign in with Google" }),
+      )
+
+      await waitFor(() => expect(assign).toHaveBeenCalled())
+      expect(fetchMock.mock.calls[0]?.[0]).toBe(
+        "/v1/auth/oauth/google/authorize",
+      )
+      // Stored *before* the navigation, or the callback would have nothing to
+      // compare the returned state against.
+      expect(window.sessionStorage.getItem("otari.oauth.state")).toBe(
+        "the-state",
+      )
+      expect(assign).toHaveBeenCalledWith(
+        "https://accounts.google.com/o/oauth2/v2/auth?x=1",
+      )
+      // Nothing has succeeded yet: the callback records the outcome.
+      expect(recordEvent).not.toHaveBeenCalledWith(
+        TELEMETRY_EVENTS.LOGIN_SUCCESS,
+        expect.anything(),
+      )
+    })
+
+    it("renders the gateway's refusal beside the form, and does not navigate", async () => {
+      const assign = stubNavigation()
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        jsonResponse({ detail: "Google sign-in is not configured." }, 503),
+      )
+      const user = userEvent.setup()
+
+      render(
+        <Mounted signInMethods={["password"]} oauthProviders={["google"]}>
+          <Harness />
+        </Mounted>,
+      )
+      await user.click(
+        screen.getByRole("button", { name: "Sign in with Google" }),
+      )
+
+      expect(
+        await screen.findByText("Google sign-in is not configured."),
+      ).toBeInTheDocument()
+      expect(assign).not.toHaveBeenCalled()
+      expect(window.sessionStorage.getItem("otari.oauth.state")).toBeNull()
+      await waitFor(() =>
+        expect(recordEvent).toHaveBeenCalledWith(
+          TELEMETRY_EVENTS.LOGIN_FAILED,
+          {
+            authentication_method: "google",
+            error_code: "http_503",
           },
         ),
       )

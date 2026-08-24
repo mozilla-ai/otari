@@ -279,9 +279,48 @@ Set `webauthn_rp_id` explicitly to bind passkeys to a **parent** domain of the o
 
 Because a relying-party ID cannot move, one constraint outlives this document. [mozilla-ai/otari-ai#1716](https://github.com/mozilla-ai/otari-ai/issues/1716) settled that migrating otari.ai users **import their credentials rather than claiming new accounts**; an imported row's `rp_id` is `otari.ai`, so that import holds exactly while the hosted origin stays `otari.ai`. Moving it re-scopes every imported passkey and the people holding them have to register again.
 
+#### OAuth sign-in (Google and GitHub)
+
+Sign in with a Google or GitHub account instead of typing a credential. Off by default: a deployment that registers no OAuth client offers no OAuth affordance at all, and the sign-in screen has no dead buttons on it.
+
+**It widens how a member signs in, never who may.** An OAuth identity signs in as an account an operator already put on the roster, matched on the address the provider vouches for. An address nobody added is refused rather than provisioned, which is the same rule signup already follows: enabling Google sign-in must not mean that every holder of a Google account can get into your gateway. The decision sits behind `IdentityProviderPort`, so an edition that wants to provision on first sight binds its own adapter and Otari's own is left alone.
+
+Turning it on takes a registered OAuth client and three settings:
+
+| Setting | Meaning |
+| --- | --- |
+| `oauth_google_client_id` / `oauth_google_client_secret` | The Google OAuth client. Both, or Google is not offered. |
+| `oauth_github_client_id` / `oauth_github_client_secret` | The GitHub OAuth client. Both, or GitHub is not offered. |
+| `public_base_url` | This deployment's own address. The redirect URI is derived from it, so without one neither provider is offered. |
+
+Register the redirect URI with the provider as exactly `{public_base_url}/auth/{provider}/callback`, for example `https://otari.example.com/auth/google/callback`. It is **not** a dashboard hash path, and cannot be: a redirection URI may not carry a fragment ([RFC 6749 §3.1.2](https://www.rfc-editor.org/rfc/rfc6749#section-3.1.2), and Google rejects one outright). The gateway serves that plain path and redirects it into the dashboard page that finishes the sign-in. Otari derives both the URI it sends with the authorization request and the one it sends with the exchange from this single setting, so the two cannot disagree with each other; they can still disagree with what you registered, which is the usual cause of an `invalid_grant` from the provider.
+
+`GET /v1/bootstrap` reports the configured providers in `oauth_providers`, and the sign-in screen renders one button per entry. Like passkeys this is **additive**: it sits beside whichever typed credential the deployment currently takes, and never replaces one.
+
+```bash
+# 1. Ask where to send the browser. The state comes back for the browser to keep.
+curl http://localhost:8000/v1/auth/oauth/google/authorize
+
+# 2. The person completes the consent screen and lands back on
+#    /auth/google/callback?code=...&state=..., which redirects into the
+#    dashboard. Once the dashboard has checked the state it spends the code:
+curl -X POST http://localhost:8000/v1/auth/oauth/google/callback \
+  -H "Content-Type: application/json" -d '{"code": "<the code>"}'
+```
+
+The exchange mints the same HttpOnly session cookie a password does, so nothing downstream of a sign-in behaves differently. Three refusals are worth knowing, and each says what to do: a provider that will not vouch for the address (`401`), an address no active identity here holds (`401`), and a provider this deployment did not configure (`503`, naming the settings). A deactivated identity is refused as unknown rather than told its account is switched off.
+
+**A verified provider address lifts the local verification gate.** A member an operator added has never confirmed their address to this gateway, and the password login hard-blocks that. The provider's assertion is a stronger proof of the same fact, so an OAuth sign-in stamps the verification and lets them in. On a deployment with no outgoing mail, that is the only way a member can get in without an operator setting something up for them.
+
+**PKCE is deliberately off**, and turning it on is a real change rather than a default to restore. Authorizing and calling back are two independent requests with nothing kept server-side between them, so a PKCE verifier minted while building the authorization URL would have nowhere to live until the exchange. The CSRF `state` survives that gap by living in the browser instead: the dashboard stores it in `sessionStorage` when it sends somebody to the provider and compares it when the provider sends them back, and a callback whose state does not match is abandoned without the code ever reaching this gateway. Enabling PKCE needs a shared server-side store first.
+
+**`email_verified` is read strictly.** The provider reports it as three states, not two: vouched for, explicitly not, or never mentioned. Otari treats the third as unverified, so an address a provider merely returned is never laundered into a verified identity. ([mozilla-ai/otari-ai#1551](https://github.com/mozilla-ai/otari-ai/issues/1551) moves identity resolution onto that three-state model and onto keying by provider subject rather than by address.)
+
+The protocol mechanics come from [apron-auth](https://pypi.org/project/apron-auth/), which owns the provider endpoints, the code exchange and the userinfo fetch. What Otari keeps is which providers are configured, which scopes are asked for (`openid email profile` for Google; `read:user user:email` for GitHub), and how a fetched identity maps onto an account here.
+
 #### Who can sign in
 
-An identity with a password can sign in once it has verified its address: the operator gets one by claiming the deployment (verified automatically, since the master key proved it), and a roster member gets one by signing up (verified by the link). There is still no way for an admin to set a password on somebody else's identity; a member added or invited by address holds a role and can be placed in workspaces, but only that address's own signup or reset gives it a way in. Passkeys are described above, and are added to an identity that can already sign in rather than being a way in of their own. OAuth sign-in is the rest of the identity track.
+An identity with a password can sign in once it has verified its address: the operator gets one by claiming the deployment (verified automatically, since the master key proved it), and a roster member gets one by signing up (verified by the link). There is still no way for an admin to set a password on somebody else's identity; a member added or invited by address holds a role and can be placed in workspaces, but only that address's own signup or reset gives it a way in. Passkeys and OAuth are described above, and neither is a way in of its own: a passkey is added to an identity that can already sign in, and an OAuth account signs in as a roster identity that already exists. So the roster is still the whole answer to who may sign in, whichever credential they use.
 
 A session is revoked on sign-out, on a password change as described above, on master-key rotation (every session, with the rotating tab's own re-minted for the same identity), when the master key changes across a restart, and when the identity it names is deleted or deactivated. A deactivated identity also stops being able to sign in, rather than keeping access until its cookie expires. Deactivation is enforced when the session is read, and the identity's sessions are deleted at that point rather than only refused, so re-activating it later does not hand back the access of any cookie that was presented while it was off. Nothing sweeps the rest: a cookie that is never presented in that window survives to its TTL, because no flow here deactivates an identity and none therefore revokes ahead of the read.
 

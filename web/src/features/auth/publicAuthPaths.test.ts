@@ -2,8 +2,12 @@ import { describe, expect, it } from "vitest"
 
 import {
   isPublicAuthPageAvailable,
+  oauthCallbackProvider,
   publicAuthPath,
 } from "@/features/auth/publicAuthPaths"
+
+/** A deployment with mail off and no OAuth provider, which each test narrows. */
+const NOTHING_CONFIGURED = { mailReady: false, oauthProviders: [] } as const
 
 describe("publicAuthPath", () => {
   it("matches on the path alone, so a query string does not hide a known page", () => {
@@ -43,13 +47,59 @@ describe("isPublicAuthPageAvailable", () => {
       "/resend-verification",
       "/recover-password",
     ] as const) {
-      expect(isPublicAuthPageAvailable(path, false)).toBe(false)
-      expect(isPublicAuthPageAvailable(path, true)).toBe(true)
+      expect(isPublicAuthPageAvailable(path, NOTHING_CONFIGURED)).toBe(false)
+      expect(
+        isPublicAuthPageAvailable(path, {
+          ...NOTHING_CONFIGURED,
+          mailReady: true,
+        }),
+      ).toBe(true)
     }
   })
 
   it("keeps the two token-landing pages open, since their message was already sent", () => {
-    expect(isPublicAuthPageAvailable("/verify-email", false)).toBe(true)
-    expect(isPublicAuthPageAvailable("/reset-password", false)).toBe(true)
+    expect(isPublicAuthPageAvailable("/verify-email", NOTHING_CONFIGURED)).toBe(
+      true,
+    )
+    expect(
+      isPublicAuthPageAvailable("/reset-password", NOTHING_CONFIGURED),
+    ).toBe(true)
+  })
+
+  it("opens an OAuth callback only for a provider this deployment configured", () => {
+    // Per provider, not per flow: a gateway with Google configured and GitHub
+    // not must answer the GitHub callback with the panel, or a bookmark reaches
+    // a page whose only outcome is the gateway's 503.
+    const googleOnly = { mailReady: false, oauthProviders: ["google"] }
+    expect(isPublicAuthPageAvailable("/auth/google/callback", googleOnly)).toBe(
+      true,
+    )
+    expect(isPublicAuthPageAvailable("/auth/github/callback", googleOnly)).toBe(
+      false,
+    )
+    expect(
+      isPublicAuthPageAvailable("/auth/google/callback", NOTHING_CONFIGURED),
+    ).toBe(false)
+  })
+
+  it("does not gate an OAuth callback on mail, which it never sends", () => {
+    expect(
+      isPublicAuthPageAvailable("/auth/google/callback", {
+        mailReady: false,
+        oauthProviders: ["google"],
+      }),
+    ).toBe(true)
+  })
+})
+
+describe("oauthCallbackProvider", () => {
+  it("names the provider an OAuth callback path finishes", () => {
+    expect(oauthCallbackProvider("/auth/google/callback")).toBe("google")
+    expect(oauthCallbackProvider("/auth/github/callback")).toBe("github")
+  })
+
+  it("answers null for every page that is not one", () => {
+    expect(oauthCallbackProvider("/signup")).toBeNull()
+    expect(oauthCallbackProvider("/reset-password")).toBeNull()
   })
 })

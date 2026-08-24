@@ -57,6 +57,7 @@ def test_standalone_reports_a_local_operator_and_the_full_surface_set(tmp_path: 
         "docs_url": None,
         "maintenance_mode": False,
         "passkeys_ready": False,
+        "oauth_providers": [],
         "mail_ready": False,
     }
 
@@ -194,6 +195,7 @@ def test_hybrid_reports_no_session_no_surfaces_and_the_hosted_url(monkeypatch: p
         "docs_url": None,
         "maintenance_mode": False,
         "passkeys_ready": False,
+        "oauth_providers": [],
         "mail_ready": False,
     }
 

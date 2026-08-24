@@ -303,6 +303,69 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/auth/oauth/{provider}/authorize": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Authorize
+         * @description Start an OAuth sign-in: where to send the browser, and the state to keep.
+         *
+         *     A GET, and safe: it reads configuration and mints a random value, writing
+         *     nothing. Repeating it simply produces another state, and only the one the
+         *     browser kept is the one it will compare against.
+         */
+        get: operations["authorize_v1_auth_oauth__provider__authorize_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/oauth/{provider}/callback": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Callback
+         * @description Exchange an authorization code and set the HttpOnly session cookie.
+         *
+         *     The session is bound to the identity the provider's account resolves to,
+         *     exactly as a password sign-in binds one to the identity that authenticated,
+         *     so every request it later authenticates resolves the same caller.
+         *
+         *     A refusal is counted like the other sign-in failures
+         *     (``record_auth_failure``) and rendered by the tenancy error handler. Like
+         *     the passkey route there is no separate post-failure throttle: this route is
+         *     throttled unconditionally on the way in, because there is no legitimate
+         *     caller here whose correct credential must never be blocked. An authorization
+         *     code is single-use and minted by a redirect, not something a person retries
+         *     by hand.
+         *
+         *     **Maintenance mode freezes this the way it freezes the other two sign-ins.**
+         *     The freeze is on starting a session, not on a credential, so an OAuth sign-in
+         *     has to answer to it or the switch is bypassable by anybody holding a Google
+         *     account. Refused before the exchange, so a frozen deployment makes no
+         *     outbound call, spends nobody's authorization code, and counts no auth
+         *     failure: nobody failed to authenticate, the gateway declined to try.
+         */
+        post: operations["callback_v1_auth_oauth__provider__callback_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/auth/password": {
         parameters: {
             query?: never;
@@ -4246,6 +4309,22 @@ export interface components {
                 [key: string]: unknown;
             };
         };
+        /**
+         * AuthorizeResponse
+         * @description Where to send the browser, and the state to check when it comes back.
+         */
+        AuthorizeResponse: {
+            /**
+             * Authorization Url
+             * @description The provider consent screen to navigate to.
+             */
+            authorization_url: string;
+            /**
+             * State
+             * @description An opaque CSRF value to keep for the length of the redirect and compare against the 'state' the provider returns. It is not stored on this deployment, so a callback whose state does not match the one held by the browser that started the flow must be abandoned by the client rather than sent here.
+             */
+            state: string;
+        };
         /** BatchRequestItem */
         BatchRequestItem: {
             /** Body */
@@ -4998,6 +5077,11 @@ export interface components {
              * @description Where the authoritative control plane lives when it is not this deployment. Set for a hybrid gateway so its landing page can link to otari.ai; null otherwise.
              */
             management_url: string | null;
+            /**
+             * Oauth Providers
+             * @description OAuth providers this deployment can sign somebody in with, sorted, one entry per provider with a client ID, a client secret and a public_base_url to build a redirect URI from. The sign-in screen renders a button per entry and none at all when the list is empty, so a provider nobody configured is absent rather than offered and then refused. Additive to sign_in_methods rather than part of it: an OAuth sign-in coexists with whichever typed credential is current, the way a passkey does. Empty for a hybrid gateway, which issues no session.
+             */
+            oauth_providers: string[];
             /**
              * Passkeys Ready
              * @description Whether this deployment can run a passkey ceremony at all: it has a relying-party ID (webauthn_rp_id, or derived from public_base_url) and an origin to serve one from. Distinct from 'passkey' in sign_in_methods, which is narrower and answers whether a registered passkey could sign somebody in *right now*: an operator with none yet needs this one, or the page that registers the first would be hidden from them. False for a hybrid gateway, which issues no session of its own.
@@ -6052,6 +6136,54 @@ export interface components {
             provider_raw?: {
                 [key: string]: unknown;
             } | null;
+        };
+        /**
+         * OAuthCallbackRequest
+         * @description The authorization code a provider handed the browser.
+         *
+         *     No ``redirect_uri``: this deployment derives its own from ``public_base_url``
+         *     so the URI used to build the authorization request and the one sent with the
+         *     exchange are the same string by construction, and a browser cannot choose
+         *     what this server sends to a provider.
+         *
+         *     No ``state`` either, and that is not an omission. The state is checked in the
+         *     browser, against the value that browser stored when it started the flow;
+         *     sending it here would let this deployment compare a value to itself, which
+         *     proves nothing without somewhere to have kept the original.
+         */
+        OAuthCallbackRequest: {
+            /**
+             * Code
+             * @description The authorization code from the provider's redirect.
+             */
+            code: string;
+        };
+        /**
+         * OAuthSessionResponse
+         * @description A dashboard session minted by an OAuth sign-in (the token travels only in the cookie).
+         *
+         *     The same three fields ``POST /v1/auth/session`` answers, deliberately: the
+         *     dashboard's sign-in path does not care which credential got it here.
+         */
+        OAuthSessionResponse: {
+            /**
+             * Active Organization Id
+             * Format: uuid
+             * @description The organization that identity is acting in, which scopes every tenancy surface.
+             */
+            active_organization_id: string;
+            /**
+             * Expires At
+             * Format: date-time
+             * @description When the session cookie stops being accepted.
+             */
+            expires_at: string;
+            /**
+             * User Id
+             * Format: uuid
+             * @description The identity this session speaks for.
+             */
+            user_id: string;
         };
         /**
          * OrgProviderKeyCreateRequest
@@ -9548,6 +9680,74 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    authorize_v1_auth_oauth__provider__authorize_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Which OAuth provider to sign in with. */
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["AuthorizeResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    callback_v1_auth_oauth__provider__callback_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                /** @description Which OAuth provider to sign in with. */
+                provider: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OAuthCallbackRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OAuthSessionResponse"];
                 };
             };
             /** @description Validation Error */

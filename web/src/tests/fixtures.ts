@@ -120,6 +120,10 @@ export function bootstrap(
     // Off by default, matching a deployment that has not set public_base_url:
     // the passkey tests turn it on rather than every other test turning it off.
     passkeys_ready: false,
+    // Empty by default, matching a deployment that registered no OAuth client:
+    // the OAuth tests name the providers they need rather than every other test
+    // clearing a list it does not care about.
+    oauth_providers: [],
     mail_ready: false,
     ...overrides,
   }

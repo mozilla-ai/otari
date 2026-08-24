@@ -2,12 +2,12 @@ import asyncio
 from collections.abc import AsyncGenerator
 from contextlib import asynccontextmanager
 from typing import Any, Callable
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from fastapi import FastAPI, Request, Response, status
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, HTMLResponse, JSONResponse
+from fastapi.responses import FileResponse, HTMLResponse, JSONResponse, RedirectResponse
 from fastapi.staticfiles import StaticFiles
 from starlette.middleware.base import BaseHTTPMiddleware, RequestResponseEndpoint
 from typing_extensions import override
@@ -116,6 +116,13 @@ _UNAUTHENTICATED_PATHS = frozenset(
         # the management surface.
         "/v1/auth/webauthn/authenticate/options",
         "/v1/auth/webauthn/authenticate",
+        # The OAuth sign-in, both halves, unauthenticated for the same reason:
+        # they are how a caller who holds no credential obtains a session. The
+        # authorization code in the second call is the credential, and it is not
+        # one of the header schemes below. Spelled with the path parameter
+        # because that is how the generated document keys them.
+        "/v1/auth/oauth/{provider}/authorize",
+        "/v1/auth/oauth/{provider}/callback",
     }
 )
 # Public, unauthenticated static assets that shared caches may keep. Paths here
@@ -538,6 +545,37 @@ def create_app(config: GatewayConfig) -> FastAPI:
         return app.openapi_schema
 
     app.openapi = custom_openapi  # type: ignore[method-assign]
+
+    if not config.is_hybrid_mode:
+
+        @app.get("/auth/{provider}/callback", include_in_schema=False)
+        async def oauth_callback_landing(provider: str, request: Request) -> RedirectResponse:
+            """Bounce a provider's redirect into the dashboard page that finishes it.
+
+            This path exists because a redirect URI may not carry a fragment
+            (RFC 6749; Google rejects one outright) and every dashboard page in
+            front of a session is a hash route. So the provider is given an
+            ordinary path, and this turns it into the hash route
+            ``DeploymentRoot`` renders ahead of the auth gate, carrying the
+            query the provider appended.
+
+            It holds no credential and decides nothing: the code in that query
+            is spent by ``POST /v1/auth/oauth/{provider}/callback``, which the
+            page reaches only after checking the state against the value the
+            browser stored. 303 rather than 307, so a browser that followed a
+            POST here would not repeat it against a page.
+
+            Not gated on the provider being configured, and not on the bundle
+            being built. A person is here because a provider sent them, and
+            landing on the dashboard's own "that did not work" panel beats a
+            bare 404 from a path they never typed.
+            """
+            query = request.url.query
+            target = f"/#/auth/{quote(provider, safe='')}/callback"
+            return RedirectResponse(
+                url=f"{target}?{query}" if query else target,
+                status_code=status.HTTP_303_SEE_OTHER,
+            )
 
     @app.get("/welcome", response_class=HTMLResponse, include_in_schema=False)
     async def root_tutorial() -> str:

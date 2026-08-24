@@ -166,8 +166,11 @@ deployment knows its own address. Setting `public_base_url` is enough on its
 own; `webauthn_rp_id` only overrides which domain the passkey is bound to and
 still needs an address to serve the ceremony from. A
 passkey is added to an identity that can already sign in rather than being a way
-in of its own, and it never replaces the password. OAuth sign-in is the rest of
-this track. See
+in of its own, and it never replaces the password. **Sign in with Google** and
+**Sign in with GitHub** work the same way, once you register an OAuth client and
+give the gateway its ID and secret: the buttons appear only for a provider you
+configured, and a Google or GitHub account signs in as somebody already on your
+roster rather than creating an account. See
 [Access control](access-control.md#dashboard-sessions-and-identity) for the full
 picture, including why a passkey is bound to one domain and what happens if that
 domain changes.
