@@ -903,4 +903,86 @@ describe("Login with a passkey", () => {
     )
     expect(screen.queryByText(/did not sign you in/)).not.toBeInTheDocument()
   })
+
+  // The sign-in funnel landed while this branch was in flight, so the passkey
+  // path has to report into it too or a whole authentication method is missing
+  // from the one place sign-in success is measurable.
+  describe("the telemetry it records", () => {
+    beforeEach(() => {
+      resetTelemetrySpy()
+    })
+
+    it("names the method on a success", async () => {
+      const get = vi.fn().mockResolvedValue(assertion())
+      stubAuthenticator(get)
+      mockCeremony(() => jsonResponse({ expires_at: "2026-09-01T00:00:00Z" }))
+      const user = userEvent.setup()
+
+      render(
+        <Mounted signInMethods={["passkey", "password"]}>
+          <Harness />
+        </Mounted>,
+      )
+      await user.click(screen.getByRole("button", { name: "Use a passkey" }))
+
+      expect(await screen.findByText("SIGNED IN")).toBeInTheDocument()
+      expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.LOGIN_SUCCESS, {
+        authentication_method: "passkey",
+      })
+    })
+
+    it("records a refusal with the gateway's status and none of its wording", async () => {
+      const get = vi.fn().mockResolvedValue(assertion())
+      stubAuthenticator(get)
+      mockCeremony(() =>
+        jsonResponse({ detail: "That passkey did not sign you in" }, 401),
+      )
+      const user = userEvent.setup()
+
+      render(
+        <Mounted signInMethods={["passkey", "password"]}>
+          <Harness />
+        </Mounted>,
+      )
+      await user.click(screen.getByRole("button", { name: "Use a passkey" }))
+
+      await waitFor(() =>
+        expect(recordEvent).toHaveBeenCalledWith(
+          TELEMETRY_EVENTS.LOGIN_FAILED,
+          {
+            authentication_method: "passkey",
+            error_code: "http_401",
+          },
+        ),
+      )
+    })
+
+    it("counts a dismissed prompt as its own outcome", async () => {
+      // Neither silence nor a generic failure: it is the most common way this
+      // button ends, and both alternatives misreport it.
+      const get = vi
+        .fn()
+        .mockRejectedValue(new DOMException("dismissed", "NotAllowedError"))
+      stubAuthenticator(get)
+      mockCeremony(() => jsonResponse({}))
+      const user = userEvent.setup()
+
+      render(
+        <Mounted signInMethods={["passkey", "password"]}>
+          <Harness />
+        </Mounted>,
+      )
+      await user.click(screen.getByRole("button", { name: "Use a passkey" }))
+
+      await waitFor(() =>
+        expect(recordEvent).toHaveBeenCalledWith(
+          TELEMETRY_EVENTS.LOGIN_FAILED,
+          {
+            authentication_method: "passkey",
+            error_code: "passkey_cancelled",
+          },
+        ),
+      )
+    })
+  })
 })
