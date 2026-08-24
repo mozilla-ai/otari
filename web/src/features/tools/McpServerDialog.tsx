@@ -3,6 +3,7 @@ import { useEffect, useState } from "react"
 
 import type { WorkspaceMcpServer } from "@/client"
 import { Field } from "@/shared/components/Field"
+import { SecretField } from "@/shared/components/SecretField"
 import { Checkbox, ErrorBanner } from "@/shared/components/ui"
 
 // The form behind both Add and Edit, one component rather than two: the only
@@ -173,7 +174,11 @@ export function McpServerDialog({
                 />
 
                 <div className="flex flex-col gap-2">
-                  <Field
+                  {/* Masked, like the provider API key it is the sibling of:
+                      the gateway stores this encrypted and never reads it back,
+                      so it must not sit in the clear on the one form that
+                      collects it, nor be offered to a password manager. */}
+                  <SecretField
                     label="Authorization token"
                     value={token}
                     // Typing a replacement takes the tick off Remove rather

@@ -33,8 +33,9 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
   { route: "/activity", name: "activity", heading: /activity/i },
   { route: "/tools", name: "tools", heading: /tools/i },
   // The one Tools child with an entry of its own. The other two render the
-  // page above filtered to one service, so the entry covers them; this one is a
-  // page in its own right, with a table and two dialogs nothing else captures.
+  // page above filtered to one service, so its entry covers them; this one is a
+  // page in its own right, and nothing else captures its table. Captured at
+  // rest, so its two dialogs are covered by neither this nor the vitest suite.
   {
     route: "/tools/mcp-servers",
     name: "tools-mcp-servers",

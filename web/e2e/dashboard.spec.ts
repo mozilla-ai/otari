@@ -87,6 +87,10 @@ test.describe("dashboard core flows", () => {
     await expect(pageHeading(page, "Routing")).toBeVisible()
     await openNested(page, "Tools", "Web search")
     await expect(pageHeading(page, "Web search")).toBeVisible()
+    // The one Tools child that is not a filtered view of the page above, so
+    // reaching it proves its own route resolves rather than that the filter did.
+    await openNested(page, "Tools", "MCP servers")
+    await expect(pageHeading(page, "MCP servers")).toBeVisible()
 
     await openOrganization(page)
     for (const [link, heading] of [
