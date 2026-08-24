@@ -530,7 +530,7 @@ deployment-wide backend. **Tools** on the sidebar expands to:
   at all, its loop and timeout ceilings, which tool kinds it may use, and which
   of the images you approved it runs in. A policy can only narrow the settings
   above it, and a workspace can pin an image only if you listed one in
-  `sandbox_allowed_images`. See
+  `sandbox_allowed_session_images`. See
   [Per-workspace policy](tools.md#per-workspace-policy).
 - **MCP servers**: the MCP endpoints the selected workspace has registered, which
   a request reaches by naming their ids in `mcp_server_ids` instead of carrying a

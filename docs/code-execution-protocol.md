@@ -95,7 +95,7 @@ outlives the values the handle reports.
 `image` is a hint in the same sense and a weaker one: a backend that leases from
 a fixed pre-baked pool MAY ignore it, and MUST NOT fail the request because it
 was sent. Otari sends it when a workspace's code-execution policy pins an image,
-or when the deployment names one in `sandbox_image`, and omits the field
+or when the deployment names one in `sandbox_session_image`, and omits the field
 entirely otherwise, so a backend built before this field existed sees the body it
 always saw. Which images a workspace may pin is the operator's decision, not the
 backend's: Otari refuses one that is not on the operator's allow-list before any

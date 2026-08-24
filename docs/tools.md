@@ -194,22 +194,31 @@ A policy can only narrow what the deployment already permits:
 - `tools` names which code-execution tool kinds the workspace may use, from
   `code_execution`, `bash_code_execution` and `text_editor_code_execution`. It
   intersects with what the sandbox backend actually serves, so it only ever
-  removes one; a list leaving nothing runnable refuses the request with a 403
-  rather than handing the model a sandbox with no tools in it. Null exposes
-  whatever the backend serves, which is what a workspace has without a policy.
+  removes one, and a list naming nothing this deployment serves is refused with
+  a 400 rather than stored: it would read as a refinement and behave as a
+  refusal on every request. Null exposes whatever the backend serves, which is
+  what a workspace has without a policy. This gateway's sandbox serves
+  `code_execution` alone today, so the field is parity with the hosted config
+  and room for a backend that serves more, rather than a narrowing you can
+  currently express; the policy reports what is actually served as
+  `available_tools`, and the dashboard offers a control only when there is more
+  than one.
 - `image` names the sandbox image the workspace's code runs in, and is the one
   field an operator has to enable before a workspace can use it. A
   workspace-settable image is a supply-chain surface, so a workspace may only
-  name an image the operator curated into `sandbox_allowed_images` (or the
-  deployment's own `sandbox_image`); anything else is refused with a 400, and
+  name an image the operator curated into `sandbox_allowed_session_images` (or the
+  deployment's own `sandbox_session_image`); anything else is refused with a 400, and
   the allowed set is reported as `allowed_images` on the policy itself. It is
   re-checked when a request arrives, so shrinking the list refuses a workspace
   still pinning what it dropped rather than silently running the deployment's
   image instead.
 
 A deployment that names no images at all is unaffected: with
-`sandbox_allowed_images` and `sandbox_image` both unset, no workspace can pin
-one and Otari asks the backend for nothing, exactly as before. Otari sends the
+`sandbox_allowed_session_images` and `sandbox_session_image` both unset, no workspace can pin
+one and Otari asks the backend for nothing, exactly as before. Note
+`OTARI_SANDBOX_SESSION_IMAGE` is not docker-compose's `$OTARI_SANDBOX_IMAGE`,
+which names the sandbox container to boot rather than the image a leased session
+runs. Otari sends the
 image as an optional field on the session it leases
 ([the code-execution protocol](code-execution-protocol.md)); a backend that
 leases from a fixed pre-baked pool ignores it.

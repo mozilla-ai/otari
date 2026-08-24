@@ -7989,10 +7989,10 @@ export interface components {
         UpdateToolSettingsRequest: {
             /** Guardrails Url */
             guardrails_url?: string | null;
-            /** Sandbox Image */
-            sandbox_image?: string | null;
             /** Sandbox Purpose Hint */
             sandbox_purpose_hint?: string | null;
+            /** Sandbox Session Image */
+            sandbox_session_image?: string | null;
             /** Sandbox Url */
             sandbox_url?: string | null;
             /** Web Search Engines */
@@ -8751,7 +8751,7 @@ export interface components {
             exec_timeout_s?: number | null;
             /**
              * Image
-             * @description Sandbox image this workspace's code runs in. Must be one the operator curated into sandbox_allowed_images (or the deployment's own sandbox_image); null uses the deployment's
+             * @description Sandbox image this workspace's code runs in. Must be one the operator curated into sandbox_allowed_session_images (or the deployment's own sandbox_session_image); null uses the deployment's
              */
             image?: string | null;
             /**

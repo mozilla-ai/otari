@@ -126,8 +126,8 @@ pricing:
 | `web_search_url` | string | none | Base URL of the web-search backend (SearXNG instance or a search adapter) for `otari_web_search` tools. When unset, such requests are rejected with HTTP 400. docker-compose sets this to the bundled SearXNG container. Also settable via `OTARI_WEB_SEARCH_URL`. |
 | `tools_header` | string | none | Override for the purpose-hint preamble header injected ahead of gateway-managed tool hints. When unset, a built-in default header is used. Also settable via `OTARI_TOOLS_HEADER`. |
 | `sandbox_purpose_hint` | string | none | Default purpose hint forwarded to the sandbox backend when a tool entry supplies none. Also settable via `OTARI_SANDBOX_PURPOSE_HINT`. |
-| `sandbox_image` | string | none | Sandbox image this deployment asks the code-execution backend to run. When unset, nothing is asked for and the backend runs whatever it runs by default. Also settable via `OTARI_SANDBOX_IMAGE`. |
-| `sandbox_allowed_images` | string | none | Comma-separated sandbox images a workspace's code-execution policy may pin. `sandbox_image` is always pinnable whether or not it appears here; when both are unset, no workspace may pin one. Deliberately not editable from the dashboard. Also settable via `OTARI_SANDBOX_ALLOWED_IMAGES`. |
+| `sandbox_session_image` | string | none | Sandbox image this deployment asks the code-execution backend to run. When unset, nothing is asked for and the backend runs whatever it runs by default. Also settable via `OTARI_SANDBOX_SESSION_IMAGE`. Distinct from docker-compose's `$OTARI_SANDBOX_IMAGE`, which names the sandbox container image to boot rather than the image a leased session runs. |
+| `sandbox_allowed_session_images` | string | none | Comma-separated sandbox images a workspace's code-execution policy may pin. `sandbox_session_image` is always pinnable whether or not it appears here; when both are unset, no workspace may pin one. Deliberately not editable from the dashboard. Also settable via `OTARI_SANDBOX_ALLOWED_SESSION_IMAGES`. |
 | `web_search_purpose_hint` | string | none | Default purpose hint for the web-search backend when a tool entry supplies none. Also settable via `OTARI_WEB_SEARCH_PURPOSE_HINT`. |
 | `web_search_engines` | string | none | Comma-separated SearXNG engine list for the web-search backend. Also settable via `OTARI_WEB_SEARCH_ENGINES`. |
 | `web_search_max_results` | int | none | Default cap on web-search hits (a per-tool `max_results` still overrides it). Also settable via `OTARI_WEB_SEARCH_MAX_RESULTS`. |
@@ -284,8 +284,8 @@ These operator-facing settings configure the gateway-managed tools (`otari_code_
 | `OTARI_GUARDRAILS_URL` | none | Default input-guardrails service URL, used when a request does not pass its own guardrail `url`. |
 | `OTARI_TOOLS_HEADER` | built-in | Override for the purpose-hint preamble header injected ahead of gateway-managed tool hints. |
 | `OTARI_SANDBOX_PURPOSE_HINT` | none | Default purpose hint forwarded to the sandbox backend when a tool entry supplies none. |
-| `OTARI_SANDBOX_IMAGE` | none | Sandbox image this deployment asks the code-execution backend to run. |
-| `OTARI_SANDBOX_ALLOWED_IMAGES` | none | Comma-separated sandbox images a workspace's code-execution policy may pin. |
+| `OTARI_SANDBOX_SESSION_IMAGE` | none | Sandbox image this deployment asks the code-execution backend to run for a session. Not to be confused with docker-compose's `$OTARI_SANDBOX_IMAGE`, which is the container tag to boot. |
+| `OTARI_SANDBOX_ALLOWED_SESSION_IMAGES` | none | Comma-separated sandbox images a workspace's code-execution policy may pin. |
 | `OTARI_WEB_SEARCH_PURPOSE_HINT` | none | Default purpose hint for the web-search backend when a tool entry supplies none. |
 | `OTARI_WEB_SEARCH_ENGINES` | backend default | Comma-separated SearXNG engine list (e.g. `google,bing`). |
 | `OTARI_WEB_SEARCH_MAX_RESULTS` | backend default | Default cap on returned hits (a per-tool `max_results` still overrides it). Must be `>= 1`. |

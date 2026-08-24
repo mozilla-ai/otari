@@ -136,15 +136,18 @@ export function WorkspaceCodeExecutionPolicyCard({
   const availableTools = policy?.available_tools ?? []
 
   // An unset list ticks every box, because that is what it means: the workspace
-  // gets whatever the backend serves. Unticking one from there is therefore a
-  // narrowing from the full set, not from nothing, and unticking the last one
-  // goes back to unset rather than saving a list the server would refuse.
+  // gets whatever the backend serves. Unticking one is therefore a narrowing
+  // from the full set, not from nothing. Both ends normalize back to `null`:
+  // the full set narrows nothing, and the empty set is refused by the server,
+  // so neither is worth storing as a list.
   const toggleTool = (tool: string, isSelected: boolean) => {
     const current = tools ?? availableTools
     const next = isSelected
       ? availableTools.filter((name) => current.includes(name) || name === tool)
       : current.filter((name) => name !== tool)
-    setTools(next.length === 0 ? null : next)
+    setTools(
+      next.length === 0 || next.length === availableTools.length ? null : next,
+    )
   }
 
   const save = () => {
@@ -183,7 +186,10 @@ export function WorkspaceCodeExecutionPolicyCard({
           max_iterations: iterations.value,
           exec_timeout_s: timeout.value,
           image: image === DEPLOYMENT_IMAGE ? null : image,
-          tools: tools && tools.length > 0 ? tools : null,
+          tools:
+            tools && tools.length > 0 && tools.length < availableTools.length
+              ? tools
+              : null,
         },
       },
       {
@@ -281,30 +287,44 @@ export function WorkspaceCodeExecutionPolicyCard({
             <p className="text-xs text-muted">
               This deployment has approved no sandbox images, so this workspace
               runs whatever the sandbox runs. An operator adds them with
-              sandbox_allowed_images.
+              sandbox_allowed_session_images.
             </p>
           )}
 
-          <fieldset className="flex flex-col gap-2">
-            <legend className="text-xs font-medium text-muted">
-              Code-execution tools
-            </legend>
+          {availableTools.length > 1 ? (
+            <fieldset className="flex flex-col gap-2">
+              <legend className="text-xs font-medium text-muted">
+                Code-execution tools
+              </legend>
+              <p className="text-xs text-muted">
+                Which of the tools this deployment's sandbox serves the
+                workspace may use. Leaving them all ticked narrows nothing; use
+                Blocked above to refuse code execution outright.
+              </p>
+              {availableTools.map((tool) => (
+                <Checkbox
+                  key={tool}
+                  isSelected={tools === null || tools.includes(tool)}
+                  isDisabled={busy}
+                  onChange={(isSelected) => toggleTool(tool, isSelected)}
+                >
+                  {tool}
+                </Checkbox>
+              ))}
+            </fieldset>
+          ) : (
+            // With one tool served there is no subset to choose: ticking and
+            // unticking the single box would both mean "narrow nothing", and a
+            // control that cannot express anything is worse than a sentence
+            // saying so. The checkboxes appear on their own the day a backend
+            // serves a second kind.
             <p className="text-xs text-muted">
-              Which tools this workspace may use. Unticking them all leaves the
-              workspace with whatever the sandbox offers; use Blocked above to
-              refuse code execution outright.
+              This deployment's sandbox serves{" "}
+              {availableTools.length === 1 ? availableTools[0] : "no tools"}, so
+              there is no tool subset to choose. Use Blocked above to refuse
+              code execution for this workspace.
             </p>
-            {availableTools.map((tool) => (
-              <Checkbox
-                key={tool}
-                isSelected={tools === null || tools.includes(tool)}
-                isDisabled={busy}
-                onChange={(isSelected) => toggleTool(tool, isSelected)}
-              >
-                {tool}
-              </Checkbox>
-            ))}
-          </fieldset>
+          )}
 
           {error ? (
             <p role="alert" className="text-sm text-danger">

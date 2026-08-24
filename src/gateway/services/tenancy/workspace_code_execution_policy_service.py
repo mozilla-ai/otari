@@ -18,8 +18,8 @@ Composition follows the rule in ``src/gateway/AGENTS.md`` (#655, settled in
   serves, so it can only take one away, and a list that leaves nothing runnable
   refuses the request rather than serving an empty tool set;
 * ``image`` names the sandbox image the workspace's code runs in, and may only
-  name one the operator has already curated into ``sandbox_allowed_images``
-  (plus the deployment's own ``sandbox_image``). A workspace-settable image is a
+  name one the operator has already curated into ``sandbox_allowed_session_images``
+  (plus the deployment's own ``sandbox_session_image``). A workspace-settable image is a
   supply-chain surface rather than a string, so the allow-list is the whole
   point of the column: without one, a workspace pins nothing;
 * and **no row means no narrowing**, which is what makes a deployment that
@@ -55,9 +55,13 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.models.entities import WorkspaceCodeExecutionPolicy
 from gateway.models.tenancy import User, Workspace
 from gateway.services.mcp_loop import MAX_TOOL_ITERATIONS_CAP
-from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAMES, DEFAULT_EXEC_TIMEOUT_S
+from gateway.services.sandbox_backend import (
+    CODE_EXECUTION_TOOL_NAME,
+    CODE_EXECUTION_TOOL_NAMES,
+    DEFAULT_EXEC_TIMEOUT_S,
+)
 from gateway.services.tenancy import authorization
-from gateway.services.tenancy.errors import SandboxImageNotAllowedError
+from gateway.services.tenancy.errors import SandboxImageNotAllowedError, SandboxToolsUnrunnableError
 from gateway.services.tenancy.organization_service import OrganizationService
 
 # The two ceilings a workspace value is floored against, which are also the
@@ -72,6 +76,11 @@ _MAX_EXEC_TIMEOUT_S = int(DEFAULT_EXEC_TIMEOUT_S)
 # Matches the hosted column's own bound. An image reference longer than this is
 # already pathological, and the column is ``String(255)``.
 _MAX_IMAGE_LENGTH = 255
+# The tool kinds this deployment's sandbox backend actually serves, as opposed to
+# the vocabulary a policy may be written in. One today. A stored list intersects
+# with this, so a list sharing nothing with it narrows to an empty set, which is
+# refused rather than stored (see ``_require_runnable_tools``).
+SERVED_TOOL_NAMES: tuple[str, ...] = (CODE_EXECUTION_TOOL_NAME,)
 
 
 class WorkspaceCodeExecutionPolicyUpdate(BaseModel):
@@ -115,7 +124,7 @@ class WorkspaceCodeExecutionPolicyUpdate(BaseModel):
         max_length=_MAX_IMAGE_LENGTH,
         description=(
             "Sandbox image this workspace's code runs in. Must be one the operator curated into "
-            "sandbox_allowed_images (or the deployment's own sandbox_image); null uses the "
+            "sandbox_allowed_session_images (or the deployment's own sandbox_session_image); null uses the "
             "deployment's"
         ),
     )
@@ -178,9 +187,11 @@ class WorkspaceCodeExecutionPolicyPublic(BaseModel):
     # offering something the write refuses; empty means the operator curated
     # none, and the dashboard says so instead of showing an empty picker.
     allowed_images: list[str]
-    # The tool kinds ``tools`` may name. Fixed today, and reported rather than
-    # hard-coded in the dashboard so the two cannot drift when a backend grows
-    # one.
+    # The tool kinds this deployment's sandbox actually serves, which is what a
+    # picker should offer: a control listing the whole *vocabulary* would offer
+    # two options that narrow nothing and one that empties the set. Reported
+    # rather than hard-coded in the dashboard so the two cannot drift when a
+    # backend grows one.
     available_tools: list[str]
     enabled: bool
     default_purpose_hint: str | None
@@ -204,7 +215,7 @@ class WorkspaceCodeExecutionPolicyPublic(BaseModel):
             configured=False,
             sandbox_configured=sandbox_configured,
             allowed_images=list(allowed_images),
-            available_tools=list(CODE_EXECUTION_TOOL_NAMES),
+            available_tools=list(SERVED_TOOL_NAMES),
             enabled=True,
             default_purpose_hint=None,
             max_iterations=None,
@@ -228,7 +239,7 @@ class WorkspaceCodeExecutionPolicyPublic(BaseModel):
             configured=True,
             sandbox_configured=sandbox_configured,
             allowed_images=list(allowed_images),
-            available_tools=list(CODE_EXECUTION_TOOL_NAMES),
+            available_tools=list(SERVED_TOOL_NAMES),
             enabled=policy.enabled,
             default_purpose_hint=policy.default_purpose_hint,
             max_iterations=policy.max_iterations,
@@ -327,6 +338,7 @@ class WorkspaceCodeExecutionPolicyService:
         """
         workspace = await self._resolve_manageable(user=user, workspace_id=workspace_id)
         self._require_allowed_image(request.image)
+        _require_runnable_tools(request.tools)
         # Read off the row once, here: a rollback below expires every instance in
         # the session, so `workspace.id` after one is a lazy load in a place that
         # cannot await it.
@@ -376,7 +388,7 @@ class WorkspaceCodeExecutionPolicyService:
         if not self.allowed_images:
             raise SandboxImageNotAllowedError(
                 "This deployment has curated no sandbox images, so a workspace cannot pin one. "
-                "Set sandbox_allowed_images (or sandbox_image) on the gateway first."
+                "Set sandbox_allowed_session_images (or sandbox_session_image) on the gateway first."
             )
         raise SandboxImageNotAllowedError(
             f"Sandbox image {candidate!r} is not one this deployment allows. "
@@ -445,6 +457,25 @@ class WorkspaceCodeExecutionPolicyService:
             self.db, user=user, workspace=workspace, organizations=self.organizations
         )
         return workspace
+
+
+def _require_runnable_tools(tools: list[str] | None) -> None:
+    """Refuse a tool list that leaves this deployment nothing to run.
+
+    ``tools`` intersects what the backend serves, so a list naming only kinds it
+    does not serve resolves to an empty set, and the request path answers 403.
+    Storing it would be a second spelling of ``enabled=False`` that reads like a
+    refinement, reachable from the dashboard by unticking one box, and the
+    operator's only signal would be users reporting 403s later.
+
+    This is the ``tools`` half of the guard ``_require_allowed_image`` gives
+    ``image``. The request path still re-checks, for the same reason it re-checks
+    the image: this asserts what is *storable*, and what a deployment serves can
+    change under a row that was valid when it was written.
+    """
+    if tools is None or set(tools) & set(SERVED_TOOL_NAMES):
+        return
+    raise SandboxToolsUnrunnableError(SERVED_TOOL_NAMES)
 
 
 def _blank_to_none(value: str | None) -> str | None:

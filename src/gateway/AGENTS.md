@@ -128,7 +128,7 @@ that `prepare_gateway_tools` calls. The row carries no URL and no credential: th
 sandbox stays deployment-scoped on `/v1/tool-settings`, and the row only refuses it,
 lowers its two ceilings, supplies a hint the request omitted, removes tool kinds
 from what the backend serves, or pins an image from a list the operator curated
-(`sandbox_allowed_images`, deliberately config-only rather than dashboard-editable,
+(`sandbox_allowed_session_images`, deliberately config-only rather than dashboard-editable,
 because it is a supply-chain gate and not a tool setting). No row means no
 narrowing. The image guard is enforced twice on purpose, at the write and again at
 admission: an operator can shrink the curated list after a workspace pinned from it,

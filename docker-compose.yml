@@ -104,6 +104,8 @@ services:
   # `mzdotai/otari-sandbox-container:{latest,<sha>}` on Docker Hub on every
   # push to that repo's main branch.
   # Override the tag via $OTARI_SANDBOX_IMAGE if you need a specific build.
+  # Distinct from the gateway's own $OTARI_SANDBOX_SESSION_IMAGE, which names the
+  # image a leased session runs rather than the container booted here.
   #
   # Opt-in via the `code-exec` compose profile so operators who don't use
   # code_execution aren't forced to pull this image or wait on its health

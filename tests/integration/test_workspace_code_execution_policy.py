@@ -29,9 +29,11 @@ from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAMES
 from gateway.services.tenancy.errors import (
     NotAuthorizedError,
     SandboxImageNotAllowedError,
+    SandboxToolsUnrunnableError,
     WorkspaceNotFoundError,
 )
 from gateway.services.tenancy.workspace_code_execution_policy_service import (
+    SERVED_TOOL_NAMES,
     WorkspaceCodeExecutionPolicyService,
     WorkspaceCodeExecutionPolicyUpdate,
     resolve_workspace_code_execution_policy,
@@ -436,7 +438,11 @@ async def test_the_policy_reports_what_may_be_pinned_and_which_tools_exist(async
 
     assert unconfigured.configured is False
     assert unconfigured.allowed_images == [_IMAGE]
-    assert unconfigured.available_tools == list(CODE_EXECUTION_TOOL_NAMES)
+    # What this deployment *serves*, not the vocabulary a policy may be written
+    # in: a picker built from the vocabulary would offer options that narrow
+    # nothing and one that empties the set.
+    assert unconfigured.available_tools == list(SERVED_TOOL_NAMES)
+    assert set(SERVED_TOOL_NAMES) < set(CODE_EXECUTION_TOOL_NAMES)
 
 
 async def test_clearing_an_image_returns_the_workspace_to_the_deployments(async_db: AsyncSession) -> None:
@@ -494,3 +500,28 @@ async def test_a_duplicated_tool_name_is_stored_once(async_db: AsyncSession) -> 
     )
 
     assert stored.tools == ["code_execution", "bash_code_execution"]
+
+
+async def test_a_tool_list_this_deployment_cannot_run_is_refused_at_the_write(
+    async_db: AsyncSession,
+) -> None:
+    """The ``tools`` counterpart of the image guard, and the reason it exists.
+
+    Such a list is storable in shape and refuses every request at admission, so
+    without this it is a policy that reads as a refinement and behaves as a
+    refusal, reachable by unticking one box. The operator's only signal would be
+    users reporting 403s.
+    """
+    org = await _organization(async_db, slug="acme-tools-unrunnable")
+    owner = await _member(async_db, org, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, org, name="Engineering", owner=owner)
+
+    with pytest.raises(SandboxToolsUnrunnableError) as excinfo:
+        await _service(async_db).set_policy(
+            user=owner,
+            workspace_id=workspace.id,
+            request=WorkspaceCodeExecutionPolicyUpdate(enabled=True, tools=["bash_code_execution"]),
+        )
+
+    assert "enabled=false" in str(excinfo.value), "the refusal points at the way to actually refuse"
+    assert await resolve_workspace_code_execution_policy(async_db, workspace.id) is None

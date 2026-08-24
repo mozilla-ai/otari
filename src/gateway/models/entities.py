@@ -1493,10 +1493,10 @@ class WorkspaceCodeExecutionPolicy(Base):
     with ``CASCADE``, like ``workspace_budget_defaults``: nothing else names
     the row, so it rides the workspace's own delete.
 
-    ``image`` and ``tools`` are the two the hosted ``CodeExecutionConfig``
-    carries and this row did not (#740). Neither breaks the rule above:
+    ``image`` and ``tools`` reach the same two decisions the hosted
+    ``CodeExecutionConfig`` carries (#740). Neither breaks the rule above:
     ``image`` may only name something the deployment's operator has already
-    curated into ``sandbox_allowed_images``, so a workspace picks from an
+    curated into ``sandbox_allowed_session_images``, so a workspace picks from an
     operator's shelf rather than pointing the gateway at an image of its own,
     and ``tools`` may only remove tool kinds from what the sandbox backend
     already serves.
@@ -1532,7 +1532,7 @@ class WorkspaceCodeExecutionPolicy(Base):
     max_iterations: Mapped[int | None] = mapped_column(default=None)
     exec_timeout_s: Mapped[int | None] = mapped_column(default=None)
     # NULL means "no workspace image": whatever the deployment names in
-    # ``sandbox_image``, and failing that whatever the sandbox backend runs by
+    # ``sandbox_session_image``, and failing that whatever the sandbox backend runs by
     # default, which is what every request got before this column existed.
     # ``String(255)`` rather than ``Text`` to match the hosted column's own
     # bound; an image reference that long is already pathological.

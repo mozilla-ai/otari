@@ -192,12 +192,12 @@ def test_patch_persists_the_sandbox_image(tmp_path: Path) -> None:
     with _client(tmp_path) as client:
         patched = client.patch(
             "/v1/tool-settings",
-            json={"sandbox_image": "mzdotai/otari-sandbox-container:latest"},
+            json={"sandbox_session_image": "mzdotai/otari-sandbox-container:latest"},
             headers=AUTH,
         )
         assert patched.status_code == 200, patched.text
         fields = _fields(client.get("/v1/tool-settings", headers=AUTH).json())
 
-    assert fields["sandbox_image"]["value"] == "mzdotai/otari-sandbox-container:latest"
-    assert fields["sandbox_image"]["service"] == "sandbox"
-    assert "sandbox_allowed_images" not in fields
+    assert fields["sandbox_session_image"]["value"] == "mzdotai/otari-sandbox-container:latest"
+    assert fields["sandbox_session_image"]["service"] == "sandbox"
+    assert "sandbox_allowed_session_images" not in fields

@@ -2131,7 +2131,7 @@ def test_platform_mode_sandbox_uses_the_deployments_own_image_and_no_tool_allow_
     enforcing it twice would let this gateway refuse a tool the platform admits.
     """
     monkeypatch.setenv("OTARI_SANDBOX_URL", "http://sandbox:8080")
-    monkeypatch.setenv("OTARI_SANDBOX_IMAGE", "mzdotai/otari-sandbox-container:latest")
+    monkeypatch.setenv("OTARI_SANDBOX_SESSION_IMAGE", "mzdotai/otari-sandbox-container:latest")
     _FakeSandboxBackend.last_image = None
     _FakeSandboxBackend.last_allowed_tools = frozenset()
 
@@ -2164,6 +2164,78 @@ def test_platform_mode_sandbox_uses_the_deployments_own_image_and_no_tool_allow_
     assert response.status_code == 200
     assert _FakeSandboxBackend.last_image == "mzdotai/otari-sandbox-container:latest"
     assert _FakeSandboxBackend.last_allowed_tools is None
+
+
+def test_platform_mode_streaming_sandbox_gets_the_same_image(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The fallback-walking stream builds a backend of its own, so it needs its own case.
+
+    Its own, and a third one: there are three places a ``SandboxBackend`` is
+    opened (non-streaming dispatch, the eager-open stream, and this one), and
+    this was the site that kept sending the old session body after ``image`` was
+    added to the other two. They now share ``ToolContext.build_sandbox_backend``,
+    and this pins the site the shared factory was introduced for.
+    """
+    from collections.abc import AsyncIterator
+
+    from any_llm.types.completion import ChatCompletionChunk
+
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://sandbox:8080")
+    monkeypatch.setenv("OTARI_SANDBOX_SESSION_IMAGE", "mzdotai/otari-sandbox-container:latest")
+    _FakeSandboxBackend.last_image = None
+
+    async def fake_post_platform(
+        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return _single_attempt_resolve_response(request_id="sbx-stream-image")
+        if url.endswith("/gateway/code-execution/resolve"):
+            return httpx.Response(200, json={"enabled": True})
+        return httpx.Response(204)
+
+    async def fake_loop_acompletion(**kwargs: Any) -> Any:
+        async def _stream() -> AsyncIterator[ChatCompletionChunk]:
+            yield ChatCompletionChunk.model_validate(
+                {
+                    "id": "chunk-1",
+                    "object": "chat.completion.chunk",
+                    "created": 1700000000,
+                    "model": "openai:gpt-4o-mini",
+                    "choices": [{"index": 0, "delta": {"content": "hello"}, "finish_reason": None}],
+                }
+            )
+            yield ChatCompletionChunk.model_validate(
+                {
+                    "id": "chunk-2",
+                    "object": "chat.completion.chunk",
+                    "created": 1700000000,
+                    "model": "openai:gpt-4o-mini",
+                    "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 3, "completion_tokens": 1, "total_tokens": 4},
+                }
+            )
+
+        return _stream()
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes._pipeline.SandboxBackend", _FakeSandboxBackend)
+    monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
+
+    response = platform_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "anything",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+            "tools": [{"type": "otari_code_execution"}],
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 200
+    assert _FakeSandboxBackend.last_image == "mzdotai/otari-sandbox-container:latest"
 
 
 def test_platform_mode_sandbox_per_request_hint_wins(

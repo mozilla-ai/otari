@@ -148,7 +148,7 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
     expect(screen.getByText(/approved no sandbox images/i)).toBeInTheDocument()
   })
 
-  it("saves the image and the tool set the operator chose", async () => {
+  it("saves the image the operator chose", async () => {
     const calls = mockApi({
       policy: workspaceCodeExecutionPolicy({
         workspace_id: ALPHA,
@@ -163,44 +163,71 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
       screen.getByLabelText("Sandbox image"),
       "mzdotai/otari-sandbox-container:latest",
     )
-    await user.click(
-      screen.getByRole("checkbox", { name: "bash_code_execution" }),
-    )
-    await user.click(
-      screen.getByRole("checkbox", { name: "text_editor_code_execution" }),
-    )
     await user.click(screen.getByRole("button", { name: "Save" }))
 
     const put = calls.find((call) => call.method === "PUT")
     expect(put?.body).toMatchObject({
       image: "mzdotai/otari-sandbox-container:latest",
-      tools: ["code_execution"],
+      tools: null,
     })
   })
 
-  it("sends no tool list when the operator unticks every tool", async () => {
-    // An empty list is refused by the server: `null` is how a policy narrows
-    // nothing, and Blocked is how it refuses. Unticking the last box therefore
-    // returns to the unnarrowed state rather than saving one nothing can run.
-    const calls = mockApi()
+  it("offers no tool checkboxes when the sandbox serves a single tool", async () => {
+    // Ticking and unticking one box would both mean "narrow nothing", so the
+    // card says what is served instead of rendering a control that cannot
+    // express anything.
+    mockApi()
+    await renderLoaded()
+
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
+    expect(screen.getByText(/serves code_execution/i)).toBeInTheDocument()
+  })
+
+  it("offers a checkbox per tool once the sandbox serves more than one", async () => {
+    mockApi({
+      policy: workspaceCodeExecutionPolicy({
+        workspace_id: ALPHA,
+        available_tools: ["code_execution", "bash_code_execution"],
+        configured: true,
+        enabled: true,
+        tools: ["code_execution"],
+      }),
+    })
+    await renderLoaded()
+
+    expect(
+      screen.getByRole("checkbox", { name: "code_execution" }),
+    ).toBeChecked()
+    expect(
+      screen.getByRole("checkbox", { name: "bash_code_execution" }),
+    ).not.toBeChecked()
+  })
+
+  it("normalizes a full tool selection back to no narrowing", async () => {
+    // Every tool ticked narrows nothing, and an empty list is refused by the
+    // server, so both ends save `null` rather than a list.
+    const calls = mockApi({
+      policy: workspaceCodeExecutionPolicy({
+        workspace_id: ALPHA,
+        available_tools: ["code_execution", "bash_code_execution"],
+        configured: true,
+        enabled: true,
+        tools: ["code_execution"],
+      }),
+    })
     const user = userEvent.setup()
     await renderLoaded()
 
-    await user.selectOptions(screen.getByLabelText("Code execution"), "allowed")
-    for (const name of [
-      "code_execution",
-      "bash_code_execution",
-      "text_editor_code_execution",
-    ]) {
-      await user.click(screen.getByRole("checkbox", { name }))
-    }
+    await user.click(
+      screen.getByRole("checkbox", { name: "bash_code_execution" }),
+    )
     await user.click(screen.getByRole("button", { name: "Save" }))
 
     const put = calls.find((call) => call.method === "PUT")
     expect(put?.body).toMatchObject({ tools: null })
   })
 
-  it("shows a stored image and tool set", async () => {
+  it("shows a stored image", async () => {
     mockApi({
       policy: workspaceCodeExecutionPolicy({
         workspace_id: ALPHA,
@@ -208,7 +235,6 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
         enabled: true,
         allowed_images: ["ghcr.io/acme/sandbox:2"],
         image: "ghcr.io/acme/sandbox:2",
-        tools: ["code_execution"],
       }),
     })
     await renderLoaded()
@@ -216,12 +242,6 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
     expect(screen.getByLabelText("Sandbox image")).toHaveValue(
       "ghcr.io/acme/sandbox:2",
     )
-    expect(
-      screen.getByRole("checkbox", { name: "code_execution" }),
-    ).toBeChecked()
-    expect(
-      screen.getByRole("checkbox", { name: "bash_code_execution" }),
-    ).not.toBeChecked()
   })
 
   it("clears the policy rather than storing one when set back to the deployment default", async () => {

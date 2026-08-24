@@ -9634,17 +9634,6 @@
             ],
             "title": "Guardrails Url"
           },
-          "sandbox_image": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Sandbox Image"
-          },
           "sandbox_purpose_hint": {
             "anyOf": [
               {
@@ -9655,6 +9644,17 @@
               }
             ],
             "title": "Sandbox Purpose Hint"
+          },
+          "sandbox_session_image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sandbox Session Image"
           },
           "sandbox_url": {
             "anyOf": [
@@ -11777,7 +11777,7 @@
                 "type": "null"
               }
             ],
-            "description": "Sandbox image this workspace's code runs in. Must be one the operator curated into sandbox_allowed_images (or the deployment's own sandbox_image); null uses the deployment's",
+            "description": "Sandbox image this workspace's code runs in. Must be one the operator curated into sandbox_allowed_session_images (or the deployment's own sandbox_session_image); null uses the deployment's",
             "title": "Image"
           },
           "max_iterations": {

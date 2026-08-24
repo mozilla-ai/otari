@@ -500,7 +500,7 @@ def test_the_deployment_image_is_used_when_the_workspace_pins_none(
 ) -> None:
     """The fallback half: a policy that says nothing about images changes nothing."""
     monkeypatch.setenv("OTARI_SANDBOX_URL", _SANDBOX_URL)
-    monkeypatch.setenv("OTARI_SANDBOX_IMAGE", _IMAGE)
+    monkeypatch.setenv("OTARI_SANDBOX_SESSION_IMAGE", _IMAGE)
     workspace_id = _default_workspace_id(client, master_key_header)
     _set_policy(client, master_key_header, workspace_id, enabled=True)
 
@@ -517,8 +517,8 @@ def test_the_workspace_image_wins_over_the_deployments(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
     monkeypatch.setenv("OTARI_SANDBOX_URL", _SANDBOX_URL)
-    monkeypatch.setenv("OTARI_SANDBOX_IMAGE", _IMAGE)
-    monkeypatch.setenv("OTARI_SANDBOX_ALLOWED_IMAGES", _OTHER_IMAGE)
+    monkeypatch.setenv("OTARI_SANDBOX_SESSION_IMAGE", _IMAGE)
+    monkeypatch.setenv("OTARI_SANDBOX_ALLOWED_SESSION_IMAGES", _OTHER_IMAGE)
     workspace_id = _default_workspace_id(client, master_key_header)
     stored = _set_policy(client, master_key_header, workspace_id, enabled=True, image=_OTHER_IMAGE)
     assert stored["image"] == _OTHER_IMAGE
@@ -541,11 +541,11 @@ def test_an_image_the_operator_no_longer_allows_refuses_the_request(
     leave a workspace believing its pin was in force.
     """
     monkeypatch.setenv("OTARI_SANDBOX_URL", _SANDBOX_URL)
-    monkeypatch.setenv("OTARI_SANDBOX_ALLOWED_IMAGES", _OTHER_IMAGE)
+    monkeypatch.setenv("OTARI_SANDBOX_ALLOWED_SESSION_IMAGES", _OTHER_IMAGE)
     workspace_id = _default_workspace_id(client, master_key_header)
     _set_policy(client, master_key_header, workspace_id, enabled=True, image=_OTHER_IMAGE)
 
-    monkeypatch.delenv("OTARI_SANDBOX_ALLOWED_IMAGES")
+    monkeypatch.delenv("OTARI_SANDBOX_ALLOWED_SESSION_IMAGES")
     response, seen = _post_with_sandbox_patched(client, api_key_header, _REQUEST)
 
     assert response.status_code == 403
@@ -585,21 +585,54 @@ def test_a_tool_list_that_keeps_code_execution_narrows_the_backend(
     assert seen.backend_kwargs["allowed_tools"] == frozenset({"code_execution"})
 
 
-def test_a_tool_list_without_code_execution_refuses_rather_than_serving_nothing(
+def test_a_tool_list_this_deployment_cannot_run_is_refused_at_the_write(
     client: TestClient,
-    api_key_header: dict[str, str],
     master_key_header: dict[str, str],
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An empty effective tool set is a refusal, not a backend with nothing in it.
+    """The management surface refuses it, so no request ever meets one through the API."""
+    monkeypatch.setenv("OTARI_SANDBOX_URL", _SANDBOX_URL)
+    workspace_id = _default_workspace_id(client, master_key_header)
 
-    Handing the model a sandbox advertising no tools would return a perfectly
-    successful response that silently never ran any code, which is the failure
-    mode a policy exists to make loud.
+    response = client.put(
+        f"/v1/workspaces/{workspace_id}/code-execution-policy",
+        json={"enabled": True, "tools": ["bash_code_execution"]},
+        headers=master_key_header,
+    )
+
+    assert response.status_code == 400
+
+
+def test_a_stored_tool_list_without_code_execution_refuses_rather_than_serving_nothing(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    db_session_factory: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The admission backstop, reached by writing the row past the service.
+
+    Unreachable through the API since the write refuses it, which is why the row
+    is planted directly: what this pins is that the *request* path fails closed
+    too, for the row that was valid when written and stopped being runnable when
+    a deployment's backend changed under it. Handing the model a sandbox that
+    advertises no tools would return a perfectly successful response that
+    silently never ran any code, which is the failure a policy exists to make
+    loud.
     """
     monkeypatch.setenv("OTARI_SANDBOX_URL", _SANDBOX_URL)
     workspace_id = _default_workspace_id(client, master_key_header)
-    _set_policy(client, master_key_header, workspace_id, enabled=True, tools=["bash_code_execution"])
+    _set_policy(client, master_key_header, workspace_id, enabled=True)
+
+    session = db_session_factory()
+    try:
+        session.execute(
+            text("UPDATE workspace_code_execution_policies SET tools = :tools WHERE workspace_id = :ws"),
+            {"tools": '["bash_code_execution"]', "ws": workspace_id},
+        )
+        session.commit()
+    finally:
+        session.close()
 
     response, seen = _post_with_sandbox_patched(client, api_key_header, _REQUEST)
 
@@ -615,7 +648,7 @@ def test_a_streaming_request_gets_the_same_image_and_tool_set(
 ) -> None:
     """The eager-open streaming path builds its own backend, so it needs its own case."""
     monkeypatch.setenv("OTARI_SANDBOX_URL", _SANDBOX_URL)
-    monkeypatch.setenv("OTARI_SANDBOX_ALLOWED_IMAGES", _IMAGE)
+    monkeypatch.setenv("OTARI_SANDBOX_ALLOWED_SESSION_IMAGES", _IMAGE)
     workspace_id = _default_workspace_id(client, master_key_header)
     _set_policy(
         client,

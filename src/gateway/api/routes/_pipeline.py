@@ -251,10 +251,11 @@ SANDBOX_TOOLS_EXCLUDED_DETAIL = (
     "code execution is not available to this workspace: its policy's tool list excludes "
     "every tool kind this gateway's sandbox serves."
 )
-SANDBOX_IMAGE_NOT_ALLOWED_DETAIL = (
-    "This workspace's code-execution policy pins a sandbox image this deployment no longer "
-    "allows. Restore it to sandbox_allowed_images, or change the workspace's policy."
-)
+# Says what happened and nothing an API caller cannot act on. The setting to
+# change is named on the management surface, which the operator reaches; naming
+# it here would send an operator instruction to a data-plane caller, which is the
+# boundary ``SANDBOX_NOT_ENABLED_DETAIL`` next door already respects.
+SANDBOX_IMAGE_NOT_ALLOWED_DETAIL = "this workspace's code-execution policy pins a sandbox image that is not allowed"
 MALFORMED_CODE_EXEC_POLICY_DETAIL = "Authorization service returned a malformed code-execution policy"
 CODE_EXEC_POLICY_UNRESOLVABLE_DETAIL = "Code execution policy could not be resolved for this request"
 WEB_SEARCH_CONFIG_UNRESOLVABLE_DETAIL = "Web search configuration could not be resolved for this request"
@@ -1523,7 +1524,7 @@ class ToolContext:
         sandbox_url: str | None,
         sandbox_auth_token: str | None,
         sandbox_exec_timeout_s: int | None = None,
-        sandbox_image: str | None = None,
+        sandbox_session_image: str | None = None,
         sandbox_allowed_tools: frozenset[str] | None = None,
         use_web_search: bool,
         web_search_tool_entry: dict[str, Any] | None,
@@ -1548,7 +1549,7 @@ class ToolContext:
         # else the deployment's, else nothing) and the tool kinds the backend may
         # expose (None for "whatever it serves"). Both are resolved at admission,
         # where the request's session is live, and read again at dispatch.
-        self.sandbox_image = sandbox_image
+        self.sandbox_session_image = sandbox_session_image
         self.sandbox_allowed_tools = sandbox_allowed_tools
         self.use_web_search = use_web_search
         self.web_search_tool_entry = web_search_tool_entry
@@ -1565,6 +1566,26 @@ class ToolContext:
         # request shares one tally across attempts: every executed call was paid
         # for, whether or not its attempt won.
         self.tally = ToolUsageTally()
+
+    def build_sandbox_backend(self) -> SandboxBackend:
+        """The one place a ``SandboxBackend`` is constructed for this request.
+
+        Three call sites open one (non-streaming dispatch, the eager-open stream,
+        and the fallback-walking stream), and each needs every value resolved at
+        admission. Spelling the argument list once is not tidiness: it was
+        spelled three times, a fourth field was added to two of them, and the
+        third silently kept sending the old session body.
+        """
+        assert self.sandbox_url is not None  # guaranteed past the missing-URL 400 in prepare_gateway_tools
+        return SandboxBackend(
+            sandbox_url=self.sandbox_url,
+            purpose_hint=_resolve_sandbox_purpose_hint(self.sandbox_tool_entry, self.config),
+            timeout_s=self.sandbox_timeout_s,
+            auth_token=self.sandbox_auth_token,
+            image=self.sandbox_session_image,
+            allowed_tools=self.sandbox_allowed_tools,
+            tally=self.tally,
+        )
 
     @property
     def tools_extracted(self) -> bool:
@@ -1918,7 +1939,7 @@ async def prepare_gateway_tools(
         # The image the session is leased against, and the tool kinds the backend
         # may expose. Both start at the deployment's own answer and are only ever
         # replaced by a *narrower* workspace one below.
-        sandbox_image: str | None = ctx.config.effective_sandbox_image()
+        sandbox_session_image: str | None = ctx.config.effective_sandbox_image()
         sandbox_allowed_tools: frozenset[str] | None = None
         if use_sandbox and ctx.hybrid_mode:
             assert ctx.user_token is not None  # guaranteed by the hybrid-mode preamble
@@ -1998,7 +2019,7 @@ async def prepare_gateway_tools(
                     # default, so the workspace learns its pin is dead.
                     if workspace_policy.image not in ctx.config.pinnable_sandbox_images():
                         raise adapter.error(403, SANDBOX_IMAGE_NOT_ALLOWED_DETAIL, ErrorKind.PERMISSION)
-                    sandbox_image = workspace_policy.image
+                    sandbox_session_image = workspace_policy.image
 
         web_search_url: str | None = ctx.config.web_search_url or otari_env("WEB_SEARCH_URL") or None
         # Interception (claiming the provider-named web_search keywords) is opt-in and
@@ -2149,7 +2170,7 @@ async def prepare_gateway_tools(
         sandbox_url=sandbox_url,
         sandbox_auth_token=sandbox_auth_token,
         sandbox_exec_timeout_s=sandbox_exec_timeout_s,
-        sandbox_image=sandbox_image,
+        sandbox_session_image=sandbox_session_image,
         sandbox_allowed_tools=sandbox_allowed_tools,
         use_web_search=use_web_search,
         web_search_tool_entry=web_search_tool_entry,
@@ -2700,17 +2721,7 @@ async def dispatch_non_stream(
             return await adapter.run_tool_loop(kwargs, pool, tool_ctx.max_tool_iterations, on_first_response)
 
     if tool_ctx.use_sandbox:
-        assert tool_ctx.sandbox_url is not None  # guaranteed past the missing-URL 400 in prepare_gateway_tools
-        sandbox_hint = _resolve_sandbox_purpose_hint(tool_ctx.sandbox_tool_entry, tool_ctx.config)
-        async with SandboxBackend(
-            sandbox_url=tool_ctx.sandbox_url,
-            purpose_hint=sandbox_hint,
-            timeout_s=tool_ctx.sandbox_timeout_s,
-            auth_token=tool_ctx.sandbox_auth_token,
-            image=tool_ctx.sandbox_image,
-            allowed_tools=tool_ctx.sandbox_allowed_tools,
-            tally=tool_ctx.tally,
-        ) as backend:
+        async with tool_ctx.build_sandbox_backend() as backend:
             kwargs = adapter.inject_hints(call_kwargs, backend.purpose_hints(), header=tool_ctx.tools_header)
             return await adapter.run_tool_loop(kwargs, backend, tool_ctx.max_tool_iterations, on_first_response)
 
@@ -2793,17 +2804,7 @@ async def open_stream(
         return _lazy_mcp_stream(adapter, kwargs, tool_ctx.mcp_server_configs, tool_ctx)
 
     if tool_ctx.use_sandbox:
-        assert tool_ctx.sandbox_url is not None  # guaranteed past the missing-URL 400 in prepare_gateway_tools
-        sandbox_hint = _resolve_sandbox_purpose_hint(tool_ctx.sandbox_tool_entry, tool_ctx.config)
-        sandbox_backend = SandboxBackend(
-            sandbox_url=tool_ctx.sandbox_url,
-            purpose_hint=sandbox_hint,
-            timeout_s=tool_ctx.sandbox_timeout_s,
-            auth_token=tool_ctx.sandbox_auth_token,
-            image=tool_ctx.sandbox_image,
-            allowed_tools=tool_ctx.sandbox_allowed_tools,
-            tally=tool_ctx.tally,
-        )
+        sandbox_backend = tool_ctx.build_sandbox_backend()
         await sandbox_backend.__aenter__()  # may raise SandboxNotReachableError
         return _eager_backend_stream(adapter, kwargs, sandbox_backend, tool_ctx)
 
@@ -3430,17 +3431,7 @@ async def run_streaming_with_fallback(
                 MCPClientPool(tool_ctx.mcp_server_configs, tally=tool_ctx.tally)
             )
         elif tool_ctx.use_sandbox:
-            assert tool_ctx.sandbox_url is not None  # guaranteed past the missing-URL 400 in prepare_gateway_tools
-            sandbox_hint = _resolve_sandbox_purpose_hint(tool_ctx.sandbox_tool_entry, tool_ctx.config)
-            pool_for_loop = await backend_stack.enter_async_context(
-                SandboxBackend(
-                    sandbox_url=tool_ctx.sandbox_url,
-                    purpose_hint=sandbox_hint,
-                    timeout_s=tool_ctx.sandbox_timeout_s,
-                    auth_token=tool_ctx.sandbox_auth_token,
-                    tally=tool_ctx.tally,
-                ),
-            )
+            pool_for_loop = await backend_stack.enter_async_context(tool_ctx.build_sandbox_backend())
         elif tool_ctx.use_web_search:
             assert tool_ctx.web_search_url is not None  # guaranteed past the missing-URL 400
             assert tool_ctx.web_search_tool_entry is not None  # guaranteed by the web_search opt-in

@@ -808,6 +808,23 @@ class OrganizationGuardrailLimitReachedError(TenancyValidationError):
         super().__init__(f"This organization already configures the maximum of {limit} guardrails")
 
 
+class SandboxToolsUnrunnableError(TenancyValidationError):
+    """A code-execution policy's tool list names nothing this deployment serves.
+
+    The list intersects what the sandbox backend offers, so this one resolves to
+    an empty set and every request would answer 403. Refused at the write rather
+    than stored, because a policy that reads as a refinement and behaves as a
+    refusal is the failure the surface exists to prevent, and the operator's only
+    signal would be users reporting 403s days later.
+    """
+
+    def __init__(self, served: tuple[str, ...]):
+        super().__init__(
+            "A code-execution tool list must name at least one tool this deployment serves "
+            f"({', '.join(served)}). Use enabled=false to refuse the workspace instead."
+        )
+
+
 class SandboxImageNotAllowedError(TenancyValidationError):
     """A workspace code-execution policy named a sandbox image the operator has not curated.
 
@@ -869,6 +886,7 @@ __all__ = [
     "PasswordPolicyError",
     "ResetTokenInvalidError",
     "SandboxImageNotAllowedError",
+    "SandboxToolsUnrunnableError",
     "SecretBoxUnavailableTenancyError",
     "SignInAddressRequiredError",
     "TenancyConflictError",
@@ -878,9 +896,9 @@ __all__ = [
     "TenancyValidationError",
     "UnmodifiedPasswordError",
     "VerificationTokenInvalidError",
+    "WorkspaceAlreadyExistsError",
     "WorkspaceActivationUnavailableError",
     "WorkspaceAlreadyActivatedError",
-    "WorkspaceAlreadyExistsError",
     "WorkspaceBudgetDefaultAlreadyExistsError",
     "WorkspaceBudgetDefaultBudgetNotFoundError",
     "WorkspaceBudgetDefaultNotFoundError",
