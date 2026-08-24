@@ -749,7 +749,9 @@ async def resolve_dispatch_provider(
         # pricing rows use. An instance removed from config while its pricing row
         # survives therefore prices, reserves a real estimate, and only fails
         # here; before this refund existed the hold stayed on users.reserved
-        # until the next budget reset (forever, for a budget with no period).
+        # until the reservation sweep reclaims it (see budget_reservation_ledger:
+        # the budget reset zeroes spend and leaves the hold in place, so before the
+        # ledger nothing gave it back at all).
         #
         # Releasing here and then raising is safe only because no caller above
         # catches this 400 and releases again: refund_reservation is not
@@ -2411,8 +2413,9 @@ async def prepare_gateway_tools(
         # policy and the workspace web-search configuration above, and
         # `_require_tool_pricing`), and a failure in any of them is not an
         # `HTTPException`, so without this arm it would leave `users.reserved`
-        # holding the estimate until the budget's next reset, or forever for a
-        # budget with no reset period. The rollback comes first because a failed
+        # holding the estimate until the reservation sweep reclaims it. That sweep
+        # is the only thing that ever does: the budget reset zeroes spend and
+        # leaves the hold where it is. The rollback comes first because a failed
         # statement leaves the session unusable and `release_reservation` writes:
         # releasing on a poisoned session raises `PendingRollbackError` and the
         # hold survives anyway. Both calls are best-effort so a database that is
@@ -2780,8 +2783,9 @@ async def release_reservation(ctx: RequestContext) -> None:
     No-op in hybrid mode and for requests that reserved nothing. Use this
     before raising on any path that rejects the request after
     :func:`resolve_request_context` pre-debited the estimate; otherwise the
-    held amount shrinks the user's budget until the next reset (or forever,
-    for budgets without a reset period).
+    held amount shrinks the user's budget until the reservation sweep reclaims
+    it, which is the only thing that ever gives it back (the budget reset zeroes
+    spend and leaves the hold in place).
 
     When ``ctx.tool_charge`` is set, the request already ran gateway-run tool calls
     that were written onto its failure row, so the reservation is *reconciled* to

@@ -709,6 +709,16 @@ class GatewayConfig(BaseSettings):
         gt=0,
         description="Maximum leaked budget reservations one sweep pass reclaims before yielding.",
     )
+    budget_reservation_retention_sec: int = Field(
+        default=604800,
+        ge=0,
+        description=(
+            "How long a settled, released or reclaimed budget reservation is kept before the "
+            "sweep deletes it. The row exists to make an in-flight hold reclaimable; what a "
+            "request cost is recorded durably in usage_logs, so this is an audit window rather "
+            "than an accounting record. 0 keeps every row forever. Standalone mode only."
+        ),
+    )
     budget_estimate_default_output_tokens: int = Field(
         default=1024,
         ge=0,

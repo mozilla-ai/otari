@@ -297,7 +297,6 @@ async def _held_handle(
             user_id=user_id,
             estimate=estimate,
             user_reserved=user_reserved,
-            counts_toward_budget=counts_toward_budget,
             scoped_budgets=scoped,
             scoped_estimate=scoped_estimate,
             ttl_seconds=ttl_seconds,
@@ -432,8 +431,8 @@ async def reserve_budget(
 
     # Reclaim this user's leaked holds, the same idiom as the period roll above: a
     # hold an earlier request left behind keeps shrinking this user's headroom
-    # until the budget's next reset, and for a budget with no reset period it
-    # never comes back.
+    # with nothing ever releasing it: the reset zeroes spend and leaves the hold
+    # where it is.
     #
     # Deliberately here rather than earlier, so it costs a query only on a request
     # that is actually about to take a hold. Everything above this line returns a
@@ -550,8 +549,8 @@ async def reconcile_reservation(db: AsyncSession, handle: ReservationHandle, act
     Note: if this UPDATE/commit fails (e.g. a transient DB error after the
     provider call succeeded), the held estimate is not released and stays in
     ``users.reserved``. The ledger row stays active with it, so the TTL sweep
-    reclaims it rather than leaving it to the budget's next reset (which, for a
-    budget with no reset period, never came).
+    reclaims it. Before the ledger nothing did: the budget reset zeroes ``spend``
+    and leaves ``reserved`` untouched, so such a hold was never given back.
 
     Idempotent by reservation identity: the first caller to claim the ledger row
     does the work and any later one is a no-op, so two settlement sites firing for
@@ -709,10 +708,6 @@ async def increase_reservation(
                 detail=f"{refused.subject} has exceeded budget limit",
             )
         handle.scoped_estimate += additional
-        # Grown here, not after the per-user reserve below, because that reserve
-        # can raise: the row has to keep step with the counter it records, or a
-        # reclaim of this hold would give back less than the ceiling is holding.
-        await ledger.grow(db, handle.reservation_id, user_delta=ZERO, scoped_delta=additional)
     # No scope is passed through: the scoped ceilings were just grown above, and
     # letting the inner call resolve them again would hold the delta twice.
     # ``record_reservation=False`` for the same reason in the ledger: this request
@@ -729,4 +724,38 @@ async def increase_reservation(
     if delta.reserved:
         handle.estimate += delta.estimate
         handle.reserved = True
-        await ledger.grow(db, handle.reservation_id, user_delta=delta.estimate, scoped_delta=ZERO)
+
+    # Fold both deltas into the row under one guard, after both holds have landed,
+    # for the same reason the original reserve writes its row last: the ledger must
+    # never claim more than the counters hold.
+    #
+    # Losing the guard means the sweep reclaimed this hold while the request was
+    # still running. The row is terminal and nothing will look at it again, so the
+    # deltas just taken would be held by something with no owner. Give them back,
+    # and unwind the handle, so the request carries on against the amount it
+    # actually holds: nothing. It will still settle, and the late-settlement path
+    # in :func:`reconcile_reservation` records what it spent.
+    grown = await ledger.grow(
+        db,
+        handle.reservation_id,
+        user_delta=delta.estimate if delta.reserved else ZERO,
+        scoped_delta=additional if handle.scoped_budgets else ZERO,
+    )
+    if not grown:
+        logger.warning(
+            "Reservation %s was reclaimed as leaked before its top-up; returning the delta. "
+            "Raise budget_reservation_ttl_sec above the slowest request served.",
+            handle.reservation_id,
+        )
+        if handle.scoped_budgets:
+            await release_scoped(db, handle.scoped_budget_ids, additional)
+            handle.scoped_estimate -= additional
+        if delta.reserved:
+            await db.execute(
+                update(User)
+                .where(User.user_id == handle.user_id, User.deleted_at.is_(None))
+                .values(reserved=_release_reserved(delta.estimate))
+                .execution_options(synchronize_session=False)
+            )
+            await db.commit()
+            handle.estimate -= delta.estimate

@@ -14,9 +14,11 @@ outstanding guarantees need:
   the first release does the work.
 * **A leaked hold is reclaimable individually.** #724 fixed a path where a
   release never ran; the residue of that class of bug used to be an amount that
-  could be seen only in aggregate and cleared only by the budget's next reset
-  (or never, for a budget with no reset period). A row gives it an owner, an age
-  and a TTL.
+  could be seen only in aggregate and released by nothing at all. Note that the
+  budget reset was never the backstop it was widely described as: both
+  ``_cas_reset_user_budget`` and ``_roll_expired_periods`` zero *spend* and leave
+  the hold where it is, so a leak shrank the headroom permanently. A row gives it
+  an owner, an age and a TTL.
 
 **No row locks**, matching :mod:`gateway.services.scoped_budget_service`: the
 sweep reads candidate rows without ``FOR UPDATE`` and lets the conditional
@@ -53,7 +55,7 @@ from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import TYPE_CHECKING
 
-from sqlalchemy import case, select, update
+from sqlalchemy import case, delete, select, update
 
 from gateway.core.database import create_session
 from gateway.log_config import logger
@@ -101,7 +103,6 @@ async def record(
     user_id: str,
     estimate: Decimal,
     user_reserved: bool,
-    counts_toward_budget: bool,
     scoped_budgets: Sequence[ApplicableBudget],
     scoped_estimate: Decimal,
     ttl_seconds: int,
@@ -123,7 +124,6 @@ async def record(
             user_id=user_id,
             estimate=estimate,
             user_reserved=user_reserved,
-            counts_toward_budget=counts_toward_budget,
             status=RESERVATION_ACTIVE,
             expires_at=datetime.now(UTC) + timedelta(seconds=ttl_seconds),
         )
@@ -146,7 +146,7 @@ async def grow(
     *,
     user_delta: Decimal,
     scoped_delta: Decimal,
-) -> None:
+) -> bool:
     """Fold a top-up into the row that already records this request's hold.
 
     ``increase_reservation`` grows the counters in place, so the ledger grows the
@@ -154,24 +154,35 @@ async def grow(
     each carry their own TTL and could be reclaimed independently, releasing part
     of a live hold.
 
-    Guarded on ``status`` so a top-up cannot resurrect a row a concurrent sweep
-    has already reclaimed; if it has, the delta the caller just took is left for
-    that row's own reclaim to find, which is the same outcome as a hold taken
-    without a ledger row at all.
+    Reports whether the row was still active, and **both** legs are guarded on
+    that, not just the per-user one. A row the sweep already reclaimed will never
+    be looked at again, so a delta folded into it is held on the counters by
+    something nothing will ever release; the caller has to give that delta back
+    rather than merely decline to record it. True when there is no row at all,
+    which is the unledgered case and keeps the pre-ledger behavior.
     """
     if reservation_id is None:
-        return
-    if user_delta > ZERO:
-        await db.execute(
-            update(BudgetReservation)
-            .where(
-                BudgetReservation.id == reservation_id,
-                BudgetReservation.status == RESERVATION_ACTIVE,
-            )
-            .values(estimate=BudgetReservation.estimate + user_delta)
-            .execution_options(synchronize_session=False)
+        return True
+    result = await db.execute(
+        update(BudgetReservation)
+        .where(
+            BudgetReservation.id == reservation_id,
+            BudgetReservation.status == RESERVATION_ACTIVE,
         )
+        .values(estimate=BudgetReservation.estimate + user_delta)
+        .execution_options(synchronize_session=False)
+    )
+    if not getattr(result, "rowcount", 0):
+        # No rollback: the UPDATE matched nothing, so there is nothing to undo, and
+        # ``rollback()`` expires every ORM instance in the session, which turns the
+        # caller's next attribute read into sync IO on an async session
+        # (``MissingGreenlet``). The same trap is documented in
+        # ``budget_service._cas_reset_user_budget``. The caller's own compensating
+        # writes commit this empty transaction along with them.
+        return False
     if scoped_delta > ZERO:
+        # In the same transaction as the guarded UPDATE above, so the lines cannot
+        # grow against a row that turned terminal between the two statements.
         await db.execute(
             update(BudgetReservationScope)
             .where(BudgetReservationScope.reservation_id == reservation_id)
@@ -179,6 +190,7 @@ async def grow(
             .execution_options(synchronize_session=False)
         )
     await db.commit()
+    return True
 
 
 async def try_terminate(db: AsyncSession, reservation_id: str | None, status: str) -> bool:
@@ -318,8 +330,8 @@ async def sweep_expired(db: AsyncSession, *, batch_size: int) -> int:
     """Reclaim leaked holds across every user, for the scheduled sweep.
 
     :func:`reclaim_expired_for_user` only runs when *that* user next reserves, so
-    a user whose lone request leaked would hold against their budget until its
-    next reset. This drains those. Returns how many it reclaimed; a caller
+    a user whose lone request leaked would hold against their budget with nothing
+    ever releasing it. This drains those. Returns how many it reclaimed; a caller
     working through a backlog loops while the count equals ``batch_size``.
     """
     expired = (
@@ -345,19 +357,63 @@ async def sweep_expired(db: AsyncSession, *, batch_size: int) -> int:
     return reclaimed
 
 
+async def prune_terminal(db: AsyncSession, *, older_than_sec: int, batch_size: int) -> int:
+    """Delete settled, released and expired rows past the retention window.
+
+    The table gains a row per billable request and nothing else ever removes one,
+    so without this it grows without bound. A terminal row's job is finished:
+    what a request actually cost lives in ``usage_logs``, which is the durable
+    accounting record, and this row only ever existed to make the hold
+    reclaimable while it was in flight.
+
+    Deletes by id rather than with one predicate DELETE so the statement stays
+    bounded, which is what keeps a first run against a long-lived deployment from
+    taking a lock over most of the table. The lines cascade.
+    """
+    if older_than_sec <= 0:
+        return 0
+    cutoff = datetime.now(UTC) - timedelta(seconds=older_than_sec)
+    ids = (
+        (
+            await db.execute(
+                select(BudgetReservation.id)
+                .where(
+                    BudgetReservation.status != RESERVATION_ACTIVE,
+                    BudgetReservation.updated_at < cutoff,
+                )
+                .limit(batch_size)
+            )
+        )
+        .scalars()
+        .all()
+    )
+    if not ids:
+        return 0
+    await db.execute(
+        delete(BudgetReservation)
+        .where(BudgetReservation.id.in_(list(ids)))
+        .execution_options(synchronize_session=False)
+    )
+    await db.commit()
+    return len(ids)
+
+
 # How many batches one tick will drain before yielding. A backlog larger than
 # this is left for the next tick rather than letting one pass run unbounded and
 # hold a session open behind it.
 _MAX_SWEEP_PASSES = 10
 
 
-async def run_reservation_sweeper(interval: float, *, batch_size: int) -> None:
+async def run_reservation_sweeper(interval: float, *, batch_size: int, retention_sec: int) -> None:
     """Reclaim leaked holds on a timer, forever. Cancelled at shutdown.
 
     :func:`reclaim_expired_for_user` only fires when *that* user next reserves,
     which is enough for a busy user and useless for the case that matters most: a
     user whose one request leaked and who then makes no more. That hold would sit
-    against their budget until its next reset, or forever without one.
+    against their budget with nothing ever releasing it.
+
+    Also prunes terminal rows past ``retention_sec``, since nothing else deletes
+    one and the table gains a row per billable request.
 
     Every error is swallowed and retried on the next tick, matching the other
     lifespan refreshers. A database blip must not kill the sweeper, because
@@ -370,6 +426,13 @@ async def run_reservation_sweeper(interval: float, *, batch_size: int) -> None:
             async with create_session() as db:
                 for _ in range(_MAX_SWEEP_PASSES):
                     if await sweep_expired(db, batch_size=batch_size) < batch_size:
+                        break
+                # Retention runs on the same tick rather than a timer of its own:
+                # it is the same bounded, best-effort maintenance against the same
+                # table, and a second lifespan task would double the machinery for
+                # work that is never urgent.
+                for _ in range(_MAX_SWEEP_PASSES):
+                    if await prune_terminal(db, older_than_sec=retention_sec, batch_size=batch_size) < batch_size:
                         break
         except asyncio.CancelledError:
             raise
@@ -388,6 +451,7 @@ __all__ = [
     "RESERVATION_SETTLED",
     "grow",
     "reclaim_expired_for_user",
+    "prune_terminal",
     "record",
     "run_reservation_sweeper",
     "release_reserved_expression",

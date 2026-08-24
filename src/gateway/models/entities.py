@@ -877,9 +877,7 @@ class BatchRecord(Base):
     # this record is the strict ownership anchor, so it must always name an owner.
     # CASCADE: deleting the user drops the ownership record (the user's keys are
     # gone too, and usage_logs remain the billing history).
-    user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
     # SET NULL: a key may be revoked while its batch is still in flight.
     api_key_id: Mapped[str | None] = mapped_column(ForeignKey("api_keys.id", ondelete="SET NULL"), index=True)
     # The workspace this batch was CREATED in (otari#643 follow-up), so
@@ -1148,8 +1146,9 @@ class BudgetReservation(Base):
       release do the work.
     * **A leaked hold becomes reclaimable individually.** A failure between
       reserve and settle used to leave an amount in the counter that could be
-      seen only in aggregate and cleared only by the budget's next reset. With a
-      row it has an owner, an age and a TTL.
+      seen only in aggregate and released by nothing at all: the budget reset
+      zeroes ``spend`` and leaves ``reserved`` where it is. With a row it has an
+      owner, an age and a TTL.
 
     The row is written *after* the holds it records, never before. A hold with no
     row is the pre-existing leak the sweep bounds; a row with no hold would have
@@ -1162,9 +1161,17 @@ class BudgetReservation(Base):
 
     __tablename__ = "budget_reservations"
     __table_args__ = (
-        # The sweep's access path: active rows whose TTL has elapsed. Equality on
-        # ``status`` leads so the range scan on ``expires_at`` rides the same index.
+        # The global sweep's access path: active rows whose TTL has elapsed.
+        # Equality on ``status`` leads so the range scan on ``expires_at`` rides
+        # the same index.
         Index("ix_budget_reservations_status_expires_at", "status", "expires_at"),
+        # The per-user reclaim's, which runs on every request that takes a hold.
+        # It has to lead on ``user_id``: given only the index above, the planner
+        # takes it and filters ``user_id``, so one user's reclaim pays for the
+        # whole deployment's backlog of expired rows. Leading on ``user_id`` also
+        # serves the FK cascade, so this replaces the plain index on that column
+        # rather than joining it.
+        Index("ix_budget_reservations_user_status_expires", "user_id", "status", "expires_at"),
     )
 
     id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
@@ -1180,10 +1187,6 @@ class BudgetReservation(Base):
     # ``estimate > 0`` because a zero-cost request on an enforced budget still
     # takes the hold, and the release has to match what the reserve did.
     user_reserved: Mapped[bool] = mapped_column(default=False, server_default=false())
-    # Mirrors ``ReservationHandle.counts_toward_budget``: a budget-exempt request
-    # is ledgered so its hold is still reclaimable, but reconciling it must not
-    # write ``users.spend``.
-    counts_toward_budget: Mapped[bool] = mapped_column(default=True, server_default=true())
     # A plain string rather than a database enum, matching ``scoped_budgets.scope_type``:
     # a new state should not need an enum migration. Values are the
     # ``RESERVATION_*`` constants in gateway.services.budget_reservation_ledger.

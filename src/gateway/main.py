@@ -378,13 +378,14 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
             # Not a cache refresher like the rest: this one returns leaked budget
             # holds. The per-user reclaim on the reserve path only runs when that
             # user next reserves, so a user whose single request leaked would hold
-            # against their budget until its next reset, and forever without one.
+            # against their budget with nothing ever releasing it.
             # Standalone only, because hybrid mode reserves nothing locally.
             if config.budget_reservation_sweep_interval_sec > 0:
                 reservation_sweeper = asyncio.create_task(
                     run_reservation_sweeper(
                         config.budget_reservation_sweep_interval_sec,
                         batch_size=config.budget_reservation_sweep_batch,
+                        retention_sec=config.budget_reservation_retention_sec,
                     )
                 )
 

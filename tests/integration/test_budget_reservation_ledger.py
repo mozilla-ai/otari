@@ -320,6 +320,78 @@ async def test_a_top_up_grows_the_row_it_already_has(async_db: AsyncSession, ten
 
 
 @pytest.mark.asyncio
+async def test_a_top_up_after_a_reclaim_returns_the_delta(async_db: AsyncSession, tenancy: Fixture) -> None:
+    """A top-up that loses the row gives its delta back on both counters.
+
+    The sweep reclaims a hold on the assumption its request is gone. When it is
+    wrong, a top-up would otherwise leave the delta held by a terminal row that
+    no later sweep will look at again, which is a leak the ledger cannot see.
+    Both legs of the grow are guarded on that, not just the per-user one.
+    """
+    await _with_budget(async_db, tenancy)
+    cap = await _scoped(async_db, scope_type="organization", scope_id=str(tenancy.organization_id), max_budget=10.0)
+    async_db.add(cap)
+    await async_db.commit()
+
+    handle = await reserve_budget(async_db, tenancy.user_id, 1.0, scope=tenancy.scope())
+    assert handle.reservation_id is not None
+    row = await async_db.get_one(BudgetReservation, handle.reservation_id)
+    row.expires_at = datetime.now(UTC) - timedelta(minutes=1)
+    await async_db.commit()
+    assert await ledger.sweep_expired(async_db, batch_size=10) == 1
+
+    await increase_reservation(async_db, handle, 2.0)
+
+    # The delta is back on both counters, and the row was not resurrected.
+    assert (await _user(async_db, tenancy.user_id)).reserved == Decimal("0.000000")
+    _, reserved = await _counters(async_db, cap.id)
+    assert reserved == pytest.approx(0.0)
+    assert await _status(async_db, handle.reservation_id) == ledger.RESERVATION_EXPIRED
+    async_db.expire_all()
+    assert (await async_db.get_one(BudgetReservation, handle.reservation_id)).estimate == Decimal("1.000000")
+    lines = await _lines(async_db, handle.reservation_id)
+    assert lines[0].amount == Decimal("1.000000")
+    # The handle no longer claims to hold what it gave back.
+    assert handle.estimate == Decimal("1.000000")
+    assert handle.scoped_estimate == Decimal("1.000000")
+
+
+@pytest.mark.asyncio
+async def test_terminal_rows_are_pruned_past_the_retention_window(
+    async_db: AsyncSession, tenancy: Fixture
+) -> None:
+    """Retention deletes finished rows and never touches a live one.
+
+    The table gains a row per billable request and nothing else removes one. What
+    a request cost lives durably in ``usage_logs``; this row only ever existed to
+    make an in-flight hold reclaimable.
+    """
+    await _with_budget(async_db, tenancy)
+    settled = await reserve_budget(async_db, tenancy.user_id, 1.0)
+    await reconcile_reservation(async_db, settled, 1.0)
+    live = await reserve_budget(async_db, tenancy.user_id, 1.0)
+
+    # Nothing is old enough yet.
+    assert await ledger.prune_terminal(async_db, older_than_sec=3600, batch_size=10) == 0
+
+    assert settled.reservation_id is not None
+    async_db.expire_all()
+    row = await async_db.get_one(BudgetReservation, settled.reservation_id)
+    row.updated_at = datetime.now(UTC) - timedelta(days=8)
+    await async_db.commit()
+
+    assert await ledger.prune_terminal(async_db, older_than_sec=604800, batch_size=10) == 1
+    remaining = {row.id for row in await _rows(async_db, tenancy.user_id)}
+    assert settled.reservation_id not in remaining
+    assert live.reservation_id in remaining
+    # The lines went with it.
+    assert await _lines(async_db, settled.reservation_id) == []
+
+    # A retention of 0 is "keep forever", not "delete everything".
+    assert await ledger.prune_terminal(async_db, older_than_sec=0, batch_size=10) == 0
+
+
+@pytest.mark.asyncio
 async def test_a_request_that_holds_nothing_writes_no_row(async_db: AsyncSession, tenancy: Fixture) -> None:
     """No budget and no ceiling means nothing to reclaim, so no row.
 

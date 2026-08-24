@@ -10,8 +10,9 @@ gateway is supposed to make were unreachable because of that
   surfaced as an under-count of live holds rather than as an error, weakening
   the overspend guarantee the budget gate exists for;
 * a hold leaked between reserve and settle could be seen only in aggregate, and
-  cleared only by the budget's next reset (never, for a budget with no reset
-  period).
+  was released by nothing at all. The budget reset is not the backstop it reads
+  as: it zeroes spend and leaves the hold in place, so a leak shrank the
+  headroom permanently.
 
 ``budget_reservations`` gives each hold a row, a status and a TTL, and
 ``budget_reservation_scopes`` records what it placed on each tenancy-scoped
@@ -53,7 +54,6 @@ def upgrade() -> None:
         sa.Column("user_id", sa.String(), nullable=False),
         sa.Column("estimate", _COST_TYPE, nullable=False, server_default="0"),
         sa.Column("user_reserved", sa.Boolean(), nullable=False, server_default=sa.false()),
-        sa.Column("counts_toward_budget", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("status", sa.String(), nullable=False, server_default="active"),
         sa.Column("expires_at", sa.DateTime(timezone=True), nullable=False),
         sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
@@ -61,15 +61,24 @@ def upgrade() -> None:
         sa.ForeignKeyConstraint(["user_id"], ["users.user_id"], ondelete="CASCADE"),
         sa.PrimaryKeyConstraint("id"),
     )
-    # The per-user reclaim runs on every request that reserves, so this one is on
-    # the hot path rather than a reporting convenience.
-    op.create_index("ix_budget_reservations_user_id", "budget_reservations", ["user_id"])
-    # The sweep's access path. Equality on status leads so the range scan on
-    # expires_at rides the same index.
+    # The global sweep's access path. Equality on status leads so the range scan
+    # on expires_at rides the same index.
     op.create_index(
         "ix_budget_reservations_status_expires_at",
         "budget_reservations",
         ["status", "expires_at"],
+    )
+    # The per-user reclaim's, which runs on every request that takes a hold. It
+    # has to lead on user_id: given only the index above, the planner takes that
+    # one and filters user_id, so one user's reclaim pays for the whole
+    # deployment's backlog of expired rows (measured at 200k rows: 1415 buffer
+    # hits per reserving request against a 100k-row backlog belonging to someone
+    # else). Leading on user_id also serves the FK cascade, so this replaces a
+    # plain index on that column rather than joining one.
+    op.create_index(
+        "ix_budget_reservations_user_status_expires",
+        "budget_reservations",
+        ["user_id", "status", "expires_at"],
     )
 
     op.create_table(
@@ -96,5 +105,5 @@ def downgrade() -> None:
     op.drop_index("ix_budget_reservation_scopes_reservation_id", table_name="budget_reservation_scopes")
     op.drop_table("budget_reservation_scopes")
     op.drop_index("ix_budget_reservations_status_expires_at", table_name="budget_reservations")
-    op.drop_index("ix_budget_reservations_user_id", table_name="budget_reservations")
+    op.drop_index("ix_budget_reservations_user_status_expires", table_name="budget_reservations")
     op.drop_table("budget_reservations")
