@@ -8,6 +8,7 @@ from fastapi import HTTPException, Request, Response, status
 
 from gateway.core.config import CONVERSATION_HEADER, ROUTER_HEADER, ROUTER_TASK_HEADER
 from gateway.core.env import otari_env
+from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
 from gateway.services.guardrails import GuardrailsNotReachableError, run_input_guardrails
 from gateway.services.routing.decide import RoutingSignal
@@ -295,7 +296,8 @@ async def apply_input_guardrails(
         HTTPException: ``400`` when a guardrail's ``url`` override fails the
             SSRF/scheme safety check; ``403`` when a ``block`` guardrail flags
             the input; ``502`` when a ``block`` guardrail that fails closed can't
-            be evaluated.
+            be evaluated. The 502 body names the profile and not the endpoint,
+            which goes to the log instead.
     """
     if not guardrails:
         return
@@ -309,7 +311,12 @@ async def apply_input_guardrails(
     except UnsafeURLError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
     except GuardrailsNotReachableError as exc:
-        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=str(exc)) from exc
+        # The full reason, endpoint included, goes to the log; the caller gets
+        # the error's `public_detail`, which names the profile and nothing else.
+        # An organization's guardrail endpoint is not the caller's to see
+        # (otari#654), and it is not theirs to fix either.
+        logger.warning("guardrail check could not be evaluated: %s", exc)
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail=exc.public_detail) from exc
 
     if verdict.blocked:
         raise HTTPException(

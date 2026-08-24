@@ -187,6 +187,57 @@ describe("OrganizationGuardrailsCard", () => {
     })
   })
 
+  it("rewrites the endpoint in place, so a typo is not a delete and recreate", async () => {
+    const calls = mockApi({
+      guardrails: [
+        organizationGuardrail({
+          url: "https://wrong.example",
+          applies_to_all_workspaces: true,
+        }),
+      ],
+    })
+    renderCard()
+
+    const endpoint = await screen.findByLabelText(
+      "Endpoint for prompt-injection",
+    )
+    await userEvent.clear(endpoint)
+    await userEvent.type(endpoint, "https://right.example")
+    await userEvent.click(
+      screen.getByRole("button", { name: "Save prompt-injection" }),
+    )
+
+    await waitFor(() =>
+      expect(calls.some((call) => call.method === "PATCH")).toBe(true),
+    )
+    expect(calls.find((call) => call.method === "PATCH")?.body).toMatchObject({
+      url: "https://right.example",
+    })
+  })
+
+  it("leaves a stored endpoint alone on a save that did not touch it", async () => {
+    const calls = mockApi({
+      guardrails: [
+        organizationGuardrail({
+          url: "https://guardrails.example",
+          applies_to_all_workspaces: true,
+        }),
+      ],
+    })
+    renderCard()
+
+    await userEvent.click(
+      await screen.findByRole("button", { name: "Save prompt-injection" }),
+    )
+
+    await waitFor(() =>
+      expect(calls.some((call) => call.method === "PATCH")).toBe(true),
+    )
+    expect(
+      calls.find((call) => call.method === "PATCH")?.body,
+    ).not.toHaveProperty("url")
+  })
+
   it("mandates a new guardrail from the add form", async () => {
     const calls = mockApi()
     renderCard()

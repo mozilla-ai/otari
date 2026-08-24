@@ -110,6 +110,14 @@ class OrganizationGuardrailCreate(BaseModel):
     A guardrail *vendor's* own key is not this: the guardrails service builds
     its guardrails from the operator's YAML and holds those itself.
 
+    The https requirement that `validate_mcp_url` puts on a credential-carrying
+    URL therefore applies to ``url`` and not to the deployment's
+    ``guardrails_url`` fallback, which is deliberate rather than an oversight:
+    the shipped compose file points that at ``http://anyguardrails:8000``, a
+    same-host sidecar, so enforcing it there would make an organization
+    credential unusable on the standard deployment while protecting a hop that
+    does not leave the host.
+
     ``on`` is not offered. This plane mandates input-direction checks, which is
     the only direction the request path enforces
     (`services.guardrails.run_input_guardrails`); an organization that could
@@ -129,7 +137,12 @@ class OrganizationGuardrailCreate(BaseModel):
     credential: str | None = Field(
         default=None,
         max_length=8192,
-        description="Bearer credential for that endpoint; requires an https URL. Encrypted at rest, never returned",
+        description=(
+            "Bearer credential for the endpoint this entry is sent to. An entry that names its own "
+            "url must then use https; one that falls back to the deployment's guardrails_url is sent "
+            "wherever the operator pointed that, which is commonly a same-host http sidecar. "
+            "Encrypted at rest, never returned"
+        ),
     )
     mode: Literal["block", "monitor"] = Field(
         default="monitor",
@@ -615,14 +628,26 @@ class OrganizationGuardrailService:
         if request.applies_to_all_workspaces is not None:
             guardrail.applies_to_all_workspaces = request.applies_to_all_workspaces
 
+        # Flushed here rather than left to the commit, and *before* the scope is
+        # rewritten, for the reason `workspace_mcp_server_service.update_server`
+        # flushes: `_replace_scope` issues a DELETE, and the autoflush that
+        # statement triggers is what would emit this row's UPDATE. A profile
+        # collision would then escape from inside that helper as a raw
+        # `IntegrityError`, with the session left unrolled-back, instead of the
+        # conflict the caller is owed. Read the profile off the row first: the
+        # rollback expires every instance in the session, so reading
+        # `guardrail.profile` afterwards would be a lazy load in a place that
+        # cannot await one.
+        attempted_profile = guardrail.profile
+        try:
+            await self.db.flush()
+        except IntegrityError as exc:
+            await self.db.rollback()
+            raise OrganizationGuardrailAlreadyExistsError(attempted_profile) from exc
+
         if scope_change is not None:
             await self._replace_scope(guardrail.id, scope_change)
 
-        # Read off the row here, before the commit: `_commit` rolls back on
-        # failure, which expires every instance in the session, so reading
-        # `guardrail.profile` in the handler below would be a lazy load in a
-        # place that cannot await one.
-        attempted_profile = guardrail.profile
         try:
             await self._commit()
         except IntegrityError as exc:

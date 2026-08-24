@@ -40,8 +40,32 @@ logger = logging.getLogger(__name__)
 _DEFAULT_TIMEOUT_S = 30.0
 
 
+def _unevaluated_detail(profile: str) -> str:
+    """What a caller is told when a guardrail could not run.
+
+    Names the profile, which the caller either asked for or is subject to, and
+    nothing about where it would have run or what the endpoint said back.
+    """
+    return f"guardrail profile {profile!r} could not be evaluated"
+
+
 class GuardrailsNotReachableError(RuntimeError):
-    """Raised when the guardrails service can't be reached or returns malformed data."""
+    """Raised when the guardrails service can't be reached or returns malformed data.
+
+    Carries two messages, because the two audiences are different. ``str(exc)``
+    is for the log and names the endpoint and the underlying failure;
+    :attr:`public_detail` is what reaches the caller in the 502 body and
+    deliberately does not. Since otari#654 that endpoint may be one an
+    organization configured, which the caller was never told about and cannot
+    act on, and the root ``AGENTS.md`` rule against leaking internals in a
+    public error response covers exactly that. The one message that stays whole
+    is the no-URL-configured case: it names an environment variable rather than
+    an address, and it is the only one a reader can actually act on.
+    """
+
+    def __init__(self, message: str, *, public_detail: str | None = None) -> None:
+        super().__init__(message)
+        self.public_detail = public_detail if public_detail is not None else message
 
 
 @dataclass
@@ -105,7 +129,8 @@ async def _validate_one(
         result = body["result"]
     except (httpx.HTTPError, KeyError, ValueError) as exc:
         raise GuardrailsNotReachableError(
-            f"guardrail profile {cfg.profile!r} failed against {base_url}: {exc}"
+            f"guardrail profile {cfg.profile!r} failed against {base_url}: {exc}",
+            public_detail=_unevaluated_detail(cfg.profile),
         ) from exc
 
     # `result` may be a list when the service runs the guardrail over a list of
@@ -114,7 +139,8 @@ async def _validate_one(
         result = result[0] if result else {}
     if not isinstance(result, dict):
         raise GuardrailsNotReachableError(
-            f"guardrail profile {cfg.profile!r} returned an unexpected result shape: {result!r}"
+            f"guardrail profile {cfg.profile!r} returned an unexpected result shape: {result!r}",
+            public_detail=_unevaluated_detail(cfg.profile),
         )
 
     # Treat a missing or non-boolean `valid` as malformed and raise, so the
@@ -123,12 +149,14 @@ async def _validate_one(
     # explicit `valid: null` is a legitimate inconclusive verdict (not flagged).
     if "valid" not in result:
         raise GuardrailsNotReachableError(
-            f"guardrail profile {cfg.profile!r} returned no 'valid' field: {result!r}"
+            f"guardrail profile {cfg.profile!r} returned no 'valid' field: {result!r}",
+            public_detail=_unevaluated_detail(cfg.profile),
         )
     valid = result["valid"]
     if valid is not None and not isinstance(valid, bool):
         raise GuardrailsNotReachableError(
-            f"guardrail profile {cfg.profile!r} returned a non-boolean 'valid': {valid!r}"
+            f"guardrail profile {cfg.profile!r} returned a non-boolean 'valid': {valid!r}",
+            public_detail=_unevaluated_detail(cfg.profile),
         )
 
     return GuardrailResult(

@@ -5502,7 +5502,7 @@
         "type": "object"
       },
       "OrganizationGuardrailCreate": {
-        "description": "Request body for mandating a guardrail across an organization.\n\n``credential`` is never stored as sent: it is encrypted with\n``OTARI_SECRET_KEY`` and only the ciphertext is kept, the same convention\n`entities.WorkspaceMcpServer` and `entities.ProviderCredential` use. It is\nsent to the endpoint as ``Authorization: Bearer`` when the guardrail runs,\nso it authenticates this gateway to the guardrails service the entry names.\nA guardrail *vendor's* own key is not this: the guardrails service builds\nits guardrails from the operator's YAML and holds those itself.\n\n``on`` is not offered. This plane mandates input-direction checks, which is\nthe only direction the request path enforces\n(`services.guardrails.run_input_guardrails`); an organization that could\nstore an output-direction mandate would be storing one nothing runs.",
+        "description": "Request body for mandating a guardrail across an organization.\n\n``credential`` is never stored as sent: it is encrypted with\n``OTARI_SECRET_KEY`` and only the ciphertext is kept, the same convention\n`entities.WorkspaceMcpServer` and `entities.ProviderCredential` use. It is\nsent to the endpoint as ``Authorization: Bearer`` when the guardrail runs,\nso it authenticates this gateway to the guardrails service the entry names.\nA guardrail *vendor's* own key is not this: the guardrails service builds\nits guardrails from the operator's YAML and holds those itself.\n\nThe https requirement that `validate_mcp_url` puts on a credential-carrying\nURL therefore applies to ``url`` and not to the deployment's\n``guardrails_url`` fallback, which is deliberate rather than an oversight:\nthe shipped compose file points that at ``http://anyguardrails:8000``, a\nsame-host sidecar, so enforcing it there would make an organization\ncredential unusable on the standard deployment while protecting a hop that\ndoes not leave the host.\n\n``on`` is not offered. This plane mandates input-direction checks, which is\nthe only direction the request path enforces\n(`services.guardrails.run_input_guardrails`); an organization that could\nstore an output-direction mandate would be storing one nothing runs.",
         "properties": {
           "applies_to_all_workspaces": {
             "default": false,
@@ -5520,7 +5520,7 @@
                 "type": "null"
               }
             ],
-            "description": "Bearer credential for that endpoint; requires an https URL. Encrypted at rest, never returned",
+            "description": "Bearer credential for the endpoint this entry is sent to. An entry that names its own url must then use https; one that falls back to the deployment's guardrails_url is sent wherever the operator pointed that, which is commonly a same-host http sidecar. Encrypted at rest, never returned",
             "title": "Credential"
           },
           "enabled": {

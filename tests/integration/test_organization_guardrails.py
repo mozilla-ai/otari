@@ -143,7 +143,7 @@ async def test_one_profile_per_organization(async_db: AsyncSession) -> None:
 
 
 async def test_renaming_onto_an_existing_profile_is_refused(async_db: AsyncSession) -> None:
-    """The collision the unique index catches at the commit rather than the flush."""
+    """The collision the unique index catches when a rename is flushed."""
     organization = await _organization(async_db)
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
     service = OrganizationGuardrailService(async_db)
@@ -153,6 +153,32 @@ async def test_renaming_onto_an_existing_profile_is_refused(async_db: AsyncSessi
     with pytest.raises(OrganizationGuardrailAlreadyExistsError):
         await service.update_guardrail(
             user=owner, guardrail_id=second.id, request=OrganizationGuardrailUpdate(profile="pii")
+        )
+
+
+async def test_renaming_onto_an_existing_profile_is_refused_alongside_a_scope_change(
+    async_db: AsyncSession,
+) -> None:
+    """The same collision, on the update that also rewrites the scope.
+
+    ``_replace_scope`` issues a DELETE, and the autoflush that triggers is what
+    emits the renamed row's UPDATE. Without an explicit flush before it, the
+    unique violation escapes from inside that helper as a raw ``IntegrityError``
+    on an unrolled-back session, so the caller sees a 500 rather than the
+    conflict.
+    """
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, owner=owner)
+    service = OrganizationGuardrailService(async_db)
+    await service.create_guardrail(user=owner, request=_create(profile="pii"))
+    second = await service.create_guardrail(user=owner, request=_create(profile="prompt-injection"))
+
+    with pytest.raises(OrganizationGuardrailAlreadyExistsError):
+        await service.update_guardrail(
+            user=owner,
+            guardrail_id=second.id,
+            request=OrganizationGuardrailUpdate(profile="pii", workspace_ids=[workspace.id]),
         )
 
 

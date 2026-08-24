@@ -162,6 +162,7 @@ function GuardrailRow({
     guardrail.applies_to_all_workspaces,
   )
   const [scope, setScope] = useState<string[]>([...guardrail.workspace_ids])
+  const [url, setUrl] = useState(guardrail.url ?? "")
   // Blank means "keep the stored credential". The field is write-only, so it
   // never shows what is stored, only whether something is.
   const [credential, setCredential] = useState("")
@@ -175,6 +176,7 @@ function GuardrailRow({
     setEnabled(guardrail.enabled)
     setEverywhere(guardrail.applies_to_all_workspaces)
     setScope([...guardrail.workspace_ids])
+    setUrl(guardrail.url ?? "")
   }, [guardrail])
 
   const busy = update.isPending || remove.isPending
@@ -189,6 +191,11 @@ function GuardrailRow({
           on_unavailable: onUnavailable,
           enabled,
           applies_to_all_workspaces: everywhere,
+          // An empty box clears the stored endpoint, which is the server's own
+          // three-state rule for this field: omitted leaves it, "" clears it, a
+          // value replaces it. Only sent when it differs from what is stored,
+          // so saving a mode never rewrites the endpoint.
+          ...(url.trim() === (guardrail.url ?? "") ? {} : { url: url.trim() }),
           // Sent only when the entry has a scope to carry: the server refuses a
           // list alongside "every workspace" rather than storing one that
           // decides nothing.
@@ -245,6 +252,16 @@ function GuardrailRow({
             { value: "off", label: "Paused" },
           ]}
           disabled={busy}
+        />
+        <input
+          type="text"
+          inputMode="url"
+          aria-label={`Endpoint for ${guardrail.profile}`}
+          value={url}
+          disabled={busy}
+          placeholder="blank uses the URL above"
+          onChange={(event) => setUrl(event.target.value)}
+          className={`w-full sm:w-72 ${INPUT_CLASS}`}
         />
         <input
           type="password"
