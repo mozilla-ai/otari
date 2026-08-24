@@ -22,13 +22,40 @@ type CredentialField = "email" | "password" | "masterKey"
 const VALIDATION = "aria" as const
 
 /**
- * The page frame both states share: anchored to a fixed offset from the top
- * rather than vertically centered. Centering means anything that grows the card
- * moves its top edge up by half the growth, which walks the submit button out
- * from under a pointer that is already on it. Opening the first-run disclosure
- * did exactly that.
+ * The page frame: optically centered, and stable while the card grows.
+ *
+ * `items-center` gave the second at the cost of the first. Centering measures
+ * the card, so anything that grows it moves its top edge up by half the growth,
+ * and opening the first-run disclosure walked the submit button out from under
+ * a pointer already resting on it. A flat top offset fixed that and left the
+ * card sitting high with the page empty below it.
+ *
+ * So the offset is half the viewport minus a **constant** half-height, rather
+ * than minus the card's real one. 17.5rem is the figure that best fits half of
+ * what the card measures at rest across its branches, taken off the running
+ * page rather than guessed: 537px for the master key with one footer link,
+ * 581px with two, 589px for a password, 721px for a password with all four
+ * links. Every one of those lands within 14px of true center, except the
+ * tallest, which nearly fills a 900px window anyway. Because the figure is a
+ * constant rather than the content's own height, the offset does not move when
+ * the disclosure opens or a refusal wraps; the card grows downward from a
+ * fixed top edge. `max()` floors it on a window shorter than
+ * the card, where the page scrolls instead.
+ *
+ * `vh`, deliberately, not `dvh`: the dynamic unit shrinks when a phone's soft
+ * keyboard opens, which would re-center the card at the exact moment someone is
+ * typing into it.
  */
-const PAGE = "flex min-h-full items-start justify-center px-4 py-16 sm:pt-30"
+const PAGE =
+  "flex min-h-full items-start justify-center px-4 pt-[max(2rem,calc(50vh-17.5rem))] pb-16"
+
+/**
+ * The same frame for the unavailable state, whose card is around 351px rather
+ * than 537px. Sharing the form's figure would leave this one sitting about
+ * 110px high, which is the complaint the computed offset exists to answer.
+ */
+const PAGE_FLAT =
+  "flex min-h-full items-start justify-center px-4 pt-[max(2rem,calc(50vh-11.5rem))] pb-16"
 
 /**
  * Card padding, on top of the 16px `<Card>` itself contributes. Read on screen
@@ -297,7 +324,7 @@ export function Login() {
 
   if (signInUnavailable) {
     return (
-      <div className={PAGE}>
+      <div className={PAGE_FLAT}>
         <Card className="w-full max-w-md">
           <Card.Content className={CARD_FLAT}>
             {/* Grouped so the mark sits 16px from the heading it belongs to,
