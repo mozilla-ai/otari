@@ -93,6 +93,13 @@ from gateway.services.tenancy.errors import (
 # person is *expected* to register their laptop, their phone and a hardware key.
 # It exists because the table is written by an authenticated caller in a loop
 # they control, and an unbounded list is a list somebody eventually fills.
+#
+# Counted over *every* row the identity holds, not just the ones under the
+# current relying-party ID. That is what keeps it a real bound: counting one
+# slice would let a deployment that has changed its ID hold another twenty per
+# change, and it is also what lets ``list_credentials`` select without a limit.
+# An identity sitting at the ceiling on orphaned rows is told to delete one,
+# which is the right instruction anyway, since orphans are all they are.
 MAX_PASSKEYS_PER_IDENTITY = 20
 
 # What a passkey is called when its owner does not say. Deliberately not derived
@@ -223,6 +230,22 @@ async def _credentials_for(db: AsyncSession, user_id: uuid.UUID, rp_id: str) -> 
     return list(result.scalars().all())
 
 
+async def _refuse_at_the_ceiling(db: AsyncSession, user_id: uuid.UUID) -> None:
+    """Refuse a registration that would take this identity past the ceiling.
+
+    ``func.count()`` rather than ``len()`` of a fetched list, and over every row
+    the identity holds rather than one relying party's slice; see
+    ``MAX_PASSKEYS_PER_IDENTITY`` for why the scope matters.
+    """
+    held = (
+        await db.execute(
+            select(func.count()).select_from(WebAuthnCredential).where(col(WebAuthnCredential.user_id) == user_id)
+        )
+    ).scalar_one()
+    if held >= MAX_PASSKEYS_PER_IDENTITY:
+        raise PasskeyLimitReachedError(MAX_PASSKEYS_PER_IDENTITY)
+
+
 async def begin_registration(db: AsyncSession, config: GatewayConfig, identity: User) -> dict[str, Any]:
     """Issue registration options for a signed-in identity to hand to its browser.
 
@@ -247,8 +270,7 @@ async def begin_registration(db: AsyncSession, config: GatewayConfig, identity: 
     # the one that actually holds (two ceremonies can start at once), but making
     # somebody touch their security key and *then* be told no is the worse way
     # to say it.
-    if len(existing) >= MAX_PASSKEYS_PER_IDENTITY:
-        raise PasskeyLimitReachedError(MAX_PASSKEYS_PER_IDENTITY)
+    await _refuse_at_the_ceiling(db, identity.id)
     options = generate_registration_options(
         rp_id=relying_party.rp_id,
         rp_name=relying_party.name,
@@ -311,8 +333,7 @@ async def finish_registration(
         raise PasskeyCeremonyError from None
 
     existing = await _credentials_for(db, identity.id, relying_party.rp_id)
-    if len(existing) >= MAX_PASSKEYS_PER_IDENTITY:
-        raise PasskeyLimitReachedError(MAX_PASSKEYS_PER_IDENTITY)
+    await _refuse_at_the_ceiling(db, identity.id)
 
     credential = WebAuthnCredential(
         user_id=identity.id,
@@ -492,6 +513,12 @@ async def list_credentials(db: AsyncSession, user_id: uuid.UUID) -> list[WebAuth
     Takes no config for the same reason the route no longer requires one: a
     deployment that has stopped being configured for passkeys still has to let
     somebody clean up after it.
+
+    No ``limit``, and this is the rare list endpoint that does not need one: the
+    table holds at most ``MAX_PASSKEYS_PER_IDENTITY`` rows per identity, enforced
+    on the only path that writes it, so the result set is bounded by
+    construction rather than by a page size. Paginating twenty rows would add a
+    contract to keep in step for nothing.
     """
     result = await db.execute(
         select(WebAuthnCredential)

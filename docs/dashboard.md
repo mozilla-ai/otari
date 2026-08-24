@@ -162,7 +162,9 @@ account and not the deployment, so it does not retire master-key sign-in: only
 the operator identity's own password does that. **Account settings** also
 manages
 passkeys: sign in with your device instead of typing a password, once the
-deployment knows its own address (`public_base_url`, or `webauthn_rp_id`). A
+deployment knows its own address. Setting `public_base_url` is enough on its
+own; `webauthn_rp_id` only overrides which domain the passkey is bound to and
+still needs an address to serve the ceremony from. A
 passkey is added to an identity that can already sign in rather than being a way
 in of its own, and it never replaces the password. OAuth sign-in is the rest of
 this track. See

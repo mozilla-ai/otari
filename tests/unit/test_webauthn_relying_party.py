@@ -54,6 +54,24 @@ def test_an_explicit_id_wins_over_the_derived_one() -> None:
     assert relying_party.origins == ("https://otari.example.com",)
 
 
+def test_a_configured_id_is_normalized_to_lowercase() -> None:
+    """A domain is case-insensitive, and the comparisons around it are not.
+
+    Left as written, a mixed-case ID passes validation (which lowercases both
+    sides) and then fails ``covers`` against the lowercased origin host, so
+    startup blames the origins list for a casing mistake in the ID.
+    """
+    config = _config(
+        public_base_url="https://Otari.Example.com",
+        webauthn_rp_id="Otari.Example.COM",
+    )
+    relying_party = config.webauthn_relying_party
+    assert relying_party is not None
+    assert relying_party.rp_id == "otari.example.com"
+    # And the pair that used to be refused now validates.
+    config.validate_webauthn_relying_party()
+
+
 def test_a_deployment_that_knows_no_address_has_no_relying_party() -> None:
     """Not an error: it is a deployment that does not offer passkeys."""
     config = _config()

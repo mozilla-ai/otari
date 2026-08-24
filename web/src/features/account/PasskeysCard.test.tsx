@@ -264,6 +264,29 @@ describe("PasskeysCard", () => {
     })
   })
 
+  it("does not send a blank rename", async () => {
+    const fetchMock = mockApi({
+      [LIST]: () => jsonResponse({ data: [PASSKEY], count: 1 }),
+    })
+    const user = userEvent.setup()
+    renderCard()
+
+    await screen.findByText("Work laptop")
+    await user.click(screen.getByRole("button", { name: "Rename" }))
+    const dialog = within(await screen.findByRole("alertdialog"))
+    await user.clear(dialog.getByLabelText("Name"))
+    await user.click(dialog.getByRole("button", { name: "Save" }))
+
+    // The dialog stays open and nothing is sent, rather than a 422 arriving
+    // from inside a dialog that looked like it worked.
+    expect(screen.getByRole("alertdialog")).toBeInTheDocument()
+    expect(
+      fetchMock.mock.calls.some(
+        ([, init]) => (init as RequestInit)?.method === "PATCH",
+      ),
+    ).toBe(false)
+  })
+
   it("deletes a passkey after confirming, and says the password still works", async () => {
     const fetchMock = mockApi({
       [LIST]: () => jsonResponse({ data: [PASSKEY], count: 1 }),

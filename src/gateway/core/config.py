@@ -1126,7 +1126,13 @@ class GatewayConfig(BaseSettings):
         the ID came from, so the common deployment configures one setting and
         gets a consistent pair rather than two settings it can put out of step.
         """
-        rp_id = (self.webauthn_rp_id or "").strip() or _host_of(self.public_base_url)
+        # Lowercased to match ``_host_of``, which returns what ``urlsplit``
+        # already normalized. Without it a configured "Otari.Example.com" passes
+        # validation (which compares against its own lowercased form) and then
+        # fails ``covers`` against the lowercased origin host, so startup blames
+        # webauthn_allowed_origins for a casing mistake in webauthn_rp_id. A
+        # relying-party ID is a domain, and domains are case-insensitive.
+        rp_id = (self.webauthn_rp_id or "").strip().lower() or _host_of(self.public_base_url)
         if not rp_id:
             return None
         origins = tuple(origin.strip().rstrip("/") for origin in self.webauthn_allowed_origins if origin.strip())

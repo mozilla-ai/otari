@@ -171,11 +171,17 @@ export function PasskeysCard() {
   }
 
   const confirmRename = () => {
-    if (!renaming || rename.isPending) {
+    const name = renamedTo.trim()
+    // `isRequired` on the field sets aria-required, which announces the rule
+    // but does not stop the dialog's Save: that is a button with a handler, not
+    // a form submit. Without this guard, clearing the box and pressing Save
+    // sends a blank name and the server answers 422 from inside a dialog that
+    // looks like it worked.
+    if (!renaming || rename.isPending || !name) {
       return
     }
     rename.mutate(
-      { id: renaming.id, name: renamedTo.trim() },
+      { id: renaming.id, name },
       { onSuccess: () => setRenaming(null) },
     )
   }
