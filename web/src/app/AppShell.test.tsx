@@ -446,11 +446,12 @@ describe("AppShell surface gating", () => {
       "Org settings",
       "Settings",
     ])
-    // The design's rail has four more rows (the organization's own Providers,
-    // Billing, Guardrails and Gateways), and each is gated on a surface a
-    // standalone gateway does not report, so none of them is here. The Gateway
-    // group is all four's worst case: both its rows are gated, so the heading
-    // goes with them.
+    // The design's rail has two more rows (the organization's own Providers and
+    // Guardrails), and each is gated on a surface a standalone gateway does not
+    // report, so neither is here. The Gateway group is their worst case: its one
+    // row is gated, so the heading goes with it. Billing and Gateways are not
+    // missing rows but overlay-owned ones this registry no longer declares at
+    // all (otari#737).
     expect(screen.queryByText("Gateway")).toBeNull()
   })
 

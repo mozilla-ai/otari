@@ -96,6 +96,28 @@ export interface NavSection {
 }
 
 /**
+ * Items an overlay adds to a section the base registry declares.
+ *
+ * The seam `overlaySections.ts` cannot cover: that one appends whole sections,
+ * and an overlay's destination does not always want one of its own. Billing
+ * belongs in "Cost & billing" beside `/budgets` and `/organization/pricing`, a
+ * section the base owns, so without this an overlay would have to edit
+ * `registry.ts` to place it, which cardinal rule 6 rules out.
+ *
+ * A contribution is appended to its section, after every row the base declares
+ * there, as `composeNavSections` appends a whole section after the base ones.
+ * The overlay orders its own items; it does not interleave them with the base's.
+ * A contribution naming a section this registry does not declare is dropped,
+ * the same way a stale `NavLabelOverride` is: a section renamed out from under
+ * an overlay costs it the rows it contributed, not the sidebar.
+ */
+export interface NavItemContribution {
+  /** Id of the base `NavSection` these items are appended to. */
+  sectionId: string
+  items: readonly NavItem[]
+}
+
+/**
  * A rename of one base section's labels: its heading, and the labels of the
  * disclosures inside it.
  *

@@ -27,8 +27,6 @@ import { Route as ToolsRouteImport } from './routes/tools'
 import { Route as UsageRouteImport } from './routes/usage'
 import { Route as WorkspacesRouteImport } from './routes/workspaces'
 import { Route as OrganizationIndexRouteImport } from './routes/organization.index'
-import { Route as OrganizationBillingRouteImport } from './routes/organization.billing'
-import { Route as OrganizationGatewaysRouteImport } from './routes/organization.gateways'
 import { Route as OrganizationGuardrailsRouteImport } from './routes/organization.guardrails'
 import { Route as OrganizationMembersRouteImport } from './routes/organization.members'
 import { Route as OrganizationPricingRouteImport } from './routes/organization.pricing'
@@ -128,16 +126,6 @@ const OrganizationIndexRoute = OrganizationIndexRouteImport.update({
   path: '/',
   getParentRoute: () => OrganizationRoute,
 } as any)
-const OrganizationBillingRoute = OrganizationBillingRouteImport.update({
-  id: '/billing',
-  path: '/billing',
-  getParentRoute: () => OrganizationRoute,
-} as any)
-const OrganizationGatewaysRoute = OrganizationGatewaysRouteImport.update({
-  id: '/gateways',
-  path: '/gateways',
-  getParentRoute: () => OrganizationRoute,
-} as any)
 const OrganizationGuardrailsRoute = OrganizationGuardrailsRouteImport.update({
   id: '/guardrails',
   path: '/guardrails',
@@ -198,8 +186,6 @@ export interface FileRoutesByFullPath {
   '/tools': typeof ToolsRouteWithChildren
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRoute
-  '/organization/billing': typeof OrganizationBillingRoute
-  '/organization/gateways': typeof OrganizationGatewaysRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
   '/organization/members': typeof OrganizationMembersRoute
   '/organization/pricing': typeof OrganizationPricingRoute
@@ -226,8 +212,6 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRoute
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRoute
-  '/organization/billing': typeof OrganizationBillingRoute
-  '/organization/gateways': typeof OrganizationGatewaysRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
   '/organization/members': typeof OrganizationMembersRoute
   '/organization/pricing': typeof OrganizationPricingRoute
@@ -257,8 +241,6 @@ export interface FileRoutesById {
   '/tools': typeof ToolsRouteWithChildren
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRoute
-  '/organization/billing': typeof OrganizationBillingRoute
-  '/organization/gateways': typeof OrganizationGatewaysRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
   '/organization/members': typeof OrganizationMembersRoute
   '/organization/pricing': typeof OrganizationPricingRoute
@@ -289,8 +271,6 @@ export interface FileRouteTypes {
     | '/tools'
     | '/usage'
     | '/workspaces'
-    | '/organization/billing'
-    | '/organization/gateways'
     | '/organization/guardrails'
     | '/organization/members'
     | '/organization/pricing'
@@ -317,8 +297,6 @@ export interface FileRouteTypes {
     | '/settings'
     | '/usage'
     | '/workspaces'
-    | '/organization/billing'
-    | '/organization/gateways'
     | '/organization/guardrails'
     | '/organization/members'
     | '/organization/pricing'
@@ -347,8 +325,6 @@ export interface FileRouteTypes {
     | '/tools'
     | '/usage'
     | '/workspaces'
-    | '/organization/billing'
-    | '/organization/gateways'
     | '/organization/guardrails'
     | '/organization/members'
     | '/organization/pricing'
@@ -508,20 +484,6 @@ declare module '@tanstack/react-router' {
       preLoaderRoute: typeof OrganizationIndexRouteImport
       parentRoute: typeof OrganizationRoute
     }
-    '/organization/billing': {
-      id: '/organization/billing'
-      path: '/billing'
-      fullPath: '/organization/billing'
-      preLoaderRoute: typeof OrganizationBillingRouteImport
-      parentRoute: typeof OrganizationRoute
-    }
-    '/organization/gateways': {
-      id: '/organization/gateways'
-      path: '/gateways'
-      fullPath: '/organization/gateways'
-      preLoaderRoute: typeof OrganizationGatewaysRouteImport
-      parentRoute: typeof OrganizationRoute
-    }
     '/organization/guardrails': {
       id: '/organization/guardrails'
       path: '/guardrails'
@@ -582,8 +544,6 @@ declare module '@tanstack/react-router' {
 }
 
 interface OrganizationRouteChildren {
-  OrganizationBillingRoute: typeof OrganizationBillingRoute
-  OrganizationGatewaysRoute: typeof OrganizationGatewaysRoute
   OrganizationGuardrailsRoute: typeof OrganizationGuardrailsRoute
   OrganizationMembersRoute: typeof OrganizationMembersRoute
   OrganizationPricingRoute: typeof OrganizationPricingRoute
@@ -592,8 +552,6 @@ interface OrganizationRouteChildren {
 }
 
 const OrganizationRouteChildren: OrganizationRouteChildren = {
-  OrganizationBillingRoute: OrganizationBillingRoute,
-  OrganizationGatewaysRoute: OrganizationGatewaysRoute,
   OrganizationGuardrailsRoute: OrganizationGuardrailsRoute,
   OrganizationMembersRoute: OrganizationMembersRoute,
   OrganizationPricingRoute: OrganizationPricingRoute,
