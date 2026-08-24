@@ -107,7 +107,8 @@ class CreateSessionRequest(BaseModel):
         max_length=512,
         description=(
             "The gateway master key; verified once and never stored by the browser. Accepted only "
-            "while no identity on this deployment has a password (see GET /v1/bootstrap)."
+            "while the operator identity has no password, which is to say while nobody has claimed "
+            "this deployment (see GET /v1/bootstrap)."
         ),
     )
     email: str | None = Field(

@@ -113,10 +113,11 @@ class DeploymentBootstrap(BaseModel):
     sign_in_methods: list[SignInMethod] = Field(
         description=(
             "How POST /v1/auth/session may be authenticated right now, sorted. 'master_key' is the "
-            "first-boot credential and is offered until some identity on this deployment has a "
-            "password; 'password' replaces it from then on, and the master key stays the credential "
-            "for the management API. Empty for a hybrid gateway, which issues no session. The login "
-            "page renders from this rather than trying a credential to find out."
+            "first-boot credential and is offered until the operator identity has a password, which "
+            "is what claiming the deployment means; 'password' replaces it from then on, and the "
+            "master key stays the credential for the management API. Empty for a hybrid gateway, "
+            "which issues no session. The login page renders from this rather than trying a "
+            "credential to find out."
         )
     )
     mail_ready: bool = Field(
@@ -145,9 +146,9 @@ async def get_bootstrap(
     credential, and it publishes nothing an unauthenticated caller could not
     already learn by trying both credentials against the sign-in endpoint.
 
-    The one database read is a ``LIMIT 1`` probe for any identity holding a
-    password, over a table a standalone deployment keeps one row per person in.
-    It runs only in standalone mode: a hybrid gateway has no session to describe,
+    The database read is two primary-key lookups: the ``tenancy_bootstrap_user_id``
+    marker, and the identity it names, to answer whether *that* identity holds a
+    password (#702). It runs only in standalone mode: a hybrid gateway has no session to describe,
     and ``get_db_if_needed`` hands it no session to read one from.
     """
     if config.is_hybrid_mode:

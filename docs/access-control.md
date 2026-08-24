@@ -135,7 +135,7 @@ curl http://localhost:8000/v1/bootstrap        # no credential needed
 # {"deployment_type":"standalone", ..., "sign_in_methods":["master_key"]}
 ```
 
-Nothing schedules the switch and nothing expires. A deployment that never claims goes on signing in with the master key indefinitely, which is a reasonable end state for a single-operator gateway that only ever talks to itself. One consequence is worth knowing: while a deployment is unclaimed, the sign-in screen offers the master key and not the password form, so a member who has signed up there signs in by calling `POST /v1/auth/session` directly until the operator claims it.
+Nothing schedules the switch and nothing expires. A deployment that never claims goes on signing in with the master key indefinitely, which is a reasonable end state for a single-operator gateway that only ever talks to itself. One consequence is worth knowing, and it has two halves. While a deployment is unclaimed, the sign-in screen offers the master key and not the password form, so a member who has signed up there signs in by calling `POST /v1/auth/session` directly until the operator claims it; and if they do reach the dashboard, **Account settings** offers them the claim form rather than the change-password form, which the endpoint then refuses for the missing `current_password`. Both follow from the same thing: `sign_in_methods` describes the deployment, and the dashboard has no route yet for asking what the signed-in identity itself holds. Claiming before you add anyone avoids both.
 
 #### Claiming the deployment
 
