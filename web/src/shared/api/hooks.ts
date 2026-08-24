@@ -38,6 +38,7 @@ import type {
   KnownProvider,
   KnownProviderSummary,
   MailSettings,
+  MaintenanceMode,
   ModelListResponse,
   ModelMetadataResponse,
   OrganizationContext,
@@ -115,6 +116,7 @@ const MODELS = "models"
 const PRICING = "pricing"
 const SETTINGS = "settings"
 const MAIL_SETTINGS = "mail-settings"
+const MAINTENANCE_MODE = "maintenance-mode"
 const TOOL_SETTINGS = "tool-settings"
 const TOOLS = "tools"
 const SEARCH_TOOLS = "search-tools"
@@ -616,6 +618,43 @@ export function useUpdateSettings() {
       // Toggling discovery changes which models the catalog and picker report.
       void queryClient.invalidateQueries({ queryKey: [MODELS] })
       void queryClient.invalidateQueries({ queryKey: [DISCOVERABLE] })
+    },
+  })
+}
+
+/**
+ * Whether this deployment is refusing new dashboard sign-ins.
+ *
+ * Not read from the bootstrap, which carries the same flag: that one is fetched
+ * once per page load and cached for the life of the tab, which is right for the
+ * sign-in screen (it renders before there is anything to poll with) and wrong
+ * for the switch that changes it. This is the live value the card renders.
+ */
+export function useMaintenanceMode() {
+  return useQuery({
+    queryKey: [MAINTENANCE_MODE],
+    queryFn: () => apiFetch<MaintenanceMode>("/v1/settings/maintenance-mode"),
+    staleTime: 60_000,
+  })
+}
+
+/**
+ * Freeze or unfreeze dashboard sign-ins.
+ *
+ * Nothing else is invalidated: the freeze changes no data any other page shows,
+ * and it deliberately does not touch the caller's own session, so the tab that
+ * flipped it keeps working either way.
+ */
+export function useSetMaintenanceMode() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (enabled: boolean) =>
+      apiFetch<MaintenanceMode>("/v1/settings/maintenance-mode", {
+        method: "PATCH",
+        body: JSON.stringify({ enabled }),
+      }),
+    onSuccess: (data) => {
+      queryClient.setQueryData([MAINTENANCE_MODE], data)
     },
   })
 }

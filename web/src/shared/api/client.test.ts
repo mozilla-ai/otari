@@ -134,6 +134,26 @@ describe("createSession", () => {
       message: expect.stringContaining("did not respond within 30s"),
     })
   })
+
+  it.each([401, 403, 503])(
+    "returns %i as a refusal carrying the gateway's own wording",
+    async (status) => {
+      // 503 is maintenance mode. It belongs with the other two rather than on
+      // the throw path: the gateway is deliberately refusing this sign-in, in
+      // wording written for the person reading it.
+      vi.spyOn(globalThis, "fetch").mockResolvedValue(
+        new Response(JSON.stringify({ detail: "refused, and here is why" }), {
+          status,
+          headers: { "Content-Type": "application/json" },
+        }),
+      )
+
+      await expect(createSession({ masterKey: "test-key" })).resolves.toEqual({
+        ok: false,
+        message: "refused, and here is why",
+      })
+    },
+  )
 })
 
 describe("createSession credentials", () => {

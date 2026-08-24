@@ -47,11 +47,12 @@ export type SignInCredential =
   | { email: string; password: string }
 
 // A refusal carries the gateway's own explanation rather than a bare false,
-// because the two refusals mean different things and only the server knows
-// which applies: a 401 is a wrong credential, while a 403 is the master key
-// being presented to a deployment that has retired it as a sign-in. Rendering
-// "Invalid master key." over the second one, as this did before there was a
-// second credential, tells the operator to retry the thing that cannot work.
+// because the refusals mean different things and only the server knows which
+// applies: a 401 is a wrong credential, a 403 is the master key presented to a
+// deployment that has retired it as a sign-in, and a 503 is maintenance mode
+// freezing every credential while the gateway is redeployed. Rendering
+// "Invalid master key." over any of the last two, as this did before there was
+// a second credential, tells the operator to retry the thing that cannot work.
 export interface SignInResult {
   ok: boolean
   message?: string
@@ -60,7 +61,7 @@ export interface SignInResult {
 // Exchange a credential for a server-issued session: the gateway verifies it and
 // answers with an HttpOnly cookie holding an opaque session token, so the
 // credential itself never needs to be stored (or even kept in memory)
-// afterwards. Refusals (401/403) come back as `ok: false` with the gateway's
+// afterwards. Refusals (401/403/503) come back as `ok: false` with the gateway's
 // message; network and other failures throw ApiError so the UI can explain them.
 export async function createSession(
   credential: SignInCredential,
@@ -86,7 +87,17 @@ export async function createSession(
     }
     throw new ApiError(0, "Network error: could not reach the gateway.")
   }
-  if (response.status === 401 || response.status === 403) {
+  // 503 is maintenance mode, and it belongs with the other two rather than on
+  // the throw path: it is the gateway deliberately refusing this sign-in, with
+  // wording written for the person reading it, not a fault to be surfaced as
+  // one. The sign-in screen normally renders a notice instead of the form on a
+  // frozen deployment (it reads the same flag from the bootstrap); this is the
+  // tab that was already open when the freeze started.
+  if (
+    response.status === 401 ||
+    response.status === 403 ||
+    response.status === 503
+  ) {
     return { ok: false, message: await extractErrorMessage(response) }
   }
   if (!response.ok) {

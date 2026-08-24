@@ -27,6 +27,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import get_config, get_db_if_needed
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
+from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.tenancy.user_service import operator_has_password
 
 router = APIRouter(prefix="/v1/bootstrap", tags=["bootstrap"])
@@ -120,6 +121,14 @@ class DeploymentBootstrap(BaseModel):
             "credential to find out."
         )
     )
+    maintenance_mode: bool = Field(
+        description=(
+            "Whether this deployment is refusing new dashboard sign-ins while an operator "
+            "redeploys it. The sign-in screen says so rather than presenting a form whose only "
+            "outcome is a 503. Sessions already issued keep working, and the management API and "
+            "the data plane are unaffected. False for a hybrid gateway, which issues no session."
+        )
+    )
     mail_ready: bool = Field(
         description=(
             "Whether this deployment can deliver a message carrying a link back to itself "
@@ -158,6 +167,7 @@ async def get_bootstrap(
             surfaces=[],
             sign_in_methods=[],
             management_url=config.platform_management_url,
+            maintenance_mode=False,
             mail_ready=False,
         )
     assert db is not None  # get_db_if_needed yields a session outside hybrid mode
@@ -167,6 +177,7 @@ async def get_bootstrap(
         surfaces=sorted(STANDALONE_SURFACES),
         sign_in_methods=await _sign_in_methods(db),
         management_url=None,
+        maintenance_mode=await _maintenance_mode(db),
         mail_ready=config.mail_ready,
     )
 
@@ -187,3 +198,20 @@ async def _sign_in_methods(db: AsyncSession) -> list[SignInMethod]:
         logger.warning("Could not read which sign-in methods this deployment offers", exc_info=True)
         return []
     return ["password"] if claimed else ["master_key"]
+
+
+async def _maintenance_mode(db: AsyncSession) -> bool:
+    """Whether this deployment is currently refusing new dashboard sign-ins.
+
+    A database failure answers "not frozen", for the same reason ``_sign_in_methods``
+    answers "none": this payload must render a page rather than propagate a 500.
+    The two degradations agree, because that failure already empties
+    ``sign_in_methods``, and the screen that emptiness selects says the gateway
+    cannot start a session at all, which is both true and more specific than a
+    maintenance notice would be.
+    """
+    try:
+        return await is_maintenance_mode(db)
+    except SQLAlchemyError:
+        logger.warning("Could not read whether this deployment is in maintenance mode", exc_info=True)
+        return False

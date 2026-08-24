@@ -658,6 +658,15 @@ password. Configure mail before you expect members to sign in.
   ready to log. Mail is optional, so a gateway with none configured says which
   settings would turn it on (see [Configuration](configuration.md#mail)) and
   disables the test send rather than offering one that would fail.
+  **Maintenance mode**, below it, freezes new dashboard sign-ins so you can
+  redeploy without anyone starting a session mid-migration. It is deliberately
+  narrow: sessions already open keep working, so it never signs you out of the
+  tab you flipped it in, and it does not touch the API, so keys and completions
+  carry on serving. The switch is stored rather than held in memory, so one
+  toggle freezes every replica at once and the freeze survives a restart. The
+  way back out is always open: the master key still authenticates the management
+  API through the header, so you can turn it off from a fresh browser even
+  while sign-ins are frozen.
 
 ## Install it on your phone
 

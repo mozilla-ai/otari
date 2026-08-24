@@ -2925,6 +2925,11 @@
             "title": "Mail Ready",
             "type": "boolean"
           },
+          "maintenance_mode": {
+            "description": "Whether this deployment is refusing new dashboard sign-ins while an operator redeploys it. The sign-in screen says so rather than presenting a form whose only outcome is a 503. Sessions already issued keep working, and the management API and the data plane are unaffected. False for a hybrid gateway, which issues no session.",
+            "title": "Maintenance Mode",
+            "type": "boolean"
+          },
           "management_url": {
             "anyOf": [
               {
@@ -2974,6 +2979,7 @@
           "surfaces",
           "management_url",
           "sign_in_methods",
+          "maintenance_mode",
           "mail_ready"
         ],
         "title": "DeploymentBootstrap",
@@ -4327,6 +4333,21 @@
           "missing"
         ],
         "title": "MailSettings",
+        "type": "object"
+      },
+      "MaintenanceMode": {
+        "description": "Whether this deployment is currently refusing new dashboard sign-ins.",
+        "properties": {
+          "enabled": {
+            "description": "When true, POST /v1/auth/session refuses every credential with 503 so nobody starts a new dashboard session during a redeploy. Sessions already issued keep working, and the management API and the data plane are unaffected: a caller presenting the master key or an API key through the header is never frozen out.",
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "MaintenanceMode",
         "type": "object"
       },
       "ManagedTool": {
@@ -8715,6 +8736,21 @@
         "title": "UpdateKeyRequest",
         "type": "object"
       },
+      "UpdateMaintenanceModeRequest": {
+        "description": "Turn the sign-in freeze on or off.",
+        "properties": {
+          "enabled": {
+            "description": "True to freeze new dashboard sign-ins, false to allow them again.",
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "UpdateMaintenanceModeRequest",
+        "type": "object"
+      },
       "UpdateScopedBudgetRequest": {
         "description": "Request model for updating a scoped budget.",
         "properties": {
@@ -12937,7 +12973,7 @@
         ]
       },
       "post": {
-        "description": "Verify a sign-in credential and set the HttpOnly session cookie.\n\nThe session is bound to the identity that authenticated, so every request it\nlater authenticates resolves a user and that user's active organization\nrather than only \"a credential was presented once\". The response names both,\nso a client knows who it is signed in as without a second call.\n\nThe rate-limit check deliberately runs only after a failed verification,\nnot before it: a pre-verification gate can't know whether *this* attempt\nwould have succeeded, so once an IP has used up its failure quota it\nwould end up blocking that IP's legitimate owner too, not just further\nattackers. Running after verification also means the throttle bounds how\nmany verdicts an IP gets, not how much work it can cause: a password attempt\npays for a bcrypt verification (cost 12, on the order of 200ms of CPU, and\none is burned against a stand-in hash even for an address nobody holds)\nbefore the limit is consulted, so a 429 costs the same as a 401. A gateway\nexposed to the internet should rate-limit this path at the proxy as well.",
+        "description": "Verify a sign-in credential and set the HttpOnly session cookie.\n\nThe session is bound to the identity that authenticated, so every request it\nlater authenticates resolves a user and that user's active organization\nrather than only \"a credential was presented once\". The response names both,\nso a client knows who it is signed in as without a second call.\n\nThe rate-limit check deliberately runs only after a failed verification,\nnot before it: a pre-verification gate can't know whether *this* attempt\nwould have succeeded, so once an IP has used up its failure quota it\nwould end up blocking that IP's legitimate owner too, not just further\nattackers. Running after verification also means the throttle bounds how\nmany verdicts an IP gets, not how much work it can cause: a password attempt\npays for a bcrypt verification (cost 12, on the order of 200ms of CPU, and\none is burned against a stand-in hash even for an address nobody holds)\nbefore the limit is consulted, so a 429 costs the same as a 401. A gateway\nexposed to the internet should rate-limit this path at the proxy as well.\n\nThe maintenance-mode check runs before either credential is verified, and\nrefuses both. Before, because a frozen deployment should not spend a bcrypt\nverification per attempt and the refusal is not about the credential\nanyway; both, because the way back out is the master key against\n``PATCH /v1/settings/maintenance-mode`` through the header, which never\npasses through this door. That is what keeps the switch from locking out\nits own operator, and it is why no identity needs an exemption here. It\nleaks nothing either: ``GET /v1/bootstrap`` already publishes the same flag\nunauthenticated, so the sign-in screen can render the right page.",
         "operationId": "create_session_v1_auth_session_post",
         "requestBody": {
           "content": {
@@ -18183,6 +18219,84 @@
           }
         ],
         "summary": "Send Test Mail",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/v1/settings/maintenance-mode": {
+      "get": {
+        "description": "Report whether new dashboard sign-ins are frozen.",
+        "operationId": "get_maintenance_mode_v1_settings_maintenance_mode_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaintenanceMode"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Maintenance Mode",
+        "tags": [
+          "settings"
+        ]
+      },
+      "patch": {
+        "description": "Freeze or unfreeze dashboard sign-ins, for this and every other replica.\n\nThe new state is persisted and nothing is applied to the running worker,\nbecause every reader goes back to the stored row. That is what makes one\ncall enough for a deployment running more than one of them.",
+        "operationId": "update_maintenance_mode_v1_settings_maintenance_mode_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMaintenanceModeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaintenanceMode"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Maintenance Mode",
         "tags": [
           "settings"
         ]

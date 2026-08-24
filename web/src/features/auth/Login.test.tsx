@@ -16,10 +16,12 @@ function Mounted({
   children,
   signInMethods = ["master_key"],
   mailReady = false,
+  maintenanceMode = false,
 }: {
   children: React.ReactNode
   signInMethods?: ("master_key" | "password")[]
   mailReady?: boolean
+  maintenanceMode?: boolean
 }) {
   return (
     <AppProviders>
@@ -27,6 +29,7 @@ function Mounted({
         value={bootstrap({
           sign_in_methods: signInMethods,
           mail_ready: mailReady,
+          maintenance_mode: maintenanceMode,
         })}
       >
         {children}
@@ -412,6 +415,53 @@ describe("Login", () => {
     expect(
       screen.queryByRole("button", { name: "Sign in" }),
     ).not.toBeInTheDocument()
+  })
+
+  it("says the gateway is under maintenance instead of offering a doomed form", async () => {
+    // The freeze refuses both credentials, so a form here could only ever be
+    // refused, and a master-key refusal reads as "wrong key" to anyone who does
+    // not already know a redeploy is under way.
+    render(
+      <Mounted maintenanceMode>
+        <Harness />
+      </Mounted>,
+    )
+
+    expect(screen.getByText("Otari is under maintenance")).toBeInTheDocument()
+    expect(screen.queryByLabelText("Master key")).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Sign in" }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("renders the gateway's own 503 wording for a tab that was open before the freeze", async () => {
+    // This tab loaded its bootstrap while sign-ins were still open, so it has
+    // the form. The refusal has to arrive as a refusal and not as a fault.
+    const fetchMock = vi
+      .spyOn(globalThis, "fetch")
+      .mockResolvedValue(
+        jsonResponse(
+          {
+            detail:
+              "This gateway is in maintenance mode and is not starting new dashboard sessions right now.",
+          },
+          503,
+        ),
+      )
+    const user = userEvent.setup()
+
+    render(
+      <Mounted>
+        <Harness />
+      </Mounted>,
+    )
+
+    await user.type(screen.getByLabelText("Master key"), "sk-correct")
+    await user.click(screen.getByRole("button", { name: "Sign in" }))
+
+    expect(await screen.findByText(/maintenance mode/)).toBeInTheDocument()
+    expect(screen.queryByText("SIGNED IN")).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalled()
   })
 
   it("refuses a new credential while a prior sign-out's revocation is still in flight (#557)", async () => {

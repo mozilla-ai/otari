@@ -242,7 +242,7 @@ function LabelRow({
  */
 export function Login() {
   const { login, isSigningOut } = useAuth()
-  const { sign_in_methods, mail_ready } = useDeployment()
+  const { sign_in_methods, mail_ready, maintenance_mode } = useDeployment()
   const usesPassword = sign_in_methods.includes("password")
   // An empty list is the gateway saying it cannot mint a session at all right
   // now, which is what `/v1/bootstrap` answers when it cannot reach its
@@ -348,6 +348,42 @@ export function Login() {
     } finally {
       setIsSubmitting(false)
     }
+  }
+
+  // An operator has frozen sign-ins to redeploy this gateway. Rendering the
+  // form instead would offer a credential whose only outcome is a 503, and one
+  // whose refusal reads as "wrong key" to anyone who does not already know a
+  // freeze is on. Read from the bootstrap, so this is what the page shows on a
+  // fresh load; a tab that was already open when the freeze started still has
+  // the form, and submitting it renders the gateway's own 503 wording on the
+  // label row, the same way every other refusal arrives.
+  //
+  // Checked after `signInUnavailable` because the two cannot both be true: the
+  // database failure that empties `sign_in_methods` is also what makes the
+  // bootstrap report no freeze, and "cannot reach its database" is the more
+  // actionable of the two if they ever did collide.
+  if (maintenance_mode) {
+    return (
+      <div className={PAGE_FLAT}>
+        <Card className="w-full max-w-md">
+          <Card.Content className={CARD_FLAT}>
+            <div className="flex flex-col items-center gap-4">
+              <img src="/favicon.svg" alt="" className="h-10 w-11" />
+              <h1 className={HEADING}>Otari is under maintenance</h1>
+            </div>
+            <p className="text-sm text-muted">
+              This gateway is not starting new dashboard sessions while it is
+              being updated. It should be back shortly, so reload this page to
+              try again.
+            </p>
+            <p className="text-sm text-muted">
+              The API is unaffected by this screen and still serves requests,
+              and the management API still accepts the master key.
+            </p>
+          </Card.Content>
+        </Card>
+      </div>
+    )
   }
 
   if (signInUnavailable) {

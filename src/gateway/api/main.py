@@ -20,6 +20,7 @@ from gateway.api.routes import (
     invitations,
     keys,
     mail,
+    maintenance_mode,
     messages,
     models,
     moderations,
@@ -103,6 +104,7 @@ def register_routers(app: FastAPI, config: GatewayConfig) -> None:
     app.include_router(otlp.router)
     app.include_router(settings.router)
     app.include_router(mail.router)
+    app.include_router(maintenance_mode.router)
     app.include_router(tool_settings.router)
     app.include_router(search_tools.router)
     app.include_router(tools.router)

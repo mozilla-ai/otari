@@ -164,6 +164,21 @@ curl -X POST http://localhost:8000/v1/auth/session \
 
 A failed sign-in answers `401 Incorrect email or password` whichever part was wrong, and takes the same time to do it, so the endpoint cannot be used to find out which addresses hold an account. A master key presented after the deployment is claimed answers `403` naming the password login, which is a different answer from a wrong master key's `401` on purpose: the credential is fine, that use of it is over.
 
+#### Freezing sign-ins for a redeploy
+
+An operator can stop the gateway issuing new dashboard sessions while it is being updated, so nobody signs in mid-migration:
+
+```bash
+curl -X PATCH http://localhost:8000/v1/settings/maintenance-mode \
+  -H "Otari-Key: $OTARI_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{"enabled": true}'
+```
+
+`POST /v1/auth/session` then answers `503` for every credential, including the master key on a deployment still using it to sign in, and `GET /v1/bootstrap` reports `maintenance_mode: true` so the sign-in screen says what is happening rather than presenting a form that can only be refused. Three things it deliberately does not do: it does not revoke sessions already issued, so the operator who set it stays signed in; it does not touch the data plane or the rest of the management API, so API keys and completions carry on serving; and it does not exempt any identity, because it does not need to. The switch is master-key gated and reachable through the header, which never passes through the door the freeze closes, so it cannot lock out its own operator. `PATCH` it back to `false`, or read the current state with `GET /v1/settings/maintenance-mode`.
+
+It is stored rather than held in memory, so a deployment running several replicas freezes all of them from one call, and the freeze survives a restart.
+
 #### What the master key still does
 
 Everything else. It authenticates `/v1/keys`, `/v1/users`, `/v1/budgets`, and the rest of this guide exactly as before, in the `Otari-Key` or `Authorization` header. Claiming a deployment changes one endpoint's answer and no others.

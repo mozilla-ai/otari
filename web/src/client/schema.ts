@@ -423,6 +423,16 @@ export interface paths {
          *     one is burned against a stand-in hash even for an address nobody holds)
          *     before the limit is consulted, so a 429 costs the same as a 401. A gateway
          *     exposed to the internet should rate-limit this path at the proxy as well.
+         *
+         *     The maintenance-mode check runs before either credential is verified, and
+         *     refuses both. Before, because a frozen deployment should not spend a bcrypt
+         *     verification per attempt and the refusal is not about the credential
+         *     anyway; both, because the way back out is the master key against
+         *     ``PATCH /v1/settings/maintenance-mode`` through the header, which never
+         *     passes through this door. That is what keeps the switch from locking out
+         *     its own operator, and it is why no identity needs an exemption here. It
+         *     leaks nothing either: ``GET /v1/bootstrap`` already publishes the same flag
+         *     unauthenticated, so the sign-in screen can render the right page.
          */
         post: operations["create_session_v1_auth_session_post"];
         /**
@@ -2391,6 +2401,34 @@ export interface paths {
         options?: never;
         head?: never;
         patch?: never;
+        trace?: never;
+    };
+    "/v1/settings/maintenance-mode": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Maintenance Mode
+         * @description Report whether new dashboard sign-ins are frozen.
+         */
+        get: operations["get_maintenance_mode_v1_settings_maintenance_mode_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Maintenance Mode
+         * @description Freeze or unfreeze dashboard sign-ins, for this and every other replica.
+         *
+         *     The new state is persisted and nothing is applied to the running worker,
+         *     because every reader goes back to the stored row. That is what makes one
+         *     call enough for a deployment running more than one of them.
+         */
+        patch: operations["update_maintenance_mode_v1_settings_maintenance_mode_patch"];
         trace?: never;
     };
     "/v1/settings/master-key/rotate": {
@@ -4525,6 +4563,11 @@ export interface components {
              */
             mail_ready: boolean;
             /**
+             * Maintenance Mode
+             * @description Whether this deployment is refusing new dashboard sign-ins while an operator redeploys it. The sign-in screen says so rather than presenting a form whose only outcome is a 503. Sessions already issued keep working, and the management API and the data plane are unaffected. False for a hybrid gateway, which issues no session.
+             */
+            maintenance_mode: boolean;
+            /**
              * Management Url
              * @description Where the authoritative control plane lives when it is not this deployment. Set for a hybrid gateway so its landing page can link to otari.ai; null otherwise.
              */
@@ -5204,6 +5247,17 @@ export interface components {
              * @description The transport a send would use: 'smtp', 'console' (logged, not delivered), or 'none'.
              */
             transport: string;
+        };
+        /**
+         * MaintenanceMode
+         * @description Whether this deployment is currently refusing new dashboard sign-ins.
+         */
+        MaintenanceMode: {
+            /**
+             * Enabled
+             * @description When true, POST /v1/auth/session refuses every credential with 503 so nobody starts a new dashboard session during a redeploy. Sessions already issued keep working, and the management API and the data plane are unaffected: a caller presenting the master key or an API key through the header is never frozen out.
+             */
+            enabled: boolean;
         };
         /**
          * ManagedTool
@@ -7129,6 +7183,17 @@ export interface components {
             } | null;
             /** Reject User Mismatch */
             reject_user_mismatch?: boolean | null;
+        };
+        /**
+         * UpdateMaintenanceModeRequest
+         * @description Turn the sign-in freeze on or off.
+         */
+        UpdateMaintenanceModeRequest: {
+            /**
+             * Enabled
+             * @description True to freeze new dashboard sign-ins, false to allow them again.
+             */
+            enabled: boolean;
         };
         /**
          * UpdateScopedBudgetRequest
@@ -11964,6 +12029,59 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["SendTestMailResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_maintenance_mode_v1_settings_maintenance_mode_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MaintenanceMode"];
+                };
+            };
+        };
+    };
+    update_maintenance_mode_v1_settings_maintenance_mode_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateMaintenanceModeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MaintenanceMode"];
                 };
             };
             /** @description Validation Error */

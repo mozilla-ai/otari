@@ -2,6 +2,8 @@ import { AlertDialog, Button, buttonVariants, Card, Input } from "@heroui/react"
 import { useEffect, useRef, useState } from "react"
 import type { ConfigField, UpdateSettingsRequest } from "@/client"
 import { MailDeliveryCard } from "@/features/settings/MailDeliveryCard"
+import { MaintenanceModeCard } from "@/features/settings/MaintenanceModeCard"
+import { Toggle } from "@/features/settings/Toggle"
 import {
   useReencryptProviderCredentials,
   useRotateMasterKey,
@@ -52,38 +54,6 @@ export function fieldMatches(field: ConfigField, query: string): boolean {
 
 // A small on/off switch. role="switch" so it reads correctly to assistive tech
 // and can be targeted by its accessible name (the config key).
-function Toggle({
-  checked,
-  onChange,
-  label,
-  disabled,
-}: {
-  checked: boolean
-  onChange: (next: boolean) => void
-  label: string
-  disabled?: boolean
-}) {
-  return (
-    <button
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      disabled={disabled}
-      onClick={() => onChange(!checked)}
-      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full transition-colors disabled:opacity-50 ${
-        checked ? "bg-accent" : "bg-surface-subtle"
-      }`}
-    >
-      <span
-        className={`inline-block h-5 w-5 transform rounded-full bg-surface shadow transition-transform ${
-          checked ? "translate-x-5" : "translate-x-0.5"
-        }`}
-      />
-    </button>
-  )
-}
-
 // A numeric setting (int or float) with an explicit Save, so a mistyped value is
 // not applied on every keystroke. The draft resyncs whenever the committed value
 // changes (after a save round-trip).
@@ -741,6 +711,8 @@ export function SettingsPage() {
       ) : null}
 
       <MailDeliveryCard />
+
+      <MaintenanceModeCard />
 
       {data ? (
         <p className="text-xs text-muted">

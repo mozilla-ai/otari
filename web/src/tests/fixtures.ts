@@ -107,6 +107,9 @@ export function bootstrap(
     // describes by default; a test about the password login overrides it.
     sign_in_methods: ["master_key"],
     management_url: null,
+    // Not frozen, because a fixture describes a deployment somebody can sign
+    // in to; the maintenance-mode tests override it.
+    maintenance_mode: false,
     mail_ready: false,
     ...overrides,
   }
