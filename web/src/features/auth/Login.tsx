@@ -383,7 +383,12 @@ export function Login() {
     // isSigningOut blocks a new sign-in until a prior sign-out's server-side
     // revocation has finished (or timed out): otherwise its expiring cookie
     // could land after this one mints a fresh session and clobber it (#557).
-    if (isSubmitting || isSigningOut) {
+    //
+    // isPasskeyPending is the same hazard from the other direction. A ceremony
+    // in flight has the system sheet open over this page, but the form is still
+    // live behind it and Enter still submits, so without this a passkey and a
+    // password sign-in race and whichever cookie lands second wins.
+    if (isSubmitting || isSigningOut || isPasskeyPending) {
       return
     }
     setError(null)
@@ -726,7 +731,7 @@ export function Login() {
               type="submit"
               variant="primary"
               fullWidth
-              isDisabled={isSubmitting || isSigningOut}
+              isDisabled={isSubmitting || isSigningOut || isPasskeyPending}
               className="h-11"
             >
               {isSigningOut

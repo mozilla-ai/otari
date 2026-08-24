@@ -806,6 +806,45 @@ describe("Login with a passkey", () => {
       })
   }
 
+  it("blocks a password sign-in while a ceremony is still open", async () => {
+    // The system sheet covers the page but the form behind it is still live and
+    // Enter still submits, so without a guard a passkey and a password sign-in
+    // race and whichever cookie lands second wins. The same hazard the
+    // sign-out guard exists for (#557), arriving from the other direction.
+    let releaseCeremony: (value: unknown) => void = () => {}
+    const get = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          releaseCeremony = resolve
+        }),
+    )
+    stubAuthenticator(get)
+    const fetchMock = mockCeremony(() =>
+      jsonResponse({ expires_at: "2026-09-01T00:00:00Z" }),
+    )
+    const user = userEvent.setup()
+
+    render(
+      <Mounted signInMethods={["passkey", "password"]}>
+        <Harness />
+      </Mounted>,
+    )
+    await user.click(screen.getByRole("button", { name: "Use a passkey" }))
+    await waitFor(() => expect(get).toHaveBeenCalled())
+
+    // The ceremony is open. Fill the form and submit it anyway.
+    await user.type(screen.getByLabelText("Email"), "operator@example.com")
+    await user.type(screen.getByLabelText("Password"), "a-real-password")
+    expect(screen.getByRole("button", { name: /Sign in/ })).toBeDisabled()
+    await user.keyboard("{Enter}")
+
+    expect(
+      fetchMock.mock.calls.some(([url]) => String(url) === "/v1/auth/session"),
+    ).toBe(false)
+
+    releaseCeremony(assertion())
+  })
+
   it("is not offered when the gateway does not publish the method", () => {
     stubAuthenticator(vi.fn())
     render(

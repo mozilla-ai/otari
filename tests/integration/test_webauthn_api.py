@@ -536,3 +536,94 @@ def test_one_identitys_registration_challenge_is_not_another_identitys(
     stolen = SoftwareAuthenticator(rp_id=RP_ID, origin=ORIGIN).register(challenge)
     refused = client.post("/v1/auth/webauthn/register", json={"credential": stolen})
     assert refused.status_code == 400, refused.text
+
+
+def test_maintenance_mode_freezes_a_passkey_sign_in_too(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    authenticator: SoftwareAuthenticator,
+    passkeys_configured: None,
+) -> None:
+    """The freeze is on starting a session, not on a credential.
+
+    A passkey mints the same session a password does, so one that walked through
+    the freeze would make the switch bypassable by everybody holding a passkey,
+    which is the population it exists to hold off during a redeploy.
+    ``test_maintenance_mode.test_every_session_minting_route_checks_the_freeze``
+    scans for the call; this proves it refuses.
+    """
+    _register(client, master_key_header, authenticator)
+    assert _sign_in(client, authenticator).status_code == 200
+    client.cookies.clear()
+
+    frozen = client.patch("/v1/settings/maintenance-mode", json={"enabled": True}, headers=master_key_header)
+    assert frozen.status_code == 200, frozen.text
+
+    refused = _sign_in(client, authenticator)
+    assert refused.status_code == 503
+    assert "maintenance mode" in refused.json()["detail"]
+    assert refused.cookies.get(SESSION_COOKIE_NAME) is None
+
+    # And it thaws: the refusal does not burn the passkey, only that attempt.
+    thawed = client.patch("/v1/settings/maintenance-mode", json={"enabled": False}, headers=master_key_header)
+    assert thawed.status_code == 200, thawed.text
+    assert _sign_in(client, authenticator).status_code == 200
+
+
+def test_a_name_an_orphan_holds_is_refused_rather_than_colliding_in_the_database(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
+    passkeys_configured: None,
+) -> None:
+    """Name uniqueness is ``(user_id, name)``, which has no relying party in it.
+
+    Checking it against the credentials under the *current* ID lets a name an
+    orphaned row holds through the check and into the unique constraint, where
+    the IntegrityError is reported as "that authenticator is already
+    registered": the wrong answer, about a different credential, given to
+    somebody whose authenticator is genuinely new.
+    """
+    first = SoftwareAuthenticator(rp_id=RP_ID, origin=ORIGIN)
+    _register(client, master_key_header, first, name="Work laptop")
+
+    # Move the relying party, orphaning it. The name stays taken, because the
+    # constraint never looked at rp_id.
+    moved_origin = "http://moved.testserver"
+    monkeypatch.setattr(test_config, "public_base_url", moved_origin)
+
+    second = SoftwareAuthenticator(rp_id="moved.testserver", origin=moved_origin)
+    options = client.post("/v1/auth/webauthn/register/options", headers=master_key_header)
+    assert options.status_code == 200, options.text
+    clash = client.post(
+        "/v1/auth/webauthn/register",
+        json={"credential": second.register(challenge_of(options.json())), "name": "Work laptop"},
+        headers=master_key_header,
+    )
+    assert clash.status_code == 409, clash.text
+    # About the name, not the authenticator: this one has never been seen here.
+    assert "Work laptop" in clash.json()["detail"]
+    assert "already registered" not in clash.json()["detail"]
+
+
+def test_an_unnamed_passkey_is_numbered_past_an_orphan(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
+    passkeys_configured: None,
+) -> None:
+    """The same rule on the defaulted path, where nobody chose the name.
+
+    Here the collision is not the caller's doing at all, so it must not surface
+    as a refusal: the generated name steps past what the orphan holds.
+    """
+    first = SoftwareAuthenticator(rp_id=RP_ID, origin=ORIGIN)
+    assert _register(client, master_key_header, first)["name"] == "Passkey"
+
+    moved_origin = "http://moved.testserver"
+    monkeypatch.setattr(test_config, "public_base_url", moved_origin)
+
+    second = SoftwareAuthenticator(rp_id="moved.testserver", origin=moved_origin)
+    assert _register(client, master_key_header, second)["name"] == "Passkey 2"

@@ -59,7 +59,7 @@ master_key: YOUR_MASTER_KEY_HERE
 #   ceremony from, so it does not turn passkeys on by itself.
 #   Changing it orphans every passkey already registered, because an
 #   authenticator only offers a credential under the ID it stored it under.
-# webauthn_rp_name: "Otari"
+# webauthn_rp_name: "otari"
 #   What an authenticator shows while a passkey is created. Cosmetic.
 # webauthn_allowed_origins:
 #   - "https://otari.example.com"

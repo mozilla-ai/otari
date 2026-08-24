@@ -233,10 +233,35 @@ async def _credentials_for(db: AsyncSession, user_id: uuid.UUID, rp_id: str) -> 
     Filtered by ``rp_id`` rather than listed wholesale: a row registered under a
     previous ID cannot be asserted now, so offering it to a browser produces a
     passkey prompt that can only fail. See `models.tenancy.WebAuthnCredential`.
+
+    **Do not reach for this to answer a question the database asks unscoped.**
+    The unique constraint is ``(user_id, name)`` with no ``rp_id`` in it, so
+    reasoning about names from this list is reasoning about a subset of what the
+    constraint sees; ``_all_credentials_for`` is what that needs.
     """
     result = await db.execute(
         select(WebAuthnCredential)
         .where(col(WebAuthnCredential.user_id) == user_id, col(WebAuthnCredential.rp_id) == rp_id)
+        .order_by(col(WebAuthnCredential.created_at))
+    )
+    return list(result.scalars().all())
+
+
+async def _all_credentials_for(db: AsyncSession, user_id: uuid.UUID) -> list[WebAuthnCredential]:
+    """Every passkey this identity holds, whatever ID it was registered under.
+
+    The counterpart to ``_credentials_for``, and the split is load-bearing rather
+    than a convenience. Two questions are asked about this table and they have
+    different scopes: *which credentials could answer a ceremony now* is
+    relying-party scoped, while *which names are taken* is not, because the
+    unique constraint is ``(user_id, name)``. Answering the second from the first
+    list lets a name held by an orphaned row through the check and into an
+    ``IntegrityError``, which surfaces as "that authenticator is already
+    registered" when the authenticator is new and only the label collided.
+    """
+    result = await db.execute(
+        select(WebAuthnCredential)
+        .where(col(WebAuthnCredential.user_id) == user_id)
         .order_by(col(WebAuthnCredential.created_at))
     )
     return list(result.scalars().all())
@@ -352,7 +377,12 @@ async def finish_registration(
         logger.info("Passkey registration did not verify for identity %s: %s", identity.id, exc)
         raise PasskeyCeremonyError from None
 
-    existing = await _credentials_for(db, identity.id, relying_party.rp_id)
+    # Every credential, not just the ones under the current relying-party ID:
+    # the name has to be unique against what the constraint sees, and that is
+    # ``(user_id, name)`` with no rp_id in it. ``begin_registration``'s
+    # ``exclude_credentials`` stays relying-party scoped, because that answers
+    # the other question, which genuinely is scoped.
+    existing = await _all_credentials_for(db, identity.id)
     await _refuse_at_the_ceiling(db, identity.id)
 
     credential = WebAuthnCredential(

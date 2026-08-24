@@ -64,7 +64,7 @@ pricing:
 | `master_key` | string | none | Master key for management endpoints |
 | `public_base_url` | string | none | This deployment's own externally-reachable URL, no trailing slash. Needed to put an absolute link in outgoing email (see [Mail](#mail)), and to derive the relying-party ID passkeys are bound to (see [Access control](access-control.md#passkeys)). |
 | `webauthn_rp_id` | string | host of `public_base_url` | The domain passkeys are bound to: bare, with no scheme, port or path. An override rather than an alternative to `public_base_url`, which is still needed as the origin a ceremony runs from. Changing it orphans every passkey already registered. |
-| `webauthn_rp_name` | string | `Otari` | The name an authenticator shows while a passkey is created, and files it under. Cosmetic; nothing verifies it. |
+| `webauthn_rp_name` | string | `otari` | The name an authenticator shows while a passkey is created, and files it under. Cosmetic; nothing verifies it. |
 | `webauthn_allowed_origins` | list | `[public_base_url]` | Origins a ceremony may run from, each with a scheme. Set only when several origins serve one dashboard under one relying-party ID; every entry must be that ID or a subdomain of it, checked at startup. |
 | `mail_transport` | string | `auto` | Which transport delivers outgoing mail: `auto`, `smtp`, `console`, or `none`. See [Mail](#mail). |
 | `smtp_host` | string | none | SMTP server host for outgoing mail. Unset disables mail entirely under the default `auto` transport. |

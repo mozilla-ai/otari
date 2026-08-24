@@ -38,6 +38,11 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import CurrentIdentity, get_config, get_db
 from gateway.api.routes._public_auth import throttle_public_auth
+
+# The refusal is the same refusal, so it is imported rather than restated: the
+# freeze is one deployment-wide state, and two sign-in routes wording it
+# differently would tell a person the two doors closed for different reasons.
+from gateway.api.routes.auth_session import MAINTENANCE_MODE_REFUSAL
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.metrics import record_auth_failure
@@ -52,6 +57,7 @@ from gateway.services.dashboard_session_service import (
     create_dashboard_session,
     request_is_https,
 )
+from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.tenancy import webauthn_service
 from gateway.services.tenancy.errors import PasskeysNotConfiguredError, TenancyError
 
@@ -223,8 +229,20 @@ async def authenticate_passkey(
     unlike a password there is no legitimate caller here whose correct
     credential must never be blocked (a passkey ceremony is one round trip a
     browser drives, not something a person retries by hand).
+
+    **Maintenance mode freezes this the way it freezes the password sign-in.**
+    The freeze is on starting a session, not on a credential, so a passkey has
+    to answer to it or the switch is bypassable by anybody holding one, which is
+    the whole population it exists to hold off during a redeploy. Refused before
+    the assertion is verified, so a frozen deployment does no crypto and counts
+    no auth failure: nobody failed to authenticate, the gateway declined to try.
     """
     throttle_public_auth(request)
+    if await is_maintenance_mode(db):
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=MAINTENANCE_MODE_REFUSAL,
+        )
     try:
         identity = await webauthn_service.finish_authentication(db, config, body.credential)
     except TenancyError:
