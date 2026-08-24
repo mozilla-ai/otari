@@ -17,8 +17,8 @@ with no token or request dimension.
 Materialization methods (``materialize_for_member``, ``materialize_for_default``)
 are flush-only: they do not commit, so they fold into the enclosing
 transaction at each call site (workspace creation, adding a member,
-organization-member creation with workspace assignments). CRUD methods commit
-on success.
+organization-member creation with workspace assignments, and first-boot
+provisioning). CRUD methods commit on success.
 """
 
 from __future__ import annotations
@@ -160,10 +160,12 @@ class WorkspaceBudgetDefaultService:
         ``IntegrityError``: a collision on one default (see
         :meth:`_insert_member_budgets`) is swallowed there, precisely so this
         method's callers (``WorkspaceService.add_member``,
-        ``OrganizationService._apply_workspace_assignments``) can keep their
-        own ``except IntegrityError`` narrow to the membership row they
-        actually insert, without a materialization-time collision escaping
-        and being misreported as a duplicate membership.
+        ``OrganizationService._apply_workspace_assignments``,
+        ``provisioning_service._provision``) can keep their own
+        ``except IntegrityError`` narrow to the membership row they actually
+        insert, without a materialization-time collision escaping and being
+        misreported as a duplicate membership (or, in the provisioning case, as
+        a lost first-boot race).
         """
         defaults = (
             (

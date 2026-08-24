@@ -37,6 +37,7 @@ from gateway.services.tenancy import OrganizationService, WorkspaceService
 from gateway.services.tenancy.errors import (
     NotAuthorizedError,
     WorkspaceBudgetDefaultAlreadyExistsError,
+    WorkspaceBudgetDefaultBudgetNotFoundError,
     WorkspaceBudgetDefaultNotFoundError,
     WorkspaceNotFoundError,
 )
@@ -716,7 +717,6 @@ async def test_removing_a_member_takes_their_workspace_ceiling_with_them(async_d
     assert await _member_budget(async_db, added.id) is None, "the ceiling must not outlive the membership"
 
 
-@pytest.mark.asyncio
 async def test_the_read_surface_reports_a_calendar_alignment(async_db: AsyncSession) -> None:
     """A period a caller cannot read is a period it has to fetch the budget to learn.
 
@@ -747,7 +747,6 @@ async def test_the_read_surface_reports_a_calendar_alignment(async_db: AsyncSess
     assert [one.reset_alignment for one in listed.data] == ["calendar_month"]
 
 
-@pytest.mark.asyncio
 async def test_a_rolling_budget_still_reads_back_with_no_alignment(async_db: AsyncSession) -> None:
     """The other arm of the exclusive pair, so the new field cannot be a constant."""
     org = await _organization(async_db, slug="acme-read-rolling")
@@ -766,7 +765,6 @@ async def test_a_rolling_budget_still_reads_back_with_no_alignment(async_db: Asy
     assert created.reset_alignment is None
 
 
-@pytest.mark.asyncio
 async def test_bootstrap_provisioning_materializes_the_default_workspaces_defaults(
     async_db: AsyncSession,
 ) -> None:
@@ -799,7 +797,44 @@ async def test_bootstrap_provisioning_materializes_the_default_workspaces_defaul
     ceiling = await _member_budget(async_db, member.id)
     assert ceiling is not None, "the operator identity must be capped by the workspace it joined"
     assert ceiling.budget_id == budget_id
-    # Materialization is flush-only, so it has to have landed in the commit
-    # ``ensure_bootstrap_identity`` makes rather than in a transaction of its own.
+    # The calendar window was stamped, so the ceiling went through the shared
+    # period derivation rather than landing with no window at all.
     assert ceiling.period_start is not None
     assert ceiling.period_start.day == 1
+
+
+async def test_bootstrap_survives_a_default_naming_a_budget_that_is_gone(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Materialization may not be able to fail identity resolution.
+
+    A stored default whose budget is missing needs a database whose ``RESTRICT``
+    foreign key was not enforced, but that is the same restored or imported
+    database that leaves the marker unresolved, so the two arrive together.
+    Raising would be terminal: the marker is written after this, so every later
+    request would re-enter ``_provision`` and fail the same way, and deleting the
+    offending default needs an authorized identity that no longer resolves.
+    """
+    organization = await OrganizationRepository(async_db).get_by_slug(DEFAULT_ORGANIZATION_SLUG)
+    assert organization is not None
+    workspace = await WorkspaceRepository(async_db).get_by_organization_and_name(
+        organization.id, DEFAULT_WORKSPACE_NAME
+    )
+    assert workspace is not None
+    budget_id = await _budget(async_db, max_budget=125.0)
+    async_db.add(WorkspaceBudgetDefault(workspace_id=workspace.id, budget_id=budget_id))
+    await async_db.commit()
+
+    async def _gone(_self: WorkspaceBudgetDefaultService, default: WorkspaceBudgetDefault) -> Budget:
+        raise WorkspaceBudgetDefaultBudgetNotFoundError(default.budget_id)
+
+    monkeypatch.setattr(WorkspaceBudgetDefaultService, "_budget_for", _gone)
+
+    operator = await ensure_bootstrap_identity(async_db)
+    member = await WorkspaceMemberRepository(async_db).get_by_workspace_and_user(workspace.id, operator.id)
+    assert member is not None
+    assert await _member_budget(async_db, member.id) is None, "the ceiling could not be materialized"
+
+    # The marker landed, so the deployment is still bootstrappable rather than
+    # re-provisioning (and re-failing) on every later request.
+    assert (await ensure_bootstrap_identity(async_db)).id == operator.id

@@ -41,7 +41,11 @@ from gateway.repositories.tenancy import (
     WorkspaceRepository,
 )
 from gateway.repositories.users_repository import get_or_create_attribution_user
-from gateway.services.tenancy.errors import ForeignTenancyError, TenancyError
+from gateway.services.tenancy.errors import (
+    ForeignTenancyError,
+    TenancyError,
+    WorkspaceBudgetDefaultBudgetNotFoundError,
+)
 
 # Stored in runtime_settings, and deliberately not a SETTABLE_KEY, so
 # runtime_settings_service ignores it exactly as it ignores the master-key hash
@@ -242,15 +246,23 @@ async def _provision(db: AsyncSession) -> User:
     # ``tests/unit/test_service_module_imports.py`` pins the graph either way.
     #
     # Flush-only, so it lands in the commit below and a lost race rolls it back
-    # with everything else. It can raise ``WorkspaceBudgetDefaultBudgetNotFoundError``
-    # for a default naming a budget that is gone, which now fails identity
-    # resolution rather than only the budget-defaults endpoints; unreachable while
-    # that column's ``RESTRICT`` foreign key holds, and self-healing once the row is.
+    # with everything else.
     from gateway.services.tenancy.workspace_budget_default_service import (
         WorkspaceBudgetDefaultService,
     )
 
-    await WorkspaceBudgetDefaultService(db).materialize_for_member(member)
+    try:
+        await WorkspaceBudgetDefaultService(db).materialize_for_member(member)
+    except WorkspaceBudgetDefaultBudgetNotFoundError as exc:
+        # A stored default naming a budget that is gone, which is only reachable
+        # on a database whose ``RESTRICT`` foreign key was not enforced. Logged
+        # and skipped rather than raised, because raising here is unrecoverable:
+        # the marker below would never be written, every later request would
+        # re-enter this function and fail identically, and deleting the offending
+        # default needs an authorized identity that no longer exists. An operator
+        # who joins uncapped is what happened before this call existed, and the
+        # dashboard can still fix it.
+        logger.warning("Skipping budget-default materialization for the operator identity: %s", exc)
 
     # Upsert rather than insert: a marker whose value no longer resolves (an
     # unreadable id, or one naming a row that is gone) is what
