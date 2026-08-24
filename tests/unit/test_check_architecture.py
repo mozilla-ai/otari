@@ -165,14 +165,39 @@ def test_service_may_import_a_port(tmp_path: Path) -> None:
 
 
 def test_the_composition_root_may_name_a_concrete_adapter(tmp_path: Path) -> None:
-    # gateway/container.py answers only to the gateway root rule, which is what
-    # leaves it the one file allowed to name an adapter.
+    # The one file exempted from the root rule's ban on gateway.adapters, which
+    # is what leaves it the one file allowed to name an adapter.
     file_path = _write(
         tmp_path,
         "gateway/container.py",
         "from gateway.adapters.billing_adapter import NullBillingAdapter\n",
     )
     assert check.check_file(file_path, tmp_path) == []
+
+
+def test_an_adapter_may_name_its_siblings(tmp_path: Path) -> None:
+    file_path = _write(
+        tmp_path,
+        "gateway/adapters/billing_adapter.py",
+        "from gateway.adapters.entitlement_adapter import BaseEntitlementAdapter\n",
+    )
+    assert check.check_file(file_path, tmp_path) == []
+
+
+@pytest.mark.parametrize(
+    "relative_path",
+    ["gateway/main.py", "gateway/cli.py", "gateway/core/config.py", "gateway/auth/models.py", "gateway/db/base.py"],
+)
+def test_an_unlayered_module_may_not_name_a_concrete_adapter(tmp_path: Path, relative_path: str) -> None:
+    # The gap a layer-by-layer ban leaves: these answer to no gateway/<layer>
+    # rule, so without the root rule's ban they could shortcut past the
+    # container and pin a capability to one implementation. gateway/main.py is
+    # where that shortcut would most naturally be written, since it is already
+    # the file that builds the container.
+    file_path = _write(tmp_path, relative_path, "from gateway.adapters.billing_adapter import NullBillingAdapter\n")
+    assert check.check_file(file_path, tmp_path) == [
+        (1, "gateway.adapters.billing_adapter", "Forbidden import in OSS base")
+    ]
 
 
 def test_shared_types_may_not_import_other_gateway_layers(tmp_path: Path) -> None:

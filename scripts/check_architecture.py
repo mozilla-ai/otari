@@ -54,7 +54,13 @@ RULES: dict[str, LayerRule] = {
     # composed.
     "gateway": {
         "allowed": [],
-        "forbidden": ["gateway.overlay", "overlay"],
+        # gateway.adapters is banned at the root, not only in the layers below,
+        # because rule 7 is "only the composition root may name a concrete
+        # adapter" and a layer-by-layer ban leaves every unlayered module
+        # (gateway/main.py, gateway/cli.py, gateway/core, gateway/auth, ...)
+        # free to shortcut past the seam. COMPOSITION_ROOT and the adapters
+        # package itself are the two exemptions; see check_file.
+        "forbidden": ["gateway.overlay", "overlay", "gateway.adapters"],
         "description": "OSS base",
     },
     # The OSS test suite answers to the same boundary: a test of overlay
@@ -140,6 +146,14 @@ RULES: dict[str, LayerRule] = {
 }
 
 
+# The one file allowed to name a concrete adapter, and the package the adapters
+# themselves live in (an adapter may of course refer to its siblings). Everything
+# else under gateway/ answers to the root rule's ban above.
+COMPOSITION_ROOT = "gateway/container.py"
+ADAPTERS_PACKAGE = "gateway/adapters/"
+ADAPTER_IMPORT = "gateway.adapters"
+
+
 def _matches(module: str, prefix: str) -> bool:
     """Return whether a module path is the prefix module itself or lives inside it."""
     return module == prefix or module.startswith(prefix + ".")
@@ -186,6 +200,8 @@ def check_file(file_path: Path, src_root: Path) -> list[tuple[int, str, str]]:
         reverse=True,
     )
     forbidden = [(prefix, layer_rule["description"]) for _, layer_rule in matches for prefix in layer_rule["forbidden"]]
+    if relative_path == COMPOSITION_ROOT or relative_path.startswith(ADAPTERS_PACKAGE):
+        forbidden = [entry for entry in forbidden if entry[0] != ADAPTER_IMPORT]
     if not forbidden:
         return []
 
