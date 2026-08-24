@@ -1085,7 +1085,9 @@ describe("the telemetry the sidebar records", () => {
     const user = userEvent.setup()
     await renderShell()
 
-    await user.click(screen.getByRole("link", { name: "Organization" }))
+    // `findByRole`, as the sibling test above does: this row appears only once
+    // the organization context resolves, since it gates on the caller's role.
+    await user.click(await screen.findByRole("link", { name: "Organization" }))
 
     expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.TAB_CHANGED, {
       tab_name: "members",
@@ -1098,7 +1100,7 @@ describe("the telemetry the sidebar records", () => {
     const user = userEvent.setup()
     await renderShell(bootstrap(), { url: "/organization/members" })
 
-    await user.click(screen.getByRole("link", { name: /^Back to/ }))
+    await user.click(await screen.findByRole("link", { name: /^Back to/ }))
 
     expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.TAB_CHANGED, {
       tab_name: "index",

@@ -25,6 +25,7 @@ const SEAM_MODULES = [
   "app/nav/overlayNavItems.ts",
   "app/nav/overlayLabelOverrides.ts",
   "app/nav/overlayWalletSlot.tsx",
+  "shared/telemetry/overlayTelemetry.ts",
 ] as const
 
 const seamPaths = new Set(SEAM_MODULES.map((module) => join(SRC, module)))

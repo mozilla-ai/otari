@@ -613,8 +613,11 @@ describe("the telemetry the sign-in screen records", () => {
   })
 
   it("records a failed request under its status rather than its message", async () => {
+    // 500 rather than 503: a 503 the gateway wrote is maintenance mode and
+    // comes back as a refusal, not a throw (see `createSession`). This is the
+    // fault path.
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      jsonResponse({ detail: "Gateway is unwell." }, 503),
+      jsonResponse({ detail: "Gateway is unwell." }, 500),
     )
 
     render(
@@ -628,8 +631,8 @@ describe("the telemetry the sign-in screen records", () => {
     await waitFor(() => {
       expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.LOGIN_FAILED, {
         authentication_method: "master_key",
-        error_code: "http_503",
-        status: 503,
+        error_code: "http_500",
+        status: 500,
       })
     })
   })
@@ -717,6 +720,31 @@ describe("the telemetry the sign-in screen records", () => {
       expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.LOGIN_FAILED, {
         authentication_method: "master_key",
         error_code: "http_403",
+      })
+    })
+  })
+
+  it("keeps a maintenance freeze apart from a rejected credential", async () => {
+    // A 503 the gateway wrote is a deliberate refusal rather than a fault, and
+    // it is the one refusal where nothing was wrong with the credential. Under
+    // one bucket with a wrong password it would read as a spike in failed
+    // sign-ins every time a deployment froze for a redeploy.
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ detail: "This gateway is paused for maintenance." }, 503),
+    )
+
+    render(
+      <Mounted>
+        <Harness />
+      </Mounted>,
+    )
+    await userEvent.type(screen.getByLabelText("Master key"), "otari-mk-secret")
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }))
+
+    await waitFor(() => {
+      expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.LOGIN_FAILED, {
+        authentication_method: "master_key",
+        error_code: "http_503",
       })
     })
   })

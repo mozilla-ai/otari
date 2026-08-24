@@ -137,7 +137,7 @@ export async function createSession(
   if (response.status === 503) {
     const refusal = await readRefusal(response)
     if (refusal.detail !== null) {
-      return { ok: false, message: refusal.detail }
+      return { ok: false, message: refusal.detail, status: response.status }
     }
     throw new ApiError(response.status, refusal.message)
   }
