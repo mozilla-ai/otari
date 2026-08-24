@@ -29,6 +29,7 @@ from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.tenancy.user_service import operator_has_password
+from gateway.services.tenancy.webauthn_service import has_any_credential
 
 router = APIRouter(prefix="/v1/bootstrap", tags=["bootstrap"])
 
@@ -40,8 +41,10 @@ SessionType = Literal["local_operator", "hosted_user", "none"]
 # deployment with a password, and the password from then on
 # (mozilla-ai/otari-ai#1716). A list rather than a single value because #651 and
 # #652 add methods that coexist with the password rather than replacing it, and
-# because a hybrid gateway offers none.
-SignInMethod = Literal["master_key", "password"]
+# because a hybrid gateway offers none. "passkey" is the first of those to land,
+# and it is genuinely additive: it appears beside whichever of the two
+# credentials is current, never instead of one.
+SignInMethod = Literal["master_key", "password", "passkey"]
 
 # The management API groups a standalone gateway serves, one name per ``/v1/``
 # router the dashboard's surfaces are built on. Naming the groups rather than the
@@ -116,7 +119,9 @@ class DeploymentBootstrap(BaseModel):
             "How POST /v1/auth/session may be authenticated right now, sorted. 'master_key' is the "
             "first-boot credential and is offered until the operator identity has a password, which "
             "is what claiming the deployment means; 'password' replaces it from then on, and the "
-            "master key stays the credential for the management API. Empty for a hybrid gateway, "
+            "master key stays the credential for the management API. 'passkey' appears alongside "
+            "either one when this deployment is configured for WebAuthn and holds at least one "
+            "passkey that its current relying-party ID can assert. Empty for a hybrid gateway, "
             "which issues no session. The login page renders from this rather than trying a "
             "credential to find out."
         )
@@ -175,15 +180,29 @@ async def get_bootstrap(
         deployment_type="standalone",
         session_type="local_operator",
         surfaces=sorted(STANDALONE_SURFACES),
-        sign_in_methods=await _sign_in_methods(db),
+        sign_in_methods=await _sign_in_methods(db, config),
         management_url=None,
         maintenance_mode=await _maintenance_mode(db),
         mail_ready=config.mail_ready,
     )
 
 
-async def _sign_in_methods(db: AsyncSession) -> list[SignInMethod]:
-    """Which credential ``POST /v1/auth/session`` accepts on this deployment.
+async def _sign_in_methods(db: AsyncSession, config: GatewayConfig) -> list[SignInMethod]:
+    """How this deployment may be signed in to right now, sorted.
+
+    Two independent questions. Which of the two *typed* credentials
+    ``POST /v1/auth/session`` accepts is the first, and they are mutually
+    exclusive: the master key until the operator identity holds a password
+    (otari#702), that password from then on. Whether a passkey can sign somebody in is the second, and it
+    is additive, because ``POST /v1/auth/webauthn/authenticate`` is a separate
+    endpoint that does not displace either.
+
+    A passkey is published only when one could actually answer: the deployment
+    has a relying-party ID *and* holds at least one credential registered under
+    it. Advertising the method on a deployment with no passkeys would put a
+    button on the login page whose only outcome is the browser reporting that it
+    found nothing, which is the same trap the master-key box would be on a
+    claimed deployment.
 
     A database failure answers "none" rather than propagating. This route is the
     first thing the dashboard shell fetches, so a 500 here is a blank page
@@ -194,10 +213,15 @@ async def _sign_in_methods(db: AsyncSession) -> list[SignInMethod]:
     """
     try:
         claimed = await operator_has_password(db)
+        passkeys = await has_any_credential(db, config)
     except SQLAlchemyError:
         logger.warning("Could not read which sign-in methods this deployment offers", exc_info=True)
         return []
-    return ["password"] if claimed else ["master_key"]
+    typed: SignInMethod = "password" if claimed else "master_key"
+    methods: list[SignInMethod] = [typed]
+    if passkeys:
+        methods.append("passkey")
+    return sorted(methods)
 
 
 async def _maintenance_mode(db: AsyncSession) -> bool:

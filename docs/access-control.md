@@ -229,9 +229,51 @@ curl -X POST http://localhost:8000/v1/auth/password/reset/confirm \
 
 **Forgot your password?** on the dashboard's sign-in screen is the same pair of calls, and the reset link lands on a page that asks for the new password. The request answers the same message whether or not the address holds a password, for the same enumeration-safety reason resending a verification link does. The reset token expires (`password_reset_expiry_hours`, default 2) and is single-use: unlike a stateless token, it is cleared the moment it is spent, so it cannot be replayed even inside its own expiry window. It is also cleared the moment the identity's password changes through any other channel (an ordinary self-service change, an operator recovery through the master key) while it is still live, so a reset link generated and then overtaken elsewhere cannot undo that change later. Completing a reset revokes every other session the identity holds, the same as an ordinary password change. Both routes share the sign-in rate limiter and the same `503`-when-unconfigured behavior signup does.
 
+#### Passkeys
+
+A passkey is a key pair whose private half never leaves the authenticator (a laptop's secure enclave, a phone, a hardware key). Registering one stores its public half in `webauthn_credential`; signing in has the authenticator sign a server-chosen challenge. Nothing this deployment stores can be used to sign in as anybody, which is the difference from a password hash.
+
+Passkeys are **additive**. They do not replace the master key or the password: `GET /v1/bootstrap` reports `passkey` in `sign_in_methods` alongside whichever of those two the deployment currently takes, and only once the deployment is configured for WebAuthn and holds at least one passkey its current relying-party ID can assert. A passkey also never creates an identity: registering one is done from inside a session, so a deployment is still claimed with the master key and a password, and a passkey joins an identity afterwards.
+
+```bash
+# Registering, from inside a session (or with the master key, as here).
+curl -X POST http://localhost:8000/v1/auth/webauthn/register/options -H "Otari-Key: Bearer $OTARI_MASTER_KEY"
+curl -X POST http://localhost:8000/v1/auth/webauthn/register \
+  -H "Otari-Key: Bearer $OTARI_MASTER_KEY" -H "Content-Type: application/json" \
+  -d '{"credential": {...the browser's response...}, "name": "Work laptop"}'
+
+# Signing in, unauthenticated.
+curl -X POST http://localhost:8000/v1/auth/webauthn/authenticate/options
+curl -X POST http://localhost:8000/v1/auth/webauthn/authenticate \
+  -H "Content-Type: application/json" -d '{"credential": {...the assertion...}}'
+```
+
+Sign-in is **usernameless**: the options carry no `allowCredentials`, so the browser offers whichever passkey it holds for this relying party and the assertion names the credential that answered. That is what lets somebody sign in without typing anything, and it also keeps the endpoint from becoming an oracle for which addresses hold a passkey here. Registration therefore asks for a discoverable (resident) credential; an authenticator too old to store one is the case this does not serve.
+
+Each ceremony is two calls joined by a single-use challenge held in `webauthn_challenge`. The row is deleted as it is spent, so a captured assertion cannot be replayed; a ceremony that fails verification rolls back instead, leaving the challenge for the retry. It is a table rather than a signed cookie because a challenge has to be retired server-side, and rather than process memory because a deployment runs more than one worker.
+
+`GET /v1/auth/webauthn/credentials` lists the caller's own passkeys, `PATCH .../{id}` renames one, and `DELETE .../{id}` removes it. The list carries no key material. Deleting the last passkey is allowed: an email and password is still the deployment's login, so it is not a lockout, and refusing would strand whoever just lost the authenticator.
+
+##### The relying-party ID
+
+A passkey is scoped by the authenticator to a **relying-party ID**, a bare domain. A credential created under one ID cannot be asserted under another, and the key material never leaves the authenticator, so **changing the ID orphans every passkey already registered** and no data migration recovers them. The ID is therefore configured or derived once, never read off the request:
+
+| Setting | Meaning |
+| --- | --- |
+| `webauthn_rp_id` | The ID itself, a bare domain with no scheme, port or path. Optional. |
+| `public_base_url` | This deployment's own address. When `webauthn_rp_id` is unset, the ID is this URL's **host**, with the scheme and port dropped (`https://otari.example.com:8443` → `otari.example.com`). |
+| `webauthn_allowed_origins` | Origins a ceremony may be performed from, each with a scheme. Defaults to `public_base_url` alone. |
+| `webauthn_rp_name` | What an authenticator shows while creating a passkey. Cosmetic. |
+
+A deployment with neither `webauthn_rp_id` nor `public_base_url` has no relying party, offers no passkeys, and is not misconfigured; the ceremony endpoints answer `503` naming the setting to fill in. Deriving the ID from the request's `Host` header instead is the shape this deliberately does not take: `Host` is attacker-controlled on any deployment that does not pin it, and the ID is the only thing scoping a passkey to this site.
+
+Set `webauthn_rp_id` explicitly to bind passkeys to a **parent** domain of the one serving the dashboard: a passkey under `example.com` works on `otari.example.com`, but not the reverse. Every entry in `webauthn_allowed_origins` must be the ID or a subdomain of it, which is checked at startup rather than left to fail as an unexplained `SecurityError` in a browser. Each row records the `rp_id` it was registered under, so a credential the current configuration cannot assert is filtered out of the list and the ceremonies instead of being offered and then failing.
+
+Because a relying-party ID cannot move, one constraint outlives this document. [mozilla-ai/otari-ai#1716](https://github.com/mozilla-ai/otari-ai/issues/1716) settled that migrating otari.ai users **import their credentials rather than claiming new accounts**; an imported row's `rp_id` is `otari.ai`, so that import holds exactly while the hosted origin stays `otari.ai`. Moving it re-scopes every imported passkey and the people holding them have to register again.
+
 #### Who can sign in
 
-An identity with a password can sign in once it has verified its address: the operator gets one by claiming the deployment (verified automatically, since the master key proved it), and a roster member gets one by signing up (verified by the link). There is still no way for an admin to set a password on somebody else's identity; a member added or invited by address holds a role and can be placed in workspaces, but only that address's own signup or reset gives it a way in. OAuth and passkey sign-in are the rest of the identity track.
+An identity with a password can sign in once it has verified its address: the operator gets one by claiming the deployment (verified automatically, since the master key proved it), and a roster member gets one by signing up (verified by the link). There is still no way for an admin to set a password on somebody else's identity; a member added or invited by address holds a role and can be placed in workspaces, but only that address's own signup or reset gives it a way in. Passkeys are described above, and are added to an identity that can already sign in rather than being a way in of their own. OAuth sign-in is the rest of the identity track.
 
 A session is revoked on sign-out, on a password change as described above, on master-key rotation (every session, with the rotating tab's own re-minted for the same identity), when the master key changes across a restart, and when the identity it names is deleted or deactivated. A deactivated identity also stops being able to sign in, rather than keeping access until its cookie expires. Deactivation is enforced when the session is read, and the identity's sessions are deleted at that point rather than only refused, so re-activating it later does not hand back the access of any cookie that was presented while it was off. Nothing sweeps the rest: a cookie that is never presented in that window survives to its TTL, because no flow here deactivates an identity and none therefore revokes ahead of the read.
 

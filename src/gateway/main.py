@@ -107,6 +107,15 @@ _UNAUTHENTICATED_PATHS = frozenset(
         "/v1/auth/resend-verification",
         "/v1/auth/password/reset",
         "/v1/auth/password/reset/confirm",
+        # The passkey sign-in ceremony, both halves. Unauthenticated for the
+        # reason the sign-in endpoint is: they are how a caller who holds no
+        # credential obtains a session. The signed assertion in the second call
+        # is the credential, and it is not one of the header schemes below.
+        # Registering, listing, renaming and deleting a passkey are *not* here:
+        # those are done from inside a session and are stamped like the rest of
+        # the management surface.
+        "/v1/auth/webauthn/authenticate/options",
+        "/v1/auth/webauthn/authenticate",
     }
 )
 # Public, unauthenticated static assets that shared caches may keep. Paths here

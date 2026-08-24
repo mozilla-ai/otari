@@ -7,7 +7,8 @@ import typing
 from collections.abc import Container
 from datetime import datetime
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
+from urllib.parse import urlsplit
 
 import yaml
 from any_llm import AnyLLM, LLMProvider
@@ -283,6 +284,44 @@ class ModelCapabilityConfig(BaseModel):
     )
 
 
+def _host_of(url: str | None) -> str:
+    """The bare hostname of an absolute URL, or "" if there isn't one.
+
+    Port and scheme are dropped: a WebAuthn relying-party ID is a domain, not an
+    origin. ``urlsplit().hostname`` also lowercases and strips the brackets off
+    an IPv6 literal, which is the comparison form a browser uses.
+    """
+    if not url:
+        return ""
+    return urlsplit(url.strip()).hostname or ""
+
+
+class RelyingParty(NamedTuple):
+    """The WebAuthn relying party a deployment presents itself as.
+
+    Resolved once from configuration (``GatewayConfig.webauthn_relying_party``)
+    rather than per request, so every ceremony on a deployment agrees on the ID
+    a passkey is bound to. See that property for why it is not read off the
+    request.
+    """
+
+    rp_id: str
+    name: str
+    origins: tuple[str, ...]
+
+    def covers(self, origin: str) -> bool:
+        """Whether ``origin``'s host is the relying-party ID or below it.
+
+        The registrable-suffix rule from the WebAuthn spec, applied to this
+        deployment's own configured origins so a typo is caught at startup
+        rather than as an unexplained ceremony failure in a browser. The
+        boundary check ('otari.example.com'.endswith('.example.com')) is what
+        keeps 'notexample.com' from passing as a subdomain of 'example.com'.
+        """
+        host = _host_of(origin)
+        return host == self.rp_id or host.endswith(f".{self.rp_id}")
+
+
 class GatewayConfig(BaseSettings):
     """Gateway configuration with support for YAML files and environment variables."""
 
@@ -370,8 +409,38 @@ class GatewayConfig(BaseSettings):
         description=(
             "This deployment's own externally-reachable URL, with no trailing slash "
             "(e.g. 'https://otari.example.com'). Used to build absolute links in outgoing "
-            "email (an invitation's accept link); nothing else here needs to describe "
-            "its own address, since every other reference is relative to the request."
+            "email (an invitation's accept link) and to derive the WebAuthn relying-party "
+            "ID a passkey is bound to; nothing else here needs to describe its own "
+            "address, since every other reference is relative to the request."
+        ),
+    )
+    webauthn_rp_id: str | None = Field(
+        default=None,
+        description=(
+            "The WebAuthn relying-party ID passkeys registered here are bound to: a bare "
+            "domain with no scheme, port or path (e.g. 'otari.example.com'). Defaults to "
+            "the host of public_base_url. Set it explicitly to bind passkeys to a parent "
+            "domain of the one serving the dashboard (an 'example.com' passkey works on "
+            "'otari.example.com', but not the reverse). Changing it invalidates every "
+            "passkey already registered, because an authenticator scopes what it stored "
+            "to the ID it stored it under."
+        ),
+    )
+    webauthn_rp_name: str = Field(
+        default="otari",
+        description=(
+            "The human-readable relying-party name an authenticator shows while a passkey "
+            "is being created, and files it under afterwards. Cosmetic: nothing verifies it."
+        ),
+    )
+    webauthn_allowed_origins: list[str] = Field(
+        default_factory=list,
+        description=(
+            "Origins a passkey ceremony may be performed from, each with a scheme and no "
+            "trailing slash (e.g. 'https://otari.example.com'). Defaults to public_base_url "
+            "alone. Set this only when more than one origin serves the dashboard under one "
+            "relying-party ID; every entry must be the relying-party ID or a subdomain of it, "
+            "which is checked at startup."
         ),
     )
     mail_transport: str = Field(
@@ -1031,6 +1100,53 @@ class GatewayConfig(BaseSettings):
             missing.append("public_base_url")
         return tuple(missing)
 
+    @property
+    def webauthn_relying_party(self) -> RelyingParty | None:
+        """The relying party passkeys on this deployment are bound to, or None.
+
+        None means this deployment cannot run a passkey ceremony, which is a
+        configuration state and not a failure: WebAuthn requires a relying-party
+        ID, and a gateway that has not been told its own address cannot invent
+        one. Deriving it from the request's ``Host`` header instead is the shape
+        this deliberately does not take: ``Host`` is attacker-controlled on any
+        deployment that does not pin it, and the ID is the *only* thing scoping a
+        passkey to this site, so a derived-per-request ID would let a request
+        choose which site's passkeys it is talking about. It is also unstable by
+        nature, and an ID that moves silently orphans every passkey registered
+        under the previous one. So it is configured (``webauthn_rp_id``) or
+        derived once from a configured address (``public_base_url``), and
+        `docs/access-control.md` documents which.
+
+        The derivation drops the port along with the scheme: a relying-party ID
+        is a bare domain, so 'https://localhost:8000' yields 'localhost', which
+        is what makes passkeys work in local development over plain HTTP (the
+        one origin browsers treat as secure without TLS).
+
+        Origins default to ``public_base_url`` alone. That is the same address
+        the ID came from, so the common deployment configures one setting and
+        gets a consistent pair rather than two settings it can put out of step.
+        """
+        rp_id = (self.webauthn_rp_id or "").strip() or _host_of(self.public_base_url)
+        if not rp_id:
+            return None
+        origins = tuple(origin.strip().rstrip("/") for origin in self.webauthn_allowed_origins if origin.strip())
+        if not origins:
+            base = (self.public_base_url or "").strip().rstrip("/")
+            if not base:
+                # An explicit rp_id with no address to serve it from. Refusing
+                # here rather than accepting the ID alone: `expected_origin` has
+                # no safe default, and defaulting it to "https://{rp_id}" would
+                # quietly guess the scheme and port of a deployment that never
+                # said.
+                return None
+            origins = (base,)
+        return RelyingParty(rp_id=rp_id, name=self.webauthn_rp_name, origins=origins)
+
+    @property
+    def webauthn_enabled(self) -> bool:
+        """Whether this deployment can register and verify passkeys."""
+        return self.webauthn_relying_party is not None
+
     def provider_instance_type(self, instance: str) -> str:
         """Return the any-llm implementation backing a provider instance.
 
@@ -1496,6 +1612,47 @@ class GatewayConfig(BaseSettings):
             msg = f"mail_from_email is not a valid email address: {self.mail_from_email!r}"
             raise ValueError(msg)
 
+    def validate_webauthn_relying_party(self) -> None:
+        """Refuse a passkey configuration a browser would reject anyway.
+
+        Only what was written explicitly is refused. A deployment that
+        configured nothing has no relying party, offers no passkeys, and is not
+        misconfigured, which is why the absence of one is not an error here.
+
+        Two mistakes are worth catching at load rather than in a browser
+        console, because both fail as an opaque ``SecurityError`` on the page
+        with nothing on the server to correlate it with: a relying-party ID
+        written as a URL rather than a domain, and an allowed origin that is
+        neither the relying-party ID nor a subdomain of it. The second is the
+        one that looks fine: 'example.com' with an origin of
+        'https://otari.example.net' is a plausible pair of settings that can
+        never complete a ceremony.
+        """
+        configured_id = (self.webauthn_rp_id or "").strip()
+        if configured_id and _host_of(f"//{configured_id}") != configured_id.lower():
+            msg = (
+                f"webauthn_rp_id must be a bare domain with no scheme, port or path, got {configured_id!r}. "
+                f"Use {_host_of(configured_id) or 'otari.example.com'!r}."
+            )
+            raise ValueError(msg)
+        relying_party = self.webauthn_relying_party
+        if relying_party is None:
+            if self.webauthn_allowed_origins and not self.public_base_url and not configured_id:
+                msg = (
+                    "webauthn_allowed_origins is set but no relying-party ID can be derived. "
+                    "Set public_base_url, or webauthn_rp_id."
+                )
+                raise ValueError(msg)
+            return
+        stray = [origin for origin in relying_party.origins if not relying_party.covers(origin)]
+        if stray:
+            msg = (
+                f"webauthn_allowed_origins entries {stray} are not the relying-party ID "
+                f"{relying_party.rp_id!r} or a subdomain of it, so a passkey ceremony from them "
+                "would be refused by the browser. Set webauthn_rp_id to a domain that covers them."
+            )
+            raise ValueError(msg)
+
     def validate_mode_selection(self) -> None:
         configured_mode = self.configured_mode
         # Mode unset: the runtime mode is derived from the token, so there is
@@ -1611,6 +1768,7 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     config.validate_routing_policies()
     config.validate_search_tools()
     config.validate_mail_transport()
+    config.validate_webauthn_relying_party()
     _bridge_yaml_fields_to_env(config, yaml_bridged_fields)
     return config
 

@@ -1234,6 +1234,22 @@
         "title": "AudioSpeechRequest",
         "type": "object"
       },
+      "AuthenticatePasskeyRequest": {
+        "description": "A completed sign-in ceremony.",
+        "properties": {
+          "credential": {
+            "additionalProperties": true,
+            "description": "The browser's PublicKeyCredential assertion, serialized.",
+            "title": "Credential",
+            "type": "object"
+          }
+        },
+        "required": [
+          "credential"
+        ],
+        "title": "AuthenticatePasskeyRequest",
+        "type": "object"
+      },
       "BatchRequestItem": {
         "properties": {
           "body": {
@@ -1569,6 +1585,13 @@
           "dispatch_model"
         ],
         "title": "CandidateResponse",
+        "type": "object"
+      },
+      "CeremonyOptions": {
+        "additionalProperties": true,
+        "description": "The `PublicKeyCredentialCreationOptions`/`RequestOptions` a browser needs.\n\nPassed through as an opaque object rather than modeled field by field. The\nshape is the W3C's, the browser is the only consumer, and it is what\n``navigator.credentials`` is handed verbatim after the two base64url fields\nare decoded. Restating it here would produce a second, slightly wrong copy\nof a spec this deployment does not own, and every field the library adds\nlater would have to be added again to keep the client from dropping it.",
+        "properties": {},
+        "title": "CeremonyOptions",
         "type": "object"
       },
       "ChatCompletionRequest": {
@@ -2758,7 +2781,7 @@
                 "type": "null"
               }
             ],
-            "description": "The gateway master key; verified once and never stored by the browser. Accepted only while the operator identity has no password, which is to say while nobody has claimed this deployment (see GET /v1/bootstrap).",
+            "description": "The gateway master key; verified once and never stored by the browser. Accepted only while no identity on this deployment has a password (see GET /v1/bootstrap).",
             "title": "Master Key"
           },
           "password": {
@@ -2953,11 +2976,12 @@
             "type": "string"
           },
           "sign_in_methods": {
-            "description": "How POST /v1/auth/session may be authenticated right now, sorted. 'master_key' is the first-boot credential and is offered until the operator identity has a password, which is what claiming the deployment means; 'password' replaces it from then on, and the master key stays the credential for the management API. Empty for a hybrid gateway, which issues no session. The login page renders from this rather than trying a credential to find out.",
+            "description": "How POST /v1/auth/session may be authenticated right now, sorted. 'master_key' is the first-boot credential and is offered until some identity on this deployment has a password; 'password' replaces it from then on, and the master key stays the credential for the management API. 'passkey' appears alongside either one when this deployment is configured for WebAuthn and holds at least one passkey that its current relying-party ID can assert. Empty for a hybrid gateway, which issues no session. The login page renders from this rather than trying a credential to find out.",
             "items": {
               "enum": [
                 "master_key",
-                "password"
+                "password",
+                "passkey"
               ],
               "type": "string"
             },
@@ -5910,6 +5934,36 @@
         "title": "OrganizationPublic",
         "type": "object"
       },
+      "PasskeySessionResponse": {
+        "description": "A dashboard session minted by a passkey (the token travels only in the cookie).\n\nThe same three fields ``POST /v1/auth/session`` answers, deliberately: the\ndashboard's sign-in path does not care which credential got it here.",
+        "properties": {
+          "active_organization_id": {
+            "description": "The organization that identity is acting in, which scopes every tenancy surface.",
+            "format": "uuid",
+            "title": "Active Organization Id",
+            "type": "string"
+          },
+          "expires_at": {
+            "description": "When the session cookie stops being accepted.",
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "user_id": {
+            "description": "The identity this session speaks for.",
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expires_at",
+          "user_id",
+          "active_organization_id"
+        ],
+        "title": "PasskeySessionResponse",
+        "type": "object"
+      },
       "PasswordResponse": {
         "description": "What the identity signs in with now.",
         "properties": {
@@ -5919,7 +5973,7 @@
             "type": "string"
           },
           "master_key_sign_in_retired": {
-            "description": "Whether POST /v1/auth/session has stopped accepting the master key as a dashboard login. True once the operator identity has a password, which is what claiming the deployment means; a member setting their own password leaves an unclaimed deployment on the master key. Either way the master key stays the credential for the management API.",
+            "description": "Always true once this succeeds: some identity on this deployment now has a password, so POST /v1/auth/session no longer accepts the master key. It stays the credential for the management API.",
             "title": "Master Key Sign In Retired",
             "type": "boolean"
           }
@@ -6674,6 +6728,35 @@
           "unreadable"
         ],
         "title": "ReencryptSearchToolsResponse",
+        "type": "object"
+      },
+      "RegisterPasskeyRequest": {
+        "description": "A completed registration ceremony, with the label to file it under.",
+        "properties": {
+          "credential": {
+            "additionalProperties": true,
+            "description": "The browser's PublicKeyCredential, serialized.",
+            "title": "Credential",
+            "type": "object"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What to call this passkey in the credential list. Optional: an unnamed one is numbered rather than refused, so a browser that offers no prompt still works.",
+            "title": "Name"
+          }
+        },
+        "required": [
+          "credential"
+        ],
+        "title": "RegisterPasskeyRequest",
         "type": "object"
       },
       "RequestPasswordResetRequest": {
@@ -10901,6 +10984,105 @@
         "title": "VerifyEmailResponse",
         "type": "object"
       },
+      "WebAuthnCredentialPublic": {
+        "description": "A passkey as the settings page lists it.\n\nCarries no key material. ``credential_id`` is here because the browser needs\nit to tell the passkey it just used from the others in the list, and it is\na public identifier the authenticator hands to any site that asks: it is\nwhat ``allowCredentials`` publishes to an unauthenticated caller during a\nceremony.",
+        "properties": {
+          "backed_up": {
+            "title": "Backed Up",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "credential_id": {
+            "title": "Credential Id",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "name": {
+            "maxLength": 255,
+            "title": "Name",
+            "type": "string"
+          },
+          "rp_id": {
+            "title": "Rp Id",
+            "type": "string"
+          },
+          "transports": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Transports",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "id",
+          "credential_id",
+          "rp_id",
+          "transports",
+          "backed_up",
+          "created_at",
+          "last_used_at"
+        ],
+        "title": "WebAuthnCredentialPublic",
+        "type": "object"
+      },
+      "WebAuthnCredentialUpdate": {
+        "description": "Renaming a passkey, which is the only thing about one that is editable.\n\nEverything else on the row is what the authenticator asserted, so there is\nnothing else a person could correct.",
+        "properties": {
+          "name": {
+            "maxLength": 255,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "WebAuthnCredentialUpdate",
+        "type": "object"
+      },
+      "WebAuthnCredentialsPublic": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/WebAuthnCredentialPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "WebAuthnCredentialsPublic",
+        "type": "object"
+      },
       "WorkspaceActivationPublic": {
         "description": "Where a workspace stands on its first successful request.",
         "properties": {
@@ -11499,17 +11681,6 @@
             ],
             "title": "Provider Key Id"
           },
-          "reset_alignment": {
-            "anyOf": [
-              {
-                "type": "string"
-              },
-              {
-                "type": "null"
-              }
-            ],
-            "title": "Reset Alignment"
-          },
           "updated_at": {
             "title": "Updated At",
             "type": "string"
@@ -11528,7 +11699,6 @@
           "name",
           "max_budget",
           "budget_duration_sec",
-          "reset_alignment",
           "created_at",
           "updated_at"
         ],
@@ -12997,7 +13167,7 @@
     },
     "/v1/auth/password": {
       "put": {
-        "description": "Set or change the password the caller signs in to the dashboard with.\n\nAlways the caller's own identity. Supply ``email`` when it has no sign-in\naddress yet, which is the state first boot leaves the operator in, and\n``current_password`` when it already has a password and the request is\nauthenticated by the session cookie. The master key in a header is what\nexcuses ``current_password``, which is how a forgotten password is\nrecovered; it does not excuse ``email``, because an identity with no address\nhas nothing to sign in with whoever is asking. The operator setting a password\nfor the first time retires master-key sign-in on this deployment.\n\nEvery other session this identity holds ends, the caller's own excepted, so\na cookie stolen before the change does not outlive it.",
+        "description": "Set or change the password the caller signs in to the dashboard with.\n\nAlways the caller's own identity. Supply ``email`` when it has no sign-in\naddress yet, which is the state first boot leaves the operator in, and\n``current_password`` when it already has a password and the request is\nauthenticated by the session cookie. The master key in a header is what\nexcuses ``current_password``, which is how a forgotten password is\nrecovered; it does not excuse ``email``, because an identity with no address\nhas nothing to sign in with whoever is asking. Setting a password for the\nfirst time retires master-key sign-in on this deployment.\n\nEvery other session this identity holds ends, the caller's own excepted, so\na cookie stolen before the change does not outlive it.",
         "operationId": "set_dashboard_password_v1_auth_password_put",
         "requestBody": {
           "content": {
@@ -13298,6 +13468,285 @@
           }
         },
         "summary": "Verify Email Route",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/webauthn/authenticate": {
+      "post": {
+        "description": "Verify an assertion and set the HttpOnly session cookie.\n\nThe session is bound to the identity whose passkey signed, exactly as a\npassword sign-in binds one to the identity that authenticated, so every\nrequest it later authenticates resolves the same caller.\n\nA refusal is counted like the other sign-in failures\n(``record_auth_failure``) and answered as a 401 by the tenancy error\nhandler. Unlike the password path there is no separate post-failure\nthrottle: this route is throttled unconditionally on the way in, because\nunlike a password there is no legitimate caller here whose correct\ncredential must never be blocked (a passkey ceremony is one round trip a\nbrowser drives, not something a person retries by hand).",
+        "operationId": "authenticate_passkey_v1_auth_webauthn_authenticate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthenticatePasskeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasskeySessionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Authenticate Passkey",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/webauthn/authenticate/options": {
+      "post": {
+        "description": "Start a passkey sign-in. Public, throttled, and names no credentials.\n\nThe options carry no ``allowCredentials``, so this publishes nothing about\nwho holds a passkey here; see ``webauthn_service.begin_authentication``.",
+        "operationId": "authentication_options_v1_auth_webauthn_authenticate_options_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CeremonyOptions"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Authentication Options",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/webauthn/credentials": {
+      "get": {
+        "description": "The caller's own passkeys. Never anybody else's, and never key material.",
+        "operationId": "list_passkeys_v1_auth_webauthn_credentials_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebAuthnCredentialsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Passkeys",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/webauthn/credentials/{credential_id}": {
+      "delete": {
+        "description": "Remove one of the caller's passkeys.\n\nRemoving the last one is allowed: an email and password is still this\ndeployment's login, so this is not a lockout, and refusing would strand\nwhoever lost the authenticator.",
+        "operationId": "delete_passkey_v1_auth_webauthn_credentials__credential_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "credential_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Credential Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Passkey",
+        "tags": [
+          "auth"
+        ]
+      },
+      "patch": {
+        "description": "Relabel one of the caller's passkeys, which is all that is editable.",
+        "operationId": "rename_passkey_v1_auth_webauthn_credentials__credential_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "credential_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Credential Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebAuthnCredentialUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebAuthnCredentialPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Rename Passkey",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/webauthn/register": {
+      "post": {
+        "description": "Verify a registration ceremony and store the passkey it produced.",
+        "operationId": "register_passkey_v1_auth_webauthn_register_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterPasskeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebAuthnCredentialPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Register Passkey",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/webauthn/register/options": {
+      "post": {
+        "description": "Start registering a passkey for the signed-in identity.\n\nA POST rather than a GET even though it reads like one: it issues a\nserver-side challenge and writes it, so it is not safe to repeat, cache, or\nprefetch.",
+        "operationId": "registration_options_v1_auth_webauthn_register_options_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CeremonyOptions"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Registration Options",
         "tags": [
           "auth"
         ]
@@ -13612,7 +14061,7 @@
     },
     "/v1/bootstrap": {
       "get": {
-        "description": "Return the deployment context the dashboard shell renders from.\n\nPublic: the shell fetches this before it knows whether it can authenticate.\nThat is also why ``sign_in_methods`` is answered here rather than behind a\ncredential, and it publishes nothing an unauthenticated caller could not\nalready learn by trying both credentials against the sign-in endpoint.\n\nThe database read is two primary-key lookups: the ``tenancy_bootstrap_user_id``\nmarker, and the identity it names, to answer whether *that* identity holds a\npassword (#702). It runs only in standalone mode: a hybrid gateway has no session to describe,\nand ``get_db_if_needed`` hands it no session to read one from.",
+        "description": "Return the deployment context the dashboard shell renders from.\n\nPublic: the shell fetches this before it knows whether it can authenticate.\nThat is also why ``sign_in_methods`` is answered here rather than behind a\ncredential, and it publishes nothing an unauthenticated caller could not\nalready learn by trying both credentials against the sign-in endpoint.\n\nThe one database read is a ``LIMIT 1`` probe for any identity holding a\npassword, over a table a standalone deployment keeps one row per person in.\nIt runs only in standalone mode: a hybrid gateway has no session to describe,\nand ``get_db_if_needed`` hands it no session to read one from.",
         "operationId": "get_bootstrap_v1_bootstrap_get",
         "responses": {
           "200": {
