@@ -288,11 +288,11 @@ async def create_session(
     verification per attempt and the refusal is not about the credential
     anyway; both, because the way back out is the master key against
     ``PATCH /v1/settings/maintenance-mode`` through the header, which never
-    passes through this door. That is what keeps the way back out off the
-    frozen path, and it is why no identity needs an exemption here (an operator
-    who no longer holds the master key recovers by setting ``OTARI_MASTER_KEY``
-    and restarting, which is a restart rather than a click). It
-    leaks nothing either: ``GET /v1/bootstrap`` already publishes the same flag
+    passes through this door. That is what keeps the way back out off the frozen
+    path, and it is why no identity needs an exemption here; an operator who no
+    longer holds the master key recovers by setting ``OTARI_MASTER_KEY`` and
+    restarting, which is a restart rather than a click. It leaks nothing
+    either: ``GET /v1/bootstrap`` already publishes the same flag
     unauthenticated, so the sign-in screen can render the right page.
     """
     if await is_maintenance_mode(db):
