@@ -40,6 +40,11 @@ from gateway.services.tenancy.errors import (
     WorkspaceBudgetDefaultNotFoundError,
     WorkspaceNotFoundError,
 )
+from gateway.services.tenancy.provisioning_service import (
+    DEFAULT_ORGANIZATION_SLUG,
+    DEFAULT_WORKSPACE_NAME,
+    ensure_bootstrap_identity,
+)
 from gateway.services.tenancy.workspace_budget_default_service import (
     WorkspaceBudgetDefaultService,
     WorkspaceMemberBudgetPolicyCreate,
@@ -709,3 +714,92 @@ async def test_removing_a_member_takes_their_workspace_ceiling_with_them(async_d
     await workspace_service.remove_member(user=owner, workspace_id=workspace.id, user_id=leaver.id)
 
     assert await _member_budget(async_db, added.id) is None, "the ceiling must not outlive the membership"
+
+
+@pytest.mark.asyncio
+async def test_the_read_surface_reports_a_calendar_alignment(async_db: AsyncSession) -> None:
+    """A period a caller cannot read is a period it has to fetch the budget to learn.
+
+    The two period fields are exclusive (a CHECK on ``budgets`` refuses both), so
+    a default naming a calendar-aligned budget has a null ``budget_duration_sec``.
+    While that was the only period field on this shape, such a default read back
+    with nothing at all in it, which is indistinguishable from a budget that never
+    resets. ``ScopedBudgetResponse`` already carries both off the budget for the
+    same reason, and so does the platform's own policy read shape.
+    """
+    org = await _organization(async_db, slug="acme-read-aligned")
+    owner = await _member(async_db, org, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, org, name="Engineering", owner=owner)
+
+    service = WorkspaceBudgetDefaultService(async_db)
+    created = await service.create_default(
+        user=owner,
+        workspace_id=workspace.id,
+        request=WorkspaceMemberBudgetPolicyCreate(
+            budget_id=await _budget(async_db, max_budget=250.0, reset_alignment="calendar_month")
+        ),
+    )
+
+    assert created.reset_alignment == "calendar_month"
+    assert created.budget_duration_sec is None
+
+    listed = await service.list_defaults(user=owner, workspace_id=workspace.id)
+    assert [one.reset_alignment for one in listed.data] == ["calendar_month"]
+
+
+@pytest.mark.asyncio
+async def test_a_rolling_budget_still_reads_back_with_no_alignment(async_db: AsyncSession) -> None:
+    """The other arm of the exclusive pair, so the new field cannot be a constant."""
+    org = await _organization(async_db, slug="acme-read-rolling")
+    owner = await _member(async_db, org, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, org, name="Engineering", owner=owner)
+
+    created = await WorkspaceBudgetDefaultService(async_db).create_default(
+        user=owner,
+        workspace_id=workspace.id,
+        request=WorkspaceMemberBudgetPolicyCreate(
+            budget_id=await _budget(async_db, max_budget=250.0, budget_duration_sec=86400)
+        ),
+    )
+
+    assert created.budget_duration_sec == 86400
+    assert created.reset_alignment is None
+
+
+@pytest.mark.asyncio
+async def test_bootstrap_provisioning_materializes_the_default_workspaces_defaults(
+    async_db: AsyncSession,
+) -> None:
+    """The fourth ``WorkspaceMember``-creating path had to materialize like the other three.
+
+    A genuine first boot has no defaults to materialize: creating one needs an
+    identity, and there is none until provisioning returns. What makes the call
+    bind is the marker being unresolved on a database that has already run, which
+    is the identity it names having been deleted or the row cleared by hand. The
+    workspace is adopted then (migration ``d5e7f1a2b3c4`` seeds the ``default``
+    organization and its ``Default workspace``, and ``_provision`` looks both up
+    before creating either), so the operator joined a workspace whose other
+    members were all capped as the one that was not, with nothing listing the gap.
+    """
+    organizations = OrganizationRepository(async_db)
+    organization = await organizations.get_by_slug(DEFAULT_ORGANIZATION_SLUG)
+    assert organization is not None, "the tenancy root is seeded by d5e7f1a2b3c4"
+    workspaces = WorkspaceRepository(async_db)
+    workspace = await workspaces.get_by_organization_and_name(organization.id, DEFAULT_WORKSPACE_NAME)
+    assert workspace is not None
+
+    budget_id = await _budget(async_db, max_budget=125.0, reset_alignment="calendar_month")
+    async_db.add(WorkspaceBudgetDefault(workspace_id=workspace.id, budget_id=budget_id))
+    await async_db.commit()
+
+    operator = await ensure_bootstrap_identity(async_db)
+
+    member = await WorkspaceMemberRepository(async_db).get_by_workspace_and_user(workspace.id, operator.id)
+    assert member is not None
+    ceiling = await _member_budget(async_db, member.id)
+    assert ceiling is not None, "the operator identity must be capped by the workspace it joined"
+    assert ceiling.budget_id == budget_id
+    # Materialization is flush-only, so it has to have landed in the commit
+    # ``ensure_bootstrap_identity`` makes rather than in a transaction of its own.
+    assert ceiling.period_start is not None
+    assert ceiling.period_start.day == 1

@@ -292,6 +292,9 @@ export function workspaceBudgetDefault(
     name: "Default member budget",
     max_budget: 50.0,
     budget_duration_sec: 2_592_000,
+    // The other arm of the period pair, exclusive with the one above: a default
+    // whose budget snaps to a calendar boundary carries this instead.
+    reset_alignment: null,
     created_at: "2026-01-01T00:00:00+00:00",
     updated_at: "2026-01-01T00:00:00+00:00",
     ...overrides,

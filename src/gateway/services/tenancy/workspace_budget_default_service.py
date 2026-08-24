@@ -106,6 +106,12 @@ class WorkspaceMemberBudgetPolicyPublic(BaseModel):
     name: str | None
     max_budget: float | None
     budget_duration_sec: int | None
+    # The other way the budget can carry a period, alongside
+    # ``budget_duration_sec`` and never with it (a CHECK on ``budgets`` refuses
+    # both). Carried for the same reason ``ScopedBudgetResponse`` carries it: a
+    # default naming a calendar-aligned budget would otherwise read back with
+    # every period field null, which is how a row that never resets looks.
+    reset_alignment: str | None
     created_at: str
     updated_at: str
 
@@ -121,6 +127,7 @@ class WorkspaceMemberBudgetPolicyPublic(BaseModel):
             # the wire contract and the dashboard client stay float.
             max_budget=as_float(budget.max_budget),
             budget_duration_sec=budget.budget_duration_sec,
+            reset_alignment=budget.reset_alignment,
             created_at=default.created_at.isoformat(),
             updated_at=default.updated_at.isoformat(),
         )

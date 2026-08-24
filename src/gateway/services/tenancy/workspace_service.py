@@ -178,7 +178,7 @@ class WorkspaceService:
             member = await self.members.create(workspace_id=workspace.id, user_id=user.id, role="owner")
             # No-op today: a workspace this fresh has no defaults of its own yet.
             # Called anyway so every WorkspaceMember-creating path materializes
-            # the same way, rather than two of three doing it and this one
+            # the same way, rather than three of four doing it and this one
             # relying on being first.
             await self.budget_defaults.materialize_for_member(member)
             await self.db.commit()

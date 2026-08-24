@@ -206,11 +206,51 @@ async def _provision(db: AsyncSession) -> User:
             organization_id=organization.id,
             created_by_user_id=operator.id,
         )
-    await WorkspaceMemberRepository(db).create(
+    # Serialized against a concurrent ``create_default`` on this workspace, via
+    # the same lock ``WorkspaceService.add_member`` takes and for the reason
+    # ``WorkspaceRepository.lock`` gives: this path reads the workspace's
+    # defaults before materializing, that one reads its members, and without a
+    # shared lock both can read before either commits, leaving the operator
+    # with no ceiling. ``create_workspace`` is the documented exception because
+    # a workspace it just made cannot have a default yet; this path is not, since
+    # it adopts an existing one. Reachable despite the marker being unresolved:
+    # ``get_current_identity`` returns a dashboard session's identity without
+    # consulting the marker at all, so a signed-in operator can be creating a
+    # default while a request with no session is provisioning here.
+    await workspaces.lock(workspace.id)
+    member = await WorkspaceMemberRepository(db).create(
         workspace_id=workspace.id,
         user_id=operator.id,
         role="owner",
     )
+    # The fourth path that creates a ``WorkspaceMember``, and it materializes
+    # the workspace's budget defaults like the other three, so
+    # ``WorkspaceService.create_workspace``'s claim that every one of them does
+    # is true. A no-op on a genuine first boot, where a default cannot exist yet:
+    # creating one needs an identity, and there is none until this returns. It
+    # binds when the marker is unresolved on a database that has already run,
+    # which is the identity it names having been deleted (``_load_marked_identity``
+    # reports a marker whose user is gone as no marker) or the row cleared by
+    # hand. The workspace is adopted in that case, and the operator would join a
+    # workspace whose other members are all capped as the one that is not.
+    #
+    # Imported inside the function, matching
+    # ``OrganizationService._apply_workspace_assignments``. There the deferral is
+    # load-bearing, since a module-level import genuinely closes a cycle; here it
+    # is not, and it stays deferred only to keep this module free of an
+    # import-time dependency on the half of the package that imports it back.
+    # ``tests/unit/test_service_module_imports.py`` pins the graph either way.
+    #
+    # Flush-only, so it lands in the commit below and a lost race rolls it back
+    # with everything else. It can raise ``WorkspaceBudgetDefaultBudgetNotFoundError``
+    # for a default naming a budget that is gone, which now fails identity
+    # resolution rather than only the budget-defaults endpoints; unreachable while
+    # that column's ``RESTRICT`` foreign key holds, and self-healing once the row is.
+    from gateway.services.tenancy.workspace_budget_default_service import (
+        WorkspaceBudgetDefaultService,
+    )
+
+    await WorkspaceBudgetDefaultService(db).materialize_for_member(member)
 
     # Upsert rather than insert: a marker whose value no longer resolves (an
     # unreadable id, or one naming a row that is gone) is what

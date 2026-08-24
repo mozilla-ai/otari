@@ -11463,6 +11463,17 @@
             ],
             "title": "Provider Key Id"
           },
+          "reset_alignment": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reset Alignment"
+          },
           "updated_at": {
             "title": "Updated At",
             "type": "string"
@@ -11481,6 +11492,7 @@
           "name",
           "max_budget",
           "budget_duration_sec",
+          "reset_alignment",
           "created_at",
           "updated_at"
         ],

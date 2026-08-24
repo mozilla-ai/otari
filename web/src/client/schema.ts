@@ -8102,6 +8102,8 @@ export interface components {
             name: string | null;
             /** Provider Key Id */
             provider_key_id: string | null;
+            /** Reset Alignment */
+            reset_alignment: string | null;
             /** Updated At */
             updated_at: string;
             /**
