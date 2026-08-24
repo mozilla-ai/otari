@@ -18,10 +18,9 @@ test("sign-in screen with a rejected key", async ({ page }) => {
   const key = page.locator('input[type="password"]')
   await key.fill("not-the-master-key")
   await key.press("Enter")
-  // The error state is a layout of its own: it adds a banner above the form,
-  // which is exactly the kind of shift a screenshot catches and a unit test
-  // does not.
-  await expect(page.getByText(/invalid|unauthor/i).first()).toBeVisible()
+  // The error is beside the credential it rejects, so this asserts the same
+  // semantic alert the operator sees rather than the implementation's text.
+  await expect(page.getByRole("alert")).toBeVisible()
   await captureScreenshot(page, "sign-in-rejected")
 })
 

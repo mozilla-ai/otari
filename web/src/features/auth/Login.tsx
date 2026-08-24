@@ -21,6 +21,9 @@ type CredentialField = "email" | "password" | "masterKey"
  */
 const VALIDATION = "aria" as const
 
+// Mirrors the gateway's `core/addresses.py` shape check. Keep the two in sync
+// so the sign-in screen neither locks out a stored address nor accepts one the
+// gateway will refuse.
 const EMAIL_PATTERN = /^[^@\s]+@[^@\s]+\.[^@\s]+$/
 
 const ERROR_IDS: Record<CredentialField, string> = {
@@ -79,8 +82,8 @@ const CARD = "flex flex-col gap-6 px-6 pt-6 pb-3 sm:px-8 sm:pt-8 sm:pb-5"
  */
 const CARD_FLAT = "flex flex-col gap-6 px-6 py-6 text-center sm:px-8 sm:py-8"
 
-/** 24px Zilla Slab. The screen's one page-defining line, so `text-display`. */
-const HEADING = "text-display font-semibold tracking-tight"
+/** The screen's one page-defining line. */
+const HEADING = "text-display"
 
 /**
  * An inline code chip. The guide used to be a tinted block, which read as a
@@ -157,9 +160,9 @@ function DisclosureCaret() {
  * The row above a credential box: label and required marker grouped left, the
  * field's refusal right, both on the label's existing 20px line. This is where
  * an `<ErrorBanner>` used to go, between the last field and the button, and it
- * inserted about 46px right where the pointer already was. The row stays one
- * line high so a refusal cannot move the submit button. Sighted users get a
- * truncated message, while assistive technology retains the complete detail.
+ * inserted about 46px right where the pointer already was. The card's fixed
+ * top edge keeps the page stable when a gateway instruction wraps below this
+ * row, rather than hiding the instruction a person needs to act on.
  */
 function LabelRow({
   label,
@@ -173,7 +176,7 @@ function LabelRow({
   const message = error ? errorMessage(error) : null
 
   return (
-    <div className="flex h-5 items-center justify-between gap-x-3">
+    <div className="flex min-h-5 flex-wrap items-center justify-between gap-x-3">
       <span className="flex shrink-0 items-center">
         {/* `text-foreground` holds the label at its resting ink while the field
             is invalid: HeroUI turns any `.label` under `[data-invalid]` red, and
@@ -194,15 +197,10 @@ function LabelRow({
         <span
           id={errorId}
           role="alert"
-          className="flex min-w-0 flex-1 items-center justify-end gap-1 text-sm text-danger"
+          className="flex min-w-0 items-center gap-1 text-sm text-danger"
         >
           <AlertIcon />
-          <span
-            aria-hidden="true"
-            data-message={message}
-            className="min-w-0 truncate after:content-[attr(data-message)]"
-          />
-          <span className="sr-only">{message}</span>
+          <span title={message}>{message}</span>
         </span>
       ) : null}
     </div>
@@ -524,7 +522,7 @@ export function Login() {
                   {/* The 12px tail is what keeps the gap to the button reading
                       24px once this is open, since the 12px it sits at closed
                       is the summary row's invisible padding doing that job. */}
-                  <p className="pb-3 text-caption leading-relaxed">
+                  <p className="pb-3 text-caption">
                     No <code className={CODE_CHIP}>OTARI_MASTER_KEY</code> set?
                     Otari printed one to the server logs on startup. Find it
                     with{" "}
