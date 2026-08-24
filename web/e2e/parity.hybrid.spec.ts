@@ -49,6 +49,8 @@ test.describe("hybrid deployment", () => {
       // not serve: a hybrid gateway mints no session for maintenance mode to
       // refuse. Its control plane owns that, as it owns the sign-in itself.
       maintenance_mode: false,
+      // No session of its own to protect, so no ceremony to run either.
+      passkeys_ready: false,
       // Its control plane sends the mail that carries links back to it.
       mail_ready: false,
     })
