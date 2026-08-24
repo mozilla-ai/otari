@@ -1607,6 +1607,11 @@ async def resolve_request_context(
                 # Already resolved for the pricing gate above, so the free-model
                 # check reads the same rate the estimate was built from.
                 organization_id=organization_id,
+                # The completion path is the one reserve site with the config
+                # object to hand, so it is the one that can honor a deployment's
+                # own TTL; the batch, search and pass-through sites take the
+                # module default.
+                reservation_ttl_sec=config.budget_reservation_ttl_sec,
             )
         except HTTPException as exc:
             # A blocked or over-budget user is refused inside reserve_budget,

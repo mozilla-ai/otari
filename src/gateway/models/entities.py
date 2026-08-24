@@ -13,6 +13,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    false,
     func,
     text,
     true,
@@ -1130,6 +1131,96 @@ class ScopedBudget(Base):
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
+
+
+class BudgetReservation(Base):
+    """One in-flight budget hold, recorded as a row.
+
+    ``users.reserved`` and ``scoped_budgets.reserved_spend`` stay the O(1)
+    counters the gate reads; this is the ledger behind them, and it exists for
+    the two things a counter cannot do (mozilla-ai/otari#742):
+
+    * **Release becomes idempotent.** Without an identity, a second release for
+      the same request silently subtracts the hold twice. ``_release_reserved``
+      clamps at zero, so that shows up not as an error but as an under-count of
+      live holds, which weakens the very overspend guarantee the reserve gate
+      exists to provide. The status transition here is what makes only the first
+      release do the work.
+    * **A leaked hold becomes reclaimable individually.** A failure between
+      reserve and settle used to leave an amount in the counter that could be
+      seen only in aggregate and cleared only by the budget's next reset. With a
+      row it has an owner, an age and a TTL.
+
+    The row is written *after* the holds it records, never before. A hold with no
+    row is the pre-existing leak the sweep bounds; a row with no hold would have
+    the sweep release an amount nobody holds, under-counting the live ones. Of
+    the two inconsistent windows only one is safe, and this is it.
+
+    Standalone mode only: hybrid mode reserves nothing locally, because the
+    platform holds against its own ledger.
+    """
+
+    __tablename__ = "budget_reservations"
+    __table_args__ = (
+        # The sweep's access path: active rows whose TTL has elapsed. Equality on
+        # ``status`` leads so the range scan on ``expires_at`` rides the same index.
+        Index("ix_budget_reservations_status_expires_at", "status", "expires_at"),
+    )
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
+    # Indexed for the opportunistic per-user reclaim on the reserve path, which
+    # asks for one user's expired holds on every request that reserves.
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # What the per-user leg holds in ``users.reserved``. Zero when the request
+    # held only scoped ceilings (a user with no budget row still passes those).
+    estimate: Mapped[Decimal] = mapped_column(UsdCost(), default=Decimal(0), server_default="0")
+    # Whether the ``users.reserved`` write actually happened. Distinct from
+    # ``estimate > 0`` because a zero-cost request on an enforced budget still
+    # takes the hold, and the release has to match what the reserve did.
+    user_reserved: Mapped[bool] = mapped_column(default=False, server_default=false())
+    # Mirrors ``ReservationHandle.counts_toward_budget``: a budget-exempt request
+    # is ledgered so its hold is still reclaimable, but reconciling it must not
+    # write ``users.spend``.
+    counts_toward_budget: Mapped[bool] = mapped_column(default=True, server_default=true())
+    # A plain string rather than a database enum, matching ``scoped_budgets.scope_type``:
+    # a new state should not need an enum migration. Values are the
+    # ``RESERVATION_*`` constants in gateway.services.budget_reservation_ledger.
+    status: Mapped[str] = mapped_column(default="active", server_default="active", nullable=False)
+    # After this instant a still-active row is treated as leaked and reclaimed.
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+
+class BudgetReservationScope(Base):
+    """The hold one reservation placed on one scoped ceiling.
+
+    ``scoped_budget_id`` is deliberately not a foreign key, following
+    ``ScopedBudget``'s own convention: a ceiling deleted while a request is in
+    flight leaves an orphan line that the release skips, rather than forcing the
+    delete to cascade into live holds.
+
+    The amount is stored per line even though today every ceiling of a request
+    holds the same figure. A ledger line that does not say what it holds is not
+    a ledger line, and reading the amount from the parent would silently become
+    wrong the first time the two diverge.
+    """
+
+    __tablename__ = "budget_reservation_scopes"
+    __table_args__ = (Index("ix_budget_reservation_scopes_reservation_id", "reservation_id"),)
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
+    reservation_id: Mapped[str] = mapped_column(
+        ForeignKey("budget_reservations.id", ondelete="CASCADE"), nullable=False
+    )
+    scoped_budget_id: Mapped[str] = mapped_column(nullable=False)
+    amount: Mapped[Decimal] = mapped_column(UsdCost(), default=Decimal(0), server_default="0")
 
 
 class OrganizationModelPricing(Base):

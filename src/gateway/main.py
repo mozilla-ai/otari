@@ -24,6 +24,7 @@ from gateway.rate_limit import RateLimiter
 from gateway.root_page import FAVICON_SVG, ROOT_TUTORIAL_HTML
 from gateway.services.alias_service import load_aliases_at_startup, reset_alias_cache, run_alias_refresher
 from gateway.services.bootstrap_service import bootstrap_first_api_key
+from gateway.services.budget_reservation_ledger import run_reservation_sweeper
 from gateway.services.dashboard_session_service import revoke_sessions_on_master_key_change
 from gateway.services.file_store import build_file_store
 from gateway.services.log_writer import LogWriter, NoopLogWriter, create_log_writer
@@ -273,6 +274,7 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
         price_refresher: asyncio.Task[None] | None = None
         discovery_refresher: asyncio.Task[None] | None = None
         catalog_refresher: asyncio.Task[None] | None = None
+        reservation_sweeper: asyncio.Task[None] | None = None
         if config.is_hybrid_mode:
             log_writer = NoopLogWriter()
         else:
@@ -373,6 +375,18 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
             discovery_refresher = asyncio.create_task(run_discovery_refresher(config))
             # Same shape for the models.dev catalog, whose fetch is bounded at 15s.
             catalog_refresher = asyncio.create_task(run_catalog_refresher(config))
+            # Not a cache refresher like the rest: this one returns leaked budget
+            # holds. The per-user reclaim on the reserve path only runs when that
+            # user next reserves, so a user whose single request leaked would hold
+            # against their budget until its next reset, and forever without one.
+            # Standalone only, because hybrid mode reserves nothing locally.
+            if config.budget_reservation_sweep_interval_sec > 0:
+                reservation_sweeper = asyncio.create_task(
+                    run_reservation_sweeper(
+                        config.budget_reservation_sweep_interval_sec,
+                        batch_size=config.budget_reservation_sweep_batch,
+                    )
+                )
 
         # Start the writer inside the try so a failure here still runs the cleanup
         # below; the refresher tasks are already created and would otherwise leak.
@@ -392,6 +406,7 @@ def _create_lifespan(config: GatewayConfig) -> Callable[[FastAPI], Any]:
                 (price_refresher, "price snapshot"),
                 (discovery_refresher, "model discovery"),
                 (catalog_refresher, "models.dev catalog"),
+                (reservation_sweeper, "budget reservation sweep"),
             ]
             await _stop_refreshers([(task, name) for task, name in refreshers if task is not None])
             if alias_refresher is not None:

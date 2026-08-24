@@ -685,6 +685,30 @@ class GatewayConfig(BaseSettings):
             "with its own capture_agent_telemetry (null inherits this setting)."
         ),
     )
+    budget_reservation_ttl_sec: int = Field(
+        default=900,
+        gt=0,
+        description=(
+            "How long a budget reservation may stay in flight before the sweep treats it as "
+            "leaked and returns the hold. It must comfortably exceed the slowest request this "
+            "deployment serves, because reclaiming a hold that is still live would let a "
+            "concurrent request past a cap the in-flight one is already spending against."
+        ),
+    )
+    budget_reservation_sweep_interval_sec: int = Field(
+        default=300,
+        ge=0,
+        description=(
+            "How often to sweep for leaked budget reservations across all users. 0 disables the "
+            "sweep, leaving the opportunistic per-user reclaim that runs when a user next "
+            "reserves. Standalone mode only."
+        ),
+    )
+    budget_reservation_sweep_batch: int = Field(
+        default=500,
+        gt=0,
+        description="Maximum leaked budget reservations one sweep pass reclaims before yielding.",
+    )
     budget_estimate_default_output_tokens: int = Field(
         default=1024,
         ge=0,
