@@ -35,14 +35,19 @@ def upgrade() -> None:
     op.create_table(
         _TABLE,
         sa.Column("workspace_id", sa.Uuid(), nullable=False),
-        sa.Column("enabled", sa.Boolean(), nullable=False),
+        # The three NOT NULL columns carry server defaults so a row can be
+        # inserted by something that is not this service's ORM mapping (a psql
+        # session, a data migration) without naming them. `sa.func.now()` rather
+        # than a dialect literal because the chain runs on SQLite too, which is
+        # how `workspace` itself declares its own `created_at`.
+        sa.Column("enabled", sa.Boolean(), nullable=False, server_default=sa.true()),
         sa.Column("max_results", sa.Integer(), nullable=True),
         sa.Column("purpose_hint", sa.Text(), nullable=True),
         sa.Column("allowed_domains", sa.JSON(), nullable=True),
         sa.Column("blocked_domains", sa.JSON(), nullable=True),
         sa.Column("provider_options", sa.JSON(), nullable=True),
-        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False),
-        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False),
+        sa.Column("created_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
+        sa.Column("updated_at", sa.DateTime(timezone=True), nullable=False, server_default=sa.func.now()),
         sa.PrimaryKeyConstraint("workspace_id"),
         sa.ForeignKeyConstraint(["workspace_id"], ["workspace.id"], ondelete="CASCADE"),
         # A ceiling of zero or less would ask for a search that can return

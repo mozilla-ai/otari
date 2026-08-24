@@ -3,7 +3,19 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Index, Text, UniqueConstraint, Uuid, text
+from sqlalchemy import (
+    JSON,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Text,
+    UniqueConstraint,
+    Uuid,
+    func,
+    text,
+    true,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlmodel import SQLModel
 
@@ -787,7 +799,9 @@ class FileObject(Base):
     bytes: Mapped[int] = mapped_column()
     purpose: Mapped[str] = mapped_column(default="user_data")
     storage_ref: Mapped[str] = mapped_column()
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True
+    )
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None, index=True)
 
@@ -830,7 +844,9 @@ class BatchRecord(Base):
     # this record is the strict ownership anchor, so it must always name an owner.
     # CASCADE: deleting the user drops the ownership record (the user's keys are
     # gone too, and usage_logs remain the billing history).
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True
+    )
     # SET NULL: a key may be revoked while its batch is still in flight.
     api_key_id: Mapped[str | None] = mapped_column(ForeignKey("api_keys.id", ondelete="SET NULL"), index=True)
     # The workspace this batch was CREATED in (otari#643 follow-up), so
@@ -1536,7 +1552,9 @@ class WorkspaceWebSearchConfig(Base):
     workspace_id: Mapped[uuid.UUID] = mapped_column(
         Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), primary_key=True
     )
-    enabled: Mapped[bool] = mapped_column(default=True, nullable=False)
+    # ``server_default`` mirrors the migration so autogenerate sees no drift, and
+    # so a row written by anything other than this mapping still gets a value.
+    enabled: Mapped[bool] = mapped_column(default=True, nullable=False, server_default=true())
     # NULL means "no workspace ceiling": the request's own value, then the
     # deployment's, then the backend's built-in, exactly as today.
     max_results: Mapped[int | None] = mapped_column(default=None)
@@ -1555,10 +1573,15 @@ class WorkspaceWebSearchConfig(Base):
     provider_options: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
     # ``UtcDateTime`` for the same reason ``WorkspaceCodeExecutionPolicy`` uses
     # it: these are serialized with ``.isoformat()`` for the dashboard, and a
-    # plain ``DateTime(timezone=True)`` round-trips naive on SQLite.
-    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
+    # plain ``DateTime(timezone=True)`` round-trips naive on SQLite. The Python
+    # default is what every write here uses; ``server_default`` is the backstop
+    # for a writer that is not this mapping, matching ``workspace`` itself.
+    created_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
+    )
     updated_at: Mapped[datetime] = mapped_column(
         UtcDateTime(),
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
+        server_default=func.now(),
     )
