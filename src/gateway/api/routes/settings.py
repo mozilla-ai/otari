@@ -149,6 +149,7 @@ _CONFIG_VIEW: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
             "enable_metrics",
             "enable_docs",
+            "docs_url",
             "bootstrap_api_key",
             "log_writer_strategy",
             "streaming_keepalive_interval_ms",
