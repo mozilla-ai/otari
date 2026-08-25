@@ -134,6 +134,15 @@ export function WorkspaceCodeExecutionPolicyCard({
   const busy = setPolicy.isPending || clearPolicy.isPending || query.isLoading
   const allowedImages = policy?.allowed_images ?? []
   const availableTools = policy?.available_tools ?? []
+  // A pin the operator has since withdrawn is still stored, and the server
+  // refuses it on the next request and on the next save. `FilterSelect` renders
+  // a controlled native `<select>`, which shows its *first* option when `value`
+  // matches none of them, so leaving it out would display "Deployment default"
+  // over a policy that is nothing of the kind, and a save would earn a 400
+  // naming a value never on screen. Carry it as an option instead, said out
+  // loud, so the withdrawal is visible and picking something else is one click.
+  const withdrawnImage =
+    policy?.image && !allowedImages.includes(policy.image) ? policy.image : null
 
   // An unset list ticks every box, because that is what it means: the workspace
   // gets whatever the backend serves. Unticking one is therefore a narrowing
@@ -263,7 +272,7 @@ export function WorkspaceCodeExecutionPolicyCard({
             description="Lowers how long one execution may run. It never raises it."
           />
 
-          {allowedImages.length > 0 ? (
+          {allowedImages.length > 0 || withdrawnImage ? (
             <div className="flex flex-col gap-1">
               <FilterSelect
                 label="Sandbox image"
@@ -275,13 +284,29 @@ export function WorkspaceCodeExecutionPolicyCard({
                     value: allowed,
                     label: allowed,
                   })),
+                  ...(withdrawnImage
+                    ? [
+                        {
+                          value: withdrawnImage,
+                          label: `${withdrawnImage} (no longer approved)`,
+                        },
+                      ]
+                    : []),
                 ]}
                 disabled={busy}
               />
-              <p className="text-xs text-muted">
-                The image this workspace's code runs in, from the list the
-                operator has approved.
-              </p>
+              {withdrawnImage ? (
+                <p className="text-xs text-warning">
+                  This workspace is pinned to an image the operator no longer
+                  approves, so its requests are refused. Pick another, or ask an
+                  operator to restore it.
+                </p>
+              ) : (
+                <p className="text-xs text-muted">
+                  The image this workspace's code runs in, from the list the
+                  operator has approved.
+                </p>
+              )}
             </div>
           ) : (
             <p className="text-xs text-muted">

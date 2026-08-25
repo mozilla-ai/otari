@@ -170,6 +170,7 @@ from gateway.services.tenancy.organization_guardrail_service import (
     resolve_organization_guardrails,
 )
 from gateway.services.tenancy.workspace_code_execution_policy_service import (
+    SERVED_TOOL_NAMES,
     resolve_workspace_code_execution_policy,
 )
 from gateway.services.tenancy.workspace_mcp_server_service import resolve_workspace_mcp_servers
@@ -2007,7 +2008,16 @@ async def prepare_gateway_tools(
                     # empty tool list, which the model would answer by not calling
                     # the tool at all: an unusable-but-successful request is the
                     # failure mode a policy exists to make loud.
-                    if CODE_EXECUTION_TOOL_NAME not in workspace_policy.tools:
+                    #
+                    # Against ``SERVED_TOOL_NAMES``, which is the same set
+                    # ``_require_runnable_tools`` refuses a write against, so the
+                    # storable rule and the admission rule are one rule. Naming
+                    # ``CODE_EXECUTION_TOOL_NAME`` here instead would agree only
+                    # while that tuple has one entry: the day a second tool kind
+                    # joins it, a policy naming only that one becomes storable and
+                    # then 403s on every request, which is the state both guards
+                    # exist to prevent.
+                    if not set(workspace_policy.tools) & set(SERVED_TOOL_NAMES):
                         raise adapter.error(403, SANDBOX_TOOLS_EXCLUDED_DETAIL, ErrorKind.PERMISSION)
                     sandbox_allowed_tools = workspace_policy.tools
                 if workspace_policy.image is not None:

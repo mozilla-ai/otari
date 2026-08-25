@@ -3,7 +3,7 @@
 Two columns, both nullable, on ``workspace_code_execution_policies``:
 
 * ``image`` names the sandbox image the workspace's code runs in, chosen from
-  the allow-list an operator curated (``sandbox_allowed_images``). A workspace
+  the allow-list an operator curated (``sandbox_allowed_session_images``). A workspace
   image is a supply-chain surface rather than a free string, which is why the
   service refuses one that is not on that list.
 * ``tools`` names which code-execution tool kinds the policy exposes. A stored

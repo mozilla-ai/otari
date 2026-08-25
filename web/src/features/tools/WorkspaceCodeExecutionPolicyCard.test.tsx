@@ -227,6 +227,72 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
     expect(put?.body).toMatchObject({ tools: null })
   })
 
+  it("names a withdrawn pin instead of showing it as the deployment default", async () => {
+    // The scenario the server guards twice: the operator dropped the image from
+    // the allow-list after the workspace pinned it. Without an option matching
+    // the stored value the native select falls back to its first option, which
+    // would show "Deployment default" over a policy that is nothing of the
+    // kind, and a save would earn a 400 naming a value never on screen.
+    mockApi({
+      policy: workspaceCodeExecutionPolicy({
+        workspace_id: ALPHA,
+        configured: true,
+        enabled: true,
+        allowed_images: ["mzdotai/otari-sandbox-container:latest"],
+        image: "ghcr.io/acme/withdrawn:1",
+      }),
+    })
+    await renderLoaded()
+
+    const select = screen.getByLabelText("Sandbox image") as HTMLSelectElement
+    expect(select).toHaveValue("ghcr.io/acme/withdrawn:1")
+    expect(
+      screen.getByRole("option", {
+        name: "ghcr.io/acme/withdrawn:1 (no longer approved)",
+      }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/no longer approves, so its requests are refused/i),
+    ).toBeInTheDocument()
+  })
+
+  it("offers the withdrawn pin even when the operator approved nothing else", async () => {
+    mockApi({
+      policy: workspaceCodeExecutionPolicy({
+        workspace_id: ALPHA,
+        configured: true,
+        enabled: true,
+        allowed_images: [],
+        image: "ghcr.io/acme/withdrawn:1",
+      }),
+    })
+    await renderLoaded()
+
+    expect(screen.getByLabelText("Sandbox image")).toHaveValue(
+      "ghcr.io/acme/withdrawn:1",
+    )
+  })
+
+  it("lets the operator move a withdrawn pin back to the deployment default", async () => {
+    const calls = mockApi({
+      policy: workspaceCodeExecutionPolicy({
+        workspace_id: ALPHA,
+        configured: true,
+        enabled: true,
+        allowed_images: ["mzdotai/otari-sandbox-container:latest"],
+        image: "ghcr.io/acme/withdrawn:1",
+      }),
+    })
+    const user = userEvent.setup()
+    await renderLoaded()
+
+    await user.selectOptions(screen.getByLabelText("Sandbox image"), "")
+    await user.click(screen.getByRole("button", { name: "Save" }))
+
+    const put = calls.find((call) => call.method === "PUT")
+    expect(put?.body).toMatchObject({ image: null })
+  })
+
   it("shows a stored image", async () => {
     mockApi({
       policy: workspaceCodeExecutionPolicy({

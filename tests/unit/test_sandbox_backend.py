@@ -870,3 +870,24 @@ async def test_allowed_tools_excluding_code_execution_offers_nothing() -> None:
 
     with pytest.raises(KeyError):
         await backend.call_tool(CODE_EXECUTION_TOOL_NAME, {"code": "1"})
+
+
+@pytest.mark.asyncio
+async def test_served_tool_names_is_what_the_backend_actually_advertises() -> None:
+    """The policy layer's idea of what this deployment serves must be the backend's.
+
+    ``SERVED_TOOL_NAMES`` is the set a workspace tool list is intersected
+    against, in two places: ``_require_runnable_tools`` refuses a write that
+    shares nothing with it, and ``prepare_gateway_tools`` refuses a request the
+    same way. Both are only correct while the tuple names what a backend really
+    offers. Growing it without teaching :class:`SandboxBackend` the new kind
+    would admit a policy naming only that kind, then hand the model a backend
+    advertising nothing, which is the silently-successful request both guards
+    exist to prevent.
+    """
+    from gateway.services.tenancy.workspace_code_execution_policy_service import SERVED_TOOL_NAMES
+
+    backend = SandboxBackend(sandbox_url="http://sandbox:8080")
+    advertised = tuple(tool["function"]["name"] for tool in backend.openai_tools)
+
+    assert advertised == SERVED_TOOL_NAMES
