@@ -16,9 +16,12 @@ from unittest.mock import AsyncMock, patch
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy import create_engine
+from sqlalchemy.orm import sessionmaker
 
 from gateway.core.config import API_KEY_HEADER, GatewayConfig
 from gateway.log_config import logger as gateway_logger
+from gateway.models.entities import User
 
 from .conftest import build_test_client
 
@@ -40,6 +43,10 @@ class FleetModelProviderAdapter:
         self.session = session
 
     async def resolve_hosted_credential(self, *, organization_id, workspace_id, provider, model):
+        if provider == "groq":
+            # Stands in for the ordinary failure of a network-backed adapter:
+            # an httpx timeout, a reset connection, a database error.
+            raise RuntimeError("fleet credential service is unreachable")
         if provider == "mistral":
             raise HostedAccessDeniedError(
                 "FleetAdapter: this organization has no mistral entitlement",
@@ -192,9 +199,7 @@ def test_a_self_hosted_backend_declaring_a_key_is_not_claimed_by_the_fleet(overl
     assert captured["model"] == "vllm:my-model"
 
 
-def test_an_unpriced_re_keyed_upstream_is_logged(
-    overlay_client: TestClient, caplog: pytest.LogCaptureFixture
-) -> None:
+def test_an_unpriced_re_keyed_upstream_is_logged(overlay_client: TestClient, caplog: pytest.LogCaptureFixture) -> None:
     """A request about to settle free says so in the log.
 
     The pricing gate ran against the name the caller asked for, and settlement
@@ -216,9 +221,65 @@ def test_an_unpriced_re_keyed_upstream_is_logged(
         gateway_logger.removeHandler(caplog.handler)
 
     assert captured["model"] == "together:gpt-4o"
-    assert any(
-        "re-keyed openai:gpt-4o onto together:gpt-4o" in record.getMessage() for record in caplog.records
-    ), f"no re-key pricing warning in {[r.getMessage() for r in caplog.records]}"
+    assert any("re-keyed openai:gpt-4o onto together:gpt-4o" in record.getMessage() for record in caplog.records), (
+        f"no re-key pricing warning in {[r.getMessage() for r in caplog.records]}"
+    )
+
+
+def test_an_adapter_failure_returns_the_budget_hold(overlay_client: TestClient, postgres_url: str) -> None:
+    """The reservation invariant, end to end against a real budget.
+
+    An overlay adapter that fetches credentials over the network fails the
+    ordinary ways, and `resolve_dispatch_provider` is called outside any `try`
+    that would catch one, with no global handler above it. Before the guard this
+    left the preamble's hold on `users.reserved` until the budget reset, which for
+    a budget with no period is forever. The unit tests assert the refund helper is
+    called; this one asserts the column it is called for.
+    """
+    budget = overlay_client.post(
+        "/v1/budgets", json={"max_budget": 100.0, "budget_duration_sec": 86400}, headers=HEADERS
+    ).json()
+    assert (
+        overlay_client.post(
+            "/v1/users", json={"user_id": "held", "budget_id": budget["budget_id"]}, headers=HEADERS
+        ).status_code
+        == 200
+    )
+    # Priced, so the preamble reserves a real estimate rather than zero. Without
+    # this the assertion below would hold whether or not anything was refunded.
+    assert (
+        overlay_client.post(
+            "/v1/pricing",
+            json={
+                "model_key": "groq:llama-3.3-70b",
+                "input_price_per_million": 1000.0,
+                "output_price_per_million": 1000.0,
+            },
+            headers=HEADERS,
+        ).status_code
+        == 200
+    )
+    key = overlay_client.post("/v1/keys", json={"user_id": "held"}, headers=HEADERS).json()["key"]
+
+    response = overlay_client.post(
+        "/v1/chat/completions",
+        json={"model": "groq:llama-3.3-70b", "messages": [{"role": "user", "content": "Hi" * 500}]},
+        headers={API_KEY_HEADER: f"Bearer {key}"},
+    )
+
+    assert response.status_code == 502
+    assert "fleet credential service" not in response.text
+
+    engine = create_engine(postgres_url)
+    try:
+        with sessionmaker(bind=engine)() as session:
+            user = session.query(User).filter(User.user_id == "held").one()
+            assert float(user.reserved) == pytest.approx(0.0), (
+                f"the budget hold leaked: users.reserved is {user.reserved}"
+            )
+            assert float(user.spend) == pytest.approx(0.0)
+    finally:
+        engine.dispose()
 
 
 def test_a_refused_upstream_answers_403_without_naming_the_adapter(overlay_client: TestClient) -> None:
