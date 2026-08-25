@@ -24,7 +24,7 @@ no row, which reads correctly as "not ledgered" and is left to the pre-existing
 budget reset, exactly as it was.
 
 Revision ID: c7a1e4d8f3b6
-Revises: d8b3f1c6a4e9
+Revises: a7f3c9e2b481
 Create Date: 2026-08-24 00:00:00.000000
 
 """
@@ -36,7 +36,7 @@ from alembic import op
 
 # revision identifiers, used by Alembic.
 revision: str = "c7a1e4d8f3b6"
-down_revision: str | Sequence[str] | None = "d8b3f1c6a4e9"
+down_revision: str | Sequence[str] | None = "a7f3c9e2b481"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
