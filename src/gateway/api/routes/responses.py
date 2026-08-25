@@ -33,6 +33,7 @@ from gateway.api.routes._pipeline import (
     run_single_attempt_stream,
     run_standalone_non_stream,
     run_streaming_with_fallback,
+    scope_prompt_cache_key,
 )
 from gateway.api.routes._platform import ResolvedAttempt, SettledCost, build_attempt_client_args
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
@@ -561,6 +562,7 @@ async def create_response(
         remaining_user_tools=tool_ctx.remaining_user_tools,
         web_search_declared_name=tool_ctx.web_search_declared_name,
     )
+    scope_prompt_cache_key(request_fields, ctx)
     # This is an internal handoff populated below, never a client request field.
     # ``ResponsesRequest`` permits extra fields for OpenAI compatibility, so
     # remove a caller-supplied value before constructing the provider kwargs.

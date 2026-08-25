@@ -34,6 +34,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
+import json
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Iterable, Sequence
@@ -702,6 +704,45 @@ class RequestContext:
         # without a shared id they would be unrelated rows in the activity log.
         # `None` for an unrouted request, which writes exactly one row.
         self.request_group_id = request_group_id
+
+
+def scope_prompt_cache_key(request_fields: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
+    """Bind a caller-supplied prompt cache key to its authenticated scope.
+
+    Provider prompt caches can be shared by every tenant using one upstream
+    account. Including the resolved identity in the routing key prevents two
+    callers from deliberately choosing the same provider cache namespace and
+    using cached-token counts as an exact-prefix oracle.
+    """
+    caller_key = request_fields.get("prompt_cache_key")
+    if not isinstance(caller_key, str):
+        return request_fields
+
+    scope: tuple[str, str] | None = None
+    if ctx.hybrid_mode:
+        if ctx.route is not None and ctx.route.user_id:
+            scope = ("user", ctx.route.user_id)
+        elif ctx.route is not None and ctx.route.workspace_id:
+            # Older platform peers may omit user_id. The workspace still keeps
+            # their cache-routing key out of every other tenant's namespace.
+            scope = ("workspace", ctx.route.workspace_id)
+    elif ctx.user_id:
+        scope = ("user", ctx.user_id)
+
+    if scope is None:
+        # Never forward an unscoped caller-controlled key when the peer did not
+        # provide an authenticated identity. Provider-side automatic caching
+        # still works without the routing hint.
+        request_fields.pop("prompt_cache_key", None)
+        return request_fields
+
+    payload = json.dumps(
+        ["otari-prompt-cache-v1", scope[0], scope[1], caller_key],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    request_fields["prompt_cache_key"] = hashlib.sha256(payload.encode()).hexdigest()
+    return request_fields
 
 
 def unresolvable_model_detail(model_selector: str) -> str:

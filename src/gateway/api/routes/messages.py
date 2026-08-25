@@ -41,6 +41,7 @@ from gateway.api.routes._pipeline import (
     run_single_attempt_stream,
     run_standalone_non_stream,
     run_streaming_with_fallback,
+    scope_prompt_cache_key,
 )
 from gateway.api.routes._platform import (
     ResolvedAttempt,
@@ -575,6 +576,7 @@ async def create_message(
         remaining_user_tools=tool_ctx.remaining_user_tools,
         web_search_declared_name=tool_ctx.web_search_declared_name,
     )
+    scope_prompt_cache_key(request_fields, ctx)
     if request_fields.get("tools"):
         request_fields["tools"] = openai_to_anthropic_tools(request_fields["tools"])
     if tool_ctx.intercepts_web_search and request_fields.get("messages"):

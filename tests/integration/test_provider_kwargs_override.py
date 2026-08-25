@@ -150,6 +150,8 @@ async def test_completion_params_reach_provider(
     because the hand-maintained schema omitted them. The schema is now derived
     from any-llm's ``CompletionParams`` and forwarded via ``model_dump``, so this
     asserts the forwarding contract end to end rather than only at the schema.
+    ``prompt_cache_key`` is the deliberate exception: it reaches the provider
+    after being bound to the authenticated user rather than verbatim.
     """
     captured_kwargs: dict[str, Any] = {}
 
@@ -195,7 +197,13 @@ async def test_completion_params_reach_provider(
     # The mock raises after capturing, so the call is reached but the request errors out.
     assert captured_kwargs, f"acompletion was never called (status {response.status_code})"
     for name, value in params.items():
-        assert captured_kwargs.get(name) == value, f"{name} was dropped before the provider call"
+        if name == "prompt_cache_key":
+            scoped_cache_key = captured_kwargs.get(name)
+            assert isinstance(scoped_cache_key, str)
+            assert scoped_cache_key != value
+            assert len(scoped_cache_key) == 64
+        else:
+            assert captured_kwargs.get(name) == value, f"{name} was dropped before the provider call"
 
 
 @pytest.mark.asyncio

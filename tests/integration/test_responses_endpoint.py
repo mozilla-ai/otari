@@ -78,6 +78,25 @@ def test_responses_endpoint_basic_completion(
     assert data["output"][0]["content"] == "Hello"
 
 
+def test_responses_endpoint_scopes_prompt_cache_key(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    responses_request_body: dict[str, Any],
+) -> None:
+    """The Responses API binds provider cache routing to the billed user."""
+    responses_request_body["prompt_cache_key"] = "tenant-session-123"
+    mock_aresponses = AsyncMock(return_value=_FakeResponse({"id": "resp_123", "output": []}))
+
+    with patch("gateway.api.routes.responses.aresponses", new=mock_aresponses):
+        result = client.post("/v1/responses", json=responses_request_body, headers=master_key_header)
+
+    assert result.status_code == 200
+    assert mock_aresponses.await_args is not None
+    scoped_cache_key = mock_aresponses.await_args.kwargs["prompt_cache_key"]
+    assert scoped_cache_key != "tenant-session-123"
+    assert len(scoped_cache_key) == 64
+
+
 def test_responses_endpoint_master_key_requires_user(
     client: TestClient,
     master_key_header: dict[str, str],
