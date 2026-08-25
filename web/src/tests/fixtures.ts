@@ -9,6 +9,7 @@
 import type {
   ActivationAttempt,
   Budget,
+  CallerOrganizationMembership,
   DeploymentBootstrap,
   Organization,
   OrganizationContext,
@@ -156,6 +157,26 @@ export function organizationContext(
     // shell treats absent and empty the same way.
     workspace_memberships: [],
     byo_provider_keys_allowed: true,
+    ...overrides,
+  }
+}
+
+/**
+ * One row of the caller's own organization memberships, as the switcher reads them.
+ *
+ * The active one by default, so a single-membership fixture describes the
+ * ordinary deployment: one organization, provisioned at first boot, and the
+ * caller in it.
+ */
+export function callerOrganizationMembership(
+  overrides: Partial<CallerOrganizationMembership> = {},
+): CallerOrganizationMembership {
+  return {
+    organization_member_id: "22222222-2222-2222-2222-222222222222",
+    organization: organization(),
+    role: "owner",
+    status: "active",
+    is_active_organization: true,
     ...overrides,
   }
 }

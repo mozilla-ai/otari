@@ -1,11 +1,16 @@
 import { Button, Modal, Popover } from "@heroui/react"
 import { useState } from "react"
 import { FiCheck, FiChevronDown, FiPlus } from "react-icons/fi"
+import { CreateOrganizationForm } from "@/features/organization/CreateOrganizationForm"
 import { canManage } from "@/features/organization/roles"
 import { CreateWorkspaceForm } from "@/features/workspaces/WorkspacesPage"
-import { useOrganizationContext } from "@/shared/api/hooks"
+import {
+  useOrganizationContext,
+  useOrganizationMemberships,
+  useSwitchOrganization,
+} from "@/shared/api/hooks"
+import { ErrorBanner } from "@/shared/components/ui"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
-import { useEntitlement } from "@/shared/hooks/useEntitlements"
 import { NAV_TRANSITION, navIndicatorClass } from "./rowStyles"
 
 // The menu's own rhythm, which is the rail's: a 44px row and a 32px heading
@@ -56,20 +61,22 @@ function PlusMark() {
 export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
   const { memberships, selected, select, isLoading } = useSelectedWorkspace()
   const context = useOrganizationContext()
+  const organizations = useOrganizationMemberships()
+  const switchOrganization = useSwitchOrganization()
   const [open, setOpen] = useState(false)
   const [creating, setCreating] = useState(false)
+  const [creatingOrganization, setCreatingOrganization] = useState(false)
   // Owners and admins only, which is what the server says of
   // `POST /v1/workspaces` and what the Workspaces page gates its own create
   // control on. Without it a member or a viewer is handed the whole form from
   // the scope menu and meets the refusal as a 403 after typing a name.
   const managesOrganization = canManage(context.data)
-  // The predicate form of the gate rather than `EntitlementGate`, for the same
-  // reason the sidebar uses a predicate: the divider above these two rows has to
-  // disappear along with the last row under it, which a wrapper cannot tell it.
-  const { entitled: createsOrganizations } = useEntitlement(
-    "organizations.create",
-  )
-  const offersCreate = managesOrganization || createsOrganizations
+  // Every organization the caller is an active member of. One row is the
+  // overwhelmingly common case (a deployment provisions one and most keep
+  // exactly that), and a single row is stated rather than offered as a control:
+  // a menu item whose only effect is to close the menu reads as broken.
+  const organizationRows = organizations.data ?? []
+  const switchable = organizationRows.length > 1
 
   // Both hops optional: the context can answer without an organization (a
   // failed read, or a shape a test supplies), and the switcher is chrome that
@@ -140,22 +147,67 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
               no accessible name is announced as an unnamed one, and the
               trigger's name does not carry over to the surface it opens. */}
           <Popover.Dialog
-            aria-label="Switch workspace"
+            aria-label="Switch workspace or organization"
             className="flex w-[19.75rem] flex-col"
           >
             <p className={`${MENU_HEADING} min-h-7`}>Organization</p>
-            {/* Not a control: a standalone gateway provisions one organization at
-              first boot and mounts no endpoint to switch or create another, so
-              this row states the scope rather than offering to change it. It
-              still carries the check, because the design's menu marks the
-              current scope at both levels and a check that only ever appears on
-              one of them reads as an incomplete list. */}
-            <div className={`${MENU_ROW} text-foreground`}>
-              <span className="min-w-0 flex-1 truncate">
-                {organizationName}
-              </span>
-              <CheckMark />
-            </div>
+            {/* The switch is the one write this menu makes that changes what
+              every other page is looking at, so its failure is reported here
+              rather than by closing the menu on a scope that did not move. */}
+            <ErrorBanner error={switchOrganization.error} />
+            {switchable ? (
+              <ul className="flex flex-col">
+                {organizationRows.map((membership) => (
+                  <li key={membership.organization.id}>
+                    <button
+                      type="button"
+                      className={`${MENU_ROW} ${
+                        membership.is_active_organization
+                          ? MENU_ROW_CURRENT
+                          : MENU_ROW_RESTING
+                      }`}
+                      // Pending on the whole group rather than per row: the
+                      // mutation is one at a time and a second click during it
+                      // would queue a switch onto a cache already being
+                      // rebuilt.
+                      disabled={switchOrganization.isPending}
+                      onClick={() => {
+                        if (membership.is_active_organization) {
+                          setOpen(false)
+                          return
+                        }
+                        switchOrganization.mutate(
+                          membership.organization.id,
+                          // Closed on success only, so the banner above has
+                          // somewhere to be read.
+                          { onSuccess: () => setOpen(false) },
+                        )
+                      }}
+                    >
+                      <span className="min-w-0 flex-1 truncate">
+                        {membership.organization.name}
+                      </span>
+                      {membership.is_active_organization ? (
+                        <CheckMark />
+                      ) : (
+                        <span aria-hidden="true" className="size-4 shrink-0" />
+                      )}
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            ) : (
+              /* One organization, so this states the scope rather than offering
+                to change it. It still carries the check, because the design's
+                menu marks the current scope at both levels and a check that only
+                ever appears on one of them reads as an incomplete list. */
+              <div className={`${MENU_ROW} text-foreground`}>
+                <span className="min-w-0 flex-1 truncate">
+                  {organizationName}
+                </span>
+                <CheckMark />
+              </div>
+            )}
             <div className={MENU_DIVIDER} />
             <p className={`${MENU_HEADING} min-h-8`}>
               Workspaces ({memberships.length})
@@ -205,7 +257,7 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
                 })}
               </ul>
             )}
-            {offersCreate ? <div className={MENU_DIVIDER} /> : null}
+            <div className={MENU_DIVIDER} />
             {managesOrganization ? (
               <button
                 type="button"
@@ -221,30 +273,23 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
                 </span>
               </button>
             ) : null}
-            {/* Coded, and absent here. A self-hosted gateway is one tenant: it
-              mounts no create-organization endpoint, so the row is gated on an
-              entitlement this build does not grant rather than rendered as a
-              control that would fail. An overlay build that serves several
-              organizations grants it and the menu matches the design whole.
-              **The handler is that build's to supply along with the grant**, and
-              closing the popover is all this one can honestly do: there is no
-              endpoint to call and no page to open. So a deployment that grants
-              the capability without wiring anything ships a row that does
-              nothing, which nothing in this repository can fail on. That is the
-              cost of proving the row's place in the menu here, and it is the
-              reason the grant and the handler belong in the same change. */}
-            {createsOrganizations ? (
-              <button
-                type="button"
-                className={`${MENU_ROW} text-muted hover:bg-surface-alt hover:text-foreground`}
-                onClick={() => setOpen(false)}
-              >
-                <PlusMark />
-                <span className="min-w-0 flex-1 truncate">
-                  Create organization
-                </span>
-              </button>
-            ) : null}
+            {/* Ungated, unlike Create workspace above it. Creating an
+              organization is not an action inside one, so there is no role in
+              one to check it against, which is also why the server gates it on
+              the management credential alone. */}
+            <button
+              type="button"
+              className={`${MENU_ROW} text-muted hover:bg-surface-alt hover:text-foreground`}
+              onClick={() => {
+                setOpen(false)
+                setCreatingOrganization(true)
+              }}
+            >
+              <PlusMark />
+              <span className="min-w-0 flex-1 truncate">
+                Create organization
+              </span>
+            </button>
           </Popover.Dialog>
         </Popover.Content>
       </Popover>
@@ -265,6 +310,24 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
           <Modal.Container placement="center" size="md">
             <Modal.Dialog aria-label="Create workspace" className="p-0">
               <CreateWorkspaceForm onClose={() => setCreating(false)} />
+            </Modal.Dialog>
+          </Modal.Container>
+        </Modal.Backdrop>
+      </Modal>
+      {/* Its own modal rather than one dialog switching on which row opened it:
+          the two forms share no field, and a single state would have to encode
+          "which" as well as "open". */}
+      <Modal
+        isOpen={creatingOrganization}
+        onOpenChange={setCreatingOrganization}
+      >
+        <Modal.Trigger className="hidden">Create organization</Modal.Trigger>
+        <Modal.Backdrop className="bg-backdrop/50">
+          <Modal.Container placement="center" size="md">
+            <Modal.Dialog aria-label="Create organization" className="p-0">
+              <CreateOrganizationForm
+                onClose={() => setCreatingOrganization(false)}
+              />
             </Modal.Dialog>
           </Modal.Container>
         </Modal.Backdrop>

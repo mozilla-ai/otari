@@ -228,7 +228,10 @@ The dashboard has two sidebars, and only one is on screen at a time.
 The **workspace rail** is the default, and the switcher above it chooses which
 workspace you are looking at. That selection scopes members, API keys, usage,
 and the request log; routing and provider credentials are deployment-wide, and
-the switcher's own popover says which is which.
+the switcher's own popover says which is which. The same popover names the
+organization above the workspaces, and where you belong to more than one it
+switches between them; **Create organization** at its foot makes another, with
+you as its owner and a default workspace inside it.
 
 The **organization rail** holds what belongs to the tenant rather than to one
 workspace. It is reached from the **Organization** entry at the foot of the
@@ -549,10 +552,12 @@ is defined.
 Reached from the **Organization** entry at the foot of the workspace rail, and
 left by the link at its top.
 
-The tenant this deployment's workspaces, members, and roles belong to. There is
-exactly one, provisioned on first boot: a self-hosted gateway is one tenant with
-several people in it, not several tenants, so it can be renamed but not created,
-switched between, or deleted.
+The tenant this deployment's workspaces, members, and roles belong to. One is
+provisioned on first boot, and for most deployments that is the only one: a
+self-hosted gateway is one organization with several people in it. Where there
+is more than one, the switcher above the workspace rail is what moves between
+them and creates another; **General** renames the one you are in and offers no
+delete.
 
 The master key is the bootstrap credential: the first authenticated request
 provisions the organization, one default workspace, and one owner identity, and

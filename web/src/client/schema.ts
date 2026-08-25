@@ -1381,6 +1381,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/organizations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Organization
+         * @description Create an organization with the caller as its owner.
+         *
+         *     Takes a name; the slug is derived from it with a random suffix, so two
+         *     organizations may share a name and a later rename does not move the slug.
+         *     A default workspace is provisioned alongside, because an organization
+         *     without one has nowhere to hold a key, a budget or a usage row.
+         *
+         *     The caller is **not** moved into it. Switching is a separate call
+         *     (``POST /me/switch``), so creating an organization does not change what the
+         *     rest of the caller's session is looking at.
+         */
+        post: operations["create_organization_v1_organizations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/organizations/me": {
         parameters: {
             query?: never;
@@ -1577,6 +1606,32 @@ export interface paths {
         patch: operations["update_active_organization_member_v1_organizations_me_members__organization_member_id__patch"];
         trace?: never;
     };
+    "/v1/organizations/me/memberships": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Caller Organization Memberships
+         * @description List the organizations the caller belongs to, and their role in each.
+         *
+         *     The caller's own active memberships, not a directory of the deployment's
+         *     organizations: this is what an organization switcher renders, and one row
+         *     carries ``is_active_organization`` so it can mark the current one. Not to be
+         *     confused with ``GET /me/members``, which is the active organization's
+         *     roster.
+         */
+        get: operations["list_caller_organization_memberships_v1_organizations_me_memberships_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/organizations/me/pricing": {
         parameters: {
             query?: never;
@@ -1750,6 +1805,32 @@ export interface paths {
          * @description Restore an archived key. Organization owners and admins only.
          */
         post: operations["restore_org_provider_key_v1_organizations_me_provider_keys__key_id__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/organizations/me/switch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Switch Active Organization
+         * @description Point the caller's identity at another organization they belong to.
+         *
+         *     Distinct from ``PATCH /me``, which renames the organization already active.
+         *     This changes which organization every later request is scoped to, so
+         *     workspaces, keys, budgets and usage all follow it. Answers 404 for an
+         *     organization the caller holds no active membership in, whether or not it
+         *     exists.
+         */
+        post: operations["switch_active_organization_v1_organizations_me_switch_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -4287,6 +4368,40 @@ export interface components {
             user_count: number;
         };
         /**
+         * CallerOrganizationMembershipPublic
+         * @description One organization the caller belongs to, and their standing in it.
+         *
+         *     What an organization switcher renders. Deliberately not
+         *     ``OrganizationMembershipContextPublic``: that one answers "the organization
+         *     this request is acting in" and carries the caller's workspaces in it, which
+         *     for an organization they are not currently in would be a second read per
+         *     row.
+         */
+        CallerOrganizationMembershipPublic: {
+            /**
+             * Is Active Organization
+             * @default false
+             */
+            is_active_organization: boolean;
+            organization: components["schemas"]["OrganizationPublic"];
+            /**
+             * Organization Member Id
+             * Format: uuid
+             */
+            organization_member_id: string;
+            /** Role */
+            role: string;
+            /** Status */
+            status: string;
+        };
+        /** CallerOrganizationMembershipsPublic */
+        CallerOrganizationMembershipsPublic: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["CallerOrganizationMembershipPublic"][];
+        };
+        /**
          * CallerWorkspaceMembershipPublic
          * @description One workspace the caller belongs to, and their role in it.
          *
@@ -6020,6 +6135,18 @@ export interface components {
             data: components["schemas"]["OrgProviderKeyPublic"][];
         };
         /**
+         * OrganizationCreateRequest
+         * @description Create an organization, with the caller as its owner.
+         *
+         *     Name only. The slug is derived server-side and never sent, because it is
+         *     unique where the name is not: two organizations may share a name, and a
+         *     rename deliberately does not move the slug.
+         */
+        OrganizationCreateRequest: {
+            /** Name */
+            name: string;
+        };
+        /**
          * OrganizationGuardrailCreate
          * @description Request body for mandating a guardrail across an organization.
          *
@@ -7494,6 +7621,22 @@ export interface components {
             timeout?: number | null;
             /** Updated At */
             updated_at?: string | null;
+        };
+        /**
+         * SwitchActiveOrganizationRequest
+         * @description Point the caller's identity at one of the organizations they belong to.
+         *
+         *     The one request in this surface that names an organization by id, and it is
+         *     not a hole in the tenant boundary: an id the caller holds no active
+         *     membership in answers 404, so it says nothing about whether the
+         *     organization exists.
+         */
+        SwitchActiveOrganizationRequest: {
+            /**
+             * Organization Id
+             * Format: uuid
+             */
+            organization_id: string;
         };
         /** TaskPool */
         TaskPool: {
@@ -11011,6 +11154,39 @@ export interface operations {
             };
         };
     };
+    create_organization_v1_organizations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrganizationCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_active_organization_context_v1_organizations_me_get: {
         parameters: {
             query?: never;
@@ -11394,6 +11570,40 @@ export interface operations {
             };
         };
     };
+    list_caller_organization_memberships_v1_organizations_me_memberships_get: {
+        parameters: {
+            query?: {
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CallerOrganizationMembershipsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_organization_pricing_v1_organizations_me_pricing_get: {
         parameters: {
             query?: {
@@ -11740,6 +11950,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OrgProviderKeyPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    switch_active_organization_v1_organizations_me_switch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SwitchActiveOrganizationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationMembershipContextPublic"];
                 };
             };
             /** @description Validation Error */

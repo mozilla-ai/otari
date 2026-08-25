@@ -1528,6 +1528,61 @@
         "title": "BudgetResponse",
         "type": "object"
       },
+      "CallerOrganizationMembershipPublic": {
+        "description": "One organization the caller belongs to, and their standing in it.\n\nWhat an organization switcher renders. Deliberately not\n``OrganizationMembershipContextPublic``: that one answers \"the organization\nthis request is acting in\" and carries the caller's workspaces in it, which\nfor an organization they are not currently in would be a second read per\nrow.",
+        "properties": {
+          "is_active_organization": {
+            "default": false,
+            "title": "Is Active Organization",
+            "type": "boolean"
+          },
+          "organization": {
+            "$ref": "#/components/schemas/OrganizationPublic"
+          },
+          "organization_member_id": {
+            "format": "uuid",
+            "title": "Organization Member Id",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "organization_member_id",
+          "organization",
+          "role",
+          "status"
+        ],
+        "title": "CallerOrganizationMembershipPublic",
+        "type": "object"
+      },
+      "CallerOrganizationMembershipsPublic": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/CallerOrganizationMembershipPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "CallerOrganizationMembershipsPublic",
+        "type": "object"
+      },
       "CallerWorkspaceMembershipPublic": {
         "description": "One workspace the caller belongs to, and their role in it.\n\nCarried on the membership context so the shell can populate its workspace\nswitcher and choose a default from the first authenticated call, rather than\nlisting workspaces and then asking for the caller's role in each. Only the\ncaller's own memberships appear, so this is not a directory of the\norganization's workspaces: an admin sees the ones they joined, and the\nworkspace list endpoint remains the way to see the rest.",
         "properties": {
@@ -5514,6 +5569,22 @@
         "title": "OrgProviderKeysPublic",
         "type": "object"
       },
+      "OrganizationCreateRequest": {
+        "description": "Create an organization, with the caller as its owner.\n\nName only. The slug is derived server-side and never sent, because it is\nunique where the name is not: two organizations may share a name, and a\nrename deliberately does not move the slug.",
+        "properties": {
+          "name": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "OrganizationCreateRequest",
+        "type": "object"
+      },
       "OrganizationGuardrailCreate": {
         "description": "Request body for mandating a guardrail across an organization.\n\n``credential`` is never stored as sent: it is encrypted with\n``OTARI_SECRET_KEY`` and only the ciphertext is kept, the same convention\n`entities.WorkspaceMcpServer` and `entities.ProviderCredential` use. It is\nsent to the endpoint as ``Authorization: Bearer`` when the guardrail runs,\nso it authenticates this gateway to the guardrails service the entry names.\nA guardrail *vendor's* own key is not this: the guardrails service builds\nits guardrails from the operator's YAML and holds those itself.\n\nA credential therefore requires ``url``. The deployment's ``guardrails_url``\nis not necessarily encrypted (the shipped compose file makes it a same-host\n``http://`` sidecar) and this row cannot see what it is set to, so an entry\nthat fell back to it could not promise the bearer was sent over https. See\n`_require_url_for_credential`.\n\n``on`` is not offered. This plane mandates input-direction checks, which is\nthe only direction the request path enforces\n(`services.guardrails.run_input_guardrails`); an organization that could\nstore an output-direction mandate would be storing one nothing runs.",
         "example": {
@@ -8624,6 +8695,21 @@
           "provider"
         ],
         "title": "StoredSearchToolSchema",
+        "type": "object"
+      },
+      "SwitchActiveOrganizationRequest": {
+        "description": "Point the caller's identity at one of the organizations they belong to.\n\nThe one request in this surface that names an organization by id, and it is\nnot a hole in the tenant boundary: an id the caller holds no active\nmembership in answers 404, so it says nothing about whether the\norganization exists.",
+        "properties": {
+          "organization_id": {
+            "format": "uuid",
+            "title": "Organization Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "organization_id"
+        ],
+        "title": "SwitchActiveOrganizationRequest",
         "type": "object"
       },
       "TaskPool": {
@@ -16084,6 +16170,56 @@
         ]
       }
     },
+    "/v1/organizations": {
+      "post": {
+        "description": "Create an organization with the caller as its owner.\n\nTakes a name; the slug is derived from it with a random suffix, so two\norganizations may share a name and a later rename does not move the slug.\nA default workspace is provisioned alongside, because an organization\nwithout one has nowhere to hold a key, a budget or a usage row.\n\nThe caller is **not** moved into it. Switching is a separate call\n(``POST /me/switch``), so creating an organization does not change what the\nrest of the caller's session is looking at.",
+        "operationId": "create_organization_v1_organizations_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Organization",
+        "tags": [
+          "organizations"
+        ]
+      }
+    },
     "/v1/organizations/me": {
       "get": {
         "description": "Get the caller's active organization and their standing in it.",
@@ -16722,6 +16858,75 @@
         ]
       }
     },
+    "/v1/organizations/me/memberships": {
+      "get": {
+        "description": "List the organizations the caller belongs to, and their role in each.\n\nThe caller's own active memberships, not a directory of the deployment's\norganizations: this is what an organization switcher renders, and one row\ncarries ``is_active_organization`` so it can mark the current one. Not to be\nconfused with ``GET /me/members``, which is the active organization's\nroster.",
+        "operationId": "list_caller_organization_memberships_v1_organizations_me_memberships_get",
+        "parameters": [
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of records to return",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallerOrganizationMembershipsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Caller Organization Memberships",
+        "tags": [
+          "organizations"
+        ]
+      }
+    },
     "/v1/organizations/me/pricing": {
       "get": {
         "description": "List the organization's rate overrides.\n\nReadable by any member: these rates decide what the caller's own requests\ncost, so they are not withheld from the people billed at them. Writing needs\nan owner or admin.\n\nPaged on the same bounds the rest of the tenancy surface uses, because the\ntable grows a row per model per period. ``count`` is the total, so a client\nknows whether another page is owed.",
@@ -17338,6 +17543,56 @@
         "summary": "Restore Org Provider Key",
         "tags": [
           "provider-keys"
+        ]
+      }
+    },
+    "/v1/organizations/me/switch": {
+      "post": {
+        "description": "Point the caller's identity at another organization they belong to.\n\nDistinct from ``PATCH /me``, which renames the organization already active.\nThis changes which organization every later request is scoped to, so\nworkspaces, keys, budgets and usage all follow it. Answers 404 for an\norganization the caller holds no active membership in, whether or not it\nexists.",
+        "operationId": "switch_active_organization_v1_organizations_me_switch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwitchActiveOrganizationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationMembershipContextPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Switch Active Organization",
+        "tags": [
+          "organizations"
         ]
       }
     },

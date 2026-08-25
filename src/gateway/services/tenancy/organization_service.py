@@ -13,18 +13,27 @@ attach. Emailed invitations shipped here in mozilla-ai/otari#641 (see
 immediate path this replaced no part of.
 
 One rule runs through every method: a caller only ever acts inside the
-organization their identity is currently pointed at, and no method takes an
-organization id from the request, so a request cannot name another tenant's
-organization at all.
+organization their identity is currently pointed at, and every method but one
+resolves that organization from the caller alone rather than from the request.
+The exception is ``switch_active_organization_for_user``, which is the method
+that *moves* the pointer and so has to be told where to; it answers not-found
+for an id the caller holds no active membership in, so naming another tenant's
+organization tells the caller nothing about it.
 
-A standalone deployment has one organization, provisioned at first boot, so
-creating, switching between and deleting them are not part of this surface. They
-are what make a deployment multi-tenant, and a self-hosted gateway is one tenant
-with several people in it. The scoping below is written as if there could be
-many, because the hosted edition has many and the schema is edition-invariant.
+A standalone deployment still *boots* one organization, provisioned at first
+boot, and that is the shape almost every deployment keeps. But a second one is
+reachable (accept an invitation into an organization elsewhere on the same
+deployment and you hold two memberships), so creating one, listing the ones you
+belong to, and switching between them are part of this surface rather than an
+overlay's: the tables are here, the invariants that decide who becomes owner
+and what happens to ``active_organization_id`` are here, and an overlay that
+contributes no tables could only fork them (mozilla-ai/otari#715). Deleting an
+organization is still absent, which is a separate question: the rows every
+historical attribution resolves through hang off it.
 """
 
 import hashlib
+import re
 import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
@@ -41,12 +50,15 @@ from gateway.models.tenancy import (
     ActiveOrganizationMemberPublic,
     ActiveOrganizationMembersPublic,
     ActiveOrganizationMemberUpdateRequest,
+    CallerOrganizationMembershipPublic,
+    CallerOrganizationMembershipsPublic,
     CallerWorkspaceMembershipPublic,
     Invitation,
     InvitationPreviewPublic,
     InviteOrganizationMemberRequest,
     InviteOrganizationMemberResultPublic,
     Organization,
+    OrganizationCreateRequest,
     OrganizationMember,
     OrganizationMembershipContextPublic,
     OrganizationPublic,
@@ -79,9 +91,18 @@ from gateway.services.tenancy.errors import (
     OrganizationMemberNotFoundError,
     OrganizationNameRequiredError,
     OrganizationNotFoundError,
+    OrganizationSlugUnavailableError,
     WorkspaceNotFoundError,
 )
 from gateway.services.tenancy.invitation_email import render_invitation_email
+
+# The name first boot gives an organization's workspace, reused so a created
+# organization's first workspace is the same thing rather than a near-copy.
+# ``provisioning_service`` reaches nothing in this module (its one edge back
+# into the tenancy graph is a function-local import), so this direction of the
+# dependency is the safe one; ``tests/unit/test_service_module_imports.py``
+# pins it.
+from gateway.services.tenancy.provisioning_service import DEFAULT_WORKSPACE_NAME
 
 
 def _validated_organization_name(name: str | None) -> str:
@@ -118,6 +139,34 @@ def _invitation_accept_path(token: str) -> str:
     ``Mailer.can_send_links`` rather than on this.
     """
     return f"/#/accept-invitation?token={token}"
+
+
+# Everything a slug may not carry, collapsed to one separator. Lowercase ASCII
+# alphanumerics survive; a name written in a script with none of them reduces to
+# nothing, which is what ``_SLUG_FALLBACK_STEM`` is for.
+_SLUG_SEPARATORS = re.compile(r"[^a-z0-9]+")
+# How much of the name the stem keeps. The column holds 255, so this is not a
+# storage bound: it keeps a 200-character name from producing a slug nobody can
+# read or repeat, and leaves the suffix room.
+_SLUG_STEM_LIMIT = 64
+_SLUG_FALLBACK_STEM = "organization"
+
+
+def _generated_slug(name: str) -> str:
+    """Derive a unique-by-construction slug from an organization's name.
+
+    The platform's own slug shape, ``{stem}-{suffix}``, and the suffix is what
+    makes the *name* free to repeat: two teams on one deployment may both call
+    an organization "Research", and a rename deliberately leaves the slug where
+    it was, so deriving a slug from the name alone would make the name unique by
+    accident and a rename a conflict.
+
+    The suffix also means this can never produce ``default``, the slug
+    ``provisioning_service`` adopts on first boot: a created organization is
+    therefore never mistaken for the provisioned one.
+    """
+    stem = _SLUG_SEPARATORS.sub("-", name.lower()).strip("-")[:_SLUG_STEM_LIMIT].strip("-")
+    return f"{stem or _SLUG_FALLBACK_STEM}-{secrets.token_hex(4)}"
 
 
 # The most workspaces a switcher seed carries. Above the repository's paging
@@ -281,6 +330,151 @@ class OrganizationService:
     # ------------------------------------------------------------------
     # The organization itself
     # ------------------------------------------------------------------
+
+    async def create_organization_for_user(
+        self,
+        *,
+        user: User,
+        request: OrganizationCreateRequest,
+    ) -> OrganizationPublic:
+        """Create an organization owned by the caller, with a workspace to work in.
+
+        Three rows, and each one answers a question that would otherwise have no
+        answer. The **owner membership** is what makes the organization reachable
+        at all, since every read here resolves through one; making the creator an
+        owner rather than an admin is what ``_validate_membership_update``
+        assumes when it refuses to leave an organization without one. The
+        **workspace** is provisioned for the reason ``delete_workspace`` refuses
+        to remove the last one: an organization without a workspace has no
+        surface to hold a key, a budget or a usage row, and nothing else would
+        provision one for an organization that already exists. Same name as first
+        boot's, so the two are indistinguishable once created.
+
+        Deliberately does **not** switch the caller into it. Creating and
+        switching are two decisions (an operator may set up an organization for
+        somebody else), and a create that silently moved the caller's active
+        organization would change what every other page on their screen is
+        looking at.
+
+        No role check, because there is no organization to check a role in yet:
+        this is not an action inside a tenant. The credential is the gate, and it
+        is the management API's own, so a caller who can reach this can already
+        reach `/v1/keys`.
+        """
+        name = _validated_organization_name(request.name)
+        try:
+            organization = await self.organizations.create_organization(
+                name=name,
+                slug=_generated_slug(name),
+                created_by_user_id=user.id,
+            )
+            await self.members.create_membership(
+                organization_id=organization.id,
+                user_id=user.id,
+                role="owner",
+            )
+            workspace = await self.workspace_rows.create_workspace(
+                name=DEFAULT_WORKSPACE_NAME,
+                organization_id=organization.id,
+                created_by_user_id=user.id,
+            )
+            # Through the assignment path rather than a bare
+            # ``WorkspaceMemberRepository.create``, so this is the same
+            # create-member-then-materialize-defaults step every other
+            # ``WorkspaceMember``-creating path takes. A no-op materialization on
+            # a workspace this fresh, exactly as in
+            # ``WorkspaceService.create_workspace``, and called anyway so there
+            # is one such path rather than one plus an exception.
+            await self._apply_workspace_assignments(
+                user_id=user.id,
+                assignments=[WorkspaceAssignmentRequest(workspace_id=workspace.id, role="owner")],
+            )
+            await self.db.commit()
+        except IntegrityError:
+            # The slug's unique index is the only one this unit of work can lose
+            # to: the membership and the workspace are the first of their kind in
+            # an organization that did not exist a statement ago.
+            await self.db.rollback()
+            raise OrganizationSlugUnavailableError from None
+
+        return OrganizationPublic.model_validate(organization)
+
+    async def list_organization_memberships_for_user(
+        self,
+        *,
+        user: User,
+        skip: int = 0,
+        limit: int = 100,
+    ) -> CallerOrganizationMembershipsPublic:
+        """List the organizations the caller belongs to, for a switcher to render.
+
+        Active memberships only. An ``invited`` one is not somewhere the caller
+        may act yet (``switch_active_organization_for_user`` would refuse it),
+        and a ``suspended`` one is somewhere they no longer may, so offering
+        either as a destination would be offering a refusal.
+        """
+        rows, count = await self.members.get_by_user_with_organizations(
+            user.id,
+            status="active",
+            skip=skip,
+            limit=limit,
+        )
+        return CallerOrganizationMembershipsPublic(
+            data=[
+                CallerOrganizationMembershipPublic(
+                    organization_member_id=membership.id,
+                    organization=OrganizationPublic.model_validate(organization),
+                    role=membership.role,
+                    status=membership.status,
+                    is_active_organization=organization.id == user.active_organization_id,
+                )
+                for membership, organization in rows
+            ],
+            count=count,
+        )
+
+    async def switch_active_organization_for_user(
+        self,
+        *,
+        user: User,
+        organization_id: uuid.UUID,
+    ) -> OrganizationMembershipContextPublic:
+        """Point the caller's identity at another organization they belong to.
+
+        Distinct from ``update_active_organization_for_user``, which renames the
+        organization already pointed at. This writes
+        ``users.active_organization_id`` and nothing else, which is what makes
+        every workspace, key, budget and usage read follow: they all resolve
+        their scope from that pointer rather than from the request.
+
+        The membership is checked first and an absent one answers not-found
+        rather than forbidden, so an id in another tenant's organization is
+        indistinguishable from an id that was never issued. That is the same
+        rule ``resolve_visible_workspace`` follows, and it is the whole of the
+        tenant boundary on the one endpoint that names an organization.
+
+        Switching to the organization already active is allowed and is a no-op
+        write: a switcher that re-sent the current row should not have to be
+        told off for it.
+        """
+        membership = await self.members.get_active_by_organization_and_user(organization_id, user.id)
+        if membership is None:
+            raise OrganizationNotFoundError(organization_id)
+        organization = await self.organizations.get(organization_id)
+        if organization is None:
+            # Only reachable if the organization was deleted between the two
+            # reads. Reported as the same not-found the membership check gives,
+            # since from the caller's side it is the same answer.
+            raise OrganizationNotFoundError(organization_id)
+
+        await self.users.set_active_organization(user, organization.id)
+        await self.db.commit()
+
+        return self._to_context(
+            membership=membership,
+            organization=organization,
+            workspace_memberships=await self._caller_workspace_memberships(user=user, organization=organization),
+        )
 
     async def update_active_organization_for_user(
         self,

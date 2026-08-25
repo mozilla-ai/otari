@@ -367,6 +367,21 @@ class OrganizationNameRequiredError(TenancyValidationError):
         super().__init__("An organization name is required")
 
 
+class OrganizationSlugUnavailableError(TenancyConflictError):
+    """A created organization's derived slug collided with one already stored.
+
+    The slug is the name reduced to a stem plus four random bytes, so two
+    organizations may share a name and a collision needs the same stem *and*
+    the same suffix. Reported rather than retried because retrying means
+    rolling back the whole unit of work (the organization, the owner
+    membership, and the first workspace) to change one column, and the caller
+    can simply send the request again.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("Could not allocate a unique organization slug; retry the request")
+
+
 class WorkspaceInUseError(TenancyConflictError):
     """A workspace still holds request-plane rows, which are ON DELETE RESTRICT.
 
@@ -831,6 +846,7 @@ __all__ = [
     "OrganizationNameRequiredError",
     "OrganizationNotFoundError",
     "OrganizationPricingNotFoundError",
+    "OrganizationSlugUnavailableError",
     "OrganizationPricingOverlapError",
     "PasskeyAlreadyRegisteredError",
     "PasskeyCeremonyError",

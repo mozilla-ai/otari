@@ -4,7 +4,10 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { AppShell } from "@/app/AppShell"
 import { Provider } from "@/app/provider"
-import type { DeploymentBootstrap } from "@/client"
+import type {
+  CallerOrganizationMembership,
+  DeploymentBootstrap,
+} from "@/client"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import type { Entitlements } from "@/shared/hooks/useEntitlements"
@@ -13,7 +16,11 @@ import {
   EntitlementProvider,
 } from "@/shared/hooks/useEntitlements"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
-import { bootstrap, organizationContext } from "@/tests/fixtures"
+import {
+  bootstrap,
+  callerOrganizationMembership,
+  organizationContext,
+} from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
 import { recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
 
@@ -67,6 +74,8 @@ function renderShell(
     url?: string
     /** The caller's membership, for the controls that gate on their role. */
     context?: Parameters<typeof organizationContext>[0]
+    /** The organizations the caller belongs to, for the organization switcher. */
+    memberships?: CallerOrganizationMembership[]
   } = {},
 ) {
   const entitlements: Entitlements = {
@@ -76,10 +85,15 @@ function renderShell(
   }
   const url = options.url ?? "/"
   // The shell reads the organization context to decide whether to offer the way
-  // into that rail, and the switcher reads it for the names it shows. Stubbed
-  // here so the sidebar behaves as it does in front of a real gateway.
-  vi.spyOn(globalThis, "fetch").mockImplementation(async () =>
-    Response.json(organizationContext(options.context)),
+  // into that rail, and the switcher reads it for the names it shows. The
+  // switcher additionally reads the caller's own memberships, which is a
+  // different shape (`{ data, count }`), so this answers per path rather than
+  // handing every request one body.
+  const memberships = options.memberships ?? [callerOrganizationMembership()]
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+    String(input).startsWith("/v1/organizations/me/memberships")
+      ? Response.json({ data: memberships, count: memberships.length })
+      : Response.json(organizationContext(options.context)),
   )
   return renderWithRouter(<div>PAGE CONTENT</div>, {
     url,

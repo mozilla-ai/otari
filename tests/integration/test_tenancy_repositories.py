@@ -335,11 +335,17 @@ async def test_memberships_join_their_organizations(async_db: AsyncSession) -> N
         status="invited",
     )
 
-    all_rows = await repository.get_by_user_with_organizations(user.id)
-    invited_rows = await repository.get_by_user_with_organizations(user.id, status="invited")
+    all_rows, all_count = await repository.get_by_user_with_organizations(user.id)
+    invited_rows, invited_count = await repository.get_by_user_with_organizations(user.id, status="invited")
+    second_page, _ = await repository.get_by_user_with_organizations(user.id, skip=1, limit=1)
 
+    assert all_count == 2
     assert {organization_row.name for _, organization_row in all_rows} == {"Acme", "Globex"}
+    assert invited_count == 1
     assert [organization_row.name for _, organization_row in invited_rows] == ["Globex"]
+    # The count is of every matching row, not of the page, so a switcher can
+    # tell that it is looking at a truncated list.
+    assert len(second_page) == 1
 
 
 # =============================================================================
