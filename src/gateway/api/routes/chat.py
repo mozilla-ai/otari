@@ -71,10 +71,12 @@ class ChatCompletionRequest(derive_request_base(CompletionParams)):  # type: ign
     (see ``_schema_derive``) so the schema cannot silently drop a param any-llm
     forwards. Fields below either tighten a derived field (``messages``,
     ``response_format``), declare an OpenAI wire param ``CompletionParams`` does
-    not model (``service_tier``, forwarded as an any-llm ``**kwargs`` param), or
-    add gateway-internal behavior (``mcp_servers``, ``mcp_server_ids``,
+    not model (``service_tier``, forwarded as an any-llm ``**kwargs`` param), add
+    gateway-internal behavior (``mcp_servers``, ``mcp_server_ids``,
     ``guardrails``, ``tools_header``, ``max_tool_iterations``) that is stripped
-    before the request is forwarded upstream.
+    before the request is forwarded upstream, or restate a derived field
+    unchanged to document it (``max_completion_tokens``), which is only worth
+    doing where the wire contract is not guessable from the field itself.
     """
 
     messages: list[dict[str, Any]] = Field(min_length=1)

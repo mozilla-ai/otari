@@ -1671,7 +1671,7 @@
         "type": "object"
       },
       "ChatCompletionRequest": {
-        "description": "OpenAI-compatible chat completion request.\n\nThe completion-param fields are derived from any-llm's ``CompletionParams``\n(see ``_schema_derive``) so the schema cannot silently drop a param any-llm\nforwards. Fields below either tighten a derived field (``messages``,\n``response_format``), declare an OpenAI wire param ``CompletionParams`` does\nnot model (``service_tier``, forwarded as an any-llm ``**kwargs`` param), or\nadd gateway-internal behavior (``mcp_servers``, ``mcp_server_ids``,\n``guardrails``, ``tools_header``, ``max_tool_iterations``) that is stripped\nbefore the request is forwarded upstream.",
+        "description": "OpenAI-compatible chat completion request.\n\nThe completion-param fields are derived from any-llm's ``CompletionParams``\n(see ``_schema_derive``) so the schema cannot silently drop a param any-llm\nforwards. Fields below either tighten a derived field (``messages``,\n``response_format``), declare an OpenAI wire param ``CompletionParams`` does\nnot model (``service_tier``, forwarded as an any-llm ``**kwargs`` param), add\ngateway-internal behavior (``mcp_servers``, ``mcp_server_ids``,\n``guardrails``, ``tools_header``, ``max_tool_iterations``) that is stripped\nbefore the request is forwarded upstream, or restate a derived field\nunchanged to document it (``max_completion_tokens``), which is only worth\ndoing where the wire contract is not guessable from the field itself.",
         "properties": {
           "frequency_penalty": {
             "anyOf": [
