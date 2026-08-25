@@ -34,9 +34,13 @@ import {
 } from "@/app/nav/rowStyles"
 import { TopBarActions } from "@/app/nav/TopBarActions"
 import type { NavItem, NavPath } from "@/app/nav/types"
-import { useNavVisibility } from "@/app/nav/useNavVisibility"
+import {
+  useNavVisibility,
+  useSurfaceVisibility,
+} from "@/app/nav/useNavVisibility"
 import { WorkspaceSwitcher } from "@/app/nav/WorkspaceSwitcher"
 import { EntitlementResolver } from "@/app/overlayEntitlementResolver"
+import { PendingPage } from "@/app/PendingPage"
 import { TelemetryIdentity } from "@/app/TelemetryIdentity"
 import { UpdatePrompt } from "@/app/UpdatePrompt"
 import { PricingWarning } from "@/features/models/PricingWarning"
@@ -414,6 +418,18 @@ function AppShellChrome() {
   // was written; the rail needs none, because a row that appears late is not a
   // row that told anyone it was missing.
   const { isLoading: entitlementsResolving } = useEntitlements()
+  // Narrowed to the entitlement axis, because only that one can still be
+  // resolving. A route gated off because this deployment does not host the
+  // surface was answered by the bootstrap before the page rendered, so waiting
+  // on the entitlement query would hold back a panel that is already correct and
+  // that the query cannot change. Asking the surface half separately is what
+  // distinguishes the two, since `isPathVisible` composes them and reports only
+  // that something hid the route.
+  const hostsRouteSurface = useSurfaceVisibility()
+  const answerIsStillComing =
+    routeIsGatedOff &&
+    entitlementsResolving &&
+    isPathVisible(pathname, hostsRouteSurface)
   // Which of the two sidebars this path belongs under. The organization context
   // is a separate rail reached from the footer, not a section inside the
   // workspace one, so the two never render together.
@@ -934,12 +950,8 @@ function AppShellChrome() {
             className="flex-1 overflow-y-auto focus:outline-none"
           >
             <div className="mx-auto flex max-w-[1800px] flex-col gap-6 px-4 py-5 md:px-6 md:py-6">
-              {routeIsGatedOff && entitlementsResolving ? (
-                // The router's own pending copy, so a route waiting on the
-                // entitlement answer reads as the same kind of wait as a route
-                // waiting on its chunk (`defaultPendingComponent` in
-                // `app/router.tsx`).
-                <div role="status">Loading page…</div>
+              {answerIsStillComing ? (
+                <PendingPage />
               ) : routeIsGatedOff ? (
                 <EmptyState
                   // The leaf's name, not the group's: someone who followed a
