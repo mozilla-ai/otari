@@ -23,8 +23,8 @@ store inside that package would close an import cycle. Being a leaf peer keeps t
 graph one-directional.
 
 Scoping matches ``alias_service`` exactly, workspace included: a stored policy
-belongs to one workspace and, within it, is either global or scoped to one user.
-A ``config.yml`` policy has no workspace and is in force in all of them. A lookup
+belongs to one workspace and, within it, is either workspace-wide or scoped to
+one user. A ``config.yml`` policy has no workspace and is in force in all of them. A lookup
 that names no workspace reads the deployment's default, which is where a
 deployment-wide write lands (``services/workspace_scope``).
 
@@ -114,7 +114,7 @@ def _parse(row: RoutingPolicy) -> PolicySpec | None:
 
 
 async def refresh_policy_cache(db: AsyncSession) -> dict[uuid.UUID, dict[str, PolicySpec]]:
-    """Reload the policy cache from the database and return the global layers.
+    """Reload the policy cache from the database and return the workspace-wide layers.
 
     Builds new dicts and rebinds, rather than clearing and refilling in place: the
     swap is then atomic from a concurrent reader's point of view, which matters

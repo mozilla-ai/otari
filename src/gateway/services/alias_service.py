@@ -77,8 +77,8 @@ def _scope(workspace_id: uuid.UUID | None) -> uuid.UUID | None:
 def cached_aliases(user_id: str | None = None, *, workspace_id: uuid.UUID | None = None) -> dict[str, str]:
     """The stored aliases this worker last loaded. Empty before the first load.
 
-    Returns one workspace's global layer, or ``user_id``'s own layer within it
-    alone when given: the caller-facing merge is :func:`effective_aliases`.
+    Returns one workspace's workspace-wide layer, or ``user_id``'s own layer
+    within it alone when given: the caller-facing merge is :func:`effective_aliases`.
     """
     scope = _scope(workspace_id)
     if scope is None:
@@ -94,7 +94,7 @@ def cache_is_stale(ttl: float = ALIAS_CACHE_TTL_SECONDS) -> bool:
 
 
 async def refresh_alias_cache(db: AsyncSession) -> dict[uuid.UUID, dict[str, str]]:
-    """Reload the alias cache from the database and return the global layers.
+    """Reload the alias cache from the database and return the workspace-wide layers.
 
     Builds fresh dicts and rebinds them, so the swap is atomic from a concurrent
     reader's point of view: the default workspace is resolved with an ``await``
@@ -139,7 +139,7 @@ def effective_aliases(
     """Every alias in force for ``user_id`` in ``workspace_id``.
 
     Layered most-specific-last, so the user's own aliases win over a
-    ``config.yml`` one, which in turn wins over the workspace's global stored
+    ``config.yml`` one, which in turn wins over the workspace's own stored
     layer. A caller with no user (the master key) sees the workspace-wide and
     configured layers only, never another user's aliases. An omitted
     ``workspace_id`` reads the deployment's default workspace, which is where a
