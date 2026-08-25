@@ -28,7 +28,7 @@ the table, and a partial index carried through that rebuild by reflection is the
 part most likely to come back subtly wrong.
 
 Revision ID: c1e4a7b9d3f6
-Revises: a9c4e2b6d8f1
+Revises: a7f3c9e2b481
 Create Date: 2026-08-25
 """
 
@@ -38,7 +38,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "c1e4a7b9d3f6"
-down_revision: str | Sequence[str] | None = "a9c4e2b6d8f1"
+down_revision: str | Sequence[str] | None = "a7f3c9e2b481"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
