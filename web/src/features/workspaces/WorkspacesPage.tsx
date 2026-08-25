@@ -222,12 +222,19 @@ function NarrowedDefaults({
 // How long the submit holds before a create that navigates hands the page over.
 // Long enough for the spinner to register as this press having done something,
 // short enough not to be a wait: the operator should read it as the button
-// acknowledging them, not as the gateway being slow. The default rather than the
-// only value: a test that had to sit through 800ms per case would spend most of
-// its run waiting on a number chosen for how a button feels, and `findBy*`'s
-// 1000ms ceiling leaves it only ~200ms of headroom, which a contended runner can
-// eat. `holdMs` is how a test shortens it.
+// acknowledging them, not as the gateway being slow. How long the shipped beat
+// lasts, and nothing a test has to sit through: `hold` below is the seam for
+// that, and it is a gate rather than a duration so a test can own when the beat
+// ends instead of guessing at a margin over this number.
 const ENTER_HOLD_MS = 800
+
+// The shipped beat, as a gate. A caller that wants to own when it opens (the
+// tests do, so the dismissal window is entered and left on purpose rather than
+// slept through) passes its own.
+const defaultHold = () =>
+  new Promise<void>((resolve) => {
+    setTimeout(resolve, ENTER_HOLD_MS)
+  })
 
 /**
  * The one form that creates a workspace, wherever it is offered from.
@@ -240,11 +247,16 @@ const ENTER_HOLD_MS = 800
 export function CreateWorkspaceForm({
   onClose,
   onCreated,
-  holdMs = ENTER_HOLD_MS,
+  hold = defaultHold,
 }: {
   onClose: () => void
-  /** The acknowledged-press hold, in ms. Shortened by tests; see ENTER_HOLD_MS. */
-  holdMs?: number
+  /**
+   * The acknowledged-press beat, as a gate rather than a duration. Defaults to
+   * `ENTER_HOLD_MS` of wall clock; a test supplies one it opens itself, so the
+   * dismissal window is entered and left deterministically instead of by a
+   * sleep long enough to have outlasted it.
+   */
+  hold?: () => Promise<void>
   // Fired once the workspace exists (and its default budget, when one was
   // picked), so the caller that opened the form can follow the new workspace.
   // The list page does not need it: it is already looking at the row that
@@ -362,11 +374,7 @@ export function CreateWorkspaceForm({
               // together: the operator waits a beat, not a beat plus a round
               // trip. A create slower than the hold keeps the spinner until it
               // answers, which is the honest reading of the same indicator.
-              const held = entersWorkspace
-                ? new Promise<void>((resolve) => {
-                    setTimeout(resolve, holdMs)
-                  })
-                : Promise.resolve()
+              const held = entersWorkspace ? hold() : Promise.resolve()
               setHolding(entersWorkspace)
               create.mutate(
                 { name: trimmed, description: description.trim() || null },

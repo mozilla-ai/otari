@@ -61,14 +61,14 @@ function PlusMark() {
 // workspace row.
 export function WorkspaceSwitcher({
   collapsed,
-  createHoldMs,
+  createHold,
 }: {
   collapsed: boolean
   // Forwarded to the create form's own hold, and only ever set by tests: at its
   // real value the three cases over this flow spend most of their run waiting,
   // and they have less headroom under `findBy*`'s ceiling than is comfortable on
   // a loaded runner. The app never passes it, so the default stands.
-  createHoldMs?: number
+  createHold?: () => Promise<void>
 }) {
   const { memberships, selected, select, isLoading } = useSelectedWorkspace()
   const context = useOrganizationContext()
@@ -348,7 +348,7 @@ export function WorkspaceSwitcher({
                   select(workspace.id)
                   void navigate({ to: "/" })
                 }}
-                holdMs={createHoldMs}
+                hold={createHold}
               />
             </Modal.Dialog>
           </Modal.Container>

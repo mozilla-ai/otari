@@ -1,5 +1,5 @@
 import { Outlet } from "@tanstack/react-router"
-import { act, screen, within } from "@testing-library/react"
+import { screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { StrictMode } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -19,13 +19,6 @@ import { renderWithRouter } from "@/tests/router"
 
 const SECOND_ORGANIZATION_ID = "99999999-9999-9999-9999-999999999999"
 const CREATED_WORKSPACE_ID = "77777777-7777-7777-7777-777777777777"
-// The create form's hold, shortened for the cases below. Nothing here depends on
-// its real value: what is under test is that the press is acknowledged before the
-// page moves and that a dismissal drops the completion, neither of which is a
-// function of how long the beat lasts. At its shipped 800ms these three cases
-// spend most of their runtime waiting, and they clear `findBy*`'s 1000ms ceiling
-// by only ~200ms, which a loaded runner can close.
-const TEST_HOLD_MS = 50
 
 /** One membership per organization, the second one being the one to switch to. */
 function twoOrganizations(): CallerOrganizationMembership[] {
@@ -247,11 +240,22 @@ describe("the organization half of the scope switcher", () => {
 // Rendered in the shell slot rather than as the page, and started away from "/",
 // so the navigation has somewhere to land and something to leave: a switcher
 // rendered as the page's own content would unmount the moment it navigated.
-function renderSwitcherOnAPage(options: { strict?: boolean } = {}) {
+/** A hold the test opens, so the beat is a gate rather than a duration. */
+function pendingHold() {
+  let release = () => {}
+  const gate = new Promise<void>((resolve) => {
+    release = resolve
+  })
+  return { hold: () => gate, release: () => release() }
+}
+
+function renderSwitcherOnAPage(
+  options: { strict?: boolean; hold?: () => Promise<void> } = {},
+) {
   const shell = (
     <Provider>
       <SelectedWorkspaceProvider>
-        <WorkspaceSwitcher collapsed={false} createHoldMs={TEST_HOLD_MS} />
+        <WorkspaceSwitcher collapsed={false} createHold={options.hold} />
         <Outlet />
       </SelectedWorkspaceProvider>
     </Provider>
@@ -291,11 +295,18 @@ describe("the workspace half of the scope switcher", () => {
     window.localStorage.clear()
   })
 
-  // The submit holds for a beat before handing the page over, shortened here to
-  // `TEST_HOLD_MS` so these cases wait on the DOM rather than on that number.
+  // The submit holds for a beat before handing the page over, and these cases
+  // supply that beat themselves (`pendingHold`) rather than waiting out the
+  // shipped one, so the window the guard exists for is entered and left on
+  // purpose. No duration in this file, and so nothing in it a slow runner can
+  // make fail.
   //
-  // Fake timers are not the answer to it, for two reasons and the second is the
-  // one that matters. While `userEvent` is driving they deadlock outright, since
+  // Two shortcuts to the same end go vacuous, and both were checked by deleting
+  // `if (!active.current) return` and watching them still pass. Deferring the
+  // create response instead moves the dismissal ahead of `onSuccess`, and
+  // TanStack Query drops `mutate`-level callbacks once the component has
+  // unmounted, so `finish()` never runs at all. And fake timers fail twice over,
+  // the second being the one that matters. While `userEvent` is driving they deadlock outright, since
   // react-aria's pointer events run on real timers. And in the dismissal case
   // below, where nothing is driving after the Escape, they look safe and are
   // worse than that: advancing the clock past the hold makes that case pass even
@@ -318,8 +329,9 @@ describe("the workspace half of the scope switcher", () => {
 
   it("enters the workspace it just created", async () => {
     mockApi({ context: startedInAWorkspace })
+    const beat = pendingHold()
     const user = userEvent.setup()
-    await renderSwitcherOnAPage()
+    await renderSwitcherOnAPage({ hold: beat.hold })
 
     const form = await fillCreateForm(user)
     // The label names the navigation, which is the only warning the operator
@@ -329,9 +341,11 @@ describe("the workspace half of the scope switcher", () => {
 
     // The press is acknowledged before the page moves, rather than the create
     // landing them somewhere else with nothing in between. The button keeps its
-    // name through the wait, so it is still the control it was.
+    // name through the beat, so it is still the control it was.
     expect(submit).toHaveAttribute("data-pending", "true")
     expect(screen.queryByText("OVERVIEW PAGE")).toBeNull()
+
+    beat.release()
 
     // Both halves of "entering" it: the shell's scope moved to the new
     // workspace, and the flow ended on the page that scope reads.
@@ -344,9 +358,13 @@ describe("the workspace half of the scope switcher", () => {
   })
 
   it("does not enter a workspace the operator dismissed the form over", async () => {
+    // The beat is a gate this test opens, so the window the guard exists for is
+    // entered and left on purpose rather than by sleeping long enough to have
+    // been inside it. Nothing here waits on a duration.
     mockApi({ context: startedInAWorkspace })
+    const beat = pendingHold()
     const user = userEvent.setup()
-    await renderSwitcherOnAPage()
+    await renderSwitcherOnAPage({ hold: beat.hold })
 
     const form = await fillCreateForm(user)
     await user.click(
@@ -356,24 +374,28 @@ describe("the workspace half of the scope switcher", () => {
     // flight, so dismissal is what is left, and it is the path that bypasses
     // every button.
     await user.keyboard("{Escape}")
-    // The only case here that waits on the clock, because what it asserts is an
-    // absence: there is no event to wait on when the completion is correctly
-    // dropped. Inside `act` so the context refetch the create triggers settles
-    // under React's watch; a raw promise is not Testing Library's `asyncWrapper`,
-    // and the update lands outside it with a warning on every run.
-    await act(async () => {
-      await new Promise((resolve) => {
-        setTimeout(resolve, TEST_HOLD_MS + 50)
-      })
-    })
+    beat.release()
 
-    // The workspace was created and the switcher will list it; what must not
+    // Reopening the switcher is a real interaction, and the workspace listed in
+    // it is the visible result of the create. Getting there is what puts the
+    // assertions below after the completion has had its turn.
+    await user.click(screen.getByLabelText(/^Switch workspace/))
+    const menu = await screen.findByRole("dialog", {
+      name: "Switch workspace or organization",
+    })
+    const staging = await within(menu).findByRole("button", { name: /Staging/ })
+    expect(staging).toBeVisible()
+
+    // The workspace was created and the switcher offers it; what must not
     // happen is being taken there after saying not to.
     expect(screen.queryByText("OVERVIEW PAGE")).toBeNull()
     expect(screen.getByText("USAGE PAGE")).toBeInTheDocument()
+    // Read from the menu rather than the trigger, which the open menu hides
+    // from the accessibility tree: the scope never moved.
     expect(
-      screen.getByRole("button", { name: /^Switch workspace/ }),
-    ).toHaveAccessibleName(/currently Default Workspace/)
+      within(menu).getByRole("button", { name: /Default Workspace/ }),
+    ).toHaveTextContent("Selected")
+    expect(staging).not.toHaveTextContent("Selected")
   })
 
   it("still completes after StrictMode's development remount", async () => {
@@ -382,13 +404,15 @@ describe("the workspace half of the scope switcher", () => {
     // would then hang with the modal open and the button spinning, in
     // development only, where `main.tsx` wraps the app in StrictMode.
     mockApi({ context: startedInAWorkspace })
+    const beat = pendingHold()
     const user = userEvent.setup()
-    await renderSwitcherOnAPage({ strict: true })
+    await renderSwitcherOnAPage({ strict: true, hold: beat.hold })
 
     const form = await fillCreateForm(user)
     await user.click(
       within(form).getByRole("button", { name: /Create and open/ }),
     )
+    beat.release()
 
     expect(await screen.findByText("OVERVIEW PAGE")).toBeInTheDocument()
   })
