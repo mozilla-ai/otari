@@ -64,7 +64,7 @@ _CREDENTIAL_COLUMNS = {
 _TOKEN_INDEX = "ix_user_email_verification_token"
 
 _ALIAS_WIDEN_REVISION = "c1e4a7b9d3f6"
-_BEFORE_ALIAS_WIDEN = "a7f3c9e2b481"
+_BEFORE_ALIAS_WIDEN = "c7a1e4d8f3b6"
 _SURVIVALS_REVISION = "d2f5b8c0e4a7"
 _SURVIVAL_TABLES = ("routing_memory", "router_preferences", "file_objects")
 
