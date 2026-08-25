@@ -143,20 +143,45 @@ export function WorkspaceCodeExecutionPolicyCard({
   // loud, so the withdrawal is visible and picking something else is one click.
   const withdrawnImage =
     policy?.image && !allowedImages.includes(policy.image) ? policy.image : null
+  // The same shape one field over: tool kinds the stored policy names that this
+  // deployment no longer serves. Admission is already refusing such a policy
+  // (`_pipeline` intersects against `SERVED_TOOL_NAMES`), so the card must show
+  // it rather than quietly drop it: a stale entry silently removed on an
+  // unrelated save turns a refusal into permission.
+  const staleTools = (policy?.tools ?? []).filter(
+    (name) => !availableTools.includes(name),
+  )
+  // What the checkboxes cover: what is served, plus whatever stale kinds the
+  // policy still names, so unticking one is how an operator retires it.
+  const listedTools = [...availableTools, ...staleTools]
 
   // An unset list ticks every box, because that is what it means: the workspace
   // gets whatever the backend serves. Unticking one is therefore a narrowing
-  // from the full set, not from nothing. Both ends normalize back to `null`:
-  // the full set narrows nothing, and the empty set is refused by the server,
-  // so neither is worth storing as a list.
+  // from the full set, not from nothing, and unticking the last leaves nothing
+  // to store, which the server refuses, so that end returns to unset.
   const toggleTool = (tool: string, isSelected: boolean) => {
     const current = tools ?? availableTools
     const next = isSelected
-      ? availableTools.filter((name) => current.includes(name) || name === tool)
+      ? listedTools.filter((name) => current.includes(name) || name === tool)
       : current.filter((name) => name !== tool)
-    setTools(
-      next.length === 0 || next.length === availableTools.length ? null : next,
+    setTools(next.length === 0 ? null : next)
+  }
+
+  // A stored list narrows nothing only when it covers everything served *and*
+  // names nothing else. Comparing lengths instead would read a stale
+  // `["bash_code_execution"]` against a served `["code_execution"]` as the full
+  // set, and save `null` over a policy admission is currently refusing, which
+  // would grant code execution to a workspace whose row denies it, from a save
+  // that meant to change the timeout.
+  const toolsForSave = (): string[] | null => {
+    if (tools === null || tools.length === 0) return null
+    const coversEverythingServed = availableTools.every((name) =>
+      tools.includes(name),
     )
+    const namesNothingElse = tools.every((name) =>
+      availableTools.includes(name),
+    )
+    return coversEverythingServed && namesNothingElse ? null : tools
   }
 
   const save = () => {
@@ -195,10 +220,7 @@ export function WorkspaceCodeExecutionPolicyCard({
           max_iterations: iterations.value,
           exec_timeout_s: timeout.value,
           image: image === DEPLOYMENT_IMAGE ? null : image,
-          tools:
-            tools && tools.length > 0 && tools.length < availableTools.length
-              ? tools
-              : null,
+          tools: toolsForSave(),
         },
       },
       {
@@ -316,7 +338,7 @@ export function WorkspaceCodeExecutionPolicyCard({
             </p>
           )}
 
-          {availableTools.length > 1 ? (
+          {availableTools.length > 1 || staleTools.length > 0 ? (
             <fieldset className="flex flex-col gap-2">
               <legend className="text-xs font-medium text-muted">
                 Code-execution tools
@@ -326,16 +348,26 @@ export function WorkspaceCodeExecutionPolicyCard({
                 workspace may use. Leaving them all ticked narrows nothing; use
                 Blocked above to refuse code execution outright.
               </p>
-              {availableTools.map((tool) => (
+              {listedTools.map((tool) => (
                 <Checkbox
                   key={tool}
                   isSelected={tools === null || tools.includes(tool)}
                   isDisabled={busy}
                   onChange={(isSelected) => toggleTool(tool, isSelected)}
                 >
-                  {tool}
+                  {staleTools.includes(tool)
+                    ? `${tool} (no longer served)`
+                    : tool}
                 </Checkbox>
               ))}
+              {staleTools.length > 0 ? (
+                <p className="text-xs text-warning">
+                  This workspace's policy names {staleTools.join(", ")}, which
+                  this deployment's sandbox no longer serves, so its requests
+                  are refused. Untick it and pick what should be allowed, or set
+                  the stance to Deployment default to drop the policy.
+                </p>
+              ) : null}
             </fieldset>
           ) : (
             // With one tool served there is no subset to choose: ticking and
