@@ -311,8 +311,8 @@ def _effective_output_cap(max_tokens: int | None, max_completion_tokens: int | N
     deprecation and the precedence any-llm's OpenAI layer already applies. The
     result is what the budget estimate reserves against as well, so the cost
     reserved and the cap dispatched can never disagree about which field won.
-    Two *different* caps in one request is the caller contradicting itself, and
-    while just ``max_completion_tokens`` value is used, everything is logged.
+    Two *different* caps in one request is the caller contradicting itself: the
+    ``max_completion_tokens`` value is the one used, and both are logged.
     """
     if max_completion_tokens is None:
         return max_tokens
