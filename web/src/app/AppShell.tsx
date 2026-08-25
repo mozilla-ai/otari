@@ -40,6 +40,7 @@ import {
 } from "@/app/nav/useNavVisibility"
 import { WorkspaceSwitcher } from "@/app/nav/WorkspaceSwitcher"
 import { EntitlementResolver } from "@/app/overlayEntitlementResolver"
+import { PostSignInGate } from "@/app/overlayPostSignInGate"
 import { PendingPage } from "@/app/PendingPage"
 import { TelemetryIdentity } from "@/app/TelemetryIdentity"
 import { UpdatePrompt } from "@/app/UpdatePrompt"
@@ -364,7 +365,8 @@ function NavGroup({
 }
 
 /**
- * The shell, with the entitlement axis resolved above it.
+ * The shell, with the entitlement axis resolved above it and a post-sign-in step
+ * able to sit in front of it.
  *
  * Two components rather than one because a provider is invisible to the
  * component that renders it: `AppShellChrome` reads the axis through
@@ -381,11 +383,20 @@ function NavGroup({
  * that render instead of the shell (the sign-in screen, the public auth pages,
  * the hybrid landing) are deliberately outside it: none of them gates on a
  * capability, and a visitor without a session has nothing to resolve one from.
+ *
+ * `PostSignInGate` is the seam for anything that has to be shown once, in front
+ * of the whole app, after a session exists (otari#789): a hosted signup's
+ * profile questions, in the build that has a signup. It is mounted here rather
+ * than anywhere else because its position *is* its contract, all three
+ * boundaries of it, and the module docstring is where that lives. The base
+ * default renders its children unchanged, so this build shows no step at all.
  */
 export function AppShell() {
   return (
     <EntitlementResolver>
-      <AppShellChrome />
+      <PostSignInGate>
+        <AppShellChrome />
+      </PostSignInGate>
     </EntitlementResolver>
   )
 }
