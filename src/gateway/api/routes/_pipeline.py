@@ -51,8 +51,11 @@ from any_llm.exceptions import AnyLLMError
 from any_llm.types.completion import (
     ChatCompletion,
     ChatCompletionChunk,
+    CompletionParams,
     CompletionUsage,
 )
+from any_llm.types.messages import MessagesParams
+from any_llm.types.responses import ResponsesParams
 from fastapi import BackgroundTasks, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import SQLAlchemyError
@@ -311,6 +314,19 @@ def _is_unsupported_feature_error(exc: BaseException) -> bool:
 
 _UNEXPECTED_KWARG = re.compile(r"unexpected keyword argument '([^']+)'")
 
+# The params a caller can actually put in a request body, across the three
+# formats that share this classifier. Derived from any-llm's ``*Params`` for the
+# same reason the request schemas are (see ``_schema_derive``): a param any-llm
+# grows is picked up here without an edit, and nothing else can pass the gate.
+_FORWARDED_PARAMS: frozenset[str] = frozenset(
+    set(CompletionParams.model_fields)
+    | set(MessagesParams.model_fields)
+    | set(ResponsesParams.model_fields)
+    # Declared on the chat request rather than derived, and forwarded through
+    # any-llm's ``**kwargs`` (see ``chat.ChatCompletionRequest.service_tier``).
+    | {"service_tier"}
+)
+
 
 def provider_rejected_param_detail(param: str) -> str:
     """Detail for a request param the provider serving this model cannot express."""
@@ -331,12 +347,33 @@ def _rejected_param(exc: BaseException) -> str | None:
     param as an upstream outage. Only the param name is returned: the SDK's
     method name is an internal detail and never reaches the client (see
     ``test_error_detail_leakage``).
+
+    Two gates keep that from blaming a caller for someone else's fault, because
+    Python raises this same wording for any bad keyword and this classifier is
+    reached from ``except Exception`` arms that wrap more than the provider call:
+
+    * The name has to be one a request body can carry (:data:`_FORWARDED_PARAMS`).
+      An operator's ``client_args`` typo (``timeoutt``) and a gateway-internal
+      signature drift after an SDK bump (a tool backend's ``image``) are neither,
+      so they keep the generic 502 and stay on the error-rate panel as the
+      upstream-or-gateway failures they are.
+    * The failing callable must not be a constructor. ``client_args`` is
+      operator-owned and reaches a provider *client's* ``__init__``, so a key
+      there that happens to collide with a real param name (``client_args={"seed":
+      1}``) would otherwise pass the first gate and read as the caller's ``seed``.
+
+    Both gates key on the same interpreter wording the match already depends on,
+    so neither adds a new assumption about how CPython phrases the error.
     """
     for candidate in upstream_exception_chain(exc):
-        if isinstance(candidate, TypeError):
-            match = _UNEXPECTED_KWARG.search(str(candidate))
-            if match:
-                return match.group(1)
+        if not isinstance(candidate, TypeError):
+            continue
+        message = str(candidate)
+        if "__init__" in message:
+            continue
+        match = _UNEXPECTED_KWARG.search(message)
+        if match and match.group(1) in _FORWARDED_PARAMS:
+            return match.group(1)
     return None
 
 

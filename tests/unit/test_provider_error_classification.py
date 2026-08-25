@@ -361,6 +361,42 @@ def test_rejected_param_is_recorded_as_400_on_the_usage_log() -> None:
     assert failure_status_code(TypeError("create() got an unexpected keyword argument 'seed'")) == 400
 
 
+def test_operator_client_args_typo_is_not_the_callers_fault() -> None:
+    """#769 review: ``client_args`` is operator-owned (config.yml or a stored
+    provider credential) and reaches the provider *client's* constructor, so a
+    typo there raises the same wording. Returning it as a 400 would blame the
+    caller for a parameter they cannot remove, and would drop a gateway
+    misconfiguration off the error-rate panel as a 4xx."""
+    exc = TypeError("AsyncOpenAI.__init__() got an unexpected keyword argument 'timeoutt'")
+    assert classify_provider_error(exc) is None
+    assert failure_status_code(exc) == 502
+
+
+def test_gateway_internal_signature_drift_is_not_the_callers_fault() -> None:
+    """The same wording arrives from gateway-internal code, because this
+    classifier is reached from ``except Exception`` arms that wrap the tool
+    backends and the stream opener, not only the provider call. A backend whose
+    constructor drifted (mozilla-ai/otari#766) must not surface as a 400 naming
+    an internal parameter."""
+    exc = TypeError("_FakeSandboxBackend.__init__() got an unexpected keyword argument 'image'")
+    assert classify_provider_error(exc) is None
+    assert failure_status_code(exc) == 502
+
+
+def test_client_args_key_colliding_with_a_real_param_is_still_not_a_400() -> None:
+    """The case the name gate alone cannot see: an operator ``client_args`` key
+    that happens to be a real request param. It is a constructor rejection, so
+    the second gate keeps it a 502."""
+    exc = TypeError("AsyncOpenAI.__init__() got an unexpected keyword argument 'seed'")
+    assert classify_provider_error(exc) is None
+
+
+def test_param_the_gateway_never_forwards_stays_unclassified() -> None:
+    """A name outside the request-body surface cannot have come from the caller,
+    whatever raised it."""
+    assert classify_provider_error(TypeError("post() got an unexpected keyword argument 'proxies'")) is None
+
+
 def test_unrelated_type_error_stays_unclassified() -> None:
     """A TypeError that is not a keyword-argument rejection carries no signal a
     caller could act on, so it keeps the generic 502 rather than becoming a 400
