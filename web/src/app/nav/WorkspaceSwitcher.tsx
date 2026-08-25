@@ -1,4 +1,5 @@
 import { Button, Modal, Popover } from "@heroui/react"
+import { useNavigate } from "@tanstack/react-router"
 import { useState } from "react"
 import { FiCheck, FiChevronDown, FiPlus } from "react-icons/fi"
 import { canManage } from "@/features/organization/roles"
@@ -56,6 +57,7 @@ function PlusMark() {
 export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
   const { memberships, selected, select, isLoading } = useSelectedWorkspace()
   const context = useOrganizationContext()
+  const navigate = useNavigate()
   const [open, setOpen] = useState(false)
   const [creating, setCreating] = useState(false)
   // Owners and admins only, which is what the server says of
@@ -262,9 +264,36 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
             AlertDialog softens itself and the Modal does not, so without this the
             page behind the form goes fully black. */}
         <Modal.Backdrop className="bg-backdrop/50">
-          <Modal.Container placement="center" size="md">
+          {/* A fixed width, not the content's own. The container is the
+              `sm:w-fit` element and `size="md"` only caps the dialog at
+              `max-w-md`, so the modal was as wide as whatever was in it: a
+              message longer than the fields made it jump out to the cap the
+              moment one appeared. 28rem is that cap, so this pins the width it
+              was already growing to, and the dialog's own `w-full` fills it.
+              Below `sm` the container is `w-full` and this does not apply. */}
+          <Modal.Container
+            placement="center"
+            size="md"
+            className="sm:w-[28rem]"
+          >
             <Modal.Dialog aria-label="Create workspace" className="p-0">
-              <CreateWorkspaceForm onClose={() => setCreating(false)} />
+              <CreateWorkspaceForm
+                onClose={() => setCreating(false)}
+                // Creating from the scope switcher is a request to work in the
+                // new workspace, so the flow ends inside it rather than back on
+                // the page it was started from: the shell's scope moves, and the
+                // overview is where that scope reads. Selecting by id is enough
+                // even though the switcher's list comes from the organization
+                // context: the mutation invalidates that context, and the
+                // selection resolves against the membership as soon as it
+                // arrives. Navigating also leaves whatever organization-scoped
+                // page the operator was on, which the new scope does not apply
+                // to.
+                onCreated={(workspace) => {
+                  select(workspace.id)
+                  void navigate({ to: "/" })
+                }}
+              />
             </Modal.Dialog>
           </Modal.Container>
         </Modal.Backdrop>

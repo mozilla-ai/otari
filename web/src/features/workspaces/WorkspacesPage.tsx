@@ -1,4 +1,4 @@
-import { Button, Card, Chip } from "@heroui/react"
+import { Button, Card, Chip, Spinner } from "@heroui/react"
 import { useMemo, useState } from "react"
 
 import type { Budget, Workspace, WorkspaceBudgetDefault } from "@/client"
@@ -23,6 +23,7 @@ import { Field } from "@/shared/components/Field"
 import {
   EmptyState,
   ErrorBanner,
+  errorMessage,
   FilterSelect,
   InfoBanner,
   PageHeader,
@@ -225,28 +226,70 @@ function NarrowedDefaults({
  * one endpoint drift: one of them grows the description field, or the ownership
  * note, and the other does not.
  */
-export function CreateWorkspaceForm({ onClose }: { onClose: () => void }) {
+// How long the submit holds before a create that navigates hands the page over.
+// Long enough for the spinner to register as this press having done something,
+// short enough not to be a wait: the operator should read it as the button
+// acknowledging them, not as the gateway being slow.
+const ENTER_HOLD_MS = 800
+
+export function CreateWorkspaceForm({
+  onClose,
+  onCreated,
+}: {
+  onClose: () => void
+  // Fired once the workspace exists (and its default budget, when one was
+  // picked), so the caller that opened the form can follow the new workspace.
+  // The list page does not need it: it is already looking at the row that
+  // appeared. The scope switcher does, because creating from there is a request
+  // to work in the new workspace, not just to add it.
+  onCreated?: (workspace: Workspace) => void
+}) {
   const create = useCreateWorkspace()
   const createDefault = useCreateWorkspaceBudgetDefault()
   const budgets = useBudgets()
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
   const [budgetId, setBudgetId] = useState(NO_DEFAULT)
+  // The hold is running, on a form whose submit navigates. Kept separately from
+  // the mutations' own pending flags, because it outlives them: the request can
+  // answer in 90ms and the button still has a beat left to serve.
+  const [holding, setHolding] = useState(false)
   const trimmed = name.trim()
+  // The submit promises the navigation only where it performs one, so the label
+  // and the hold below are read off the same prop that does it. A form whose
+  // button said "and open" while nothing opened would be the worse bug of the
+  // two this fixes.
+  const entersWorkspace = onCreated !== undefined
+  const pending = create.isPending || createDefault.isPending || holding
   return (
     <Card>
       <Card.Content className="flex flex-col gap-4 p-5">
         <div className="text-sm font-semibold text-foreground">
           Create workspace
         </div>
-        <ErrorBanner error={create.error ?? createDefault.error} />
+        {/* Only the default's failure is a banner now. Every way the create
+            itself is refused is about the name (taken, empty, too long), so it
+            belongs on the field that caused it rather than in a block above the
+            form that resizes whatever frames it. The default budget is a
+            separate call about a different control, and it fails after the
+            workspace already exists, which no field state can say. */}
+        <ErrorBanner error={createDefault.error} />
         <Field
           label="Name"
           value={name}
-          onChange={setName}
+          onChange={(next) => {
+            setName(next)
+            // The refusal was about the name that produced it, so editing the
+            // name retires it. Without this the field stays red while the
+            // operator types the correction, and the button they press next
+            // looks like it is retrying a rejected name.
+            if (create.error) create.reset()
+          }}
           placeholder="Production"
           isRequired
           autoFocus
+          isInvalid={create.error !== null}
+          errorMessage={create.error ? errorMessage(create.error) : undefined}
           description="Unique within this organization. You become its owner."
         />
         <Field
@@ -263,8 +306,18 @@ export function CreateWorkspaceForm({ onClose }: { onClose: () => void }) {
           <Button
             variant="primary"
             isDisabled={trimmed === ""}
-            isPending={create.isPending || createDefault.isPending}
-            onPress={() =>
+            isPending={pending}
+            onPress={() => {
+              // Started before the request, not after it answers, so the two run
+              // together: the operator waits a beat, not a beat plus a round
+              // trip. A create slower than the hold keeps the spinner until it
+              // answers, which is the honest reading of the same indicator.
+              const held = entersWorkspace
+                ? new Promise<void>((resolve) => {
+                    setTimeout(resolve, ENTER_HOLD_MS)
+                  })
+                : Promise.resolve()
+              setHolding(entersWorkspace)
               create.mutate(
                 { name: trimmed, description: description.trim() || null },
                 {
@@ -273,8 +326,15 @@ export function CreateWorkspaceForm({ onClose }: { onClose: () => void }) {
                   // here leaves the workspace created and undefaulted, which the
                   // banner reports and the edit form can finish.
                   onSuccess: (workspace) => {
-                    if (budgetId === NO_DEFAULT) {
+                    const finish = async () => {
+                      await held
+                      // No setHolding here: the form unmounts on close, and the
+                      // failure paths below are what release the button.
                       onClose()
+                      onCreated?.(workspace)
+                    }
+                    if (budgetId === NO_DEFAULT) {
+                      void finish()
                       return
                     }
                     createDefault.mutate(
@@ -282,14 +342,45 @@ export function CreateWorkspaceForm({ onClose }: { onClose: () => void }) {
                         workspaceId: workspace.id,
                         body: { budget_id: budgetId },
                       },
-                      { onSuccess: onClose },
+                      {
+                        onSuccess: () => {
+                          void finish()
+                        },
+                        onError: () => setHolding(false),
+                      },
                     )
                   },
+                  onError: () => setHolding(false),
                 },
               )
-            }
+            }}
           >
-            Create workspace
+            {/* The spinner takes the label's place rather than sitting beside
+                it, so pressing moves nothing: the label holds the button's width
+                while faded, and the spinner is centered over it by the `relative`
+                that `.button` already sets.
+
+                `opacity-0`, not `invisible`: visibility removes the label from
+                the accessibility tree, which would leave the button unnamed for
+                the whole wait. Faded, it still names the control while the
+                spinner reports the state. That is also why the spinner is
+                `aria-hidden` (and it is its own live region as of HeroUI 3.2.4,
+                which would announce a bare "Loading" over the name).
+
+                `color="current"` because the default is `accent`, which on this
+                accent-filled variant paints the spinner in the fill's own
+                color; `current` inherits the label's. */}
+            <span className={pending ? "opacity-0" : undefined}>
+              {entersWorkspace ? "Create and open" : "Create workspace"}
+            </span>
+            {pending ? (
+              <Spinner
+                size="sm"
+                color="current"
+                aria-hidden="true"
+                className="absolute inset-0 m-auto"
+              />
+            ) : null}
           </Button>
           <Button variant="ghost" onPress={onClose}>
             Cancel

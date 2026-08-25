@@ -45,6 +45,8 @@ function mockApi(
     // Keyed by workspace id, so a test can give one workspace a default and
     // leave another without one.
     budgetDefaults?: Record<string, WorkspaceBudgetDefault[]>
+    /** A refusal for `POST /v1/workspaces`, for the error paths. */
+    createRefusal?: { status: number; detail: string }
   } = {},
 ) {
   const context = opts.context ?? organizationContext()
@@ -83,6 +85,12 @@ function mockApi(
         return jsonResponse({ data: list, count: list.length })
       }
       if (method === "DELETE") return jsonResponse({ message: "deleted" })
+      if (method === "POST" && opts.createRefusal) {
+        return jsonResponse(
+          { detail: opts.createRefusal.detail },
+          opts.createRefusal.status,
+        )
+      }
       return jsonResponse(workspace({ name: "Created" }))
     }
     if (url.includes("/v1/organizations/me/members")) {
@@ -143,6 +151,38 @@ describe("WorkspacesPage", () => {
       name: "Research",
       description: "Experiments",
     })
+  })
+
+  it("puts a refused create on the name that caused it, not in a banner", async () => {
+    // A banner above the form resizes whatever frames it, and every way this
+    // endpoint refuses is about the name: taken, empty, too long.
+    mockApi({
+      createRefusal: {
+        status: 409,
+        detail: "A workspace named 'test' already exists in this organization",
+      },
+    })
+    const user = userEvent.setup()
+    renderPage(<WorkspacesPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Create workspace" }),
+    )
+    await user.type(screen.getByLabelText("Name"), "test")
+    await user.click(screen.getByRole("button", { name: "Create workspace" }))
+
+    const input = await screen.findByLabelText("Name")
+    expect(input).toHaveAttribute("aria-invalid", "true")
+    expect(await screen.findByText(/already exists/)).toBeInTheDocument()
+    // The description it replaced, rather than a row added below it: the two
+    // together would grow the form by a line.
+    expect(screen.queryByText(/You become its owner/)).toBeNull()
+
+    // Editing the name retires the refusal it produced, so the field is not
+    // still red while the correction is being typed.
+    await user.type(input, "2")
+    expect(input).not.toHaveAttribute("aria-invalid", "true")
+    expect(screen.getByText(/You become its owner/)).toBeInTheDocument()
   })
 
   it("confirms before deleting a workspace", async () => {
