@@ -626,7 +626,11 @@ async def explain_policy(
     # stored examples and no provider call, only the weights the policy declares.
     # Passing it in makes explain show the split rather than the decline path.
     weighted_ordering, weighted_shares = explain_router_ordering(
-        config, spec, user_id=request.user_id, allowlist=request.allowed_models
+        config,
+        spec,
+        user_id=request.user_id,
+        allowlist=request.allowed_models,
+        workspace_id=request.workspace_id,
     )
     try:
         plan = compile_policy(
