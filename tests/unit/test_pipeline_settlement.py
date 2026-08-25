@@ -1179,21 +1179,56 @@ async def test_duplicate_mcp_server_name_against_a_stored_server_releases_reserv
     assert settlement.refunded == 1
 
 
+# RFC 1918, deliberately not loopback: `MCP_ALLOW_LOOPBACK` defaults to *true*,
+# so `127.0.0.1` passes `validate_mcp_url` and would make the ordering test below
+# vacuous. `MCP_ALLOW_PRIVATE_HOSTS` defaults to false, so these are rejected with
+# only that variable cleared.
+_UNSAFE_URL = "https://10.0.0.1/mcp"
+_OTHER_UNSAFE_URL = "https://10.0.0.2/mcp"
+
+
 @pytest.mark.asyncio
-async def test_an_inline_duplicate_is_refused_before_the_url_safety_check(
+async def test_an_unsafe_inline_url_is_refused_when_the_names_are_distinct(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """The name check runs first, so a doomed request does not spend a DNS lookup per server."""
+    """Negative control for the ordering test below: these URLs really do fail the safety check."""
     settlement = _Settlement()
     settlement.install(monkeypatch)
     monkeypatch.delenv("OTARI_MCP_ALLOW_PRIVATE_HOSTS", raising=False)
 
     ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation(), workspace_id=uuid.uuid4())
-    # Loopback: both URLs would fail `validate_mcp_url`, so the detail says which
-    # of the two gates answered.
+    with pytest.raises(HTTPException) as exc_info:
+        await _call_prepare_gateway_tools(
+            ctx,
+            mcp_servers=[
+                McpServerConfig(name="tools", url=_UNSAFE_URL),
+                McpServerConfig(name="other", url=_OTHER_UNSAFE_URL),
+            ],
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "private range" in str(exc_info.value.detail)
+    assert settlement.refunded == 1
+
+
+@pytest.mark.asyncio
+async def test_an_inline_duplicate_is_refused_before_the_url_safety_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The name check runs first, so a doomed request does not spend a DNS lookup per server.
+
+    Same URLs as the test above, which reports the unsafe URL when the names
+    differ; only the repeated name changes the answer, so this pins the order
+    rather than passing for either reason.
+    """
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    monkeypatch.delenv("OTARI_MCP_ALLOW_PRIVATE_HOSTS", raising=False)
+
+    ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation(), workspace_id=uuid.uuid4())
     dupes = [
-        McpServerConfig(name="tools", url="https://127.0.0.1/mcp"),
-        McpServerConfig(name="tools", url="https://127.0.0.1/other"),
+        McpServerConfig(name="tools", url=_UNSAFE_URL),
+        McpServerConfig(name="tools", url=_OTHER_UNSAFE_URL),
     ]
     with pytest.raises(HTTPException) as exc_info:
         await _call_prepare_gateway_tools(ctx, mcp_servers=dupes)

@@ -38,6 +38,7 @@ import hashlib
 import json
 import time
 import uuid
+from collections import Counter
 from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine, Iterable, Sequence
 from contextlib import AsyncExitStack
 from dataclasses import dataclass, replace
@@ -2254,7 +2255,7 @@ async def prepare_gateway_tools(
             await _validate_mcp_server_urls(
                 adapter, stored_servers, stored=True, workspace_id=ctx.workspace_id
             )
-            stored_names = [server.name for server in stored_servers]
+            stored_name_counts = Counter(server.name for server in stored_servers)
             # Standalone cannot reach this: `uq_workspace_mcp_servers_workspace_name`
             # makes stored names unique per workspace and `resolve_workspace_mcp_servers`
             # de-duplicates the ids. Hybrid can, because `_resolve_platform_mcp_servers`
@@ -2263,11 +2264,11 @@ async def prepare_gateway_tools(
             # URL does, since a stored duplicate is workspace configuration the caller
             # can neither see nor fix: a fixed 500 detail, with the names and the
             # workspace in the log.
-            if len(set(stored_names)) != len(stored_names):
+            if len(stored_name_counts) != len(stored_servers):
                 logger.error(
                     "Stored MCP servers do not have unique names for workspace %s: %s",
                     ctx.workspace_id,
-                    sorted({name for name in stored_names if stored_names.count(name) > 1}),
+                    sorted(name for name, count in stored_name_counts.items() if count > 1),
                 )
                 raise adapter.error(500, MCP_SERVER_NAMES_NOT_UNIQUE_DETAIL, ErrorKind.API)
             # Fixed detail rather than the name: a stored name is not the caller's to
@@ -2275,7 +2276,7 @@ async def prepare_gateway_tools(
             # key), so the rejection does not repeat one back. It does not pretend to
             # close the oracle: the probe name is caller-supplied, so a caller holding a
             # stored id still learns a name by guessing it here and reading the 400.
-            if inline_names & set(stored_names):
+            if inline_names & stored_name_counts.keys():
                 raise adapter.error(400, MCP_SERVER_NAME_COLLIDES_WITH_STORED_DETAIL, ErrorKind.INVALID_REQUEST)
             mcp_servers = (mcp_servers or []) + stored_servers
 

@@ -906,12 +906,20 @@ async def _resolve_platform_mcp_servers(
     user_token: str,
     mcp_server_ids: list[uuid.UUID],
 ) -> list[McpServerConfig]:
-    """Swap workspace-scoped MCP server ids for inline configs by calling the platform."""
+    """Swap workspace-scoped MCP server ids for inline configs by calling the platform.
+
+    Ids are de-duplicated with their order preserved, which is the contract
+    `resolve_workspace_mcp_servers` states the two modes share. It matters more
+    than a saved round trip now that two resolved servers sharing a name are a
+    500 (`prepare_gateway_tools`): the protocol does not say what the platform
+    answers for a repeated id, so sending one twice must not be able to make a
+    request fail on a duplicate the caller never really asked for.
+    """
     payload = await _post_resolve(
         config,
         user_token=user_token,
         path="/gateway/mcp-servers/resolve",
-        body={"mcp_server_ids": [str(uid) for uid in mcp_server_ids]},
+        body={"mcp_server_ids": [str(uid) for uid in dict.fromkeys(mcp_server_ids)]},
         client_error_detail="MCP server resolution failed",
     )
     return [
