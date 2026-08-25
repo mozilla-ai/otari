@@ -330,6 +330,19 @@ def test_unsupported_parameter_maps_to_400_with_the_reason() -> None:
     assert failure_status_code(exc) == 400
 
 
+def test_unsupported_parameter_payload_echo_uses_fallback_detail() -> None:
+    """A capability error that echoes the payload never returns an empty detail."""
+    exc = UnsupportedParameterError(
+        "prompt_cache_key",
+        "bedrock",
+        'request_body={"messages":[{"content":"secret prompt"}]}',
+    )
+    mapping = classify_provider_error(exc)
+    assert mapping is not None
+    assert mapping.status_code == 400
+    assert mapping.detail == PROVIDER_BAD_REQUEST_DETAIL
+
+
 def test_unsupported_feature_is_recorded_as_400_on_the_usage_log() -> None:
     """The usage-log status follows the classification rather than the generic 502."""
     assert failure_status_code(NotImplementedError(_CONTEXT_MANAGEMENT_MSG)) == 400

@@ -332,8 +332,17 @@ def _unsupported_feature_detail(exc: BaseException) -> str:
         if isinstance(candidate, UnsupportedParameterError):
             # AnyLLMError.__str__ prefixes the provider to ``message``. Feeding
             # both through upstream_error_message would repeat the same reason.
-            return redact_upstream_message(candidate.message)
+            return _redacted_caller_fault_detail(candidate.message, PROVIDER_BAD_REQUEST_DETAIL)
     return _caller_fault_detail(exc, PROVIDER_BAD_REQUEST_DETAIL)
+
+
+def _redacted_caller_fault_detail(message: str, fallback: str) -> str:
+    """Return redacted explanatory text, or a fixed detail when none remains."""
+    redacted = redact_upstream_message(message)
+    explanatory = redacted.replace("[redacted]", "")
+    if not any(char.isalpha() for char in explanatory):
+        return fallback
+    return redacted
 
 
 def _caller_fault_detail(exc: BaseException, fallback: str) -> str:
@@ -350,11 +359,7 @@ def _caller_fault_detail(exc: BaseException, fallback: str) -> str:
     A message made entirely of redaction placeholders is empty for this
     purpose, too.
     """
-    redacted = redact_upstream_message(upstream_error_message(exc))
-    explanatory = redacted.replace("[redacted]", "")
-    if not any(char.isalpha() for char in explanatory):
-        return fallback
-    return redacted
+    return _redacted_caller_fault_detail(upstream_error_message(exc), fallback)
 
 
 def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
