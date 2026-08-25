@@ -157,7 +157,7 @@ class KnnRoutingMemory:
             return RoutingDecision.decline(f"sparse neighborhood: {len(neighbors)}/{self.k} comparable records")
 
         try:
-            prices = await self._candidate_prices(pool)
+            prices = await self._candidate_prices(pool, workspace_id=ctx.workspace_id)
         except RouterPricingError as exc:
             # Startup and write-time validation should have caught this, so getting
             # here means pricing was removed under a running gateway. Declining
@@ -237,8 +237,13 @@ class KnnRoutingMemory:
         # still match: a miss is silent, and leaves the cheap candidate scoreless
         # while the pool reports warm.
         cache: dict[str, str] = {}
-        key_of = {model: self._canonical(model, ctx.user_id, cache) for model in pool}
-        recorded = [self._canonical_qualities(record.qualities, ctx.user_id, cache) for _, record in neighbors]
+        key_of = {
+            model: self._canonical(model, ctx.user_id, cache, workspace_id=ctx.workspace_id) for model in pool
+        }
+        recorded = [
+            self._canonical_qualities(record.qualities, ctx.user_id, cache, workspace_id=ctx.workspace_id)
+            for _, record in neighbors
+        ]
 
         scores: dict[str, float] = {}
         for model in pool:
@@ -286,21 +291,38 @@ class KnnRoutingMemory:
 
     # -- model identity ------------------------------------------------------
 
-    def _canonical(self, selector: str, user_id: str | None, cache: dict[str, str]) -> str:
+    def _canonical(
+        self,
+        selector: str,
+        user_id: str | None,
+        cache: dict[str, str],
+        *,
+        workspace_id: uuid.UUID | None = None,
+    ) -> str:
         """``instance:model`` for a selector, or the selector unchanged if it resolves to nothing.
 
         An unresolvable selector keeps its own spelling rather than dropping out, so
         it can still match a stored key spelled the same way; scoring is not the
         place to decide a candidate is invalid.
 
+        ``workspace_id`` is the request's, and has to be: a candidate selector can
+        name an alias, and this workspace's alias may point somewhere the default
+        workspace's does not. ``usable_candidates`` filtered the pool in this
+        workspace and ``/rank`` canonicalized the stored keys in it, so resolving
+        here in another one produces a key that matches neither, and the candidate
+        drops out of scoring with no score and no error.
+
         ``cache`` is per decision: the pool and the neighbors' stored keys repeat the
         same handful of selectors, and each resolution walks the alias and
-        static-policy tables.
+        static-policy tables. Keying it on the selector alone is safe because one
+        decision has one workspace.
         """
         canonical = cache.get(selector)
         if canonical is None:
             try:
-                resolved = resolve_provider_selector(self.config, selector, user_id)
+                resolved = resolve_provider_selector(
+                    self.config, selector, user_id, workspace_id=workspace_id
+                )
                 canonical = f"{resolved.instance}:{resolved.model}"
             except (ValueError, AnyLLMError):
                 canonical = selector
@@ -308,7 +330,12 @@ class KnnRoutingMemory:
         return canonical
 
     def _canonical_qualities(
-        self, qualities: dict[str, float], user_id: str | None, cache: dict[str, str]
+        self,
+        qualities: dict[str, float],
+        user_id: str | None,
+        cache: dict[str, str],
+        *,
+        workspace_id: uuid.UUID | None = None,
     ) -> dict[str, float]:
         """One record's scores, rekeyed on canonical model identity.
 
@@ -320,7 +347,7 @@ class KnnRoutingMemory:
         """
         canonical: dict[str, float] = {}
         for model, quality in qualities.items():
-            canonical.setdefault(self._canonical(model, user_id, cache), quality)
+            canonical.setdefault(self._canonical(model, user_id, cache, workspace_id=workspace_id), quality)
         return canonical
 
     # -- candidate pool / ordering ------------------------------------------
@@ -440,17 +467,28 @@ class KnnRoutingMemory:
 
     # -- pricing -----------------------------------------------------------
 
-    async def _candidate_prices(self, pool: list[str]) -> dict[str, float]:
+    async def _candidate_prices(
+        self, pool: list[str], *, workspace_id: uuid.UUID | None = None
+    ) -> dict[str, float]:
         async with create_session() as db:
-            return {model: await self._input_price(db, model) for model in pool}
+            return {model: await self._input_price(db, model, workspace_id=workspace_id) for model in pool}
 
-    async def _input_price(self, db: AsyncSession, selector: str) -> float:
+    async def _input_price(
+        self, db: AsyncSession, selector: str, *, workspace_id: uuid.UUID | None = None
+    ) -> float:
         """Input price per million tokens for one candidate.
 
         Resolved through ``resolve_provider_selector`` rather than split by hand so
         the lookup keys on the same ``instance:model`` the request will be billed
         under. A candidate naming a provider *instance* would otherwise be priced
         against its implementation name and look unpriced.
+
+        ``workspace_id`` decides *which model* the selector names, for the same
+        reason it does in :meth:`_canonical`: an alias can point somewhere
+        different per workspace, and pricing the default workspace's target while
+        scoring this workspace's would rank on a price the request never pays.
+        That is separate from *whose rates* apply, which the next paragraph is
+        about and which this deliberately leaves alone.
 
         Deliberately reads the *deployment* price list, not an organization's rate
         overrides, so a router's ranking can differ from what the chosen request
@@ -465,7 +503,7 @@ class KnnRoutingMemory:
         candidate priced only by an override never becomes a stored policy.
         """
         try:
-            resolved = resolve_provider_selector(self.config, selector)
+            resolved = resolve_provider_selector(self.config, selector, workspace_id=workspace_id)
         except (ValueError, AnyLLMError) as exc:
             raise RouterPricingError(f"Router candidate '{selector}' does not resolve to a provider.") from exc
         pricing = await find_model_pricing(db, resolved.instance, resolved.model)
@@ -476,6 +514,18 @@ class KnnRoutingMemory:
     # -- embedding ---------------------------------------------------------
 
     async def _embed(self, text: str) -> list[float]:
+        """Embed ``text`` with the deployment's configured embedding model.
+
+        Resolved with no workspace, and deliberately, unlike every other selector
+        this class resolves. ``router_embedding_model`` is operator configuration
+        rather than caller input, which is the case ``resolve_provider_selector``
+        documents as workspace-less. More than a convention here: every stored
+        vector is tagged with this model name and compared against others carrying
+        the same tag, so if two workspaces resolved that one name to different
+        providers, their vectors would be silently incomparable while claiming to
+        be the same space. Scoping this would create the bug that scoping the
+        others fixes.
+        """
         resolved = resolve_provider_selector(self.config, self.embedding_model)
         result = await aembedding(
             model=resolved.model, inputs=text, provider=resolved.provider, **resolved.kwargs
@@ -516,7 +566,11 @@ class KnnRoutingMemory:
 
 
 async def unpriced_router_candidates(
-    config: GatewayConfig, db: AsyncSession, candidates: list[str]
+    config: GatewayConfig,
+    db: AsyncSession,
+    candidates: list[str],
+    *,
+    workspace_id: uuid.UUID | None = None,
 ) -> list[str]:
     """Which of ``candidates`` have no configured pricing.
 
@@ -524,11 +578,17 @@ async def unpriced_router_candidates(
     validation over the config policies, and the write path for a stored one. The
     router scores by cost, so a candidate with no price could never be compared,
     and a policy that silently never routes is worse than one that fails to load.
+
+    ``workspace_id`` is the workspace the policy is being stored into, so a
+    candidate naming an alias is validated as it will resolve for the requests
+    that policy will serve. Omitted by startup validation, which reads the
+    ``config.yml`` policies: those are deployment-wide, so the default workspace
+    is the only workspace-shaped answer there is.
     """
     missing: list[str] = []
     for selector in candidates:
         try:
-            resolved = resolve_provider_selector(config, selector)
+            resolved = resolve_provider_selector(config, selector, workspace_id=workspace_id)
         except (ValueError, AnyLLMError):
             # An unresolvable selector is refused elsewhere, with a clearer message.
             continue

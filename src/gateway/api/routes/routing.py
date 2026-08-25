@@ -278,7 +278,9 @@ def _validate_write(config: GatewayConfig, name: str, spec: PolicySpec, user_id:
         )
 
 
-async def _validate_router_pricing(config: GatewayConfig, db: AsyncSession, spec: PolicySpec) -> None:
+async def _validate_router_pricing(
+    config: GatewayConfig, db: AsyncSession, spec: PolicySpec, workspace_id: uuid.UUID
+) -> None:
     """Refuse a learned policy whose candidates are not all priced.
 
     The *learned* router scores by cost, so one unpriced candidate makes it decline
@@ -291,11 +293,15 @@ async def _validate_router_pricing(config: GatewayConfig, db: AsyncSession, spec
 
     Scoped to the backends that actually read a price: the weighted router balances
     on operator-declared capacity, so requiring pricing there would refuse a policy
-    that works.
+    that works. Candidates resolve in the workspace the policy is being stored
+    into, so one naming an alias is validated as it will resolve for the requests
+    this policy will actually serve.
     """
     if not backend_requires_pricing(spec.router_backend):
         return
-    missing = await unpriced_router_candidates(config, db, spec.router_candidates)
+    missing = await unpriced_router_candidates(
+        config, db, spec.router_candidates, workspace_id=workspace_id
+    )
     if missing:
         raise HTTPException(
             status_code=status.HTTP_400_BAD_REQUEST,
@@ -447,7 +453,7 @@ async def set_policy(
     spec = _validated_spec(request.name, request.spec)
     await refresh_policy_cache(db)
     _validate_write(config, request.name, spec, request.user_id)
-    await _validate_router_pricing(config, db, spec)
+    await _validate_router_pricing(config, db, spec, workspace_id)
 
     # Both scopes are part of the identity: the upsert must not turn one
     # workspace's policy into another's, nor a workspace-wide policy into a

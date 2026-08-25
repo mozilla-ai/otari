@@ -17,14 +17,20 @@ Each routing-memory record is one example: a prompt embedding plus a
 
 from __future__ import annotations
 
+import time
 import uuid
-from typing import Any
+from collections.abc import Iterator
+from decimal import Decimal
+from types import SimpleNamespace
+from typing import Any, cast
 
 import pytest
 
 from gateway.api.routes._helpers import conversation_opening_text, first_user_text, latest_user_text
 from gateway.core.config import GatewayConfig
 from gateway.models.entities import RoutingMemory
+from gateway.services import alias_service
+from gateway.services.routing import knn
 from gateway.services.routing.backends import RoutingContext
 from gateway.services.routing.knn import KnnRoutingMemory
 
@@ -97,7 +103,7 @@ def _wire(
         padding = [] if total is None else [_both_good()] * max(0, total - len(records))
         return [*records, *padding]
 
-    async def _prices(pool: list[str]) -> dict[str, float]:
+    async def _prices(pool: list[str], *, workspace_id: uuid.UUID | None = None) -> dict[str, float]:
         return prices or dict.fromkeys(pool, 1.0)
 
     backend._embed = _embed  # type: ignore[method-assign]
@@ -178,7 +184,7 @@ async def test_unpriced_candidate_declines_rather_than_failing() -> None:
     backend = _backend()
     _wire(backend, [_both_good(), _both_good()])
 
-    async def _prices(pool: list[str]) -> dict[str, float]:
+    async def _prices(pool: list[str], *, workspace_id: uuid.UUID | None = None) -> dict[str, float]:
         raise RouterPricingError(f"Router candidate '{CHEAP}' has no configured pricing.")
 
     backend._candidate_prices = _prices  # type: ignore[method-assign]
@@ -531,3 +537,90 @@ def test_ordered_with_fallthrough_appends_the_default_last() -> None:
     assert backend._ordered_with_fallthrough([CHEAP, STRONG], STRONG, [CHEAP, STRONG]) == [CHEAP, STRONG]
     # Chosen == default: it must NOT be demoted; it stays first.
     assert backend._ordered_with_fallthrough([STRONG, CHEAP], STRONG, [CHEAP, STRONG]) == [STRONG, CHEAP]
+
+
+# ---------------------------------------------------------------------------
+# Workspace-scoped aliases (otari-ai#1643)
+#
+# A candidate selector can name an alias, and this PR is what makes an alias
+# point somewhere different per workspace. Every reader of one inside a decision
+# therefore has to resolve it in the *request's* workspace: the pool filter, the
+# score keys and the price all key on the resolved target, so a reader that used
+# the default workspace instead would disagree with the others and the candidate
+# would drop out of scoring with no score and no error.
+# ---------------------------------------------------------------------------
+
+_WORKSPACE = uuid.UUID("00000000-0000-4000-8000-0000000000ab")
+_DEFAULT_WORKSPACE = uuid.UUID("00000000-0000-4000-8000-00000000d3fa")
+_ALIAS = "fast-alias"
+
+
+@pytest.fixture
+def _aliased_workspaces() -> Iterator[None]:
+    """``fast-alias`` points at the cheap model in one workspace, the strong one by default."""
+    alias_service.reset_alias_cache()
+    alias_service._cache[_WORKSPACE] = {_ALIAS: CHEAP}
+    alias_service._cache[_DEFAULT_WORKSPACE] = {_ALIAS: STRONG}
+    alias_service._default_workspace = _DEFAULT_WORKSPACE
+    alias_service._cached_at = time.monotonic()
+    yield
+    alias_service.reset_alias_cache()
+
+
+def test_scoring_canonicalizes_an_alias_in_the_requests_workspace(_aliased_workspaces: None) -> None:
+    """The score-key half. Resolving in the default workspace names the wrong model."""
+    backend = _backend()
+
+    assert backend._canonical(_ALIAS, "u", {}, workspace_id=_WORKSPACE) == "openai:gpt-3.5-turbo"
+    # The same name, the deployment-wide reading: a different model entirely.
+    assert backend._canonical(_ALIAS, "u", {}, workspace_id=None) == "openai:gpt-4o"
+
+
+@pytest.mark.asyncio
+async def test_pricing_follows_the_same_workspaces_alias_as_scoring(
+    _aliased_workspaces: None, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """The price half, which has to name the same model the score key does.
+
+    Pricing the default workspace's target while scoring this workspace's would
+    rank the candidate on a price the request never pays. Separate from *whose*
+    rates apply, which stays the deployment list either way.
+    """
+    asked: list[tuple[str, str]] = []
+
+    async def _pricing(db: Any, instance: str, model: str) -> Any:
+        asked.append((instance, model))
+        return SimpleNamespace(input_price_per_million=Decimal("1"))
+
+    monkeypatch.setattr(knn, "find_model_pricing", _pricing)
+    backend = _backend()
+
+    await backend._input_price(cast(Any, object()), _ALIAS, workspace_id=_WORKSPACE)
+    await backend._input_price(cast(Any, object()), _ALIAS, workspace_id=None)
+
+    assert asked == [("openai", "gpt-3.5-turbo"), ("openai", "gpt-4o")]
+
+
+@pytest.mark.asyncio
+async def test_an_aliased_candidate_matches_the_scores_taught_in_its_workspace(
+    _aliased_workspaces: None,
+) -> None:
+    """End to end: the decline this bug produced, and the routing it should produce.
+
+    ``/rank`` canonicalizes a stored score key in the workspace it was taught in,
+    so these records are keyed on the cheap model alone, which is what teaching
+    ``fast-alias`` in this workspace produces. Resolving the candidate in the
+    default workspace instead looks up ``openai:gpt-4o``, which no record scores,
+    so every candidate is skipped and the router declines while the pool reports
+    warm. That silent decline is the whole failure mode.
+    """
+    backend = _backend(router_alpha=0.0, router_confidence_floor=0.0)
+    records = [_mem({"openai:gpt-3.5-turbo": 1.0}), _mem({"openai:gpt-3.5-turbo": 1.0})]
+    _wire(backend, records, prices={_ALIAS: 1.0, STRONG: 10.0})
+
+    decision = await backend.rank(
+        _ctx(candidates=(_ALIAS, STRONG), default=STRONG, workspace_id=_WORKSPACE)
+    )
+
+    assert decision.ordered_models[0] == _ALIAS
+    assert "no neighbor scored any candidate" not in decision.rationale
