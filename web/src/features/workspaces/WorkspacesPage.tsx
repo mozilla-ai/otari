@@ -1,5 +1,5 @@
 import { Button, Card, Chip, Spinner } from "@heroui/react"
-import { useMemo, useState } from "react"
+import { useEffect, useMemo, useRef, useState } from "react"
 
 import type { Budget, Workspace, WorkspaceBudgetDefault } from "@/client"
 import { canManage } from "@/features/organization/roles"
@@ -254,6 +254,18 @@ export function CreateWorkspaceForm({
   // the mutations' own pending flags, because it outlives them: the request can
   // answer in 90ms and the button still has a beat left to serve.
   const [holding, setHolding] = useState(false)
+  // Whether this form is still the one on screen. The hold outlives the render
+  // that started it, so a dismissal during it would otherwise still hand the
+  // page over: the operator cancels and is taken somewhere anyway. Disabling
+  // Cancel is not enough on its own, because Escape and a click outside dismiss
+  // the modal too, and neither goes through a button.
+  const active = useRef(true)
+  useEffect(
+    () => () => {
+      active.current = false
+    },
+    [],
+  )
   const trimmed = name.trim()
   // The submit promises the navigation only where it performs one, so the label
   // and the hold below are read off the same prop that does it. A form whose
@@ -328,6 +340,10 @@ export function CreateWorkspaceForm({
                   onSuccess: (workspace) => {
                     const finish = async () => {
                       await held
+                      // Dismissed while it was held: the workspace exists, and
+                      // the list and the switcher will both show it, but the
+                      // operator said not to go there.
+                      if (!active.current) return
                       // No setHolding here: the form unmounts on close, and the
                       // failure paths below are what release the button.
                       onClose()
@@ -382,7 +398,11 @@ export function CreateWorkspaceForm({
               />
             ) : null}
           </Button>
-          <Button variant="ghost" onPress={onClose}>
+          {/* Disabled while the create is in flight, as `ConfirmDialog` does
+              with its own: the workspace is already being made, so offering to
+              abandon it mid-flight only invites the operator to expect that it
+              was not. */}
+          <Button variant="ghost" onPress={onClose} isDisabled={pending}>
             Cancel
           </Button>
         </div>

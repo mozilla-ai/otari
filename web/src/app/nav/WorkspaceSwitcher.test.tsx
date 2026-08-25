@@ -14,6 +14,9 @@ import { organizationContext, workspace } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
 
 const CREATED_ID = "77777777-7777-7777-7777-777777777777"
+// The form's own hold, mirrored rather than imported: it is a private constant,
+// and a test that waited on the real one would pass even if it were removed.
+const ENTER_HOLD_MS = 800
 
 function jsonResponse(body: unknown): Response {
   return new Response(JSON.stringify(body), {
@@ -82,23 +85,30 @@ afterEach(() => {
   vi.restoreAllMocks()
 })
 
+// Open the switcher, open the create form from it, and name the workspace. The
+// press is left to the test, because what each one is about is what happens
+// after it.
+async function fillCreateForm(user: ReturnType<typeof userEvent.setup>) {
+  await user.click(
+    await screen.findByRole("button", { name: /^Switch workspace/ }),
+  )
+  await user.click(
+    within(await screen.findByRole("dialog")).getByRole("button", {
+      name: "Create workspace",
+    }),
+  )
+  const form = await screen.findByRole("dialog", { name: "Create workspace" })
+  await user.type(within(form).getByLabelText(/^Name/), "Staging")
+  return form
+}
+
 describe("WorkspaceSwitcher create flow", () => {
   it("enters the workspace it just created", async () => {
     mockApi()
     const user = userEvent.setup()
     await renderSwitcher()
 
-    await user.click(
-      await screen.findByRole("button", { name: /^Switch workspace/ }),
-    )
-    await user.click(
-      within(await screen.findByRole("dialog")).getByRole("button", {
-        name: "Create workspace",
-      }),
-    )
-
-    const form = await screen.findByRole("dialog", { name: "Create workspace" })
-    await user.type(within(form).getByLabelText(/^Name/), "Staging")
+    const form = await fillCreateForm(user)
     // Nothing in the button at rest: the spinner arrives in the label's place,
     // so a resting slot for it would only leave dead space.
     expect(
@@ -143,5 +153,32 @@ describe("WorkspaceSwitcher create flow", () => {
         name: /^Switch workspace, currently Staging/,
       }),
     ).toBeInTheDocument()
+  })
+
+  it("does not enter a workspace the operator dismissed the form over", async () => {
+    mockApi()
+    const user = userEvent.setup()
+    await renderSwitcher()
+
+    const form = await fillCreateForm(user)
+    await user.click(
+      within(form).getByRole("button", { name: /Create and open/ }),
+    )
+    // Escape rather than Cancel: Cancel is disabled while the create is in
+    // flight, so dismissal is what is left, and it is the path that bypasses
+    // every button.
+    await user.keyboard("{Escape}")
+
+    // Past the hold, so this is the completion having been dropped rather than
+    // not having run yet. The workspace was created and the switcher will list
+    // it; what must not happen is being taken there after saying not to.
+    await new Promise((resolve) => {
+      setTimeout(resolve, ENTER_HOLD_MS * 2)
+    })
+    expect(screen.queryByText("OVERVIEW PAGE")).toBeNull()
+    expect(screen.getByText("USAGE PAGE")).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: /^Switch workspace/ }),
+    ).toHaveAccessibleName(/currently Default Workspace/)
   })
 })
