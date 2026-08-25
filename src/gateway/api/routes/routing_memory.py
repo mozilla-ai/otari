@@ -398,6 +398,12 @@ async def rank_candidates(
     backend = _knn(config)
     await _require_user(db, request.user_id)
     workspace_id = await resolve_managed_workspace_id(db, request.workspace_id)
+    # Committed before the loop, because `record_preference` writes its
+    # routing-memory row in a session of its own. On a deployment that has never
+    # provisioned tenancy, resolving the default workspace *creates* it, and an
+    # uncommitted workspace is one the other session's foreign key cannot see. A
+    # no-op when the workspace already existed, which is every other case.
+    await db.commit()
     normalized = _validated_scores(config, request.user_id, request.examples, workspace_id)
 
     recorded = 0

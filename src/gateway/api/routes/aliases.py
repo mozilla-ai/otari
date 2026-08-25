@@ -6,7 +6,7 @@ live in a file this process does not own); these routes manage the
 ``model_aliases`` table, which means the same thing to a request but can change
 without a restart.
 
-A stored alias belongs to one workspace, and within it is either global
+A stored alias belongs to one workspace, and within it is either workspace-wide
 (``user_id`` omitted) or scoped to one user, who is then the only caller in that
 workspace that resolves it. A ``config.yml`` alias has no workspace and is in
 force in all of them. See ``services/alias_service`` for the precedence between
@@ -70,8 +70,8 @@ class AliasResponse(BaseModel):
     # "config" for a config.yml alias (read-only here) or "stored" for a row in
     # model_aliases. Only stored aliases can be edited or deleted.
     source: str
-    # The user this alias is scoped to, or null when it applies to every caller.
-    # config.yml aliases are always global.
+    # The user this alias is scoped to, or null when it applies to every caller
+    # in its workspace. config.yml aliases are never user-scoped.
     user_id: str | None = None
     # The workspace the stored row lives in. Null for a config.yml alias, which
     # is deployment-wide and in force in every workspace.
@@ -107,7 +107,7 @@ def _validate(config: GatewayConfig, name: str, target: str, user_id: str | None
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
                 f"'{name}' is already an alias in config.yml, pointing at '{config.aliases[name]}'. "
-                "Config aliases take precedence over global stored ones, so this one would never be used. "
+                "Config aliases take precedence over workspace-wide stored ones, so this one would never be used. "
                 "Rename it, scope it to a user, or edit config.yml."
             ),
         )

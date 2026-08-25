@@ -237,7 +237,7 @@ def _validate_write(config: GatewayConfig, name: str, spec: PolicySpec, user_id:
             status_code=status.HTTP_400_BAD_REQUEST,
             detail=(
                 f"'{name}' is already a routing policy in config.yml. Config policies take precedence over "
-                "global stored ones, so this one would never be used. Rename it, scope it to a user, or "
+                "workspace-wide stored ones, so this one would never be used. Rename it, scope it to a user, or "
                 "edit config.yml."
             ),
         )

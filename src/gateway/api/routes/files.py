@@ -250,6 +250,10 @@ async def list_files(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File uploads are disabled")
 
     user_id = _resolve_user(auth_result, user, config)
+    # The key's own workspace wins over anything the caller sent, rather than
+    # 400ing on a mismatch: the parameter is a master-key narrowing, and a keyed
+    # request is confined either way, so refusing it would only add a way to get
+    # an error instead of the same answer.
     scope = _request_workspace_id(auth_result) or workspace_id
     stmt = select(FileObject).where(
         FileObject.user_id == user_id,

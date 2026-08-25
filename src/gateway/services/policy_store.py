@@ -65,7 +65,7 @@ __all__ = [
 # having them converge at different rates would be a surprise nobody benefits from.
 POLICY_CACHE_TTL_SECONDS = 30.0
 
-# Workspace-global stored policies: workspace_id -> {name -> spec}.
+# Workspace-wide stored policies: workspace_id -> {name -> spec}.
 _cache: dict[uuid.UUID, dict[str, PolicySpec]] = {}
 # User-scoped stored policies: workspace_id -> user_id -> {name -> spec}. Kept
 # separate rather than keyed on (user_id, name) so resolving for one user never
@@ -158,9 +158,9 @@ def effective_policies(
     """Every policy in force for this caller: stored ones plus configured ones.
 
     Precedence is most-specific-last, matching aliases exactly:
-    ``user-scoped stored > config.yml > workspace-global stored``. The middle pair
+    ``user-scoped stored > config.yml > workspace-wide stored``. The middle pair
     is the pre-existing rule for aliases (and the write path refuses to store a
-    workspace-global policy that shadows a configured one, so this ordering is a
+    workspace-wide policy that shadows a configured one, so this ordering is a
     safety net rather than the enforcement); the user-scoped layer sits on top
     because overriding a shared name for one caller is the entire point of scoping
     it. An omitted ``workspace_id`` reads the deployment's default workspace.
@@ -245,7 +245,7 @@ async def load_policies_at_startup(db: AsyncSession) -> None:
     scoped = sum(len(names) for per_user in _user_cache.values() for names in per_user.values())
     if workspace_global or scoped:
         logger.info(
-            "Loaded %d workspace-global and %d user-scoped routing policy/policies across %d workspace(s)",
+            "Loaded %d workspace-wide and %d user-scoped routing policy/policies across %d workspace(s)",
             workspace_global,
             scoped,
             len(set(_cache) | set(_user_cache)),

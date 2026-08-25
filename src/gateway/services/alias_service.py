@@ -10,14 +10,14 @@ owns it: an alias resolves only for requests in that workspace, which is what
 lets two workspaces each define ``fast`` and get their own target. Within a
 workspace, ``user_id`` scopes it further: ``NULL`` means every caller in that
 workspace sees it, and a non-null ``user_id`` belongs to that user alone,
-shadowing the workspace-global row of the same name for them.
+shadowing the workspace-wide row of the same name for them.
 
 A ``config.yml`` alias has no workspace. It comes from a file the deployment
 owns, so it is in force in every workspace, and it is never listed under one.
 
 Precedence is most-specific-first, so ``user-scoped > config.yml > stored
-workspace-global``. The middle pair is the pre-existing rule (the API refuses to
-store a workspace-global alias shadowing a configured one, so it is a safety
+workspace-wide``. The middle pair is the pre-existing rule (the API refuses to
+store a workspace-wide alias shadowing a configured one, so it is a safety
 net); the user-scoped layer sits on top of both, because overriding a shared name
 for one user is the whole point of scoping it.
 
@@ -56,7 +56,7 @@ from gateway.services.workspace_scope import lookup_default_workspace_id
 # takes at most this long to work on every replica; existing ones are unaffected.
 ALIAS_CACHE_TTL_SECONDS = 30.0
 
-# Workspace-global stored aliases: workspace_id -> {name -> target}.
+# Workspace-wide stored aliases: workspace_id -> {name -> target}.
 _cache: dict[uuid.UUID, dict[str, str]] = {}
 # User-scoped stored aliases: workspace_id -> user_id -> {name -> target}. Kept
 # separate from _cache rather than keyed on (user_id, name) so a resolution for
@@ -140,7 +140,7 @@ def effective_aliases(
 
     Layered most-specific-last, so the user's own aliases win over a
     ``config.yml`` one, which in turn wins over the workspace's global stored
-    layer. A caller with no user (the master key) sees the workspace-global and
+    layer. A caller with no user (the master key) sees the workspace-wide and
     configured layers only, never another user's aliases. An omitted
     ``workspace_id`` reads the deployment's default workspace, which is where a
     deployment-wide write lands.
@@ -218,7 +218,7 @@ async def load_aliases_at_startup(db: AsyncSession) -> None:
     scoped = sum(len(names) for per_user in _user_cache.values() for names in per_user.values())
     if workspace_global or scoped:
         logger.info(
-            "Loaded %d workspace-global and %d user-scoped model alias(es) across %d workspace(s)",
+            "Loaded %d workspace-wide and %d user-scoped model alias(es) across %d workspace(s)",
             workspace_global,
             scoped,
             len(set(_cache) | set(_user_cache)),
