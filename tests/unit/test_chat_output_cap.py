@@ -16,6 +16,8 @@ told, in every combination a client can send.
 import logging
 
 import pytest
+from any_llm.providers.openai.base import BaseOpenAIProvider
+from any_llm.types.completion import CompletionParams
 
 from gateway.api.routes.chat import _effective_output_cap
 from gateway.log_config import logger as gateway_logger
@@ -98,3 +100,22 @@ def test_one_cap_or_none_stays_quiet(
     """The ordinary requests: nothing ambiguous, nothing to say."""
     _, text = _caps_with_logs(max_tokens, max_completion_tokens, caplog)
     assert text == ""
+
+
+def test_any_llm_still_remaps_the_legacy_name_for_openai_providers() -> None:
+    """The upstream behavior the fold depends on, pinned because it is not ours.
+
+    Folding onto the deprecated spelling is only lossless because any-llm's
+    OpenAI layer renames it back on the way out, which is what lets an OpenAI
+    reasoning model (which rejects ``max_tokens`` outright) keep working through
+    this gateway. That layer belongs to any-llm, so a version bump could drop the
+    remap and the fold would start sending the deprecated name to the one
+    provider family that refuses it, with nothing else in the suite noticing.
+
+    Asked in review on mozilla-ai/otari#769: why fold onto the deprecated field.
+    """
+    converted = BaseOpenAIProvider._convert_completion_params(
+        CompletionParams(model_id="gpt-5", messages=[{"role": "user", "content": "hi"}], max_tokens=20)
+    )
+    assert converted.get("max_completion_tokens") == 20
+    assert "max_tokens" not in converted
