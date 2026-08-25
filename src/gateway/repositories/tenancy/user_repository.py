@@ -129,10 +129,10 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         token hash is what makes the second caller through the lock see the
         first caller's clear.
 
-        ``FOR UPDATE`` is a no-op on SQLite, which has no row locks. That
-        engine admits one writer at a time for the whole database, so the same
-        pair of transactions serializes there anyway; PostgreSQL is where the
-        lock is load-bearing.
+        PostgreSQL only. ``FOR UPDATE`` is a no-op on SQLite, which has no row
+        locks, and its driver opens no transaction for a bare ``SELECT``, so
+        both racers read the live hash before either writes and both writes
+        land. A deployment that needs this guarantee runs PostgreSQL.
         """
         await self.db.execute(select(col(User.id)).where(col(User.id) == user_id).with_for_update())
 
