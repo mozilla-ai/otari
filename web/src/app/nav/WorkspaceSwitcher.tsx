@@ -64,10 +64,10 @@ export function WorkspaceSwitcher({
   createHold,
 }: {
   collapsed: boolean
-  // Forwarded to the create form's own hold, and only ever set by tests: at its
-  // real value the three cases over this flow spend most of their run waiting,
-  // and they have less headroom under `findBy*`'s ceiling than is comfortable on
-  // a loaded runner. The app never passes it, so the default stands.
+  // Forwarded to the create form's own hold, and only ever set by tests:
+  // supplying the beat as a gate is what lets a test enter and leave the
+  // dismissal window on purpose, instead of sleeping past a duration it cannot
+  // await. The app never passes it, so the default stands.
   createHold?: () => Promise<void>
 }) {
   const { memberships, selected, select, isLoading } = useSelectedWorkspace()
