@@ -1288,7 +1288,7 @@ async def _compile_request_plan(
     else (a policy exists partly to keep its targets off the wire); the enumerated
     per-candidate reasons go to the activity log, which is a master-key surface.
     """
-    spec = resolve_effective_policy(config, model, user_id)
+    spec = resolve_effective_policy(config, model, user_id, workspace_id=workspace_id)
     if spec is None:
         return None
 
@@ -1315,6 +1315,7 @@ async def _compile_request_plan(
             user_id=user_id,
             allowlist=allowlist,
             signal=routing_signal() if routing_signal is not None else None,
+            workspace_id=workspace_id,
         )
 
     try:
@@ -1363,7 +1364,8 @@ async def resolve_request_context(
     estimate_cache_write_ttl: Literal["5m", "1h"] | None = None,
     routing_signal: Callable[[], RoutingSignal] | None = None,
     normalize_messages: Callable[
-        [str, LLMProvider | None, str, str | None], Awaitable[tuple[int, CompletionUsage | None]]
+        [str, LLMProvider | None, str, str | None, uuid.UUID | None],
+        Awaitable[tuple[int, CompletionUsage | None]],
     ]
     | None = None,
 ) -> RequestContext:
@@ -1727,7 +1729,17 @@ async def resolve_request_context(
         # provider-call settlement does not cover.
         if normalize_messages is not None:
             try:
-                post_chars, vision_usage = await normalize_messages(user_id, gate_impl, gate_model, gate_instance)
+                # The key's own workspace, not the resolved one: a master-key
+                # request has no key and resolves to the default workspace, which
+                # would narrow an operator's file references to it. `fetch_file`
+                # reads None as "every workspace", matching the /v1/files routes.
+                post_chars, vision_usage = await normalize_messages(
+                    user_id,
+                    gate_impl,
+                    gate_model,
+                    gate_instance,
+                    api_key.workspace_id if api_key is not None else None,
+                )
                 # Bill the vision describe side-call before the reservation
                 # top-up: its cost is already incurred by normalize_messages,
                 # so a 402 from the top-up below must not skip it (the refund

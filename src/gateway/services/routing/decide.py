@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from dataclasses import dataclass
 
 from any_llm.exceptions import AnyLLMError
@@ -87,6 +88,7 @@ async def decide_ordering(
     user_id: str | None,
     allowlist: list[str] | None,
     signal: RoutingSignal | None,
+    workspace_id: uuid.UUID | None = None,
 ) -> RouterOrdering | None:
     """Ask the policy's router to rank its candidates for this request.
 
@@ -136,6 +138,7 @@ async def decide_ordering(
         user_id=user_id or "",
         default_model=default_model,
         candidate_pool=pool,
+        workspace_id=workspace_id,
         task_signal=signal.task_signal,
         trace_signal=signal.trace_signal,
         trace_anchor=signal.trace_anchor,

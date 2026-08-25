@@ -14,11 +14,13 @@ sub-floor confidence, tool-bearing request, unpriced candidate), and a decline
 serves the policy's default target, so a learned policy is never worse than the
 plain failover policy it was written from.
 
-The store is a linear cosine scan over the user's records held in the gateway DB
+The store is a linear cosine scan over the records the requesting user has in the
+requesting workspace, held in the gateway DB
 (:class:`gateway.models.entities.RoutingMemory`). That holds into the low
-thousands of records per user (the ``router_max_records_per_user`` cap); pgvector
-or an ANN index is the next step past that, and the reasoning is in
-`docs/routing-scaling.md`. Records carry an ``embedding_model`` tag so changing
+thousands of records per partition (the ``router_max_records_per_user`` cap,
+which bounds one user's records in one workspace, since that is what a decision
+loads); pgvector or an ANN index is the next step past that, and the reasoning is
+in `docs/routing-scaling.md`. Records carry an ``embedding_model`` tag so changing
 the embedding model invalidates stale vectors rather than mixing incomparable
 spaces.
 
@@ -33,6 +35,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import uuid
 from collections import OrderedDict
 from typing import TYPE_CHECKING
 
@@ -142,7 +145,7 @@ class KnnRoutingMemory:
             logger.warning("Router embedding failed (%s); serving the policy default", type(exc).__name__)
             return RoutingDecision.decline(f"embedding error ({type(exc).__name__})")
 
-        records = await self._load_records(ctx.user_id, ctx.task_id)
+        records = await self._load_records(ctx.user_id, ctx.task_id, ctx.workspace_id)
         if len(records) < self.seed_count:
             partition = f" and task '{ctx.task_id}'" if ctx.task_id else ""
             return RoutingDecision.decline(
@@ -173,6 +176,7 @@ class KnnRoutingMemory:
         self,
         *,
         user_id: str,
+        workspace_id: uuid.UUID,
         prompt: str,
         scores: dict[str, float],
         task_id: str | None,
@@ -195,6 +199,7 @@ class KnnRoutingMemory:
             db.add(
                 RoutingMemory(
                     user_id=user_id,
+                    workspace_id=workspace_id,
                     embedding_model=self.embedding_model,
                     embedding=embedding,
                     qualities={model: float(score) for model, score in scores.items()},
@@ -207,7 +212,7 @@ class KnnRoutingMemory:
             except SQLAlchemyError:
                 await db.rollback()
                 raise
-        await self._evict_if_needed(user_id)
+        await self._evict_if_needed(user_id, workspace_id)
         return 1
 
     # -- scoring -----------------------------------------------------------
@@ -347,23 +352,32 @@ class KnnRoutingMemory:
 
     # -- storage / retrieval ------------------------------------------------
 
-    async def _load_records(self, user_id: str, task_id: str | None) -> list[RoutingMemory]:
-        """Load a user's records for the current embedding model.
+    async def _load_records(
+        self, user_id: str, task_id: str | None, workspace_id: uuid.UUID | None = None
+    ) -> list[RoutingMemory]:
+        """Load a user's records for the current embedding model, in one workspace.
 
         A ``task_id`` is a hard partition: only records carrying that label load,
         so the cold-start gate counts that partition alone and a request stays on
         the default target until its own task is warm. Records from other tasks
         never influence it. With no task, every record the user has is in play.
+
+        ``workspace_id`` is a hard partition too: examples labeled in one
+        workspace never steer another's traffic, even for a user who holds keys in
+        both. Omitted only where there is no request to route (no backend is asked
+        to rank there), which reads every workspace the user has records in.
         """
         async with create_session() as db:
             stmt = select(RoutingMemory).where(
                 RoutingMemory.user_id == user_id,
                 RoutingMemory.embedding_model == self.embedding_model,
             )
+            if workspace_id is not None:
+                stmt = stmt.where(RoutingMemory.workspace_id == workspace_id)
             if task_id is not None:
                 stmt = stmt.where(RoutingMemory.task_id == task_id)
             # Newest first, and bounded. Eviction is enforced lazily on write, and
-            # only for the user's whole set rather than per partition, so nothing
+            # only for the (user, workspace) set rather than per task, so nothing
             # else stops this select from growing without limit: a request would
             # then load and cosine-score every row it finds. The cap is what the
             # operator already configured as "how many records this router uses",
@@ -376,15 +390,21 @@ class KnnRoutingMemory:
         sims.sort(key=lambda pair: pair[0], reverse=True)
         return sims[: self.k]
 
-    async def _evict_if_needed(self, user_id: str) -> None:
-        """Keep at most ``max_records`` of the newest records per user."""
+    async def _evict_if_needed(self, user_id: str, workspace_id: uuid.UUID) -> None:
+        """Keep at most ``max_records`` of the newest records per user and workspace.
+
+        Applied within the partition the router reads, not across every workspace
+        the user has records in. ``router_max_records_per_user`` bounds what one
+        decision loads and scores, and a decision only ever loads one workspace,
+        so evicting across them would have a busy workspace delete labels another
+        one is still routing on.
+        """
         if self.max_records <= 0:
             return
+        partition = (RoutingMemory.user_id == user_id, RoutingMemory.workspace_id == workspace_id)
         async with create_session() as db:
             count = (
-                await db.execute(
-                    select(func.count()).select_from(RoutingMemory).where(RoutingMemory.user_id == user_id)
-                )
+                await db.execute(select(func.count()).select_from(RoutingMemory).where(*partition))
             ).scalar_one()
             if count <= self.max_records:
                 return
@@ -395,7 +415,7 @@ class KnnRoutingMemory:
             cutoff = (
                 await db.execute(
                     select(RoutingMemory.created_at)
-                    .where(RoutingMemory.user_id == user_id)
+                    .where(*partition)
                     .order_by(RoutingMemory.created_at.desc())
                     .offset(self.max_records - 1)
                     .limit(1)
@@ -408,7 +428,7 @@ class KnnRoutingMemory:
             # evicted; the count can sit slightly above the cap until the next write.
             await db.execute(
                 delete(RoutingMemory).where(
-                    RoutingMemory.user_id == user_id,
+                    *partition,
                     RoutingMemory.created_at < cutoff,
                 )
             )
