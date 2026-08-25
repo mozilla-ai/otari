@@ -64,9 +64,24 @@ _CREDENTIAL_COLUMNS = {
 _TOKEN_INDEX = "ix_user_email_verification_token"
 
 _ALIAS_WIDEN_REVISION = "c1e4a7b9d3f6"
-_BEFORE_ALIAS_WIDEN = "c7a1e4d8f3b6"
 _SURVIVALS_REVISION = "d2f5b8c0e4a7"
 _SURVIVAL_TABLES = ("routing_memory", "router_preferences", "file_objects")
+
+
+def _parent_of(revision: str) -> str:
+    """The revision immediately below ``revision``, read from the chain itself.
+
+    Deliberately derived rather than written down. This pair of revisions sits at
+    the end of the chain, so every migration that lands on ``main`` while the
+    branch is open re-points the lower one's ``down_revision``, and a hardcoded
+    constant here is a second place to remember. Reading it back means the
+    downgrade targets below follow the re-point on their own, and the test keeps
+    asserting what it means ("roll back to just before this revision") rather
+    than a literal that goes stale.
+    """
+    parent = ScriptDirectory.from_config(_alembic_config("sqlite://")).get_revision(revision).down_revision
+    assert isinstance(parent, str), f"{revision} should have exactly one parent, got {parent!r}"
+    return parent
 
 _TOKEN_REVISION = "db8fbf901ee0"
 _BEFORE_TOKENS = "c8e2a4f6b0d3"
@@ -783,7 +798,7 @@ def test_the_widening_round_trips(sqlite_at_head: tuple[Config, Engine]) -> None
     """
     config, engine = sqlite_at_head
 
-    command.downgrade(config, _BEFORE_ALIAS_WIDEN)
+    command.downgrade(config, _parent_of(_ALIAS_WIDEN_REVISION))
 
     inspector = inspect(engine)
     for table in ("model_aliases", "routing_policies"):
