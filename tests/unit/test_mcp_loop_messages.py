@@ -6,6 +6,7 @@ in Anthropic content-block / streaming-event shape.
 
 from __future__ import annotations
 
+import asyncio
 from collections.abc import AsyncIterator
 from typing import Any, cast
 
@@ -29,6 +30,7 @@ from any_llm.types.messages import (
 )
 
 from gateway.services import mcp_loop_messages as messages_loop_module
+from gateway.services.mcp_client import MCPToolCallOutcome
 from gateway.services.mcp_loop_messages import (
     MaxToolIterationsExceeded,
     anthropic_tool_loop,
@@ -76,6 +78,26 @@ class _FakePool:
         if name not in self._results:
             return f"ran {name}"
         return self._results[name]
+
+
+class _ActivityPool(_FakePool):
+    """MCP pool stand-in with server metadata and controllable execution."""
+
+    def __init__(self, *, content: str = "ok", is_error: bool = False) -> None:
+        super().__init__(["fetch_url"])
+        self.content = content
+        self.is_error = is_error
+        self.started = asyncio.Event()
+        self.release = asyncio.Event()
+
+    def server_name_for_tool(self, name: str) -> str | None:
+        return "fixture-server" if self.owns_tool(name) else None
+
+    async def call_tool_outcome(self, name: str, arguments: dict[str, Any]) -> MCPToolCallOutcome:
+        self.calls.append((name, arguments))
+        self.started.set()
+        await self.release.wait()
+        return MCPToolCallOutcome(content=self.content, is_error=self.is_error)
 
 
 def _text_block(text: str) -> TextBlock:
@@ -235,9 +257,7 @@ async def test_loop_executes_owned_tool_and_completes(monkeypatch: pytest.Monkey
 async def test_loop_replays_compaction_block_with_context_management(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    context_management = {
-        "edits": [{"type": "compact_20260112", "trigger": {"type": "input_tokens", "value": 50_000}}]
-    }
+    context_management = {"edits": [{"type": "compact_20260112", "trigger": {"type": "input_tokens", "value": 50_000}}]}
     responses = iter(
         [
             MessageResponse.model_validate(
@@ -772,12 +792,146 @@ async def test_stream_runs_owned_tool_and_continues(monkeypatch: pytest.MonkeyPa
 
 
 @pytest.mark.asyncio
+@pytest.mark.parametrize(("content", "is_error"), [("fixture result", False), ("fixture error", True)])
+async def test_stream_emits_live_mcp_activity_around_execution(
+    monkeypatch: pytest.MonkeyPatch,
+    content: str,
+    is_error: bool,
+) -> None:
+    """The MCP start reaches the client before execution, then a paired completion follows."""
+    iter_streams = iter(
+        [
+            _async_iter(
+                _msg_start_event(),
+                _tool_use_block_start(0, "tu_internal", "fetch_url"),
+                _input_json_delta(0, '{"url": "https://example.test"}'),
+                _content_block_stop(0),
+                _msg_delta_event("tool_use"),
+                _msg_stop_event(),
+            ),
+            _async_iter(
+                _msg_start_event(),
+                _text_block_start(0),
+                _text_delta(0, "done"),
+                _content_block_stop(0),
+                _msg_delta_event("end_turn"),
+                _msg_stop_event(),
+            ),
+        ]
+    )
+
+    async def fake_amessages(**kwargs: Any) -> AsyncIterator[MessageStreamEvent]:
+        return next(iter_streams)
+
+    monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
+    pool = _ActivityPool(content=content, is_error=is_error)
+    stream = anthropic_tool_loop_stream(
+        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+        pool=cast(Any, pool),
+        max_iterations=5,
+    )
+
+    assert (await anext(stream)).type == "message_start"
+    activity_start = await anext(stream)
+    assert activity_start.type == "content_block_start"
+    use = cast(Any, activity_start).content_block
+    assert use.type == "mcp_tool_use"
+    assert use.id.startswith("otari_mcptoolu_")
+    assert use.name == "fetch_url"
+    assert use.server_name == "fixture-server"
+    assert use.input == {"url": "https://example.test"}
+    assert not pool.started.is_set(), "execution must not precede the client-visible start"
+
+    assert (await anext(stream)).type == "content_block_stop"
+    pending_completion = asyncio.create_task(anext(stream))
+    await asyncio.wait_for(pool.started.wait(), timeout=1)
+    assert not pending_completion.done(), "the completion must wait for the MCP call"
+    pool.release.set()
+
+    completion_start = await pending_completion
+    assert completion_start.type == "content_block_start"
+    result = cast(Any, completion_start).content_block
+    assert result.type == "mcp_tool_result"
+    assert result.tool_use_id == use.id
+    assert result.content == content
+    assert result.is_error is is_error
+    assert cast(Any, completion_start).index == cast(Any, activity_start).index + 1
+
+    remaining = [event async for event in stream]
+    assert [event.type for event in remaining] == [
+        "content_block_stop",
+        "content_block_start",
+        "content_block_delta",
+        "content_block_stop",
+        "message_delta",
+        "message_stop",
+    ]
+    assert cast(Any, remaining[1]).index == cast(Any, completion_start).index + 1
+    assert pool.calls == [("fetch_url", {"url": "https://example.test"})]
+
+
+@pytest.mark.asyncio
+async def test_stream_mcp_exception_emits_error_without_logging_detail(
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    iter_streams = iter(
+        [
+            _async_iter(
+                _msg_start_event(),
+                _tool_use_block_start(0, "tu_internal", "fetch_url"),
+                _input_json_delta(0, '{"secret_input": "do-not-log"}'),
+                _content_block_stop(0),
+                _msg_delta_event("tool_use"),
+                _msg_stop_event(),
+            ),
+            _async_iter(
+                _msg_start_event(),
+                _text_block_start(0),
+                _text_delta(0, "recovered"),
+                _content_block_stop(0),
+                _msg_delta_event("end_turn"),
+                _msg_stop_event(),
+            ),
+        ]
+    )
+
+    async def fake_amessages(**kwargs: Any) -> AsyncIterator[MessageStreamEvent]:
+        return next(iter_streams)
+
+    class FailingActivityPool(_ActivityPool):
+        async def call_tool_outcome(self, name: str, arguments: dict[str, Any]) -> MCPToolCallOutcome:
+            self.calls.append((name, arguments))
+            raise RuntimeError("credential-detail-do-not-log")
+
+    monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
+    pool = FailingActivityPool()
+    events = [
+        event
+        async for event in anthropic_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+            pool=cast(Any, pool),
+            max_iterations=5,
+        )
+    ]
+
+    result = next(
+        cast(Any, event).content_block
+        for event in events
+        if event.type == "content_block_start"
+        and getattr(cast(Any, event).content_block, "type", None) == "mcp_tool_result"
+    )
+    assert result.is_error is True
+    assert result.content == "[tool error] MCP tool execution failed"
+    assert "credential-detail-do-not-log" not in caplog.text
+    assert "do-not-log" not in caplog.text
+
+
+@pytest.mark.asyncio
 async def test_stream_replays_compaction_content_when_tool_loop_continues(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    context_management = {
-        "edits": [{"type": "compact_20260112", "trigger": {"type": "input_tokens", "value": 50_000}}]
-    }
+    context_management = {"edits": [{"type": "compact_20260112", "trigger": {"type": "input_tokens", "value": 50_000}}]}
     iter_streams = iter(
         [
             _async_iter(
@@ -1030,9 +1184,9 @@ async def test_stream_mixed_batch_hides_and_still_runs_the_gateway_tool(
 ) -> None:
     """A mixed batch shows only the caller's tool, and still runs the gateway's.
 
-    The loop exits so the caller can dispatch its own tool. The gateway's block was
-    withheld from the stream (the client can never be sent its result), so it has to
-    be executed anyway or the model's search silently vanishes.
+    The loop exits so the caller can dispatch its own tool. The gateway's ordinary
+    tool block is withheld, but the client receives the server-owned MCP activity
+    pair while Otari executes it.
     """
     iter_streams = iter(
         [
@@ -1055,7 +1209,8 @@ async def test_stream_mixed_batch_hides_and_still_runs_the_gateway_tool(
 
     monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
 
-    pool = _FakePool(tool_names=["fetch_url"], results={"fetch_url": "ok"})
+    pool = _ActivityPool(content="ok")
+    pool.release.set()
     events = [
         event
         async for event in anthropic_tool_loop_stream(
@@ -1071,9 +1226,14 @@ async def test_stream_mixed_batch_hides_and_still_runs_the_gateway_tool(
         if getattr(getattr(e, "content_block", None), "type", None) == "tool_use"
     ]
     assert shown == ["user_tool"]
-    # Renumbered so the caller's block is index 0, with no hole where the hidden one was.
+    # Renumbered so the caller's block is index 0, with no hole where the hidden
+    # raw call was. Server-owned MCP activity follows at indices 1 and 2.
     starts = [getattr(e, "index") for e in events if e.type == "content_block_start"]
-    assert starts == [0]
+    assert starts == [0, 1, 2]
+    activity_types = [
+        getattr(getattr(e, "content_block", None), "type", None) for e in events if e.type == "content_block_start"
+    ]
+    assert activity_types == ["tool_use", "mcp_tool_use", "mcp_tool_result"]
     assert pool.calls == [("fetch_url", {"u": "x"})]
 
 

@@ -456,9 +456,14 @@ class _ChatToolLoopStrategy:
         # the foreign calls" contract the non-streaming loop applies.
         return has_foreign or not state.mcp_calls
 
-    async def finalize_exit(self, state: _ChatStreamState, pool: ToolBackend) -> None:
+    async def finalize_exit(
+        self, state: _ChatStreamState, pool: ToolBackend, acc: None
+    ) -> AsyncIterator[ChatCompletionChunk]:
+        del acc
         if state.mcp_calls:
             await _execute_mcp_calls(pool, state.mcp_calls)
+        return
+        yield  # pragma: no cover - makes this a no-event async iterator
 
     def terminal_events(self, state: _ChatStreamState, acc: None) -> list[ChatCompletionChunk]:
         return [state.pending_terminal] if state.pending_terminal is not None else []
@@ -476,11 +481,15 @@ class _ChatToolLoopStrategy:
         transcript: list[Any],
         state: _ChatStreamState,
         pool: ToolBackend,
-    ) -> None:
+        acc: None,
+    ) -> AsyncIterator[ChatCompletionChunk]:
+        del acc
         # All-MCP: the terminal chunk was silently dropped so the client
         # doesn't think this iteration's response was the final answer.
         transcript.append({"role": "assistant", "tool_calls": state.mcp_calls})
         transcript.extend(await _execute_mcp_calls(pool, state.mcp_calls))
+        return
+        yield  # pragma: no cover - makes this a no-event async iterator
 
 
 _CHAT_STRATEGY = _ChatToolLoopStrategy()

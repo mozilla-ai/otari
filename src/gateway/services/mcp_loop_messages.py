@@ -21,6 +21,7 @@ from contextlib import aclosing
 from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
 
 from anthropic.types import ServerToolUseBlock, WebSearchResultBlock, WebSearchToolResultBlock
+from anthropic.types.beta import BetaMCPToolResultBlock, BetaMCPToolUseBlock
 from any_llm import amessages
 from any_llm.types.messages import (
     BetaContextManagementResponse,
@@ -37,6 +38,7 @@ from gateway.services.mcp_loop import (
     ToolBackend,
 )
 from gateway.services.tool_format import openai_to_anthropic_tools
+from gateway.services.tool_usage import is_tool_error
 from gateway.services.web_search_backend import WEB_SEARCH_TOOL_NAME
 
 if TYPE_CHECKING:
@@ -51,6 +53,7 @@ __all__ = [
     "DEFAULT_MAX_TOOL_ITERATIONS",
     "MAX_TOOL_ITERATIONS_CAP",
     "MaxToolIterationsExceeded",
+    "MCP_ACTIVITY_ID_PREFIX",
     "anthropic_tool_loop",
     "anthropic_tool_loop_stream",
 ]
@@ -61,6 +64,12 @@ __all__ = [
 # value is whatever a search-API-fronting adapter forwarded, so one overlong or
 # multiline entry shouldn't be what makes a citations panel unreadable.
 _PAGE_AGE_MAX_CHARS = 128
+
+# Provenance marker for MCP activity blocks minted by this gateway. Clients may
+# echo the accumulated assistant message on their next request; the Messages
+# route uses this prefix to remove only our synthetic pair while preserving
+# provider-native MCP blocks.
+MCP_ACTIVITY_ID_PREFIX = "otari_mcptoolu_"
 
 
 def _native_web_search_blocks(query: str, results: list[dict[str, Any]]) -> list[Any]:
@@ -280,37 +289,6 @@ def _reindexed(event: Any, visible_index: int) -> Any:
     return event.model_copy(update={"index": visible_index})
 
 
-async def _execute_stream_owned(
-    state: "_MessagesStreamState",
-    pool: ToolBackend,
-    *,
-    native_blocks: list[Any] | None = None,
-) -> list[dict[str, Any]]:
-    """Run the stream's gateway-owned tool_use blocks, returning tool_result blocks.
-
-    Shared by the continue path (which feeds the results back to the model) and the
-    mixed-batch exit (which runs them for their side effects only), so both parse the
-    buffered JSON arguments the same way. ``native_blocks`` collects per-call native
-    server-tool blocks exactly as in :func:`_execute_tool_uses`.
-    """
-    results: list[dict[str, Any]] = []
-    for spec in state.owned_specs:
-        try:
-            parsed_input = json.loads(state.tool_use_json_bufs.get(spec["index"], "") or "{}")
-        except json.JSONDecodeError:
-            parsed_input = {}
-        try:
-            text = await pool.call_tool(spec["name"], parsed_input)
-        except Exception as exc:  # noqa: BLE001 (same tool-error-as-message idiom as the non-stream loop)
-            logger.warning("MCP tool %s execution failed: %s", spec["name"], exc)
-            text = f"[tool error] {exc}"
-        else:
-            if native_blocks is not None:
-                native_blocks.extend(_native_blocks_for_call(pool, spec["name"], parsed_input))
-        results.append({"type": "tool_result", "tool_use_id": spec["id"], "content": text})
-    return results
-
-
 class _MessagesStreamState:
     """Per-iteration bookkeeping for the Anthropic streaming loop.
 
@@ -331,14 +309,116 @@ class _MessagesStreamState:
         self.stop_reason: str | None = None
         self.deferred_terminal: list[MessageStreamEvent] = []
         self.owned_specs: list[dict[str, Any]] = []
-        # Blocks the gateway runs itself. Their events are swallowed rather than
-        # forwarded: a client shown a ``tool_use`` for ``web_search`` can never be
-        # sent the matching ``tool_result``, because the gateway consumes it.
+        # Blocks the gateway runs itself. Their caller-owned ``tool_use`` events are
+        # swallowed because the gateway consumes them. MCP calls may instead get a
+        # server-owned ``mcp_tool_use`` / ``mcp_tool_result`` representation.
         self.hidden_indices: set[int] = set()
         # Upstream block index -> the index the client sees. Each iteration's
         # blocks start again at 0 upstream, but the client is being shown one
         # single message, so forwarded blocks are renumbered.
         self.visible_index: dict[int, int] = {}
+
+
+def _parsed_stream_input(state: _MessagesStreamState, spec: dict[str, Any]) -> dict[str, Any]:
+    """Parse one buffered tool input, falling back to the loop's historical empty object."""
+    try:
+        value = json.loads(state.tool_use_json_bufs.get(spec["index"], "") or "{}")
+    except json.JSONDecodeError:
+        return {}
+    return value if isinstance(value, dict) else {}
+
+
+def _mcp_server_name(pool: ToolBackend, tool_name: str) -> str | None:
+    """Return MCP ownership metadata when ``pool`` is an MCP client pool."""
+    resolver = getattr(pool, "server_name_for_tool", None)
+    if not callable(resolver):
+        return None
+    value = resolver(tool_name)
+    return value if isinstance(value, str) and value else None
+
+
+async def _call_stream_tool(
+    pool: ToolBackend,
+    name: str,
+    arguments: dict[str, Any],
+    *,
+    preserve_mcp_error: bool,
+) -> tuple[str, bool, bool]:
+    """Return ``(content, is_error, raised)`` for one gateway-owned call."""
+    try:
+        call_outcome = getattr(pool, "call_tool_outcome", None)
+        if preserve_mcp_error and callable(call_outcome):
+            outcome = await call_outcome(name, arguments)
+            return str(outcome.content), bool(outcome.is_error), False
+        text = await pool.call_tool(name, arguments)
+        return text, is_tool_error(text), False
+    except Exception as exc:  # noqa: BLE001 - recoverable tool failure is model input
+        # Do not put exception details in logs: transports may include URLs or
+        # headers in them. The internal model result keeps the detail for recovery;
+        # the client-facing activity event receives a fixed error below.
+        logger.warning("Gateway tool %s execution failed", name)
+        return f"[tool error] {exc}", True, True
+
+
+def _content_block_events(block: Any, acc: _MessagesStreamAccumulator) -> list[Any]:
+    """A complete synthetic content block at the next client-visible index."""
+    index = acc["next_index"]
+    acc["next_index"] += 1
+    return [
+        ContentBlockStartEvent(content_block=block, index=index, type="content_block_start"),
+        ContentBlockStopEvent(index=index, type="content_block_stop"),
+    ]
+
+
+async def _execute_stream_owned_events(
+    state: _MessagesStreamState,
+    pool: ToolBackend,
+    acc: _MessagesStreamAccumulator,
+    results: list[dict[str, Any]],
+    *,
+    native_blocks: list[Any] | None = None,
+) -> AsyncGenerator[MessageStreamEvent, None]:
+    """Execute owned calls and yield live MCP start/completion representations."""
+    for spec in state.owned_specs:
+        name = str(spec["name"])
+        parsed_input = _parsed_stream_input(state, spec)
+        server_name = _mcp_server_name(pool, name)
+        activity_id: str | None = None
+        if server_name is not None:
+            activity_id = f"{MCP_ACTIVITY_ID_PREFIX}{uuid.uuid4().hex}"
+            start = BetaMCPToolUseBlock(
+                type="mcp_tool_use",
+                id=activity_id,
+                name=name,
+                server_name=server_name,
+                input=parsed_input,
+            )
+            for event in _content_block_events(start, acc):
+                yield event
+
+        text, is_error, raised = await _call_stream_tool(
+            pool,
+            name,
+            parsed_input,
+            preserve_mcp_error=server_name is not None,
+        )
+        if not raised and native_blocks is not None:
+            native_blocks.extend(_native_blocks_for_call(pool, name, parsed_input))
+        results.append({"type": "tool_result", "tool_use_id": spec["id"], "content": text})
+
+        if activity_id is not None:
+            # A transport exception may embed URLs or headers. Keep its detail in
+            # the model-facing internal result for recovery, but expose only the
+            # truthful failure state and a fixed message to the streaming client.
+            activity_content = "[tool error] MCP tool execution failed" if raised else text
+            completion = BetaMCPToolResultBlock(
+                type="mcp_tool_result",
+                tool_use_id=activity_id,
+                content=activity_content,
+                is_error=is_error,
+            )
+            for event in _content_block_events(completion, acc):
+                yield event
 
 
 class _MessagesToolLoopStrategy:
@@ -580,7 +660,12 @@ class _MessagesToolLoopStrategy:
         # dropped iterations).
         return not owned_specs or has_foreign or state.stop_reason != "tool_use"
 
-    async def finalize_exit(self, state: _MessagesStreamState, pool: ToolBackend) -> None:
+    async def finalize_exit(
+        self,
+        state: _MessagesStreamState,
+        pool: ToolBackend,
+        acc: _MessagesStreamAccumulator,
+    ) -> AsyncIterator[MessageStreamEvent]:
         # Mixed batch: the gateway's tool_use blocks were withheld from the stream, so
         # run them for their side effects rather than dropping the model's request.
         # Matches the non-streaming loop, which executes the owned subset and filters
@@ -588,8 +673,17 @@ class _MessagesToolLoopStrategy:
         if state.stop_reason == "tool_use" and state.owned_specs:
             # Collected, not discarded: the search ran, so a native client is owed the
             # pair describing it even though this round exits for the caller to
-            # dispatch its own tool. ``terminal_events`` emits them.
-            await _execute_stream_owned(state, pool, native_blocks=self._native_sink(state.native_blocks))
+            # dispatch its own tool. ``terminal_events`` emits them. MCP activity is
+            # yielded around the call itself so the start signal is truthful.
+            discarded: list[dict[str, Any]] = []
+            async for event in _execute_stream_owned_events(
+                state,
+                pool,
+                acc,
+                discarded,
+                native_blocks=self._native_sink(state.native_blocks),
+            ):
+                yield event
 
     def terminal_events(
         self,
@@ -626,22 +720,17 @@ class _MessagesToolLoopStrategy:
         appends the start event's block wholesale and only overwrites ``input`` when a
         delta actually arrives, so a start/stop pair preserves the query.
         """
-        events: list[Any] = []
-        for block in blocks:
-            index = acc["next_index"]
-            acc["next_index"] += 1
-            events.append(ContentBlockStartEvent(content_block=block, index=index, type="content_block_start"))
-            events.append(ContentBlockStopEvent(index=index, type="content_block_stop"))
-        return events
+        return [event for block in blocks for event in _content_block_events(block, acc)]
 
-    def synthetic_events(self, state: _MessagesStreamState, acc: _MessagesStreamAccumulator) -> list[Any]:
+    def synthetic_events(
+        self, state: _MessagesStreamState, acc: _MessagesStreamAccumulator
+    ) -> list[Any]:
         """Announce this iteration's gateway-run searches as native content blocks.
 
-        The model's own ``tool_use`` events were swallowed (the client can never be
-        sent the matching ``tool_result``), so a ``server_tool_use`` /
-        ``web_search_tool_result`` pair takes their place for a caller that declared
-        the tool natively. Empty for every other caller, which is what keeps the
-        gateway's calls invisible on the wire as they have always been.
+        The model's own ``tool_use`` events were swallowed, so a
+        ``server_tool_use`` / ``web_search_tool_result`` pair takes their place for a
+        caller that declared the tool natively. MCP activity is yielded directly
+        around execution and therefore does not pass through this deferred hook.
 
         Each block gets a ``content_block_start`` carrying the complete block plus a
         ``content_block_stop``, and no ``input_json_delta``: the SDK accumulator
@@ -656,7 +745,8 @@ class _MessagesToolLoopStrategy:
         transcript: list[Any],
         state: _MessagesStreamState,
         pool: ToolBackend,
-    ) -> None:
+        acc: _MessagesStreamAccumulator,
+    ) -> AsyncIterator[MessageStreamEvent]:
         # Assistant message for the next round; preserve original block
         # ordering. tool_use blocks pick up the parsed input from their
         # JSON buffer.
@@ -664,18 +754,20 @@ class _MessagesToolLoopStrategy:
         for idx in sorted(state.blocks_by_index):
             block_dict = state.blocks_by_index[idx]
             if block_dict.get("type") == "tool_use":
-                try:
-                    parsed_input = json.loads(state.tool_use_json_bufs.get(idx, "") or "{}")
-                except json.JSONDecodeError:
-                    parsed_input = {}
-                block_dict = {**block_dict, "input": parsed_input}
+                spec = {"index": idx}
+                block_dict = {**block_dict, "input": _parsed_stream_input(state, spec)}
             assistant_content.append(block_dict)
 
-        tool_results = await _execute_stream_owned(
-            state, pool, native_blocks=self._native_sink(state.native_blocks)
-        )
-
         transcript.append({"role": "assistant", "content": assistant_content})
+        tool_results: list[dict[str, Any]] = []
+        async for event in _execute_stream_owned_events(
+            state,
+            pool,
+            acc,
+            tool_results,
+            native_blocks=self._native_sink(state.native_blocks),
+        ):
+            yield event
         transcript.append({"role": "user", "content": tool_results})
 
 
@@ -750,14 +842,14 @@ async def anthropic_tool_loop_stream(
       2. Track tool_use content blocks by ``index`` from ``content_block_start``
          (when ``content_block.type == "tool_use"``). Buffer their
          ``input_json_delta`` chunks until ``content_block_stop``.
-      3. Yield every event as it arrives (including the tool_use events, so the
-         client sees the model's tool intent even mid-loop). Defer
-         ``message_delta`` and ``message_stop`` until we know whether the loop
-         will continue.
-      4. On ``message_stop``: if any buffered tool_use blocks exist AND all
-         owned by the pool, execute them, append messages, drop the terminal
-         events, and continue. If foreign blocks exist OR no tool_use blocks
-         were buffered, forward the terminal events and exit.
+      3. Forward caller-owned blocks, but hide gateway-owned ``tool_use`` events.
+         Defer ``message_delta`` and ``message_stop`` until the loop knows whether
+         the logical message will continue.
+      4. On ``message_stop``: if all buffered tool uses are gateway-owned, execute
+         them, append the hidden call and result to the internal transcript, and
+         continue. MCP execution is represented live as server-owned
+         ``mcp_tool_use`` / ``mcp_tool_result`` blocks. If foreign blocks exist or
+         no owned blocks were buffered, forward the terminal events and exit.
 
     Re-emitting a synthetic ``message_start`` for the next iteration is not
     needed because ``amessages`` produces a fresh stream; the next call's

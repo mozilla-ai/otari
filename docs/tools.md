@@ -73,6 +73,9 @@ Responses and Messages can expose native server-tool result blocks when their
 wire format expects them. Chat Completions returns only the final assistant
 message. Calls for tools the client must execute are preserved.
 
+For gateway-run MCP activity in Messages streams, see
+[Messages streaming activity](mcp.md#messages-streaming-activity).
+
 ## Code execution
 
 Start the bundled sandbox:

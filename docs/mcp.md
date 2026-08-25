@@ -24,6 +24,24 @@ When the model emits an MCP tool call, Otari:
 The loop stops when the model returns a normal assistant response or hits
 `max_tool_iterations`.
 
+## Messages streaming activity
+
+A streaming `/v1/messages` client receives live server-owned activity around
+each gateway-run MCP call. Otari emits a `content_block_start` /
+`content_block_stop` pair containing `mcp_tool_use` immediately before the call,
+then another pair containing the matching `mcp_tool_result` immediately after it.
+The blocks carry an opaque call id, tool and server names, parsed input, result
+content, and an explicit `is_error` value.
+
+These blocks report execution; they do not transfer it. Otari still owns the MCP
+call, feeds the result into the internal model loop, and returns one logical
+Messages stream. The server URL, authorization token, and headers are never
+included. If a client echoes the accumulated assistant message on a later turn,
+Otari removes its activity pairs before forwarding the history upstream.
+
+Chat Completions and Responses streams continue to hide gateway-run MCP activity
+because those formats have no equivalent server-owned MCP vocabulary.
+
 ## Inline MCP servers
 
 ```json

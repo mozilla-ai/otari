@@ -1,8 +1,8 @@
 """Inbound stripping of the server-tool blocks the gateway mints itself.
 
 Continuing an Anthropic conversation means echoing the previous assistant turn
-back. A gateway-minted ``web_search_tool_result`` carries an
-``encrypted_content`` the gateway cannot sign, so it must not reach a provider.
+back. Gateway-minted web-search and MCP activity blocks describe work Otari
+already consumed, so they must not reach the provider on the next request.
 Mirrors ``responses._strip_gateway_minted_items``.
 """
 
@@ -13,8 +13,12 @@ from typing import Any
 import pytest
 
 from gateway.api.routes._pipeline import ToolContext
-from gateway.api.routes.messages import _strip_gateway_minted_blocks
+from gateway.api.routes.messages import (
+    _has_gateway_minted_mcp_blocks,
+    _strip_gateway_minted_blocks,
+)
 from gateway.core.config import GatewayConfig
+from gateway.services.mcp_loop_messages import MCP_ACTIVITY_ID_PREFIX
 
 
 def test_strips_the_minted_pair_but_keeps_the_text() -> None:
@@ -164,6 +168,71 @@ def _gateway_pair(tool_use_id: str = "srvtoolu_gw") -> list[dict[str, Any]]:
     ]
 
 
+def _mcp_pair(tool_use_id: str) -> list[dict[str, Any]]:
+    return [
+        {
+            "type": "mcp_tool_use",
+            "id": tool_use_id,
+            "name": "lookup",
+            "server_name": "fixture",
+            "input": {"id": 755},
+        },
+        {
+            "type": "mcp_tool_result",
+            "tool_use_id": tool_use_id,
+            "content": "result",
+            "is_error": False,
+        },
+    ]
+
+
+def test_gateway_mcp_activity_pair_is_stripped() -> None:
+    gateway_pair = _mcp_pair(f"{MCP_ACTIVITY_ID_PREFIX}abc")
+    messages: list[dict[str, Any]] = [
+        {
+            "role": "assistant",
+            "content": [*gateway_pair, {"type": "text", "text": "answer"}],
+        }
+    ]
+
+    kept = _strip_gateway_minted_blocks(messages)[0]["content"]
+
+    assert _has_gateway_minted_mcp_blocks(messages) is True
+    assert kept == [{"type": "text", "text": "answer"}]
+
+
+def test_early_mcp_strip_preserves_web_search_blocks() -> None:
+    gateway_mcp_pair = _mcp_pair(f"{MCP_ACTIVITY_ID_PREFIX}abc")
+    web_pair = _gateway_pair()
+    messages: list[dict[str, Any]] = [
+        {
+            "role": "assistant",
+            "content": [*web_pair, *gateway_mcp_pair, {"type": "text", "text": "answer"}],
+        }
+    ]
+
+    kept = _strip_gateway_minted_blocks(messages, strip_web_search=False)[0]["content"]
+
+    assert kept == [*web_pair, {"type": "text", "text": "answer"}]
+
+
+def test_provider_mcp_activity_pair_survives() -> None:
+    messages: list[dict[str, Any]] = [{"role": "assistant", "content": _mcp_pair("mcptoolu_provider")}]
+
+    assert _has_gateway_minted_mcp_blocks(messages) is False
+    assert _strip_gateway_minted_blocks(messages) == messages
+
+
+def test_mcp_result_is_removed_only_with_its_gateway_use() -> None:
+    provider_pair = _mcp_pair("mcptoolu_provider")
+    gateway_pair = _mcp_pair(f"{MCP_ACTIVITY_ID_PREFIX}abc")
+    messages: list[dict[str, Any]] = [{"role": "assistant", "content": [*provider_pair, *gateway_pair]}]
+
+    kept = _strip_gateway_minted_blocks(messages)[0]["content"]
+
+    assert kept == provider_pair
+
+
 def test_provider_signed_blocks_survive() -> None:
     """A search Anthropic ran and signed must round-trip untouched, even with
     interception on: stripping it would break the citations chain Anthropic owns."""
@@ -192,9 +261,7 @@ def test_gateway_pair_is_stripped_and_provider_pair_kept_in_one_turn() -> None:
 def test_a_providers_server_tool_use_is_never_orphaned() -> None:
     """The server_tool_use dropped is the one our result answers, matched by id, so a
     provider's pair is never split into an orphan the API would reject."""
-    messages: list[dict[str, Any]] = [
-        {"role": "assistant", "content": [*_provider_pair(), *_gateway_pair()]}
-    ]
+    messages: list[dict[str, Any]] = [{"role": "assistant", "content": [*_provider_pair(), *_gateway_pair()]}]
 
     kept = _strip_gateway_minted_blocks(messages)[0]["content"]
 

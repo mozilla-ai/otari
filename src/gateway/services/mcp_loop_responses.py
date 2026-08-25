@@ -560,12 +560,20 @@ class _ResponsesToolLoopStrategy:
         # trade-off as the Anthropic streaming variant.
         return has_foreign or not owned_specs
 
-    async def finalize_exit(self, state: _ResponsesStreamState, pool: ToolBackend) -> None:
+    async def finalize_exit(
+        self,
+        state: _ResponsesStreamState,
+        pool: ToolBackend,
+        acc: dict[str, Any],
+    ) -> AsyncIterator[ResponseStreamEvent]:
+        del acc
         # Mixed batch: the gateway's function_call items were withheld from the
         # stream, so run them for their side effects rather than dropping the model's
         # request. Matches the non-streaming loop's mixed-batch handling.
         if state.owned_specs:
             await _execute_stream_owned(state, pool)
+        return
+        yield  # pragma: no cover - makes this a no-event async iterator
 
     def terminal_events(self, state: _ResponsesStreamState, acc: dict[str, Any]) -> list[ResponseStreamEvent]:
         if state.deferred_completed is None:
@@ -637,7 +645,9 @@ class _ResponsesToolLoopStrategy:
         transcript: list[Any],
         state: _ResponsesStreamState,
         pool: ToolBackend,
-    ) -> None:
+        acc: dict[str, Any],
+    ) -> AsyncIterator[ResponseStreamEvent]:
+        del acc
         replay_items: list[Any] = []
         for output_index in sorted(set(state.compaction_items) | set(state.function_calls)):
             if output_index in state.compaction_items:
@@ -654,6 +664,8 @@ class _ResponsesToolLoopStrategy:
                 )
         transcript.extend(_items_to_dicts(replay_items))
         transcript.extend(await _execute_stream_owned(state, pool))
+        return
+        yield  # pragma: no cover - makes this a no-event async iterator
 
 
 _RESPONSES_STRATEGY = _ResponsesToolLoopStrategy()

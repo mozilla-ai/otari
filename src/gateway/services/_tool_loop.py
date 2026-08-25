@@ -148,16 +148,17 @@ class StreamToolLoopStrategy(Protocol, Generic[ChunkT, StateT, AccT]):
 
     def accumulate_stream_usage(self, acc: AccT, state: StateT) -> None: ...
 
-    async def advance_stream_transcript(
+    def advance_stream_transcript(
         self,
         transcript: list[Any],
         state: StateT,
         pool: ToolBackend,
-    ) -> None: ...
+        acc: AccT,
+    ) -> AsyncIterator[ChunkT]: ...
 
     def synthetic_events(self, state: StateT, acc: AccT) -> list[ChunkT]: ...
 
-    async def finalize_exit(self, state: StateT, pool: ToolBackend) -> None: ...
+    def finalize_exit(self, state: StateT, pool: ToolBackend, acc: AccT) -> AsyncIterator[ChunkT]: ...
 
 
 def _prepare(
@@ -293,6 +294,9 @@ async def run_tool_loop_stream(
     events are forwarded, with cumulative usage folded in where the format
     supports it) and continuing (the terminal events are dropped, their usage
     accumulated, the owned calls executed, and the next round dispatched).
+    Execution hooks are async iterators so a format can yield truthful server-tool
+    start and completion events around the awaited call without transferring
+    execution ownership to the client.
 
     The upstream stream is closed when the loop stops consuming it early;
     see :func:`_stream_scope`.
@@ -331,13 +335,15 @@ async def run_tool_loop_stream(
             # search and would get silence. Executing them for their side effects is
             # what the non-streaming loop already does before returning a mixed
             # result (see ``run_tool_loop``), so the two agree.
-            await strategy.finalize_exit(state, pool)
+            async for activity in strategy.finalize_exit(state, pool, acc):
+                yield activity
             for terminal in strategy.terminal_events(state, acc):
                 yield terminal
             return
 
         strategy.accumulate_stream_usage(acc, state)
-        await strategy.advance_stream_transcript(transcript, state, pool)
+        async for activity in strategy.advance_stream_transcript(transcript, state, pool, acc):
+            yield activity
         # A format with a native vocabulary for server-side tool calls announces
         # the calls the gateway just ran, in place of the raw tool-call events that
         # were swallowed. Formats without one return nothing.

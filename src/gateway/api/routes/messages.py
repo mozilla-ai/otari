@@ -61,6 +61,7 @@ from gateway.services.log_writer import LogWriter
 from gateway.services.mcp_loop import ToolBackend
 from gateway.services.mcp_loop_messages import (
     MAX_TOOL_ITERATIONS_CAP,
+    MCP_ACTIVITY_ID_PREFIX,
     anthropic_tool_loop,
     anthropic_tool_loop_stream,
 )
@@ -152,22 +153,43 @@ def _is_gateway_minted_result(block: Any) -> bool:
     return all(isinstance(hit, dict) and not hit.get("encrypted_content") for hit in hits)
 
 
-def _strip_gateway_minted_blocks(messages: Any) -> Any:
+def _has_gateway_minted_mcp_blocks(messages: Any) -> bool:
+    """Whether an inbound transcript contains an Otari-provenance MCP use block."""
+    if not isinstance(messages, list):
+        return False
+    for message in messages:
+        if not isinstance(message, dict):
+            continue
+        content = message.get("content")
+        if not isinstance(content, list):
+            continue
+        if any(
+            isinstance(block, dict)
+            and block.get("type") == "mcp_tool_use"
+            and str(block.get("id") or "").startswith(MCP_ACTIVITY_ID_PREFIX)
+            for block in content
+        ):
+            return True
+    return False
+
+
+def _strip_gateway_minted_blocks(
+    messages: Any,
+    *,
+    strip_web_search: bool = True,
+) -> Any:
     """Drop this gateway's own server-tool blocks from inbound ``messages``.
 
-    Continuing an Anthropic conversation means echoing the previous assistant turn,
-    and a gateway-minted ``web_search_tool_result`` carries an ``encrypted_content``
-    the gateway cannot sign, so an echoed turn would ship an unsignable block to a
-    provider. Mirrors ``responses._strip_gateway_minted_items``, but where Responses
-    has no way to tell its own minted items from a provider's, here it can: only
-    blocks with gateway provenance are removed (see
-    :func:`_is_gateway_minted_result`), so a genuine provider-run search's signed
-    blocks round-trip untouched even with interception on. A `server_tool_use` is
-    removed only alongside the gateway-minted result that answers it, matched by
-    ``tool_use_id``, so a provider's pair is never split.
-
-    Only called when interception is active (opted in, with a backend configured),
-    which is the only way one of our blocks can be in a transcript at all.
+    Continuing an Anthropic conversation means echoing the previous assistant turn.
+    A gateway-minted ``web_search_tool_result`` carries an ``encrypted_content`` the
+    gateway cannot sign, while a gateway-minted MCP pair describes execution the
+    internal loop already consumed. Neither should be shipped to a provider on the
+    next request. Mirrors ``responses._strip_gateway_minted_items``, but where
+    Responses has no way to tell its own minted items from a provider's, here it can:
+    web search uses the empty signed-content field and MCP uses an Otari-prefixed call
+    id. Genuine provider-run pairs therefore round-trip untouched. Each use is removed
+    only alongside the result that answers it, matched by ``tool_use_id``, so a
+    provider's pair is never split.
 
     A message left with no content is dropped: an empty ``content`` array is rejected
     by the API, and a turn that held nothing but our pair has nothing left to say.
@@ -181,12 +203,21 @@ def _strip_gateway_minted_blocks(messages: Any) -> Any:
         if not isinstance(content, list):
             kept_messages.append(message)
             continue
-        # Two passes: identify our result blocks, then drop them along with the
-        # server_tool_use each one answers. A provider's pair matches neither.
-        minted_ids = {
-            block.get("tool_use_id") for block in content if _is_gateway_minted_result(block)
+        # Two passes: identify our web-search results and our provenance-prefixed
+        # MCP uses, then drop each complete pair. A provider's pair matches neither.
+        minted_web_ids = (
+            {block.get("tool_use_id") for block in content if _is_gateway_minted_result(block)}
+            if strip_web_search
+            else set()
+        )
+        minted_mcp_ids = {
+            block.get("id")
+            for block in content
+            if isinstance(block, dict)
+            and block.get("type") == "mcp_tool_use"
+            and str(block.get("id") or "").startswith(MCP_ACTIVITY_ID_PREFIX)
         }
-        kept_blocks = [block for block in content if not _is_minted_pair_member(block, minted_ids)]
+        kept_blocks = [block for block in content if not _is_minted_pair_member(block, minted_web_ids, minted_mcp_ids)]
         if len(kept_blocks) == len(content):
             kept_messages.append(message)
             continue
@@ -198,13 +229,22 @@ def _strip_gateway_minted_blocks(messages: Any) -> Any:
     return kept_messages
 
 
-def _is_minted_pair_member(block: Any, minted_ids: set[Any]) -> bool:
+def _is_minted_pair_member(
+    block: Any,
+    minted_web_ids: set[Any],
+    minted_mcp_ids: set[Any],
+) -> bool:
     """Whether ``block`` is one half of a gateway-minted server-tool pair."""
     if not isinstance(block, dict):
         return False
     if _is_gateway_minted_result(block):
-        return True
-    return block.get("type") == "server_tool_use" and block.get("id") in minted_ids
+        return block.get("tool_use_id") in minted_web_ids
+    block_type = block.get("type")
+    if block_type == "server_tool_use":
+        return block.get("id") in minted_web_ids
+    if block_type == "mcp_tool_use":
+        return block.get("id") in minted_mcp_ids
+    return block_type == "mcp_tool_result" and block.get("tool_use_id") in minted_mcp_ids
 
 
 def _anthropic_error(error_type: str, message: str, status_code: int) -> HTTPException:
@@ -546,6 +586,17 @@ async def create_message(
     """
     user_from_metadata = request.metadata.get("user_id") if request.metadata else None
 
+    # Remove replayed gateway-owned MCP activity before admission derives prompt
+    # size. Waiting until request_fields are built below would reserve against
+    # result content that never reaches the provider and can falsely reject or
+    # overcharge the request. Web-search stripping remains gated later because
+    # its provenance depends on the resolved interception configuration.
+    if _has_gateway_minted_mcp_blocks(request.messages):
+        request.messages = _strip_gateway_minted_blocks(
+            request.messages,
+            strip_web_search=False,
+        )
+
     async def _normalize(
         user_id: str,
         provider: LLMProvider | None,
@@ -635,8 +686,13 @@ async def create_message(
     scope_prompt_cache_key(request_fields, ctx)
     if request_fields.get("tools"):
         request_fields["tools"] = openai_to_anthropic_tools(request_fields["tools"])
-    if tool_ctx.intercepts_web_search and request_fields.get("messages"):
-        request_fields["messages"] = _strip_gateway_minted_blocks(request_fields["messages"])
+    inbound_messages = request_fields.get("messages")
+    if inbound_messages and (
+        tool_ctx.intercepts_web_search
+        or tool_ctx.mcp_server_configs
+        or _has_gateway_minted_mcp_blocks(inbound_messages)
+    ):
+        request_fields["messages"] = _strip_gateway_minted_blocks(inbound_messages)
     if tool_ctx.use_sandbox:
         # ``container`` addresses Anthropic's own code-execution container, and
         # the gateway sandbox owns execution for this request, so the provider

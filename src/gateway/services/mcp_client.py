@@ -42,6 +42,14 @@ def mcp_tool_to_openai(tool: MCPTool) -> dict[str, Any]:
     }
 
 
+@dataclass(frozen=True)
+class MCPToolCallOutcome:
+    """Rendered MCP result plus the server's explicit error classification."""
+
+    content: str
+    is_error: bool
+
+
 @dataclass
 class _ConnectedServer:
     name: str
@@ -121,19 +129,16 @@ class MCPClientPool:
     def purpose_hints(self) -> list[tuple[str, str]]:
         return [(s.name, s.purpose_hint) for s in self._servers.values() if s.purpose_hint]
 
-    async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
-        """Execute a tool call against its owning MCP server and flatten the result to text.
+    def server_name_for_tool(self, name: str) -> str | None:
+        """Return the configured server that owns ``name``, if connected."""
+        return self._tool_owner.get(name)
 
-        MCP supports rich content blocks (image, embedded resource, structured data). This
-        flattener concatenates text blocks verbatim and renders non-text blocks as a brief
-        ``[type=…]`` placeholder so the model can at least see that *something* came back.
-        For tools that return images or large embedded resources, this is intentionally
-        lossy — fine for the current text-tool use case, but a future improvement is to
-        pass image content through as multimodal message blocks when the model supports it.
+    async def call_tool_outcome(self, name: str, arguments: dict[str, Any]) -> MCPToolCallOutcome:
+        """Execute an MCP call and preserve its explicit ``isError`` status.
 
-        The call is recorded on the request's tally (see
-        :class:`gateway.services.tool_usage.ToolUsageTally`); an ``isError`` result
-        is counted and never billed.
+        The Messages stream uses this richer form for server-owned activity
+        events. Other API formats keep using :meth:`call_tool`, which returns the
+        same model-facing text as before.
         """
         owner = self._tool_owner.get(name)
         if owner is None:
@@ -149,7 +154,23 @@ class MCPClientPool:
         rendered = f"[tool error] {flattened}" if result.isError else flattened
         if self._tally is not None:
             self._tally.record_result(name, rendered)
-        return rendered
+        return MCPToolCallOutcome(content=rendered, is_error=bool(result.isError))
+
+    async def call_tool(self, name: str, arguments: dict[str, Any]) -> str:
+        """Execute a tool call against its owning MCP server and flatten the result to text.
+
+        MCP supports rich content blocks (image, embedded resource, structured data). This
+        flattener concatenates text blocks verbatim and renders non-text blocks as a brief
+        ``[type=…]`` placeholder so the model can at least see that *something* came back.
+        For tools that return images or large embedded resources, this is intentionally
+        lossy — fine for the current text-tool use case, but a future improvement is to
+        pass image content through as multimodal message blocks when the model supports it.
+
+        The call is recorded on the request's tally (see
+        :class:`gateway.services.tool_usage.ToolUsageTally`); an ``isError`` result
+        is counted and never billed.
+        """
+        return (await self.call_tool_outcome(name, arguments)).content
 
 
 def _render_content_block(block: Any) -> str:

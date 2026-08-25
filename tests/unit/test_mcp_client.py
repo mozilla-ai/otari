@@ -1,14 +1,10 @@
-"""Unit tests for MCPClientPool's own duplicate-name guard.
-
-prepare_gateway_tools (routes/_pipeline.py) rejects a duplicate server name at
-request-admission time, before any pool is built. That covers every current
-production caller, but the pool's own module docstring advertises
-``async with MCPClientPool(configs) as pool`` as a supported direct entry
-point, so the invariant belongs here too for a caller that reaches it another
-way (otari#792 review).
-"""
+"""Unit coverage for MCPClientPool behavior."""
 
 from __future__ import annotations
+
+from types import SimpleNamespace
+from typing import Any, cast
+from unittest.mock import AsyncMock
 
 import pytest
 
@@ -53,3 +49,29 @@ async def test_aenter_connects_distinct_names(monkeypatch: pytest.MonkeyPatch) -
     async with MCPClientPool(configs) as pool:
         assert set(pool._servers) == {"a", "b"}
     assert connected == ["a", "b"]
+
+
+@pytest.mark.asyncio
+@pytest.mark.parametrize("is_error", [False, True])
+async def test_call_tool_outcome_preserves_server_error_status(is_error: bool) -> None:
+    session = SimpleNamespace(
+        call_tool=AsyncMock(
+            return_value=SimpleNamespace(
+                content=[SimpleNamespace(type="text", text="fixture result")],
+                isError=is_error,
+            )
+        )
+    )
+    pool = MCPClientPool([])
+    pool._servers["fixture"] = _ConnectedServer(
+        name="fixture",
+        session=cast(Any, session),
+    )
+    pool._tool_owner["lookup"] = "fixture"
+
+    outcome = await pool.call_tool_outcome("lookup", {"id": 755})
+
+    assert pool.server_name_for_tool("lookup") == "fixture"
+    assert outcome.is_error is is_error
+    assert outcome.content == ("[tool error] fixture result" if is_error else "fixture result")
+    session.call_tool.assert_awaited_once_with("lookup", {"id": 755})
