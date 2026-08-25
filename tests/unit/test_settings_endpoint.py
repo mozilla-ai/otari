@@ -289,6 +289,18 @@ def test_config_view_preserves_ipv6_host_when_masking() -> None:
     assert by_key["database_url"] == "postgresql+asyncpg://u:***@[2001:db8::1]:5432/otari"
 
 
+def test_config_view_shows_the_documentation_link_target() -> None:
+    # An operator sets docs_url in YAML or the environment and has no control for
+    # it in the dashboard, so the config viewer is where they confirm it took.
+    # Shown verbatim: unlike the URLs in _REDACTED_URL_FIELDS this one carries no
+    # credential, it is a public link target the bootstrap already publishes.
+    by_key = {field.key: field for field in _config_fields(GatewayConfig(docs_url="https://docs.otari.ai/en/"))}
+
+    assert by_key["docs_url"].value == "https://docs.otari.ai/en/"
+    # Read-only: retargeting the links is a restart-time decision, not a runtime one.
+    assert by_key["docs_url"].settable is False
+
+
 def test_config_view_exposes_numeric_bounds() -> None:
     # Settable numeric fields carry their lower bound so the dashboard can gate a
     # number input the same way the backend validator does.

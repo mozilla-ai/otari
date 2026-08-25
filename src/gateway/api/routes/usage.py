@@ -21,7 +21,14 @@ from sqlalchemy.ext.asyncio import AsyncSession
 from gateway.api.deps import get_config, get_db, verify_api_key_or_master_key, verify_master_key
 from gateway.api.routes._billing_schemas import ChargeLine, MeterMap
 from gateway.core.config import GatewayConfig
-from gateway.core.sql import MAX_FILTER_VALUES, match_any, utc_bound
+from gateway.core.sql import (
+    MAX_FILTER_VALUES,
+    bucket_expr,
+    canonical_bucket,
+    dialect_name,
+    match_any,
+    utc_bound,
+)
 from gateway.inflight import get_registry
 from gateway.models.entities import APIKey, UsageLog, User
 from gateway.models.money import as_float
@@ -864,41 +871,14 @@ def _resolve_window(start_date: datetime | None, end_date: datetime | None) -> t
     return start, end
 
 
-def _bucket_expr(dialect_name: str, bucket: Bucket, column: Any = None) -> Any:
-    """A SQL expression that truncates ``column`` to the bucket start, in UTC.
+def _bucket_expr(dialect: str, bucket: Bucket, column: Any = None) -> Any:
+    """``core.sql.bucket_expr`` defaulted to ``usage_logs.timestamp``.
 
-    Defaults to ``usage_logs.timestamp``; ``column`` lets another timestamped
-    table (``agent_telemetry``) bucket on the same grid, so a chart built from
-    both lines up. PostgreSQL ``date_trunc`` honors the session ``TimeZone``, so we
-    pin UTC with ``AT TIME ZONE 'UTC'`` (``func.timezone``) rather than trusting
-    engine config, otherwise buckets would silently shift per deployment and break
-    across DST. SQLite ``strftime`` already normalizes any stored offset to UTC.
-    ``bucket`` is a validated ``Literal`` (never raw client text), so there is no
-    injection surface.
+    The grid itself is shared code, because the telemetry storage adapters
+    bucket on it too and a chart built from both sides lines up only if every
+    producer truncates identically.
     """
-    timestamp = UsageLog.timestamp if column is None else column
-    if dialect_name == "sqlite":
-        fmt = "%Y-%m-%dT%H:00:00Z" if bucket == "hour" else "%Y-%m-%dT00:00:00Z"
-        return func.strftime(fmt, timestamp)
-    # PostgreSQL (and anything else that speaks date_trunc).
-    return func.date_trunc(bucket, func.timezone("UTC", timestamp))
-
-
-def _canonical_bucket(value: Any, bucket: Bucket) -> str:
-    """Normalize a bucket key to canonical ISO-8601 UTC (``YYYY-MM-DDTHH:00:00Z``).
-
-    SQLite already returns that string; PostgreSQL returns a (naive, UTC) datetime.
-    """
-    if isinstance(value, str):
-        return value
-    dt: datetime = value
-    fmt = "%Y-%m-%dT%H:00:00Z" if bucket == "hour" else "%Y-%m-%dT00:00:00Z"
-    return dt.strftime(fmt)
-
-
-def _dialect_name(db: AsyncSession) -> str:
-    bind = db.get_bind()
-    return bind.dialect.name
+    return bucket_expr(dialect, bucket, UsageLog.timestamp if column is None else column)
 
 
 def _request_count_expr(status_filter: str | None = None) -> Any:
@@ -1431,7 +1411,7 @@ async def usage_summary(
     )
     by_tool = await _tool_breakdown(db, conditions) if _TOOL_DIMENSION in requested else []
 
-    expr = _bucket_expr(_dialect_name(db), bucket)
+    expr = _bucket_expr(dialect_name(db), bucket)
     series_rows = (
         await db.execute(
             select(
@@ -1451,8 +1431,8 @@ async def usage_summary(
     ).all()
     # Zero-fill empty buckets so the chart is time-linear (GROUP BY drops gaps).
     populated = {
-        _canonical_bucket(row[0], bucket): UsageSeriesPoint(
-            bucket_start=_canonical_bucket(row[0], bucket),
+        canonical_bucket(row[0], bucket): UsageSeriesPoint(
+            bucket_start=canonical_bucket(row[0], bucket),
             cost=float(row[1]),
             tokens=int(row[2]),
             requests=int(row[3]),
@@ -1577,7 +1557,7 @@ async def usage_series(
         fold_expr = case((column.is_(None), 0), (column.in_(named), 0), else_=1)
     else:
         fold_expr = case((column.in_(named), 0), else_=1)
-    bucket_expr = _bucket_expr(_dialect_name(db), bucket)
+    bucket_expr = _bucket_expr(dialect_name(db), bucket)
     rows = (
         await db.execute(
             select(
@@ -1595,7 +1575,7 @@ async def usage_series(
 
     points = [
         UsageGroupedSeriesPoint(
-            bucket_start=_canonical_bucket(row[0], bucket),
+            bucket_start=canonical_bucket(row[0], bucket),
             key=row[1],
             is_other=bool(row[2]),
             cost=float(row[3]),

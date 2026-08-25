@@ -80,18 +80,20 @@ describe("OrganizationGeneralPage", () => {
     expect(screen.getByRole("button", { name: "Save name" })).toBeDisabled()
   })
 
-  it("offers nothing that would make the deployment multi-tenant", async () => {
+  it("leaves creating and switching to the scope switcher, and offers no delete", async () => {
     mockApi()
     renderPage(<OrganizationGeneralPage />)
 
     await screen.findByDisplayValue("Default Organization")
-    // A self-hosted gateway is one tenant with several people in it. The
-    // gateway mounts no create, switch, or delete endpoint, so a control for
-    // any of them here would be a 404 waiting to happen.
+    // Both controls exist, in the switcher above the rail: they are about which
+    // organization you are looking at, where this page is about the one you are
+    // in. A second copy here would be a second thing to keep in step.
     expect(
       screen.queryByRole("button", { name: /Create organization/ }),
     ).toBeNull()
     expect(screen.queryByRole("button", { name: "Switch" })).toBeNull()
+    // Delete is the one with no endpoint anywhere, so a control for it would be
+    // a 404 waiting to happen.
     expect(
       screen.queryByRole("button", { name: /Delete organization/ }),
     ).toBeNull()

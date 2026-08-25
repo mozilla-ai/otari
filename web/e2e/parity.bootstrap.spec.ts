@@ -37,6 +37,10 @@ test("the deployment bootstrap is served unauthenticated", async ({
     // docs/access-control.md#dashboard-sessions-and-identity.
     sign_in_methods: ["master_key"],
     management_url: null,
+    // No docs_url in this e2e environment, so the dashboard's Documentation
+    // links stay on the operator guide bundled with this gateway; see
+    // docs/configuration.md#documentation-links.
+    docs_url: null,
     // Sign-ins are open, which is the resting state: maintenance mode is a
     // stored row an operator sets to freeze them during a redeploy, and
     // nothing in this environment sets it.

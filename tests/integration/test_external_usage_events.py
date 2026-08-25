@@ -502,6 +502,31 @@ def test_rejects_reserved_gateway_source(client: TestClient, master_key_header: 
     assert "reserved" in resp.text
 
 
+def test_rejects_reserved_otari_ai_source_prefix(client: TestClient, master_key_header: dict[str, str]) -> None:
+    """otari.ai stamps the rows its backfill writes `otari-ai:<slug>`; an import under
+    that prefix is a lookalike in every reconciliation total."""
+    _seed_user(client, master_key_header)
+    for source in ("otari-ai:gateway", "otari-ai:claude_code", "OTARI-AI:gateway"):
+        resp = _post(client, master_key_header, [_event()], source=source)
+        assert resp.status_code == 422, f"{source}: {resp.text}"
+        assert "reserved" in resp.text
+
+
+def test_accepts_source_with_colon_outside_the_reserved_prefix(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """The guard is a prefix check, not a ban on colons in a slug."""
+    _seed_user(client, master_key_header)
+    _seed_pricing(client, master_key_header)
+
+    resp = _post(client, master_key_header, [_event("colon_ok")], source="foo:bar")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["accepted"] == 1
+
+    row = db_session.query(UsageLog).filter(UsageLog.source_event_id == "colon_ok").one()
+    assert row.source == "foo:bar"
+
+
 def test_rejects_token_counts_above_column_width(client: TestClient, master_key_header: dict[str, str]) -> None:
     """Counts past the 32-bit column cap are a 422, not a DB error that 500s the batch."""
     _seed_user(client, master_key_header)

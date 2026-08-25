@@ -283,12 +283,15 @@ into something a text-only local model can read.
 
 ### Organizations
 
-Tenancy above users and keys; see [Access control](access-control.md#organizations-and-workspaces). A standalone deployment has one organization, provisioned on the first master-key request, so every path is scoped to it and none names it. Creating, switching between and deleting organizations is what makes a deployment multi-tenant, and belongs to a hosted control plane rather than here.
+Tenancy above users and keys; see [Access control](access-control.md#organizations-and-workspaces). One organization is provisioned on the first master-key request, and that is the shape almost every deployment keeps, so nearly every path is scoped to the caller's active organization and does not name one. A second is reachable, though (an invitation into an organization elsewhere on the deployment), so create, list-mine and switch are mounted too. `POST /v1/organizations/me/switch` is the one path that names an organization, and it answers `404` for one the caller holds no active membership in. Deleting an organization has no endpoint: every historical attribution resolves through rows that hang off one.
 
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
+| `POST` | `/v1/organizations` | Create an organization with the caller as its owner, and a default workspace in it. | Master key |
 | `GET` | `/v1/organizations/me` | Get the active organization and the caller's role in it. | Master key |
 | `PATCH` | `/v1/organizations/me` | Rename the active organization. | Master key |
+| `GET` | `/v1/organizations/me/memberships` | List the organizations the caller is an active member of, paged, flagging the current one. | Master key |
+| `POST` | `/v1/organizations/me/switch` | Point the caller's identity at another organization they belong to. | Master key |
 | `GET` | `/v1/organizations/me/members` | List the active organization's members. | Master key |
 | `POST` | `/v1/organizations/me/members` | Add a member by email, optionally into workspaces at the same time. | Master key |
 | `PATCH` | `/v1/organizations/me/members/{organization_member_id}` | Change a member's role or status. | Master key |

@@ -33,11 +33,13 @@ from gateway.adapters.billing_adapter import NullBillingAdapter
 from gateway.adapters.entitlement_adapter import BaseEntitlementAdapter
 from gateway.adapters.growth_signal_adapter import NullGrowthSignalAdapter
 from gateway.adapters.model_provider_adapter import SelfHostedModelProviderAdapter
+from gateway.adapters.telemetry_storage_adapter import DatabaseTelemetryStorageAdapter
 from gateway.log_config import logger
 from gateway.ports.billing_port import BillingPort
 from gateway.ports.entitlement_port import EntitlementPort
 from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.model_provider_port import ModelProviderPort
+from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 
 T = TypeVar("T")
 
@@ -172,6 +174,11 @@ def _model_provider_adapter(session: AsyncSession | None) -> ModelProviderPort:
     return SelfHostedModelProviderAdapter(session)
 
 
+def _telemetry_storage_adapter(session: AsyncSession | None) -> TelemetryStoragePort:
+    """Build the core ``TelemetryStoragePort`` adapter for one request."""
+    return DatabaseTelemetryStorageAdapter(session)
+
+
 def _growth_signal_adapter(session: AsyncSession | None) -> GrowthSignalPort:
     """Build the core ``GrowthSignalPort`` adapter for one request."""
     return NullGrowthSignalAdapter(session)
@@ -260,6 +267,10 @@ def build_container(bootstrap_selector: str | None = None) -> Container:
     # Growth and support-messenger notifications: the base has no vendor of its
     # own, so every lifecycle event is a no-op.
     container.bind(GrowthSignalPort, _growth_signal_adapter)
+    # Telemetry storage: the base keeps what the OTLP receiver captures in
+    # this deployment's own database, which is where it has always gone. An
+    # overlay binds a scale-out store behind the same port.
+    container.bind(TelemetryStoragePort, _telemetry_storage_adapter)
 
     if bootstrap_selector is None:
         # No selector is a legitimate deployment (the plain open-source one), so

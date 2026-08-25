@@ -100,7 +100,15 @@ The enforcement strategy is configurable with `OTARI_BUDGET_STRATEGY` (`for_upda
 
 Otari is growing a tenancy layer above the users, keys, and budgets described here: an **organization** owns **workspaces**, and identities join both as members with a fixed role (`owner`, `admin`, `member`, or `viewer`). It is available over the API (`/v1/organizations/*` and `/v1/workspaces/*`, master-key authenticated like the rest of this guide) and in the dashboard, under Organization in the sidebar; see [Admin dashboard](dashboard.md#organization).
 
-A self-hosted deployment is **one organization with several people in it**, not several tenants: the organization is provisioned for you and cannot be created, switched or deleted, and workspaces are the unit you separate teams and projects by. Hosting mutually isolated tenants on one deployment is what a hosted control plane is for.
+A self-hosted deployment is **one organization with several people in it**: the organization is provisioned for you, and workspaces are the unit you separate teams and projects by. That is the shape almost every deployment keeps, and hosting mutually isolated tenants on one deployment is still what a hosted control plane is for.
+
+A second organization is possible, though, because it is already reachable: invite an address that belongs to an organization elsewhere on this deployment and they end up in two. So three endpoints exist for it, all of them scoped to the caller:
+
+- `POST /v1/organizations` creates one, with the caller as its owner and a default workspace to work in. Only a name is sent; the slug is derived from it with a random suffix, so two organizations may share a name and a later rename does not move the slug. It does **not** move the caller into the new organization.
+- `GET /v1/organizations/me/memberships` lists the organizations the caller is an active member of, with their role in each and which one is current. It is the caller's own memberships, not a directory of the deployment's organizations.
+- `POST /v1/organizations/me/switch` points the caller's identity at another organization they belong to. Everything scoped follows it: workspaces, keys, budgets and usage all resolve through that pointer. An organization the caller holds no active membership in answers `404`, whether or not it exists.
+
+Switching is not renaming: `PATCH /v1/organizations/me` renames the organization already active. And there is no delete: every historical attribution resolves through rows that hang off an organization.
 
 Nothing is required to set it up. The first request to one of those endpoints provisions a default organization, a default workspace, and one owner identity representing the operator, and every later request resolves that same identity. Organization owners and admins can create further workspaces, add members, and manage roles; a workspace's own owners and admins can manage the workspace they belong to.
 
@@ -227,7 +235,7 @@ curl -X POST http://localhost:8000/v1/auth/password/reset/confirm \
   -d '{"token": "<the token from the link>", "new_password": "<a new password>"}'
 ```
 
-**Forgot your password?** on the dashboard's sign-in screen is the same pair of calls, and the reset link lands on a page that asks for the new password. The request answers the same message whether or not the address holds a password, for the same enumeration-safety reason resending a verification link does. The reset token expires (`password_reset_expiry_hours`, default 2) and is single-use: unlike a stateless token, it is cleared the moment it is spent, so it cannot be replayed even inside its own expiry window. It is also cleared the moment the identity's password changes through any other channel (an ordinary self-service change, an operator recovery through the master key) while it is still live, so a reset link generated and then overtaken elsewhere cannot undo that change later. Completing a reset revokes every other session the identity holds, the same as an ordinary password change. Both routes share the sign-in rate limiter and the same `503`-when-unconfigured behavior signup does.
+**Forgot your password?** on the dashboard's sign-in screen is the same pair of calls, and the reset link lands on a page that asks for the new password. The request answers the same message whether or not the address holds a password, for the same enumeration-safety reason resending a verification link does. The reset token expires (`password_reset_expiry_hours`, default 2) and is single-use: unlike a stateless token, it is cleared the moment it is spent, so it cannot be replayed even inside its own expiry window, including by a second request racing the first: the identity row is locked before the clear, so only one concurrent redemption spends it. That last part needs PostgreSQL. SQLite, the default for a single-node deployment, has no row locks, so two redemptions of one token arriving together can both land there. It is also cleared the moment the identity's password changes through any other channel (an ordinary self-service change, an operator recovery through the master key) while it is still live, so a reset link generated and then overtaken elsewhere cannot undo that change later. Completing a reset revokes every other session the identity holds, the same as an ordinary password change. Both routes share the sign-in rate limiter and the same `503`-when-unconfigured behavior signup does.
 
 #### Passkeys
 
@@ -281,7 +289,7 @@ An opaque session token is the settled shape here, not a stopgap: it is revocabl
 
 ### Adopting an existing tenancy
 
-Provisioning adopts an organization whose slug is `default`, which is the one it would have created itself. It cannot adopt any other, because every route is scoped to the organization the operator identity is currently pointed at, and there is no route to list, switch, or fetch an organization by id. So an organization this deployment did not provision is unreachable through the API until the operator identity points at it.
+Provisioning adopts an organization whose slug is `default`, which is the one it would have created itself. It cannot adopt any other, because every route is scoped to the organization the operator identity is currently pointed at. `POST /v1/organizations/me/switch` is no way in either: it refuses an organization the caller holds no active membership in, and a freshly provisioned operator identity holds none in an imported one. So an organization this deployment did not provision is unreachable through the API until the operator identity points at it.
 
 That is the state a database restored or imported from elsewhere arrives in: those slugs are `{name}-{suffix}` and never the literal `default`. Otari refuses rather than shadowing it, and the tenancy endpoints answer `500` with `Internal server error` while the specific organizations are named in the gateway's log.
 

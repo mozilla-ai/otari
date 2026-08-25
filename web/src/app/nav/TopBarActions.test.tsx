@@ -9,10 +9,15 @@ import { renderWithRouter } from "@/tests/router"
 
 // The cluster holds a router Link, so it needs a real router; `renderWithRouter`
 // mounts it at "/" and resolves the first location before the assertions run.
-function renderActions(management_url: string | null = null) {
+function renderActions(
+  overrides: Partial<{
+    management_url: string | null
+    docs_url: string | null
+  }> = {},
+) {
   return renderWithRouter(
     <AppProviders>
-      <DeploymentProvider value={bootstrap({ management_url })}>
+      <DeploymentProvider value={bootstrap(overrides)}>
         <TopBarActions />
       </DeploymentProvider>
     </AppProviders>,
@@ -42,12 +47,33 @@ describe("TopBarActions", () => {
   })
 
   it("still omits the hosted playground on a gateway that has one to point at", async () => {
-    await renderActions("https://otari.ai/")
+    await renderActions({ management_url: "https://otari.ai/" })
 
     // `management_url` is only half of that gate: the base build grants no
     // capabilities, so the entitlement half withholds the link regardless.
     expect(
       screen.queryByRole("link", { name: "Playground" }),
     ).not.toBeInTheDocument()
+  })
+
+  it("points Documentation at the bundled guide when no docs site is configured", async () => {
+    await renderActions()
+
+    // The hash route, because the guide ships with this gateway: a router Link
+    // renders the router's own href rather than an absolute URL.
+    const link = await screen.findByRole("link", { name: "Documentation" })
+    expect(link).toHaveAttribute("href", "/docs")
+    expect(link).not.toHaveAttribute("target")
+  })
+
+  it("retargets Documentation at the deployment's own docs site", async () => {
+    await renderActions({ docs_url: "https://docs.otari.ai/en/" })
+
+    const link = await screen.findByRole("link", { name: "Documentation" })
+    expect(link).toHaveAttribute("href", "https://docs.otari.ai/en/")
+    // A new tab, like every other link out of the dashboard: this one leaves the
+    // app, where the bundled guide is a page inside it.
+    expect(link).toHaveAttribute("target", "_blank")
+    expect(link).toHaveAttribute("rel", "noopener noreferrer")
   })
 })

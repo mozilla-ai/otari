@@ -180,16 +180,16 @@ test.describe("standalone tenancy", () => {
     await expect(page.getByText(/already in this workspace/)).toBeVisible()
   })
 
-  test("offers nothing that would make the deployment multi-tenant", async ({
+  test("leaves creating and switching to the scope switcher, and offers no delete", async ({
     page,
   }) => {
     await login(page)
     await openOrganization(page)
     await openPage(page, "Org settings", "Organization")
 
-    // A self-hosted gateway is one tenant with several people in it, so the
-    // gateway mounts no endpoint to create, switch between, or delete an
-    // organization, and the page offers no control for one.
+    // Creating an organization and moving between them are the scope switcher's,
+    // which sits on the workspace rail and is replaced by the way back out on
+    // this one, so neither control is here. Deleting one has no endpoint at all.
     await expect(
       page.getByRole("button", { name: /Create organization/ }),
     ).toHaveCount(0)

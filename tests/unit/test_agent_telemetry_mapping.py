@@ -1,7 +1,7 @@
 from datetime import UTC, datetime
 
+from gateway.ports.telemetry_storage_port import TelemetryRecord
 from gateway.services.agent_telemetry_service import (
-    TelemetryRecord,
     event_dedup_key,
     map_behavioral_event,
     map_metric_point,
