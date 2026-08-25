@@ -15,6 +15,7 @@ plain build:
 - an adapter naming an upstream any-llm does not implement becomes a 502.
 """
 
+import asyncio
 import uuid
 from typing import Any, cast
 
@@ -61,7 +62,10 @@ class RecordingPort:
         self,
         *,
         credential: HostedCredential | None = None,
-        error: Exception | None = None,
+        # ``BaseException`` and not ``Exception``: one case here raises
+        # ``asyncio.CancelledError``, which the call site must deliberately not
+        # catch, and typing this narrowly would make that case unexpressible.
+        error: BaseException | None = None,
     ) -> None:
         self.credential = credential
         self.error = error
@@ -251,6 +255,62 @@ async def test_a_provider_needing_no_credential_is_not_asked_about(selector: str
     assert port.calls == []
 
 
+@pytest.mark.parametrize(
+    ("provider_config", "label"),
+    [
+        ({"client_args": {"timeout": 60}}, "transport tuning only"),
+        ({"api_key": None}, "a key written with no value"),
+        ({"api_key": ""}, "an empty key"),
+        ({"client_args": {"timeout": 60}, "api_key": None}, "both"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_an_instance_with_no_usable_credential_still_reaches_the_port(
+    provider_config: dict[str, Any], label: str
+) -> None:
+    """A described instance is not a credentialed one.
+
+    ``get_provider_kwargs`` returns a non-empty dict for each of these, so testing
+    the dict for emptiness would report the ladder as having answered when it
+    found a provider entry and no way to call it. any-llm would then fail its own
+    missing-key check on a candidate this build could have served.
+    """
+    config = GatewayConfig(providers={"openai": provider_config})
+    resolved = resolve_provider_selector(config, "openai:gpt-4o")
+    assert resolved.kwargs, f"guard: {label} must resolve a non-empty kwargs dict"
+    port = RecordingPort(credential=HostedCredential(api_key="hosted-key", api_base=None, response_provider="openai"))
+
+    result = await pipeline.resolve_dispatch_provider(
+        _ctx(resolved_provider=resolved),
+        config,
+        "openai:gpt-4o",
+        adapter=chat._ADAPTER,
+        model_provider=port,
+    )
+
+    assert len(port.calls) == 1, f"the port was not asked despite {label}"
+    assert result.kwargs == {"api_key": "hosted-key"}
+
+
+@pytest.mark.asyncio
+async def test_client_args_alone_does_not_shadow_a_real_key() -> None:
+    """The converse: transport tuning beside a real key is still a credentialed rung."""
+    config = GatewayConfig(providers={"openai": {"api_key": "sk-real", "client_args": {"timeout": 60}}})
+    resolved = resolve_provider_selector(config, "openai:gpt-4o")
+    port = RecordingPort(credential=HostedCredential(api_key="hosted", api_base=None, response_provider="openai"))
+
+    result = await pipeline.resolve_dispatch_provider(
+        _ctx(resolved_provider=resolved),
+        config,
+        "openai:gpt-4o",
+        adapter=chat._ADAPTER,
+        model_provider=port,
+    )
+
+    assert port.calls == []
+    assert result.kwargs["api_key"] == "sk-real"
+
+
 @pytest.mark.asyncio
 async def test_request_without_an_organization_is_not_asked_about() -> None:
     """The port keys its access decision on the organization, so there is nothing to ask."""
@@ -410,6 +470,59 @@ async def test_a_refused_alias_does_not_spell_its_target(monkeypatch: pytest.Mon
     detail = str(exc_info.value.detail)
     assert "fast" in detail
     assert "openai:gpt-4o" not in detail
+
+
+@pytest.mark.parametrize(
+    "failure",
+    [
+        RuntimeError("adapter blew up"),
+        TimeoutError("upstream credential service timed out"),
+        ValueError("malformed adapter response"),
+    ],
+)
+@pytest.mark.asyncio
+async def test_an_adapter_failure_refunds_and_becomes_a_502(
+    monkeypatch: pytest.MonkeyPatch, failure: Exception
+) -> None:
+    """Any failure but the port's own refusal still owes the reservation back.
+
+    An overlay adapter resolving credentials over the network fails the ordinary
+    ways: a timeout, a connection reset, a database error. `resolve_dispatch_provider`
+    is called outside any `try` that would catch one (`chat.py`, `responses.py`, and
+    the non-streaming half of `messages.py`; the streaming half's `try` catches
+    `HTTPException` alone), and `gateway.main` registers handlers only for
+    `TenancyError` and `RequestValidationError`, so nothing above this refunds. The
+    hold the preamble took would sit in `users.reserved` until the budget resets.
+    """
+    released, rejections = _capture_settlement(monkeypatch)
+    port = RecordingPort(error=failure)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await _dispatch(_ctx(resolved_provider=_uncredentialed()), port)
+
+    assert exc_info.value.status_code == 502
+    assert pipeline.HOSTED_CREDENTIAL_UNUSABLE_DETAIL in str(exc_info.value.detail)
+    # Non-leaky: the adapter's own wording never reaches the caller.
+    assert str(failure) not in str(exc_info.value.detail)
+    assert len(released) == 1
+    assert [row["status_code"] for row in rejections] == [502]
+
+
+@pytest.mark.asyncio
+async def test_cancellation_is_not_swallowed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A cancelled request stays cancelled: it is not a hosted-inference failure.
+
+    `asyncio.CancelledError` derives from `BaseException`, so the `except Exception`
+    guard above lets it through. Turning a disconnect into a 502 would both lie about
+    what happened and, worse, mark the task as handled.
+    """
+    released, _ = _capture_settlement(monkeypatch)
+    port = RecordingPort(error=asyncio.CancelledError())
+
+    with pytest.raises(asyncio.CancelledError):
+        await _dispatch(_ctx(resolved_provider=_uncredentialed()), port)
+
+    assert released == []
 
 
 @pytest.mark.asyncio

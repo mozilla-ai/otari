@@ -80,6 +80,24 @@ _KEYLESS_SELF_HOSTED_PROVIDERS = frozenset({"vllm", "lmstudio", "cascadia", "ota
 # nothing is configured and nothing can serve it anyway).
 _AMBIENT_CREDENTIAL_PROVIDERS = frozenset({"bedrock", "sagemaker"})
 
+# Keys ``get_provider_kwargs`` can return that credential nothing on their own:
+# transport tuning an operator attached to an instance. An instance carrying only
+# these has been *described* and not credentialed, so it must not count as a rung
+# that answered. ``api_base`` is deliberately absent: an instance with a base URL
+# and no key takes the keyless placeholder, so it never reaches a caller alone.
+_NON_CREDENTIAL_KWARGS = frozenset({"client_args"})
+
+
+def _kwargs_carry_a_credential(kwargs: dict[str, Any]) -> bool:
+    """Whether anything in a resolved provider's kwargs could authenticate a call.
+
+    Emptiness is not the question: ``providers.openai: {client_args: {timeout:
+    60}}`` resolves a non-empty dict with no credential in it, and a key written
+    as ``api_key:`` with no value resolves ``None``. Both mean the ladder found a
+    provider entry and no way to call it.
+    """
+    return any(value for key, value in kwargs.items() if key not in _NON_CREDENTIAL_KWARGS)
+
 
 def _provider_env_key_present(provider: LLMProvider) -> bool:
     """Whether the provider's native API-key env var (e.g. OPENAI_API_KEY) is set.
@@ -113,11 +131,13 @@ def credential_ladder_exhausted(provider: LLMProvider, kwargs: dict[str, Any]) -
     ladder itself is unchanged and still the only thing consulted first.
 
     Both halves of that sentence are load-bearing. **None was found** means
-    :func:`get_provider_kwargs` produced nothing at all for the candidate: no
-    organization-scoped key, no stored instance, no credential from a
-    ``config.yml`` entry (an instance declaring only ``provider_type``/``models``
-    leaves nothing behind once the meta keys are stripped), and so no keyless
-    placeholder either, *and* the provider's own SDK environment variable is
+    :func:`get_provider_kwargs` produced no credential for the candidate: no
+    organization-scoped key, no stored instance, nothing usable from a
+    ``config.yml`` entry (one declaring only ``provider_type``/``models`` leaves
+    nothing behind once the meta keys are stripped, and one carrying only
+    ``client_args`` leaves nothing that can authenticate a call, per
+    :func:`_kwargs_carry_a_credential`), and so no keyless placeholder either,
+    *and* the provider's own SDK environment variable is
     unset, which any-llm would otherwise fall back to before raising. That env
     check is the same one the keyless placeholder makes, so both agree on what
     counts as a credential already in hand.
@@ -137,7 +157,7 @@ def credential_ladder_exhausted(provider: LLMProvider, kwargs: dict[str, Any]) -
     to serve the candidate, which is the same position an uncredentialed provider
     with a declared variable is in.
     """
-    if kwargs:
+    if _kwargs_carry_a_credential(kwargs):
         return False
     if provider.value in _KEYLESS_SELF_HOSTED_PROVIDERS or provider.value in _AMBIENT_CREDENTIAL_PROVIDERS:
         return False

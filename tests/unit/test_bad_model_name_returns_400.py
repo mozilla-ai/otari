@@ -12,7 +12,7 @@ These tests cover:
 - resolve_dispatch_provider returns cached provider when ctx.resolved_provider is set
 """
 
-from unittest.mock import AsyncMock, MagicMock, patch
+from unittest.mock import MagicMock, patch
 
 import pytest
 from any_llm.exceptions import AnyLLMError
@@ -65,6 +65,19 @@ def _make_config() -> MagicMock:
     return MagicMock()
 
 
+class _NoHostedCredential:
+    """A ``ModelProviderPort`` that serves nothing, which is the core adapter's answer.
+
+    These tests are about the 400 mapping, not about the hosted-credential rung,
+    so the port is pinned to the answer that leaves a resolved provider untouched.
+    An ``AsyncMock`` would not: it answers every call with a truthy mock, which
+    sends the caller down the re-key path and fails on a nonsense provider name.
+    """
+
+    async def resolve_hosted_credential(self, **kwargs: object) -> None:
+        return None
+
+
 @pytest.mark.asyncio
 async def test_resolve_dispatch_provider_returns_cached() -> None:
     """When ctx.resolved_provider is set it is returned without calling resolve_provider_selector."""
@@ -72,7 +85,7 @@ async def test_resolve_dispatch_provider_returns_cached() -> None:
     ctx = _make_ctx(resolved_provider=cached)
     with patch("gateway.api.routes._pipeline.resolve_provider_selector") as mock_rps:
         result = await resolve_dispatch_provider(
-            ctx, _make_config(), "openai:gpt-4o", adapter=MagicMock(), model_provider=AsyncMock()
+            ctx, _make_config(), "openai:gpt-4o", adapter=MagicMock(), model_provider=_NoHostedCredential()
         )
     assert result is cached
     mock_rps.assert_not_called()
@@ -88,7 +101,7 @@ async def test_resolve_dispatch_provider_unparseable_raises_400() -> None:
     ):
         with pytest.raises(HTTPException) as exc_info:
             await resolve_dispatch_provider(
-                ctx, _make_config(), "nosuchmodel", adapter=MagicMock(), model_provider=AsyncMock()
+                ctx, _make_config(), "nosuchmodel", adapter=MagicMock(), model_provider=_NoHostedCredential()
             )
     assert exc_info.value.status_code == 400
     assert "nosuchmodel" in exc_info.value.detail
@@ -104,7 +117,7 @@ async def test_resolve_dispatch_provider_unknown_provider_raises_400() -> None:
     ):
         with pytest.raises(HTTPException) as exc_info:
             await resolve_dispatch_provider(
-                ctx, _make_config(), "nobody:model", adapter=MagicMock(), model_provider=AsyncMock()
+                ctx, _make_config(), "nobody:model", adapter=MagicMock(), model_provider=_NoHostedCredential()
             )
     assert exc_info.value.status_code == 400
     assert "nobody:model" in exc_info.value.detail
@@ -120,7 +133,7 @@ async def test_resolve_dispatch_provider_fresh_resolution_succeeds() -> None:
         return_value=fresh,
     ) as mock_rps:
         result = await resolve_dispatch_provider(
-            ctx, _make_config(), "openai:gpt-4o", adapter=MagicMock(), model_provider=AsyncMock()
+            ctx, _make_config(), "openai:gpt-4o", adapter=MagicMock(), model_provider=_NoHostedCredential()
         )
     assert result is fresh
     mock_rps.assert_called_once()

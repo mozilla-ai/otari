@@ -765,6 +765,54 @@ async def resolve_dispatch_provider(
     return await _serve_from_hosted_credential(ctx, resolved, adapter=adapter, port=model_provider)
 
 
+async def _warn_if_hosted_upstream_is_unpriced(
+    ctx: RequestContext,
+    resolved: ResolvedProvider,
+    upstream: str,
+) -> None:
+    """Record that a re-keyed request is about to settle free, if it is.
+
+    The pricing and budget gates ran in the preamble against the name the caller
+    asked for, and settlement reprices on the instance the request actually
+    served under. So an overlay returning a ``response_provider`` it has not
+    priced settles the request at ``cost=NULL`` and releases the whole hold,
+    which is ``require_pricing`` bypassed rather than enforced. Refusing here is
+    deliberately not done (see the caller), but the routed-chain hazard this
+    resembles at least has a guard, and an operator should not have to infer this
+    one from a usage report. The settlement warning alone does not distinguish
+    it: an unpriced re-key looks exactly like an ordinary unpriced model there.
+
+    Best-effort, like the rejection log: observability must not be able to fail a
+    request that is otherwise about to succeed.
+    """
+    if ctx.db is None:
+        return
+    try:
+        pricing = await find_model_pricing(
+            ctx.db,
+            upstream,
+            resolved.model,
+            organization_id=ctx.organization_id,
+        )
+    except SQLAlchemyError:
+        logger.warning(
+            "Could not check pricing for hosted upstream %s:%s; it may settle at no cost",
+            upstream,
+            resolved.model,
+        )
+        return
+    if pricing is None:
+        logger.warning(
+            "ModelProviderPort re-keyed %s:%s onto %s:%s, which resolves no pricing: this "
+            "request will settle at no cost and release its whole budget hold. Price the "
+            "upstreams this build's adapter returns.",
+            resolved.instance,
+            resolved.model,
+            upstream,
+            resolved.model,
+        )
+
+
 async def _serve_from_hosted_credential(
     ctx: RequestContext,
     resolved: ResolvedProvider,
@@ -851,6 +899,45 @@ async def _serve_from_hosted_credential(
             started_at=ctx.started_at,
         )
         raise adapter.error(403, denied_detail, ErrorKind.PERMISSION) from exc
+    except Exception as exc:
+        # Everything an adapter can fail at that is not its own refusal. Resolving
+        # a hosted credential is expected to be a network call (that is what an
+        # overlay binds this port to do), so a timeout, a connection reset or a
+        # database error is ordinary here rather than exotic. Nothing above this
+        # would catch one: all three routes call ``resolve_dispatch_provider``
+        # outside any ``try`` that takes a bare exception, and ``gateway.main``
+        # registers handlers only for ``TenancyError`` and
+        # ``RequestValidationError``. Without this the reservation the preamble
+        # took stays on ``users.reserved`` until the budget resets, which for a
+        # budget with no period is forever.
+        #
+        # ``Exception`` and not ``BaseException``: ``asyncio.CancelledError`` is a
+        # disconnected client rather than a failed lookup, and swallowing it would
+        # both mislabel the outcome and mark a cancelled task as handled.
+        logger.error(
+            "ModelProviderPort failed to resolve a credential for %s:%s: %s",
+            resolved.instance,
+            resolved.model,
+            exc,
+            exc_info=True,
+        )
+        await release_reservation(ctx)
+        await log_gateway_rejection(
+            db=ctx.db,
+            log_writer=ctx.log_writer,
+            api_key_id=ctx.api_key_id,
+            user_id=ctx.user_id,
+            model=resolved.model,
+            provider=resolved.instance,
+            endpoint=adapter.endpoint,
+            detail=HOSTED_CREDENTIAL_UNUSABLE_DETAIL,
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            started_at=ctx.started_at,
+        )
+        # The same detail the unusable-``response_provider`` branch below returns:
+        # from the caller's side both are "this build could not put an upstream
+        # behind your request", and which internal step failed is not theirs.
+        raise adapter.error(502, HOSTED_CREDENTIAL_UNUSABLE_DETAIL, ErrorKind.API) from exc
 
     if credential is None:
         # This build has no hosted path for the candidate. The candidate is
@@ -899,6 +986,8 @@ async def _serve_from_hosted_credential(
     # substitution is the adapter's decision rather than a plan's and refusing it
     # here would make a build's own fleet unusable until it were priced. An
     # overlay binding this port owns that.
+    await _warn_if_hosted_upstream_is_unpriced(ctx, resolved, credential.response_provider)
+
     kwargs: dict[str, Any] = {"api_key": credential.api_key}
     if credential.api_base is not None:
         kwargs["api_base"] = credential.api_base
