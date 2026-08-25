@@ -174,7 +174,7 @@ def test_inject_purpose_hints_no_system_inserts_at_front() -> None:
 
 def test_inject_purpose_hints_preserves_list_shaped_system_content() -> None:
     """List-shaped system content (Anthropic-style cache_control parts) must not be stringified into a repr."""
-    msgs = [
+    msgs: list[dict[str, Any]] = [
         {"role": "system", "content": [{"type": "text", "text": "be helpful"}]},
         {"role": "user", "content": "hi"},
     ]

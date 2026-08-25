@@ -71,6 +71,12 @@ def inject_purpose_hints(
 ) -> list[dict[str, Any]]:
     """Prepend or extend the system message with per-tool usage hints.
 
+    The merge target is the first message whose ``role`` is ``"system"``, wherever
+    it sits (a ``developer`` message may legally precede it); one is inserted at
+    the front when the conversation has none. ``content`` may be a string or a
+    list of content parts, so a list keeps its shape and gains a leading text
+    part rather than being stringified.
+
     Header resolution priority:
       1. ``header`` arg (per-request override, set from the request body)
       2. ``OTARI_TOOLS_HEADER`` env (per-deployment override)
