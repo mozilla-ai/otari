@@ -62,6 +62,24 @@ RESERVED_SOURCES = {"gateway"}
 RESERVED_SOURCE_PREFIXES = ("otari-ai:",)
 
 
+def reserved_source_reason(value: str) -> str | None:
+    """Why ``value`` may not be used as a provenance slug, or None when it is free.
+
+    Both ingest doors read this: the batch schema below turns it into a 422, and the
+    OTLP route falls back to its default source rather than 422-ing an exporter.
+    """
+    lowered = value.lower()
+    if lowered in RESERVED_SOURCES:
+        return "source 'gateway' is reserved for usage Otari served itself; pick another slug."
+    for prefix in RESERVED_SOURCE_PREFIXES:
+        if lowered.startswith(prefix):
+            return (
+                f"source prefix '{prefix}' is reserved for provenance tags otari.ai writes itself; "
+                "pick another slug."
+            )
+    return None
+
+
 class ExternalUsageEvent(BaseModel):
     """One imported usage event. Content-free: token counts and metadata only.
 
@@ -118,15 +136,9 @@ class ExternalEventsRequest(BaseModel):
     @field_validator("source")
     @classmethod
     def _not_reserved(cls, value: str) -> str:
-        lowered = value.lower()
-        if lowered in RESERVED_SOURCES:
-            raise ValueError("source 'gateway' is reserved for usage Otari served itself; pick another slug.")
-        for prefix in RESERVED_SOURCE_PREFIXES:
-            if lowered.startswith(prefix):
-                raise ValueError(
-                    f"source prefix '{prefix}' is reserved for provenance tags otari.ai writes itself; "
-                    "pick another slug."
-                )
+        reason = reserved_source_reason(value)
+        if reason is not None:
+            raise ValueError(reason)
         return value
 
 

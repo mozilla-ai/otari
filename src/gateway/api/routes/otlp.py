@@ -75,10 +75,10 @@ from gateway.services.agent_telemetry_service import (
 from gateway.services.agent_telemetry_service import ingest as ingest_telemetry
 from gateway.services.external_usage_service import (
     MAX_EVENTS_PER_BATCH,
-    RESERVED_SOURCES,
     ExternalEventsRequest,
     ExternalUsageEvent,
     ingest_external_events,
+    reserved_source_reason,
 )
 
 router = APIRouter(tags=["otel"])
@@ -206,9 +206,10 @@ def _resolve_timestamp(attrs: dict[str, Any], default: datetime | None) -> datet
 
 def _sanitize_source(name: str) -> str:
     slug = re.sub(r"[^A-Za-z0-9._:-]+", "-", name).strip("-")[:64]
-    # "gateway" is reserved for usage Otari served itself; a client claiming it
-    # would masquerade as native traffic (and fail the ingest schema with a 500).
-    if not slug or slug.lower() in RESERVED_SOURCES:
+    # "gateway" is reserved for usage Otari served itself and the `otari-ai:` prefix for
+    # the provenance tags otari.ai writes; a client claiming either would masquerade as
+    # those rows (and fail the ingest schema with a 500).
+    if not slug or reserved_source_reason(slug) is not None:
         return _DEFAULT_SOURCE
     return slug
 

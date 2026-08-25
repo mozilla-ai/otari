@@ -182,7 +182,7 @@ Otari reads only the content-free usage attributes, preferring the
 | `gen_ai.usage.output_tokens` | output |
 | `gen_ai.usage.cache_read_tokens` (or `cached_tokens`) | cache read |
 | `gen_ai.usage.cache_write_tokens` | cache write |
-| `otari.client_name` | `source` (provenance) |
+| `otari.client_name` | `source` (provenance); a reserved slug (`gateway`, or anything starting with `otari-ai:`) falls back to `otel` |
 | `otari.user_session_label` / `otari.session_label` | session label |
 
 A record with no model/provider/tokens (a non-LLM span, a prompt log, a metric) is
