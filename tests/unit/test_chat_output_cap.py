@@ -27,7 +27,13 @@ def test_current_name_alone_is_the_cap() -> None:
 
 
 def test_legacy_name_alone_is_the_cap() -> None:
-    """The deprecated spelling keeps working, unchanged."""
+    """The deprecated spelling keeps working, unchanged.
+
+    An explicit ``"max_completion_tokens": null`` reaches this helper as the same
+    call, since a null and an unset field are indistinguishable once pydantic has
+    parsed the body; that they differ on the wire is pinned where it is visible,
+    in ``tests/integration/test_output_cap_fold.py``.
+    """
     assert _effective_output_cap(20, None) == 20
 
 
@@ -42,12 +48,6 @@ def test_neither_leaves_the_cap_unset() -> None:
     """No cap stays no cap: the provider applies its own default, and the budget
     estimate falls back to its configured default output tokens."""
     assert _effective_output_cap(None, None) is None
-
-
-def test_explicit_null_current_name_does_not_erase_the_legacy_one() -> None:
-    """A client that sends ``"max_completion_tokens": null`` alongside a real
-    ``max_tokens`` asked for the latter, so the null must not win the fold."""
-    assert _effective_output_cap(20, None) == 20
 
 
 def test_zero_is_a_cap_and_not_an_absent_value() -> None:
