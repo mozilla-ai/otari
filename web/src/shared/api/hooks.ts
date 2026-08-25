@@ -79,6 +79,7 @@ import type {
   StoredProvider,
   StoredSearchTool,
   SummaryDimension,
+  SwitchOrganizationRequest,
   TestProviderResult,
   TestServiceResponse,
   ToolSettingsResponse,
@@ -1794,11 +1795,18 @@ export function useCreateOrganization() {
 export function useSwitchOrganization() {
   const queryClient = useQueryClient()
   return useMutation({
-    mutationFn: (organizationId: string) =>
-      apiFetch<OrganizationContext>("/v1/organizations/me/switch", {
+    mutationFn: (organizationId: string) => {
+      // Typed against the generated request rather than written inline, so a
+      // field the gateway renames fails here instead of on the wire. The
+      // parameter stays a bare id: both call sites have one, not a body.
+      const body: SwitchOrganizationRequest = {
+        organization_id: organizationId,
+      }
+      return apiFetch<OrganizationContext>("/v1/organizations/me/switch", {
         method: "POST",
-        body: JSON.stringify({ organization_id: organizationId }),
-      }),
+        body: JSON.stringify(body),
+      })
+    },
     onSuccess: () => {
       void queryClient.invalidateQueries()
     },

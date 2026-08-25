@@ -38,7 +38,7 @@ import secrets
 import uuid
 from datetime import UTC, datetime, timedelta
 
-from sqlalchemy.exc import IntegrityError
+from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.config import GatewayConfig
@@ -396,6 +396,16 @@ class OrganizationService:
             # an organization that did not exist a statement ago.
             await self.db.rollback()
             raise OrganizationSlugUnavailableError from None
+        except SQLAlchemyError:
+            # Not tidiness: SQLAlchemy leaves a session whose flush failed
+            # unusable, so a caller that reuses it gets `PendingRollbackError`
+            # from its next statement instead of the failure that actually
+            # happened. Same reasoning as
+            # ``WorkspaceWebSearchConfigService._commit``. The request path is
+            # covered either way, since ``get_db`` closes the session at
+            # teardown; a service-layer caller (every test here is one) is not.
+            await self.db.rollback()
+            raise
 
         return OrganizationPublic.model_validate(organization)
 

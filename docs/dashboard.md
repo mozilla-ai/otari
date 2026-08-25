@@ -669,7 +669,7 @@ password. Configure mail before you expect members to sign in.
 
 ### General
 
-- **Org settings**: rename the organization. There is exactly one.
+- **Org settings**: rename the organization you are acting in. Creating another, and moving between them, is the switcher above the workspace rail.
 - **Settings**: search and toggle runtime settings, and rotate the generated
   master key. Rotating the master key issues a fresh `otari-mk-…` value and keeps
   your current session signed in. **Email delivery** at the bottom of the page

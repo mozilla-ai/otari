@@ -94,7 +94,7 @@ export function OrganizationGeneralPage() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Organization"
-        description={`The tenant this gateway's workspaces, members, and roles belong to. There is one per deployment, provisioned on first boot. Your role here is ${role}.`}
+        description={`The organization you are acting in, and what this page renames. The first one is provisioned on first boot; the switcher above the rail is where you create another or move between them. Your role here is ${role}.`}
       />
 
       {canEdit ? null : (

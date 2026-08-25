@@ -5,6 +5,8 @@ it is covered in `tests/integration/test_tenancy_api.py`.
 """
 
 import re
+import secrets
+from unittest import mock
 
 from gateway.services.tenancy.organization_service import _generated_slug
 from gateway.services.tenancy.provisioning_service import DEFAULT_ORGANIZATION_SLUG
@@ -37,8 +39,22 @@ def test_the_stem_is_bounded_so_a_long_name_cannot_produce_an_unreadable_slug() 
 
 
 def test_two_organizations_with_one_name_get_different_slugs() -> None:
-    """What lets a name repeat: the slug is unique, the name is not."""
-    assert _generated_slug("Research") != _generated_slug("Research")
+    """What lets a name repeat: the suffix, not the name.
+
+    Asserted against a patched suffix rather than two live random ones. Two real
+    4-byte suffixes collide once in four billion, so comparing them tests
+    entropy rather than construction and fails for nothing; pinning the suffix
+    says the stronger thing, which is that the slug is built from
+    ``secrets.token_hex(4)`` and that a different suffix is the whole of the
+    difference.
+    """
+    with mock.patch.object(secrets, "token_hex", side_effect=["aaaaaaaa", "bbbbbbbb"]) as token_hex:
+        first = _generated_slug("Research")
+        second = _generated_slug("Research")
+
+    assert (first, second) == ("research-aaaaaaaa", "research-bbbbbbbb")
+    # Four bytes, which is what makes a real collision negligible in the first place.
+    assert token_hex.call_args_list == [mock.call(4), mock.call(4)]
 
 
 def test_a_created_slug_is_never_the_one_first_boot_adopts() -> None:
