@@ -97,7 +97,11 @@ class _Recorder:
 
 
 async def _normalize_with_vision(
-    user_id: str, provider: LLMProvider | None, model: str, instance: str | None
+    user_id: str,
+    provider: LLMProvider | None,
+    model: str,
+    instance: str | None,
+    workspace_id: uuid.UUID | None,
 ) -> tuple[int, CompletionUsage | None]:
     return 5000, _VISION_USAGE
 

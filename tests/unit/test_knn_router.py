@@ -17,6 +17,7 @@ Each routing-memory record is one example: a prompt embedding plus a
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 import pytest
@@ -88,7 +89,9 @@ def _wire(
     async def _embed(text: str) -> list[float]:
         return list(query)
 
-    async def _load(user_id: str, task_id: str | None) -> list[RoutingMemory]:
+    async def _load(
+        user_id: str, task_id: str | None, workspace_id: uuid.UUID | None = None
+    ) -> list[RoutingMemory]:
         # `total` pads the record count without inventing neighbors, which is how
         # the seed gate and the sparse-neighborhood gate are tested separately.
         padding = [] if total is None else [_both_good()] * max(0, total - len(records))

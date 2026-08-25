@@ -15,9 +15,12 @@ than in-memory because batch mode's rebuild is what is under test.
 The later revisions that reshape the same tables are exercised here too, for the
 same reason: the workspace scoping that rebuilds four request-plane tables, the
 credential columns added to ``user``, whose downgrade depends on SQLite's refusal
-to drop an indexed column, and the identity column added to
-``dashboard_sessions``, which rebuilds that table to tighten a column to NOT NULL
-and point it at ``user``.
+to drop an indexed column, the identity column added to ``dashboard_sessions``,
+which rebuilds that table to tighten a column to NOT NULL and point it at
+``user``, and the two revisions that finish scoping the gateway survivals: one
+swaps the alias and policy uniqueness constraints (a batch rebuild with the
+partial indexes taken out and put back around it), the other adds
+``workspace_id`` to three more tables.
 """
 
 import json
@@ -59,6 +62,11 @@ _CREDENTIAL_COLUMNS = {
     "email_verified_at",
 }
 _TOKEN_INDEX = "ix_user_email_verification_token"
+
+_ALIAS_WIDEN_REVISION = "c1e4a7b9d3f6"
+_BEFORE_ALIAS_WIDEN = "a9c4e2b6d8f1"
+_SURVIVALS_REVISION = "d2f5b8c0e4a7"
+_SURVIVAL_TABLES = ("routing_memory", "router_preferences", "file_objects")
 
 _TOKEN_REVISION = "db8fbf901ee0"
 _BEFORE_TOKENS = "c8e2a4f6b0d3"
@@ -243,6 +251,10 @@ def test_workspace_scope_keeps_the_partial_indexes_it_rebuilds_around(
     foreign key needs it, so this is what proves the indexes survive it rather
     than what proves it was avoided (the migration's own docstring retracts that
     earlier rationale).
+
+    The names are the workspace-scoped ones because ``c1e4a7b9d3f6`` widened both
+    indexes to lead with ``workspace_id``; what is under test here is unchanged,
+    that a partial index survives a batch rebuild of its table.
     """
     _, engine = sqlite_at_head
     with engine.begin() as connection:
@@ -252,7 +264,10 @@ def test_workspace_scope_keeps_the_partial_indexes_it_rebuilds_around(
                 text("SELECT name FROM sqlite_master WHERE type='index' AND sql LIKE '%WHERE%'")
             )
         }
-    assert {"uq_model_aliases_global_name", "uq_routing_policies_global_name"} <= partial
+    assert {
+        "uq_model_aliases_workspace_global_name",
+        "uq_routing_policies_workspace_global_name",
+    } <= partial
 
 
 def _insert_identity(connection: Connection, *, email: str | None = None, token: str | None = None) -> str:
@@ -623,3 +638,308 @@ def test_the_migrated_session_table_matches_the_model(sqlite_at_head: tuple[Conf
 
     assert set(migrated) == set(declared.columns.keys())
     assert migrated["user_id"]["nullable"] is False
+
+
+# ---------------------------------------------------------------------------
+# Workspace-scoped survivals (otari-ai#1643): the two revisions that finish
+# scoping what stays in the gateway. Both reshape existing tables, so SQLite's
+# batch rebuild is the risk, and this module is its only coverage.
+# ---------------------------------------------------------------------------
+
+
+def _two_workspaces(connection: Connection) -> tuple[str, str]:
+    """The migrated default workspace plus a second one beside it, as stored ids.
+
+    A UUID is CHAR(32) hex on SQLite, which is the engine every test here drives,
+    so the returned ids are what the ``workspace_id`` columns actually hold.
+    """
+    default = connection.execute(
+        text(
+            "SELECT w.id FROM workspace w JOIN organization o ON o.id = w.organization_id "
+            "WHERE o.slug = 'default'"
+        )
+    ).scalar_one()
+    organization_id = connection.execute(
+        text("SELECT organization_id FROM workspace WHERE id = :id"), {"id": default}
+    ).scalar_one()
+    second = uuid.uuid4().hex
+    connection.execute(
+        text(
+            "INSERT INTO workspace "
+            "(id, organization_id, name, description, created_by_user_id, "
+            " activation_classification, created_at) "
+            "VALUES (:id, :org, 'Second workspace', NULL, NULL, 'eligible', CURRENT_TIMESTAMP)"
+        ),
+        {"id": second, "org": organization_id},
+    )
+    return str(default), second
+
+
+def test_alias_and_policy_uniqueness_leads_with_the_workspace(
+    sqlite_at_head: tuple[Config, Engine],
+) -> None:
+    """The composite constraint and the partial index both gain ``workspace_id``.
+
+    The pair is what the widening is: the constraint keeps one row per
+    (workspace, name, user), and the partial index keeps one workspace-wide row
+    per (workspace, name), which the constraint cannot, both engines treating a
+    NULL ``user_id`` as distinct.
+    """
+    _, engine = sqlite_at_head
+    inspector = inspect(engine)
+
+    for table, constraint, index in (
+        ("model_aliases", "uq_model_aliases_workspace_name_user", "uq_model_aliases_workspace_global_name"),
+        (
+            "routing_policies",
+            "uq_routing_policies_workspace_name_user",
+            "uq_routing_policies_workspace_global_name",
+        ),
+    ):
+        unique = {c["name"]: c["column_names"] for c in inspector.get_unique_constraints(table)}
+        assert unique[constraint] == ["workspace_id", "name", "user_id"]
+        partial = {i["name"]: i["column_names"] for i in inspector.get_indexes(table)}
+        assert partial[index] == ["workspace_id", "name"]
+
+
+def test_the_widening_keeps_the_plain_indexes_the_rebuild_would_drop(
+    sqlite_at_head: tuple[Config, Engine],
+) -> None:
+    """``copy_from`` replaces reflection, so an index left out of it is lost.
+
+    Both tables carry a ``user_id`` and a ``workspace_id`` index that predate this
+    revision and that nothing else would notice going missing: a dropped index is
+    a slow query, not a failure.
+    """
+    _, engine = sqlite_at_head
+    inspector = inspect(engine)
+
+    for table in ("model_aliases", "routing_policies"):
+        names = {index["name"] for index in inspector.get_indexes(table)}
+        assert {f"ix_{table}_user_id", f"ix_{table}_workspace_id"} <= names
+
+
+def test_two_workspaces_can_hold_the_same_alias_name(tmp_path: Path) -> None:
+    """The row the narrower constraint refused and the widened one admits.
+
+    Written against the migrated schema rather than the models, so it is the
+    revision under test rather than the metadata that produced it.
+    """
+    url = f"sqlite:///{tmp_path / 'widen.db'}"
+    config = _alembic_config(url)
+    command.upgrade(config, "head")
+    engine = create_engine(url)
+
+    with engine.begin() as connection:
+        first, second = _two_workspaces(connection)
+        for index, workspace in enumerate((first, second)):
+            connection.execute(
+                text(
+                    "INSERT INTO model_aliases (id, name, target, user_id, workspace_id, created_at, updated_at) "
+                    "VALUES (:id, 'fast', :target, NULL, :ws, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+                ),
+                {"id": f"alias-{index}", "target": f"anthropic:model-{index}", "ws": workspace},
+            )
+        stored = connection.execute(text("SELECT COUNT(*) FROM model_aliases WHERE name = 'fast'")).scalar_one()
+
+    assert stored == 2
+    engine.dispose()
+
+
+def test_one_workspace_still_cannot_hold_two_of_a_name(tmp_path: Path) -> None:
+    """Widening admits rows; it does not stop admitting the duplicate it existed for."""
+    url = f"sqlite:///{tmp_path / 'widen-dup.db'}"
+    config = _alembic_config(url)
+    command.upgrade(config, "head")
+    engine = create_engine(url)
+
+    with engine.begin() as connection:
+        workspace, _second = _two_workspaces(connection)
+        connection.execute(
+            text(
+                "INSERT INTO model_aliases (id, name, target, user_id, workspace_id, created_at, updated_at) "
+                "VALUES ('a1', 'fast', 'anthropic:one', NULL, :ws, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+            ),
+            {"ws": workspace},
+        )
+
+    with pytest.raises(IntegrityError), engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO model_aliases (id, name, target, user_id, workspace_id, created_at, updated_at) "
+                "VALUES ('a2', 'fast', 'anthropic:two', NULL, :ws, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"
+            ),
+            {"ws": workspace},
+        )
+    engine.dispose()
+
+
+def test_the_widening_round_trips(sqlite_at_head: tuple[Config, Engine]) -> None:
+    """Down narrows both constraints back; up widens them again.
+
+    The partial indexes are dropped before each batch rebuild and recreated
+    after, so this is what proves neither direction leaves one behind under a
+    stale name.
+    """
+    config, engine = sqlite_at_head
+
+    command.downgrade(config, _BEFORE_ALIAS_WIDEN)
+
+    inspector = inspect(engine)
+    for table in ("model_aliases", "routing_policies"):
+        assert {c["name"] for c in inspector.get_unique_constraints(table)} == {f"uq_{table}_name_user"}
+        names = {index["name"] for index in inspector.get_indexes(table)}
+        assert f"uq_{table}_global_name" in names
+        assert f"uq_{table}_workspace_global_name" not in names
+
+    command.upgrade(config, "head")
+
+    inspector = inspect(engine)
+    for table in ("model_aliases", "routing_policies"):
+        assert {c["name"] for c in inspector.get_unique_constraints(table)} == {
+            f"uq_{table}_workspace_name_user"
+        }
+
+
+def test_the_survivals_carry_a_restricting_workspace_foreign_key(
+    sqlite_at_head: tuple[Config, Engine],
+) -> None:
+    """NOT NULL and RESTRICT on all three, matching ``api_keys.workspace_id``.
+
+    RESTRICT rather than cascade because deleting a workspace must not silently
+    take a user's uploads or a router's training data with it.
+    """
+    _, engine = sqlite_at_head
+    inspector = inspect(engine)
+
+    for table in _SURVIVAL_TABLES:
+        column = next(c for c in inspector.get_columns(table) if c["name"] == "workspace_id")
+        assert column["nullable"] is False
+        workspace_fk = [fk for fk in inspector.get_foreign_keys(table) if fk["referred_table"] == "workspace"]
+        assert [tuple(fk["constrained_columns"]) for fk in workspace_fk] == [("workspace_id",)]
+        assert workspace_fk[0]["options"].get("ondelete") == "RESTRICT"
+        # The user foreign key is untouched: the workspace is a second axis, not
+        # a re-parenting (otari-ai#1643).
+        user_fk = [fk for fk in inspector.get_foreign_keys(table) if fk["referred_table"] == "users"]
+        assert [tuple(fk["constrained_columns"]) for fk in user_fk] == [("user_id",)]
+        assert user_fk[0]["options"].get("ondelete") == "CASCADE"
+
+
+def test_the_router_indexes_are_rebuilt_leading_with_the_workspace(
+    sqlite_at_head: tuple[Config, Engine],
+) -> None:
+    """Every read filters on the workspace, so it leads each composite index."""
+    _, engine = sqlite_at_head
+    inspector = inspect(engine)
+
+    memory = {index["name"]: index["column_names"] for index in inspector.get_indexes("routing_memory")}
+    assert memory["ix_routing_memory_workspace_user_model"] == ["workspace_id", "user_id", "embedding_model"]
+    assert memory["ix_routing_memory_workspace_user_created"] == ["workspace_id", "user_id", "created_at"]
+    assert memory["ix_routing_memory_workspace_user_model_task"] == [
+        "workspace_id",
+        "user_id",
+        "embedding_model",
+        "task_id",
+    ]
+    assert "ix_routing_memory_user_model" not in memory
+
+    preferences = {i["name"]: i["column_names"] for i in inspector.get_indexes("router_preferences")}
+    assert preferences["ix_router_preferences_workspace_user_created"] == [
+        "workspace_id",
+        "user_id",
+        "created_at",
+    ]
+
+
+def test_existing_survival_rows_are_backfilled_onto_the_default_workspace(tmp_path: Path) -> None:
+    """The upgrade an operator with uploaded files and a taught router runs.
+
+    NOT NULL means the migration has to supply a value, and the only right one is
+    the workspace every other request-plane row was already backfilled onto: no
+    data moves and nothing is re-issued.
+    """
+    url = f"sqlite:///{tmp_path / 'survivals.db'}"
+    config = _alembic_config(url)
+    command.upgrade(config, _ALIAS_WIDEN_REVISION)
+    engine = create_engine(url)
+
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO users (user_id, spend, reserved, blocked, created_at, updated_at, metadata) "
+                "VALUES ('alice', 0, 0, 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP, '{}')"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO file_objects "
+                "(id, user_id, filename, mime_type, bytes, purpose, storage_ref, created_at, metadata) "
+                "VALUES ('file-1', 'alice', 'notes.txt', 'text/plain', 4, 'user_data', 'ref-1', "
+                " CURRENT_TIMESTAMP, '{}')"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO routing_memory "
+                "(id, user_id, embedding_model, embedding, qualities, task_id, label_source, created_at) "
+                "VALUES ('m1', 'alice', 'openai:text-embedding-3-small', '[0.1]', '{}', NULL, 'human', "
+                " CURRENT_TIMESTAMP)"
+            )
+        )
+        connection.execute(
+            text(
+                "INSERT INTO router_preferences "
+                "(id, user_id, prompt, task_id, scores, label_source, created_at) "
+                "VALUES ('p1', 'alice', 'hello', NULL, '{}', 'human', CURRENT_TIMESTAMP)"
+            )
+        )
+
+    command.upgrade(config, _SURVIVALS_REVISION)
+
+    with engine.begin() as connection:
+        default = connection.execute(
+            text(
+                "SELECT w.id FROM workspace w "
+                "JOIN organization o ON o.id = w.organization_id WHERE o.slug = 'default'"
+            )
+        ).scalar_one()
+        for table in _SURVIVAL_TABLES:
+            landed = connection.execute(text(f"SELECT workspace_id FROM {table}")).scalar_one()  # noqa: S608
+            assert landed == default, table
+    engine.dispose()
+
+
+def test_the_survivals_revision_round_trips(sqlite_at_head: tuple[Config, Engine]) -> None:
+    """Down drops the column, its index and the renamed ones; up puts them back.
+
+    The downgrade drops the workspace index before its column on purpose: SQLite
+    refuses ``DROP COLUMN`` while an index covers it, the same ordering the
+    credential revision needed.
+    """
+    config, engine = sqlite_at_head
+
+    command.downgrade(config, _ALIAS_WIDEN_REVISION)
+
+    inspector = inspect(engine)
+    for table in _SURVIVAL_TABLES:
+        assert "workspace_id" not in {column["name"] for column in inspector.get_columns(table)}
+        assert f"ix_{table}_workspace_id" not in {index["name"] for index in inspector.get_indexes(table)}
+    memory = {index["name"] for index in inspector.get_indexes("routing_memory")}
+    assert "ix_routing_memory_user_model" in memory
+    assert "ix_routing_memory_workspace_user_model" not in memory
+
+    command.upgrade(config, "head")
+
+    inspector = inspect(engine)
+    for table in _SURVIVAL_TABLES:
+        assert "workspace_id" in {column["name"] for column in inspector.get_columns(table)}
+
+
+def test_the_migrated_survival_tables_match_their_models(sqlite_at_head: tuple[Config, Engine]) -> None:
+    """Hand-written revisions, so nothing else would notice the two drifting apart."""
+    _, engine = sqlite_at_head
+
+    for table in _SURVIVAL_TABLES:
+        declared = SQLModel.metadata.tables[table]
+        migrated = {column["name"] for column in inspect(engine).get_columns(table)}
+        assert migrated == set(declared.columns.keys()), table
