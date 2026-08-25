@@ -1,7 +1,8 @@
 """Which workspace a request-plane row belongs to.
 
-Every row in ``api_keys``, ``usage_logs``, ``model_aliases`` and
-``routing_policies`` carries a workspace, so every writer needs one. There are
+Every row in ``api_keys``, ``usage_logs``, ``model_aliases``,
+``routing_policies``, ``routing_memory``, ``router_preferences`` and
+``file_objects`` carries a workspace, so every writer needs one. There are
 only two sources:
 
 - **An API key request.** The workspace comes off the key that authenticated it,
@@ -71,11 +72,13 @@ def reset_key_workspace_cache() -> None:
     _workspace_organization.clear()
 
 
-async def default_workspace_id(db: AsyncSession) -> uuid.UUID:
-    """The workspace a deployment-wide write lands in.
+async def lookup_default_workspace_id(db: AsyncSession) -> uuid.UUID | None:
+    """The default workspace, or ``None`` when the deployment has none yet.
 
-    Seeded by the migration that added the columns, and adopted by first-boot
-    provisioning rather than duplicated, so it exists on every migrated database.
+    The read-only half of :func:`default_workspace_id`, for a caller that must
+    not write: the alias and policy cache refreshers run on a timer in every
+    worker, and creating a workspace as a side effect of reloading a cache would
+    turn a read path into a writer racing three replicas.
     """
     resolved = (
         await db.execute(
@@ -84,17 +87,27 @@ async def default_workspace_id(db: AsyncSession) -> uuid.UUID:
             .where(col(Organization.slug) == DEFAULT_ORGANIZATION_SLUG, col(Workspace.name) == DEFAULT_WORKSPACE_NAME)
         )
     ).scalar_one_or_none()
-    if resolved is None:
-        # Fall back to the oldest workspace before creating one: an operator may
-        # have renamed the default, and minting a second beside it would be worse
-        # than billing to the one that exists. The id breaks a ``created_at``
-        # tie, which one transaction creating two workspaces produces, so every
-        # process picks the same one rather than each picking its own.
-        resolved = (
-            await db.execute(
-                select(col(Workspace.id)).order_by(col(Workspace.created_at), col(Workspace.id)).limit(1)
-            )
-        ).scalar_one_or_none()
+    if resolved is not None:
+        return resolved
+    # Fall back to the oldest workspace before reporting none: an operator may
+    # have renamed the default, and a caller that then minted a second beside it
+    # would be worse than using the one that exists. The id breaks a
+    # ``created_at`` tie, which one transaction creating two workspaces produces,
+    # so every process picks the same one rather than each picking its own.
+    return (
+        await db.execute(
+            select(col(Workspace.id)).order_by(col(Workspace.created_at), col(Workspace.id)).limit(1)
+        )
+    ).scalar_one_or_none()
+
+
+async def default_workspace_id(db: AsyncSession) -> uuid.UUID:
+    """The workspace a deployment-wide write lands in.
+
+    Seeded by the migration that added the columns, and adopted by first-boot
+    provisioning rather than duplicated, so it exists on every migrated database.
+    """
+    resolved = await lookup_default_workspace_id(db)
     if resolved is None:
         return await _create_default_workspace(db)
 
@@ -213,6 +226,7 @@ async def organization_for_key_id(db: AsyncSession, api_key_id: str | None) -> u
 
 __all__ = [
     "default_workspace_id",
+    "lookup_default_workspace_id",
     "organization_for_key_id",
     "organization_for_workspace_id",
     "reset_key_workspace_cache",

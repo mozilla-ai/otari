@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import uuid
 from dataclasses import dataclass
 
 from any_llm.exceptions import AnyLLMError
@@ -87,6 +88,7 @@ async def decide_ordering(
     user_id: str | None,
     allowlist: list[str] | None,
     signal: RoutingSignal | None,
+    workspace_id: uuid.UUID | None = None,
 ) -> RouterOrdering | None:
     """Ask the policy's router to rank its candidates for this request.
 
@@ -127,7 +129,9 @@ async def decide_ordering(
             )
         return None
 
-    pool = usable_candidates(config, spec.router_candidates, user_id=user_id, allowlist=allowlist)
+    pool = usable_candidates(
+        config, spec.router_candidates, user_id=user_id, allowlist=allowlist, workspace_id=workspace_id
+    )
     default_model = spec.default_target
     if not pool:
         return RouterOrdering([], rationale="no candidate in the pool is usable by this caller")
@@ -136,6 +140,7 @@ async def decide_ordering(
         user_id=user_id or "",
         default_model=default_model,
         candidate_pool=pool,
+        workspace_id=workspace_id,
         task_signal=signal.task_signal,
         trace_signal=signal.trace_signal,
         trace_anchor=signal.trace_anchor,
@@ -207,6 +212,7 @@ def explain_router_ordering(
     *,
     user_id: str | None = None,
     allowlist: list[str] | None = None,
+    workspace_id: uuid.UUID | None = None,
 ) -> tuple[RouterOrdering | None, list[WeightedShare]]:
     """The ordering to show on a surface that has no request to route.
 
@@ -238,13 +244,15 @@ def explain_router_ordering(
     if not backend_is_weighted(spec.router_backend):
         return None, []
     declared = spec.router_candidates
-    usable = usable_candidates(config, declared, user_id=user_id, allowlist=allowlist)
+    usable = usable_candidates(
+        config, declared, user_id=user_id, allowlist=allowlist, workspace_id=workspace_id
+    )
     weights = spec.router_weights
     shares = declared_shares(weights, usable)
     displayed: list[WeightedShare] = []
     for selector in explain_ordering(usable, weights):
         try:
-            resolved = resolve_provider_selector(config, selector, user_id)
+            resolved = resolve_provider_selector(config, selector, user_id, workspace_id=workspace_id)
         except (ValueError, AnyLLMError):  # pragma: no cover - usable_candidates already resolved these
             continue
         displayed.append(
@@ -272,12 +280,18 @@ def usable_candidates(
     *,
     user_id: str | None,
     allowlist: list[str] | None,
+    workspace_id: uuid.UUID | None = None,
 ) -> list[str]:
     """The candidates this caller may actually be served, in declared order.
 
     Selectors are kept in the form the policy wrote them (the compiler resolves
     them again for dispatch); resolution here is only to test the allow-list,
     which matches on the canonical ``instance:model``.
+
+    ``workspace_id`` is passed for the same reason the compiler takes one: a
+    candidate selector can itself name an alias, so resolving it in a workspace
+    other than the one dispatch uses would filter the pool against a canonical
+    key the request never sees.
 
     Public because ``explain`` needs the same pool: a weighted policy's shares are
     normalized over what survived filtering, so computing them from the declared
@@ -286,7 +300,7 @@ def usable_candidates(
     usable: list[str] = []
     for selector in candidates:
         try:
-            resolved = resolve_provider_selector(config, selector, user_id)
+            resolved = resolve_provider_selector(config, selector, user_id, workspace_id=workspace_id)
         except (ValueError, AnyLLMError):
             # The compiler records this as a dropped candidate with a reason; here
             # it just means the router should not rank it.

@@ -8,13 +8,17 @@ any-llm is actually dispatched against. When an instance name is itself a real
 any-llm provider (the common case, no ``provider_type`` declared), the two
 coincide and behavior is identical to splitting the selector directly.
 
-**Organization-scoped provider keys** (otari-ai#1748, otari#643) are a second,
-disjoint credential source, consulted only when ``workspace_id`` is passed and
-only for a *bare* ``provider:model``/``provider/model`` selector, i.e. one with
-no matching ``config.providers`` instance. An ``instance:model`` selector
-always resolves through ``config.providers`` exactly as before and never
-touches organization-scoped keys, by construction: the two addressing schemes
-occupy disjoint selector shapes rather than one layering over the other. See
+``workspace_id`` does two unrelated jobs here, and it is worth keeping them
+apart. It selects **which workspace's aliases and routing policies** the
+selector is resolved against (``alias_service``, ``policy_store``), which
+applies to every selector shape. Separately, it selects **whose
+organization-scoped provider keys** may supply credentials (otari-ai#1748,
+otari#643): a second, disjoint credential source, consulted only for a *bare*
+``provider:model``/``provider/model`` selector, i.e. one with no matching
+``config.providers`` instance. An ``instance:model`` selector always draws its
+credentials from ``config.providers`` exactly as before and never touches
+organization-scoped keys, by construction: the two addressing schemes occupy
+disjoint selector shapes rather than one layering over the other. See
 ``services/tenancy/org_provider_key_service.py`` for the overlay this reads.
 
 ``workspace_id`` is per-request, not per-deployment: which organization's keys
@@ -294,9 +298,10 @@ def resolve_provider_selector(
     instance's ``provider_type`` (defaulting to the instance name). Otherwise the
     selector is split by any-llm directly, so unconfigured selectors and the
     legacy ``provider/model`` form keep working exactly as before, and it is
-    this bare-selector branch alone that ``workspace_id`` reaches: an
-    instance-addressed selector never consults organization-scoped keys (see
-    the module docstring).
+    this bare-selector branch alone that hands ``workspace_id`` on to credential
+    resolution: an instance-addressed selector never consults organization-scoped
+    keys (see the module docstring). Alias and policy resolution reads the
+    workspace on both branches.
 
     A selector that names an alias, whether from ``config.yml`` or the
     ``model_aliases`` table, is first substituted with the alias target, then
@@ -305,17 +310,19 @@ def resolve_provider_selector(
 
     ``user_id`` is the billed user, so a user-scoped alias resolves to that
     user's target. Omit it only for a selector that is not caller input (the
-    operator-configured vision describe model), which is global by definition;
-    omitting it for a request selector would silently ignore the caller's own
-    aliases and resolve the global one instead. ``workspace_id`` is the same
-    kind of omission: pass it for caller input, leave it unset for an
-    operator-configured or otherwise workspace-less resolution.
+    operator-configured vision describe model), which belongs to no user by
+    definition; omitting it for a request selector would silently ignore the
+    caller's own aliases and resolve the workspace-wide one instead.
+    ``workspace_id`` is the same kind of omission: pass it for caller input,
+    leave it unset for an operator-configured or otherwise workspace-less
+    resolution, which then reads the deployment's default workspace's aliases
+    and policies.
 
     Raises ``ValueError`` / ``AnyLLMError`` (from any-llm) for a selector that
     names neither a configured instance nor a known provider, mirroring the
     prior ``AnyLLM.split_model_provider`` behavior.
     """
-    alias = resolve_effective_alias(config, model_selector, user_id)
+    alias = resolve_effective_alias(config, model_selector, user_id, workspace_id=workspace_id)
     if alias is None:
         # A *static* routing policy is an alias in everything but spelling: one
         # name, one target. Resolving it here is what makes "an alias is a
@@ -327,7 +334,7 @@ def resolve_provider_selector(
         # honest answer to give; picking its default anyway would silently serve a
         # different model than the policy describes. The completion routes compile
         # it properly; everywhere else it surfaces as an unknown model.
-        alias = resolve_static_policy_target(config, model_selector, user_id)
+        alias = resolve_static_policy_target(config, model_selector, user_id, workspace_id=workspace_id)
     selector = alias if alias is not None else model_selector
 
     split = split_selector(selector)
@@ -356,14 +363,20 @@ def resolve_provider_selector(
     )
 
 
-def resolve_static_policy_target(config: GatewayConfig, model_selector: str, user_id: str | None = None) -> str | None:
+def resolve_static_policy_target(
+    config: GatewayConfig,
+    model_selector: str,
+    user_id: str | None = None,
+    *,
+    workspace_id: uuid.UUID | None = None,
+) -> str | None:
     """The single target of a static routing policy, or ``None``.
 
     ``None`` for a name that is not a policy, for a dynamic policy (whose target
     depends on the request), and when routing is disabled. Scoped like an alias, so
-    a user-scoped policy resolves to that user's target.
+    a user-scoped policy in this workspace resolves to that user's target.
     """
-    spec = resolve_effective_policy(config, model_selector, user_id)
+    spec = resolve_effective_policy(config, model_selector, user_id, workspace_id=workspace_id)
     if spec is None or spec.is_dynamic:
         return None
     return spec.default_target

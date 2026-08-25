@@ -33,6 +33,7 @@ from gateway.api.routes._pipeline import (
     run_single_attempt_stream,
     run_standalone_non_stream,
     run_streaming_with_fallback,
+    scope_prompt_cache_key,
 )
 from gateway.api.routes._platform import ResolvedAttempt, SettledCost, build_attempt_client_args
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
@@ -453,7 +454,11 @@ async def create_response(
     max_output_tokens = raw_max_output if isinstance(raw_max_output, int) and raw_max_output >= 0 else None
 
     async def _normalize(
-        user_id: str, provider: LLMProvider | None, model: str, instance: str | None
+        user_id: str,
+        provider: LLMProvider | None,
+        model: str,
+        instance: str | None,
+        workspace_id: uuid.UUID | None,
     ) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the Responses input payload
         # before the cost estimate. Standalone only; no-op when the files
@@ -468,6 +473,7 @@ async def create_response(
             raw_request=raw_request,
             user_id=user_id,
             instance=instance,
+            workspace_id=workspace_id,
         )
         chars = len(str(request_body.input)) + len(str(getattr(request_body, "instructions", "") or ""))
         return chars, stats.vision_usage()
@@ -561,6 +567,7 @@ async def create_response(
         remaining_user_tools=tool_ctx.remaining_user_tools,
         web_search_declared_name=tool_ctx.web_search_declared_name,
     )
+    scope_prompt_cache_key(request_fields, ctx)
     # This is an internal handoff populated below, never a client request field.
     # ``ResponsesRequest`` permits extra fields for OpenAI compatibility, so
     # remove a caller-supplied value before constructing the provider kwargs.

@@ -283,7 +283,7 @@ Like named instances, aliases are a standalone-mode feature. In hybrid mode mode
 resolution and routing are owned by the otari.ai platform, so the local `aliases`
 map does not apply.
 
-### Runtime aliases, and scoping one to a user
+### Runtime aliases, and scoping one to a user or a workspace
 
 Aliases can also be created without a restart, through `/v1/aliases` (master key
 only) or the dashboard's Routing page, which lists and manages aliases alongside
@@ -292,21 +292,30 @@ request as a configured one; it is stored in the database rather than in
 `config.yml`, and the listing tells you which is which (`source: config` or
 `source: stored`).
 
-A runtime alias applies to every caller by default. Give it a `user_id` and it
-applies to that user alone:
+A runtime alias has two independent scopes. It belongs to one **workspace**, and
+within that workspace it applies to every caller unless you give it a `user_id`,
+which narrows it to that user alone. Omitting `workspace_id` means the
+deployment's default workspace, so a single-workspace deployment never names one:
 
 ```bash
-# Global: everyone resolves "fast" to gpt-5-mini.
+# Workspace-wide: everyone in the default workspace resolves "fast" to gpt-5-mini.
 curl -X POST http://localhost:8000/v1/aliases \
   -H "Authorization: Bearer <master-key>" \
   -H "Content-Type: application/json" \
   -d '{"name": "fast", "target": "openai:gpt-5-mini"}'
 
-# Scoped: alice alone resolves "fast" to a local model instead.
+# Scoped to a user: alice alone resolves "fast" to a local model instead.
 curl -X POST http://localhost:8000/v1/aliases \
   -H "Authorization: Bearer <master-key>" \
   -H "Content-Type: application/json" \
   -d '{"name": "fast", "target": "home_lab:qwen3", "user_id": "alice"}'
+
+# Scoped to a workspace: the platform team resolves "fast" to their own target,
+# and nobody outside that workspace sees it.
+curl -X POST http://localhost:8000/v1/aliases \
+  -H "Authorization: Bearer <master-key>" \
+  -H "Content-Type: application/json" \
+  -d '{"name": "fast", "target": "openai:gpt-5", "workspace_id": "<workspace-id>"}'
 ```
 
 Scoping is what lets one stable model name mean different things to different
@@ -316,23 +325,31 @@ the `model` they send.
 
 The rules that follow from it:
 
+- Which workspace a request resolves in comes off the API key that authenticated
+  it, never off a header: a caller controls its headers and not which key it
+  holds. A master-key request resolves in the default workspace, which is where
+  its own writes land.
+- A `config.yml` alias has no workspace. It comes from a file the deployment owns,
+  so it is in force in every one of them and is listed unscoped.
 - Resolution is most-specific-first: a user's own alias wins over a `config.yml`
-  alias, which wins over a global stored one. So a user-scoped alias may override
-  a configured name (that is a working override), while a *global* stored alias
-  may not (config would win, and the stored one would silently never be used, so
-  the API refuses it with a 400).
-- A name plus a scope is the identity. Creating `fast` for `alice` leaves the
-  global `fast` alone, and deleting either leaves the other in place. Deletes take
-  the scope as a query parameter: `DELETE /v1/aliases/fast?user_id=alice`, or omit
-  it for the global one.
-- `GET /v1/models` is scoped the same way, so a caller sees the global and
-  configured aliases plus their own, never another user's. `GET /v1/aliases` is
-  the master-key management view and lists every scope at once.
-- Target-hiding follows the scope. A global alias hides its target from
-  everyone's listing; a user-scoped one hides it from that user's listing only, so
-  another caller may still see the real model (subject to their own model access).
-  If you are using aliases to curate one catalog for everybody, keep those
-  aliases global.
+  alias, which wins over the workspace-wide stored one. So a user-scoped alias may
+  override a configured name (that is a working override), while a
+  *workspace-wide* stored alias may not (config would win, and the stored one
+  would silently never be used, so the API refuses it with a 400).
+- A name plus both scopes is the identity. Creating `fast` for `alice` leaves the
+  workspace-wide `fast` alone, two workspaces can each hold their own `fast`, and
+  deleting any of them leaves the others in place. Deletes take the scope as query
+  parameters: `DELETE /v1/aliases/fast?user_id=alice&workspace_id=<id>`, omitting
+  either for the workspace-wide alias and the default workspace respectively.
+- `GET /v1/models` is scoped the same way, so a caller sees their workspace's
+  aliases and the configured ones plus their own, never another user's and never
+  another workspace's. `GET /v1/aliases` is the master-key management view and
+  lists every scope at once, narrowable with `?workspace_id=<id>`.
+- Target-hiding follows the scope. A workspace-wide alias hides its target from
+  every listing in that workspace; a user-scoped one hides it from that user's
+  listing only, so another caller may still see the real model (subject to their
+  own model access). If you are using aliases to curate one catalog for everybody
+  in a workspace, keep those aliases workspace-wide.
 - That rule inverts when a user-scoped alias overrides a **`config.yml`** name.
   The override replaces the configured entry for that user, so the configured
   target is no longer among the names being withheld and it reappears in that

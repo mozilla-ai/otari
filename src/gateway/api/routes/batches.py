@@ -230,8 +230,16 @@ def _authorize_record(
     credential before ever learning the batch is not theirs. Only the
     strict, record-based check needs to run this early; the legacy,
     metadata-anchored fallback (:func:`_authorize_legacy_batch`) has no such
-    risk, because a record-less batch has no stored workspace to leak --
+    risk, because a record-less batch has no stored workspace to leak:
     credentials there already resolve to the caller's own.
+
+    Both the owning user and the owning workspace have to match. The workspace
+    half is what stops a key in one workspace reaching a batch created in
+    another by the same user, which the user check alone allows and which would
+    then dispatch the lifecycle call against the creating workspace's
+    organization credential. ``record.workspace_id`` is NULL on a batch created
+    before the column existed; those fall through to the user check alone, the
+    same tolerance the metadata-anchored fallback already extends them.
 
     Raises 404 (not 403) on denial so a foreign key cannot probe which batch
     ids exist.
@@ -239,7 +247,12 @@ def _authorize_record(
     if is_master_key:
         return
     requester = str(api_key.user_id) if api_key and api_key.user_id else None
-    if record.user_id != requester:
+    denied = record.user_id != requester or (
+        record.workspace_id is not None
+        and api_key is not None
+        and record.workspace_id != api_key.workspace_id
+    )
+    if denied:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
             detail=f"Batch '{batch_id}' not found",
@@ -579,9 +592,10 @@ async def list_batches(
 ) -> dict[str, Any]:
     """List batches for a provider.
 
-    Non-master keys only see batches they own (plus legacy batches without an
-    ownership marker); the page is filtered after the provider call, so a page
-    may contain fewer than ``limit`` items.
+    Non-master keys only see batches they own in their own workspace (plus
+    legacy batches without an ownership marker, or without a recorded
+    workspace); the page is filtered after the provider call, so a page may
+    contain fewer than ``limit`` items.
     """
     api_key, is_master_key = auth_result
     provider_enum, provider_kwargs = _resolve_batch_provider(
@@ -618,7 +632,15 @@ async def list_batches(
             return True
         record = records.get(batch.id)
         if record is not None:
-            return record.user_id == requester
+            # Same pair as `_authorize_record`, and tolerant of a NULL workspace
+            # for the same reason: a batch created before the column existed has
+            # no workspace to compare against.
+            in_workspace = (
+                record.workspace_id is None
+                or api_key is None
+                or record.workspace_id == api_key.workspace_id
+            )
+            return record.user_id == requester and in_workspace
         return _owns_batch(batch, api_key, is_master_key)
 
     return {"data": [{**batch.model_dump(), "provider": provider} for batch in batches if _visible(batch)]}

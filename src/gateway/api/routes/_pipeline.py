@@ -34,6 +34,8 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import hashlib
+import json
 import re
 import time
 import uuid
@@ -47,7 +49,7 @@ from typing import Any, Generic, Literal, NamedTuple, NoReturn, Protocol, TypeVa
 from urllib.parse import ParseResult, urlparse
 
 from any_llm import LLMProvider
-from any_llm.exceptions import AnyLLMError
+from any_llm.exceptions import AnyLLMError, UnsupportedParameterError
 from any_llm.types.completion import (
     ChatCompletion,
     ChatCompletionChunk,
@@ -322,12 +324,32 @@ class _PendingUsageReport(NamedTuple):
 def _is_unsupported_feature_error(exc: BaseException) -> bool:
     """True when any-llm refused a request feature its backend cannot express.
 
-    Unwraps ``original_exception`` as well: once
-    ``ANY_LLM_UNIFIED_EXCEPTIONS=1`` becomes the default, the raw
-    ``NotImplementedError`` arrives wrapped in a generic ``ProviderError`` and a
-    check against ``exc`` alone would stop matching.
+    Newer any-llm releases use ``UnsupportedParameterError`` for typed provider
+    capability checks, while older feature checks still raise
+    ``NotImplementedError``. Unwrap ``original_exception`` as well so either
+    signal survives the unified-exception wrapper.
     """
-    return any(isinstance(candidate, NotImplementedError) for candidate in upstream_exception_chain(exc))
+    unsupported_types = (NotImplementedError, UnsupportedParameterError)
+    return any(isinstance(candidate, unsupported_types) for candidate in upstream_exception_chain(exc))
+
+
+def _unsupported_feature_detail(exc: BaseException) -> str:
+    """Return one actionable reason for a locally rejected request feature."""
+    for candidate in upstream_exception_chain(exc):
+        if isinstance(candidate, UnsupportedParameterError):
+            # AnyLLMError.__str__ prefixes the provider to ``message``. Feeding
+            # both through upstream_error_message would repeat the same reason.
+            return _redacted_caller_fault_detail(candidate.message, PROVIDER_BAD_REQUEST_DETAIL)
+    return _caller_fault_detail(exc, PROVIDER_BAD_REQUEST_DETAIL)
+
+
+def _redacted_caller_fault_detail(message: str, fallback: str) -> str:
+    """Return redacted explanatory text, or a fixed detail when none remains."""
+    redacted = redact_upstream_message(message)
+    explanatory = redacted.replace("[redacted]", "")
+    if not any(char.isalpha() for char in explanatory):
+        return fallback
+    return redacted
 
 
 _UNEXPECTED_KWARG = re.compile(r"unexpected keyword argument '([^']+)'")
@@ -421,11 +443,7 @@ def _caller_fault_detail(exc: BaseException, fallback: str) -> str:
     A message made entirely of redaction placeholders is empty for this
     purpose, too.
     """
-    redacted = redact_upstream_message(upstream_error_message(exc))
-    explanatory = redacted.replace("[redacted]", "")
-    if not any(char.isalpha() for char in explanatory):
-        return fallback
-    return redacted
+    return _redacted_caller_fault_detail(upstream_error_message(exc), fallback)
 
 
 def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
@@ -454,21 +472,16 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
     kind, status_code = upstream_exception_shape(exc)
     if kind == "timeout":
         return ProviderErrorMapping(status.HTTP_504_GATEWAY_TIMEOUT, PROVIDER_TIMEOUT_DETAIL)
-    # any-llm raises NotImplementedError when a request asks a provider for
-    # something its backend cannot express: context_management/betas against a
-    # provider with no native Anthropic Messages API is the case that surfaced
-    # this (#530). It carries no HTTP status, so it would otherwise fall through
-    # to the generic 502/500 and tell the caller a guaranteed-permanent failure
-    # was a transient one. The exception type is the whole signal here, so this
-    # needs no probe into any-llm's wording, and the message it carries already
-    # names the unsupported feature.
+    # any-llm raises UnsupportedParameterError for typed provider-capability
+    # checks and still uses NotImplementedError for older feature checks such as
+    # context_management/betas (#530). Neither carries an HTTP status, so either
+    # would otherwise fall through to a generic 502/500 and tell the caller a
+    # guaranteed-permanent failure was transient. The exception type is the
+    # whole signal here, and its message names the unsupported feature.
     if _is_unsupported_feature_error(exc):
-        return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, _caller_fault_detail(exc, PROVIDER_BAD_REQUEST_DETAIL))
+        return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, _unsupported_feature_detail(exc))
     # The same shape one layer down: a param any-llm forwards that the resolved
-    # provider's SDK has no parameter for. Also permanent, also the caller's to
-    # fix (by dropping the param or routing to a provider that has it), and the
-    # response names it, since a caller cannot otherwise tell which param the
-    # provider objected to.
+    # provider's SDK has no parameter for.
     if (param := _rejected_param(exc)) is not None:
         return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, _provider_rejected_param_detail(param))
     if status_code is None:
@@ -779,6 +792,45 @@ class RequestContext:
         self.request_group_id = request_group_id
 
 
+def scope_prompt_cache_key(request_fields: dict[str, Any], ctx: RequestContext) -> dict[str, Any]:
+    """Bind a caller-supplied prompt cache key to its authenticated scope.
+
+    Provider prompt caches can be shared by every tenant using one upstream
+    account. Including the resolved identity in the routing key prevents two
+    callers from deliberately choosing the same provider cache namespace and
+    using cached-token counts as an exact-prefix oracle.
+    """
+    caller_key = request_fields.get("prompt_cache_key")
+    if not isinstance(caller_key, str):
+        return request_fields
+
+    scope: tuple[str, str] | None = None
+    if ctx.hybrid_mode:
+        if ctx.route is not None and ctx.route.user_id:
+            scope = ("user", ctx.route.user_id)
+        elif ctx.route is not None and ctx.route.workspace_id:
+            # Older platform peers may omit user_id. The workspace still keeps
+            # their cache-routing key out of every other tenant's namespace.
+            scope = ("workspace", ctx.route.workspace_id)
+    elif ctx.user_id:
+        scope = ("user", ctx.user_id)
+
+    if scope is None:
+        # Never forward an unscoped caller-controlled key when the peer did not
+        # provide an authenticated identity. Provider-side automatic caching
+        # still works without the routing hint.
+        request_fields.pop("prompt_cache_key", None)
+        return request_fields
+
+    payload = json.dumps(
+        ["otari-prompt-cache-v1", scope[0], scope[1], caller_key],
+        ensure_ascii=False,
+        separators=(",", ":"),
+    )
+    request_fields["prompt_cache_key"] = hashlib.sha256(payload.encode()).hexdigest()
+    return request_fields
+
+
 def unresolvable_model_detail(model_selector: str) -> str:
     """Human-readable 400 detail for a selector the gateway cannot resolve."""
     return (
@@ -838,7 +890,9 @@ async def resolve_dispatch_provider(
         # pricing rows use. An instance removed from config while its pricing row
         # survives therefore prices, reserves a real estimate, and only fails
         # here; before this refund existed the hold stayed on users.reserved
-        # until the next budget reset (forever, for a budget with no period).
+        # until the reservation sweep reclaims it (see budget_reservation_ledger:
+        # the budget reset zeroes spend and leaves the hold in place, so before the
+        # ledger nothing gave it back at all).
         #
         # Releasing here and then raising is safe only because no caller above
         # catches this 400 and releases again: refund_reservation is not
@@ -1320,7 +1374,7 @@ async def _compile_request_plan(
     else (a policy exists partly to keep its targets off the wire); the enumerated
     per-candidate reasons go to the activity log, which is a master-key surface.
     """
-    spec = resolve_effective_policy(config, model, user_id)
+    spec = resolve_effective_policy(config, model, user_id, workspace_id=workspace_id)
     if spec is None:
         return None
 
@@ -1347,6 +1401,7 @@ async def _compile_request_plan(
             user_id=user_id,
             allowlist=allowlist,
             signal=routing_signal() if routing_signal is not None else None,
+            workspace_id=workspace_id,
         )
 
     try:
@@ -1395,7 +1450,8 @@ async def resolve_request_context(
     estimate_cache_write_ttl: Literal["5m", "1h"] | None = None,
     routing_signal: Callable[[], RoutingSignal] | None = None,
     normalize_messages: Callable[
-        [str, LLMProvider | None, str, str | None], Awaitable[tuple[int, CompletionUsage | None]]
+        [str, LLMProvider | None, str, str | None, uuid.UUID | None],
+        Awaitable[tuple[int, CompletionUsage | None]],
     ]
     | None = None,
 ) -> RequestContext:
@@ -1696,6 +1752,11 @@ async def resolve_request_context(
                 # Already resolved for the pricing gate above, so the free-model
                 # check reads the same rate the estimate was built from.
                 organization_id=organization_id,
+                # The completion path is the one reserve site with the config
+                # object to hand, so it is the one that can honor a deployment's
+                # own TTL; the batch, search and pass-through sites take the
+                # module default.
+                reservation_ttl_sec=config.budget_reservation_ttl_sec,
             )
         except HTTPException as exc:
             # A blocked or over-budget user is refused inside reserve_budget,
@@ -1754,7 +1815,17 @@ async def resolve_request_context(
         # provider-call settlement does not cover.
         if normalize_messages is not None:
             try:
-                post_chars, vision_usage = await normalize_messages(user_id, gate_impl, gate_model, gate_instance)
+                # The key's own workspace, not the resolved one: a master-key
+                # request has no key and resolves to the default workspace, which
+                # would narrow an operator's file references to it. `fetch_file`
+                # reads None as "every workspace", matching the /v1/files routes.
+                post_chars, vision_usage = await normalize_messages(
+                    user_id,
+                    gate_impl,
+                    gate_model,
+                    gate_instance,
+                    api_key.workspace_id if api_key is not None else None,
+                )
                 # Bill the vision describe side-call before the reservation
                 # top-up: its cost is already incurred by normalize_messages,
                 # so a 402 from the top-up below must not skip it (the refund
@@ -2495,8 +2566,9 @@ async def prepare_gateway_tools(
         # policy and the workspace web-search configuration above, and
         # `_require_tool_pricing`), and a failure in any of them is not an
         # `HTTPException`, so without this arm it would leave `users.reserved`
-        # holding the estimate until the budget's next reset, or forever for a
-        # budget with no reset period. The rollback comes first because a failed
+        # holding the estimate until the reservation sweep reclaims it. That sweep
+        # is the only thing that ever does: the budget reset zeroes spend and
+        # leaves the hold where it is. The rollback comes first because a failed
         # statement leaves the session unusable and `release_reservation` writes:
         # releasing on a poisoned session raises `PendingRollbackError` and the
         # hold survives anyway. Both calls are best-effort so a database that is
@@ -2864,8 +2936,9 @@ async def release_reservation(ctx: RequestContext) -> None:
     No-op in hybrid mode and for requests that reserved nothing. Use this
     before raising on any path that rejects the request after
     :func:`resolve_request_context` pre-debited the estimate; otherwise the
-    held amount shrinks the user's budget until the next reset (or forever,
-    for budgets without a reset period).
+    held amount shrinks the user's budget until the reservation sweep reclaims
+    it, which is the only thing that ever gives it back (the budget reset zeroes
+    spend and leaves the hold in place).
 
     When ``ctx.tool_charge`` is set, the request already ran gateway-run tool calls
     that were written onto its failure row, so the reservation is *reconciled* to

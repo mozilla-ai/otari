@@ -16,6 +16,7 @@ import asyncio
 import httpx
 import pytest
 from anthropic import APITimeoutError as AnthropicAPITimeoutError
+from any_llm.exceptions import UnsupportedParameterError
 from openai import APITimeoutError as OpenAIAPITimeoutError
 
 from gateway.api.routes._pipeline import (
@@ -319,6 +320,29 @@ def test_unsupported_feature_survives_the_unified_exception_wrapper() -> None:
     assert mapping is not None
     assert mapping.status_code == 400
     assert "context_management" in mapping.detail
+
+
+def test_unsupported_parameter_maps_to_400_with_the_reason() -> None:
+    """Typed any-llm capability failures are permanent caller errors, not 502s."""
+    exc = UnsupportedParameterError("prompt_cache_key", "anthropic")
+    mapping = classify_provider_error(exc)
+    assert mapping is not None
+    assert mapping.status_code == 400
+    assert mapping.detail == "'prompt_cache_key' is not supported for anthropic"
+    assert failure_status_code(exc) == 400
+
+
+def test_unsupported_parameter_payload_echo_uses_fallback_detail() -> None:
+    """A capability error that echoes the payload never returns an empty detail."""
+    exc = UnsupportedParameterError(
+        "prompt_cache_key",
+        "bedrock",
+        'request_body={"messages":[{"content":"secret prompt"}]}',
+    )
+    mapping = classify_provider_error(exc)
+    assert mapping is not None
+    assert mapping.status_code == 400
+    assert mapping.detail == PROVIDER_BAD_REQUEST_DETAIL
 
 
 def test_unsupported_feature_is_recorded_as_400_on_the_usage_log() -> None:

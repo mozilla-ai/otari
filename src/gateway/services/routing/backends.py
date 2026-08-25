@@ -24,6 +24,7 @@ this build does not have serves its default target and warns once.
 
 from __future__ import annotations
 
+import uuid
 from dataclasses import dataclass, field
 from typing import TYPE_CHECKING, Any, Protocol, runtime_checkable
 
@@ -69,6 +70,12 @@ class RoutingContext:
     safe choice a low-confidence decision leads with."""
     candidate_pool: list[str]
     """The policy's candidates, already filtered to what this caller may use."""
+    workspace_id: uuid.UUID | None = None
+    """The workspace this request bills to, when there is one. A backend that
+    reads stored state partitions on it as well as on ``user_id``, so a user
+    holding keys in two workspaces does not have one steer the other. ``None``
+    only where there is no request (a synchronous surface), which is also where
+    no backend is asked to rank."""
     task_signal: str = ""
     """This turn's prompt text. What ``step`` granularity routes on."""
     trace_signal: str = ""

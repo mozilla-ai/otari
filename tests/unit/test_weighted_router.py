@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import asyncio
 import random
+import uuid
 from collections import Counter
 
 import pytest
@@ -56,6 +57,11 @@ def config() -> GatewayConfig:
             "mistral": {"api_key": "sk-mistral"},
         },
     )
+
+
+# The routing-memory surfaces are workspace-scoped; these tests are about which
+# backends read a pool at all, so any one workspace stands for all of them.
+_WORKSPACE = uuid.UUID("00000000-0000-4000-8000-00000000d3fa")
 
 
 def _spec(
@@ -313,9 +319,9 @@ def test_a_weighted_policy_is_not_a_consumer_of_routing_memory() -> None:
     )
     assert not backend_pool_is_teachable(WEIGHTED_BACKEND)
     assert not backend_pool_is_teachable(" Weighted ")
-    assert _learned_policies(weighted_config, "alice") == []
+    assert _learned_policies(weighted_config, "alice", _WORKSPACE) == []
     assert _validated_scores(
-        weighted_config, "alice", [ScoredExample(prompt="hi", scores={"openai:gpt-5-mini": 1.0})]
+        weighted_config, "alice", [ScoredExample(prompt="hi", scores={"openai:gpt-5-mini": 1.0})], _WORKSPACE
     ) == {"openai:gpt-5-mini": "openai:gpt-5-mini"}
 
 
@@ -342,12 +348,14 @@ def test_a_noop_placeholder_pool_is_still_teachable() -> None:
     )
     assert backend_pool_is_teachable("noop")
     assert backend_pool_is_teachable("some-future-backend")
-    assert [policy.name for policy in _learned_policies(cfg, "alice")] == ["warming"]
+    assert [policy.name for policy in _learned_policies(cfg, "alice", _WORKSPACE)] == ["warming"]
     assert _validated_scores(
-        cfg, "alice", [ScoredExample(prompt="hi", scores={"openai:gpt-5-mini": 1.0})]
+        cfg, "alice", [ScoredExample(prompt="hi", scores={"openai:gpt-5-mini": 1.0})], _WORKSPACE
     ) == {"openai:gpt-5-mini": "openai:gpt-5-mini"}
     with pytest.raises(HTTPException, match="do not name a model"):
-        _validated_scores(cfg, "alice", [ScoredExample(prompt="hi", scores={"openai:gpt-4o": 1.0})])
+        _validated_scores(
+            cfg, "alice", [ScoredExample(prompt="hi", scores={"openai:gpt-4o": 1.0})], _WORKSPACE
+        )
 
 
 def test_the_backend_is_registered_and_needs_no_pricing(config: GatewayConfig) -> None:

@@ -244,7 +244,7 @@ into something a text-only local model can read.
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
 | `POST` | `/v1/files` | Upload a file (multipart: `file`, `purpose`). Returns a file object with an `id`. | API key or master key |
-| `GET` | `/v1/files` | List the caller's files. Query params: `purpose`. | API key or master key |
+| `GET` | `/v1/files` | List the caller's files in the workspace of the key that authenticated them. Query params: `purpose`, and `workspace_id` to narrow a master-key listing to one workspace. | API key or master key |
 | `GET` | `/v1/files/{file_id}` | Get file metadata. | API key or master key |
 | `GET` | `/v1/files/{file_id}/content` | Download the raw file bytes. | API key or master key |
 | `DELETE` | `/v1/files/{file_id}` | Delete a file. | API key or master key |
@@ -254,7 +254,7 @@ into something a text-only local model can read.
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
 | `POST` | `/v1/batches` | Create an async batch of LLM requests. | API key or master key |
-| `GET` | `/v1/batches` | List batches. Query param: `provider`. | API key or master key |
+| `GET` | `/v1/batches` | List batches. Query param: `provider`. A non-master key sees only the batches it owns in its own workspace, plus legacy ones carrying no owner marker or no recorded workspace; the master key sees all of them. Ownership is filtered after the provider call, so a page can come back with fewer items than `limit`. | API key or master key |
 | `GET` | `/v1/batches/{batch_id}` | Get batch status. Query param: `provider`. | API key or master key |
 | `POST` | `/v1/batches/{batch_id}/cancel` | Cancel a batch. Query param: `provider`. | API key or master key |
 | `GET` | `/v1/batches/{batch_id}/results` | Get batch results. Returns 409 if not complete. Query param: `provider`. | API key or master key |
@@ -352,9 +352,9 @@ An alias is a display name that resolves to one real model selector. See
 
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| `GET` | `/v1/aliases` | List every alias in force, from `config.yml` and from storage, in every scope. | Master key |
-| `POST` | `/v1/aliases` | Create or update a stored alias. Omit `user_id` for a global one. | Master key |
-| `DELETE` | `/v1/aliases/{name}` | Delete a stored alias. `user_id` query param selects the scope; omit it for the global one. Aliases from `config.yml` cannot be deleted here. | Master key |
+| `GET` | `/v1/aliases` | List every alias in force, from `config.yml` and from storage, in every scope. `workspace_id` narrows the stored ones to one workspace; `config.yml` aliases are deployment-wide and always listed. | Master key |
+| `POST` | `/v1/aliases` | Create or update a stored alias. Omit `user_id` for one every caller in the workspace sees, and `workspace_id` for the deployment's default workspace. | Master key |
+| `DELETE` | `/v1/aliases/{name}` | Delete a stored alias. `user_id` and `workspace_id` query params select the scope; omit them for the workspace-wide alias and the default workspace. Aliases from `config.yml` cannot be deleted here. | Master key |
 
 ### Routing policies
 
@@ -364,10 +364,10 @@ See [Routing policies](routing.md).
 
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| `GET` | `/v1/routing/policies` | List every policy in force, from `config.yml` and from storage, in every scope. | Master key |
-| `POST` | `/v1/routing/policies` | Create or update a stored policy. Body is `{name, spec, user_id?, rename_from?}`; `spec` is the same document a `routing.policies` entry takes. Omit `user_id` for a global one. `rename_from` renames an existing policy in the same scope to `name` on the same write: 404 if it does not exist, 409 if `name` is already taken. | Master key |
-| `POST` | `/v1/routing/policies/explain` | Compile a policy and return the plan without dispatching anything. Takes a saved `name`, an unsaved draft `spec`, or both (the draft wins). Optional `user_id`, `key_id`, `allowed_models`, `budget_used_pct`, `budget_remaining_usd` simulate the request. Returns the ordered candidates **and** the ones that were dropped, with reasons. For a weighted policy it also returns `router_weights`, the share each candidate takes once filtering is applied. | Master key |
-| `DELETE` | `/v1/routing/policies/{name}` | Delete a stored policy. `user_id` query param selects the scope. Policies from `config.yml` cannot be deleted here. | Master key |
+| `GET` | `/v1/routing/policies` | List every policy in force, from `config.yml` and from storage, in every scope. `workspace_id` narrows the stored ones to one workspace. | Master key |
+| `POST` | `/v1/routing/policies` | Create or update a stored policy. Body is `{name, spec, user_id?, workspace_id?, rename_from?}`; `spec` is the same document a `routing.policies` entry takes. Omit `user_id` for one every caller in the workspace sees, and `workspace_id` for the deployment's default workspace. `rename_from` renames an existing policy in the same scope to `name` on the same write: 404 if it does not exist, 409 if `name` is already taken. | Master key |
+| `POST` | `/v1/routing/policies/explain` | Compile a policy and return the plan without dispatching anything. Takes a saved `name`, an unsaved draft `spec`, or both (the draft wins). Optional `user_id`, `workspace_id`, `key_id`, `allowed_models`, `budget_used_pct`, `budget_remaining_usd` simulate the request. Returns the ordered candidates **and** the ones that were dropped, with reasons. For a weighted policy it also returns `router_weights`, the share each candidate takes once filtering is applied. | Master key |
+| `DELETE` | `/v1/routing/policies/{name}` | Delete a stored policy. `user_id` and `workspace_id` query params select the scope. Policies from `config.yml` cannot be deleted here. | Master key |
 
 Master key on every verb, including `explain`: the response enumerates a policy's
 targets, which is what a policy exists to keep off the wire.
@@ -383,8 +383,8 @@ are budget-checked and logged. See
 
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| `POST` | `/v1/routing/preferences/rank` | Record a batch of scored `examples` under `user_id`: each has a `prompt`, `scores` (selector to quality in `[0, 1]`), an optional `task_id` partition, and an optional `label_source`. Writes the examples the router votes over and returns each touched pool's progress toward the seed count. Up to 100 per call. A score key that no learned policy could route to is refused, because such records are unmatchable and cannot be deleted. | Master key |
-| `GET` | `/v1/routing/status` | For `user_id`: records and warmth per pool (the default pool plus each task partition), the router's tuning, and which policies depend on it. | Master key |
+| `POST` | `/v1/routing/preferences/rank` | Record a batch of scored `examples` under `user_id`, in `workspace_id` (optional, defaulting to the deployment's default workspace): each has a `prompt`, `scores` (selector to quality in `[0, 1]`), an optional `task_id` partition, and an optional `label_source`. Writes the examples the router votes over and returns each touched pool's progress toward the seed count. Up to 100 per call. A score key that no learned policy could route to is refused, because such records are unmatchable and cannot be deleted. | Master key |
+| `GET` | `/v1/routing/status` | For `user_id` in `workspace_id` (optional, defaulting to the deployment's default workspace): records and warmth per pool (the default pool plus each task partition), the router's tuning, and which policies depend on it. | Master key |
 
 ### Pricing
 

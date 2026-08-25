@@ -41,6 +41,7 @@ from gateway.api.routes._pipeline import (
     run_single_attempt_stream,
     run_standalone_non_stream,
     run_streaming_with_fallback,
+    scope_prompt_cache_key,
 )
 from gateway.api.routes._platform import (
     ResolvedAttempt,
@@ -505,7 +506,11 @@ async def create_message(
     user_from_metadata = request.metadata.get("user_id") if request.metadata else None
 
     async def _normalize(
-        user_id: str, provider: LLMProvider | None, model: str, instance: str | None
+        user_id: str,
+        provider: LLMProvider | None,
+        model: str,
+        instance: str | None,
+        workspace_id: uuid.UUID | None,
     ) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the Anthropic wire payload
         # before the cost estimate. Standalone only; no-op when the files
@@ -520,6 +525,7 @@ async def create_message(
             raw_request=raw_request,
             user_id=user_id,
             instance=instance,
+            workspace_id=workspace_id,
         )
         return len(str(request.messages)) + len(str(request.system or "")), stats.vision_usage()
 
@@ -575,6 +581,7 @@ async def create_message(
         remaining_user_tools=tool_ctx.remaining_user_tools,
         web_search_declared_name=tool_ctx.web_search_declared_name,
     )
+    scope_prompt_cache_key(request_fields, ctx)
     if request_fields.get("tools"):
         request_fields["tools"] = openai_to_anthropic_tools(request_fields["tools"])
     if tool_ctx.intercepts_web_search and request_fields.get("messages"):

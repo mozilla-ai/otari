@@ -26,6 +26,7 @@ const SEAM_MODULES = [
   "app/nav/overlayLabelOverrides.ts",
   "app/nav/overlayWalletSlot.tsx",
   "app/overlayEntitlementResolver.tsx",
+  "app/overlayPostSignInGate.tsx",
   "shared/telemetry/overlayTelemetry.ts",
 ] as const
 

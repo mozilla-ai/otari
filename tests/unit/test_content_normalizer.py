@@ -193,7 +193,7 @@ async def test_file_id_resolved_and_inlined_for_native(monkeypatch: pytest.Monke
         storage_ref="x/file-x",
     )
 
-    async def fake_fetch(db, file_id, user_id):  # type: ignore[no-untyped-def]
+    async def fake_fetch(db, file_id, user_id, *, workspace_id=None):  # type: ignore[no-untyped-def]
         assert file_id == "file-x"
         return record
 

@@ -128,6 +128,9 @@ class TestLifecycleWorkspaceId:
         assert resolved == caller_workspace_id
 
 
+_WORKSPACE = uuid.UUID("00000000-0000-4000-8000-00000000d3fa")
+_OTHER_WORKSPACE = uuid.UUID("00000000-0000-4000-8000-0000000007e5")
+
 class TestAuthorizeRecord:
     """`_authorize_record` runs *before* the batch's originating-organization
     credential is used to call the provider (see `_lifecycle_workspace_id`),
@@ -137,27 +140,54 @@ class TestAuthorizeRecord:
     dispatch to happen first."""
 
     def test_master_key_is_always_authorized(self) -> None:
-        record = SimpleNamespace(user_id="someone-else")
+        record = SimpleNamespace(user_id="someone-else", workspace_id=_WORKSPACE)
         _authorize_record(record, "batch-1", api_key=None, is_master_key=True)  # type: ignore[arg-type]
 
-    def test_the_records_own_user_is_authorized(self) -> None:
-        record = SimpleNamespace(user_id="user-1")
-        api_key = SimpleNamespace(user_id="user-1")
+    def test_the_records_own_user_in_its_own_workspace_is_authorized(self) -> None:
+        record = SimpleNamespace(user_id="user-1", workspace_id=_WORKSPACE)
+        api_key = SimpleNamespace(user_id="user-1", workspace_id=_WORKSPACE)
         _authorize_record(record, "batch-1", api_key=api_key, is_master_key=False)  # type: ignore[arg-type]
 
     def test_a_different_user_is_refused_with_404_not_403(self) -> None:
         """404, not 403: a foreign key must not be able to probe which batch
         ids exist by distinguishing "not yours" from "no such batch"."""
-        record = SimpleNamespace(user_id="the-owner")
-        api_key = SimpleNamespace(user_id="someone-else")
+        record = SimpleNamespace(user_id="the-owner", workspace_id=_WORKSPACE)
+        api_key = SimpleNamespace(user_id="someone-else", workspace_id=_WORKSPACE)
 
         with pytest.raises(HTTPException) as exc_info:
             _authorize_record(record, "batch-1", api_key=api_key, is_master_key=False)  # type: ignore[arg-type]
 
         assert exc_info.value.status_code == 404
 
+    def test_the_same_user_in_another_workspace_is_refused(self) -> None:
+        """The half the user check alone cannot see (otari-ai#1643).
+
+        A key confined to one workspace reaching a batch created in another
+        would dispatch the lifecycle call against the *creating* workspace's
+        organization credential, which is exactly what running this check before
+        the dispatch exists to prevent.
+        """
+        record = SimpleNamespace(user_id="user-1", workspace_id=_WORKSPACE)
+        api_key = SimpleNamespace(user_id="user-1", workspace_id=_OTHER_WORKSPACE)
+
+        with pytest.raises(HTTPException) as exc_info:
+            _authorize_record(record, "batch-1", api_key=api_key, is_master_key=False)  # type: ignore[arg-type]
+
+        assert exc_info.value.status_code == 404
+
+    def test_a_batch_predating_the_workspace_column_falls_back_to_the_user_check(self) -> None:
+        """NULL workspace is an unmigrated batch, not a foreign one.
+
+        The same tolerance the metadata-anchored fallback already extends a
+        record-less batch: there is nothing to compare against, so the owner
+        check is the whole check.
+        """
+        record = SimpleNamespace(user_id="user-1", workspace_id=None)
+        api_key = SimpleNamespace(user_id="user-1", workspace_id=_OTHER_WORKSPACE)
+        _authorize_record(record, "batch-1", api_key=api_key, is_master_key=False)  # type: ignore[arg-type]
+
     def test_no_api_key_is_refused(self) -> None:
-        record = SimpleNamespace(user_id="the-owner")
+        record = SimpleNamespace(user_id="the-owner", workspace_id=_WORKSPACE)
 
         with pytest.raises(HTTPException) as exc_info:
             _authorize_record(record, "batch-1", api_key=None, is_master_key=False)  # type: ignore[arg-type]

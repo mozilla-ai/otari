@@ -5,14 +5,21 @@ runtime and validated at startup; ``model_aliases`` rows are writable through
 ``/v1/aliases``. Both mean the same thing to a request, so everything that
 resolves or lists aliases reads them merged, via :func:`effective_aliases`.
 
-A stored alias also has a scope. A row with no ``user_id`` is global, which is
-what a ``config.yml`` alias always is. A row with a ``user_id`` belongs to that
-user alone: nobody else resolves it, and it shadows a global alias of the same
-name for that user. Precedence is most-specific-first, so
-``user-scoped > config.yml > global stored``. The middle pair is the pre-existing
-rule (the API refuses to store a global alias shadowing a configured one, so it
-is a safety net); the user-scoped layer sits on top of both, because overriding
-a shared name for one user is the whole point of scoping it.
+A stored alias has two independent scopes. Its **workspace** says which tenant
+owns it: an alias resolves only for requests in that workspace, which is what
+lets two workspaces each define ``fast`` and get their own target. Within a
+workspace, ``user_id`` scopes it further: ``NULL`` means every caller in that
+workspace sees it, and a non-null ``user_id`` belongs to that user alone,
+shadowing the workspace-wide row of the same name for them.
+
+A ``config.yml`` alias has no workspace. It comes from a file the deployment
+owns, so it is in force in every workspace, and it is never listed under one.
+
+Precedence is most-specific-first, so ``user-scoped > config.yml > stored
+workspace-wide``. The middle pair is the pre-existing rule (the API refuses to
+store a workspace-wide alias shadowing a configured one, so it is a safety
+net); the user-scoped layer sits on top of both, because overriding a shared name
+for one user is the whole point of scoping it.
 
 Resolution has to stay synchronous. ``resolve_provider_selector`` is called from
 eleven places, including ``services/vision.py``, which has no database session
@@ -22,10 +29,19 @@ cache, refreshed from the database rather than read per request. A write
 refreshes its own worker immediately; other workers and replicas converge within
 ``ALIAS_CACHE_TTL_SECONDS``, which is the staleness window for a newly created
 alias, not for anything already serving traffic.
+
+The cache is keyed by workspace first, which is what made widening the table's
+uniqueness constraint safe: while it was keyed on name alone, a second
+workspace's ``fast`` silently shadowed the first at request time, so the
+constraint could not allow one. A resolution that names no workspace falls back
+to the deployment's default, matching ``services/workspace_scope``: a caller with
+no workspace of its own (the master key, an operator-configured selector) is
+acting deployment-wide, and the default workspace is where its writes land too.
 """
 
 import asyncio
 import time
+import uuid
 
 from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -34,29 +50,42 @@ from gateway.core.config import GatewayConfig
 from gateway.core.database import create_session
 from gateway.log_config import logger
 from gateway.models.entities import ModelAlias
+from gateway.services.workspace_scope import lookup_default_workspace_id
 
 # How long a worker may serve a stale alias map before refreshing. A new alias
 # takes at most this long to work on every replica; existing ones are unaffected.
 ALIAS_CACHE_TTL_SECONDS = 30.0
 
-# Global stored aliases: name -> target.
-_cache: dict[str, str] = {}
-# User-scoped stored aliases: user_id -> {name -> target}. Kept separate from
-# _cache rather than keyed on (user_id, name) so a resolution for one user never
-# has to scan another user's aliases.
-_user_cache: dict[str, dict[str, str]] = {}
+# Workspace-wide stored aliases: workspace_id -> {name -> target}.
+_cache: dict[uuid.UUID, dict[str, str]] = {}
+# User-scoped stored aliases: workspace_id -> user_id -> {name -> target}. Kept
+# separate from _cache rather than keyed on (user_id, name) so a resolution for
+# one user never has to scan another user's aliases.
+_user_cache: dict[uuid.UUID, dict[str, dict[str, str]]] = {}
+# Where a resolution that names no workspace looks. Loaded with the rows, so it
+# cannot disagree with them, and ``None`` on a deployment with no workspace at
+# all, where there are no stored aliases to resolve anyway.
+_default_workspace: uuid.UUID | None = None
 _cached_at: float | None = None
 
 
-def cached_aliases(user_id: str | None = None) -> dict[str, str]:
+def _scope(workspace_id: uuid.UUID | None) -> uuid.UUID | None:
+    """The workspace a lookup reads, resolving "none given" to the default."""
+    return workspace_id if workspace_id is not None else _default_workspace
+
+
+def cached_aliases(user_id: str | None = None, *, workspace_id: uuid.UUID | None = None) -> dict[str, str]:
     """The stored aliases this worker last loaded. Empty before the first load.
 
-    Returns the global ones, or ``user_id``'s own layer alone when given: the
-    caller-facing merge is :func:`effective_aliases`.
+    Returns one workspace's workspace-wide layer, or ``user_id``'s own layer
+    within it alone when given: the caller-facing merge is :func:`effective_aliases`.
     """
+    scope = _scope(workspace_id)
+    if scope is None:
+        return {}
     if user_id is None:
-        return dict(_cache)
-    return dict(_user_cache.get(user_id, {}))
+        return dict(_cache.get(scope, {}))
+    return dict(_user_cache.get(scope, {}).get(user_id, {}))
 
 
 def cache_is_stale(ttl: float = ALIAS_CACHE_TTL_SECONDS) -> bool:
@@ -64,20 +93,30 @@ def cache_is_stale(ttl: float = ALIAS_CACHE_TTL_SECONDS) -> bool:
     return _cached_at is None or (time.monotonic() - _cached_at) >= ttl
 
 
-async def refresh_alias_cache(db: AsyncSession) -> dict[str, str]:
-    """Reload the alias cache from the database and return the global layer."""
-    global _cached_at  # noqa: PLW0603
+async def refresh_alias_cache(db: AsyncSession) -> dict[uuid.UUID, dict[str, str]]:
+    """Reload the alias cache from the database and return the workspace-wide layers.
+
+    Builds fresh dicts and rebinds them, so the swap is atomic from a concurrent
+    reader's point of view: the default workspace is resolved with an ``await``
+    in the middle, and clearing in place would leave a window where a request
+    resolves against an empty map and 400s on a model that exists.
+    """
+    global _cache, _user_cache, _default_workspace, _cached_at  # noqa: PLW0603
 
     rows = (await db.execute(select(ModelAlias))).scalars().all()
-    _cache.clear()
-    _user_cache.clear()
+    fresh_global: dict[uuid.UUID, dict[str, str]] = {}
+    fresh_scoped: dict[uuid.UUID, dict[str, dict[str, str]]] = {}
     for row in rows:
         if row.user_id is None:
-            _cache[row.name] = row.target
+            fresh_global.setdefault(row.workspace_id, {})[row.name] = row.target
         else:
-            _user_cache.setdefault(row.user_id, {})[row.name] = row.target
+            fresh_scoped.setdefault(row.workspace_id, {}).setdefault(row.user_id, {})[row.name] = row.target
+
+    default_workspace = await lookup_default_workspace_id(db)
+
+    _cache, _user_cache, _default_workspace = fresh_global, fresh_scoped, default_workspace
     _cached_at = time.monotonic()
-    return dict(_cache)
+    return {workspace: dict(names) for workspace, names in _cache.items()}
 
 
 def reset_alias_cache() -> None:
@@ -87,30 +126,38 @@ def reset_alias_cache() -> None:
     process-wide cache, and a worker restarting against a different database
     would answer from the old one until its first refresh.
     """
-    global _cached_at  # noqa: PLW0603
+    global _cache, _user_cache, _default_workspace, _cached_at  # noqa: PLW0603
 
-    _cache.clear()
-    _user_cache.clear()
+    _cache, _user_cache = {}, {}
+    _default_workspace = None
     _cached_at = None
 
 
-def effective_aliases(config: GatewayConfig, user_id: str | None = None) -> dict[str, str]:
-    """Every alias in force for ``user_id``: stored ones plus the configured ones.
+def effective_aliases(
+    config: GatewayConfig, user_id: str | None = None, *, workspace_id: uuid.UUID | None = None
+) -> dict[str, str]:
+    """Every alias in force for ``user_id`` in ``workspace_id``.
 
-    Layered most-specific-last, so ``user_id``'s own aliases win over a
-    ``config.yml`` one, which in turn wins over a global stored one. A caller with
-    no user (the master key) sees the global and configured layers only, never
-    another user's aliases.
+    Layered most-specific-last, so the user's own aliases win over a
+    ``config.yml`` one, which in turn wins over the workspace's own stored
+    layer. A caller with no user (the master key) sees the workspace-wide and
+    configured layers only, never another user's aliases. An omitted
+    ``workspace_id`` reads the deployment's default workspace, which is where a
+    deployment-wide write lands.
     """
-    merged = {**_cache, **config.aliases}
-    if user_id is not None:
-        merged.update(_user_cache.get(user_id, {}))
+    scope = _scope(workspace_id)
+    stored = _cache.get(scope, {}) if scope is not None else {}
+    merged = {**stored, **config.aliases}
+    if user_id is not None and scope is not None:
+        merged.update(_user_cache.get(scope, {}).get(user_id, {}))
     return merged
 
 
-def resolve_effective_alias(config: GatewayConfig, name: str, user_id: str | None = None) -> str | None:
-    """The target ``name`` resolves to for ``user_id``, or None when not an alias."""
-    target = effective_aliases(config, user_id).get(name)
+def resolve_effective_alias(
+    config: GatewayConfig, name: str, user_id: str | None = None, *, workspace_id: uuid.UUID | None = None
+) -> str | None:
+    """The target ``name`` resolves to for this caller, or None when not an alias."""
+    target = effective_aliases(config, user_id, workspace_id=workspace_id).get(name)
     return target if isinstance(target, str) and target else None
 
 
@@ -119,12 +166,16 @@ def all_alias_names(config: GatewayConfig) -> set[str]:
 
     For writes that must refuse to treat an alias name as a real model key
     (pricing rows, model allow-list entries). Those checks are scope-blind on
-    purpose: the name means "alias" to at least one caller, so storing it as a
-    model key would be dead data no matter whose request came in.
+    purpose, across workspaces as well as users: the name means "alias" to at
+    least one caller, so storing it as a model key would be dead data no matter
+    whose request came in.
     """
-    names = set(_cache) | set(config.aliases)
-    for scoped in _user_cache.values():
-        names |= set(scoped)
+    names = set(config.aliases)
+    for workspace_names in _cache.values():
+        names |= set(workspace_names)
+    for per_user in _user_cache.values():
+        for scoped in per_user.values():
+            names |= set(scoped)
     return names
 
 
@@ -163,6 +214,12 @@ async def load_aliases_at_startup(db: AsyncSession) -> None:
     except Exception:
         logger.exception("Failed to load model aliases; continuing with config aliases only")
         return
-    scoped = sum(len(names) for names in _user_cache.values())
-    if aliases or scoped:
-        logger.info("Loaded %d global and %d user-scoped model alias(es)", len(aliases), scoped)
+    workspace_global = sum(len(names) for names in aliases.values())
+    scoped = sum(len(names) for per_user in _user_cache.values() for names in per_user.values())
+    if workspace_global or scoped:
+        logger.info(
+            "Loaded %d workspace-wide and %d user-scoped model alias(es) across %d workspace(s)",
+            workspace_global,
+            scoped,
+            len(set(_cache) | set(_user_cache)),
+        )

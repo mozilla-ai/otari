@@ -5,8 +5,10 @@ on:
     branches: [ main, develop ]
     paths:
       - 'src/gateway/**'
+      - 'alembic/**'
       - 'tests/**'
       - 'scripts/**'
+      - 'Makefile'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/otari-lint.yml'
@@ -14,8 +16,10 @@ on:
     branches: [ main ]
     paths:
       - 'src/gateway/**'
+      - 'alembic/**'
       - 'tests/**'
       - 'scripts/**'
+      - 'Makefile'
       - 'pyproject.toml'
       - 'uv.lock'
       - '.github/workflows/otari-lint.yml'

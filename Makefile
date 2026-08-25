@@ -1,4 +1,4 @@
-.PHONY: help dev dashboard test test-unit test-integration lint check-architecture typecheck openapi-check postman postman-check changelog
+.PHONY: help dev dashboard test test-unit test-integration lint check-architecture typecheck openapi-check postman postman-check changelog check-migrations
 
 help:
 	@printf "Available targets:\n"
@@ -51,13 +51,19 @@ test-unit:
 test-integration:
 	uv run pytest -v tests/integration
 
-lint: check-architecture
+lint: check-architecture check-migrations
 	uv run ruff check src tests scripts
 
 # Enforce gateway layer rules. Pure stdlib; runs as part of `make lint` (which
 # otari-lint.yml calls on every PR) and stays independently runnable.
 check-architecture:
 	uv run python scripts/check_architecture.py
+
+# Refuse a branched revision graph. Cheap, and it runs before the suites so a
+# rebase-away-from-correct branch says so in one line instead of failing every
+# test that builds a schema.
+check-migrations:
+	uv run python scripts/check_alembic_heads.py
 
 typecheck:
 	uv run mypy

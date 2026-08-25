@@ -33,6 +33,7 @@ from gateway.api.routes._pipeline import (
     run_single_attempt_stream,
     run_standalone_non_stream,
     run_streaming_with_fallback,
+    scope_prompt_cache_key,
 )
 from gateway.api.routes._platform import ResolvedAttempt, SettledCost
 from gateway.api.routes._schema_derive import SESSION_LABEL_DESC, SESSION_LABEL_MAX_LENGTH, derive_request_base
@@ -359,7 +360,11 @@ async def chat_completions(
         )
 
     async def _normalize(
-        user_id: str, provider: LLMProvider | None, model: str, instance: str | None
+        user_id: str,
+        provider: LLMProvider | None,
+        model: str,
+        instance: str | None,
+        workspace_id: uuid.UUID | None,
     ) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the wire payload (extract to
         # text for text-only models, inline for natively-capable ones) before
@@ -375,6 +380,7 @@ async def chat_completions(
             raw_request=raw_request,
             user_id=user_id,
             instance=instance,
+            workspace_id=workspace_id,
         )
         return len(str(request.messages)), stats.vision_usage()
 
@@ -418,6 +424,7 @@ async def chat_completions(
         remaining_user_tools=tool_ctx.remaining_user_tools,
         web_search_declared_name=tool_ctx.web_search_declared_name,
     )
+    scope_prompt_cache_key(request_fields, ctx)
     # Dispatch one cap, under the name any-llm understands and knows how to map to
     # any provider (via BaseOpenAIProvider._convert_completion_params). Popped
     # unconditionally so exactly one spelling reaches the provider call, whether

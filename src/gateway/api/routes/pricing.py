@@ -288,6 +288,13 @@ def _policy_pricing_detail(config: GatewayConfig, request: SetPricingRequest) ->
     Names the candidates when they are knowable, because the operator's next
     action is to price them: a policy resolves to one of its own selectors, and
     that is the key the price has to be stored under.
+
+    "Knowable" means resolvable in the default workspace, which is where this
+    master-key surface reads (``services/policy_store``). A policy that lives in
+    another workspace still triggers the refusal, because the name check above is
+    scope-blind, and falls back to the generic wording: the price would be dead
+    data either way, and guessing which workspace the operator meant would be
+    worse than not naming its candidates.
     """
     spec = resolve_effective_policy(config, request.model_key)
     if spec is None:

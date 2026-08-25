@@ -57,6 +57,22 @@ an intentionally unpriced backend.
 You can also inline a file as a base64 `data:` URL (`file.file_data`) or send an
 `image_url` block, with or without uploading first.
 
+### Who can see an uploaded file
+
+A file belongs to the user who uploaded it and to the workspace the uploading API
+key belongs to. Both have to match for a request to reach it, on the listing, the
+metadata, the download, the delete, and the `file_id` references resolved out of
+a chat message. So a user who holds keys in two workspaces reaches each
+workspace's files only through that workspace's key, and anything they cannot see
+answers 404 rather than 403, which is what keeps a foreign id indistinguishable
+from a missing one.
+
+The workspace comes off the key rather than a header, because a caller controls
+its headers and not which key it holds. The master key is the exception: it is the
+operator acting deployment-wide and sees every workspace, narrowable with
+`GET /v1/files?workspace_id=<id>`. A master-key upload lands in the deployment's
+default workspace.
+
 ## What Otari does per attachment
 
 For each file/image block it resolves the **target model's** capabilities, then:

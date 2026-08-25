@@ -21,9 +21,14 @@ Master-key gated, like ``/v1/routing/policies``, with ``user_id`` naming whose
 memory is being taught rather than taking it from the calling key: which model
 serves a caller is an operator decision, exactly as a policy's targets are.
 
-Routing memory is **per user**, even for a global policy: the records hold the
-prompts a user sends, so sharing them across users would let one caller's traffic
-steer another's. A global learned policy therefore warms once per user.
+Routing memory is **per user and per workspace**, even for a workspace-wide
+policy: the records hold the prompts a user sends, so sharing them across users
+would let one caller's traffic steer another's, and sharing them across
+workspaces would do the same across tenants for a user who holds keys in both. A
+workspace-wide learned policy therefore warms once per user in each workspace.
+Both routes take an optional ``workspace_id``; omitting it means the deployment's
+default workspace, which is where a master-key request bills and where every row
+predating workspace scoping was backfilled.
 
 Known gap, tracked on #187: there is no route that lists or deletes recorded
 examples, so a mis-scored example can only be undone in the database. Until that
@@ -33,6 +38,7 @@ accepting anything a typo can produce.
 
 from __future__ import annotations
 
+import uuid
 from typing import Annotated
 
 from any_llm.exceptions import AnyLLMError
@@ -43,6 +49,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, verify_master_key
+from gateway.api.routes._helpers import resolve_managed_workspace_id
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import RouterPreference, RoutingMemory
@@ -119,6 +126,13 @@ class RankRequest(BaseModel):
     """
 
     user_id: str = Field(description="Whose routing memory these examples belong to.")
+    workspace_id: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            "Which workspace's routing memory these examples belong to. Omit for the deployment's "
+            "default workspace. Only requests billing to that workspace vote over them."
+        ),
+    )
     examples: list[ScoredExample] = Field(
         min_length=1,
         max_length=MAX_EXAMPLES_PER_REQUEST,
@@ -171,12 +185,13 @@ class RouterStatus(BaseModel):
 
     Routing memory has no single warmth: it is a set of independent pools.
     ``default_pool`` is what a request with no ``Otari-Router-Task`` header votes
-    over (every record the user has, labeled or not) and ``tasks`` lists each
-    partition, which only requests carrying that label use. Each crosses
-    ``seed_count`` on its own.
+    over (every record the user has in this workspace, labeled or not) and
+    ``tasks`` lists each partition, which only requests carrying that label use.
+    Each crosses ``seed_count`` on its own.
     """
 
     user_id: str
+    workspace_id: uuid.UUID
     embedding_model: str
     seed_count: int
     granularity: str
@@ -215,16 +230,20 @@ async def _require_user(db: AsyncSession, user_id: str) -> None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User '{user_id}' not found")
 
 
-def _canonical(config: GatewayConfig, selector: str, user_id: str | None = None) -> str | None:
+def _canonical(
+    config: GatewayConfig, selector: str, user_id: str | None = None, *, workspace_id: uuid.UUID | None = None
+) -> str | None:
     """``instance:model`` for a selector, or ``None`` if it resolves to nothing."""
     try:
-        resolved = resolve_provider_selector(config, selector, user_id)
+        resolved = resolve_provider_selector(config, selector, user_id, workspace_id=workspace_id)
     except (ValueError, AnyLLMError):
         return None
     return f"{resolved.instance}:{resolved.model}"
 
 
-def _validated_scores(config: GatewayConfig, user_id: str, examples: list[ScoredExample]) -> dict[str, str]:
+def _validated_scores(
+    config: GatewayConfig, user_id: str, examples: list[ScoredExample], workspace_id: uuid.UUID
+) -> dict[str, str]:
     """Refuse a score key no learned policy could ever ask about, and canonicalize the rest.
 
     The failure this prevents is the worst one the feature has. A mistyped selector
@@ -236,8 +255,9 @@ def _validated_scores(config: GatewayConfig, user_id: str, examples: list[Scored
     Resolution alone is too weak a check: ``openai:gpt-4o-typo`` resolves happily,
     because the prefix names a configured instance and nothing here verifies model
     names. So keys are checked against the union of every learned policy's
-    candidates (plus their default targets) for this user, canonicalized so
-    ``provider/model`` and ``instance:model`` spellings compare equal.
+    candidates (plus their default targets) for this user in this workspace,
+    canonicalized so ``provider/model`` and ``instance:model`` spellings compare
+    equal.
 
     Accepting those spellings is only safe if the stored key is the one the router
     looks up, so the returned map rewrites every accepted key to its canonical
@@ -255,11 +275,11 @@ def _validated_scores(config: GatewayConfig, user_id: str, examples: list[Scored
     would refuse the very examples the learned policy being prepared needs.
     """
     known: dict[str, str] = {}
-    for spec in effective_policies(config, user_id).values():
+    for spec in effective_policies(config, user_id, workspace_id=workspace_id).values():
         if not backend_pool_is_teachable(spec.router_backend):
             continue
         for selector in [*spec.router_candidates, spec.default_target]:
-            canonical = _canonical(config, selector, user_id)
+            canonical = _canonical(config, selector, user_id, workspace_id=workspace_id)
             if canonical is not None:
                 known.setdefault(canonical, selector)
 
@@ -269,7 +289,7 @@ def _validated_scores(config: GatewayConfig, user_id: str, examples: list[Scored
         for selector in example.scores:
             if selector in rejected or selector in normalized:
                 continue
-            canonical = _canonical(config, selector, user_id)
+            canonical = _canonical(config, selector, user_id, workspace_id=workspace_id)
             if canonical is None or (known and canonical not in known):
                 rejected.append(selector)
                 continue
@@ -308,9 +328,11 @@ def _validated_scores(config: GatewayConfig, user_id: str, examples: list[Scored
     return normalized
 
 
-def _learned_policies(config: GatewayConfig, user_id: str | None) -> list[LearnedPolicy]:
+def _learned_policies(
+    config: GatewayConfig, user_id: str | None, workspace_id: uuid.UUID
+) -> list[LearnedPolicy]:
     policies: list[LearnedPolicy] = []
-    for name, spec in effective_policies(config, user_id).items():
+    for name, spec in effective_policies(config, user_id, workspace_id=workspace_id).items():
         backend = spec.router_backend
         if not backend_pool_is_teachable(backend) or backend is None:
             continue
@@ -326,11 +348,17 @@ def _learned_policies(config: GatewayConfig, user_id: str | None) -> list[Learne
 
 
 async def _pool_counts(
-    db: AsyncSession, backend: KnnRoutingMemory, user_id: str
+    db: AsyncSession, backend: KnnRoutingMemory, user_id: str, workspace_id: uuid.UUID
 ) -> tuple[int, list[tuple[str, int]]]:
-    """This user's total record count and per-task counts, for the current embedding model."""
+    """This user's record counts in one workspace, for the current embedding model.
+
+    Filtered by workspace because that is the partition the router reads
+    (``KnnRoutingMemory._load_records``): a total spanning workspaces would report
+    a pool warm that no single request ever votes over.
+    """
     scope = (
         RoutingMemory.user_id == user_id,
+        RoutingMemory.workspace_id == workspace_id,
         RoutingMemory.embedding_model == backend.embedding_model,
     )
     total = int((await db.execute(select(func.count()).select_from(RoutingMemory).where(*scope))).scalar_one())
@@ -369,7 +397,24 @@ async def rank_candidates(
     """
     backend = _knn(config)
     await _require_user(db, request.user_id)
-    normalized = _validated_scores(config, request.user_id, request.examples)
+    workspace_id = await resolve_managed_workspace_id(db, request.workspace_id)
+    # Committed before the loop, because `record_preference` writes its
+    # routing-memory row in a session of its own. On a deployment that has never
+    # provisioned tenancy, resolving the default workspace *creates* it, and an
+    # uncommitted workspace is one the other session's foreign key cannot see. A
+    # no-op when the workspace already existed, which is every other case.
+    #
+    # Guarded rather than left bare precisely because it can be a real write: a
+    # failure here would otherwise surface as an unhandled SQLAlchemyError, and
+    # every example in the batch would then fail its foreign key one at a time.
+    try:
+        await db.commit()
+    except SQLAlchemyError:
+        await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR, detail="Database error"
+        ) from None
+    normalized = _validated_scores(config, request.user_id, request.examples, workspace_id)
 
     recorded = 0
     touched: set[str | None] = set()
@@ -378,6 +423,7 @@ async def rank_candidates(
         try:
             written = await backend.record_preference(
                 user_id=request.user_id,
+                workspace_id=workspace_id,
                 prompt=example.prompt,
                 scores=scores,
                 task_id=example.task_id,
@@ -414,6 +460,7 @@ async def rank_candidates(
             db.add(
                 RouterPreference(
                     user_id=request.user_id,
+                    workspace_id=workspace_id,
                     prompt=example.prompt,
                     task_id=example.task_id,
                     scores=example.scores,
@@ -429,7 +476,7 @@ async def rank_candidates(
 
     # Warmth of every pool this batch wrote into: each named partition, plus the
     # default pool when any example carried no task label.
-    total, per_task = await _pool_counts(db, backend, request.user_id)
+    total, per_task = await _pool_counts(db, backend, request.user_id, workspace_id)
     counts = dict(per_task)
     pools = [
         RecordedPool(
@@ -447,19 +494,28 @@ async def routing_memory_status(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     user_id: Annotated[str, Query(description="Whose routing memory to report on.")],
+    workspace_id: Annotated[
+        uuid.UUID | None,
+        Query(description="Which workspace's routing memory to report on. Omit for the default workspace."),
+    ] = None,
 ) -> RouterStatus:
-    """Report how warm one user's routing memory is, per pool.
+    """Report how warm one user's routing memory is in one workspace, per pool.
 
     ``user_id`` is required rather than optional because there is no aggregate
     answer: warmth is per user, and a total across users would describe a pool
-    that no request ever votes over.
+    that no request ever votes over. The same holds across workspaces, which is
+    why ``workspace_id`` narrows rather than aggregating; it merely defaults
+    instead of being required, because a single-workspace deployment has one
+    answer.
     """
     backend = _knn(config)
     await _require_user(db, user_id)
-    total, per_task = await _pool_counts(db, backend, user_id)
+    target_workspace_id = await resolve_managed_workspace_id(db, workspace_id)
+    total, per_task = await _pool_counts(db, backend, user_id, target_workspace_id)
     seed = backend.seed_count
     return RouterStatus(
         user_id=user_id,
+        workspace_id=target_workspace_id,
         embedding_model=backend.embedding_model,
         seed_count=seed,
         granularity=backend.granularity,
@@ -470,7 +526,7 @@ async def routing_memory_status(
         tasks=[
             TaskPool(task_id=task_id, records=count, warm=count >= seed) for task_id, count in per_task
         ],
-        policies=_learned_policies(config, user_id),
+        policies=_learned_policies(config, user_id, target_workspace_id),
     )
 
 

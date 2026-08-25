@@ -13,6 +13,7 @@ from sqlalchemy import (
     Text,
     UniqueConstraint,
     Uuid,
+    false,
     func,
     text,
     true,
@@ -253,31 +254,33 @@ class ModelAlias(Base):
     meaning, but writable through the API. Pricing, budgets, and usage all key
     on the resolved target, so nothing here is billed against ``name``.
 
-    ``user_id`` is the scope. ``NULL`` means the alias is global (every caller
-    sees it), which is what every row predating this column is. A non-null
-    ``user_id`` scopes the alias to that user, so two users can point the same
-    display name at different models, and a user-scoped row shadows a global one
-    of the same name for that user only.
+    There are two scopes, and they are independent. ``workspace_id`` says which
+    tenant owns the alias: it resolves only for requests in that workspace, so
+    two workspaces can each point ``fast`` somewhere different. Within a
+    workspace, ``user_id`` narrows it further: ``NULL`` means every caller in
+    that workspace sees it, which is what every row predating the column is, and
+    a non-null ``user_id`` scopes it to that user, shadowing the workspace-wide
+    row of the same name for them alone.
 
     Uniqueness needs two constraints rather than one because SQLite and
     PostgreSQL both treat NULLs as distinct in a unique index: the composite
-    constraint keeps one row per (name, user), and the partial index keeps one
-    global row per name (which the composite one cannot, its ``user_id`` being
-    NULL). The surrogate ``id`` exists only because the natural key contains a
-    nullable column, which a primary key cannot.
+    constraint keeps one row per (workspace, name, user), and the partial index
+    keeps one workspace-wide row per (workspace, name), which the composite one
+    cannot, its ``user_id`` being NULL. The surrogate ``id`` exists only because
+    the natural key contains a nullable column, which a primary key cannot.
     """
 
     __tablename__ = "model_aliases"
     __table_args__ = (
-        # Deliberately not workspace-scoped yet. Widening this to
-        # (workspace_id, name, user_id) would let two workspaces each hold a
-        # "fast" entry, but resolution reads a process-wide cache keyed by name
-        # alone, so the second would silently shadow the first at request time.
-        # The constraint widens in the change that makes that cache
-        # workspace-aware, not before.
-        UniqueConstraint("name", "user_id", name="uq_model_aliases_name_user"),
+        # Workspace-scoped, so two workspaces can each hold a "fast" entry
+        # pointing somewhere different. Safe only because resolution is keyed by
+        # workspace too (``services/alias_service``); while that cache was keyed
+        # on name alone the second workspace's row silently shadowed the first at
+        # request time, which is why this constraint waited for it.
+        UniqueConstraint("workspace_id", "name", "user_id", name="uq_model_aliases_workspace_name_user"),
         Index(
-            "uq_model_aliases_global_name",
+            "uq_model_aliases_workspace_global_name",
+            "workspace_id",
             "name",
             unique=True,
             sqlite_where=text("user_id IS NULL"),
@@ -286,10 +289,10 @@ class ModelAlias(Base):
     )
 
     id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
-    # No index of its own: uq_model_aliases_name_user already leads with `name`,
-    # and uq_model_aliases_global_name indexes it again for the global rows. A
-    # third copy would be paid for on every write to serve reads that mostly do
-    # not happen, since resolution goes through the process-wide alias cache.
+    # No index of its own: both constraints above lead with `workspace_id` and
+    # carry `name` second, and a listing is always workspace-scoped. A third copy
+    # would be paid for on every write to serve reads that mostly do not happen,
+    # since resolution goes through the process-wide alias cache.
     name: Mapped[str] = mapped_column()
     target: Mapped[str] = mapped_column()
     user_id: Mapped[str | None] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), index=True)
@@ -326,24 +329,24 @@ class RoutingPolicy(Base):
     so a row that predates a schema change surfaces as a startup warning rather
     than as a request-time crash.
 
-    Scoping mirrors :class:`ModelAlias` exactly, including the two-constraint
-    uniqueness (SQLite and PostgreSQL both treat NULLs as distinct in a unique
-    index, so the composite constraint cannot keep one *global* row per name).
-    A policy and an alias are the same concept at different complexities, so it
-    would be strange for their scoping rules to differ.
+    Scoping mirrors :class:`ModelAlias` exactly, workspace included, and so does
+    the two-constraint uniqueness (SQLite and PostgreSQL both treat NULLs as
+    distinct in a unique index, so the composite constraint cannot keep one
+    *workspace-wide* row per name). A policy and an alias are the same concept at
+    different complexities, so it would be strange for their scoping rules to
+    differ.
     """
 
     __tablename__ = "routing_policies"
     __table_args__ = (
-        # Deliberately not workspace-scoped yet. Widening this to
-        # (workspace_id, name, user_id) would let two workspaces each hold a
-        # "fast" entry, but resolution reads a process-wide cache keyed by name
-        # alone, so the second would silently shadow the first at request time.
-        # The constraint widens in the change that makes that cache
-        # workspace-aware, not before.
-        UniqueConstraint("name", "user_id", name="uq_routing_policies_name_user"),
+        # Workspace-scoped for the same reason, and on the same precondition, as
+        # :class:`ModelAlias`: ``services/policy_store`` keys its cache by
+        # workspace, so two workspaces holding a "fast" policy each resolve their
+        # own rather than one shadowing the other.
+        UniqueConstraint("workspace_id", "name", "user_id", name="uq_routing_policies_workspace_name_user"),
         Index(
-            "uq_routing_policies_global_name",
+            "uq_routing_policies_workspace_global_name",
+            "workspace_id",
             "name",
             unique=True,
             sqlite_where=text("user_id IS NULL"),
@@ -817,7 +820,10 @@ class FileObject(Base):
     The raw bytes live in a pluggable blob backend (see
     gateway.services.file_store); this row holds metadata plus the backend
     ``storage_ref`` used to fetch them. Files are scoped to ``user_id`` for
-    tenant isolation and soft-deleted via ``deleted_at``.
+    tenant isolation and soft-deleted via ``deleted_at``. ``workspace_id`` is a
+    second, independent axis: it says which workspace the upload was made in, so
+    a key confined to one workspace never reaches another's files even when the
+    same user holds keys in both.
     """
 
     __tablename__ = "file_objects"
@@ -826,6 +832,13 @@ class FileObject(Base):
     # Always set to the authenticated user; non-null enforces the user-scoping
     # contract at the schema level. CASCADE removes a user's files on delete.
     user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), index=True)
+    # The workspace this row belongs to; see `APIKey.workspace_id` for why it is
+    # NOT NULL and RESTRICT rather than nullable and cascading. Existing rows were
+    # backfilled onto the deployment's default workspace, which is also where a
+    # master-key upload lands.
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
     filename: Mapped[str] = mapped_column()
     mime_type: Mapped[str] = mapped_column()
     bytes: Mapped[int] = mapped_column()
@@ -925,20 +938,35 @@ class RoutingMemory(Base):
     Scoped by ``user_id``, which is the identity the request is routed and billed
     under, so one user's examples never steer another's traffic. CASCADE: the
     records are derived training data, worthless once the user is gone.
+    ``workspace_id`` narrows that further: the router reads one (user, workspace)
+    partition, so a user who holds keys in two workspaces does not have one
+    workspace's labels steering the other's traffic.
     """
 
     __tablename__ = "routing_memory"
     __table_args__ = (
-        Index("ix_routing_memory_user_model", "user_id", "embedding_model"),
-        Index("ix_routing_memory_user_created", "user_id", "created_at"),
-        # A task-scoped read filters on all three; without this it walks every
+        # Every read filters on the workspace as well as the user, so the
+        # workspace leads: the same three shapes, one partition narrower.
+        Index("ix_routing_memory_workspace_user_model", "workspace_id", "user_id", "embedding_model"),
+        Index("ix_routing_memory_workspace_user_created", "workspace_id", "user_id", "created_at"),
+        # A task-scoped read filters on all four; without this it walks every
         # record the user has for the embedding model before partitioning.
-        Index("ix_routing_memory_user_model_task", "user_id", "embedding_model", "task_id"),
+        Index(
+            "ix_routing_memory_workspace_user_model_task",
+            "workspace_id",
+            "user_id",
+            "embedding_model",
+            "task_id",
+        ),
     )
 
     id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id: Mapped[str] = mapped_column(
         ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # The workspace this row belongs to; see `APIKey.workspace_id` for why.
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     embedding_model: Mapped[str] = mapped_column()
     embedding: Mapped[list[float]] = mapped_column(JSON)
@@ -959,6 +987,7 @@ class RoutingMemory(Base):
         return {
             "id": self.id,
             "user_id": self.user_id,
+            "workspace_id": str(self.workspace_id),
             "embedding_model": self.embedding_model,
             "qualities": self.qualities,
             "task_id": self.task_id,
@@ -975,14 +1004,23 @@ class RouterPreference(Base):
     only the embedding, so this is where the prompt text and the raw per-model
     scores live: enough to recompute the memory if the scoring changes, and to
     tell a human label from a judge's.
+
+    ``workspace_id`` matches the :class:`RoutingMemory` row written beside it, so
+    the audit trail partitions exactly the way the training data does.
     """
 
     __tablename__ = "router_preferences"
-    __table_args__ = (Index("ix_router_preferences_user_created", "user_id", "created_at"),)
+    __table_args__ = (
+        Index("ix_router_preferences_workspace_user_created", "workspace_id", "user_id", "created_at"),
+    )
 
     id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id: Mapped[str] = mapped_column(
         ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # The workspace this row belongs to; see `APIKey.workspace_id` for why.
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     prompt: Mapped[str] = mapped_column()
     task_id: Mapped[str | None] = mapped_column(default=None)
@@ -997,6 +1035,7 @@ class RouterPreference(Base):
         return {
             "id": self.id,
             "user_id": self.user_id,
+            "workspace_id": str(self.workspace_id),
             "prompt": self.prompt,
             "task_id": self.task_id,
             "scores": self.scores,
@@ -1130,6 +1169,101 @@ class ScopedBudget(Base):
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
+
+
+class BudgetReservation(Base):
+    """One in-flight budget hold, recorded as a row.
+
+    ``users.reserved`` and ``scoped_budgets.reserved_spend`` stay the O(1)
+    counters the gate reads; this is the ledger behind them, and it exists for
+    the two things a counter cannot do (mozilla-ai/otari#742):
+
+    * **Release becomes idempotent.** Without an identity, a second release for
+      the same request silently subtracts the hold twice. ``_release_reserved``
+      clamps at zero, so that shows up not as an error but as an under-count of
+      live holds, which weakens the very overspend guarantee the reserve gate
+      exists to provide. The status transition here is what makes only the first
+      release do the work.
+    * **A leaked hold becomes reclaimable individually.** A failure between
+      reserve and settle used to leave an amount in the counter that could be
+      seen only in aggregate and released by nothing at all: the budget reset
+      zeroes ``spend`` and leaves ``reserved`` where it is. With a row it has an
+      owner, an age and a TTL.
+
+    The row is written *after* the holds it records, never before. A hold with no
+    row is the pre-existing leak the sweep bounds; a row with no hold would have
+    the sweep release an amount nobody holds, under-counting the live ones. Of
+    the two inconsistent windows only one is safe, and this is it.
+
+    Standalone mode only: hybrid mode reserves nothing locally, because the
+    platform holds against its own ledger.
+    """
+
+    __tablename__ = "budget_reservations"
+    __table_args__ = (
+        # The global sweep's access path: active rows whose TTL has elapsed.
+        # Equality on ``status`` leads so the range scan on ``expires_at`` rides
+        # the same index.
+        Index("ix_budget_reservations_status_expires_at", "status", "expires_at"),
+        # The per-user reclaim's, which runs on every request that takes a hold.
+        # It has to lead on ``user_id``: given only the index above, the planner
+        # takes it and filters ``user_id``, so one user's reclaim pays for the
+        # whole deployment's backlog of expired rows. Leading on ``user_id`` also
+        # serves the FK cascade, so this replaces the plain index on that column
+        # rather than joining it.
+        Index("ix_budget_reservations_user_status_expires", "user_id", "status", "expires_at"),
+    )
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
+    # No ``index=True``: the composite in ``__table_args__`` leads on this column,
+    # so a plain index here would be a second, redundant one, and the migration
+    # deliberately does not create it. Declaring it anyway made a ``create_all``
+    # schema and a migrated one disagree.
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
+    # What the per-user leg holds in ``users.reserved``. Zero when the request
+    # held only scoped ceilings (a user with no budget row still passes those).
+    estimate: Mapped[Decimal] = mapped_column(UsdCost(), default=Decimal(0), server_default="0")
+    # Whether the ``users.reserved`` write actually happened. Distinct from
+    # ``estimate > 0`` because a zero-cost request on an enforced budget still
+    # takes the hold, and the release has to match what the reserve did.
+    user_reserved: Mapped[bool] = mapped_column(default=False, server_default=false())
+    # A plain string rather than a database enum, matching ``scoped_budgets.scope_type``:
+    # a new state should not need an enum migration. Values are the
+    # ``RESERVATION_*`` constants in gateway.services.budget_reservation_ledger.
+    status: Mapped[str] = mapped_column(default="active", server_default="active", nullable=False)
+    # After this instant a still-active row is treated as leaked and reclaimed.
+    expires_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), nullable=False)
+    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+
+class BudgetReservationScope(Base):
+    """The hold one reservation placed on one scoped ceiling.
+
+    ``scoped_budget_id`` is deliberately not a foreign key, following
+    ``ScopedBudget``'s own convention: a ceiling deleted while a request is in
+    flight leaves an orphan line that the release skips, rather than forcing the
+    delete to cascade into live holds.
+
+    The amount is stored per line even though today every ceiling of a request
+    holds the same figure. A ledger line that does not say what it holds is not
+    a ledger line, and reading the amount from the parent would silently become
+    wrong the first time the two diverge.
+    """
+
+    __tablename__ = "budget_reservation_scopes"
+    __table_args__ = (Index("ix_budget_reservation_scopes_reservation_id", "reservation_id"),)
+
+    id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
+    reservation_id: Mapped[str] = mapped_column(
+        ForeignKey("budget_reservations.id", ondelete="CASCADE"), nullable=False
+    )
+    scoped_budget_id: Mapped[str] = mapped_column(nullable=False)
+    amount: Mapped[Decimal] = mapped_column(UsdCost(), default=Decimal(0), server_default="0")
 
 
 class OrganizationModelPricing(Base):

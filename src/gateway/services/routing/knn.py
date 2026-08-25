@@ -14,11 +14,13 @@ sub-floor confidence, tool-bearing request, unpriced candidate), and a decline
 serves the policy's default target, so a learned policy is never worse than the
 plain failover policy it was written from.
 
-The store is a linear cosine scan over the user's records held in the gateway DB
+The store is a linear cosine scan over the records the requesting user has in the
+requesting workspace, held in the gateway DB
 (:class:`gateway.models.entities.RoutingMemory`). That holds into the low
-thousands of records per user (the ``router_max_records_per_user`` cap); pgvector
-or an ANN index is the next step past that, and the reasoning is in
-`docs/routing-scaling.md`. Records carry an ``embedding_model`` tag so changing
+thousands of records per partition (the ``router_max_records_per_user`` cap,
+which bounds one user's records in one workspace, since that is what a decision
+loads); pgvector or an ANN index is the next step past that, and the reasoning is
+in `docs/routing-scaling.md`. Records carry an ``embedding_model`` tag so changing
 the embedding model invalidates stale vectors rather than mixing incomparable
 spaces.
 
@@ -33,6 +35,7 @@ from __future__ import annotations
 
 import hashlib
 import math
+import uuid
 from collections import OrderedDict
 from typing import TYPE_CHECKING
 
@@ -142,7 +145,7 @@ class KnnRoutingMemory:
             logger.warning("Router embedding failed (%s); serving the policy default", type(exc).__name__)
             return RoutingDecision.decline(f"embedding error ({type(exc).__name__})")
 
-        records = await self._load_records(ctx.user_id, ctx.task_id)
+        records = await self._load_records(ctx.user_id, ctx.task_id, ctx.workspace_id)
         if len(records) < self.seed_count:
             partition = f" and task '{ctx.task_id}'" if ctx.task_id else ""
             return RoutingDecision.decline(
@@ -154,7 +157,7 @@ class KnnRoutingMemory:
             return RoutingDecision.decline(f"sparse neighborhood: {len(neighbors)}/{self.k} comparable records")
 
         try:
-            prices = await self._candidate_prices(pool)
+            prices = await self._candidate_prices(pool, workspace_id=ctx.workspace_id)
         except RouterPricingError as exc:
             # Startup and write-time validation should have caught this, so getting
             # here means pricing was removed under a running gateway. Declining
@@ -173,6 +176,7 @@ class KnnRoutingMemory:
         self,
         *,
         user_id: str,
+        workspace_id: uuid.UUID,
         prompt: str,
         scores: dict[str, float],
         task_id: str | None,
@@ -195,6 +199,7 @@ class KnnRoutingMemory:
             db.add(
                 RoutingMemory(
                     user_id=user_id,
+                    workspace_id=workspace_id,
                     embedding_model=self.embedding_model,
                     embedding=embedding,
                     qualities={model: float(score) for model, score in scores.items()},
@@ -207,7 +212,7 @@ class KnnRoutingMemory:
             except SQLAlchemyError:
                 await db.rollback()
                 raise
-        await self._evict_if_needed(user_id)
+        await self._evict_if_needed(user_id, workspace_id)
         return 1
 
     # -- scoring -----------------------------------------------------------
@@ -232,8 +237,13 @@ class KnnRoutingMemory:
         # still match: a miss is silent, and leaves the cheap candidate scoreless
         # while the pool reports warm.
         cache: dict[str, str] = {}
-        key_of = {model: self._canonical(model, ctx.user_id, cache) for model in pool}
-        recorded = [self._canonical_qualities(record.qualities, ctx.user_id, cache) for _, record in neighbors]
+        key_of = {
+            model: self._canonical(model, ctx.user_id, cache, workspace_id=ctx.workspace_id) for model in pool
+        }
+        recorded = [
+            self._canonical_qualities(record.qualities, ctx.user_id, cache, workspace_id=ctx.workspace_id)
+            for _, record in neighbors
+        ]
 
         scores: dict[str, float] = {}
         for model in pool:
@@ -281,21 +291,38 @@ class KnnRoutingMemory:
 
     # -- model identity ------------------------------------------------------
 
-    def _canonical(self, selector: str, user_id: str | None, cache: dict[str, str]) -> str:
+    def _canonical(
+        self,
+        selector: str,
+        user_id: str | None,
+        cache: dict[str, str],
+        *,
+        workspace_id: uuid.UUID | None = None,
+    ) -> str:
         """``instance:model`` for a selector, or the selector unchanged if it resolves to nothing.
 
         An unresolvable selector keeps its own spelling rather than dropping out, so
         it can still match a stored key spelled the same way; scoring is not the
         place to decide a candidate is invalid.
 
+        ``workspace_id`` is the request's, and has to be: a candidate selector can
+        name an alias, and this workspace's alias may point somewhere the default
+        workspace's does not. ``usable_candidates`` filtered the pool in this
+        workspace and ``/rank`` canonicalized the stored keys in it, so resolving
+        here in another one produces a key that matches neither, and the candidate
+        drops out of scoring with no score and no error.
+
         ``cache`` is per decision: the pool and the neighbors' stored keys repeat the
         same handful of selectors, and each resolution walks the alias and
-        static-policy tables.
+        static-policy tables. Keying it on the selector alone is safe because one
+        decision has one workspace.
         """
         canonical = cache.get(selector)
         if canonical is None:
             try:
-                resolved = resolve_provider_selector(self.config, selector, user_id)
+                resolved = resolve_provider_selector(
+                    self.config, selector, user_id, workspace_id=workspace_id
+                )
                 canonical = f"{resolved.instance}:{resolved.model}"
             except (ValueError, AnyLLMError):
                 canonical = selector
@@ -303,7 +330,12 @@ class KnnRoutingMemory:
         return canonical
 
     def _canonical_qualities(
-        self, qualities: dict[str, float], user_id: str | None, cache: dict[str, str]
+        self,
+        qualities: dict[str, float],
+        user_id: str | None,
+        cache: dict[str, str],
+        *,
+        workspace_id: uuid.UUID | None = None,
     ) -> dict[str, float]:
         """One record's scores, rekeyed on canonical model identity.
 
@@ -315,7 +347,7 @@ class KnnRoutingMemory:
         """
         canonical: dict[str, float] = {}
         for model, quality in qualities.items():
-            canonical.setdefault(self._canonical(model, user_id, cache), quality)
+            canonical.setdefault(self._canonical(model, user_id, cache, workspace_id=workspace_id), quality)
         return canonical
 
     # -- candidate pool / ordering ------------------------------------------
@@ -347,23 +379,32 @@ class KnnRoutingMemory:
 
     # -- storage / retrieval ------------------------------------------------
 
-    async def _load_records(self, user_id: str, task_id: str | None) -> list[RoutingMemory]:
-        """Load a user's records for the current embedding model.
+    async def _load_records(
+        self, user_id: str, task_id: str | None, workspace_id: uuid.UUID | None = None
+    ) -> list[RoutingMemory]:
+        """Load a user's records for the current embedding model, in one workspace.
 
         A ``task_id`` is a hard partition: only records carrying that label load,
         so the cold-start gate counts that partition alone and a request stays on
         the default target until its own task is warm. Records from other tasks
         never influence it. With no task, every record the user has is in play.
+
+        ``workspace_id`` is a hard partition too: examples labeled in one
+        workspace never steer another's traffic, even for a user who holds keys in
+        both. Omitted only where there is no request to route (no backend is asked
+        to rank there), which reads every workspace the user has records in.
         """
         async with create_session() as db:
             stmt = select(RoutingMemory).where(
                 RoutingMemory.user_id == user_id,
                 RoutingMemory.embedding_model == self.embedding_model,
             )
+            if workspace_id is not None:
+                stmt = stmt.where(RoutingMemory.workspace_id == workspace_id)
             if task_id is not None:
                 stmt = stmt.where(RoutingMemory.task_id == task_id)
             # Newest first, and bounded. Eviction is enforced lazily on write, and
-            # only for the user's whole set rather than per partition, so nothing
+            # only for the (user, workspace) set rather than per task, so nothing
             # else stops this select from growing without limit: a request would
             # then load and cosine-score every row it finds. The cap is what the
             # operator already configured as "how many records this router uses",
@@ -376,15 +417,21 @@ class KnnRoutingMemory:
         sims.sort(key=lambda pair: pair[0], reverse=True)
         return sims[: self.k]
 
-    async def _evict_if_needed(self, user_id: str) -> None:
-        """Keep at most ``max_records`` of the newest records per user."""
+    async def _evict_if_needed(self, user_id: str, workspace_id: uuid.UUID) -> None:
+        """Keep at most ``max_records`` of the newest records per user and workspace.
+
+        Applied within the partition the router reads, not across every workspace
+        the user has records in. ``router_max_records_per_user`` bounds what one
+        decision loads and scores, and a decision only ever loads one workspace,
+        so evicting across them would have a busy workspace delete labels another
+        one is still routing on.
+        """
         if self.max_records <= 0:
             return
+        partition = (RoutingMemory.user_id == user_id, RoutingMemory.workspace_id == workspace_id)
         async with create_session() as db:
             count = (
-                await db.execute(
-                    select(func.count()).select_from(RoutingMemory).where(RoutingMemory.user_id == user_id)
-                )
+                await db.execute(select(func.count()).select_from(RoutingMemory).where(*partition))
             ).scalar_one()
             if count <= self.max_records:
                 return
@@ -395,7 +442,7 @@ class KnnRoutingMemory:
             cutoff = (
                 await db.execute(
                     select(RoutingMemory.created_at)
-                    .where(RoutingMemory.user_id == user_id)
+                    .where(*partition)
                     .order_by(RoutingMemory.created_at.desc())
                     .offset(self.max_records - 1)
                     .limit(1)
@@ -408,7 +455,7 @@ class KnnRoutingMemory:
             # evicted; the count can sit slightly above the cap until the next write.
             await db.execute(
                 delete(RoutingMemory).where(
-                    RoutingMemory.user_id == user_id,
+                    *partition,
                     RoutingMemory.created_at < cutoff,
                 )
             )
@@ -420,17 +467,28 @@ class KnnRoutingMemory:
 
     # -- pricing -----------------------------------------------------------
 
-    async def _candidate_prices(self, pool: list[str]) -> dict[str, float]:
+    async def _candidate_prices(
+        self, pool: list[str], *, workspace_id: uuid.UUID | None = None
+    ) -> dict[str, float]:
         async with create_session() as db:
-            return {model: await self._input_price(db, model) for model in pool}
+            return {model: await self._input_price(db, model, workspace_id=workspace_id) for model in pool}
 
-    async def _input_price(self, db: AsyncSession, selector: str) -> float:
+    async def _input_price(
+        self, db: AsyncSession, selector: str, *, workspace_id: uuid.UUID | None = None
+    ) -> float:
         """Input price per million tokens for one candidate.
 
         Resolved through ``resolve_provider_selector`` rather than split by hand so
         the lookup keys on the same ``instance:model`` the request will be billed
         under. A candidate naming a provider *instance* would otherwise be priced
         against its implementation name and look unpriced.
+
+        ``workspace_id`` decides *which model* the selector names, for the same
+        reason it does in :meth:`_canonical`: an alias can point somewhere
+        different per workspace, and pricing the default workspace's target while
+        scoring this workspace's would rank on a price the request never pays.
+        That is separate from *whose rates* apply, which the next paragraph is
+        about and which this deliberately leaves alone.
 
         Deliberately reads the *deployment* price list, not an organization's rate
         overrides, so a router's ranking can differ from what the chosen request
@@ -445,7 +503,7 @@ class KnnRoutingMemory:
         candidate priced only by an override never becomes a stored policy.
         """
         try:
-            resolved = resolve_provider_selector(self.config, selector)
+            resolved = resolve_provider_selector(self.config, selector, workspace_id=workspace_id)
         except (ValueError, AnyLLMError) as exc:
             raise RouterPricingError(f"Router candidate '{selector}' does not resolve to a provider.") from exc
         pricing = await find_model_pricing(db, resolved.instance, resolved.model)
@@ -456,6 +514,18 @@ class KnnRoutingMemory:
     # -- embedding ---------------------------------------------------------
 
     async def _embed(self, text: str) -> list[float]:
+        """Embed ``text`` with the deployment's configured embedding model.
+
+        Resolved with no workspace, and deliberately, unlike every other selector
+        this class resolves. ``router_embedding_model`` is operator configuration
+        rather than caller input, which is the case ``resolve_provider_selector``
+        documents as workspace-less. More than a convention here: every stored
+        vector is tagged with this model name and compared against others carrying
+        the same tag, so if two workspaces resolved that one name to different
+        providers, their vectors would be silently incomparable while claiming to
+        be the same space. Scoping this would create the bug that scoping the
+        others fixes.
+        """
         resolved = resolve_provider_selector(self.config, self.embedding_model)
         result = await aembedding(
             model=resolved.model, inputs=text, provider=resolved.provider, **resolved.kwargs
@@ -466,15 +536,22 @@ class KnnRoutingMemory:
     # -- trace memory ------------------------------------------------------
 
     def _trace_key(self, ctx: RoutingContext) -> str:
-        """Per-(user, task) trace identity for trace-sticky reuse.
+        """Per-(workspace, user, task) trace identity for trace-sticky reuse.
 
         The client-supplied conversation id when present, otherwise a hash of the
-        conversation's opening text. Both are namespaced by user and task, so one
-        conversation id never collides across users or across partitions.
+        conversation's opening text. Both are namespaced by workspace, user and
+        task, so one conversation id never collides across any of the three.
+
+        The workspace belongs here for the same reason it is on
+        :meth:`_load_records`, and is load-bearing rather than tidy: this cache is
+        consulted *before* any record loads, so without it a user sending one
+        conversation id in two workspaces would have workspace A's decision
+        replayed in workspace B, out of process memory, having never read
+        workspace B's examples at all.
         """
         explicit = ctx.trace_key.strip() if ctx.trace_key else ""
         anchor = explicit or ctx.trace_anchor
-        raw = f"{ctx.user_id}\x00{ctx.task_id or ''}\x00{anchor}"
+        raw = f"{ctx.workspace_id or ''}\x00{ctx.user_id}\x00{ctx.task_id or ''}\x00{anchor}"
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def _remember_trace(self, trace_key: str, model: str) -> None:
@@ -489,7 +566,11 @@ class KnnRoutingMemory:
 
 
 async def unpriced_router_candidates(
-    config: GatewayConfig, db: AsyncSession, candidates: list[str]
+    config: GatewayConfig,
+    db: AsyncSession,
+    candidates: list[str],
+    *,
+    workspace_id: uuid.UUID | None = None,
 ) -> list[str]:
     """Which of ``candidates`` have no configured pricing.
 
@@ -497,11 +578,17 @@ async def unpriced_router_candidates(
     validation over the config policies, and the write path for a stored one. The
     router scores by cost, so a candidate with no price could never be compared,
     and a policy that silently never routes is worse than one that fails to load.
+
+    ``workspace_id`` is the workspace the policy is being stored into, so a
+    candidate naming an alias is validated as it will resolve for the requests
+    that policy will serve. Omitted by startup validation, which reads the
+    ``config.yml`` policies: those are deployment-wide, so the default workspace
+    is the only workspace-shaped answer there is.
     """
     missing: list[str] = []
     for selector in candidates:
         try:
-            resolved = resolve_provider_selector(config, selector)
+            resolved = resolve_provider_selector(config, selector, workspace_id=workspace_id)
         except (ValueError, AnyLLMError):
             # An unresolvable selector is refused elsewhere, with a clearer message.
             continue

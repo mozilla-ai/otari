@@ -1,18 +1,24 @@
 from __future__ import annotations
 
 import json
+import uuid
 from collections.abc import Collection, Mapping, Sequence
 from typing import TYPE_CHECKING, Any
 
 from fastapi import HTTPException, Request, Response, status
+from sqlalchemy import select
+from sqlalchemy.ext.asyncio import AsyncSession
+from sqlmodel import col
 
 from gateway.core.config import CONVERSATION_HEADER, ROUTER_HEADER, ROUTER_TASK_HEADER
 from gateway.core.env import otari_env
 from gateway.log_config import logger
 from gateway.models.guardrails import GuardrailConfig
+from gateway.models.tenancy import Workspace
 from gateway.services.guardrails import GuardrailsNotReachableError, run_input_guardrails
 from gateway.services.routing.decide import RoutingSignal
 from gateway.services.url_safety import UnsafeURLError
+from gateway.services.workspace_scope import default_workspace_id
 
 if TYPE_CHECKING:
     from gateway.core.config import GatewayConfig
@@ -358,3 +364,28 @@ async def apply_input_guardrails(
             for r in verdict.results
         ]
         response.headers[GUARDRAILS_RESULT_HEADER] = json.dumps(summary, separators=(",", ":"))
+
+
+async def resolve_managed_workspace_id(db: AsyncSession, workspace_id: uuid.UUID | None) -> uuid.UUID:
+    """The workspace a master-key management write lands in, validated.
+
+    ``None`` means the deployment's default workspace, which is what an operator
+    acting deployment-wide gets everywhere else (``services/workspace_scope``),
+    and is where every row predating workspace scoping was backfilled.
+
+    A named workspace is checked rather than left to the foreign key, matching
+    ``POST /v1/keys``: an id naming no workspace is a bad request, and letting it
+    reach the constraint answers 500 "Database error" for a value the caller
+    supplied and can fix.
+    """
+    if workspace_id is None:
+        return await default_workspace_id(db)
+    named = (
+        await db.execute(select(col(Workspace.id)).where(col(Workspace.id) == workspace_id))
+    ).scalar_one_or_none()
+    if named is None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Workspace '{workspace_id}' not found",
+        )
+    return named

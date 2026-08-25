@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import base64
 import binascii
+import uuid
 from dataclasses import dataclass, field
 from typing import Any, Literal
 
@@ -123,6 +124,7 @@ async def _resolve_from_ref(
     db: AsyncSession | None,
     file_store: FileStore | None,
     user_id: str | None,
+    workspace_id: uuid.UUID | None,
 ) -> tuple[bytes, str, str | None, bool] | None:
     """Resolve a ``{file_data|url|file_id, filename}`` descriptor to bytes.
 
@@ -133,7 +135,7 @@ async def _resolve_from_ref(
     filename = ref.get("filename")
     file_id = ref.get("file_id")
     if file_id and db is not None and file_store is not None:
-        record = await fetch_file(db, str(file_id), user_id)
+        record = await fetch_file(db, str(file_id), user_id, workspace_id=workspace_id)
         if record is None:
             logger.warning("content normalizer: file_id %s not found for user %s", file_id, user_id)
             return None
@@ -155,6 +157,7 @@ async def _classify(
     db: AsyncSession | None,
     file_store: FileStore | None,
     user_id: str | None,
+    workspace_id: uuid.UUID | None,
 ) -> _Source | None:
     """Identify an image/document block and resolve its bytes, or return None."""
     btype = block.get("type")
@@ -169,7 +172,9 @@ async def _classify(
                 data = _decode_data_url(f"data:{src.get('media_type', '')};base64,{src.get('data', '')}")[0]
                 return _Source(_IMAGE, data, src.get("media_type", "image/png"), None, None)
             if src.get("type") == "file":
-                resolved = await _resolve_from_ref(src, db=db, file_store=file_store, user_id=user_id)
+                resolved = await _resolve_from_ref(
+                    src, db=db, file_store=file_store, user_id=user_id, workspace_id=workspace_id
+                )
                 if resolved:
                     return _Source(_IMAGE, resolved[0], resolved[1], resolved[2], None, resolved[3])
             return _Source(_IMAGE, None, "image/png", None, src.get("url"))
@@ -177,7 +182,9 @@ async def _classify(
         image_url = block.get("image_url")
         url = image_url.get("url") if isinstance(image_url, dict) else image_url
         if block.get("file_id"):
-            resolved = await _resolve_from_ref(block, db=db, file_store=file_store, user_id=user_id)
+            resolved = await _resolve_from_ref(
+                block, db=db, file_store=file_store, user_id=user_id, workspace_id=workspace_id
+            )
             if resolved:
                 return _Source(_IMAGE, resolved[0], resolved[1], resolved[2], None, resolved[3])
         if isinstance(url, str):
@@ -197,12 +204,16 @@ async def _classify(
                 data = _decode_data_url(f"data:{src.get('media_type', '')};base64,{src.get('data', '')}")[0]
                 return _Source(_DOCUMENT, data, src.get("media_type", "application/pdf"), None, None)
             if src.get("type") == "file":
-                resolved = await _resolve_from_ref(src, db=db, file_store=file_store, user_id=user_id)
+                resolved = await _resolve_from_ref(
+                    src, db=db, file_store=file_store, user_id=user_id, workspace_id=workspace_id
+                )
                 if resolved:
                     return _Source(_DOCUMENT, resolved[0], resolved[1], resolved[2], None, resolved[3])
             return _Source(_DOCUMENT, None, "application/pdf", None, src.get("url"))
         ref = block.get("file", block) if btype == "file" else block
-        resolved = await _resolve_from_ref(ref, db=db, file_store=file_store, user_id=user_id)
+        resolved = await _resolve_from_ref(
+            ref, db=db, file_store=file_store, user_id=user_id, workspace_id=workspace_id
+        )
         if resolved:
             return _Source(_DOCUMENT, resolved[0], resolved[1], resolved[2], None, resolved[3])
         return None
@@ -302,11 +313,14 @@ async def _normalize_block(
     db: AsyncSession | None,
     file_store: FileStore | None,
     user_id: str | None,
+    workspace_id: uuid.UUID | None,
 ) -> Any:
     if not isinstance(block, dict):
         return block
     try:
-        src = await _classify(block, fmt, db=db, file_store=file_store, user_id=user_id)
+        src = await _classify(
+            block, fmt, db=db, file_store=file_store, user_id=user_id, workspace_id=workspace_id
+        )
     except Exception as exc:  # noqa: BLE001 — never fail the request over a block
         logger.warning("content normalizer: failed to classify block: %s", exc)
         return block
@@ -349,8 +363,13 @@ async def normalize_messages(
     db: AsyncSession | None,
     file_store: FileStore | None,
     user_id: str | None,
+    workspace_id: uuid.UUID | None = None,
 ) -> tuple[list[dict[str, Any]], NormalizationStats]:
     """Return (possibly-rewritten messages, stats).
+
+    ``workspace_id`` confines ``file_id`` resolution to one workspace, and is the
+    workspace of the API key that authenticated the request. ``None`` means "any",
+    which is what a master-key request gets: the operator acting deployment-wide.
 
     Messages whose ``content`` is a plain string are returned untouched (the
     common, zero-overhead path). Only list-content messages are walked.
@@ -370,7 +389,15 @@ async def normalize_messages(
             continue
         new_content = [
             await _normalize_block(
-                block, fmt, caps, config, stats, db=db, file_store=file_store, user_id=user_id
+                block,
+                fmt,
+                caps,
+                config,
+                stats,
+                db=db,
+                file_store=file_store,
+                user_id=user_id,
+                workspace_id=workspace_id,
             )
             for block in content
         ]

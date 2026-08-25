@@ -97,7 +97,11 @@ class _Recorder:
 
 
 async def _normalize_with_vision(
-    user_id: str, provider: LLMProvider | None, model: str, instance: str | None
+    user_id: str,
+    provider: LLMProvider | None,
+    model: str,
+    instance: str | None,
+    workspace_id: uuid.UUID | None,
 ) -> tuple[int, CompletionUsage | None]:
     return 5000, _VISION_USAGE
 
@@ -181,6 +185,10 @@ async def test_reservation_uses_the_resolved_provider_for_pricing(monkeypatch: p
         # reservation, so the free-model shortcut prices at the same rate the
         # request settles at. None here is the stub above saying "no override".
         "organization_id": None,
+        # The completion path is the one reserve site with the config object to
+        # hand, so it is the one that passes the deployment's own reservation TTL
+        # rather than letting the ledger fall back to its module default.
+        "reservation_ttl_sec": 900,
     }
     # The scoped ceilings narrow on the same resolved provider the pricing does,
     # and bill to the key that authenticated the request.
