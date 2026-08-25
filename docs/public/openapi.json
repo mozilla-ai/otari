@@ -1634,6 +1634,7 @@
                 "type": "null"
               }
             ],
+            "description": "Upper bound on generated tokens. OpenAI's current name for the cap `max_tokens` used to carry; either field is accepted, and this one wins when a request sends both.",
             "title": "Max Completion Tokens"
           },
           "max_tokens": {

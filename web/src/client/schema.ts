@@ -4021,7 +4021,10 @@ export interface components {
             } | null;
             /** Logprobs */
             logprobs?: boolean | null;
-            /** Max Completion Tokens */
+            /**
+             * Max Completion Tokens
+             * @description Upper bound on generated tokens. OpenAI's current name for the cap `max_tokens` used to carry; either field is accepted, and this one wins when a request sends both.
+             */
             max_completion_tokens?: number | null;
             /** Max Tokens */
             max_tokens?: number | null;
