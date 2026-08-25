@@ -310,12 +310,13 @@ def resolve_provider_selector(
 
     ``user_id`` is the billed user, so a user-scoped alias resolves to that
     user's target. Omit it only for a selector that is not caller input (the
-    operator-configured vision describe model), which is global by definition;
-    omitting it for a request selector would silently ignore the caller's own
-    aliases and resolve the global one instead. ``workspace_id`` is the same
-    kind of omission: pass it for caller input, leave it unset for an
-    operator-configured or otherwise workspace-less resolution, which then reads
-    the deployment's default workspace's aliases and policies.
+    operator-configured vision describe model), which belongs to no user by
+    definition; omitting it for a request selector would silently ignore the
+    caller's own aliases and resolve the workspace-wide one instead.
+    ``workspace_id`` is the same kind of omission: pass it for caller input,
+    leave it unset for an operator-configured or otherwise workspace-less
+    resolution, which then reads the deployment's default workspace's aliases
+    and policies.
 
     Raises ``ValueError`` / ``AnyLLMError`` (from any-llm) for a selector that
     names neither a configured instance nor a known provider, mirroring the
