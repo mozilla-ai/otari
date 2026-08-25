@@ -12,6 +12,7 @@ has no local DB / file store to resolve ``file_id`` references against.
 
 from __future__ import annotations
 
+import uuid
 from typing import Any
 
 from any_llm import LLMProvider
@@ -35,6 +36,7 @@ async def normalize_request_messages(
     raw_request: Request,
     user_id: str | None,
     instance: str | None = None,
+    workspace_id: uuid.UUID | None = None,
 ) -> tuple[list[dict[str, Any]], NormalizationStats]:
     """Normalize ``messages`` for the resolved ``provider/model``.
 
@@ -60,6 +62,7 @@ async def normalize_request_messages(
             db=db,
             file_store=file_store,
             user_id=user_id,
+            workspace_id=workspace_id,
         )
     except Exception as exc:  # noqa: BLE001 — never fail the request / leak the reservation
         logger.warning("content normalization failed; forwarding messages unchanged: %s", exc)

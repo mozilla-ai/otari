@@ -454,7 +454,11 @@ async def create_response(
     max_output_tokens = raw_max_output if isinstance(raw_max_output, int) and raw_max_output >= 0 else None
 
     async def _normalize(
-        user_id: str, provider: LLMProvider | None, model: str, instance: str | None
+        user_id: str,
+        provider: LLMProvider | None,
+        model: str,
+        instance: str | None,
+        workspace_id: uuid.UUID | None,
     ) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the Responses input payload
         # before the cost estimate. Standalone only; no-op when the files
@@ -469,6 +473,7 @@ async def create_response(
             raw_request=raw_request,
             user_id=user_id,
             instance=instance,
+            workspace_id=workspace_id,
         )
         chars = len(str(request_body.input)) + len(str(getattr(request_body, "instructions", "") or ""))
         return chars, stats.vision_usage()

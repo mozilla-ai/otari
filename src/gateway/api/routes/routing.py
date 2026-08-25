@@ -6,9 +6,11 @@ request, what is tried after a retryable failure, and which guardrails always ru
 in a file this process does not own); these routes manage the ``routing_policies``
 table, which means the same thing to a request but can change without a restart.
 
-Scoping matches ``/v1/aliases``: a stored policy is either global (``user_id``
-omitted) or scoped to one user, who is then the only caller that resolves it. See
-``services/policy_store`` for precedence between the layers.
+Scoping matches ``/v1/aliases``: a stored policy belongs to one workspace and,
+within it, is either workspace-wide (``user_id`` omitted) or scoped to one user,
+who is then the only caller that resolves it. Omitting ``workspace_id`` means the
+deployment's default workspace, so a single-workspace deployment never names one.
+See ``services/policy_store`` for precedence between the layers.
 
 Master-key gated on every verb, like alias management. That is what makes a policy
 safe as a unit of access: only an operator can decide which models a name reaches,
@@ -25,6 +27,7 @@ from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, verify_master_key
+from gateway.api.routes._helpers import resolve_managed_workspace_id
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import RoutingPolicy
@@ -44,7 +47,6 @@ from gateway.services.routing import (
 )
 from gateway.services.routing.decide import explain_router_ordering
 from gateway.services.routing.knn import unpriced_router_candidates
-from gateway.services.workspace_scope import default_workspace_id
 
 router = APIRouter(prefix="/v1/routing/policies", tags=["routing"])
 
@@ -63,8 +65,17 @@ class PolicyRequest(BaseModel):
     user_id: str | None = Field(
         default=None,
         description=(
-            "User this policy belongs to. Omit for a global policy every caller sees. "
-            "A user-scoped policy resolves only for that user and shadows a global one of the same name."
+            "User this policy belongs to. Omit for a policy every caller in the workspace sees. "
+            "A user-scoped policy resolves only for that user and shadows the workspace-wide one "
+            "of the same name."
+        ),
+    )
+    workspace_id: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            "Workspace this policy belongs to. Omit for the deployment's default workspace. "
+            "The policy resolves only for requests in that workspace, so two workspaces can each "
+            "define their own 'fast'."
         ),
     )
     rename_from: str | None = Field(
@@ -88,6 +99,9 @@ class PolicyResponse(BaseModel):
     # routing_policies. Only stored policies can be edited or deleted.
     source: str
     user_id: str | None = None
+    # The workspace the stored row lives in. Null for a config.yml policy, which
+    # is deployment-wide and in force in every workspace.
+    workspace_id: uuid.UUID | None = None
     # True when the selected candidate depends on request state (a condition or a
     # router), so the policy has no single target or price. Surfaced because it
     # changes where the policy can be used, and the dashboard needs to say so.
@@ -102,6 +116,7 @@ class PolicyResponse(BaseModel):
             spec=policy.spec,
             source="stored",
             user_id=policy.user_id,
+            workspace_id=policy.workspace_id,
             is_dynamic=is_dynamic,
             created_at=policy.created_at.isoformat() if policy.created_at else None,
             updated_at=policy.updated_at.isoformat() if policy.updated_at else None,
@@ -139,6 +154,13 @@ class ExplainRequest(BaseModel):
     name: str | None = Field(default=None, description="An existing policy to explain.")
     spec: dict[str, Any] | None = Field(default=None, description="An unsaved policy body to explain.")
     user_id: str | None = Field(default=None, description="Evaluate conditions as this user.")
+    workspace_id: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            "Resolve `name` and the policy's candidate selectors in this workspace. "
+            "Omit for the deployment's default workspace."
+        ),
+    )
     key_id: str | None = Field(default=None, description="Evaluate conditions as this API key id.")
     allowed_models: list[str] | None = Field(
         default=None,
@@ -204,9 +226,9 @@ def _validated_spec(name: str, spec: dict[str, Any]) -> PolicySpec:
 def _validate_write(config: GatewayConfig, name: str, spec: PolicySpec, user_id: str | None) -> None:
     """Apply the startup policy rules to a runtime write, as a 400.
 
-    A configured policy wins over a *global* stored one during resolution, so
-    storing a global name that shadows one would be accepted and then never take
-    effect. Refusing is the only answer that does not lie about what the gateway
+    A configured policy wins over a *workspace-wide* stored one during resolution,
+    so storing a workspace-wide name that shadows one would be accepted and then
+    never take effect. Refusing is the only answer that does not lie about what the gateway
     will do. A user-scoped policy is exempt: it outranks both other layers, so
     shadowing a configured name is a working override rather than dead data.
     """
@@ -297,7 +319,9 @@ async def _require_user(db: AsyncSession, user_id: str) -> None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User '{user_id}' not found")
 
 
-def _missing_policy_detail(config: GatewayConfig, name: str, user_id: str | None, verb: str) -> str:
+def _missing_policy_detail(
+    config: GatewayConfig, name: str, user_id: str | None, verb: str, workspace_id: uuid.UUID
+) -> str:
     """Explain a stored policy that is not there, naming the scope that was searched.
 
     A config.yml policy is visible in the listing but has no row, so "not found" on
@@ -306,15 +330,19 @@ def _missing_policy_detail(config: GatewayConfig, name: str, user_id: str | None
     """
     if user_id is None and name in config.routing.policies:
         return f"Routing policy '{name}' is defined in config.yml and cannot be {verb} through the API."
-    scope = "global" if user_id is None else f"scoped to user '{user_id}'"
-    return f"Routing policy '{name}' ({scope}) not found"
+    scope = "workspace-wide" if user_id is None else f"scoped to user '{user_id}'"
+    return f"Routing policy '{name}' ({scope}) not found in workspace '{workspace_id}'"
 
 
-async def _name_is_taken(db: AsyncSession, name: str, user_id: str | None) -> bool:
+async def _name_is_taken(db: AsyncSession, name: str, user_id: str | None, workspace_id: uuid.UUID) -> bool:
     """True when a stored policy already answers to ``name`` in this scope."""
     existing = (
         await db.execute(
-            select(RoutingPolicy.id).where(RoutingPolicy.name == name, RoutingPolicy.user_id == user_id)
+            select(RoutingPolicy.id).where(
+                RoutingPolicy.workspace_id == workspace_id,
+                RoutingPolicy.name == name,
+                RoutingPolicy.user_id == user_id,
+            )
         )
     ).scalar_one_or_none()
     return existing is not None
@@ -345,18 +373,16 @@ async def list_policies(
         uuid.UUID | None,
         Query(
             description=(
-                "Only stored policies in this workspace. Config-file policies are always included. "
-                "Every stored policy is in the deployment's default workspace today, because name "
-                "uniqueness and the resolution cache are both deployment-wide, so this narrows to "
-                "one workspace and finds the rest empty until those are scoped (otari-ai#1643)."
+                "Only stored policies in this workspace. Config-file policies are always included, "
+                "being deployment-wide. Omit to list the stored policies of every workspace."
             )
         ),
     ] = None,
 ) -> list[PolicyResponse]:
     """List every routing policy in force, from config.yml and from storage.
 
-    Every scope at once, global and user-scoped alike: this is the master-key
-    management view, not what any one caller resolves.
+    Every scope at once, workspace-wide and user-scoped alike: this is the
+    master-key management view, not what any one caller resolves.
     """
     statement = select(RoutingPolicy)
     if workspace_id is not None:
@@ -365,8 +391,9 @@ async def list_policies(
         # it out would misreport what actually resolves.
         statement = statement.where(RoutingPolicy.workspace_id == workspace_id)
     rows = (await db.execute(statement.order_by(RoutingPolicy.name))).scalars().all()
-    merged: dict[tuple[str, str | None], PolicyResponse] = {}
+    merged: dict[tuple[uuid.UUID | None, str, str | None], PolicyResponse] = {}
     for row in rows:
+        key = (row.workspace_id, row.name, row.user_id)
         try:
             parsed = PolicySpec.model_validate(row.spec)
         except ValidationError:
@@ -374,19 +401,23 @@ async def list_policies(
             # row this build cannot parse, and hiding it would make the dashboard
             # disagree with the database.
             logger.warning("Stored routing policy %r does not validate; listing it as-is", row.name)
-            merged[(row.name, row.user_id)] = PolicyResponse.from_model(row, is_dynamic=False)
+            merged[key] = PolicyResponse.from_model(row, is_dynamic=False)
             continue
-        merged[(row.name, row.user_id)] = PolicyResponse.from_model(row, is_dynamic=parsed.is_dynamic)
-    # Config last, matching effective_policies: if a global name somehow exists on
-    # both sides, list the one that would actually resolve rather than both.
+        merged[key] = PolicyResponse.from_model(row, is_dynamic=parsed.is_dynamic)
+    # Config last, matching effective_policies: a configured name beats the stored
+    # workspace-wide row in every workspace, so it is listed once, unscoped,
+    # instead of shadowing each workspace's row in place.
     for name, spec in config.routing.policies.items():
-        merged[(name, None)] = PolicyResponse(
+        merged[(None, name, None)] = PolicyResponse(
             name=name,
             spec=spec.model_dump(mode="json", exclude_none=True),
             source="config",
             is_dynamic=spec.is_dynamic,
         )
-    return sorted(merged.values(), key=lambda policy: (policy.name, policy.user_id or ""))
+    return sorted(
+        merged.values(),
+        key=lambda policy: (policy.name, str(policy.workspace_id or ""), policy.user_id or ""),
+    )
 
 
 @router.post("", dependencies=[Depends(verify_master_key)])
@@ -395,7 +426,7 @@ async def set_policy(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> PolicyResponse:
-    """Create or update a stored policy, global or scoped to one user.
+    """Create or update a stored policy in one workspace, optionally for one user.
 
     The spec is validated here and stored as given, so a row can never contain a
     body this build would refuse at load. The cache is refreshed twice: once before
@@ -411,20 +442,24 @@ async def set_policy(
     """
     if request.user_id is not None:
         await _require_user(db, request.user_id)
+    workspace_id = await resolve_managed_workspace_id(db, request.workspace_id)
     spec = _validated_spec(request.name, request.spec)
     await refresh_policy_cache(db)
     _validate_write(config, request.name, spec, request.user_id)
     await _validate_router_pricing(config, db, spec)
 
-    # Scope is part of the identity: the upsert must not turn a global policy into
-    # a user-scoped one (or vice versa) just because the names match. A rename moves
-    # the name half of that key and leaves the scope alone.
+    # Both scopes are part of the identity: the upsert must not turn one
+    # workspace's policy into another's, nor a workspace-wide policy into a
+    # user-scoped one (or vice versa), just because the names match. A rename
+    # moves the name half of that key and leaves both scopes alone.
     renaming = request.rename_from is not None and request.rename_from != request.name
     lookup_name = request.rename_from if request.rename_from is not None else request.name
     policy = (
         await db.execute(
             select(RoutingPolicy).where(
-                RoutingPolicy.name == lookup_name, RoutingPolicy.user_id == request.user_id
+                RoutingPolicy.workspace_id == workspace_id,
+                RoutingPolicy.name == lookup_name,
+                RoutingPolicy.user_id == request.user_id,
             )
         )
     ).scalar_one_or_none()
@@ -436,12 +471,12 @@ async def set_policy(
         if policy is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
-                detail=_missing_policy_detail(config, lookup_name, request.user_id, "renamed"),
+                detail=_missing_policy_detail(config, lookup_name, request.user_id, "renamed", workspace_id),
             )
         if renaming:
             # Without this the rename would be an upsert onto the target name, silently
             # destroying whatever policy already answered to it.
-            if await _name_is_taken(db, request.name, request.user_id):
+            if await _name_is_taken(db, request.name, request.user_id, workspace_id):
                 raise HTTPException(status_code=status.HTTP_409_CONFLICT, detail=_name_taken_detail(request.name))
             policy.name = request.name
     # Round-tripped through the model so the stored document is normalized (defaults
@@ -455,10 +490,7 @@ async def set_policy(
             name=request.name,
             spec=stored_spec,
             user_id=request.user_id,
-            # Resolution is still deployment-wide, so everything lands in the
-            # default workspace: a policy stored elsewhere would be listed there
-            # and resolve everywhere, which is worse than not scoping it yet.
-            workspace_id=await default_workspace_id(db),
+            workspace_id=workspace_id,
         )
         db.add(policy)
 
@@ -471,7 +503,7 @@ async def set_policy(
         # catches it. Re-read rather than assuming: the same constraint class also
         # covers the user foreign key, and reporting a deleted user as a name clash
         # would send the operator after the wrong thing.
-        if await _name_is_taken(db, request.name, request.user_id):
+        if await _name_is_taken(db, request.name, request.user_id, workspace_id):
             raise HTTPException(
                 status_code=status.HTTP_409_CONFLICT, detail=_name_taken_detail(request.name)
             ) from None
@@ -487,10 +519,11 @@ async def set_policy(
     # An operator changing where traffic goes is worth a line in the log: this is the
     # object that decides which model spends money.
     logger.info(
-        "Routing policy written name=%s renamed_from=%s scope=%s candidates=%d dynamic=%s router=%s",
+        "Routing policy written name=%s renamed_from=%s workspace=%s scope=%s candidates=%d dynamic=%s router=%s",
         policy.name,
         request.rename_from if renaming else "-",
-        policy.user_id or "global",
+        policy.workspace_id,
+        policy.user_id or "workspace-wide",
         # A router entry contributes its whole pool, since the walker cascades
         # through the ranking. Counting one head candidate here logged
         # "candidates=1" for a policy that can dispatch three.
@@ -509,24 +542,34 @@ async def delete_policy(
     config: Annotated[GatewayConfig, Depends(get_config)],
     user_id: Annotated[
         str | None,
-        Query(description="Delete the policy scoped to this user. Omit to delete the global one."),
+        Query(description="Delete the policy scoped to this user. Omit to delete the workspace-wide one."),
+    ] = None,
+    workspace_id: Annotated[
+        uuid.UUID | None,
+        Query(description="Delete the policy in this workspace. Omit for the deployment's default workspace."),
     ] = None,
 ) -> None:
     """Delete a stored policy in one scope.
 
-    Scoped by ``user_id`` for the same reason the upsert is: deleting the global
-    policy must not take a user's override with it, and deleting an override must
-    leave the global one serving everyone else.
+    Scoped by ``workspace_id`` and ``user_id`` for the same reason the upsert is:
+    deleting one workspace's policy must not touch another's, deleting the
+    workspace-wide policy must not take a user's override with it, and deleting an
+    override must leave the workspace-wide one serving everyone else.
     """
+    target_workspace_id = await resolve_managed_workspace_id(db, workspace_id)
     policy = (
         await db.execute(
-            select(RoutingPolicy).where(RoutingPolicy.name == name, RoutingPolicy.user_id == user_id)
+            select(RoutingPolicy).where(
+                RoutingPolicy.workspace_id == target_workspace_id,
+                RoutingPolicy.name == name,
+                RoutingPolicy.user_id == user_id,
+            )
         )
     ).scalar_one_or_none()
     if policy is None:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=_missing_policy_detail(config, name, user_id, "deleted"),
+            detail=_missing_policy_detail(config, name, user_id, "deleted", target_workspace_id),
         )
 
     await db.delete(policy)
@@ -572,7 +615,7 @@ async def explain_policy(
     else:
         assert request.name is not None
         name = request.name
-        resolved = resolve_effective_policy(config, name, request.user_id)
+        resolved = resolve_effective_policy(config, name, request.user_id, workspace_id=request.workspace_id)
         if resolved is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND, detail=f"Routing policy '{name}' not found"
@@ -597,6 +640,7 @@ async def explain_policy(
                 used_pct=request.budget_used_pct, remaining_usd=request.budget_remaining_usd
             ),
             router_ordering=weighted_ordering,
+            workspace_id=request.workspace_id,
         )
     except NoEligibleCandidatesError as exc:
         return ExplainResponse(

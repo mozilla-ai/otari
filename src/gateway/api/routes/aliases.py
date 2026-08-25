@@ -6,9 +6,16 @@ live in a file this process does not own); these routes manage the
 ``model_aliases`` table, which means the same thing to a request but can change
 without a restart.
 
-A stored alias is either global (``user_id`` omitted) or scoped to one user, who
-is then the only caller that resolves it. See ``services/alias_service`` for the
-precedence between the layers.
+A stored alias belongs to one workspace, and within it is either global
+(``user_id`` omitted) or scoped to one user, who is then the only caller in that
+workspace that resolves it. A ``config.yml`` alias has no workspace and is in
+force in all of them. See ``services/alias_service`` for the precedence between
+the layers.
+
+Every verb here takes an optional ``workspace_id``; omitting it means the
+deployment's default workspace, which is where an operator acting deployment-wide
+writes and where every row predating workspace scoping was backfilled. A
+single-workspace deployment therefore never has to name one.
 """
 
 import uuid
@@ -21,13 +28,13 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, verify_master_key
+from gateway.api.routes._helpers import resolve_managed_workspace_id
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import ModelAlias
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.alias_service import all_alias_names, refresh_alias_cache
 from gateway.services.policy_store import all_policy_names
-from gateway.services.workspace_scope import default_workspace_id
 
 router = APIRouter(prefix="/v1/aliases", tags=["aliases"])
 
@@ -40,8 +47,17 @@ class AliasRequest(BaseModel):
     user_id: str | None = Field(
         default=None,
         description=(
-            "User this alias belongs to. Omit for a global alias every caller sees. "
-            "A user-scoped alias resolves only for that user and shadows a global one of the same name."
+            "User this alias belongs to. Omit for an alias every caller in the workspace sees. "
+            "A user-scoped alias resolves only for that user and shadows the workspace-wide one "
+            "of the same name."
+        ),
+    )
+    workspace_id: uuid.UUID | None = Field(
+        default=None,
+        description=(
+            "Workspace this alias belongs to. Omit for the deployment's default workspace. "
+            "The alias resolves only for requests in that workspace, so two workspaces can each "
+            "point the same name at a different model."
         ),
     )
 
@@ -57,6 +73,9 @@ class AliasResponse(BaseModel):
     # The user this alias is scoped to, or null when it applies to every caller.
     # config.yml aliases are always global.
     user_id: str | None = None
+    # The workspace the stored row lives in. Null for a config.yml alias, which
+    # is deployment-wide and in force in every workspace.
+    workspace_id: uuid.UUID | None = None
     created_at: str | None = None
     updated_at: str | None = None
 
@@ -67,6 +86,7 @@ class AliasResponse(BaseModel):
             target=alias.target,
             source="stored",
             user_id=alias.user_id,
+            workspace_id=alias.workspace_id,
             created_at=alias.created_at.isoformat() if alias.created_at else None,
             updated_at=alias.updated_at.isoformat() if alias.updated_at else None,
         )
@@ -75,9 +95,9 @@ class AliasResponse(BaseModel):
 def _validate(config: GatewayConfig, name: str, target: str, user_id: str | None) -> None:
     """Apply the startup alias rules to a runtime write, as a 400.
 
-    A configured alias wins over a *global* stored one during resolution, so
-    storing a global name that shadows one would be accepted and then never take
-    effect. Refusing is the only answer that does not lie about what the gateway
+    A configured alias wins over a *workspace-wide* stored one during resolution,
+    so storing a workspace-wide name that shadows one would be accepted and then
+    never take effect. Refusing is the only answer that does not lie about what the gateway
     will do. A user-scoped alias is exempt: it outranks both other layers, so
     shadowing a configured name is a working override rather than dead data, and
     is the reason to scope an alias in the first place.
@@ -137,17 +157,15 @@ async def list_aliases(
     workspace_id: Annotated[
         uuid.UUID | None,
         Query(description=(
-            "Only stored entries in this workspace. Config-file entries are always included. "
-            "Every stored entry is in the deployment's default workspace today, because name "
-            "uniqueness and the resolution cache are both deployment-wide, so this narrows to "
-            "one workspace and finds the rest empty until those are scoped (otari-ai#1643)."
+            "Only stored entries in this workspace. Config-file entries are always included, "
+            "being deployment-wide. Omit to list the stored entries of every workspace."
         )),
     ] = None,
 ) -> list[AliasResponse]:
     """List every alias in force, from config.yml and from storage.
 
-    Every scope at once, global and user-scoped alike: this is the master-key
-    management view, not what any one caller resolves.
+    Every scope at once, workspace-wide and user-scoped alike: this is the
+    master-key management view, not what any one caller resolves.
     """
     statement = select(ModelAlias)
     if workspace_id is not None:
@@ -156,18 +174,25 @@ async def list_aliases(
         # it out would misreport what actually resolves.
         statement = statement.where(ModelAlias.workspace_id == workspace_id)
     rows = (await db.execute(statement.order_by(ModelAlias.name))).scalars().all()
-    # Keyed on (name, scope) rather than name: the same display name can exist
-    # globally and per user, and both are real rows to manage.
-    merged = {(row.name, row.user_id): AliasResponse.from_model(row) for row in rows}
-    # Config last, matching effective_aliases: if a global name somehow exists on
-    # both sides, list the one that would actually resolve rather than both.
+    # Keyed on (workspace, name, user) rather than name: the same display name can
+    # exist in several workspaces, and within one both workspace-wide and per
+    # user, and every one of those is a real row to manage.
+    merged: dict[tuple[uuid.UUID | None, str, str | None], AliasResponse] = {
+        (row.workspace_id, row.name, row.user_id): AliasResponse.from_model(row) for row in rows
+    }
+    # Config last, matching effective_aliases: a configured name beats the stored
+    # workspace-wide row in every workspace, so it is listed once, unscoped,
+    # instead of shadowing each workspace's row in place.
     merged.update(
         {
-            (name, None): AliasResponse(name=name, target=target, source="config")
+            (None, name, None): AliasResponse(name=name, target=target, source="config")
             for name, target in config.aliases.items()
         }
     )
-    return sorted(merged.values(), key=lambda alias: (alias.name, alias.user_id or ""))
+    return sorted(
+        merged.values(),
+        key=lambda alias: (alias.name, str(alias.workspace_id or ""), alias.user_id or ""),
+    )
 
 
 @router.post("", dependencies=[Depends(verify_master_key)])
@@ -176,17 +201,23 @@ async def set_alias(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> AliasResponse:
-    """Create or update a stored alias, global or scoped to one user."""
+    """Create or update a stored alias in one workspace, optionally for one user."""
     if request.user_id is not None:
         await _require_user(db, request.user_id)
+    workspace_id = await resolve_managed_workspace_id(db, request.workspace_id)
     await refresh_alias_cache(db)
     _validate(config, request.name, request.target, request.user_id)
 
-    # Scope is part of the identity: the upsert must not turn a global alias into
-    # a user-scoped one (or vice versa) just because the names match.
+    # Both scopes are part of the identity: the upsert must not turn one
+    # workspace's alias into another's, nor a workspace-wide alias into a
+    # user-scoped one (or vice versa), just because the names match.
     alias = (
         await db.execute(
-            select(ModelAlias).where(ModelAlias.name == request.name, ModelAlias.user_id == request.user_id)
+            select(ModelAlias).where(
+                ModelAlias.workspace_id == workspace_id,
+                ModelAlias.name == request.name,
+                ModelAlias.user_id == request.user_id,
+            )
         )
     ).scalar_one_or_none()
     if alias:
@@ -196,10 +227,7 @@ async def set_alias(
             name=request.name,
             target=request.target,
             user_id=request.user_id,
-            # See the note on RoutingPolicy: alias resolution reads a
-            # process-wide, name-keyed cache, so storing one outside the default
-            # workspace would show it as scoped while it resolved everywhere.
-            workspace_id=await default_workspace_id(db),
+            workspace_id=workspace_id,
         )
         db.add(alias)
 
@@ -229,21 +257,38 @@ async def delete_alias(
     config: Annotated[GatewayConfig, Depends(get_config)],
     user_id: Annotated[
         str | None,
-        Query(description="Delete the alias scoped to this user. Omit to delete the global alias of that name."),
+        Query(
+            description=(
+                "Delete the alias scoped to this user. Omit to delete the workspace-wide alias "
+                "of that name."
+            )
+        ),
+    ] = None,
+    workspace_id: Annotated[
+        uuid.UUID | None,
+        Query(description="Delete the alias in this workspace. Omit for the deployment's default workspace."),
     ] = None,
 ) -> None:
     """Delete a stored alias in one scope.
 
-    Scoped by ``user_id`` for the same reason the upsert is: deleting the global
-    alias must not take a user's override with it, and deleting an override must
-    leave the global one serving everyone else.
+    Scoped by ``workspace_id`` and ``user_id`` for the same reason the upsert is:
+    deleting one workspace's alias must not touch another's, deleting the
+    workspace-wide alias must not take a user's override with it, and deleting an
+    override must leave the workspace-wide one serving everyone else.
     """
+    target_workspace_id = await resolve_managed_workspace_id(db, workspace_id)
     alias = (
-        await db.execute(select(ModelAlias).where(ModelAlias.name == name, ModelAlias.user_id == user_id))
+        await db.execute(
+            select(ModelAlias).where(
+                ModelAlias.workspace_id == target_workspace_id,
+                ModelAlias.name == name,
+                ModelAlias.user_id == user_id,
+            )
+        )
     ).scalar_one_or_none()
     if alias is None:
-        scope = "global" if user_id is None else f"scoped to user '{user_id}'"
-        detail = f"Alias '{name}' ({scope}) not found"
+        scope = "workspace-wide" if user_id is None else f"scoped to user '{user_id}'"
+        detail = f"Alias '{name}' ({scope}) not found in workspace '{target_workspace_id}'"
         if user_id is None and name in config.aliases:
             detail = f"Alias '{name}' is defined in config.yml and cannot be deleted through the API."
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=detail)

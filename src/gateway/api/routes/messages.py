@@ -506,7 +506,11 @@ async def create_message(
     user_from_metadata = request.metadata.get("user_id") if request.metadata else None
 
     async def _normalize(
-        user_id: str, provider: LLMProvider | None, model: str, instance: str | None
+        user_id: str,
+        provider: LLMProvider | None,
+        model: str,
+        instance: str | None,
+        workspace_id: uuid.UUID | None,
     ) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the Anthropic wire payload
         # before the cost estimate. Standalone only; no-op when the files
@@ -521,6 +525,7 @@ async def create_message(
             raw_request=raw_request,
             user_id=user_id,
             instance=instance,
+            workspace_id=workspace_id,
         )
         return len(str(request.messages)) + len(str(request.system or "")), stats.vision_usage()
 

@@ -316,7 +316,11 @@ async def chat_completions(
         )
 
     async def _normalize(
-        user_id: str, provider: LLMProvider | None, model: str, instance: str | None
+        user_id: str,
+        provider: LLMProvider | None,
+        model: str,
+        instance: str | None,
+        workspace_id: uuid.UUID | None,
     ) -> tuple[int, CompletionUsage | None]:
         # Resolve uploaded file/image blocks into the wire payload (extract to
         # text for text-only models, inline for natively-capable ones) before
@@ -332,6 +336,7 @@ async def chat_completions(
             raw_request=raw_request,
             user_id=user_id,
             instance=instance,
+            workspace_id=workspace_id,
         )
         return len(str(request.messages)), stats.vision_usage()
 

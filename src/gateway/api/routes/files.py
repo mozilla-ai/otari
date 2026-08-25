@@ -4,6 +4,14 @@ Stores uploaded files so they can later be referenced from chat messages by
 ``file_id``. The content normalizer (gateway.services.content_normalizer)
 resolves those references and either forwards them to natively-capable
 providers or extracts them to text for text-only local models.
+
+Files carry two scopes. ``user_id`` is the owner, resolved from the authenticated
+principal. ``workspace_id`` is the workspace the upload was made in, taken off the
+API key that authenticated it and never from a header, exactly as every other
+request-plane row does (``services/workspace_scope``). A keyed request is confined
+to its own key's workspace on every verb; a master-key request is the operator
+acting deployment-wide and sees every workspace, narrowable on the listing with
+``workspace_id``, matching ``GET /v1/keys``.
 """
 
 import mimetypes
@@ -26,12 +34,26 @@ from gateway.log_config import logger
 from gateway.models.entities import APIKey, FileObject
 from gateway.services.file_service import fetch_file
 from gateway.services.file_store import FileStore
+from gateway.services.workspace_scope import default_workspace_id
 
 router = APIRouter(prefix="/v1", tags=["files"])
 
 # OpenAI's documented file purposes plus a generic default. We don't enforce the
 # enum (forward-compat), but normalise the empty case to "user_data".
 _DEFAULT_PURPOSE = "user_data"
+
+
+def _request_workspace_id(auth_result: tuple[APIKey | None, bool]) -> uuid.UUID | None:
+    """The workspace a keyed request is confined to, or ``None`` for the master key.
+
+    Read off the key rather than from a header: a caller controls its headers and
+    not which key it holds, so a header here would let anyone reach another
+    workspace's files. ``None`` for the master key is deliberate, and is what keeps
+    an existing deployment's operator tooling working: the master key is the
+    operator acting deployment-wide, so it is not narrowed to any one workspace.
+    """
+    api_key, _is_master_key = auth_result
+    return api_key.workspace_id if api_key is not None else None
 
 
 def _resolve_user(
@@ -160,6 +182,10 @@ async def create_file(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File uploads are disabled")
 
     user_id = _resolve_user(auth_result, user, config)
+    # A master-key upload has no key to read a workspace off, so it lands in the
+    # default workspace: the operator acting deployment-wide, which is the same
+    # answer `resolve_workspace_id` gives every other master-key write.
+    workspace_id = _request_workspace_id(auth_result) or await default_workspace_id(db)
 
     file_id = f"file-{uuid.uuid4().hex}"
     storage_ref, size = await file_store.put_stream(file_id, _capped_chunks(file, config.files_max_bytes))
@@ -177,6 +203,7 @@ async def create_file(
     record = FileObject(
         id=file_id,
         user_id=user_id,
+        workspace_id=workspace_id,
         filename=file.filename or file_id,
         mime_type=_guess_mime(file.filename, file.content_type),
         bytes=size,
@@ -199,7 +226,9 @@ async def create_file(
             detail="Failed to store file",
         ) from exc
 
-    logger.info("Stored file %s (%d bytes) for user %s", file_id, size, user_id)
+    logger.info(
+        "Stored file %s (%d bytes) for user %s in workspace %s", file_id, size, user_id, workspace_id
+    )
     return record.to_dict()
 
 
@@ -210,16 +239,24 @@ async def list_files(
     config: Annotated[GatewayConfig, Depends(get_config)],
     user: str | None = None,
     purpose: str | None = None,
+    workspace_id: uuid.UUID | None = None,
 ) -> dict[str, Any]:
-    """List the authenticated user's uploaded files."""
+    """List the authenticated user's uploaded files in the request's workspace.
+
+    ``workspace_id`` narrows a master-key listing to one workspace; a keyed
+    request is already confined to its key's own and cannot widen or move it.
+    """
     if not config.files_enabled:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File uploads are disabled")
 
     user_id = _resolve_user(auth_result, user, config)
+    scope = _request_workspace_id(auth_result) or workspace_id
     stmt = select(FileObject).where(
         FileObject.user_id == user_id,
         FileObject.deleted_at.is_(None),
     )
+    if scope is not None:
+        stmt = stmt.where(FileObject.workspace_id == scope)
     if purpose is not None:
         stmt = stmt.where(FileObject.purpose == purpose)
     stmt = stmt.order_by(FileObject.created_at.desc())
@@ -242,7 +279,7 @@ async def get_file(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File uploads are disabled")
 
     user_id = _resolve_user(auth_result, user, config)
-    record = await fetch_file(db, file_id, user_id)
+    record = await fetch_file(db, file_id, user_id, workspace_id=_request_workspace_id(auth_result))
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
     return record.to_dict()
@@ -262,7 +299,7 @@ async def get_file_content(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File uploads are disabled")
 
     user_id = _resolve_user(auth_result, user, config)
-    record = await fetch_file(db, file_id, user_id)
+    record = await fetch_file(db, file_id, user_id, workspace_id=_request_workspace_id(auth_result))
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
@@ -301,7 +338,7 @@ async def delete_file(
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File uploads are disabled")
 
     user_id = _resolve_user(auth_result, user, config)
-    record = await fetch_file(db, file_id, user_id)
+    record = await fetch_file(db, file_id, user_id, workspace_id=_request_workspace_id(auth_result))
     if record is None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="File not found")
 
