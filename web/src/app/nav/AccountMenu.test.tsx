@@ -1,6 +1,6 @@
 import { screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { describe, expect, it } from "vitest"
 
 import { AccountMenu } from "@/app/nav/AccountMenu"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
@@ -22,10 +22,6 @@ async function openMenu() {
 }
 
 describe("AccountMenu", () => {
-  afterEach(() => {
-    vi.restoreAllMocks()
-  })
-
   it("opens the account page, rather than naming a destination it cannot reach", async () => {
     await openMenu()
 

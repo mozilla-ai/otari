@@ -12,6 +12,7 @@ import {
   FiShield,
 } from "react-icons/fi"
 
+import type { DeploymentBootstrap } from "@/client"
 import { useAuth } from "@/features/auth/AuthContext"
 import { EntitlementGate } from "@/shared/components/EntitlementGate"
 import { useDeployment } from "@/shared/hooks/useDeployment"
@@ -28,8 +29,11 @@ import {
 } from "./rowStyles"
 
 // The control that ends the sidebar, and the menu it opens: account settings,
-// appearance, the legal pages, who you are signed in as, and the way out. The
-// design's "Menu member · Linear order" artboard is the order and the geometry.
+// appearance, the legal pages, and the way out. The design's
+// "Menu member · Linear order" artboard is the order and the geometry. Who you
+// are signed in as is the trigger's own line, not a row inside the menu: the
+// menu repeated it under an avatar the trigger already draws, so that block is
+// gone and /account is where an identity is actually read.
 //
 // Three of these are real in a standalone gateway. Appearance drives the dark
 // token block globals.css has carried since the design foundation was rehomed,
@@ -69,7 +73,7 @@ const MENU_DIVIDER = "h-px shrink-0 bg-border"
 // standalone gateway issues one, for the operator identity it provisioned
 // itself, and no management route reports the caller's own name or address, so
 // this is the most it can honestly say.
-function sessionIdentity(sessionType: string): {
+function sessionIdentity(sessionType: DeploymentBootstrap["session_type"]): {
   name: string
   initials: string
 } {
