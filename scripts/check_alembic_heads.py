@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Check the Alembic revision graph has exactly one head.
 
-Two migrations that name the same `down_revision` are both heads, and alembic
+Two migrations that name the same `down_revision` are both heads, and Alembic
 refuses to resolve `head` when there is more than one. Nothing reports that at
 the point it is introduced: the branch that adds the second child is green until
 main lands the first, and then every test that builds a schema fails at once
