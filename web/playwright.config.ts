@@ -1,5 +1,7 @@
 import { defineConfig, devices } from "@playwright/test"
 
+import { HYBRID_BASE_URL } from "./e2e/hybrid"
+
 // End-to-end tests for the dashboard, run against a real gateway serving the
 // built bundle (booted by `webServer` below). Component behavior is covered by
 // Vitest; this exercises the multi-page flows a browser actually walks.
@@ -38,8 +40,6 @@ const SCREENSHOT_THEMES = ["light", "dark"] as const
 // port is e2e/otari.hybrid.yml's, and the host is 127.0.0.1 rather than
 // localhost so the page's own `window.location.origin` matches this string,
 // which the hybrid spec asserts against.
-const HYBRID_BASE_URL = "http://127.0.0.1:8010"
-
 // One project per cell. The theme reaches the app through localStorage (see
 // e2e/screenshots/fixtures.ts, which reads it back off the project name);
 // `colorScheme` here is the OS-level preference underneath it, set to match so
@@ -183,9 +183,9 @@ export default defineConfig({
     },
     ...screenshotProjects,
   ],
-  // Two gateways, both booted before any project runs. The hybrid one is up for
-  // the screenshot projects too, which never visit it; it opens no database and
-  // costs a process, which is cheaper than making its lifetime conditional on
+  // Two gateways, both booted before any project runs. The screenshot projects
+  // use the hybrid one only for their hybrid landing registry; it opens no database
+  // and costs a process, which is cheaper than making its lifetime conditional on
   // which projects were selected.
   webServer: [
     {
