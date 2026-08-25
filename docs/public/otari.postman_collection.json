@@ -2099,6 +2099,38 @@
     {
       "item": [
         {
+          "name": "Create Organization",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"name\": \"string\"\n}"
+            },
+            "description": "Create an organization with the caller as its owner.\n\nTakes a name; the slug is derived from it with a random suffix, so two\norganizations may share a name and a later rename does not move the slug.\nA default workspace is provisioned alongside, because an organization\nwithout one has nowhere to hold a key, a budget or a usage row.\n\nThe caller is **not** moved into it. Switching is a separate call\n(``POST /me/switch``), so creating an organization does not change what the\nrest of the caller's session is looking at.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations"
+            }
+          }
+        },
+        {
           "name": "Get Active Organization Context",
           "request": {
             "description": "Get the caller's active organization and their standing in it.",
@@ -2347,6 +2379,74 @@
                   "value": ""
                 }
               ]
+            }
+          }
+        },
+        {
+          "name": "List Caller Organization Memberships",
+          "request": {
+            "description": "List the organizations the caller belongs to, and their role in each.\n\nThe caller's own active memberships, not a directory of the deployment's\norganizations: this is what an organization switcher renders, and one row\ncarries ``is_active_organization`` so it can mark the current one. Not to be\nconfused with ``GET /me/members``, which is the active organization's\nroster.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "memberships"
+              ],
+              "query": [
+                {
+                  "description": "Number of records to skip",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "Maximum number of records to return",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/memberships?skip=&limit="
+            }
+          }
+        },
+        {
+          "name": "Switch Active Organization",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"organization_id\": \"00000000-0000-0000-0000-000000000000\"\n}"
+            },
+            "description": "Point the caller's identity at another organization they belong to.\n\nDistinct from ``PATCH /me``, which renames the organization already active.\nThis changes which organization every later request is scoped to, so\nworkspaces, keys, budgets and usage all follow it. Answers 404 for an\norganization the caller holds no active membership in, whether or not it\nexists.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "switch"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/switch"
             }
           }
         }
@@ -5440,7 +5540,7 @@
         {
           "name": "Delete User",
           "request": {
-            "description": "Delete a user.",
+            "description": "Delete a user, and erase the telemetry captured under their name.",
             "header": [],
             "method": "DELETE",
             "url": {
@@ -5953,7 +6053,7 @@
               },
               "raw": "{\n  \"enabled\": false\n}"
             },
-            "description": "Set a workspace's code-execution policy, replacing any existing one.\n\nAn organization owner/admin, or an owner/admin of this workspace, may\nwrite it. The policy can only narrow what the deployment permits: turning\ncode execution off for the workspace, and lowering the loop and execution\nceilings. It never turns a sandbox the deployment has not configured on.",
+            "description": "Set a workspace's code-execution policy, replacing any existing one.\n\nAn organization owner/admin, or an owner/admin of this workspace, may\nwrite it. The policy can only narrow what the deployment permits: turning\ncode execution off for the workspace, lowering the loop and execution\nceilings, and removing tool kinds from what the sandbox backend serves. It\nnever turns a sandbox the deployment has not configured on, and ``image``\nmay only name one the operator curated (``allowed_images`` on the response\nreports the set); anything else is refused with 400.",
             "header": [
               {
                 "key": "Content-Type",

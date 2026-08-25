@@ -1,25 +1,23 @@
-"""Operator purge of previously-captured behavioral-event rows.
+"""Operator purge of previously-captured telemetry rows.
 
-`agent_telemetry` never counts toward budget or spend, so this needs none of
+Captured telemetry never counts toward budget or spend, so this needs none of
 `usage_admin_service`'s imported-only safety scoping: a fresh, narrower
 selection schema (mirroring its `ids`-or-`by_filter` shape) is simpler than
 threading a generic filter through fields that would not apply here. The
-filter set is deliberately scoped to fields a behavioral-event row actually
-has: no `model`, `provider`, `status`, `source_label`, `priced`, or `tool`.
+filter set is deliberately scoped to fields a captured row actually has: no
+`model`, `provider`, `status`, `source_label`, `priced`, or `tool`.
+
+Which rows are removed is decided here; removing them is `TelemetryStoragePort`'s
+job, so a deployment storing telemetry elsewhere purges from that store instead.
 """
 
 from datetime import datetime
-from typing import Annotated, Any, cast
+from typing import Annotated
 
 from pydantic import BaseModel, Field, model_validator
-from sqlalchemy import ColumnElement, delete
-from sqlalchemy.engine import CursorResult
-from sqlalchemy.exc import SQLAlchemyError
-from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.core.sql import MAX_FILTER_VALUES, match_any, utc_bound
-from gateway.log_config import logger
-from gateway.models.entities import AgentTelemetry
+from gateway.core.sql import MAX_FILTER_VALUES
+from gateway.ports.telemetry_storage_port import TelemetryFilter, TelemetryStoragePort
 
 # Matches UsageSelection's ids cap: page selections drive this path, and 1000
 # leaves headroom without letting a single request name an unbounded set.
@@ -63,38 +61,34 @@ class AgentTelemetryDeleteResult(BaseModel):
     deleted: int = 0
 
 
-def _selection_conditions(selection: AgentTelemetrySelection) -> list[ColumnElement[bool]]:
-    if selection.ids:
-        return [AgentTelemetry.id.in_(selection.ids)]
-    conditions: list[ColumnElement[bool]] = []
-    if selection.user_id is not None and selection.user_id != []:
-        conditions.append(match_any(AgentTelemetry.user_id, selection.user_id))
-    if selection.api_key_id is not None and selection.api_key_id != []:
-        conditions.append(match_any(AgentTelemetry.api_key_id, selection.api_key_id))
-    if selection.name is not None:
-        conditions.append(AgentTelemetry.name == selection.name)
-    if selection.start_date is not None:
-        conditions.append(AgentTelemetry.timestamp >= utc_bound(selection.start_date))
-    if selection.end_date is not None:
-        conditions.append(AgentTelemetry.timestamp < utc_bound(selection.end_date))
-    return conditions
+def _values(value: str | list[str] | None) -> tuple[str, ...]:
+    """One filter field as a tuple, treating an explicit empty list as unset."""
+    if value is None:
+        return ()
+    return (value,) if isinstance(value, str) else tuple(value)
 
 
-async def delete_agent_telemetry(db: AsyncSession, request: AgentTelemetryDeleteRequest) -> AgentTelemetryDeleteResult:
-    """Delete the agent_telemetry rows a selection matches.
+def _selection_filter(selection: AgentTelemetrySelection) -> TelemetryFilter:
+    """The filter half of a selection, ignored by storage when ids are given."""
+    return TelemetryFilter(
+        start=selection.start_date,
+        end=selection.end_date,
+        user_ids=_values(selection.user_id),
+        api_key_ids=_values(selection.api_key_id),
+        name=selection.name,
+    )
+
+
+async def delete_agent_telemetry(
+    request: AgentTelemetryDeleteRequest,
+    *,
+    storage: TelemetryStoragePort,
+) -> AgentTelemetryDeleteResult:
+    """Delete the telemetry rows a selection matches.
 
     A selection matching zero rows succeeds with `deleted: 0`, not an error.
     No anti-replay guarantee: a purged event re-exported later is treated as
     new by `POST /v1/logs` and may be re-stored.
     """
-    conditions = _selection_conditions(request)
-    try:
-        result = cast("CursorResult[Any]", await db.execute(delete(AgentTelemetry).where(*conditions)))
-        await db.commit()
-    except SQLAlchemyError:
-        await db.rollback()
-        logger.exception("agent_telemetry delete failed")
-        raise
-    deleted = result.rowcount or 0
-    logger.info("agent_telemetry delete: removed=%d by_filter=%s", deleted, request.by_filter)
+    deleted = await storage.purge(ids=tuple(request.ids or ()), filters=_selection_filter(request))
     return AgentTelemetryDeleteResult(deleted=deleted)

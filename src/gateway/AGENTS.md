@@ -12,7 +12,7 @@ read that first if a change touches mode selection.
 ## Ports, container, bootstrap
 `ports/` holds the domain-named `Protocol` interfaces the core depends on, `adapters/` holds Otari's own implementation of each, and `container.py` is the composition root that binds them, built once per app in `create_app` and read through the port dependencies in `api/deps.py`. `OTARI_BOOTSTRAP=module:callable` points at an overlay's register function, imported after the defaults are bound; unset, nothing is imported. Why the seam is shaped this way, and the rules for keeping it, are in [../../ARCHITECTURE.md](../../ARCHITECTURE.md); `scripts/check_architecture.py` enforces them.
 
-Two local consequences worth knowing before you use it. A port factory receives `AsyncSession | None`, because hybrid mode runs with no local database and an adapter resolved on a hybrid request has to say what it does without one. And nothing on the request path calls a port yet: the four that exist are the mechanism, and a capability earns its port when a second implementation is real, not before.
+Two local consequences worth knowing before you use it. A port factory receives `AsyncSession | None`, because hybrid mode runs with no local database and an adapter resolved on a hybrid request has to say what it does without one. `TelemetryStoragePort` is the exception that proves the rule: every surface resolving it is standalone-only, so `get_telemetry_storage_port` names `get_db` rather than `PortSessionDep`, which hands the adapter the caller's session instead of opening a second one for the same request. And a capability earns its port when a second implementation is real, not before: of the five that exist, two have core callers, `TelemetryStoragePort` and `ModelProviderPort` (the last rung of the credential ladder below), and the other three are still mechanism alone.
 
 ## Request lifecycle (chat completions)
 Read these together before changing request behavior, the flow spans several files.
@@ -94,6 +94,12 @@ wired into the lifespan, standalone-only.
 
 Their pages are in [../../web/AGENTS.md](../../web/AGENTS.md).
 
+Below both stores is one more rung, deliberately last: when a candidate needed a credential
+and none of them had one, `resolve_dispatch_provider` asks `ModelProviderPort` whether this
+build serves it from a deployment-owned fleet. `_serve_from_hosted_credential` in
+`api/routes/_pipeline.py` is the whole of it and says why on each branch. Nothing here may
+move above BYO.
+
 Neither store becomes workspace-keyed. Per-tenant tool configuration (web search, code
 execution, MCP servers, guardrails) is resolved at admission in `prepare_gateway_tools`
 off `RequestContext.workspace_id` and `organization_id`, never from a header, and lands on
@@ -126,8 +132,13 @@ narrowing rule rather than of the exception. `workspace_code_execution_policies`
 the role-gated CRUD and the identity-free `resolve_workspace_code_execution_policy`
 that `prepare_gateway_tools` calls. The row carries no URL and no credential: the
 sandbox stays deployment-scoped on `/v1/tool-settings`, and the row only refuses it,
-lowers its two ceilings, or supplies a hint the request omitted. No row means no
-narrowing.
+lowers its two ceilings, supplies a hint the request omitted, removes tool kinds
+from what the backend serves, or pins an image from a list the operator curated
+(`sandbox_allowed_session_images`, deliberately config-only rather than dashboard-editable,
+because it is a supply-chain gate and not a tool setting). No row means no
+narrowing. The image guard is enforced twice on purpose, at the write and again at
+admission: an operator can shrink the curated list after a workspace pinned from it,
+and a stale pin refuses the request rather than quietly falling back.
 
 Web search is the third (#656), and the one whose narrowing is not just a number.
 `workspace_web_search_configs` (`models/entities.py`) holds one row per workspace
@@ -180,7 +191,7 @@ from the direction, and none of them generalize to the other three:
   scope means nothing runs, and `guardrails_url` stays a `runtime_settings` concern.
 
 ## The first-request setup guide
-`services/tenancy/workspace_activation_service.py` is the state behind the dashboard's setup guide (`routes/workspace_activation.py`, `/v1/workspaces/{id}/activation`): whether to offer it, the API key it hands out, what the workspace's traffic says about the attempt, and the dismissal that retires it. Ported from the platform's `WorkspaceActivationService`, and the one departure to know is that **activation is derived, not recorded**: the first successful `source="gateway"` row in `usage_logs` for the workspace *is* the evidence, read through `ix_usage_logs_workspace_source_status_timestamp`. The platform stores that telemetry in columns because its usage pipeline is asynchronous and crosses services; here the row is written by this process into this database, so a second copy could only drift. `workspace_activation_state` therefore holds one row per workspace carrying what cannot be observed elsewhere (the dismissal, when a key was last issued, and which key it was).
+`services/tenancy/workspace_activation_service.py` is the state behind the dashboard's setup guide (`routes/workspace_activation.py`, `/v1/workspaces/{id}/activation`): whether to offer it, the API key it hands out, what the workspace's traffic says about the attempt, and the dismissal that retires it. Ported from the platform's `WorkspaceActivationService`, and the one departure to know is that **activation is derived, not recorded**: the first successful row in `usage_logs` this deployment served itself (`core/usage_source.served_here`, which covers a row migrated from hosted history as well as one recorded live) *is* the evidence, read through `ix_usage_logs_workspace_source_status_timestamp`. The platform stores that telemetry in columns because its usage pipeline is asynchronous and crosses services; here the row is written by this process into this database, so a second copy could only drift. `workspace_activation_state` therefore holds one row per workspace carrying what cannot be observed elsewhere (the dismissal, when a key was last issued, and which key it was).
 
 Two consequences worth keeping. Imported usage (`POST /v1/usage/external-events`) is excluded, so a workspace whose only rows came from an import has still never called this gateway; and `absorbed` rows are excluded from the latest-attempt read, because a failed attempt a routing policy recovered from is not the request's outcome. Issuing the key is a workspace management action (`authorization.require_workspace_management_access`) and rotates one `api_keys` row in place rather than minting a second, while `GET` is readable by any member and answers `experience_eligible: false` for one who may not act. `config.activation_guide` turns the whole flow off without unmounting the endpoints.
 
@@ -208,7 +219,7 @@ A bulk usage mutation (`DELETE /v1/usage`, `POST /v1/usage/set-price`) can targe
 - **A filter's accepted value space must match on both sides.** `model` / `user_id` / `api_key_id` are repeatable, so the selection body takes lists too; a body that could only express one value would target every value of that dimension.
 - **The bounds must match as well.** The read endpoints cap a repeatable filter at `MAX_FILTER_VALUES`, so the selection body carries the same ceiling. Without it a value set `/count` refuses (422) was still deletable, on an unbounded `IN` list. Annotate the bound on the list arm (`str | Annotated[list[str], Field(max_length=...)] | None`); on the union it would also cap a single value's character length and reject a long `provider:model` name.
 
-The imported-only guards in `_selection_conditions` (`source != "gateway"` plus `counts_toward_budget = False`) bound the damage but do not substitute for any of the above: they keep a mutation off gateway rows, not off the wrong imported rows.
+The imported-only guards in `_selection_conditions` (`core/usage_source.not_served_here` plus `counts_toward_budget = False`) bound the damage but do not substitute for any of the above: they keep a mutation off gateway rows, not off the wrong imported rows.
 
 ## Logging
 - Use module logger from `gateway.log_config`.

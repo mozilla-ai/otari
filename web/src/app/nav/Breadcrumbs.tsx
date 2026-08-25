@@ -8,10 +8,11 @@ import { useDeployment } from "@/shared/hooks/useDeployment"
 /**
  * Where you are, at the head of the content pane: scope first, then the page.
  *
- * The organization is left out of a standalone deployment's trail. It has
- * exactly one, provisioned at first boot with no way to mint a second, so naming
- * it on every page is a segment that never changes and never disambiguates
- * anything. A hosted deployment can hold several, so there it leads.
+ * The organization is left out of a standalone deployment's trail. One is
+ * provisioned at first boot and most deployments keep exactly that, so naming it
+ * on every page is a segment that never disambiguates anything; where a caller
+ * does belong to a second, the scope switcher above the rail names the active
+ * one. A hosted deployment can hold several, so there it leads.
  *
  * The two contexts have different scopes to show: the workspace rail is inside
  * one workspace, and the organization rail is not inside any.

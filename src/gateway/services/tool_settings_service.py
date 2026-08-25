@@ -44,6 +44,7 @@ WEB_SEARCH_PURPOSE_HINT = "web_search_purpose_hint"
 WEB_SEARCH_INTERCEPT = "web_search_intercept"
 SANDBOX_URL = "sandbox_url"
 SANDBOX_PURPOSE_HINT = "sandbox_purpose_hint"
+SANDBOX_SESSION_IMAGE = "sandbox_session_image"
 GUARDRAILS_URL = "guardrails_url"
 
 
@@ -71,6 +72,7 @@ _TOOL_SPECS: dict[str, _ToolSpec] = {
     WEB_SEARCH_ENGINES: _ToolSpec("str"),
     WEB_SEARCH_PURPOSE_HINT: _ToolSpec("str"),
     SANDBOX_PURPOSE_HINT: _ToolSpec("str"),
+    SANDBOX_SESSION_IMAGE: _ToolSpec("str"),
     WEB_SEARCH_MAX_RESULTS: _ToolSpec("int", ge=1),
     WEB_SEARCH_EXTRACT: _ToolSpec("bool"),
     WEB_SEARCH_INTERCEPT: _ToolSpec("bool"),
@@ -88,6 +90,7 @@ _FIELD_SERVICE: dict[str, str] = {
     WEB_SEARCH_INTERCEPT: "web_search",
     SANDBOX_URL: "sandbox",
     SANDBOX_PURPOSE_HINT: "sandbox",
+    SANDBOX_SESSION_IMAGE: "sandbox",
     GUARDRAILS_URL: "guardrails",
 }
 

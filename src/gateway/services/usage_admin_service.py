@@ -30,6 +30,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.core.metered_pricing import BillableUsage, billable_usage, price_billable_usage
 from gateway.core.sql import MAX_FILTER_VALUES, match_any, utc_bound
+from gateway.core.usage_source import not_served_here
 from gateway.log_config import logger
 from gateway.models.entities import ModelPricing, UsageLog
 from gateway.services.tool_usage import TOOL_METER_NAMESPACE
@@ -142,12 +143,16 @@ def _selection_conditions(selection: UsageSelection) -> list[ColumnElement[bool]
     Two fixed conditions pin the target set to imported usage regardless of the
     caller's input:
 
-    - ``source != "gateway"`` is the provenance invariant: imported rows carry a
-      source slug (e.g. ``claude_code``), and "gateway" is reserved for usage Otari
-      served itself. This is the load-bearing guard, because ``counts_toward_budget``
+    - :func:`not_served_here` is the provenance invariant: imported rows carry a
+      source slug (e.g. ``claude_code``), while usage Otari served itself is tagged
+      ``gateway`` (or ``otari-ai:gateway`` when it was backfilled from hosted
+      history). This is the load-bearing guard, because ``counts_toward_budget``
       alone is *not* an imported-only flag: gateway traffic on a budget-exempt API
       key (``exclude_from_budget``) is also ``counts_toward_budget = False``, and
-      those are real gateway rows a cleanup / reprice must never touch.
+      those are real gateway rows a cleanup / reprice must never touch. Matching the
+      slug behind the legacy prefix, rather than the prefix itself, is what keeps a
+      migrated import (``otari-ai:claude_code``) repriceable while a migrated hosted
+      row is not; see :mod:`gateway.core.usage_source`.
     - ``counts_toward_budget = False`` is kept as a defense-in-depth budget guard, so
       the spend ledger can never be affected even if the provenance guard ever slips.
 
@@ -155,7 +160,7 @@ def _selection_conditions(selection: UsageSelection) -> list[ColumnElement[bool]
     rows cannot reach them: they simply do not match.
     """
     conditions: list[ColumnElement[bool]] = [
-        UsageLog.source != "gateway",
+        not_served_here(UsageLog.source),
         UsageLog.counts_toward_budget.is_(False),
     ]
     if selection.ids:
@@ -271,7 +276,8 @@ async def set_usage_price(db: AsyncSession, request: UsageSetPriceRequest) -> Us
 
     Builds a transient ``ModelPricing`` from the supplied rates and reprices each
     matched row against its own token counts, writing ``cost`` / ``billing_meters`` /
-    ``pricing_breakdown`` back. Only imported rows are touched (see
+    ``pricing_breakdown`` back and clearing the row's pricing provenance, which the
+    old amount's source no longer explains. Only imported rows are touched (see
     ``_selection_conditions``), so recomputing cost can never desync ``users.spend``.
     Rows whose recomputed cost equals the stored value are reported ``unchanged``.
 
@@ -317,6 +323,16 @@ async def set_usage_price(db: AsyncSession, request: UsageSetPriceRequest) -> Us
                 row.cost = cost
                 row.billing_meters = meters
                 row.pricing_breakdown = breakdown
+                # The amount no longer comes from whatever priced it before, so the
+                # provenance recorded against it would now be a lie. Cleared rather
+                # than rewritten: a manual per-1M rate an operator typed is not an
+                # entry in any price list, so there is no source to name and NULL is
+                # the honest answer (see ``UsageLog.pricing_source``).
+                row.pricing_source = None
+                row.pricing_reference = None
+                row.pricing_effective_at = None
+                row.pricing_version = None
+                row.calculated_at = None
                 result.updated += 1
             last_id = rows[-1].id
             # Flush this page's UPDATEs into the (still open) transaction, then detach

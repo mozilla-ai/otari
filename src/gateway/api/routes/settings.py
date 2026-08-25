@@ -113,6 +113,8 @@ _CONFIG_VIEW: tuple[tuple[str, tuple[str, ...]], ...] = (
             "guardrails_url",
             "tools_header",
             "sandbox_purpose_hint",
+            "sandbox_session_image",
+            "sandbox_allowed_session_images",
             "web_search_url",
             "web_search_purpose_hint",
             "web_search_engines",
@@ -149,6 +151,7 @@ _CONFIG_VIEW: tuple[tuple[str, tuple[str, ...]], ...] = (
         (
             "enable_metrics",
             "enable_docs",
+            "docs_url",
             "bootstrap_api_key",
             "log_writer_strategy",
             "streaming_keepalive_interval_ms",

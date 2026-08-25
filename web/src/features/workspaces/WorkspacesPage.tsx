@@ -222,8 +222,10 @@ function NarrowedDefaults({
 // How long the submit holds before a create that navigates hands the page over.
 // Long enough for the spinner to register as this press having done something,
 // short enough not to be a wait: the operator should read it as the button
-// acknowledging them, not as the gateway being slow.
-const ENTER_HOLD_MS = 800
+// acknowledging them, not as the gateway being slow. Exported so a test can wait
+// past it by name rather than by a copy of the number, which would keep passing
+// if this were changed or removed.
+export const ENTER_HOLD_MS = 800
 
 /**
  * The one form that creates a workspace, wherever it is offered from.
@@ -261,12 +263,18 @@ export function CreateWorkspaceForm({
   // Cancel is not enough on its own, because Escape and a click outside dismiss
   // the modal too, and neither goes through a button.
   const active = useRef(true)
-  useEffect(
-    () => () => {
+  // Set on the way in as well as cleared on the way out. StrictMode remounts
+  // every component once in development (`main.tsx` wraps the app in it), which
+  // runs mount, cleanup, mount: a cleanup-only effect would leave this `false`
+  // for the rest of the session, and every create would then return early and
+  // leave the modal open with the button spinning. `VerifyEmailPage` carries the
+  // same hazard for the same reason.
+  useEffect(() => {
+    active.current = true
+    return () => {
       active.current = false
-    },
-    [],
-  )
+    }
+  }, [])
   const trimmed = name.trim()
   // The submit promises the navigation only where it performs one, so the label
   // and the hold below are read off the same prop that does it. A form whose
@@ -319,7 +327,15 @@ export function CreateWorkspaceForm({
           autoFocus
           isInvalid={nameRefusal !== null}
           errorMessage={nameRefusal ? errorMessage(nameRefusal) : undefined}
-          description="Unique within this organization. You become its owner."
+          // Dropped while the refusal is up, rather than shown above it: `Field`
+          // renders the two as separate rows, and a modal that grows a line when
+          // it reports a problem moves the fields under the pointer that caused
+          // it. The refusal is the more useful of the two at that moment.
+          description={
+            nameRefusal
+              ? undefined
+              : "Unique within this organization. You become its owner."
+          }
         />
         <Field
           label="Description (optional)"

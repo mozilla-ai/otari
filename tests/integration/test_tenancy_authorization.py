@@ -19,6 +19,7 @@ from gateway.models.tenancy import (
     ActiveOrganizationMemberUpdateRequest,
     InviteOrganizationMemberRequest,
     Organization,
+    OrganizationCreateRequest,
     OrganizationMember,
     User,
     Workspace,
@@ -42,6 +43,7 @@ from gateway.services.tenancy.errors import (
     OrganizationNotFoundError,
     WorkspaceNotFoundError,
 )
+from gateway.services.tenancy.provisioning_service import DEFAULT_WORKSPACE_NAME
 
 _TEST_CONFIG = GatewayConfig()
 
@@ -389,6 +391,142 @@ async def test_an_identity_with_no_live_membership_has_no_context(async_db: Asyn
 
     with pytest.raises(OrganizationNotFoundError):
         await OrganizationService(async_db).get_active_membership_context_for_user(user)
+
+
+# =============================================================================
+# Belonging to more than one organization
+# =============================================================================
+
+
+async def test_anyone_may_create_an_organization_and_owns_the_one_they_create(
+    async_db: AsyncSession,
+) -> None:
+    """Creating one is not an action inside a tenant, so no role gates it.
+
+    A viewer in the organization they are currently in becomes the owner of the
+    one they create, and their standing in the first is untouched: the two
+    memberships are independent rows.
+    """
+    organization = await _organization(async_db)
+    viewer = await _member(async_db, organization, role="viewer", full_name="Viewer")
+    service = OrganizationService(async_db)
+
+    created = await service.create_organization_for_user(
+        user=viewer,
+        request=OrganizationCreateRequest(name="Theirs"),
+    )
+
+    memberships, count = await service.members.get_by_user_with_organizations(viewer.id, status="active")
+    assert count == 2
+    roles = {row_organization.id: membership.role for membership, row_organization in memberships}
+    assert roles[created.id] == "owner"
+    assert roles[organization.id] == "viewer"
+    # And it is usable: an organization with no workspace has nowhere to hold a
+    # key, a budget or a usage row, and nothing would provision one later.
+    workspaces, _ = await WorkspaceRepository(async_db).get_by_organization(created.id)
+    assert [workspace.name for workspace in workspaces] == [DEFAULT_WORKSPACE_NAME]
+
+
+async def test_switching_is_refused_for_an_organization_the_caller_only_created_for_someone_else(
+    async_db: AsyncSession,
+) -> None:
+    """The membership is what admits a switch, not the organization existing."""
+    organization = await _organization(async_db, slug="acme")
+    elsewhere = await _organization(async_db, slug="globex")
+    user = await _member(async_db, organization, role="owner", full_name="Owner")
+
+    with pytest.raises(OrganizationNotFoundError):
+        await OrganizationService(async_db).switch_active_organization_for_user(
+            user=user,
+            organization_id=elsewhere.id,
+        )
+    assert user.active_organization_id == organization.id
+
+
+@pytest.mark.parametrize("status", ["invited", "suspended"])
+async def test_switching_is_refused_for_a_membership_that_is_not_active(
+    async_db: AsyncSession,
+    status: str,
+) -> None:
+    """An invited membership is not somewhere the caller may act yet; a suspended one no longer is."""
+    organization = await _organization(async_db, slug="acme")
+    elsewhere = await _organization(async_db, slug="globex")
+    user = await _member(async_db, organization, role="owner", full_name="Owner")
+    await OrganizationMemberRepository(async_db).create_membership(
+        organization_id=elsewhere.id,
+        user_id=user.id,
+        role="member",
+        status=status,
+    )
+
+    with pytest.raises(OrganizationNotFoundError):
+        await OrganizationService(async_db).switch_active_organization_for_user(
+            user=user,
+            organization_id=elsewhere.id,
+        )
+    assert user.active_organization_id == organization.id
+
+
+async def test_switching_carries_the_caller_workspaces_of_the_organization_moved_to(
+    async_db: AsyncSession,
+) -> None:
+    """The context a switch returns is the destination's, workspace seed included."""
+    here = await _organization(async_db, slug="here")
+    there = await _organization(async_db, slug="there")
+    user = await _member(async_db, here, role="owner", full_name="Owner")
+    await OrganizationMemberRepository(async_db).create_membership(
+        organization_id=there.id, user_id=user.id, role="member"
+    )
+    await _workspace(async_db, here, name="Mine here", owner=user)
+    await _workspace(async_db, there, name="Mine there", owner=user)
+
+    context = await OrganizationService(async_db).switch_active_organization_for_user(
+        user=user,
+        organization_id=there.id,
+    )
+
+    assert context.organization.id == there.id
+    assert context.role == "member"
+    assert [membership.name for membership in context.workspace_memberships] == ["Mine there"]
+
+
+async def test_accepting_an_invitation_into_a_second_organization_is_no_longer_a_dead_end(
+    async_db: AsyncSession,
+) -> None:
+    """The state this slice exists for (mozilla-ai/otari#715).
+
+    Inviting an address that already holds an identity reuses it, and the
+    membership check is scoped to the inviting organization, so accepting lands
+    a second membership. Before switching existed, that identity could reach
+    only whichever organization its pointer happened to hold.
+    """
+    home = await _organization(async_db, slug="home")
+    inviting = await _organization(async_db, slug="inviting")
+    admin = await _member(async_db, inviting, role="owner", full_name="Admin")
+    invitee = await UserRepository(async_db).create_local_identity(
+        full_name="Invitee",
+        active_organization_id=home.id,
+        email="invitee@example.com",
+    )
+    await OrganizationMemberRepository(async_db).create_membership(
+        organization_id=home.id, user_id=invitee.id, role="owner"
+    )
+    service = OrganizationService(async_db)
+
+    invitation = await service.invite_active_organization_member_for_user(
+        user=admin,
+        request=InviteOrganizationMemberRequest(email="invitee@example.com"),
+        config=_TEST_CONFIG,
+    )
+    await service.accept_invitation(invitation.accept_link.split("token=")[1])
+
+    memberships = await service.list_organization_memberships_for_user(user=invitee)
+    assert memberships.count == 2
+    assert {row.organization.slug for row in memberships.data} == {"home", "inviting"}
+    assert [row.organization.slug for row in memberships.data if row.is_active_organization] == ["home"]
+
+    context = await service.switch_active_organization_for_user(user=invitee, organization_id=inviting.id)
+    assert context.organization.id == inviting.id
 
 
 # =============================================================================

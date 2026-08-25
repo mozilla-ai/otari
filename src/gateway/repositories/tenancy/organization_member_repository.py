@@ -210,18 +210,38 @@ class OrganizationMemberRepository(
         user_id: uuid.UUID,
         *,
         status: str | None = None,
-    ) -> list[tuple[OrganizationMember, Organization]]:
-        """Return a user's memberships joined to their organizations, oldest first."""
-        statement = (
+        skip: int = 0,
+        limit: int = 100,
+    ) -> tuple[list[tuple[OrganizationMember, Organization]], int]:
+        """Return a page of a user's memberships joined to their organizations, plus the total.
+
+        One join rather than a lookup per row, the same shape as
+        ``get_by_organization_with_users``: this is what an organization
+        switcher renders, so every row needs its organization's name.
+
+        ``id`` breaks the ``created_at`` tie for the reason
+        ``get_first_active_for_user`` gives: two memberships written in one
+        transaction share a timestamp, and a page whose order is not total
+        can return one row twice and another never.
+        """
+        conditions = [col(OrganizationMember.user_id) == user_id]
+        if status is not None:
+            conditions.append(col(OrganizationMember.status) == status)
+
+        count_result = await self.db.execute(
+            select(func.count()).select_from(OrganizationMember).where(*conditions)
+        )
+        count = count_result.scalar_one()
+
+        result = await self.db.execute(
             select(OrganizationMember, Organization)
             .join(Organization, col(OrganizationMember.organization_id) == col(Organization.id))
-            .where(col(OrganizationMember.user_id) == user_id)
-            .order_by(col(OrganizationMember.created_at))
+            .where(*conditions)
+            .order_by(col(OrganizationMember.created_at), col(OrganizationMember.id))
+            .offset(skip)
+            .limit(limit)
         )
-        if status is not None:
-            statement = statement.where(col(OrganizationMember.status) == status)
-        result = await self.db.execute(statement)
-        return [(member, organization) for member, organization in result.all()]
+        return [(member, organization) for member, organization in result.all()], count
 
 
 __all__ = ["LISTABLE_STATUSES", "OrganizationMemberRepository"]

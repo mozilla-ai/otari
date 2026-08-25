@@ -12,6 +12,7 @@ import type {
   ApiKey,
   Budget,
   BudgetResetLog,
+  CallerOrganizationMembership,
   CreateAliasRequest,
   CreateBudgetRequest,
   CreateKeyRequest,
@@ -20,11 +21,13 @@ import type {
   CreateOrganizationMemberRequest,
   CreateOrganizationMemberResult,
   CreateOrganizationPricingOverride,
+  CreateOrganizationRequest,
   CreateScopedBudgetRequest,
   CreateSearchToolRequest,
   CreateStoredProviderRequest,
   CreateUserRequest,
   CreateWorkspaceBudgetDefaultRequest,
+  CreateWorkspaceMcpServerRequest,
   CreateWorkspaceRequest,
   DashboardBuild,
   DiscoverableModelsResponse,
@@ -42,6 +45,7 @@ import type {
   MaintenanceMode,
   ModelListResponse,
   ModelMetadataResponse,
+  Organization,
   OrganizationContext,
   OrganizationGuardrail,
   OrganizationMember,
@@ -76,6 +80,7 @@ import type {
   StoredProvider,
   StoredSearchTool,
   SummaryDimension,
+  SwitchOrganizationRequest,
   TestProviderResult,
   TestServiceResponse,
   ToolSettingsResponse,
@@ -94,6 +99,7 @@ import type {
   UpdateUserRequest,
   UpdateWorkspaceBudgetDefaultRequest,
   UpdateWorkspaceCodeExecutionPolicyRequest,
+  UpdateWorkspaceMcpServerRequest,
   UpdateWorkspaceRequest,
   UpdateWorkspaceWebSearchConfigRequest,
   UsageBucket,
@@ -113,6 +119,8 @@ import type {
   WorkspaceActivation,
   WorkspaceBudgetDefault,
   WorkspaceCodeExecutionPolicy,
+  WorkspaceMcpServer,
+  WorkspaceMcpServers,
   WorkspaceMember,
   WorkspaceMemberRole,
   WorkspaceWebSearchConfig,
@@ -1740,6 +1748,75 @@ export function useOrganizationContext() {
   })
 }
 
+// The organizations the caller is an active member of, which is what the
+// organization half of the scope switcher renders. Its own read rather than a
+// field on the context: the context is one organization, and a switcher needs
+// the list. Cached for the same minute, because they move at the same rate.
+export function useOrganizationMemberships() {
+  return useQuery({
+    queryKey: [ORGANIZATIONS, "memberships"],
+    queryFn: () =>
+      fetchAllPaged<CallerOrganizationMembership>(
+        "/v1/organizations/me/memberships",
+      ),
+    staleTime: 60_000,
+    // Same guard as `useUsageGroupedSeries` and `useInFlightRequests`, and for
+    // both of their reasons: a gateway older than this bundle does not serve
+    // this route (the process may not have restarted onto the build that ships
+    // it), and a hybrid gateway answers 404 for every `/v1/organizations` path
+    // by design. Neither is something a retry fixes; the switcher falls back to
+    // stating the one organization the context names.
+    retry: (failureCount, error) =>
+      !(error instanceof ApiError && error.status === 404) && failureCount < 3,
+  })
+}
+
+// Creating one makes the caller its owner and provisions a default workspace,
+// and deliberately does not switch into it: the switcher chains this with
+// `useSwitchOrganization` so the two steps stay separately reportable.
+export function useCreateOrganization() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: CreateOrganizationRequest) =>
+      apiFetch<Organization>("/v1/organizations", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => {
+      // The membership list has a new row; nothing else has changed, because
+      // the caller is still acting in the organization they were in.
+      void queryClient.invalidateQueries({ queryKey: [ORGANIZATIONS] })
+    },
+  })
+}
+
+// Switching moves `users.active_organization_id`, which is what every scoped
+// read on the server resolves through, so *everything* cached here is about
+// the organization just left. Hence `invalidateQueries()` with no key rather
+// than a list of them: enumerating the affected keys would mean keeping that
+// list in step with every future query, and the one it missed would render
+// another organization's rows under this one's name.
+export function useSwitchOrganization() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (organizationId: string) => {
+      // Typed against the generated request rather than written inline, so a
+      // field the gateway renames fails here instead of on the wire. The
+      // parameter stays a bare id: both call sites have one, not a body.
+      const body: SwitchOrganizationRequest = {
+        organization_id: organizationId,
+      }
+      return apiFetch<OrganizationContext>("/v1/organizations/me/switch", {
+        method: "POST",
+        body: JSON.stringify(body),
+      })
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries()
+    },
+  })
+}
+
 // `enabled` because the roster is now read from outside the Organization pages
 // too, to name the owner of an API key. A deployment that does not host the
 // `organizations` surface has no such route to call, so the caller gates on it
@@ -2465,6 +2542,98 @@ export function useClearWorkspaceWebSearchConfig() {
     onSuccess: (_data, { workspaceId }) => {
       void queryClient.invalidateQueries({
         queryKey: [WORKSPACES, workspaceId, "web-search"],
+      })
+    },
+  })
+}
+
+// A workspace's MCP servers. A list rather than the single row the two config
+// planes beside it hold, and nested under the workspaces key for the same
+// reason they are.
+//
+// One request, at the endpoint's own documented ceiling, rather than a paged
+// walk: the service caps how many servers a workspace may hold well below this,
+// so a second page cannot exist. The ceiling is the route's (`le=1000`), not a
+// copy of that cap, so this stays right if the cap moves.
+const MCP_SERVERS_PAGE_SIZE = 1000
+
+export function useWorkspaceMcpServers(workspaceId: string | null) {
+  return useQuery({
+    queryKey: [WORKSPACES, workspaceId, "mcp-servers"],
+    queryFn: () =>
+      apiFetch<WorkspaceMcpServers>(
+        `/v1/workspaces/${encodeURIComponent(workspaceId as string)}/mcp-servers?limit=${MCP_SERVERS_PAGE_SIZE}`,
+      ),
+    enabled: workspaceId !== null,
+    staleTime: 60_000,
+  })
+}
+
+export function useCreateWorkspaceMcpServer() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      body,
+    }: {
+      workspaceId: string
+      body: CreateWorkspaceMcpServerRequest
+    }) =>
+      apiFetch<WorkspaceMcpServer>(
+        `/v1/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers`,
+        { method: "POST", body: JSON.stringify(body) },
+      ),
+    onSuccess: (_data, { workspaceId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: [WORKSPACES, workspaceId, "mcp-servers"],
+      })
+    },
+  })
+}
+
+// A partial update, which is what keeps the write-only token's three states
+// expressible. See `McpServerDialog` for the rule and how the form maps onto it.
+export function useUpdateWorkspaceMcpServer() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      serverId,
+      body,
+    }: {
+      workspaceId: string
+      serverId: string
+      body: UpdateWorkspaceMcpServerRequest
+    }) =>
+      apiFetch<WorkspaceMcpServer>(
+        `/v1/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers/${encodeURIComponent(serverId)}`,
+        { method: "PATCH", body: JSON.stringify(body) },
+      ),
+    onSuccess: (_data, { workspaceId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: [WORKSPACES, workspaceId, "mcp-servers"],
+      })
+    },
+  })
+}
+
+export function useDeleteWorkspaceMcpServer() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      serverId,
+    }: {
+      workspaceId: string
+      serverId: string
+    }) =>
+      apiFetch<void>(
+        `/v1/workspaces/${encodeURIComponent(workspaceId)}/mcp-servers/${encodeURIComponent(serverId)}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: (_data, { workspaceId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: [WORKSPACES, workspaceId, "mcp-servers"],
       })
     },
   })

@@ -32,7 +32,13 @@ export function ConfirmDialog({
   return (
     <AlertDialog isOpen={isOpen} onOpenChange={onOpenChange}>
       {isOpen ? (
-        <AlertDialog.Backdrop>
+        <AlertDialog.Backdrop
+          // Dismissable: every use of this dialog puts a destructive action
+          // behind a confirm, so dismissing it is the same as Cancel and costs
+          // nothing. The confirm button stays the only way to proceed.
+          isDismissable
+          isKeyboardDismissDisabled={false}
+        >
           <AlertDialog.Container placement="center" size="md">
             <AlertDialog.Dialog>
               <AlertDialog.Header>

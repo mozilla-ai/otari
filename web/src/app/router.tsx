@@ -1,4 +1,5 @@
 import { createHashHistory, createRouter } from "@tanstack/react-router"
+import { PendingPage } from "@/app/PendingPage"
 import { routeTree } from "@/routeTree.gen"
 import { parseSearch, stringifySearch } from "@/shared/helpers/search"
 
@@ -15,7 +16,7 @@ export const router = createRouter({
   // Show the loader as soon as that wait starts and drop it the moment the chunk
   // lands: the defaults hold it back a second and then keep it up for half of
   // one, which turns an instant navigation into a visible stall.
-  defaultPendingComponent: () => <div role="status">Loading page…</div>,
+  defaultPendingComponent: PendingPage,
   defaultPendingMs: 0,
   defaultPendingMinMs: 0,
 })

@@ -48,6 +48,13 @@ configured, malformed response) **fails closed**: the request is rejected with a
 `502` rather than forwarded unchecked. A `monitor` guardrail fails open, since it
 was never enforcing.
 
+A mandated entry whose endpoint fails its safety check counts as unevaluable
+too, and takes the same two paths. That covers a host that has stopped
+resolving, so an organization's endpoint going away is an outage of that entry
+rather than a refusal of every request scoped to it. A `url` you send in the
+request body is different: it is yours to fix, so a URL that fails the check is
+a `400` naming what was wrong with it.
+
 Set `"on_unavailable": "monitor"` on an entry to trade that enforcement for
 availability: the request is served and the check is recorded as inconclusive.
 `"on_unavailable": "block"` is the default and the pre-existing behavior. An

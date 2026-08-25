@@ -419,52 +419,52 @@ def _guardrail(
 def test_a_mandated_guardrail_is_applied_when_the_caller_asked_for_nothing() -> None:
     from gateway.api.routes._pipeline import merge_guardrail_layers
 
-    merged, _ = merge_guardrail_layers(_ctx_with_guardrails(_guardrail("prompt-injection")), None, [])
+    merged = merge_guardrail_layers(_ctx_with_guardrails(_guardrail("prompt-injection")), None, [])
 
-    assert merged is not None
-    assert [g.profile for g in merged] == ["prompt-injection"]
-    assert merged[0].mode == "block"
+    assert merged.configs is not None
+    assert [g.profile for g in merged.configs] == ["prompt-injection"]
+    assert merged.configs[0].mode == "block"
 
 
 def test_a_caller_cannot_weaken_a_mandated_guardrail() -> None:
     from gateway.api.routes._pipeline import merge_guardrail_layers
 
-    merged, _ = merge_guardrail_layers(
+    merged = merge_guardrail_layers(
         _ctx_with_guardrails(_guardrail("prompt-injection", mode="block", on_unavailable="block")),
         [_guardrail("prompt-injection", mode="monitor", on_unavailable="monitor")],
         [],
     )
 
-    assert merged is not None and len(merged) == 1
-    assert merged[0].mode == "block"
-    assert merged[0].on_unavailable == "block"
+    assert merged.configs is not None and len(merged.configs) == 1
+    assert merged.configs[0].mode == "block"
+    assert merged.configs[0].on_unavailable == "block"
 
 
 def test_a_caller_may_tighten_a_mandated_guardrail() -> None:
     from gateway.api.routes._pipeline import merge_guardrail_layers
 
-    merged, _ = merge_guardrail_layers(
+    merged = merge_guardrail_layers(
         _ctx_with_guardrails(_guardrail("prompt-injection", mode="monitor", on_unavailable="monitor")),
         [_guardrail("prompt-injection", mode="block", on_unavailable="block")],
         [],
     )
 
-    assert merged is not None
-    assert merged[0].mode == "block"
-    assert merged[0].on_unavailable == "block"
+    assert merged.configs is not None
+    assert merged.configs[0].mode == "block"
+    assert merged.configs[0].on_unavailable == "block"
 
 
 def test_a_caller_may_add_their_own_guardrails_alongside_a_mandate() -> None:
     from gateway.api.routes._pipeline import merge_guardrail_layers
 
-    merged, _ = merge_guardrail_layers(
+    merged = merge_guardrail_layers(
         _ctx_with_guardrails(_guardrail("prompt-injection")),
         [_guardrail("pii", mode="monitor")],
         [],
     )
 
-    assert merged is not None
-    assert sorted(g.profile for g in merged) == ["pii", "prompt-injection"]
+    assert merged.configs is not None
+    assert sorted(g.profile for g in merged.configs) == ["pii", "prompt-injection"]
 
 
 def test_an_unrouted_request_keeps_exactly_the_callers_guardrails() -> None:
@@ -472,5 +472,5 @@ def test_an_unrouted_request_keeps_exactly_the_callers_guardrails() -> None:
 
     unrouted = _request_context(None)
     caller = [_guardrail("pii", mode="monitor")]
-    assert merge_guardrail_layers(unrouted, caller, []) == (caller, {})
-    assert merge_guardrail_layers(unrouted, None, []) == (None, {})
+    assert merge_guardrail_layers(unrouted, caller, []).configs is caller
+    assert merge_guardrail_layers(unrouted, None, []).configs is None

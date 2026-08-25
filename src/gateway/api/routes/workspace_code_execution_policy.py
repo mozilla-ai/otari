@@ -42,10 +42,16 @@ def get_workspace_code_execution_policy_service(
     The sandbox-presence check is the same one ``GET /v1/tools`` makes when it
     decides whether to advertise code execution, so the page and the discovery
     endpoint agree about whether this deployment can run any.
+
+    ``allowed_images`` is the operator's curated image list, read from the
+    deployment config here for the same reason: which images exist is a property
+    of the running gateway, not of the workspace, and the service is handed the
+    answer rather than reaching for the config itself.
     """
     return WorkspaceCodeExecutionPolicyService(
         db,
         sandbox_configured=bool(config.sandbox_url or otari_env("SANDBOX_URL")),
+        allowed_images=config.pinnable_sandbox_images(),
     )
 
 
@@ -83,8 +89,11 @@ async def set_workspace_code_execution_policy(
 
     An organization owner/admin, or an owner/admin of this workspace, may
     write it. The policy can only narrow what the deployment permits: turning
-    code execution off for the workspace, and lowering the loop and execution
-    ceilings. It never turns a sandbox the deployment has not configured on.
+    code execution off for the workspace, lowering the loop and execution
+    ceilings, and removing tool kinds from what the sandbox backend serves. It
+    never turns a sandbox the deployment has not configured on, and ``image``
+    may only name one the operator curated (``allowed_images`` on the response
+    reports the set); anything else is refused with 400.
     """
     return await service.set_policy(user=current_identity, workspace_id=workspace_id, request=body)
 

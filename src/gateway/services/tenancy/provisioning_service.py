@@ -102,13 +102,21 @@ async def _refuse_to_shadow_existing_tenancy(db: AsyncSession) -> None:
     one it would have made itself. Anything else it would quietly ignore: it
     would create its own organization, point the marker at that, and every route
     is scoped to the marked identity's organization, so the rows already in the
-    database become unreachable through the API. There is no list, no switch and
-    no by-id route to find them again, and the marker is deliberately not a
-    settable key, so the only way back is editing ``runtime_settings`` by hand.
+    database become unreachable through the API. ``POST /v1/organizations/me/switch``
+    is no way back either: it refuses an organization the caller holds no active
+    membership in, and a freshly provisioned operator holds none in an imported
+    one. The marker is deliberately not a settable key, so the only way back is
+    editing ``runtime_settings`` by hand.
 
     That is the state a restored or imported tenancy arrives in, because the
     platform's slugs are ``{name}-{prefix}`` and never the literal ``default``.
     Failing here turns silent data loss into an error naming the fix.
+
+    It also fires for a deployment that created organizations of its own
+    (``POST /v1/organizations``) and then lost its marker, since those slugs are
+    not ``default`` either. The refusal is still the right answer there: what it
+    reports is that the deployment can no longer say which organization it
+    serves, and the fix below is the same one.
 
     It catches one of the two orderings. The check runs only while the marker is
     unresolved, so it covers importing into a database this gateway has never

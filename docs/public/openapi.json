@@ -1528,6 +1528,61 @@
         "title": "BudgetResponse",
         "type": "object"
       },
+      "CallerOrganizationMembershipPublic": {
+        "description": "One organization the caller belongs to, and their standing in it.\n\nWhat an organization switcher renders. Deliberately not\n``OrganizationMembershipContextPublic``: that one answers \"the organization\nthis request is acting in\" and carries the caller's workspaces in it, which\nfor an organization they are not currently in would be a second read per\nrow.",
+        "properties": {
+          "is_active_organization": {
+            "default": false,
+            "title": "Is Active Organization",
+            "type": "boolean"
+          },
+          "organization": {
+            "$ref": "#/components/schemas/OrganizationPublic"
+          },
+          "organization_member_id": {
+            "format": "uuid",
+            "title": "Organization Member Id",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "organization_member_id",
+          "organization",
+          "role",
+          "status"
+        ],
+        "title": "CallerOrganizationMembershipPublic",
+        "type": "object"
+      },
+      "CallerOrganizationMembershipsPublic": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/CallerOrganizationMembershipPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "CallerOrganizationMembershipsPublic",
+        "type": "object"
+      },
       "CallerWorkspaceMembershipPublic": {
         "description": "One workspace the caller belongs to, and their role in it.\n\nCarried on the membership context so the shell can populate its workspace\nswitcher and choose a default from the first authenticated call, rather than\nlisting workspaces and then asking for the caller's role in each. Only the\ncaller's own memberships appear, so this is not a directory of the\norganization's workspaces: an admin sees the ones they joined, and the\nworkspace list endpoint remains the way to see the rest.",
         "properties": {
@@ -2943,6 +2998,18 @@
             "title": "Deployment Type",
             "type": "string"
           },
+          "docs_url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Where this deployment's documentation lives, when it is not the operator guide bundled with the gateway. Set, the dashboard's Documentation links open it in a new tab; null, they go to the bundled guide at /#/docs, which stays served either way. A link target an operator configured, validated at startup as an absolute http(s) URL.",
+            "title": "Docs Url"
+          },
           "mail_ready": {
             "description": "Whether this deployment can deliver a message carrying a link back to itself (an invitation's accept link, and the verification and reset links to come), not merely whether a transport is configured: it also needs to know its own public URL to put in one. Lets the dashboard disable or hide a mail-dependent affordance instead of offering one that would fail at send time. Every message this control plane sends carries such a link, which is why this is one flag and not one per feature. False for a hybrid gateway, whose control plane is otari.ai and which sends no mail of its own.",
             "title": "Mail Ready",
@@ -3007,6 +3074,7 @@
           "session_type",
           "surfaces",
           "management_url",
+          "docs_url",
           "sign_in_methods",
           "maintenance_mode",
           "passkeys_ready",
@@ -5499,6 +5567,22 @@
           "count"
         ],
         "title": "OrgProviderKeysPublic",
+        "type": "object"
+      },
+      "OrganizationCreateRequest": {
+        "description": "Create an organization, with the caller as its owner.\n\nName only. The slug is derived server-side and never sent, because it is\nunique where the name is not: two organizations may share a name, and a\nrename deliberately does not move the slug.",
+        "properties": {
+          "name": {
+            "maxLength": 255,
+            "minLength": 1,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "OrganizationCreateRequest",
         "type": "object"
       },
       "OrganizationGuardrailCreate": {
@@ -8613,6 +8697,21 @@
         "title": "StoredSearchToolSchema",
         "type": "object"
       },
+      "SwitchActiveOrganizationRequest": {
+        "description": "Point the caller's identity at one of the organizations they belong to.\n\nThe one request in this surface that names an organization by id, and it is\nnot a hole in the tenant boundary: an id the caller holds no active\nmembership in answers 404, so it says nothing about whether the\norganization exists.",
+        "properties": {
+          "organization_id": {
+            "format": "uuid",
+            "title": "Organization Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "organization_id"
+        ],
+        "title": "SwitchActiveOrganizationRequest",
+        "type": "object"
+      },
       "TaskPool": {
         "properties": {
           "records": {
@@ -9545,6 +9644,17 @@
               }
             ],
             "title": "Sandbox Purpose Hint"
+          },
+          "sandbox_session_image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sandbox Session Image"
           },
           "sandbox_url": {
             "anyOf": [
@@ -11492,6 +11602,20 @@
       "WorkspaceCodeExecutionPolicyPublic": {
         "description": "A workspace's policy, or the unconfigured policy it has without one.",
         "properties": {
+          "allowed_images": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Allowed Images",
+            "type": "array"
+          },
+          "available_tools": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Available Tools",
+            "type": "array"
+          },
           "configured": {
             "title": "Configured",
             "type": "boolean"
@@ -11533,6 +11657,17 @@
             ],
             "title": "Exec Timeout S"
           },
+          "image": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Image"
+          },
           "max_iterations": {
             "anyOf": [
               {
@@ -11547,6 +11682,20 @@
           "sandbox_configured": {
             "title": "Sandbox Configured",
             "type": "boolean"
+          },
+          "tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Tools"
           },
           "updated_at": {
             "anyOf": [
@@ -11569,10 +11718,14 @@
           "workspace_id",
           "configured",
           "sandbox_configured",
+          "allowed_images",
+          "available_tools",
           "enabled",
           "default_purpose_hint",
           "max_iterations",
           "exec_timeout_s",
+          "image",
+          "tools",
           "created_at",
           "updated_at"
         ],
@@ -11614,6 +11767,19 @@
             "description": "Ceiling on one execution's runtime in seconds; only ever lowers the effective limit, so at most 60",
             "title": "Exec Timeout S"
           },
+          "image": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Sandbox image this workspace's code runs in. Must be one the operator curated into sandbox_allowed_session_images (or the deployment's own sandbox_session_image); null uses the deployment's",
+            "title": "Image"
+          },
           "max_iterations": {
             "anyOf": [
               {
@@ -11627,6 +11793,21 @@
             ],
             "description": "Ceiling on tool-loop iterations; only ever lowers the effective limit, so at most 25",
             "title": "Max Iterations"
+          },
+          "tools": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Code-execution tool kinds this workspace may use, from code_execution, bash_code_execution, text_editor_code_execution. Only ever removes one the backend serves; null exposes whatever it serves",
+            "title": "Tools"
           }
         },
         "required": [
@@ -16071,6 +16252,56 @@
         ]
       }
     },
+    "/v1/organizations": {
+      "post": {
+        "description": "Create an organization with the caller as its owner.\n\nTakes a name; the slug is derived from it with a random suffix, so two\norganizations may share a name and a later rename does not move the slug.\nA default workspace is provisioned alongside, because an organization\nwithout one has nowhere to hold a key, a budget or a usage row.\n\nThe caller is **not** moved into it. Switching is a separate call\n(``POST /me/switch``), so creating an organization does not change what the\nrest of the caller's session is looking at.",
+        "operationId": "create_organization_v1_organizations_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationCreateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Organization",
+        "tags": [
+          "organizations"
+        ]
+      }
+    },
     "/v1/organizations/me": {
       "get": {
         "description": "Get the caller's active organization and their standing in it.",
@@ -16709,6 +16940,75 @@
         ]
       }
     },
+    "/v1/organizations/me/memberships": {
+      "get": {
+        "description": "List the organizations the caller belongs to, and their role in each.\n\nThe caller's own active memberships, not a directory of the deployment's\norganizations: this is what an organization switcher renders, and one row\ncarries ``is_active_organization`` so it can mark the current one. Not to be\nconfused with ``GET /me/members``, which is the active organization's\nroster.",
+        "operationId": "list_caller_organization_memberships_v1_organizations_me_memberships_get",
+        "parameters": [
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of records to return",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallerOrganizationMembershipsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Caller Organization Memberships",
+        "tags": [
+          "organizations"
+        ]
+      }
+    },
     "/v1/organizations/me/pricing": {
       "get": {
         "description": "List the organization's rate overrides.\n\nReadable by any member: these rates decide what the caller's own requests\ncost, so they are not withheld from the people billed at them. Writing needs\nan owner or admin.\n\nPaged on the same bounds the rest of the tenancy surface uses, because the\ntable grows a row per model per period. ``count`` is the total, so a client\nknows whether another page is owed.",
@@ -17325,6 +17625,56 @@
         "summary": "Restore Org Provider Key",
         "tags": [
           "provider-keys"
+        ]
+      }
+    },
+    "/v1/organizations/me/switch": {
+      "post": {
+        "description": "Point the caller's identity at another organization they belong to.\n\nDistinct from ``PATCH /me``, which renames the organization already active.\nThis changes which organization every later request is scoped to, so\nworkspaces, keys, budgets and usage all follow it. Answers 404 for an\norganization the caller holds no active membership in, whether or not it\nexists.",
+        "operationId": "switch_active_organization_v1_organizations_me_switch_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SwitchActiveOrganizationRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationMembershipContextPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Switch Active Organization",
+        "tags": [
+          "organizations"
         ]
       }
     },
@@ -21859,7 +22209,7 @@
     },
     "/v1/users/{user_id}": {
       "delete": {
-        "description": "Delete a user.",
+        "description": "Delete a user, and erase the telemetry captured under their name.",
         "operationId": "delete_user_v1_users__user_id__delete",
         "parameters": [
           {
@@ -22624,7 +22974,7 @@
         ]
       },
       "put": {
-        "description": "Set a workspace's code-execution policy, replacing any existing one.\n\nAn organization owner/admin, or an owner/admin of this workspace, may\nwrite it. The policy can only narrow what the deployment permits: turning\ncode execution off for the workspace, and lowering the loop and execution\nceilings. It never turns a sandbox the deployment has not configured on.",
+        "description": "Set a workspace's code-execution policy, replacing any existing one.\n\nAn organization owner/admin, or an owner/admin of this workspace, may\nwrite it. The policy can only narrow what the deployment permits: turning\ncode execution off for the workspace, lowering the loop and execution\nceilings, and removing tool kinds from what the sandbox backend serves. It\nnever turns a sandbox the deployment has not configured on, and ``image``\nmay only name one the operator curated (``allowed_images`` on the response\nreports the set); anything else is refused with 400.",
         "operationId": "set_workspace_code_execution_policy_v1_workspaces__workspace_id__code_execution_policy_put",
         "parameters": [
           {

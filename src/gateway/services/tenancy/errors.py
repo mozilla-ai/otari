@@ -367,6 +367,21 @@ class OrganizationNameRequiredError(TenancyValidationError):
         super().__init__("An organization name is required")
 
 
+class OrganizationSlugUnavailableError(TenancyConflictError):
+    """A created organization's derived slug collided with one already stored.
+
+    The slug is the name reduced to a stem plus four random bytes, so two
+    organizations may share a name and a collision needs the same stem *and*
+    the same suffix. Reported rather than retried because retrying means
+    rolling back the whole unit of work (the organization, the owner
+    membership, and the first workspace) to change one column, and the caller
+    can simply send the request again.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("Could not allocate a unique organization slug; retry the request")
+
+
 class WorkspaceInUseError(TenancyConflictError):
     """A workspace still holds request-plane rows, which are ON DELETE RESTRICT.
 
@@ -793,6 +808,33 @@ class OrganizationGuardrailLimitReachedError(TenancyValidationError):
         super().__init__(f"This organization already configures the maximum of {limit} guardrails")
 
 
+class SandboxToolsUnrunnableError(TenancyValidationError):
+    """A code-execution policy's tool list names nothing this deployment serves.
+
+    The list intersects what the sandbox backend offers, so this one resolves to
+    an empty set and every request would answer 403. Refused at the write rather
+    than stored, because a policy that reads as a refinement and behaves as a
+    refusal is the failure the surface exists to prevent, and the operator's only
+    signal would be users reporting 403s days later.
+    """
+
+    def __init__(self, served: tuple[str, ...]):
+        super().__init__(
+            "A code-execution tool list must name at least one tool this deployment serves "
+            f"({', '.join(served)}). Use enabled=false to refuse the workspace instead."
+        )
+
+
+class SandboxImageNotAllowedError(TenancyValidationError):
+    """A workspace code-execution policy named a sandbox image the operator has not curated.
+
+    A 400 rather than a 403: the caller has the role to set the policy, and the
+    value they sent is the thing being refused. The message names the allowed
+    set, which is not a disclosure worth withholding, because that set is
+    already reported on the policy itself so the dashboard can offer it.
+    """
+
+
 __all__ = [
     "CurrentPasswordIncorrectError",
     "CurrentPasswordRequiredError",
@@ -831,6 +873,7 @@ __all__ = [
     "OrganizationNameRequiredError",
     "OrganizationNotFoundError",
     "OrganizationPricingNotFoundError",
+    "OrganizationSlugUnavailableError",
     "OrganizationPricingOverlapError",
     "PasskeyAlreadyRegisteredError",
     "PasskeyCeremonyError",
@@ -842,6 +885,8 @@ __all__ = [
     "PasswordNotSetError",
     "PasswordPolicyError",
     "ResetTokenInvalidError",
+    "SandboxImageNotAllowedError",
+    "SandboxToolsUnrunnableError",
     "SecretBoxUnavailableTenancyError",
     "SignInAddressRequiredError",
     "TenancyConflictError",

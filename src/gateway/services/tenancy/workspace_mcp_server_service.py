@@ -31,8 +31,9 @@ standalone deployment is not a hosted multi-tenant one:
   repository's `validate_mcp_url` is a single async function that already does
   both, and these routes are async, so the reason for the split does not apply.
 - No analytics events, and no `status` field on the public shape (the
-  platform's is a hosted dashboard affordance; this repository has no page for
-  these rows yet).
+  platform's is an affordance of its hosted dashboard; the page here,
+  `web/src/features/tools/McpServersPage.tsx`, reports `enabled` and
+  `has_token` and needs no third state).
 """
 
 from __future__ import annotations

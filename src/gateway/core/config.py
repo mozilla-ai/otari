@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_valid
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from gateway.core.addresses import normalized_address
+from gateway.core.env import otari_env
 from gateway.log_config import logger
 from gateway.models.routing import RoutingConfig
 
@@ -74,6 +75,8 @@ ENV_BRIDGED_FIELDS = (
     "guardrails_url",
     "tools_header",
     "sandbox_purpose_hint",
+    "sandbox_session_image",
+    "sandbox_allowed_session_images",
     "web_search_url",
     "web_search_purpose_hint",
     "web_search_engines",
@@ -412,6 +415,17 @@ class GatewayConfig(BaseSettings):
             "email (an invitation's accept link) and to derive the WebAuthn relying-party "
             "ID a passkey is bound to; nothing else here needs to describe its own "
             "address, since every other reference is relative to the request."
+        ),
+    )
+    docs_url: str | None = Field(
+        default=None,
+        description=(
+            "Where this deployment's documentation lives, as an absolute http(s) URL "
+            "(e.g. 'https://docs.otari.ai/en/'). Unset, the dashboard's Documentation links "
+            "point at the operator guide bundled with the gateway at /#/docs, which is the "
+            "right default for a self-hosted deployment. Set it to retarget those links at "
+            "a product documentation site instead; the bundled guide stays reachable at "
+            "/#/docs either way."
         ),
     )
     webauthn_rp_id: str | None = Field(
@@ -861,6 +875,35 @@ class GatewayConfig(BaseSettings):
         description=(
             "Default purpose hint forwarded to the sandbox backend when an otari_code_execution "
             "tool entry does not supply its own."
+        ),
+    )
+    # "session_image" rather than the more obvious "image": ``OTARI_SANDBOX_IMAGE``
+    # is already taken. ``docker-compose.yml`` documents it as the Docker tag of the
+    # sandbox *container* to boot, and both names are read from the operator's own
+    # environment, so a field spelled ``sandbox_image`` would silently make one
+    # variable mean two things. The near-miss is what makes it dangerous: an
+    # operator overriding the container tag would also start pinning that tag onto
+    # every leased session, and (via ``pinnable_sandbox_images``) offering it to
+    # workspaces. This names the narrower thing it actually is: the image a leased
+    # session runs, not the image the backend process is.
+    sandbox_session_image: str | None = Field(
+        default=None,
+        max_length=255,
+        description=(
+            "Sandbox image this deployment asks the code-execution backend to run "
+            "(e.g. 'mzdotai/otari-sandbox-container:latest'). When unset, nothing is asked for and "
+            "the backend runs whatever it runs by default. A workspace policy may name a different "
+            "image only if sandbox_allowed_session_images lists it."
+        ),
+    )
+    sandbox_allowed_session_images: str | None = Field(
+        default=None,
+        description=(
+            "Comma-separated sandbox images a workspace's code-execution policy may pin "
+            "(e.g. 'mzdotai/otari-sandbox-container:latest,ghcr.io/acme/sandbox:2'). Deliberately "
+            "not editable from the dashboard: it is the operator's supply-chain allow-list, and "
+            "sandbox_session_image is always pinnable whether or not it appears here. When unset, a "
+            "workspace may not pin an image at all."
         ),
     )
     web_search_url: str | None = Field(
@@ -1485,6 +1528,39 @@ class GatewayConfig(BaseSettings):
             and not entry.get("api_base")
         ]
 
+    def effective_sandbox_image(self) -> str | None:
+        """The image this deployment asks a sandbox session for, or ``None``.
+
+        Resolved the way every other tool field is: the config value (which a
+        dashboard override has already been written onto) and then the env var,
+        because clearing an override sets the attribute to ``None`` and the
+        deployment should fall back to what it was configured with rather than
+        to nothing (``services/tool_settings_service``).
+        """
+        return (self.sandbox_session_image or "").strip() or otari_env("SANDBOX_SESSION_IMAGE") or None
+
+    def pinnable_sandbox_images(self) -> tuple[str, ...]:
+        """The sandbox images a workspace's code-execution policy may name.
+
+        The operator's curated list, plus this deployment's own
+        ``sandbox_session_image``: a workspace naming the image every request already
+        gets is asking for nothing it did not already have, so refusing it would
+        only be confusing. Order is the operator's, with the deployment image
+        first, and duplicates collapse.
+
+        Empty is the meaningful default. An operator who has curated nothing has
+        not vetted anything for a workspace to pin, and a workspace-settable
+        image is a supply-chain surface rather than a string, so the answer to
+        "which images may they choose from" is *none* until one is named.
+        """
+        curated = self.sandbox_allowed_session_images or otari_env("SANDBOX_ALLOWED_SESSION_IMAGES") or ""
+        images: list[str] = []
+        for candidate in (self.effective_sandbox_image(), *curated.split(",")):
+            image = (candidate or "").strip()
+            if image and image not in images:
+                images.append(image)
+        return tuple(images)
+
     def validate_search_tools(self) -> None:
         """Validate the ``search_tools`` map at startup so misconfig fails fast.
 
@@ -1500,6 +1576,26 @@ class GatewayConfig(BaseSettings):
         normalized = value.strip().lower()
         if normalized not in STREAM_MISSING_USAGE_POLICIES:
             msg = f"stream_missing_usage_policy must be one of {sorted(STREAM_MISSING_USAGE_POLICIES)}, got '{value}'"
+            raise ValueError(msg)
+        return normalized
+
+    @field_validator("docs_url")
+    @classmethod
+    def _validate_docs_url(cls, value: str | None) -> str | None:
+        """Reject a documentation link that is not an absolute http(s) URL.
+
+        The deployment bootstrap publishes this to the browser as a link target,
+        so a scheme that is not http(s) would be a script URL an operator put in
+        their own config. Rejected at load rather than dropped per request, for
+        the same reason ``platform.management_url`` is: a typo should be a
+        startup error, not a Documentation link that silently goes nowhere.
+        """
+        normalized = (value or "").strip()
+        if not normalized:
+            return None
+        parsed = urlsplit(normalized)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            msg = f"docs_url must be an absolute http(s) URL, got '{value}'"
             raise ValueError(msg)
         return normalized
 

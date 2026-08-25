@@ -1381,6 +1381,35 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/organizations": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Create Organization
+         * @description Create an organization with the caller as its owner.
+         *
+         *     Takes a name; the slug is derived from it with a random suffix, so two
+         *     organizations may share a name and a later rename does not move the slug.
+         *     A default workspace is provisioned alongside, because an organization
+         *     without one has nowhere to hold a key, a budget or a usage row.
+         *
+         *     The caller is **not** moved into it. Switching is a separate call
+         *     (``POST /me/switch``), so creating an organization does not change what the
+         *     rest of the caller's session is looking at.
+         */
+        post: operations["create_organization_v1_organizations_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/organizations/me": {
         parameters: {
             query?: never;
@@ -1577,6 +1606,32 @@ export interface paths {
         patch: operations["update_active_organization_member_v1_organizations_me_members__organization_member_id__patch"];
         trace?: never;
     };
+    "/v1/organizations/me/memberships": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Caller Organization Memberships
+         * @description List the organizations the caller belongs to, and their role in each.
+         *
+         *     The caller's own active memberships, not a directory of the deployment's
+         *     organizations: this is what an organization switcher renders, and one row
+         *     carries ``is_active_organization`` so it can mark the current one. Not to be
+         *     confused with ``GET /me/members``, which is the active organization's
+         *     roster.
+         */
+        get: operations["list_caller_organization_memberships_v1_organizations_me_memberships_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/organizations/me/pricing": {
         parameters: {
             query?: never;
@@ -1750,6 +1805,32 @@ export interface paths {
          * @description Restore an archived key. Organization owners and admins only.
          */
         post: operations["restore_org_provider_key_v1_organizations_me_provider_keys__key_id__restore_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/organizations/me/switch": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Switch Active Organization
+         * @description Point the caller's identity at another organization they belong to.
+         *
+         *     Distinct from ``PATCH /me``, which renames the organization already active.
+         *     This changes which organization every later request is scoped to, so
+         *     workspaces, keys, budgets and usage all follow it. Answers 404 for an
+         *     organization the caller holds no active membership in, whether or not it
+         *     exists.
+         */
+        post: operations["switch_active_organization_v1_organizations_me_switch_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -3079,7 +3160,7 @@ export interface paths {
         post?: never;
         /**
          * Delete User
-         * @description Delete a user.
+         * @description Delete a user, and erase the telemetry captured under their name.
          */
         delete: operations["delete_user_v1_users__user_id__delete"];
         options?: never;
@@ -3264,8 +3345,11 @@ export interface paths {
          *
          *     An organization owner/admin, or an owner/admin of this workspace, may
          *     write it. The policy can only narrow what the deployment permits: turning
-         *     code execution off for the workspace, and lowering the loop and execution
-         *     ceilings. It never turns a sandbox the deployment has not configured on.
+         *     code execution off for the workspace, lowering the loop and execution
+         *     ceilings, and removing tool kinds from what the sandbox backend serves. It
+         *     never turns a sandbox the deployment has not configured on, and ``image``
+         *     may only name one the operator curated (``allowed_images`` on the response
+         *     reports the set); anything else is refused with 400.
          */
         put: operations["set_workspace_code_execution_policy_v1_workspaces__workspace_id__code_execution_policy_put"];
         post?: never;
@@ -4287,6 +4371,40 @@ export interface components {
             user_count: number;
         };
         /**
+         * CallerOrganizationMembershipPublic
+         * @description One organization the caller belongs to, and their standing in it.
+         *
+         *     What an organization switcher renders. Deliberately not
+         *     ``OrganizationMembershipContextPublic``: that one answers "the organization
+         *     this request is acting in" and carries the caller's workspaces in it, which
+         *     for an organization they are not currently in would be a second read per
+         *     row.
+         */
+        CallerOrganizationMembershipPublic: {
+            /**
+             * Is Active Organization
+             * @default false
+             */
+            is_active_organization: boolean;
+            organization: components["schemas"]["OrganizationPublic"];
+            /**
+             * Organization Member Id
+             * Format: uuid
+             */
+            organization_member_id: string;
+            /** Role */
+            role: string;
+            /** Status */
+            status: string;
+        };
+        /** CallerOrganizationMembershipsPublic */
+        CallerOrganizationMembershipsPublic: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["CallerOrganizationMembershipPublic"][];
+        };
+        /**
          * CallerWorkspaceMembershipPublic
          * @description One workspace the caller belongs to, and their role in it.
          *
@@ -4860,6 +4978,11 @@ export interface components {
              * @enum {string}
              */
             deployment_type: "standalone" | "hosted" | "hybrid";
+            /**
+             * Docs Url
+             * @description Where this deployment's documentation lives, when it is not the operator guide bundled with the gateway. Set, the dashboard's Documentation links open it in a new tab; null, they go to the bundled guide at /#/docs, which stays served either way. A link target an operator configured, validated at startup as an absolute http(s) URL.
+             */
+            docs_url: string | null;
             /**
              * Mail Ready
              * @description Whether this deployment can deliver a message carrying a link back to itself (an invitation's accept link, and the verification and reset links to come), not merely whether a transport is configured: it also needs to know its own public URL to put in one. Lets the dashboard disable or hide a mail-dependent affordance instead of offering one that would fail at send time. Every message this control plane sends carries such a link, which is why this is one flag and not one per feature. False for a hybrid gateway, whose control plane is otari.ai and which sends no mail of its own.
@@ -6013,6 +6136,18 @@ export interface components {
             count: number;
             /** Data */
             data: components["schemas"]["OrgProviderKeyPublic"][];
+        };
+        /**
+         * OrganizationCreateRequest
+         * @description Create an organization, with the caller as its owner.
+         *
+         *     Name only. The slug is derived server-side and never sent, because it is
+         *     unique where the name is not: two organizations may share a name, and a
+         *     rename deliberately does not move the slug.
+         */
+        OrganizationCreateRequest: {
+            /** Name */
+            name: string;
         };
         /**
          * OrganizationGuardrailCreate
@@ -7490,6 +7625,22 @@ export interface components {
             /** Updated At */
             updated_at?: string | null;
         };
+        /**
+         * SwitchActiveOrganizationRequest
+         * @description Point the caller's identity at one of the organizations they belong to.
+         *
+         *     The one request in this surface that names an organization by id, and it is
+         *     not a hole in the tenant boundary: an id the caller holds no active
+         *     membership in answers 404, so it says nothing about whether the
+         *     organization exists.
+         */
+        SwitchActiveOrganizationRequest: {
+            /**
+             * Organization Id
+             * Format: uuid
+             */
+            organization_id: string;
+        };
         /** TaskPool */
         TaskPool: {
             /** Records */
@@ -7840,6 +7991,8 @@ export interface components {
             guardrails_url?: string | null;
             /** Sandbox Purpose Hint */
             sandbox_purpose_hint?: string | null;
+            /** Sandbox Session Image */
+            sandbox_session_image?: string | null;
             /** Sandbox Url */
             sandbox_url?: string | null;
             /** Web Search Engines */
@@ -8542,6 +8695,10 @@ export interface components {
          * @description A workspace's policy, or the unconfigured policy it has without one.
          */
         WorkspaceCodeExecutionPolicyPublic: {
+            /** Allowed Images */
+            allowed_images: string[];
+            /** Available Tools */
+            available_tools: string[];
             /** Configured */
             configured: boolean;
             /** Created At */
@@ -8552,10 +8709,14 @@ export interface components {
             enabled: boolean;
             /** Exec Timeout S */
             exec_timeout_s: number | null;
+            /** Image */
+            image: string | null;
             /** Max Iterations */
             max_iterations: number | null;
             /** Sandbox Configured */
             sandbox_configured: boolean;
+            /** Tools */
+            tools: string[] | null;
             /** Updated At */
             updated_at: string | null;
             /**
@@ -8589,10 +8750,20 @@ export interface components {
              */
             exec_timeout_s?: number | null;
             /**
+             * Image
+             * @description Sandbox image this workspace's code runs in. Must be one the operator curated into sandbox_allowed_session_images (or the deployment's own sandbox_session_image); null uses the deployment's
+             */
+            image?: string | null;
+            /**
              * Max Iterations
              * @description Ceiling on tool-loop iterations; only ever lowers the effective limit, so at most 25
              */
             max_iterations?: number | null;
+            /**
+             * Tools
+             * @description Code-execution tool kinds this workspace may use, from code_execution, bash_code_execution, text_editor_code_execution. Only ever removes one the backend serves; null exposes whatever it serves
+             */
+            tools?: string[] | null;
         };
         /** WorkspaceCreate */
         WorkspaceCreate: {
@@ -11006,6 +11177,39 @@ export interface operations {
             };
         };
     };
+    create_organization_v1_organizations_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrganizationCreateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     get_active_organization_context_v1_organizations_me_get: {
         parameters: {
             query?: never;
@@ -11389,6 +11593,40 @@ export interface operations {
             };
         };
     };
+    list_caller_organization_memberships_v1_organizations_me_memberships_get: {
+        parameters: {
+            query?: {
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CallerOrganizationMembershipsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     list_organization_pricing_v1_organizations_me_pricing_get: {
         parameters: {
             query?: {
@@ -11735,6 +11973,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OrgProviderKeyPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    switch_active_organization_v1_organizations_me_switch_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["SwitchActiveOrganizationRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationMembershipContextPublic"];
                 };
             };
             /** @description Validation Error */

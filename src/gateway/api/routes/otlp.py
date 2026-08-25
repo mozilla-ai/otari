@@ -61,24 +61,24 @@ from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
 from opentelemetry.proto.metrics.v1.metrics_pb2 import AggregationTemporality
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, verify_api_key_or_master_key
+from gateway.api.deps import TelemetryStoragePortDep, get_config, get_db, verify_api_key_or_master_key
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import APIKey
+from gateway.ports.telemetry_storage_port import TelemetryRecord
 from gateway.services.agent_telemetry_service import (
     CUMULATIVE,
     DELTA,
-    TelemetryRecord,
     map_behavioral_event,
     map_metric_point,
 )
 from gateway.services.agent_telemetry_service import ingest as ingest_telemetry
 from gateway.services.external_usage_service import (
     MAX_EVENTS_PER_BATCH,
-    RESERVED_SOURCES,
     ExternalEventsRequest,
     ExternalUsageEvent,
     ingest_external_events,
+    reserved_source_reason,
 )
 
 router = APIRouter(tags=["otel"])
@@ -206,9 +206,10 @@ def _resolve_timestamp(attrs: dict[str, Any], default: datetime | None) -> datet
 
 def _sanitize_source(name: str) -> str:
     slug = re.sub(r"[^A-Za-z0-9._:-]+", "-", name).strip("-")[:64]
-    # "gateway" is reserved for usage Otari served itself; a client claiming it
-    # would masquerade as native traffic (and fail the ingest schema with a 500).
-    if not slug or slug.lower() in RESERVED_SOURCES:
+    # "gateway" is reserved for usage Otari served itself and the `otari-ai:` prefix for
+    # the provenance tags otari.ai writes; a client claiming either would masquerade as
+    # those rows (and fail the ingest schema with a 500).
+    if not slug or reserved_source_reason(slug) is not None:
         return _DEFAULT_SOURCE
     return slug
 
@@ -477,6 +478,7 @@ async def receive_logs(
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    storage: TelemetryStoragePortDep,
 ) -> Response:
     """Ingest LLM usage from OTLP log events (Claude Code, Codex, or GenAI logs)."""
     api_key = _require_import_key(auth_result[0])
@@ -522,7 +524,7 @@ async def receive_logs(
     response = ExportLogsServiceResponse()
     rejected = await _ingest(pairs, api_key=api_key, db=db, config=config) if pairs else 0
     if telemetry:
-        rejected += (await ingest_telemetry(db, telemetry, api_key=api_key)).rejected
+        rejected += (await ingest_telemetry(db, telemetry, api_key=api_key, storage=storage)).rejected
     if rejected:
         response.partial_success.rejected_log_records = rejected
         response.partial_success.error_message = f"{rejected} log record(s) rejected (see gateway logs)"
@@ -535,6 +537,7 @@ async def receive_metrics(
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    storage: TelemetryStoragePortDep,
 ) -> Response:
     """Ingest content-free coding-agent outcome metrics from OTLP metric points.
 
@@ -606,7 +609,7 @@ async def receive_metrics(
 
     response = ExportMetricsServiceResponse()
     if telemetry:
-        result = await ingest_telemetry(db, telemetry, api_key=api_key)
+        result = await ingest_telemetry(db, telemetry, api_key=api_key, storage=storage)
         logger.info(
             "otlp metrics ingest: accepted=%d duplicate=%d rejected=%d",
             result.accepted,

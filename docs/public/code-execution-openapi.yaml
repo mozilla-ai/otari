@@ -358,8 +358,17 @@ components:
     CreateSessionRequest:
       type: object
       additionalProperties: true
-      description: Lifetime hints, both optional.
+      description: Lifetime hints and an image hint, all optional.
       properties:
+        image:
+          type: [string, "null"]
+          maxLength: 255
+          description: |
+            The image the session should run. A hint: a backend that leases from
+            a fixed pre-baked pool, as the reference backend does, MAY ignore it
+            and MUST NOT fail the request because of it. Otari sends it when a
+            workspace's code-execution policy pins an image, or when the
+            deployment names one, and omits the field entirely otherwise.
         idle_timeout_seconds:
           type: [integer, "null"]
           minimum: 1

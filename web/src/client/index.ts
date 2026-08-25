@@ -361,10 +361,17 @@ export type VisionStrategy = NonNullable<
 // pages built on them here are the ones otari.ai's control plane brings across
 // at M5, so a renamed field would have to be reconciled twice.
 // ---------------------------------------------------------------------------
-// A standalone gateway hosts exactly one organization, provisioned at first
-// boot and fixed: the create, switch and delete endpoints are not mounted here,
-// so there is no request shape for any of them to alias.
+// One organization is provisioned at first boot and that is what most
+// deployments keep, but a second is reachable (an invitation into one elsewhere
+// on the deployment), so create, list-mine and switch are all mounted. Delete
+// is not, and has no request shape to alias.
 export type Organization = Schemas["OrganizationPublic"]
+export type CreateOrganizationRequest = Schemas["OrganizationCreateRequest"]
+/** One organization the caller belongs to, as the organization switcher renders it. */
+export type CallerOrganizationMembership =
+  Schemas["CallerOrganizationMembershipPublic"]
+export type SwitchOrganizationRequest =
+  Schemas["SwitchActiveOrganizationRequest"]
 /** An organization plus the caller's standing in it: what every tenancy page reads first. */
 export type OrganizationContext = Schemas["OrganizationMembershipContextPublic"]
 // The caller's own workspace memberships, carried on the context so the shell
@@ -469,5 +476,16 @@ export type CreateOrganizationGuardrailRequest = Defaulted<
 >
 export type UpdateOrganizationGuardrailRequest =
   Schemas["OrganizationGuardrailUpdate"]
+
+// The MCP servers a workspace has registered, which a request names by id in
+// `mcp_server_ids`; see
+// `src/gateway/services/tenancy/workspace_mcp_server_service.py`. The stored
+// bearer token is write-only, so the public shape reports only `has_token`.
+export type WorkspaceMcpServer = Schemas["WorkspaceMcpServerPublic"]
+export type WorkspaceMcpServers = Schemas["WorkspaceMcpServersPublic"]
+export type CreateWorkspaceMcpServerRequest =
+  Schemas["WorkspaceMcpServerCreate"]
+export type UpdateWorkspaceMcpServerRequest =
+  Schemas["WorkspaceMcpServerUpdate"]
 
 export type * from "./local"

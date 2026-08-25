@@ -1,26 +1,30 @@
 """Read and purge endpoints for captured coding-agent telemetry.
 
-`agent_telemetry` holds two kinds of content-free, non-billable row: behavioral
-events (tool results, decisions, prompts, errors) and outcome-metric points
-(lines changed, commits, pull requests, active time). Neither is worth much on
-its own; joined against recorded spend they answer "what did this cost per unit
-of work", which is what `/summary` computes.
+Captured telemetry is two kinds of content-free, non-billable record:
+behavioral events (tool results, decisions, prompts, errors) and outcome-metric
+points (lines changed, commits, pull requests, active time). Neither is worth
+much on its own; joined against recorded spend they answer "what did this cost
+per unit of work", which is what `/summary` computes.
 
-The aggregation queries live here rather than in a service module, matching
-`usage.py`'s own layout, and use SQLAlchemy core against the ORM-mapped classes
-so the route layer stays free of `sqlalchemy.orm`.
+The telemetry half of every query here goes through `TelemetryStoragePort`, so
+these endpoints read whatever store this build bound. The spend half does not:
+`usage_logs` is the money path and stays in this deployment's database in every
+build, queried inline with SQLAlchemy core against the ORM-mapped class, the way
+`usage.py` does, so the route layer stays free of `sqlalchemy.orm`. Joining the
+two is this module's job, which is why the arithmetic sits here and not behind
+the port.
 """
 
 from collections import defaultdict
 from datetime import UTC, datetime, timedelta
-from typing import Annotated, Any, Literal
+from typing import Annotated, Literal
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
-from sqlalchemy import ColumnElement, case, func, null, select
+from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_db, verify_master_key
+from gateway.api.deps import TelemetryStoragePortDep, get_db, verify_master_key
 
 # The window, bucket-grid, and fold conventions are `usage.py`'s: a summary read
 # from both endpoints has to describe the same window the same way, so they share
@@ -29,15 +33,18 @@ from gateway.api.routes.usage import (
     _MAX_SERIES_POINTS,
     _SERIES_TOP_N,
     Bucket,
-    _bucket_expr,
-    _canonical_bucket,
     _dense_series,
-    _dialect_name,
     _request_count_expr,
     _resolve_window,
 )
-from gateway.core.sql import MAX_FILTER_VALUES, match_any, utc_bound
-from gateway.models.entities import AgentTelemetry, UsageLog
+from gateway.core.sql import MAX_FILTER_VALUES, bucket_expr, canonical_bucket, dialect_name, match_any
+from gateway.models.entities import UsageLog
+from gateway.ports.telemetry_storage_port import (
+    BehaviorCounts,
+    TelemetryFilter,
+    TelemetryScanTooLargeError,
+    TelemetryStoragePort,
+)
 from gateway.services.agent_telemetry_admin_service import (
     AgentTelemetryDeleteRequest,
     AgentTelemetryDeleteResult,
@@ -221,7 +228,7 @@ class AgentTelemetryGroupedSeries(BaseModel):
     points: list[AgentTelemetryGroupedSeriesPoint]
 
 
-def _telemetry_filters(
+def _scope(
     *,
     start_date: datetime | None,
     end_date: datetime | None,
@@ -229,27 +236,21 @@ def _telemetry_filters(
     api_key_id: list[str] | None,
     name: str | None = None,
     session_label: str | None = None,
-) -> list[ColumnElement[bool]]:
-    """Shared WHERE conditions, so `/count` sizes exactly what the others read.
+) -> TelemetryFilter:
+    """The shared scope, so `/count` sizes exactly what the others read.
 
     ``session_label`` is `/summary`'s alone: `/count` and `/series` mirror the
     purge endpoint's filter set, and a read filter the purge cannot express would
     size a selection it could not delete.
     """
-    conditions: list[ColumnElement[bool]] = []
-    if start_date is not None:
-        conditions.append(AgentTelemetry.timestamp >= utc_bound(start_date))
-    if end_date is not None:
-        conditions.append(AgentTelemetry.timestamp < utc_bound(end_date))
-    if user_id:
-        conditions.append(match_any(AgentTelemetry.user_id, user_id))
-    if api_key_id:
-        conditions.append(match_any(AgentTelemetry.api_key_id, api_key_id))
-    if name is not None:
-        conditions.append(AgentTelemetry.name == name)
-    if session_label is not None:
-        conditions.append(AgentTelemetry.session_label == session_label)
-    return conditions
+    return TelemetryFilter(
+        start=start_date,
+        end=end_date,
+        user_ids=tuple(user_id or ()),
+        api_key_ids=tuple(api_key_id or ()),
+        name=name,
+        session_label=session_label,
+    )
 
 
 def _usage_filters(
@@ -292,100 +293,74 @@ def _ratio(numerator: float, denominator: float) -> float | None:
 
 
 async def _metric_increments(
-    db: AsyncSession, conditions: list[ColumnElement[bool]], bucket: Bucket, start: datetime
+    storage: TelemetryStoragePort, scope: TelemetryFilter, bucket: Bucket, start: datetime
 ) -> tuple[dict[str, float], dict[str, dict[str, float]]]:
     """Window increments per metric name, in total and per time bucket.
 
-    The delta arithmetic is deliberately not in SQL: a cumulative point is stored
-    exactly as reported, so turning a series into "how much happened here" means
-    walking its points in time order and diffing, split at each series generation
-    (a changed ``series_start`` is a counter reset). The scan is bounded by the
-    window and served by the ``(series_key, timestamp)`` index.
+    The delta arithmetic is deliberately not pushed into storage: a cumulative
+    point is stored exactly as reported, so turning a series into "how much
+    happened here" means walking its points in time order and diffing, split at
+    each series generation (a changed ``series_start`` is a counter reset). That
+    is one piece of domain logic every adapter has to agree on, so it runs here
+    once rather than once per store.
 
     A generation that began inside the window is diffed from its own zero: a
     cumulative counter reads zero at its series start, and an OTel counter exports
     no point until its first measurement, so without that baseline the first
     reading of every session's series is dropped.
 
-    Because the diff is in Python, the window bounds a span and not a row count, so
-    the scan carries its own ``_MAX_METRIC_POINTS`` ceiling and fails closed past it
-    rather than materializing an unbounded read, the way `/series` caps its grid.
+    Because the diff is here, the window bounds a span and not a point count, so
+    the read carries its own ``_MAX_METRIC_POINTS`` ceiling and fails closed past
+    it rather than materializing an unbounded read, the way `/series` caps its grid.
     """
-    rows = (
-        await db.execute(
-            select(
-                AgentTelemetry.name,
-                AgentTelemetry.series_key,
-                AgentTelemetry.series_start,
-                AgentTelemetry.temporality,
-                AgentTelemetry.timestamp,
-                AgentTelemetry.value,
-            )
-            .where(*conditions, AgentTelemetry.kind == "metric", AgentTelemetry.value.is_not(None))
-            .limit(_MAX_METRIC_POINTS + 1)
-        )
-    ).all()
-    if len(rows) > _MAX_METRIC_POINTS:
+    try:
+        points = await storage.metric_points(filters=scope, limit=_MAX_METRIC_POINTS)
+    except TelemetryScanTooLargeError as exc:
         raise HTTPException(
             status_code=422,
             detail=(
-                f"window holds more than {_MAX_METRIC_POINTS} metric data points; narrow the range "
+                f"window holds more than {exc.limit} metric data points; narrow the range "
                 "or filter by user_id, api_key_id, or session_label"
             ),
-        )
+        ) from exc
 
     generations: dict[tuple[str, str | None, datetime | None, str | None], list[tuple[datetime, float]]] = defaultdict(
         list
     )
-    for name, series_key, series_start, temporality, timestamp, value in rows:
-        generations[(name, series_key, series_start, temporality)].append((_aware(timestamp), float(value)))
+    for point in points:
+        generations[(point.name, point.series_key, point.series_start, point.temporality)].append(
+            (_aware(point.timestamp), point.value)
+        )
 
     totals: dict[str, float] = defaultdict(float)
     by_bucket: dict[str, dict[str, float]] = defaultdict(lambda: defaultdict(float))
-    for (name, _series_key, generation_start, temporality), points in generations.items():
+    for (name, _series_key, generation_start, temporality), series in generations.items():
         generation_start = _aware(generation_start) if generation_start is not None else None
         baseline = generation_start if generation_start is not None and generation_start >= start else None
-        increments = series_point_increments(points, temporality or DELTA, series_start=baseline)
+        increments = series_point_increments(series, temporality or DELTA, series_start=baseline)
         totals[name] += compute_series_increment(increments, DELTA)
         for timestamp, increment in increments:
             by_bucket[_bucket_key(timestamp, bucket)][name] += increment
     return totals, by_bucket
 
 
-async def _behavior(
-    db: AsyncSession, conditions: list[ColumnElement[bool]]
-) -> AgentTelemetryBehavior:
-    """Behavioral-event counts, from one grouped pass plus the session count."""
-    behavioral = [*conditions, AgentTelemetry.kind.is_(None)]
-    rows = (
-        await db.execute(
-            select(AgentTelemetry.name, AgentTelemetry.tool_name, AgentTelemetry.decision, func.count())
-            .where(*behavioral)
-            .group_by(AgentTelemetry.name, AgentTelemetry.tool_name, AgentTelemetry.decision)
-        )
-    ).all()
-    sessions = (
-        await db.execute(
-            select(func.count(func.distinct(AgentTelemetry.session_label))).where(*behavioral)
-        )
-    ).scalar_one()
-
-    behavior = AgentTelemetryBehavior(sessions=int(sessions))
+def _fold_behavior(counts: BehaviorCounts) -> AgentTelemetryBehavior:
+    """Shape the storage layer's grouped counts into the response body."""
+    behavior = AgentTelemetryBehavior(sessions=counts.sessions)
     by_tool: dict[str | None, int] = defaultdict(int)
-    for name, tool_name, decision, count in rows:
-        count = int(count)
-        if name == "tool_result":
-            behavior.tool_calls += count
-            by_tool[tool_name] += count
-        elif name == "tool_decision":
-            if decision == "accept":
-                behavior.tool_accepts += count
-            elif decision == "reject":
-                behavior.tool_rejects += count
-        elif name == "user_prompt":
-            behavior.turns += count
-        elif name == "api_error":
-            behavior.api_errors += count
+    for group in counts.groups:
+        if group.name == "tool_result":
+            behavior.tool_calls += group.count
+            by_tool[group.tool_name] += group.count
+        elif group.name == "tool_decision":
+            if group.decision == "accept":
+                behavior.tool_accepts += group.count
+            elif group.decision == "reject":
+                behavior.tool_rejects += group.count
+        elif group.name == "user_prompt":
+            behavior.turns += group.count
+        elif group.name == "api_error":
+            behavior.api_errors += group.count
     behavior.by_tool = [
         AgentTelemetryToolRow(tool=tool, calls=calls)
         for tool, calls in sorted(by_tool.items(), key=lambda item: item[1], reverse=True)[:_TOOL_MIX_TOP_N]
@@ -396,6 +371,7 @@ async def _behavior(
 @router.get("/summary", dependencies=[Depends(verify_master_key)])
 async def agent_telemetry_summary(
     db: Annotated[AsyncSession, Depends(get_db)],
+    storage: TelemetryStoragePortDep,
     start_date: datetime | None = Query(default=None, description=_START_DESC),
     end_date: datetime | None = Query(default=None, description=_END_DESC),
     user_id: _UserFilter = None,
@@ -428,15 +404,15 @@ async def agent_telemetry_summary(
     reset never reads as negative work. Master-key only.
     """
     start, end = _resolve_window(start_date, end_date)
-    conditions = _telemetry_filters(
+    scope = _scope(
         start_date=start, end_date=end, user_id=user_id, api_key_id=api_key_id, session_label=session_label
     )
     usage_conditions = _usage_filters(
         start=start, end=end, user_id=user_id, api_key_id=api_key_id, session_label=session_label
     )
 
-    outcome_totals, outcomes_by_bucket = await _metric_increments(db, conditions, bucket, start)
-    behavior = await _behavior(db, conditions)
+    outcome_totals, outcomes_by_bucket = await _metric_increments(storage, scope, bucket, start)
+    behavior = _fold_behavior(await storage.behavior_counts(filters=scope))
     # Requests, not rows, the same way /v1/usage/summary counts them: a routed
     # request writes one row per recovered attempt, and counting those would
     # deflate the error rate against a request volume the Usage page never shows.
@@ -468,7 +444,8 @@ async def agent_telemetry_summary(
 
     series = await _summary_series(
         db,
-        conditions,
+        storage,
+        scope,
         usage_conditions,
         outcomes_by_bucket,
         bucket=bucket,
@@ -489,7 +466,8 @@ async def agent_telemetry_summary(
 
 async def _summary_series(
     db: AsyncSession,
-    conditions: list[ColumnElement[bool]],
+    storage: TelemetryStoragePort,
+    scope: TelemetryFilter,
     usage_conditions: list[ColumnElement[bool]],
     outcomes_by_bucket: dict[str, dict[str, float]],
     *,
@@ -497,17 +475,14 @@ async def _summary_series(
     start: datetime,
     end: datetime,
 ) -> list[AgentTelemetrySeriesPoint]:
-    """Merge the per-bucket outcome increments with bucketed behavior and spend."""
-    dialect = _dialect_name(db)
-    telemetry_bucket = _bucket_expr(dialect, bucket, AgentTelemetry.timestamp)
-    behavior_rows = (
-        await db.execute(
-            select(telemetry_bucket, AgentTelemetry.name, func.count())
-            .where(*conditions, AgentTelemetry.kind.is_(None))
-            .group_by(telemetry_bucket, AgentTelemetry.name)
-        )
-    ).all()
-    usage_bucket = _bucket_expr(dialect, bucket)
+    """Merge the per-bucket outcome increments with bucketed behavior and spend.
+
+    Behavior comes back already bucketed on the canonical UTC grid, and the
+    spend beside it is bucketed on the same grid here, which is what lets the
+    two line up in one point regardless of where telemetry is stored.
+    """
+    behavior_rows = await storage.behavior_counts_by_bucket(filters=scope, bucket=bucket)
+    usage_bucket = bucket_expr(dialect_name(db), bucket, UsageLog.timestamp)
     usage_rows = (
         await db.execute(
             select(usage_bucket, func.coalesce(func.sum(UsageLog.cost), 0.0))
@@ -527,16 +502,16 @@ async def _summary_series(
         point.pull_requests = outcomes.get(METRIC_PULL_REQUESTS, 0.0)
         point.lines_of_code = outcomes.get(METRIC_LINES_OF_CODE, 0.0)
         point.active_time = outcomes.get(METRIC_ACTIVE_TIME, 0.0)
-    for raw_bucket, name, count in behavior_rows:
-        point = point_for(_canonical_bucket(raw_bucket, bucket))
-        if name == "tool_result":
-            point.tool_calls += int(count)
-        elif name == "user_prompt":
-            point.turns += int(count)
-        elif name == "api_error":
-            point.api_errors += int(count)
+    for row in behavior_rows:
+        point = point_for(row.bucket_start)
+        if row.name == "tool_result":
+            point.tool_calls += row.count
+        elif row.name == "user_prompt":
+            point.turns += row.count
+        elif row.name == "api_error":
+            point.api_errors += row.count
     for raw_bucket, cost in usage_rows:
-        point_for(_canonical_bucket(raw_bucket, bucket)).cost = float(cost)
+        point_for(canonical_bucket(raw_bucket, bucket)).cost = float(cost)
 
     return _dense_series(
         start, end, bucket, populated, lambda key: AgentTelemetrySeriesPoint(bucket_start=key)
@@ -545,7 +520,7 @@ async def _summary_series(
 
 @router.get("/count", dependencies=[Depends(verify_master_key)])
 async def count_agent_telemetry(
-    db: Annotated[AsyncSession, Depends(get_db)],
+    storage: TelemetryStoragePortDep,
     start_date: datetime | None = Query(default=None, description=_START_DESC),
     end_date: datetime | None = Query(default=None, description=_END_DESC),
     user_id: _UserFilter = None,
@@ -558,16 +533,15 @@ async def count_agent_telemetry(
     "delete all N matching" would remove. Behavioral and metric rows are counted
     together: neither this nor the purge distinguishes them. Master-key only.
     """
-    conditions = _telemetry_filters(
+    scope = _scope(
         start_date=start_date, end_date=end_date, user_id=user_id, api_key_id=api_key_id, name=name
     )
-    stmt: Any = select(func.count()).select_from(AgentTelemetry).where(*conditions)
-    return AgentTelemetryCount(total=(await db.execute(stmt)).scalar_one())
+    return AgentTelemetryCount(total=await storage.count(filters=scope))
 
 
 @router.get("/series", dependencies=[Depends(verify_master_key)])
 async def agent_telemetry_series(
-    db: Annotated[AsyncSession, Depends(get_db)],
+    storage: TelemetryStoragePortDep,
     group_by: TelemetryGroupBy = Query(description="Dimension to split the series by"),
     start_date: datetime | None = Query(default=None, description=_START_DESC),
     end_date: datetime | None = Query(default=None, description=_END_DESC),
@@ -590,55 +564,29 @@ async def agent_telemetry_series(
             status_code=422,
             detail=f"window spans more than {_MAX_SERIES_POINTS} {bucket} buckets; use bucket=day or narrow the range",
         )
-    conditions = _telemetry_filters(
-        start_date=start, end_date=end, user_id=user_id, api_key_id=api_key_id, name=name
+    scope = _scope(start_date=start, end_date=end, user_id=user_id, api_key_id=api_key_id, name=name)
+    counts = await storage.grouped_row_counts(
+        filters=scope, group_by=group_by, bucket=bucket, top_n=_SERIES_TOP_N
     )
-    column = AgentTelemetry.user_id if group_by == "user_id" else AgentTelemetry.api_key_id
 
-    row_count = func.count()
-    group_rows = (
-        await db.execute(
-            select(column, row_count).where(*conditions).group_by(column).order_by(row_count.desc()).limit(
-                _SERIES_TOP_N
-            )
-        )
-    ).all()
-    total = (
-        await db.execute(select(func.count()).select_from(AgentTelemetry).where(*conditions))
-    ).scalar_one()
-    groups = [AgentTelemetryGroupRow(key=row[0], rows=int(row[1])) for row in group_rows]
-    folded = int(total) - sum(group.rows for group in groups)
+    # The fold reconciles the ranked groups against every matching row, so the
+    # stacked series adds up to the total whatever storage ranked. It is encoded
+    # as (key NULL, flag) rather than a sentinel key, which no value could be
+    # trusted never to collide with; the flag then separates a real NULL group
+    # that ranked in the top N from the remainder.
+    groups = [AgentTelemetryGroupRow(key=group.key, rows=group.rows) for group in counts.groups]
+    folded = counts.total - sum(group.rows for group in groups)
     if folded > 0:
         groups.append(AgentTelemetryGroupRow(key=None, rows=folded, is_other=True))
 
-    # Groups past the top N collapse in SQL, so the grid stays bounded by
-    # buckets x (top N + 2) however high the dimension's cardinality is. The fold
-    # is encoded as (key NULL, flag) rather than a sentinel key, which no value
-    # could be trusted never to collide with; the flag then separates a real NULL
-    # group that ranked in the top N from the remainder.
-    named = {group.key for group in groups if group.key is not None}
-    keeps_null = any(group.key is None and not group.is_other for group in groups)
-    key_expr = case((column.in_(named), column), else_=null())
-    if keeps_null:
-        fold_expr = case((column.is_(None), 0), (column.in_(named), 0), else_=1)
-    else:
-        fold_expr = case((column.in_(named), 0), else_=1)
-    bucket_expr = _bucket_expr(_dialect_name(db), bucket, AgentTelemetry.timestamp)
-    rows = (
-        await db.execute(
-            select(bucket_expr, key_expr, fold_expr, func.count())
-            .where(*conditions)
-            .group_by(bucket_expr, key_expr, fold_expr)
-        )
-    ).all()
     points = [
         AgentTelemetryGroupedSeriesPoint(
-            bucket_start=_canonical_bucket(row[0], bucket),
-            key=row[1],
-            is_other=bool(row[2]),
-            rows=int(row[3]),
+            bucket_start=point.bucket_start,
+            key=point.key,
+            is_other=point.is_other,
+            rows=point.rows,
         )
-        for row in rows
+        for point in counts.points
     ]
     points.sort(key=lambda point: point.bucket_start)
 
@@ -655,7 +603,7 @@ async def agent_telemetry_series(
 @router.delete("", dependencies=[Depends(verify_master_key)])
 async def delete_agent_telemetry_rows(
     request: AgentTelemetryDeleteRequest,
-    db: Annotated[AsyncSession, Depends(get_db)],
+    storage: TelemetryStoragePortDep,
 ) -> AgentTelemetryDeleteResult:
     """Delete agent_telemetry rows by explicit ids or by filter (standalone).
 
@@ -664,4 +612,4 @@ async def delete_agent_telemetry_rows(
     range). A selection matching zero rows succeeds with `deleted: 0`.
     Master-key only.
     """
-    return await delete_agent_telemetry(db, request)
+    return await delete_agent_telemetry(request, storage=storage)

@@ -34,8 +34,13 @@ import {
 } from "@/app/nav/rowStyles"
 import { TopBarActions } from "@/app/nav/TopBarActions"
 import type { NavItem, NavPath } from "@/app/nav/types"
-import { useNavVisibility } from "@/app/nav/useNavVisibility"
+import {
+  useNavVisibility,
+  useSurfaceVisibility,
+} from "@/app/nav/useNavVisibility"
 import { WorkspaceSwitcher } from "@/app/nav/WorkspaceSwitcher"
+import { EntitlementResolver } from "@/app/overlayEntitlementResolver"
+import { PendingPage } from "@/app/PendingPage"
 import { TelemetryIdentity } from "@/app/TelemetryIdentity"
 import { UpdatePrompt } from "@/app/UpdatePrompt"
 import { PricingWarning } from "@/features/models/PricingWarning"
@@ -43,6 +48,7 @@ import { canManage } from "@/features/organization/roles"
 import { useOrganizationContext } from "@/shared/api/hooks"
 import { EmptyState } from "@/shared/components/ui"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
+import { useEntitlements } from "@/shared/hooks/useEntitlements"
 import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 
@@ -357,7 +363,34 @@ function NavGroup({
   )
 }
 
+/**
+ * The shell, with the entitlement axis resolved above it.
+ *
+ * Two components rather than one because a provider is invisible to the
+ * component that renders it: `AppShellChrome` reads the axis through
+ * `useNavVisibility`, so a resolver mounted inside its body would answer every
+ * consumer below it and none of the ones that decide the rail. Mounted here it
+ * sits above both halves the axis gates, the navigation and the `<Outlet>` the
+ * routes render into, which is what the seam is for. The base default renders
+ * its children unchanged, so this build's shell is the shell it was.
+ *
+ * Here rather than in `__root.tsx` or beside `DeploymentProvider` in `App.tsx`,
+ * because everything that reads the axis is inside the shell and because the
+ * resolver a superset build swaps in issues a query: it belongs behind the auth
+ * gate `App.tsx` puts the router behind, not in front of it. So the surfaces
+ * that render instead of the shell (the sign-in screen, the public auth pages,
+ * the hybrid landing) are deliberately outside it: none of them gates on a
+ * capability, and a visitor without a session has nothing to resolve one from.
+ */
 export function AppShell() {
+  return (
+    <EntitlementResolver>
+      <AppShellChrome />
+    </EntitlementResolver>
+  )
+}
+
+function AppShellChrome() {
   // Navigation is data: the shell renders whatever the registry declares and
   // decides visibility from the deployment and the entitlements,
   // rather than each page asking what it is running against.
@@ -374,6 +407,29 @@ export function AppShell() {
   // differently: whichever way the nested case resolves, both read it from one
   // place.
   const routeIsGatedOff = !isPathVisible(pathname, isVisible)
+  // Kept beside that answer rather than folded into it, because the two are
+  // different claims: "gated off" decides whether the page renders, and this
+  // decides whether the shell may yet say *why*. The panel below asserts that
+  // this deployment does not serve the page, which is not something the shell
+  // knows while the entitlement axis is still resolving. Always settled in this
+  // build, where `useEntitlements` answers from a constant, so this is a branch
+  // a superset build's asynchronous resolver takes and the base never does.
+  // `EntitlementGate` has had a `loading` state for precisely this reason since it
+  // was written; the rail needs none, because a row that appears late is not a
+  // row that told anyone it was missing.
+  const { isLoading: entitlementsResolving } = useEntitlements()
+  // Narrowed to the entitlement axis, because only that one can still be
+  // resolving. A route gated off because this deployment does not host the
+  // surface was answered by the bootstrap before the page rendered, so waiting
+  // on the entitlement query would hold back a panel that is already correct and
+  // that the query cannot change. Asking the surface half separately is what
+  // distinguishes the two, since `isPathVisible` composes them and reports only
+  // that something hid the route.
+  const hostsRouteSurface = useSurfaceVisibility()
+  const answerIsStillComing =
+    routeIsGatedOff &&
+    entitlementsResolving &&
+    isPathVisible(pathname, hostsRouteSurface)
   // Which of the two sidebars this path belongs under. The organization context
   // is a separate rail reached from the footer, not a section inside the
   // workspace one, so the two never render together.
@@ -894,7 +950,9 @@ export function AppShell() {
             className="flex-1 overflow-y-auto focus:outline-none"
           >
             <div className="mx-auto flex max-w-[1800px] flex-col gap-6 px-4 py-5 md:px-6 md:py-6">
-              {routeIsGatedOff ? (
+              {answerIsStillComing ? (
+                <PendingPage />
+              ) : routeIsGatedOff ? (
                 <EmptyState
                   // The leaf's name, not the group's: someone who followed a
                   // link to Guardrails should not be told "Routing" is missing.

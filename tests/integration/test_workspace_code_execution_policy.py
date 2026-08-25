@@ -13,6 +13,7 @@ from typing import Any
 
 import pytest
 import pytest_asyncio
+from pydantic import ValidationError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from gateway.models.entities import WorkspaceCodeExecutionPolicy
@@ -24,8 +25,15 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
-from gateway.services.tenancy.errors import NotAuthorizedError, WorkspaceNotFoundError
+from gateway.services.sandbox_backend import CODE_EXECUTION_TOOL_NAMES
+from gateway.services.tenancy.errors import (
+    NotAuthorizedError,
+    SandboxImageNotAllowedError,
+    SandboxToolsUnrunnableError,
+    WorkspaceNotFoundError,
+)
 from gateway.services.tenancy.workspace_code_execution_policy_service import (
+    SERVED_TOOL_NAMES,
     WorkspaceCodeExecutionPolicyService,
     WorkspaceCodeExecutionPolicyUpdate,
     resolve_workspace_code_execution_policy,
@@ -61,8 +69,15 @@ async def _workspace(db: AsyncSession, organization: Organization, *, name: str,
     return workspace
 
 
-def _service(db: AsyncSession, *, sandbox_configured: bool = True) -> WorkspaceCodeExecutionPolicyService:
-    return WorkspaceCodeExecutionPolicyService(db, sandbox_configured=sandbox_configured)
+def _service(
+    db: AsyncSession,
+    *,
+    sandbox_configured: bool = True,
+    allowed_images: tuple[str, ...] = (),
+) -> WorkspaceCodeExecutionPolicyService:
+    return WorkspaceCodeExecutionPolicyService(
+        db, sandbox_configured=sandbox_configured, allowed_images=allowed_images
+    )
 
 
 async def test_a_workspace_with_no_policy_reads_as_unconfigured_and_narrows_nothing(
@@ -341,4 +356,172 @@ async def test_deleting_the_workspace_takes_its_policy_with_it(async_db: AsyncSe
     await WorkspaceRepository(async_db).delete_workspace(workspace)
     await async_db.commit()
 
+    assert await resolve_workspace_code_execution_policy(async_db, workspace.id) is None
+
+
+# ---------------------------------------------------------------------------
+# The sandbox image and the exposed tool set (#740)
+# ---------------------------------------------------------------------------
+
+_IMAGE = "mzdotai/otari-sandbox-container:latest"
+
+
+async def test_an_image_the_operator_curated_round_trips_to_the_request_path(async_db: AsyncSession) -> None:
+    org = await _organization(async_db, slug="acme-image")
+    owner = await _member(async_db, org, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, org, name="Engineering", owner=owner)
+
+    stored = await _service(async_db, allowed_images=(_IMAGE,)).set_policy(
+        user=owner,
+        workspace_id=workspace.id,
+        request=WorkspaceCodeExecutionPolicyUpdate(enabled=True, image=_IMAGE, tools=["code_execution"]),
+    )
+
+    assert stored.image == _IMAGE
+    assert stored.tools == ["code_execution"]
+
+    resolved = await resolve_workspace_code_execution_policy(async_db, workspace.id)
+    assert resolved is not None
+    assert resolved.image == _IMAGE
+    assert resolved.tools == frozenset({"code_execution"})
+
+
+async def test_an_image_the_operator_did_not_curate_is_refused(async_db: AsyncSession) -> None:
+    """The guard the column exists for: a workspace picks from the operator's shelf."""
+    org = await _organization(async_db, slug="acme-image-bad")
+    owner = await _member(async_db, org, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, org, name="Engineering", owner=owner)
+
+    with pytest.raises(SandboxImageNotAllowedError) as excinfo:
+        await _service(async_db, allowed_images=(_IMAGE,)).set_policy(
+            user=owner,
+            workspace_id=workspace.id,
+            request=WorkspaceCodeExecutionPolicyUpdate(enabled=True, image="ghcr.io/attacker/pwn:latest"),
+        )
+
+    assert _IMAGE in str(excinfo.value), "the refusal names what is allowed instead"
+    # And nothing was stored: the check runs before the row is touched.
+    assert await resolve_workspace_code_execution_policy(async_db, workspace.id) is None
+
+
+async def test_a_deployment_that_curated_no_images_lets_a_workspace_pin_none(async_db: AsyncSession) -> None:
+    org = await _organization(async_db, slug="acme-image-empty")
+    owner = await _member(async_db, org, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, org, name="Engineering", owner=owner)
+
+    with pytest.raises(SandboxImageNotAllowedError):
+        await _service(async_db).set_policy(
+            user=owner,
+            workspace_id=workspace.id,
+            request=WorkspaceCodeExecutionPolicyUpdate(enabled=True, image=_IMAGE),
+        )
+
+    # A policy that pins nothing is unaffected by an empty allow-list.
+    stored = await _service(async_db).set_policy(
+        user=owner,
+        workspace_id=workspace.id,
+        request=WorkspaceCodeExecutionPolicyUpdate(enabled=True),
+    )
+    assert stored.image is None
+    assert stored.allowed_images == []
+
+
+async def test_the_policy_reports_what_may_be_pinned_and_which_tools_exist(async_db: AsyncSession) -> None:
+    """The dashboard's controls are built from the response, not from a second endpoint."""
+    org = await _organization(async_db, slug="acme-image-report")
+    owner = await _member(async_db, org, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, org, name="Engineering", owner=owner)
+
+    unconfigured = await _service(async_db, allowed_images=(_IMAGE,)).get_policy(
+        user=owner, workspace_id=workspace.id
+    )
+
+    assert unconfigured.configured is False
+    assert unconfigured.allowed_images == [_IMAGE]
+    # What this deployment *serves*, not the vocabulary a policy may be written
+    # in: a picker built from the vocabulary would offer options that narrow
+    # nothing and one that empties the set.
+    assert unconfigured.available_tools == list(SERVED_TOOL_NAMES)
+    assert set(SERVED_TOOL_NAMES) < set(CODE_EXECUTION_TOOL_NAMES)
+
+
+async def test_clearing_an_image_returns_the_workspace_to_the_deployments(async_db: AsyncSession) -> None:
+    """``PUT`` replaces the whole policy, so an omitted image clears the pin."""
+    org = await _organization(async_db, slug="acme-image-clear")
+    owner = await _member(async_db, org, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, org, name="Engineering", owner=owner)
+    service = _service(async_db, allowed_images=(_IMAGE,))
+
+    await service.set_policy(
+        user=owner,
+        workspace_id=workspace.id,
+        request=WorkspaceCodeExecutionPolicyUpdate(enabled=True, image=_IMAGE, tools=["code_execution"]),
+    )
+    stored = await service.set_policy(
+        user=owner,
+        workspace_id=workspace.id,
+        request=WorkspaceCodeExecutionPolicyUpdate(enabled=True),
+    )
+
+    assert stored.image is None
+    assert stored.tools is None
+
+
+@pytest.mark.parametrize(
+    "tools",
+    [
+        pytest.param(["not_a_tool"], id="unknown-name"),
+        pytest.param([], id="empty-list"),
+    ],
+)
+async def test_an_unusable_tool_list_is_refused_at_the_schema(tools: list[str]) -> None:
+    """Neither an unknown name nor an empty list reaches a row.
+
+    Empty is refused in both stances rather than only when enabled: a stored
+    ``[]`` would be a third spelling of "refuse this workspace", and a surface
+    with two spellings of one decision eventually shows one and enforces the
+    other.
+    """
+    with pytest.raises(ValidationError):
+        WorkspaceCodeExecutionPolicyUpdate(enabled=True, tools=tools)
+
+
+async def test_a_duplicated_tool_name_is_stored_once(async_db: AsyncSession) -> None:
+    org = await _organization(async_db, slug="acme-tools-dupe")
+    owner = await _member(async_db, org, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, org, name="Engineering", owner=owner)
+
+    stored = await _service(async_db).set_policy(
+        user=owner,
+        workspace_id=workspace.id,
+        request=WorkspaceCodeExecutionPolicyUpdate(
+            enabled=True, tools=["code_execution", "bash_code_execution", "code_execution"]
+        ),
+    )
+
+    assert stored.tools == ["code_execution", "bash_code_execution"]
+
+
+async def test_a_tool_list_this_deployment_cannot_run_is_refused_at_the_write(
+    async_db: AsyncSession,
+) -> None:
+    """The ``tools`` counterpart of the image guard, and the reason it exists.
+
+    Such a list is storable in shape and refuses every request at admission, so
+    without this it is a policy that reads as a refinement and behaves as a
+    refusal, reachable by unticking one box. The operator's only signal would be
+    users reporting 403s.
+    """
+    org = await _organization(async_db, slug="acme-tools-unrunnable")
+    owner = await _member(async_db, org, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, org, name="Engineering", owner=owner)
+
+    with pytest.raises(SandboxToolsUnrunnableError) as excinfo:
+        await _service(async_db).set_policy(
+            user=owner,
+            workspace_id=workspace.id,
+            request=WorkspaceCodeExecutionPolicyUpdate(enabled=True, tools=["bash_code_execution"]),
+        )
+
+    assert "enabled=false" in str(excinfo.value), "the refusal points at the way to actually refuse"
     assert await resolve_workspace_code_execution_policy(async_db, workspace.id) is None

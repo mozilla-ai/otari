@@ -1,7 +1,8 @@
 """Integration tests for POST /v1/usage/external-events.
 
 Covers auth, content-free validation, idempotency, historical + cache pricing,
-budget isolation, and the read-surface (source filter, by_source, CSV).
+organization-scoped rates, budget isolation, and the read-surface (source filter,
+by_source, CSV).
 """
 
 from datetime import UTC, datetime, timedelta
@@ -12,7 +13,8 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from gateway.models.entities import UsageLog, User
+from gateway.models.entities import OrganizationModelPricing, UsageLog, User
+from gateway.models.tenancy import Organization, Workspace
 
 _SRC = "claude_code"
 _MODEL_KEY = "anthropic:claude-sonnet-4-6"
@@ -104,21 +106,23 @@ def _make_key(
     *,
     exclude_from_budget: bool = True,
     reject_user_mismatch: bool | None = None,
+    workspace_id: str | None = None,
 ) -> dict[str, str]:
     """Create an API key bound to `user_id` and return its auth header.
 
-    Import keys must be budget-exempt, so that is the default here.
+    Import keys must be budget-exempt, so that is the default here. Passing
+    `workspace_id` puts the key in a named workspace instead of the default one,
+    which is what lets a test import as an organization other than the default.
     """
-    resp = client.post(
-        "/v1/keys",
-        json={
-            "key_name": f"importer-{user_id}",
-            "user_id": user_id,
-            "exclude_from_budget": exclude_from_budget,
-            "reject_user_mismatch": reject_user_mismatch,
-        },
-        headers=master_key_header,
-    )
+    body: dict[str, Any] = {
+        "key_name": f"importer-{user_id}",
+        "user_id": user_id,
+        "exclude_from_budget": exclude_from_budget,
+        "reject_user_mismatch": reject_user_mismatch,
+    }
+    if workspace_id is not None:
+        body["workspace_id"] = workspace_id
+    resp = client.post("/v1/keys", json=body, headers=master_key_header)
     assert resp.status_code == 200, resp.text
     return {"Otari-Key": f"Bearer {resp.json()['key']}"}
 
@@ -448,6 +452,228 @@ def test_historical_pricing(
     assert row.cost == pytest.approx(1.0)  # 1M input * $1/M, cheap rate
 
 
+def test_organization_override_prices_imported_usage_at_the_event_timestamp(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """An imported event prices at its organization's rate, as of its own timestamp.
+
+    Imported here with the master key, which has no key row and therefore lands
+    in the default workspace: this covers the deployment-wide branch and the
+    timestamp rule, not the key-to-workspace wiring. That wiring is a separate
+    test below, because the master key cannot demonstrate it.
+
+    Two events either side of the override's start, in one batch imported after
+    both, so the same run shows the rate applying *and* shows it applying by the
+    event's clock rather than the importer's. Priced at the older rate is the
+    correct answer for the older event even though the newer rate is in force at
+    the moment of import.
+    """
+    _seed_user(client, master_key_header)
+    now = datetime.now(UTC)
+    _seed_pricing(
+        client,
+        master_key_header,
+        input_price=1.0,
+        output_price=1.0,
+        cache_read_price=0.0,
+        cache_write_price=0.0,
+        effective_at=(now - timedelta(days=365)).isoformat().replace("+00:00", "Z"),
+    )
+    override_from = now - timedelta(minutes=30)
+    created = client.post(
+        "/v1/organizations/me/pricing",
+        json={
+            "model_key": _MODEL_KEY,
+            "input_price_per_million": 5.0,
+            "output_price_per_million": 5.0,
+            "effective_from": override_from.isoformat(),
+        },
+        headers=master_key_header,
+    )
+    assert created.status_code == 201, created.text
+
+    # One million input tokens and nothing else, so the cost reads straight off
+    # the input rate.
+    tokens: dict[str, Any] = {
+        "input_tokens": 1_000_000,
+        "output_tokens": 0,
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+    }
+    resp = _post(
+        client,
+        master_key_header,
+        [
+            _event(
+                "org-before",
+                timestamp=(override_from - timedelta(hours=1)).isoformat().replace("+00:00", "Z"),
+                **tokens,
+            ),
+            _event(
+                "org-after",
+                timestamp=(override_from + timedelta(minutes=10)).isoformat().replace("+00:00", "Z"),
+                **tokens,
+            ),
+        ],
+    )
+    assert resp.json()["accepted"] == 2, resp.text
+
+    before = db_session.query(UsageLog).filter(UsageLog.source_event_id == "org-before").one()
+    after = db_session.query(UsageLog).filter(UsageLog.source_event_id == "org-after").one()
+    assert before.cost == pytest.approx(1.0), "predates the override, so the deployment list still prices it"
+    assert after.cost == pytest.approx(5.0), "inside the override period, so the organization's rate prices it"
+
+
+def test_imported_usage_is_unchanged_when_no_override_exists(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """The other half of the definition of done: nothing moves without an override."""
+    _seed_user(client, master_key_header)
+    _seed_pricing(
+        client,
+        master_key_header,
+        input_price=1.0,
+        output_price=1.0,
+        cache_read_price=0.0,
+        cache_write_price=0.0,
+    )
+
+    resp = _post(
+        client,
+        master_key_header,
+        [_event("no-override", input_tokens=1_000_000, output_tokens=0, cache_read_tokens=0, cache_write_tokens=0)],
+    )
+    assert resp.json()["accepted"] == 1, resp.text
+
+    row = db_session.query(UsageLog).filter(UsageLog.source_event_id == "no-override").one()
+    assert row.cost == pytest.approx(1.0)
+
+
+def test_another_organizations_override_does_not_price_an_import(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """Whose rates apply is decided by the importing key's workspace, nothing else.
+
+    The tenant boundary on the import path. A second organization holding a rate
+    for the same model must not reach an import it has no relationship to, and
+    the way that could break is subtle: resolving the organization from the
+    *event* (its user, its session label) instead of from the workspace the
+    importing key belongs to would look correct in a single-organization test and
+    leak rates in a real deployment.
+    """
+    _seed_user(client, master_key_header)
+    _seed_pricing(
+        client,
+        master_key_header,
+        input_price=1.0,
+        output_price=1.0,
+        cache_read_price=0.0,
+        cache_write_price=0.0,
+    )
+
+    # A far cheaper rate for the same model, in an organization the importing
+    # credential has nothing to do with. Written straight to the table: the route
+    # is scoped to `/me`, so this is not reachable through the API by design.
+    other = Organization(name="Other", slug="other-import-org")
+    db_session.add(other)
+    db_session.flush()
+    db_session.add(
+        OrganizationModelPricing(
+            organization_id=other.id,
+            model_key=_MODEL_KEY,
+            input_price_per_million=0.01,
+            output_price_per_million=0.01,
+            effective_from=datetime.now(UTC) - timedelta(days=365),
+            pricing_tiers=[],
+        )
+    )
+    db_session.commit()
+
+    resp = _post(
+        client,
+        master_key_header,
+        [_event("cross-org", input_tokens=1_000_000, output_tokens=0, cache_read_tokens=0, cache_write_tokens=0)],
+    )
+    assert resp.json()["accepted"] == 1, resp.text
+
+    row = db_session.query(UsageLog).filter(UsageLog.source_event_id == "cross-org").one()
+    assert row.cost == pytest.approx(1.0), "the deployment rate, never another organization's override"
+
+
+def test_a_keys_import_prices_at_its_own_organizations_rate(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """The key-to-workspace-to-organization wiring, on the recommended import path.
+
+    Every other pricing test here imports with the master key, which has no key
+    row and lands in the default workspace, so none of them can tell "resolved the
+    importing key's organization" apart from "used the default organization for
+    everything". This one can, because three rates are in play and they disagree:
+    the deployment list says 1.0, the *default* organization says 5.0, and the
+    organization the importing key actually belongs to says 0.25. Only the last is
+    correct, and each wrong answer names a different bug.
+    """
+    _seed_user(client, master_key_header, "dev-org-b")
+    _seed_pricing(
+        client,
+        master_key_header,
+        input_price=1.0,
+        output_price=1.0,
+        cache_read_price=0.0,
+        cache_write_price=0.0,
+    )
+    # The trap: an override on the default organization, which is where a
+    # master-key import lands and where a regression would wrongly resolve to.
+    default_override = client.post(
+        "/v1/organizations/me/pricing",
+        json={
+            "model_key": _MODEL_KEY,
+            "input_price_per_million": 5.0,
+            "output_price_per_million": 5.0,
+            "effective_from": (datetime.now(UTC) - timedelta(days=365)).isoformat(),
+        },
+        headers=master_key_header,
+    )
+    assert default_override.status_code == 201, default_override.text
+
+    # A second organization, with its own workspace and its own much cheaper rate.
+    other = Organization(name="Other Co", slug="other-co-import")
+    db_session.add(other)
+    db_session.flush()
+    workspace = Workspace(name="Other Platform", organization_id=other.id)
+    db_session.add(workspace)
+    db_session.flush()
+    db_session.add(
+        OrganizationModelPricing(
+            organization_id=other.id,
+            model_key=_MODEL_KEY,
+            input_price_per_million=0.25,
+            output_price_per_million=0.25,
+            effective_from=datetime.now(UTC) - timedelta(days=365),
+            pricing_tiers=[],
+        )
+    )
+    db_session.commit()
+    workspace_id = str(workspace.id)
+
+    headers = _make_key(client, master_key_header, "dev-org-b", workspace_id=workspace_id)
+    resp = _post(
+        client,
+        headers,
+        [_event("key-org", input_tokens=1_000_000, output_tokens=0, cache_read_tokens=0, cache_write_tokens=0)],
+        user_id=None,
+    )
+    assert resp.json()["accepted"] == 1, resp.text
+
+    row = db_session.query(UsageLog).filter(UsageLog.source_event_id == "key-org").one()
+    assert row.cost == pytest.approx(0.25), (
+        "1.0 means overrides were skipped; 5.0 means the default organization was used "
+        "instead of the importing key's own"
+    )
+    # The row and the rate agree on which workspace this import belonged to.
+    assert str(row.workspace_id) == workspace_id
+
+
 def test_read_surface_source_filter_and_summary(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
@@ -500,6 +726,31 @@ def test_rejects_reserved_gateway_source(client: TestClient, master_key_header: 
     resp = _post(client, master_key_header, [_event()], source="gateway")
     assert resp.status_code == 422
     assert "reserved" in resp.text
+
+
+def test_rejects_reserved_otari_ai_source_prefix(client: TestClient, master_key_header: dict[str, str]) -> None:
+    """otari.ai stamps the rows its backfill writes `otari-ai:<slug>`; an import under
+    that prefix is a lookalike in every reconciliation total."""
+    _seed_user(client, master_key_header)
+    for source in ("otari-ai:gateway", "otari-ai:claude_code", "OTARI-AI:gateway"):
+        resp = _post(client, master_key_header, [_event()], source=source)
+        assert resp.status_code == 422, f"{source}: {resp.text}"
+        assert "reserved" in resp.text
+
+
+def test_accepts_source_with_colon_outside_the_reserved_prefix(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """The guard is a prefix check, not a ban on colons in a slug."""
+    _seed_user(client, master_key_header)
+    _seed_pricing(client, master_key_header)
+
+    resp = _post(client, master_key_header, [_event("colon_ok")], source="foo:bar")
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["accepted"] == 1
+
+    row = db_session.query(UsageLog).filter(UsageLog.source_event_id == "colon_ok").one()
+    assert row.source == "foo:bar"
 
 
 def test_rejects_token_counts_above_column_width(client: TestClient, master_key_header: dict[str, str]) -> None:

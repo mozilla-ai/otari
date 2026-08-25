@@ -9,11 +9,13 @@ import { useDeployment } from "@/shared/hooks/useDeployment"
 // The right end of the top bar: the links that are not destinations in either
 // rail.
 //
-// Documentation is the guide bundled with this gateway. It sits in the chrome
-// because it is read alongside a page rather than instead of one, and the
-// design's account menu has no row for it; the menu keeps a row of its own
-// anyway, because this cluster is hidden below `md` and the guide would
-// otherwise have no entry point on a phone.
+// Documentation is the guide bundled with this gateway, unless the deployment
+// named documentation of its own (`docs_url`), which is what a hosted build
+// points at its product docs. It sits in the chrome because it is read
+// alongside a page rather than instead of one, and the design's account menu
+// has no row for it; the menu keeps a row of its own anyway, because this
+// cluster is hidden below `md` and the guide would otherwise have no entry
+// point on a phone.
 //
 // Playground is a hosted surface, gated on the two things it actually needs:
 // it is a page otari.ai serves and this gateway does not, so the link needs
@@ -30,7 +32,7 @@ const ACTION =
   "flex min-h-[2.125rem] items-center rounded-md px-1 text-chrome-row font-medium text-muted transition-colors hover:text-foreground"
 
 export function TopBarActions() {
-  const { management_url } = useDeployment()
+  const { management_url, docs_url } = useDeployment()
   const platform = management_url?.replace(/\/$/, "")
 
   return (
@@ -39,9 +41,20 @@ export function TopBarActions() {
     // cluster and so inherits that, which is what otari.ai's own navbar does
     // with the balance.
     <div className="hidden shrink-0 items-center gap-5 md:flex">
-      <Link to="/docs" className={ACTION}>
-        Documentation
-      </Link>
+      {docs_url ? (
+        <a
+          href={docs_url}
+          target="_blank"
+          rel="noopener noreferrer"
+          className={ACTION}
+        >
+          Documentation
+        </a>
+      ) : (
+        <Link to="/docs" className={ACTION}>
+          Documentation
+        </Link>
+      )}
       {platform ? (
         <EntitlementGate capability="playground">
           <a
