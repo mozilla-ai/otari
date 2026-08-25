@@ -14,10 +14,13 @@ import asyncio
 import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
+from typing import Any
+from unittest.mock import patch
 
 import pytest
 import pytest_asyncio
 from sqlalchemy import select
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from gateway.models.entities import Budget, BudgetReservation, BudgetReservationScope, ScopedBudget, User
@@ -377,7 +380,9 @@ async def test_terminal_rows_are_pruned_past_the_retention_window(
     assert settled.reservation_id is not None
     async_db.expire_all()
     row = await async_db.get_one(BudgetReservation, settled.reservation_id)
-    row.updated_at = datetime.now(UTC) - timedelta(days=8)
+    # Retention ages a row by ``expires_at``, not ``updated_at``, so the whole
+    # predicate rides ix_budget_reservations_status_expires_at.
+    row.expires_at = datetime.now(UTC) - timedelta(days=8)
     await async_db.commit()
 
     assert await ledger.prune_terminal(async_db, older_than_sec=604800, batch_size=10) == 1
@@ -435,6 +440,54 @@ async def test_the_sweep_reclaims_across_users(async_db: AsyncSession) -> None:
     assert await ledger.sweep_expired(async_db, batch_size=10) == 2
     for fixture in (first, second):
         assert (await _user(async_db, fixture.user_id)).reserved == Decimal("0.000000")
+
+
+@pytest.mark.asyncio
+async def test_a_failed_settlement_leaves_the_row_reclaimable(
+    async_db: AsyncSession, tenancy: Fixture
+) -> None:
+    """A settlement that fails mid-flight rolls the claim back with it.
+
+    The claim and the writes it authorizes are one transaction precisely so this
+    cannot happen: committing the claim first would leave the row terminal with
+    its hold still held and its spend unrecorded, and no later sweep would look
+    at that row again, which is strictly worse than the pre-ledger behavior.
+    """
+    await _with_budget(async_db, tenancy)
+    cap = await _scoped(async_db, scope_type="organization", scope_id=str(tenancy.organization_id), max_budget=10.0)
+    async_db.add(cap)
+    await async_db.commit()
+
+    # Captured before the rollback below, which expires every ORM instance in the
+    # session, so reading ``cap.id`` afterwards would be sync IO on an async session.
+    cap_id = cap.id
+    handle = await reserve_budget(async_db, tenancy.user_id, 3.0, scope=tenancy.scope())
+    assert handle.reservation_id is not None
+
+    # Fail the user-row UPDATE that lands after the claim, the way a transient
+    # database error would.
+    original = AsyncSession.execute
+    calls = {"n": 0}
+
+    async def failing_execute(self: AsyncSession, statement: Any, *args: Any, **kwargs: Any) -> Any:
+        calls["n"] += 1
+        if calls["n"] == 3:  # claim, scoped settle, then the user row
+            raise SQLAlchemyError("transient failure")
+        return await original(self, statement, *args, **kwargs)
+
+    with patch.object(AsyncSession, "execute", failing_execute), pytest.raises(SQLAlchemyError):
+        await reconcile_reservation(async_db, handle, 1.0)
+    await async_db.rollback()
+
+    # The row is still claimable, so the sweep can still return the hold.
+    assert await _status(async_db, handle.reservation_id) == ledger.RESERVATION_ACTIVE
+    row = await async_db.get_one(BudgetReservation, handle.reservation_id)
+    row.expires_at = datetime.now(UTC) - timedelta(minutes=1)
+    await async_db.commit()
+    assert await ledger.sweep_expired(async_db, batch_size=10) == 1
+    assert (await _user(async_db, tenancy.user_id)).reserved == Decimal("0.000000")
+    _, reserved = await _counters(async_db, cap_id)
+    assert reserved == pytest.approx(0.0)
 
 
 @pytest.mark.asyncio

@@ -337,8 +337,15 @@ def _release_expression(amount: Decimal) -> object:
     )
 
 
-async def release(db: AsyncSession, budget_ids: Sequence[str], amount: Decimal) -> None:
-    """Give a held amount back to every ceiling that took it."""
+async def release(
+    db: AsyncSession, budget_ids: Sequence[str], amount: Decimal, *, commit: bool = True
+) -> None:
+    """Give a held amount back to every ceiling that took it.
+
+    ``commit=False`` folds this into a surrounding unit of work, which is what
+    lets the reservation ledger land a hold's terminal status and the release it
+    authorizes in one transaction instead of two.
+    """
     if not budget_ids or amount <= ZERO:
         return
     await db.execute(
@@ -347,7 +354,8 @@ async def release(db: AsyncSession, budget_ids: Sequence[str], amount: Decimal) 
         .values(reserved_spend=_release_expression(amount))
         .execution_options(synchronize_session=False)
     )
-    await db.commit()
+    if commit:
+        await db.commit()
 
 
 async def reserve(
@@ -404,8 +412,13 @@ async def settle(
     actual_cost: Decimal,
     held: Decimal,
     counts_toward_budget: bool = True,
+    commit: bool = True,
 ) -> None:
-    """Record the real cost on every ceiling and release what the request held."""
+    """Record the real cost on every ceiling and release what the request held.
+
+    ``commit=False`` folds this into a surrounding unit of work; see
+    :func:`release`.
+    """
     if not budget_ids:
         return
     values: dict[str, object] = {}
@@ -421,7 +434,8 @@ async def settle(
         .values(**values)
         .execution_options(synchronize_session=False)
     )
-    await db.commit()
+    if commit:
+        await db.commit()
 
 
 __all__ = [

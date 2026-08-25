@@ -877,7 +877,9 @@ class BatchRecord(Base):
     # this record is the strict ownership anchor, so it must always name an owner.
     # CASCADE: deleting the user drops the ownership record (the user's keys are
     # gone too, and usage_logs remain the billing history).
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True
+    )
     # SET NULL: a key may be revoked while its batch is still in flight.
     api_key_id: Mapped[str | None] = mapped_column(ForeignKey("api_keys.id", ondelete="SET NULL"), index=True)
     # The workspace this batch was CREATED in (otari#643 follow-up), so
@@ -1175,11 +1177,11 @@ class BudgetReservation(Base):
     )
 
     id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
-    # Indexed for the opportunistic per-user reclaim on the reserve path, which
-    # asks for one user's expired holds on every request that reserves.
-    user_id: Mapped[str] = mapped_column(
-        ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True
-    )
+    # No ``index=True``: the composite in ``__table_args__`` leads on this column,
+    # so a plain index here would be a second, redundant one, and the migration
+    # deliberately does not create it. Declaring it anyway made a ``create_all``
+    # schema and a migrated one disagree.
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False)
     # What the per-user leg holds in ``users.reserved``. Zero when the request
     # held only scoped ceilings (a user with no budget row still passes those).
     estimate: Mapped[Decimal] = mapped_column(UsdCost(), default=Decimal(0), server_default="0")

@@ -32,16 +32,13 @@ row is the pre-existing leak this sweep bounds, while a row with no hold would
 have the sweep hand back an amount nobody is holding and under-count the live
 ones.
 
-**The claim commits before the release**, which is what makes a race between two
-finalizers resolve correctly, and it leaves one window this module does not
-close: a process that dies between the two leaves a terminal row whose hold was
-never returned, and no later sweep will look at it again. That is the same
-per-step-commit trade-off the rest of this path already takes (see
-``scoped_budget_service``'s "the price is that a partial reservation is
-possible"), and it leaves such a hold exactly where the pre-ledger code left
-every leaked hold. Closing it needs the claim and both releases in one
-transaction, which ``scoped_budget_service.release`` committing for itself
-currently prevents.
+**The claim and the release it authorizes commit together.** A row is never
+observed terminal while its hold is still outstanding, because the two are one
+transaction: if the release fails, the claim rolls back with it and the row stays
+active for a later sweep to find. That is why ``try_terminate`` and
+``scoped_budget_service.release``/``settle`` both take ``commit=False``. The
+price is a row lock on the reservation held for the length of that transaction,
+which is a couple of UPDATEs and never spans the provider call the hold guards.
 
 Standalone mode only. Hybrid mode reserves nothing locally, because the platform
 holds against its own ledger.
@@ -77,6 +74,13 @@ RESERVATION_ACTIVE = "active"
 RESERVATION_SETTLED = "settled"  # Actual recorded, hold released
 RESERVATION_RELEASED = "released"  # Hold returned with no spend recorded
 RESERVATION_EXPIRED = "expired"  # Reclaimed by the TTL sweep after leaking
+
+# The three a row can rest in. Written out as a set the retention query can ask
+# for by equality: ``status != ACTIVE`` reads the same but is an inequality on
+# the leading column of ``ix_budget_reservations_status_expires_at``, which the
+# planner cannot use, so it degenerated into a full scan of a table that gains a
+# row per billable request.
+TERMINAL_STATUSES = (RESERVATION_SETTLED, RESERVATION_RELEASED, RESERVATION_EXPIRED)
 
 
 def release_reserved_expression(estimate: Decimal) -> object:
@@ -193,7 +197,9 @@ async def grow(
     return True
 
 
-async def try_terminate(db: AsyncSession, reservation_id: str | None, status: str) -> bool:
+async def try_terminate(
+    db: AsyncSession, reservation_id: str | None, status: str, *, commit: bool = True
+) -> bool:
     """Claim the ACTIVE -> terminal transition, reporting whether this caller won.
 
     This is the whole point of the ledger. The ``WHERE status = ACTIVE`` guard is
@@ -203,6 +209,12 @@ async def try_terminate(db: AsyncSession, reservation_id: str | None, status: st
 
     A ``None`` id means the request holds nothing worth ledgering (see
     :func:`record`), and the caller keeps its pre-ledger behavior.
+
+    ``commit=False`` leaves the claim in the caller's transaction, which is how
+    the status and the release it authorizes land together. A concurrent
+    finalizer then blocks on this row's lock until that transaction ends, re-reads
+    the now-terminal status and gets ``rowcount`` 0, which is the same answer it
+    got before, one wait later.
     """
     if reservation_id is None:
         return True
@@ -215,11 +227,14 @@ async def try_terminate(db: AsyncSession, reservation_id: str | None, status: st
         .values(status=status)
         .execution_options(synchronize_session=False)
     )
-    await db.commit()
+    if commit:
+        await db.commit()
     return bool(getattr(result, "rowcount", 0))
 
 
-async def try_settle_reclaimed(db: AsyncSession, reservation_id: str | None) -> bool:
+async def try_settle_reclaimed(
+    db: AsyncSession, reservation_id: str | None, *, commit: bool = True
+) -> bool:
     """Claim EXPIRED -> SETTLED for a request that outlived its own hold.
 
     The sweep reclaims a hold on the assumption that its request is gone, and it
@@ -242,7 +257,8 @@ async def try_settle_reclaimed(db: AsyncSession, reservation_id: str | None) -> 
         .values(status=RESERVATION_SETTLED)
         .execution_options(synchronize_session=False)
     )
-    await db.commit()
+    if commit:
+        await db.commit()
     return bool(getattr(result, "rowcount", 0))
 
 
@@ -250,7 +266,9 @@ async def _release_holds(db: AsyncSession, reservation: BudgetReservation) -> No
     """Return every hold one reclaimed row placed, on both mechanisms.
 
     Only ever called by the winner of :func:`try_terminate`, so it can subtract
-    unconditionally.
+    unconditionally. Does not commit: the caller commits the claim and these
+    releases together, so a row can never end up terminal with its hold still
+    outstanding.
     """
     lines = (
         (
@@ -271,7 +289,7 @@ async def _release_holds(db: AsyncSession, reservation: BudgetReservation) -> No
         if amount > ZERO:
             by_amount.setdefault(amount, []).append(scoped_budget_id)
     for amount, budget_ids in by_amount.items():
-        await release_scoped(db, budget_ids, amount)
+        await release_scoped(db, budget_ids, amount, commit=False)
 
     if reservation.user_reserved and reservation.estimate > ZERO:
         await db.execute(
@@ -280,16 +298,22 @@ async def _release_holds(db: AsyncSession, reservation: BudgetReservation) -> No
             .values(reserved=release_reserved_expression(reservation.estimate))
             .execution_options(synchronize_session=False)
         )
-        await db.commit()
 
 
 async def _reclaim(db: AsyncSession, expired: Sequence[BudgetReservation]) -> int:
     """Expire and release each leaked hold, returning how many this call claimed."""
     reclaimed = 0
     for reservation in expired:
-        if not await try_terminate(db, reservation.id, RESERVATION_EXPIRED):
+        # Claim and release in one transaction. Committing the claim first would
+        # mean a failure in the release left a row terminal with its hold still
+        # held, and no later sweep would look at that row again.
+        if not await try_terminate(db, reservation.id, RESERVATION_EXPIRED, commit=False):
+            # Empty transaction, and ``rollback()`` would expire the rows this loop
+            # is still iterating over (see budget_service for the same trap).
+            await db.commit()
             continue
         await _release_holds(db, reservation)
+        await db.commit()
         reclaimed += 1
     return reclaimed
 
@@ -369,6 +393,15 @@ async def prune_terminal(db: AsyncSession, *, older_than_sec: int, batch_size: i
     Deletes by id rather than with one predicate DELETE so the statement stays
     bounded, which is what keeps a first run against a long-lived deployment from
     taking a lock over most of the table. The lines cascade.
+
+    Ages rows by ``expires_at`` rather than by ``updated_at``, and asks for the
+    terminal statuses by equality, so the whole predicate rides
+    ``ix_budget_reservations_status_expires_at``. ``updated_at`` is the more
+    literal answer to "when did this go terminal" and would need a third index to
+    ask for: ``.limit()`` bounds the result and not the scan, so without one the
+    steady state is the worst case, a full scan every tick to return nothing.
+    ``expires_at`` is the row's creation plus the TTL, so over a retention window
+    measured in days the two differ by minutes.
     """
     if older_than_sec <= 0:
         return 0
@@ -378,8 +411,8 @@ async def prune_terminal(db: AsyncSession, *, older_than_sec: int, batch_size: i
             await db.execute(
                 select(BudgetReservation.id)
                 .where(
-                    BudgetReservation.status != RESERVATION_ACTIVE,
-                    BudgetReservation.updated_at < cutoff,
+                    BudgetReservation.status.in_(TERMINAL_STATUSES),
+                    BudgetReservation.expires_at < cutoff,
                 )
                 .limit(batch_size)
             )
@@ -455,6 +488,7 @@ __all__ = [
     "record",
     "run_reservation_sweeper",
     "release_reserved_expression",
+    "TERMINAL_STATUSES",
     "sweep_expired",
     "try_settle_reclaimed",
     "try_terminate",

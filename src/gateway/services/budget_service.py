@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import contextlib
 import uuid
 from dataclasses import dataclass
 from datetime import UTC, datetime
@@ -290,20 +291,36 @@ async def _held_handle(
     ledger never claims a hold the counters do not have. The reverse window (a
     hold with no row) is the leak the sweep already bounds; this one would have
     the sweep hand back an amount nobody holds.
+
+    A ledger write that fails does not fail the request. The hold is already live
+    at this point, so raising would leave the caller with no handle to reconcile
+    or refund and guarantee the very leak the ledger exists to prevent. Degrading
+    to an unledgered hold keeps the caller's normal settlement path working,
+    which is exactly the behavior every reservation had before this table existed.
     """
-    reservation_id = (
-        await ledger.record(
-            db,
-            user_id=user_id,
-            estimate=estimate,
-            user_reserved=user_reserved,
-            scoped_budgets=scoped,
-            scoped_estimate=scoped_estimate,
-            ttl_seconds=ttl_seconds,
-        )
-        if record_reservation
-        else None
-    )
+    reservation_id: str | None = None
+    if record_reservation:
+        try:
+            reservation_id = await ledger.record(
+                db,
+                user_id=user_id,
+                estimate=estimate,
+                user_reserved=user_reserved,
+                scoped_budgets=scoped,
+                scoped_estimate=scoped_estimate,
+                ttl_seconds=ttl_seconds,
+            )
+        except SQLAlchemyError:
+            # Leave the session usable for the caller's own settlement writes; a
+            # failed commit otherwise poisons it for the rest of the request.
+            with contextlib.suppress(SQLAlchemyError):
+                await db.rollback()
+            logger.warning(
+                "Could not write the reservation ledger row for user %s; the hold is live but "
+                "unledgered, so it settles through the handle and is not reclaimable by the sweep.",
+                user_id,
+                exc_info=True,
+            )
     return ReservationHandle(
         user_id=user_id,
         estimate=estimate,
@@ -548,9 +565,11 @@ async def reconcile_reservation(db: AsyncSession, handle: ReservationHandle, act
 
     Note: if this UPDATE/commit fails (e.g. a transient DB error after the
     provider call succeeded), the held estimate is not released and stays in
-    ``users.reserved``. The ledger row stays active with it, so the TTL sweep
-    reclaims it. Before the ledger nothing did: the budget reset zeroes ``spend``
-    and leaves ``reserved`` untouched, so such a hold was never given back.
+    ``users.reserved``. The claim and the writes below are one transaction, so a
+    failure rolls the row back to active rather than leaving it terminal with its
+    hold still held, and the TTL sweep reclaims it. Before the ledger nothing did:
+    the budget reset zeroes ``spend`` and leaves ``reserved`` untouched, so such a
+    hold was never given back.
 
     Idempotent by reservation identity: the first caller to claim the ledger row
     does the work and any later one is a no-op, so two settlement sites firing for
@@ -559,7 +578,7 @@ async def reconcile_reservation(db: AsyncSession, handle: ReservationHandle, act
     the spend it still owes and releases nothing.
 
     This is the single authority for writing ``users.spend`` on the billable
-    path — the usage-log writer no longer touches spend, so reconciliation must
+    path: the usage-log writer no longer touches spend, so reconciliation must
     run for every served request (even when ``actual_cost`` is 0, to release the
     reservation). Runs inline in the request, not in the (possibly batched) log
     writer, so the next request's reservation sees fresh totals.
@@ -575,7 +594,7 @@ async def reconcile_reservation(db: AsyncSession, handle: ReservationHandle, act
     # expression clamps at zero that would pass silently as an under-count of
     # live holds rather than fail.
     reclaimed_early = False
-    if not await ledger.try_terminate(db, handle.reservation_id, ledger.RESERVATION_SETTLED):
+    if not await ledger.try_terminate(db, handle.reservation_id, ledger.RESERVATION_SETTLED, commit=False):
         # Losing that claim has two causes and they settle differently. Another
         # settlement site for this request already ran, and there is nothing left
         # to do; or the TTL sweep reclaimed the hold while the request was still
@@ -583,7 +602,12 @@ async def reconcile_reservation(db: AsyncSession, handle: ReservationHandle, act
         # is still owed. Dropping it would leave ``users.spend`` permanently short
         # of the sum of that user's rows, which is the counter a 403 is decided
         # against.
-        if not await ledger.try_settle_reclaimed(db, handle.reservation_id):
+        if not await ledger.try_settle_reclaimed(db, handle.reservation_id, commit=False):
+        # Commit rather than roll back the empty transaction: the guarded UPDATE
+        # matched nothing, so there is nothing to undo, and ``rollback()`` expires
+        # every ORM instance in the session regardless of ``expire_on_commit``,
+        # turning the caller's next attribute read into sync IO on an async session.
+            await db.commit()
             return
         reclaimed_early = True
         logger.warning(
@@ -612,15 +636,18 @@ async def reconcile_reservation(db: AsyncSession, handle: ReservationHandle, act
         actual_cost=spent,
         held=ZERO if reclaimed_early else handle.scoped_estimate,
         counts_toward_budget=handle.counts_toward_budget,
+        commit=False,
     )
-    if not values:
-        return
-    await db.execute(
-        update(User)
-        .where(User.user_id == handle.user_id, User.deleted_at.is_(None))
-        .values(**values)
-        .execution_options(synchronize_session=False)
-    )
+    if values:
+        await db.execute(
+            update(User)
+            .where(User.user_id == handle.user_id, User.deleted_at.is_(None))
+            .values(**values)
+            .execution_options(synchronize_session=False)
+        )
+    # One commit for the claim, the ceilings and the user row. Committing the
+    # claim on its own would mean a failure below left the row terminal with its
+    # hold still held and its spend unrecorded, which no sweep would ever revisit.
     await db.commit()
 
 
@@ -651,17 +678,22 @@ async def refund_reservation(db: AsyncSession, handle: ReservationHandle) -> Non
     reachable from roughly seven sites, and only control flow (a ``raise`` after
     each) has kept two of them from firing for one request.
     """
-    if not await ledger.try_terminate(db, handle.reservation_id, ledger.RESERVATION_RELEASED):
+    if not await ledger.try_terminate(db, handle.reservation_id, ledger.RESERVATION_RELEASED, commit=False):
+    # Commit rather than roll back the empty transaction: the guarded UPDATE
+    # matched nothing, so there is nothing to undo, and ``rollback()`` expires
+    # every ORM instance in the session regardless of ``expire_on_commit``,
+    # turning the caller's next attribute read into sync IO on an async session.
+        await db.commit()
         return
-    await release_scoped(db, handle.scoped_budget_ids, handle.scoped_estimate)
-    if not handle.reserved:
-        return
-    await db.execute(
-        update(User)
-        .where(User.user_id == handle.user_id, User.deleted_at.is_(None))
-        .values(reserved=_release_reserved(handle.estimate))
-        .execution_options(synchronize_session=False)
-    )
+    await release_scoped(db, handle.scoped_budget_ids, handle.scoped_estimate, commit=False)
+    if handle.reserved:
+        await db.execute(
+            update(User)
+            .where(User.user_id == handle.user_id, User.deleted_at.is_(None))
+            .values(reserved=_release_reserved(handle.estimate))
+            .execution_options(synchronize_session=False)
+        )
+    # One commit, for the reason given in :func:`reconcile_reservation`.
     await db.commit()
 
 
