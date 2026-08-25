@@ -14,7 +14,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
 from gateway.models.entities import OrganizationModelPricing, UsageLog, User
-from gateway.models.tenancy import Organization
+from gateway.models.tenancy import Organization, Workspace
 
 _SRC = "claude_code"
 _MODEL_KEY = "anthropic:claude-sonnet-4-6"
@@ -106,21 +106,23 @@ def _make_key(
     *,
     exclude_from_budget: bool = True,
     reject_user_mismatch: bool | None = None,
+    workspace_id: str | None = None,
 ) -> dict[str, str]:
     """Create an API key bound to `user_id` and return its auth header.
 
-    Import keys must be budget-exempt, so that is the default here.
+    Import keys must be budget-exempt, so that is the default here. Passing
+    `workspace_id` puts the key in a named workspace instead of the default one,
+    which is what lets a test import as an organization other than the default.
     """
-    resp = client.post(
-        "/v1/keys",
-        json={
-            "key_name": f"importer-{user_id}",
-            "user_id": user_id,
-            "exclude_from_budget": exclude_from_budget,
-            "reject_user_mismatch": reject_user_mismatch,
-        },
-        headers=master_key_header,
-    )
+    body: dict[str, Any] = {
+        "key_name": f"importer-{user_id}",
+        "user_id": user_id,
+        "exclude_from_budget": exclude_from_budget,
+        "reject_user_mismatch": reject_user_mismatch,
+    }
+    if workspace_id is not None:
+        body["workspace_id"] = workspace_id
+    resp = client.post("/v1/keys", json=body, headers=master_key_header)
     assert resp.status_code == 200, resp.text
     return {"Otari-Key": f"Bearer {resp.json()['key']}"}
 
@@ -455,10 +457,10 @@ def test_organization_override_prices_imported_usage_at_the_event_timestamp(
 ) -> None:
     """An imported event prices at its organization's rate, as of its own timestamp.
 
-    The wiring this proves is the one the unit tests cannot reach: the importing
-    key names a workspace, the workspace names the organization, and that is the
-    organization whose rates ingest resolves against. Nothing is read from the
-    request body.
+    Imported here with the master key, which has no key row and therefore lands
+    in the default workspace: this covers the deployment-wide branch and the
+    timestamp rule, not the key-to-workspace wiring. That wiring is a separate
+    test below, because the master key cannot demonstrate it.
 
     Two events either side of the override's start, in one batch imported after
     both, so the same run shows the rate applying *and* shows it applying by the
@@ -596,6 +598,80 @@ def test_another_organizations_override_does_not_price_an_import(
 
     row = db_session.query(UsageLog).filter(UsageLog.source_event_id == "cross-org").one()
     assert row.cost == pytest.approx(1.0), "the deployment rate, never another organization's override"
+
+
+def test_a_keys_import_prices_at_its_own_organizations_rate(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """The key-to-workspace-to-organization wiring, on the recommended import path.
+
+    Every other pricing test here imports with the master key, which has no key
+    row and lands in the default workspace, so none of them can tell "resolved the
+    importing key's organization" apart from "used the default organization for
+    everything". This one can, because three rates are in play and they disagree:
+    the deployment list says 1.0, the *default* organization says 5.0, and the
+    organization the importing key actually belongs to says 0.25. Only the last is
+    correct, and each wrong answer names a different bug.
+    """
+    _seed_user(client, master_key_header, "dev-org-b")
+    _seed_pricing(
+        client,
+        master_key_header,
+        input_price=1.0,
+        output_price=1.0,
+        cache_read_price=0.0,
+        cache_write_price=0.0,
+    )
+    # The trap: an override on the default organization, which is where a
+    # master-key import lands and where a regression would wrongly resolve to.
+    default_override = client.post(
+        "/v1/organizations/me/pricing",
+        json={
+            "model_key": _MODEL_KEY,
+            "input_price_per_million": 5.0,
+            "output_price_per_million": 5.0,
+            "effective_from": (datetime.now(UTC) - timedelta(days=365)).isoformat(),
+        },
+        headers=master_key_header,
+    )
+    assert default_override.status_code == 201, default_override.text
+
+    # A second organization, with its own workspace and its own much cheaper rate.
+    other = Organization(name="Other Co", slug="other-co-import")
+    db_session.add(other)
+    db_session.flush()
+    workspace = Workspace(name="Other Platform", organization_id=other.id)
+    db_session.add(workspace)
+    db_session.flush()
+    db_session.add(
+        OrganizationModelPricing(
+            organization_id=other.id,
+            model_key=_MODEL_KEY,
+            input_price_per_million=0.25,
+            output_price_per_million=0.25,
+            effective_from=datetime.now(UTC) - timedelta(days=365),
+            pricing_tiers=[],
+        )
+    )
+    db_session.commit()
+    workspace_id = str(workspace.id)
+
+    headers = _make_key(client, master_key_header, "dev-org-b", workspace_id=workspace_id)
+    resp = _post(
+        client,
+        headers,
+        [_event("key-org", input_tokens=1_000_000, output_tokens=0, cache_read_tokens=0, cache_write_tokens=0)],
+        user_id=None,
+    )
+    assert resp.json()["accepted"] == 1, resp.text
+
+    row = db_session.query(UsageLog).filter(UsageLog.source_event_id == "key-org").one()
+    assert row.cost == pytest.approx(0.25), (
+        "1.0 means overrides were skipped; 5.0 means the default organization was used "
+        "instead of the importing key's own"
+    )
+    # The row and the rate agree on which workspace this import belonged to.
+    assert str(row.workspace_id) == workspace_id
 
 
 def test_read_surface_source_filter_and_summary(
