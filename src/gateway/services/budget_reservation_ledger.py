@@ -197,9 +197,7 @@ async def grow(
     return True
 
 
-async def try_terminate(
-    db: AsyncSession, reservation_id: str | None, status: str, *, commit: bool = True
-) -> bool:
+async def try_terminate(db: AsyncSession, reservation_id: str | None, status: str) -> bool:
     """Claim the ACTIVE -> terminal transition, reporting whether this caller won.
 
     This is the whole point of the ledger. The ``WHERE status = ACTIVE`` guard is
@@ -210,11 +208,14 @@ async def try_terminate(
     A ``None`` id means the request holds nothing worth ledgering (see
     :func:`record`), and the caller keeps its pre-ledger behavior.
 
-    ``commit=False`` leaves the claim in the caller's transaction, which is how
-    the status and the release it authorizes land together. A concurrent
-    finalizer then blocks on this row's lock until that transaction ends, re-reads
-    the now-terminal status and gets ``rowcount`` 0, which is the same answer it
-    got before, one wait later.
+    **Never commits.** The claim stays in the caller's transaction so the status
+    and the release it authorizes land together; committing here first would leave
+    a terminal row with a live hold whenever the release then failed, and no later
+    sweep revisits a terminal row. There is deliberately no ``commit`` switch,
+    because a call site taking a permissive default is exactly how that window
+    would come back. A concurrent finalizer blocks on this row's lock until the
+    caller's transaction ends, then re-reads the now-terminal status and gets
+    ``rowcount`` 0, which is the answer it would have got anyway, one wait later.
     """
     if reservation_id is None:
         return True
@@ -227,14 +228,10 @@ async def try_terminate(
         .values(status=status)
         .execution_options(synchronize_session=False)
     )
-    if commit:
-        await db.commit()
     return bool(getattr(result, "rowcount", 0))
 
 
-async def try_settle_reclaimed(
-    db: AsyncSession, reservation_id: str | None, *, commit: bool = True
-) -> bool:
+async def try_settle_reclaimed(db: AsyncSession, reservation_id: str | None) -> bool:
     """Claim EXPIRED -> SETTLED for a request that outlived its own hold.
 
     The sweep reclaims a hold on the assumption that its request is gone, and it
@@ -244,7 +241,8 @@ async def try_settle_reclaimed(
     cost would leave the counter a 403 is decided against permanently short.
 
     Same CAS as :func:`try_terminate`, one state further along, so only the first
-    late settlement records the spend and a second is still a no-op.
+    late settlement records the spend and a second is still a no-op. Never commits,
+    for the reason given there.
     """
     if reservation_id is None:
         return False
@@ -257,8 +255,6 @@ async def try_settle_reclaimed(
         .values(status=RESERVATION_SETTLED)
         .execution_options(synchronize_session=False)
     )
-    if commit:
-        await db.commit()
     return bool(getattr(result, "rowcount", 0))
 
 
@@ -307,7 +303,7 @@ async def _reclaim(db: AsyncSession, expired: Sequence[BudgetReservation]) -> in
         # Claim and release in one transaction. Committing the claim first would
         # mean a failure in the release left a row terminal with its hold still
         # held, and no later sweep would look at that row again.
-        if not await try_terminate(db, reservation.id, RESERVATION_EXPIRED, commit=False):
+        if not await try_terminate(db, reservation.id, RESERVATION_EXPIRED):
             # Empty transaction, and ``rollback()`` would expire the rows this loop
             # is still iterating over (see budget_service for the same trap).
             await db.commit()

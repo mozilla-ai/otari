@@ -119,9 +119,7 @@ async def test_a_hold_becomes_a_row_on_both_mechanisms(async_db: AsyncSession, t
 
 
 @pytest.mark.asyncio
-async def test_reconcile_is_idempotent_by_reservation_identity(
-    async_db: AsyncSession, tenancy: Fixture
-) -> None:
+async def test_reconcile_is_idempotent_by_reservation_identity(async_db: AsyncSession, tenancy: Fixture) -> None:
     """A second reconcile records no second spend and returns no second hold.
 
     Without the row this passed silently in the worst possible direction: the
@@ -189,9 +187,7 @@ async def test_reconcile_after_a_refund_writes_nothing(async_db: AsyncSession, t
 
 
 @pytest.mark.asyncio
-async def test_a_second_hold_survives_the_first_being_reclaimed(
-    async_db: AsyncSession, tenancy: Fixture
-) -> None:
+async def test_a_second_hold_survives_the_first_being_reclaimed(async_db: AsyncSession, tenancy: Fixture) -> None:
     """A leaked hold is reclaimed on its own, and a live one beside it is untouched.
 
     This is the guarantee a counter could not give: before the ledger the only
@@ -226,9 +222,7 @@ async def test_a_second_hold_survives_the_first_being_reclaimed(
 
 
 @pytest.mark.asyncio
-async def test_settling_a_reclaimed_hold_does_not_release_it_twice(
-    async_db: AsyncSession, tenancy: Fixture
-) -> None:
+async def test_settling_a_reclaimed_hold_does_not_release_it_twice(async_db: AsyncSession, tenancy: Fixture) -> None:
     """The sweep and the request's own settlement contend; only one releases.
 
     The request that leaked may still be alive and finish after the sweep has
@@ -360,9 +354,7 @@ async def test_a_top_up_after_a_reclaim_returns_the_delta(async_db: AsyncSession
 
 
 @pytest.mark.asyncio
-async def test_terminal_rows_are_pruned_past_the_retention_window(
-    async_db: AsyncSession, tenancy: Fixture
-) -> None:
+async def test_terminal_rows_are_pruned_past_the_retention_window(async_db: AsyncSession, tenancy: Fixture) -> None:
     """Retention deletes finished rows and never touches a live one.
 
     The table gains a row per billable request and nothing else removes one. What
@@ -443,9 +435,7 @@ async def test_the_sweep_reclaims_across_users(async_db: AsyncSession) -> None:
 
 
 @pytest.mark.asyncio
-async def test_a_failed_settlement_leaves_the_row_reclaimable(
-    async_db: AsyncSession, tenancy: Fixture
-) -> None:
+async def test_a_failed_settlement_leaves_the_row_reclaimable(async_db: AsyncSession, tenancy: Fixture) -> None:
     """A settlement that fails mid-flight rolls the claim back with it.
 
     The claim and the writes it authorizes are one transaction precisely so this
@@ -491,9 +481,7 @@ async def test_a_failed_settlement_leaves_the_row_reclaimable(
 
 
 @pytest.mark.asyncio
-async def test_an_orphan_scope_line_does_not_block_the_release(
-    async_db: AsyncSession, tenancy: Fixture
-) -> None:
+async def test_an_orphan_scope_line_does_not_block_the_release(async_db: AsyncSession, tenancy: Fixture) -> None:
     """A ceiling deleted mid-flight leaves a line the release skips.
 
     ``scoped_budget_id`` is deliberately FK-less for this: a delete must not have

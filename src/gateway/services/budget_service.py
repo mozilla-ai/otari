@@ -594,7 +594,7 @@ async def reconcile_reservation(db: AsyncSession, handle: ReservationHandle, act
     # expression clamps at zero that would pass silently as an under-count of
     # live holds rather than fail.
     reclaimed_early = False
-    if not await ledger.try_terminate(db, handle.reservation_id, ledger.RESERVATION_SETTLED, commit=False):
+    if not await ledger.try_terminate(db, handle.reservation_id, ledger.RESERVATION_SETTLED):
         # Losing that claim has two causes and they settle differently. Another
         # settlement site for this request already ran, and there is nothing left
         # to do; or the TTL sweep reclaimed the hold while the request was still
@@ -602,11 +602,11 @@ async def reconcile_reservation(db: AsyncSession, handle: ReservationHandle, act
         # is still owed. Dropping it would leave ``users.spend`` permanently short
         # of the sum of that user's rows, which is the counter a 403 is decided
         # against.
-        if not await ledger.try_settle_reclaimed(db, handle.reservation_id, commit=False):
-        # Commit rather than roll back the empty transaction: the guarded UPDATE
-        # matched nothing, so there is nothing to undo, and ``rollback()`` expires
-        # every ORM instance in the session regardless of ``expire_on_commit``,
-        # turning the caller's next attribute read into sync IO on an async session.
+        if not await ledger.try_settle_reclaimed(db, handle.reservation_id):
+            # Commit rather than roll back the empty transaction: the guarded UPDATE
+            # matched nothing, so there is nothing to undo, and ``rollback()`` expires
+            # every ORM instance in the session regardless of ``expire_on_commit``,
+            # turning the caller's next attribute read into sync IO on an async session.
             await db.commit()
             return
         reclaimed_early = True
@@ -678,11 +678,11 @@ async def refund_reservation(db: AsyncSession, handle: ReservationHandle) -> Non
     reachable from roughly seven sites, and only control flow (a ``raise`` after
     each) has kept two of them from firing for one request.
     """
-    if not await ledger.try_terminate(db, handle.reservation_id, ledger.RESERVATION_RELEASED, commit=False):
-    # Commit rather than roll back the empty transaction: the guarded UPDATE
-    # matched nothing, so there is nothing to undo, and ``rollback()`` expires
-    # every ORM instance in the session regardless of ``expire_on_commit``,
-    # turning the caller's next attribute read into sync IO on an async session.
+    if not await ledger.try_terminate(db, handle.reservation_id, ledger.RESERVATION_RELEASED):
+        # Commit rather than roll back the empty transaction: the guarded UPDATE
+        # matched nothing, so there is nothing to undo, and ``rollback()`` expires
+        # every ORM instance in the session regardless of ``expire_on_commit``,
+        # turning the caller's next attribute read into sync IO on an async session.
         await db.commit()
         return
     await release_scoped(db, handle.scoped_budget_ids, handle.scoped_estimate, commit=False)
