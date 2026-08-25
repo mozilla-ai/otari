@@ -270,15 +270,15 @@ class ModelAlias(Base):
 
     __tablename__ = "model_aliases"
     __table_args__ = (
-        # Deliberately not workspace-scoped yet. Widening this to
-        # (workspace_id, name, user_id) would let two workspaces each hold a
-        # "fast" entry, but resolution reads a process-wide cache keyed by name
-        # alone, so the second would silently shadow the first at request time.
-        # The constraint widens in the change that makes that cache
-        # workspace-aware, not before.
-        UniqueConstraint("name", "user_id", name="uq_model_aliases_name_user"),
+        # Workspace-scoped, so two workspaces can each hold a "fast" entry
+        # pointing somewhere different. Safe only because resolution is keyed by
+        # workspace too (``services/alias_service``); while that cache was keyed
+        # on name alone the second workspace's row silently shadowed the first at
+        # request time, which is why this constraint waited for it.
+        UniqueConstraint("workspace_id", "name", "user_id", name="uq_model_aliases_workspace_name_user"),
         Index(
-            "uq_model_aliases_global_name",
+            "uq_model_aliases_workspace_global_name",
+            "workspace_id",
             "name",
             unique=True,
             sqlite_where=text("user_id IS NULL"),
@@ -287,10 +287,10 @@ class ModelAlias(Base):
     )
 
     id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
-    # No index of its own: uq_model_aliases_name_user already leads with `name`,
-    # and uq_model_aliases_global_name indexes it again for the global rows. A
-    # third copy would be paid for on every write to serve reads that mostly do
-    # not happen, since resolution goes through the process-wide alias cache.
+    # No index of its own: both constraints above lead with `workspace_id` and
+    # carry `name` second, and a listing is always workspace-scoped. A third copy
+    # would be paid for on every write to serve reads that mostly do not happen,
+    # since resolution goes through the process-wide alias cache.
     name: Mapped[str] = mapped_column()
     target: Mapped[str] = mapped_column()
     user_id: Mapped[str | None] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), index=True)
@@ -336,15 +336,14 @@ class RoutingPolicy(Base):
 
     __tablename__ = "routing_policies"
     __table_args__ = (
-        # Deliberately not workspace-scoped yet. Widening this to
-        # (workspace_id, name, user_id) would let two workspaces each hold a
-        # "fast" entry, but resolution reads a process-wide cache keyed by name
-        # alone, so the second would silently shadow the first at request time.
-        # The constraint widens in the change that makes that cache
-        # workspace-aware, not before.
-        UniqueConstraint("name", "user_id", name="uq_routing_policies_name_user"),
+        # Workspace-scoped for the same reason, and on the same precondition, as
+        # :class:`ModelAlias`: ``services/policy_store`` keys its cache by
+        # workspace, so two workspaces holding a "fast" policy each resolve their
+        # own rather than one shadowing the other.
+        UniqueConstraint("workspace_id", "name", "user_id", name="uq_routing_policies_workspace_name_user"),
         Index(
-            "uq_routing_policies_global_name",
+            "uq_routing_policies_workspace_global_name",
+            "workspace_id",
             "name",
             unique=True,
             sqlite_where=text("user_id IS NULL"),
@@ -818,7 +817,10 @@ class FileObject(Base):
     The raw bytes live in a pluggable blob backend (see
     gateway.services.file_store); this row holds metadata plus the backend
     ``storage_ref`` used to fetch them. Files are scoped to ``user_id`` for
-    tenant isolation and soft-deleted via ``deleted_at``.
+    tenant isolation and soft-deleted via ``deleted_at``. ``workspace_id`` is a
+    second, independent axis: it says which workspace the upload was made in, so
+    a key confined to one workspace never reaches another's files even when the
+    same user holds keys in both.
     """
 
     __tablename__ = "file_objects"
@@ -827,6 +829,13 @@ class FileObject(Base):
     # Always set to the authenticated user; non-null enforces the user-scoping
     # contract at the schema level. CASCADE removes a user's files on delete.
     user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), index=True)
+    # The workspace this row belongs to; see `APIKey.workspace_id` for why it is
+    # NOT NULL and RESTRICT rather than nullable and cascading. Existing rows were
+    # backfilled onto the deployment's default workspace, which is also where a
+    # master-key upload lands.
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="RESTRICT"), nullable=False, index=True
+    )
     filename: Mapped[str] = mapped_column()
     mime_type: Mapped[str] = mapped_column()
     bytes: Mapped[int] = mapped_column()
@@ -926,20 +935,35 @@ class RoutingMemory(Base):
     Scoped by ``user_id``, which is the identity the request is routed and billed
     under, so one user's examples never steer another's traffic. CASCADE: the
     records are derived training data, worthless once the user is gone.
+    ``workspace_id`` narrows that further: the router reads one (user, workspace)
+    partition, so a user who holds keys in two workspaces does not have one
+    workspace's labels steering the other's traffic.
     """
 
     __tablename__ = "routing_memory"
     __table_args__ = (
-        Index("ix_routing_memory_user_model", "user_id", "embedding_model"),
-        Index("ix_routing_memory_user_created", "user_id", "created_at"),
-        # A task-scoped read filters on all three; without this it walks every
+        # Every read filters on the workspace as well as the user, so the
+        # workspace leads: the same three shapes, one partition narrower.
+        Index("ix_routing_memory_workspace_user_model", "workspace_id", "user_id", "embedding_model"),
+        Index("ix_routing_memory_workspace_user_created", "workspace_id", "user_id", "created_at"),
+        # A task-scoped read filters on all four; without this it walks every
         # record the user has for the embedding model before partitioning.
-        Index("ix_routing_memory_user_model_task", "user_id", "embedding_model", "task_id"),
+        Index(
+            "ix_routing_memory_workspace_user_model_task",
+            "workspace_id",
+            "user_id",
+            "embedding_model",
+            "task_id",
+        ),
     )
 
     id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id: Mapped[str] = mapped_column(
         ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # The workspace this row belongs to; see `APIKey.workspace_id` for why.
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     embedding_model: Mapped[str] = mapped_column()
     embedding: Mapped[list[float]] = mapped_column(JSON)
@@ -960,6 +984,7 @@ class RoutingMemory(Base):
         return {
             "id": self.id,
             "user_id": self.user_id,
+            "workspace_id": str(self.workspace_id),
             "embedding_model": self.embedding_model,
             "qualities": self.qualities,
             "task_id": self.task_id,
@@ -976,14 +1001,23 @@ class RouterPreference(Base):
     only the embedding, so this is where the prompt text and the raw per-model
     scores live: enough to recompute the memory if the scoring changes, and to
     tell a human label from a judge's.
+
+    ``workspace_id`` matches the :class:`RoutingMemory` row written beside it, so
+    the audit trail partitions exactly the way the training data does.
     """
 
     __tablename__ = "router_preferences"
-    __table_args__ = (Index("ix_router_preferences_user_created", "user_id", "created_at"),)
+    __table_args__ = (
+        Index("ix_router_preferences_workspace_user_created", "workspace_id", "user_id", "created_at"),
+    )
 
     id: Mapped[str] = mapped_column(primary_key=True, default=lambda: str(uuid.uuid4()))
     user_id: Mapped[str] = mapped_column(
         ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    # The workspace this row belongs to; see `APIKey.workspace_id` for why.
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="RESTRICT"), nullable=False, index=True
     )
     prompt: Mapped[str] = mapped_column()
     task_id: Mapped[str | None] = mapped_column(default=None)
@@ -998,6 +1032,7 @@ class RouterPreference(Base):
         return {
             "id": self.id,
             "user_id": self.user_id,
+            "workspace_id": str(self.workspace_id),
             "prompt": self.prompt,
             "task_id": self.task_id,
             "scores": self.scores,
