@@ -253,7 +253,7 @@ def test_a_management_url_that_is_not_an_http_link_fails_at_startup(
 
 
 def test_a_deployment_with_no_docs_url_points_at_the_bundled_guide(tmp_path: Path) -> None:
-    """Null is the answer the dashboard reads as "use /docs", not a missing field."""
+    """Null is the answer the dashboard reads as "use the bundled guide", not a missing field."""
     app = create_app(_standalone(tmp_path))
 
     with TestClient(app) as client:
