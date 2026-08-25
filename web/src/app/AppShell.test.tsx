@@ -927,8 +927,9 @@ describe("AppShell entitlement gating", () => {
     mockMatchMedia(false)
     await renderShell()
 
-    // Standalone has exactly one organization and no way to mint a second, so
-    // naming it on every page is a segment that never disambiguates anything.
+    // Standalone provisions one organization and most deployments keep exactly
+    // that, so naming it on every page is a segment that never disambiguates
+    // anything; the scope switcher names the active one where it matters.
     const crumb = await screen.findByLabelText("Breadcrumb")
     expect(crumb).toHaveTextContent("Overview")
     expect(crumb).not.toHaveTextContent(/organization/i)
@@ -948,10 +949,11 @@ describe("AppShell entitlement gating", () => {
   it("leads the trail with the organization when a deployment can hold several", async () => {
     mockMatchMedia(false)
     // The only way to exercise this: no gateway in this repository reports
-    // `hosted` (bootstrap.py answers standalone or hybrid), and the endpoints
-    // that would mint a second organization are not mounted in standalone. So
-    // the multi-organization trail has no live deployment to be seen on, and
-    // this is what keeps it from rotting until the hosted shell arrives.
+    // `hosted` (bootstrap.py answers standalone or hybrid), and a standalone
+    // deployment leaves the organization out of the trail whether or not the
+    // caller belongs to a second. So the multi-organization trail has no live
+    // deployment to be seen on, and this is what keeps it from rotting until
+    // the hosted shell arrives.
     await renderShell(bootstrap({ deployment_type: "hosted" }))
 
     const crumb = await screen.findByLabelText("Breadcrumb")
