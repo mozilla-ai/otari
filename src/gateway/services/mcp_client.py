@@ -65,6 +65,8 @@ class MCPClientPool:
     async def __aenter__(self) -> MCPClientPool:
         try:
             for cfg in self._configs:
+                if cfg.name in self._servers:
+                    raise ValueError(f"Duplicate MCP server name {cfg.name!r}")
                 self._servers[cfg.name] = await self._connect(cfg)
         except BaseException:
             await self._stack.aclose()

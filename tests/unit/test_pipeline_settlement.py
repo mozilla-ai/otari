@@ -1152,7 +1152,8 @@ async def test_duplicate_inline_mcp_server_name_releases_reservation(monkeypatch
 async def test_duplicate_mcp_server_name_against_a_stored_server_releases_reservation(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """An inline server whose name matches a workspace's stored server is refused, not silently dropped."""
+    """An inline server whose name matches a workspace's stored server is refused with a fixed
+    detail that does not echo the stored server's name back to the caller (otari#792 review)."""
     settlement = _Settlement()
     settlement.install(monkeypatch)
 
@@ -1170,6 +1171,11 @@ async def test_duplicate_mcp_server_name_against_a_stored_server_releases_reserv
         )
 
     assert exc_info.value.status_code == 400
+    # Deliberately not asserting the stored server's name is IN the detail: it
+    # must not be, since an inline caller would otherwise learn a stored
+    # server's name by guessing it and reading the error (otari#792 review).
+    assert exc_info.value.detail == pipeline.MCP_SERVER_NAME_COLLIDES_WITH_STORED_DETAIL
+    assert "tools" not in str(exc_info.value.detail)
     assert settlement.refunded == 1
 
 

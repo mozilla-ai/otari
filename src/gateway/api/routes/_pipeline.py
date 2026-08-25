@@ -215,6 +215,9 @@ API_KEY_NO_USER_DETAIL = "API key has no associated user"
 MCP_SERVER_IDS_UNAVAILABLE_DETAIL = "mcp_server_ids is unavailable for this request"
 MCP_SERVER_TOKEN_UNREADABLE_DETAIL = "A configured MCP server's authorization token could not be read"
 MCP_SERVER_URL_UNSAFE_DETAIL = "A configured MCP server's URL failed its safety check"
+MCP_SERVER_NAME_COLLIDES_WITH_STORED_DETAIL = (
+    "A request-supplied MCP server name collides with one of this workspace's stored servers"
+)
 NO_RESOLVABLE_PROVIDER_DETAIL = "Authorization service returned no resolvable provider"
 PROVIDER_ERROR_DETAIL = "LLM provider error"
 PROVIDER_TIMEOUT_DETAIL = "LLM provider timeout"
@@ -1262,12 +1265,8 @@ def policy_in_hybrid_mode_detail(model_selector: str) -> str:
 
 
 def duplicate_mcp_server_name_detail(name: str) -> str:
-    """400 detail for two mcp_servers entries sharing a name."""
-    return (
-        f"Duplicate MCP server name {name!r}. mcp_servers entries (including a workspace's stored "
-        "servers) must have unique names: MCPClientPool keys its connected sessions by name, so a "
-        "duplicate silently drops one server's tools and routes its tool calls to the other server."
-    )
+    """400 detail for two entries in the caller's own ``mcp_servers`` list sharing a name."""
+    return f"Duplicate MCP server name {name!r}. mcp_servers entries must have unique names."
 
 
 async def _compile_request_plan(
@@ -2236,23 +2235,33 @@ async def prepare_gateway_tools(
 
         # Checked per source, not over the merged list: see
         # `_validate_mcp_server_urls` for why a stored server's rejection cannot
-        # carry the same body a caller's own does.
+        # carry the same body a caller's own does. The duplicate-name check below
+        # follows the same split. Inline-vs-inline is the caller's own request, so
+        # the 400 names the duplicate. Inline-vs-stored gets a fixed detail instead:
+        # echoing the name there would let any key holder learn a stored server's
+        # name by guessing it inline and reading the error, the same existence
+        # oracle `_validate_mcp_server_urls` withholds for a stored host.
+        inline_names: set[str] = set()
         if mcp_servers:
             await _validate_mcp_server_urls(adapter, mcp_servers)
+            # MCPClientPool keys sessions by `name`; a duplicate silently collapses two
+            # servers into one and misroutes tool calls (otari#591). Reject it here.
+            for server in mcp_servers:
+                if server.name in inline_names:
+                    raise adapter.error(400, duplicate_mcp_server_name_detail(server.name), ErrorKind.INVALID_REQUEST)
+                inline_names.add(server.name)
         if mcp_server_ids:
             stored_servers = await _resolve_mcp_server_ids(adapter, ctx, mcp_server_ids)
             await _validate_mcp_server_urls(
                 adapter, stored_servers, stored=True, workspace_id=ctx.workspace_id
             )
+            # Stored names are already unique within a workspace
+            # (uq_workspace_mcp_servers_workspace_name) and mcp_server_ids is
+            # de-duplicated by resolve_workspace_mcp_servers, so the only
+            # remaining collision to check is inline vs. stored.
+            if inline_names & {server.name for server in stored_servers}:
+                raise adapter.error(400, MCP_SERVER_NAME_COLLIDES_WITH_STORED_DETAIL, ErrorKind.INVALID_REQUEST)
             mcp_servers = (mcp_servers or []) + stored_servers
-        if mcp_servers:
-            # MCPClientPool keys sessions by `name`; a duplicate silently collapses two
-            # servers into one and misroutes tool calls (otari#591). Reject it here.
-            seen_names: set[str] = set()
-            for server in mcp_servers:
-                if server.name in seen_names:
-                    raise adapter.error(400, duplicate_mcp_server_name_detail(server.name), ErrorKind.INVALID_REQUEST)
-                seen_names.add(server.name)
 
         sandbox_tool_entry, tools_after_sandbox = _extract_code_execution_tool(tools)
         # Read the effective config value (dashboard override / env / YAML), falling
