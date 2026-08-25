@@ -328,7 +328,7 @@ _FORWARDED_PARAMS: frozenset[str] = frozenset(
 )
 
 
-def provider_rejected_param_detail(param: str) -> str:
+def _provider_rejected_param_detail(param: str) -> str:
     """Detail for a request param the provider serving this model cannot express."""
     return f"The provider serving this model does not accept the '{param}' parameter"
 
@@ -440,7 +440,7 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
     # response names it, since a caller cannot otherwise tell which param the
     # provider objected to.
     if (param := _rejected_param(exc)) is not None:
-        return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, provider_rejected_param_detail(param))
+        return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, _provider_rejected_param_detail(param))
     if status_code is None:
         return None
     # Account billing exhaustion, which several providers report as a 400/422
