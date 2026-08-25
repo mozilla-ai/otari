@@ -621,7 +621,10 @@ class UsageLog(Base):
     endpoint: Mapped[str] = mapped_column()
 
     # Provenance. "gateway" for requests Otari served itself; a source slug (e.g.
-    # "claude_code") for usage imported through POST /v1/usage/external-events.
+    # "claude_code") for usage imported through POST /v1/usage/external-events. A row
+    # backfilled from hosted history keeps its origin's slug behind a legacy prefix
+    # ("otari-ai:gateway", "otari-ai:claude_code"), so asking whether this deployment
+    # served a row means asking about the slug behind that prefix: core/usage_source.
     # source_event_id is the upstream event id used for idempotent import (NULL for
     # gateway rows); source_label carries optional session/project attribution.
     source: Mapped[str] = mapped_column(default="gateway", index=True)
