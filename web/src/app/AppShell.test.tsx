@@ -78,6 +78,8 @@ function renderShell(
     context?: Parameters<typeof organizationContext>[0]
     /** The organizations the caller belongs to, for the organization switcher. */
     memberships?: CallerOrganizationMembership[]
+    /** Whether the deployment administration surface admits this caller. */
+    operator?: boolean
   } = {},
 ) {
   const entitlements: Entitlements = {
@@ -94,6 +96,15 @@ function renderShell(
   const memberships = options.memberships ?? [callerOrganizationMembership()]
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const path = String(input)
+    // The caller axis, which unlike the other two is a request rather than a
+    // context. Refused by default: that is what every other test here is, and
+    // it is the answer for a deployment nobody has granted operator access on.
+    if (path.startsWith("/v1/admin/access")) {
+      return Response.json({ granted: options.operator ?? false })
+    }
+    if (path.startsWith("/v1/admin/users")) {
+      return Response.json({ data: [], count: 0 })
+    }
     if (path.startsWith("/v1/organizations/me/memberships")) {
       return Response.json({ data: memberships, count: memberships.length })
     }
@@ -595,6 +606,39 @@ describe("AppShell entitlement gating", () => {
       await screen.findByText("Providers is not available here"),
     ).toBeInTheDocument()
     expect(screen.queryByText("PAGE CONTENT")).toBeNull()
+  })
+
+  it("leaves an operator-only route to the page, whichever way the gate answers", async () => {
+    mockMatchMedia(false)
+    // The caller axis gates the rail row, not the route. Two reasons, and this
+    // pins both: the answer arrives from a query, so gating the route on it
+    // would put "this deployment does not serve that page" in front of a real
+    // operator until it landed; and a caller who is not one is looking at a page
+    // this deployment does serve and that refuses them in its own words, which
+    // the shell's panel would contradict.
+    await renderShell(bootstrap(), {
+      url: "/admin/accounts",
+      operator: false,
+    })
+
+    expect(await screen.findByText("PAGE CONTENT")).toBeInTheDocument()
+    expect(screen.queryByText("Accounts is not available here")).toBeNull()
+  })
+
+  it("adds the operator-only row to the rail once the caller is known to be one", async () => {
+    mockMatchMedia(false)
+    // The other half of the same split: the row is what the axis hides, and it
+    // is absent by default in every test above because they answer the gate no.
+    await renderShell(bootstrap(), {
+      url: "/organization/members",
+      operator: true,
+    })
+
+    expect(
+      await within(
+        screen.getByRole("navigation", { name: "Sidebar" }),
+      ).findByRole("link", { name: "Accounts" }),
+    ).toBeInTheDocument()
   })
 
   it("highlights one link on a nested route, and names it correctly", async () => {

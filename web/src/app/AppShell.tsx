@@ -36,6 +36,7 @@ import { TopBarActions } from "@/app/nav/TopBarActions"
 import type { NavItem, NavPath } from "@/app/nav/types"
 import {
   useNavVisibility,
+  useRouteVisibility,
   useSurfaceVisibility,
 } from "@/app/nav/useNavVisibility"
 import { WorkspaceSwitcher } from "@/app/nav/WorkspaceSwitcher"
@@ -417,7 +418,14 @@ function AppShellChrome() {
   // so this and the rail memory cannot answer "is this destination served"
   // differently: whichever way the nested case resolves, both read it from one
   // place.
-  const routeIsGatedOff = !isPathVisible(pathname, isVisible)
+  //
+  // The route predicate, not the rail one: they part on the caller axis alone,
+  // and both reasons are in `useRouteVisibility`. Short version: that axis is a
+  // query, so gating the route on it would show the panel below to a real
+  // operator until it answered, and a caller who is not one is owed the page's
+  // own words rather than a claim that the deployment does not serve it.
+  const isRouteVisible = useRouteVisibility()
+  const routeIsGatedOff = !isPathVisible(pathname, isRouteVisible)
   // Kept beside that answer rather than folded into it, because the two are
   // different claims: "gated off" decides whether the page renders, and this
   // decides whether the shell may yet say *why*. The panel below asserts that

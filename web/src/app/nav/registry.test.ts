@@ -230,6 +230,7 @@ describe("nav registry", () => {
     // And none of those surface names is one a standalone gateway reports, or the
     // gate would be decoration.
     const standalone = [
+      "admin",
       "budgets",
       "keys",
       "models",
