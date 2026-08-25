@@ -25,9 +25,12 @@ cross the seam as canonical UTC strings so two adapters cannot disagree about
 which bucket a reading falls in.
 
 Durability is the adapter's own. :meth:`TelemetryStoragePort.record` and the
-purge methods settle their work before returning and do not join a caller's
-database transaction, which is what today's storage already does (it commits
-per batch) and the only contract an out-of-process store could honor.
+purge methods settle their work before returning, so a caller cannot roll one
+back and must not treat one as part of its own unit of work. That is what
+today's storage already does (it commits per batch), and the only contract an
+out-of-process store could honor. The corollary for a caller: do not hold
+uncommitted changes across one of these calls, because an adapter sharing your
+session will settle those too.
 
 Stability: this interface is not frozen while Otari is pre-1.0. Overlay authors
 should pin a released tag and expect the shape to move.

@@ -131,6 +131,11 @@ class DatabaseTelemetryStorageAdapter:
     surfaces that reach this port are standalone-only, so a ``None`` session
     means a caller mounted one somewhere it cannot work rather than an ordinary
     hybrid request, and it fails loudly instead of silently storing nothing.
+
+    The session is the caller's own (``get_telemetry_storage_port`` names
+    ``get_db``, which FastAPI caches per callable), and the writes here commit.
+    A caller therefore settles its own pending changes before calling one, or
+    they settle with the port's; the callers in the tree all do.
     """
 
     def __init__(self, session: AsyncSession | None) -> None:

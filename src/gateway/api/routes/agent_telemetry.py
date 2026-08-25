@@ -1,14 +1,18 @@
 """Read and purge endpoints for captured coding-agent telemetry.
 
-`agent_telemetry` holds two kinds of content-free, non-billable row: behavioral
-events (tool results, decisions, prompts, errors) and outcome-metric points
-(lines changed, commits, pull requests, active time). Neither is worth much on
-its own; joined against recorded spend they answer "what did this cost per unit
-of work", which is what `/summary` computes.
+Captured telemetry is two kinds of content-free, non-billable record:
+behavioral events (tool results, decisions, prompts, errors) and outcome-metric
+points (lines changed, commits, pull requests, active time). Neither is worth
+much on its own; joined against recorded spend they answer "what did this cost
+per unit of work", which is what `/summary` computes.
 
-The aggregation queries live here rather than in a service module, matching
-`usage.py`'s own layout, and use SQLAlchemy core against the ORM-mapped classes
-so the route layer stays free of `sqlalchemy.orm`.
+The telemetry half of every query here goes through `TelemetryStoragePort`, so
+these endpoints read whatever store this build bound. The spend half does not:
+`usage_logs` is the money path and stays in this deployment's database in every
+build, queried inline with SQLAlchemy core against the ORM-mapped class, the way
+`usage.py` does, so the route layer stays free of `sqlalchemy.orm`. Joining the
+two is this module's job, which is why the arithmetic sits here and not behind
+the port.
 """
 
 from collections import defaultdict
