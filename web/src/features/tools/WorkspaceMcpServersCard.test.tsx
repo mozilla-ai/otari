@@ -121,6 +121,19 @@ describe("WorkspaceMcpServersCard", () => {
     expect(screen.getByText("Disabled")).toBeVisible()
   })
 
+  it("reads an empty allow-list as every tool, the way the gateway does", async () => {
+    // `mcp_client` takes a falsy `allowed_tools` as no allow-list at all, so a
+    // row holding `[]` exposes every tool exactly as null does. "0 allowed"
+    // would tell an operator the opposite. This form never sends `[]`, but the
+    // API accepts one, so a row can arrive here holding it.
+    const servers = [workspaceMcpServer({ allowed_tools: [] })]
+    mockApi({ servers })
+    await renderLoaded(servers)
+
+    expect(screen.getByText("All")).toBeVisible()
+    expect(screen.queryByText("0 allowed")).not.toBeInTheDocument()
+  })
+
   it("registers a server from the add form", async () => {
     const calls = mockApi()
     const user = userEvent.setup()
@@ -271,8 +284,13 @@ describe("WorkspaceMcpServersCard", () => {
     await user.type(screen.getByLabelText("URL"), "http://mcp.example.com")
     await user.type(screen.getByLabelText("Authorization token"), "ghp_secret")
 
-    expect(await screen.findByRole("alert")).toHaveTextContent(
-      /needs an https URL/,
+    // Asserted through the input's own accessible description rather than by
+    // finding the text somewhere on screen: the reason for putting it in the
+    // field's error slot is that a screen reader on the URL box is told why.
+    await waitFor(() =>
+      expect(screen.getByLabelText("URL")).toHaveAccessibleDescription(
+        /needs an https URL/,
+      ),
     )
     await user.click(screen.getByRole("button", { name: "Add server" }))
     expect(writes(calls)).toHaveLength(0)

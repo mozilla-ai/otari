@@ -171,6 +171,11 @@ export function McpServerDialog({
                   placeholder="https://mcp.example.com/github"
                   isRequired
                   description="The streamable HTTP MCP endpoint."
+                  // On the field rather than at the foot of the dialog, which
+                  // is five controls further down: the refusal is about this
+                  // input, so it is announced with this input.
+                  isInvalid={urlReason !== undefined}
+                  errorMessage={urlReason}
                 />
 
                 <div className="flex flex-col gap-2">
@@ -230,12 +235,6 @@ export function McpServerDialog({
                     that names it skips it rather than failing.
                   </span>
                 </div>
-
-                {urlReason ? (
-                  <p role="alert" className="text-sm text-danger">
-                    {urlReason}
-                  </p>
-                ) : null}
               </AlertDialog.Body>
               <AlertDialog.Footer>
                 <Button

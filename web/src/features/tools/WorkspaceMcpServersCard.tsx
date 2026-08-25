@@ -158,8 +158,13 @@ export function WorkspaceMcpServersCard({
     {
       id: "allowed_tools",
       header: "Tools",
+      // An empty list reads as "All", not as "0 allowed", because that is what
+      // the gateway does with it: `mcp_client` takes a falsy `allowed_tools` as
+      // no allow-list at all, so `[]` exposes every tool exactly as null does.
+      // This form never sends `[]`, but a row created over the API can hold one,
+      // and a cell claiming no tools were exposed would be the opposite of true.
       cell: (row) =>
-        row.allowed_tools === null ? (
+        row.allowed_tools === null || row.allowed_tools.length === 0 ? (
           <span className="text-muted">All</span>
         ) : (
           // The names themselves would be an unbounded column (the list runs to
@@ -171,11 +176,13 @@ export function WorkspaceMcpServersCard({
     {
       id: "enabled",
       header: "Status",
+      // `color` rather than a span that re-skins the chip from inside: it is
+      // the component's own prop, it carries the right foreground for its fill
+      // (`--chip-fg` per `.chip--success`), and it is what the two cards next
+      // door already use.
       cell: (row) => (
-        <Chip size="sm" variant="secondary">
-          <span className={row.enabled ? "text-success" : "text-muted"}>
-            {row.enabled ? "Enabled" : "Disabled"}
-          </span>
+        <Chip size="sm" color={row.enabled ? "success" : "default"}>
+          {row.enabled ? "Enabled" : "Disabled"}
         </Chip>
       ),
     },
