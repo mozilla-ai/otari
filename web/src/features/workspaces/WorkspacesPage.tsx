@@ -222,10 +222,12 @@ function NarrowedDefaults({
 // How long the submit holds before a create that navigates hands the page over.
 // Long enough for the spinner to register as this press having done something,
 // short enough not to be a wait: the operator should read it as the button
-// acknowledging them, not as the gateway being slow. Exported so a test can wait
-// past it by name rather than by a copy of the number, which would keep passing
-// if this were changed or removed.
-export const ENTER_HOLD_MS = 800
+// acknowledging them, not as the gateway being slow. The default rather than the
+// only value: a test that had to sit through 800ms per case would spend most of
+// its run waiting on a number chosen for how a button feels, and `findBy*`'s
+// 1000ms ceiling leaves it only ~200ms of headroom, which a contended runner can
+// eat. `holdMs` is how a test shortens it.
+const ENTER_HOLD_MS = 800
 
 /**
  * The one form that creates a workspace, wherever it is offered from.
@@ -238,8 +240,11 @@ export const ENTER_HOLD_MS = 800
 export function CreateWorkspaceForm({
   onClose,
   onCreated,
+  holdMs = ENTER_HOLD_MS,
 }: {
   onClose: () => void
+  /** The acknowledged-press hold, in ms. Shortened by tests; see ENTER_HOLD_MS. */
+  holdMs?: number
   // Fired once the workspace exists (and its default budget, when one was
   // picked), so the caller that opened the form can follow the new workspace.
   // The list page does not need it: it is already looking at the row that
@@ -359,7 +364,7 @@ export function CreateWorkspaceForm({
               // answers, which is the honest reading of the same indicator.
               const held = entersWorkspace
                 ? new Promise<void>((resolve) => {
-                    setTimeout(resolve, ENTER_HOLD_MS)
+                    setTimeout(resolve, holdMs)
                   })
                 : Promise.resolve()
               setHolding(entersWorkspace)

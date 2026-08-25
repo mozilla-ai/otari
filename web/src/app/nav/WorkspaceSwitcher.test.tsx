@@ -1,5 +1,5 @@
 import { Outlet } from "@tanstack/react-router"
-import { screen, within } from "@testing-library/react"
+import { act, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { StrictMode } from "react"
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
@@ -7,7 +7,6 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 import { WorkspaceSwitcher } from "@/app/nav/WorkspaceSwitcher"
 import { Provider } from "@/app/provider"
 import type { CallerOrganizationMembership } from "@/client"
-import { ENTER_HOLD_MS } from "@/features/workspaces/WorkspacesPage"
 import * as apiClient from "@/shared/api/client"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import {
@@ -20,6 +19,13 @@ import { renderWithRouter } from "@/tests/router"
 
 const SECOND_ORGANIZATION_ID = "99999999-9999-9999-9999-999999999999"
 const CREATED_WORKSPACE_ID = "77777777-7777-7777-7777-777777777777"
+// The create form's hold, shortened for the cases below. Nothing here depends on
+// its real value: what is under test is that the press is acknowledged before the
+// page moves and that a dismissal drops the completion, neither of which is a
+// function of how long the beat lasts. At its shipped 800ms these three cases
+// spend most of their runtime waiting, and they clear `findBy*`'s 1000ms ceiling
+// by only ~200ms, which a loaded runner can close.
+const TEST_HOLD_MS = 50
 
 /** One membership per organization, the second one being the one to switch to. */
 function twoOrganizations(): CallerOrganizationMembership[] {
@@ -245,7 +251,7 @@ function renderSwitcherOnAPage(options: { strict?: boolean } = {}) {
   const shell = (
     <Provider>
       <SelectedWorkspaceProvider>
-        <WorkspaceSwitcher collapsed={false} />
+        <WorkspaceSwitcher collapsed={false} createHoldMs={TEST_HOLD_MS} />
         <Outlet />
       </SelectedWorkspaceProvider>
     </Provider>
@@ -285,11 +291,17 @@ describe("the workspace half of the scope switcher", () => {
     window.localStorage.clear()
   })
 
-  // The submit holds for `ENTER_HOLD_MS` before handing the page over, which is
-  // inside `findBy*`'s own ceiling, so the cases below wait on the DOM rather
-  // than on the clock. Fake timers are not an option: `userEvent` drives
-  // react-aria's pointer events through real ones, and freezing the clock
-  // deadlocks the interactions rather than the wait.
+  // The submit holds for a beat before handing the page over, shortened here to
+  // `TEST_HOLD_MS` so these cases wait on the DOM rather than on that number.
+  //
+  // Fake timers are not the answer to it, for two reasons and the second is the
+  // one that matters. While `userEvent` is driving they deadlock outright, since
+  // react-aria's pointer events run on real timers. And in the dismissal case
+  // below, where nothing is driving after the Escape, they look safe and are
+  // worse than that: advancing the clock past the hold makes that case pass even
+  // with the guard in `WorkspacesPage` deleted, because the router transition
+  // never lands inside the fake-timer window. It would be vacuous rather than
+  // fast.
 
   // A workspace to start in, so "moved into the new one" is distinguishable
   // from "the new one is the only one there is": without a prior membership the
@@ -346,9 +358,13 @@ describe("the workspace half of the scope switcher", () => {
     await user.keyboard("{Escape}")
     // The only case here that waits on the clock, because what it asserts is an
     // absence: there is no event to wait on when the completion is correctly
-    // dropped. Bounded by the hold itself rather than by a copy of it.
-    await new Promise((resolve) => {
-      setTimeout(resolve, ENTER_HOLD_MS + 100)
+    // dropped. Inside `act` so the context refetch the create triggers settles
+    // under React's watch; a raw promise is not Testing Library's `asyncWrapper`,
+    // and the update lands outside it with a warning on every run.
+    await act(async () => {
+      await new Promise((resolve) => {
+        setTimeout(resolve, TEST_HOLD_MS + 50)
+      })
     })
 
     // The workspace was created and the switcher will list it; what must not

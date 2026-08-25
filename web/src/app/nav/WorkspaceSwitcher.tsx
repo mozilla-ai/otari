@@ -59,7 +59,17 @@ function PlusMark() {
 // reads a process-wide name-keyed cache, so filtering them would hide live
 // policies. Provider credentials are process-wide config rather than a
 // workspace row.
-export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
+export function WorkspaceSwitcher({
+  collapsed,
+  createHoldMs,
+}: {
+  collapsed: boolean
+  // Forwarded to the create form's own hold, and only ever set by tests: at its
+  // real value the three cases over this flow spend most of their run waiting,
+  // and they have less headroom under `findBy*`'s ceiling than is comfortable on
+  // a loaded runner. The app never passes it, so the default stands.
+  createHoldMs?: number
+}) {
   const { memberships, selected, select, isLoading } = useSelectedWorkspace()
   const context = useOrganizationContext()
   const navigate = useNavigate()
@@ -338,6 +348,7 @@ export function WorkspaceSwitcher({ collapsed }: { collapsed: boolean }) {
                   select(workspace.id)
                   void navigate({ to: "/" })
                 }}
+                holdMs={createHoldMs}
               />
             </Modal.Dialog>
           </Modal.Container>
