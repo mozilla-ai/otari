@@ -345,11 +345,11 @@ The rules that follow from it:
   aliases and the configured ones plus their own, never another user's and never
   another workspace's. `GET /v1/aliases` is the master-key management view and
   lists every scope at once, narrowable with `?workspace_id=<id>`.
-- Target-hiding follows the scope. A global alias hides its target from
-  everyone's listing; a user-scoped one hides it from that user's listing only, so
-  another caller may still see the real model (subject to their own model access).
-  If you are using aliases to curate one catalog for everybody, keep those
-  aliases global.
+- Target-hiding follows the scope. A workspace-wide alias hides its target from
+  every listing in that workspace; a user-scoped one hides it from that user's
+  listing only, so another caller may still see the real model (subject to their
+  own model access). If you are using aliases to curate one catalog for everybody
+  in a workspace, keep those aliases workspace-wide.
 - That rule inverts when a user-scoped alias overrides a **`config.yml`** name.
   The override replaces the configured entry for that user, so the configured
   target is no longer among the names being withheld and it reappears in that
