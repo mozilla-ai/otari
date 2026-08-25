@@ -27,6 +27,32 @@ def _ok_response(servers: list[dict[str, Any]]) -> httpx.Response:
 
 
 @pytest.mark.asyncio
+async def test_repeated_ids_are_sent_once_in_request_order(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Hybrid de-duplicates ids like the standalone path, so a repeat cannot resolve twice.
+
+    Two resolved servers sharing a name are a 500 in `prepare_gateway_tools`,
+    and the protocol does not say what the platform answers for a repeated id,
+    so a caller naming one twice must not be able to trip that (otari#792
+    review).
+    """
+    captured: dict[str, Any] = {}
+
+    async def fake_post(
+        *, url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        captured["body"] = body
+        return _ok_response([])
+
+    monkeypatch.setattr(platform_module, "_post_platform", fake_post)
+
+    first = uuid.UUID("11111111-1111-1111-1111-111111111111")
+    second = uuid.UUID("22222222-2222-2222-2222-222222222222")
+    await _resolve_platform_mcp_servers(_config(), "tk_user", [first, second, first])
+
+    assert captured["body"]["mcp_server_ids"] == [str(first), str(second)]
+
+
+@pytest.mark.asyncio
 async def test_resolve_returns_configs(monkeypatch: pytest.MonkeyPatch) -> None:
     captured: dict[str, Any] = {}
 

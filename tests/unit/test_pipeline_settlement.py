@@ -53,6 +53,7 @@ from gateway.api.routes._pipeline import (
 )
 from gateway.api.routes._platform import ResolvedAttempt, ResolvedRoute, SettledCost
 from gateway.core.config import GatewayConfig
+from gateway.models.mcp import McpServerConfig
 from gateway.rate_limit import RateLimitInfo
 from gateway.services.budget_service import ReservationHandle
 from gateway.services.tenancy.errors import WorkspaceMcpServerNotFoundError
@@ -1125,6 +1126,153 @@ async def test_unknown_mcp_server_id_releases_reservation(monkeypatch: pytest.Mo
         )
 
     assert exc_info.value.status_code == 404
+    assert settlement.refunded == 1
+
+
+@pytest.mark.asyncio
+async def test_duplicate_inline_mcp_server_name_releases_reservation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Two request-body servers sharing a name are refused, not silently collapsed (otari#591)."""
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation(), workspace_id=uuid.uuid4())
+    dupes = [
+        McpServerConfig(name="tools", url="https://93.184.216.34/mcp"),
+        McpServerConfig(name="tools", url="https://93.184.216.35/mcp"),
+    ]
+    with pytest.raises(HTTPException) as exc_info:
+        await _call_prepare_gateway_tools(ctx, mcp_servers=dupes)
+
+    assert exc_info.value.status_code == 400
+    assert "tools" in str(exc_info.value.detail)
+    assert settlement.refunded == 1
+
+
+@pytest.mark.asyncio
+async def test_duplicate_mcp_server_name_against_a_stored_server_releases_reservation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An inline server whose name matches a workspace's stored server is refused with a fixed
+    detail that does not echo the stored server's name back to the caller (otari#792 review)."""
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    async def stored(*args: Any, **kwargs: Any) -> list[McpServerConfig]:
+        return [McpServerConfig(name="tools", url="https://93.184.216.35/mcp")]
+
+    monkeypatch.setattr(pipeline, "resolve_workspace_mcp_servers", stored)
+
+    ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation(), workspace_id=uuid.uuid4())
+    with pytest.raises(HTTPException) as exc_info:
+        await _call_prepare_gateway_tools(
+            ctx,
+            mcp_servers=[McpServerConfig(name="tools", url="https://93.184.216.34/mcp")],
+            mcp_server_ids=[cast(Any, "11111111-1111-1111-1111-111111111111")],
+        )
+
+    assert exc_info.value.status_code == 400
+    # Deliberately not asserting the stored server's name is IN the detail: it
+    # must not be, since an inline caller would otherwise learn a stored
+    # server's name by guessing it and reading the error (otari#792 review).
+    assert exc_info.value.detail == pipeline.MCP_SERVER_NAME_COLLIDES_WITH_STORED_DETAIL
+    assert "tools" not in str(exc_info.value.detail)
+    assert settlement.refunded == 1
+
+
+# RFC 1918, deliberately not loopback: `MCP_ALLOW_LOOPBACK` defaults to *true*,
+# so `127.0.0.1` passes `validate_mcp_url` and would make the ordering test below
+# vacuous. `MCP_ALLOW_PRIVATE_HOSTS` defaults to false, so these are rejected with
+# only that variable cleared.
+_UNSAFE_URL = "https://10.0.0.1/mcp"
+_OTHER_UNSAFE_URL = "https://10.0.0.2/mcp"
+
+
+@pytest.mark.asyncio
+async def test_an_unsafe_inline_url_is_refused_when_the_names_are_distinct(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Negative control for the ordering test below: these URLs really do fail the safety check."""
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    monkeypatch.delenv("OTARI_MCP_ALLOW_PRIVATE_HOSTS", raising=False)
+
+    ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation(), workspace_id=uuid.uuid4())
+    with pytest.raises(HTTPException) as exc_info:
+        await _call_prepare_gateway_tools(
+            ctx,
+            mcp_servers=[
+                McpServerConfig(name="tools", url=_UNSAFE_URL),
+                McpServerConfig(name="other", url=_OTHER_UNSAFE_URL),
+            ],
+        )
+
+    assert exc_info.value.status_code == 400
+    assert "private range" in str(exc_info.value.detail)
+    assert settlement.refunded == 1
+
+
+@pytest.mark.asyncio
+async def test_an_inline_duplicate_is_refused_before_the_url_safety_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The name check runs first, so a doomed request does not spend a DNS lookup per server.
+
+    Same URLs as the test above, which reports the unsafe URL when the names
+    differ; only the repeated name changes the answer, so this pins the order
+    rather than passing for either reason.
+    """
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    monkeypatch.delenv("OTARI_MCP_ALLOW_PRIVATE_HOSTS", raising=False)
+
+    ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation(), workspace_id=uuid.uuid4())
+    dupes = [
+        McpServerConfig(name="tools", url=_UNSAFE_URL),
+        McpServerConfig(name="tools", url=_OTHER_UNSAFE_URL),
+    ]
+    with pytest.raises(HTTPException) as exc_info:
+        await _call_prepare_gateway_tools(ctx, mcp_servers=dupes)
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == pipeline.duplicate_mcp_server_name_detail("tools")
+    assert settlement.refunded == 1
+
+
+@pytest.mark.asyncio
+async def test_stored_mcp_servers_sharing_a_name_are_an_operator_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two *stored* servers sharing a name is broken workspace config, not a bad request.
+
+    Unreachable in standalone (`uq_workspace_mcp_servers_workspace_name`, plus
+    `resolve_workspace_mcp_servers` de-duplicates the ids), so the resolve is
+    stubbed to produce what hybrid can: `_resolve_platform_mcp_servers` returns
+    the platform's payload verbatim, and that uniqueness is the platform's
+    promise rather than a local invariant (otari#792 review).
+    """
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    async def stored(*args: Any, **kwargs: Any) -> list[McpServerConfig]:
+        return [
+            McpServerConfig(name="tools", url="https://93.184.216.34/mcp"),
+            McpServerConfig(name="tools", url="https://93.184.216.35/mcp"),
+        ]
+
+    monkeypatch.setattr(pipeline, "resolve_workspace_mcp_servers", stored)
+
+    ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation(), workspace_id=uuid.uuid4())
+    with pytest.raises(HTTPException) as exc_info:
+        await _call_prepare_gateway_tools(
+            ctx,
+            mcp_server_ids=[cast(Any, "11111111-1111-1111-1111-111111111111")],
+        )
+
+    assert exc_info.value.status_code == 500
+    # The caller can neither see nor fix a stored server, so the name stays in
+    # the log, as it does for a stored URL that fails its safety check.
+    assert exc_info.value.detail == pipeline.MCP_SERVER_NAMES_NOT_UNIQUE_DETAIL
+    assert "tools" not in str(exc_info.value.detail)
     assert settlement.refunded == 1
 
 
