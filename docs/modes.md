@@ -53,7 +53,7 @@ gateway refuses to start if it is not. This is a link target, never a credential
 
 - No local database is used for keys, users, budgets, or usage logs.
 - The `providers` block in `config.yml` must be empty (or absent).
-- Only these routes are exposed: `/health`, `/health/liveness`, `/health/readiness`, `/v1/chat/completions`, `/v1/messages`, `/v1/messages/count_tokens`, and `/v1/responses`.
+- Only these routes are exposed: `/health`, `/health/liveness`, `/health/readiness`, `/v1/bootstrap`, `/v1/chat/completions`, `/v1/messages`, `/v1/messages/count_tokens`, and `/v1/responses`.
 - Chat requests use `Authorization: Bearer <otari-user-token>`.
 - The `/health` endpoint includes platform reachability status.
 
