@@ -137,7 +137,13 @@ export function McpServerDialog({
   return (
     <AlertDialog isOpen={isOpen} onOpenChange={onOpenChange}>
       {isOpen ? (
-        <AlertDialog.Backdrop>
+        <AlertDialog.Backdrop
+          // Dismissable, unlike HeroUI's default for an alert dialog: this is
+          // an ordinary edit form rather than a decision that has to be
+          // acknowledged, so clicking away or pressing Escape cancels it.
+          isDismissable
+          isKeyboardDismissDisabled={false}
+        >
           <AlertDialog.Container placement="center" size="lg">
             <AlertDialog.Dialog>
               <AlertDialog.Header>
