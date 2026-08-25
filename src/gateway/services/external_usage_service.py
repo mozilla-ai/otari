@@ -56,6 +56,10 @@ _MAX_TOKENS = 2_147_483_647
 # "gateway" tags rows Otari served itself; an import claiming it would masquerade
 # as native traffic in every provenance breakdown.
 RESERVED_SOURCES = {"gateway"}
+# otari.ai owns this namespace: its backfill stamps the rows it writes `otari-ai:gateway`,
+# `otari-ai:claude_code`, and so on. An import under the same prefix produces lookalike
+# rows that inflate reconciliation totals and read as a mismatch during a cutover.
+RESERVED_SOURCE_PREFIXES = ("otari-ai:",)
 
 
 class ExternalUsageEvent(BaseModel):
@@ -114,8 +118,15 @@ class ExternalEventsRequest(BaseModel):
     @field_validator("source")
     @classmethod
     def _not_reserved(cls, value: str) -> str:
-        if value.lower() in RESERVED_SOURCES:
+        lowered = value.lower()
+        if lowered in RESERVED_SOURCES:
             raise ValueError("source 'gateway' is reserved for usage Otari served itself; pick another slug.")
+        for prefix in RESERVED_SOURCE_PREFIXES:
+            if lowered.startswith(prefix):
+                raise ValueError(
+                    f"source prefix '{prefix}' is reserved for provenance tags otari.ai writes itself; "
+                    "pick another slug."
+                )
         return value
 
 

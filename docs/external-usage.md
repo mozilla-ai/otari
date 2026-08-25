@@ -103,7 +103,7 @@ The body is a batch that shares a `source` and a default `user_id`:
 
 | Field | Required | Notes |
 | --- | --- | --- |
-| `source` | yes | Provenance slug, e.g. `claude_code`. Generic: add your own sources. |
+| `source` | yes | Provenance slug, e.g. `claude_code`. Generic: add your own sources. `gateway` and any slug starting with `otari-ai:` are reserved (otari.ai writes those tags itself) and rejected with a 422. |
 | `user_id` | with master key | Default attribution. Optional with an API key (binds to the key's user); required with the master key. Must be an existing user. |
 | `events` | yes | 1 to 1000 events. |
 
