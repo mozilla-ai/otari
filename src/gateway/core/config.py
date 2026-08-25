@@ -414,6 +414,17 @@ class GatewayConfig(BaseSettings):
             "address, since every other reference is relative to the request."
         ),
     )
+    docs_url: str | None = Field(
+        default=None,
+        description=(
+            "Where this deployment's documentation lives, as an absolute http(s) URL "
+            "(e.g. 'https://docs.otari.ai/en/'). Unset, the dashboard's Documentation links "
+            "point at the operator guide bundled with the gateway at /docs, which is the "
+            "right default for a self-hosted deployment. Set it to retarget those links at "
+            "a product documentation site instead; the bundled guide stays reachable at "
+            "/docs either way."
+        ),
+    )
     webauthn_rp_id: str | None = Field(
         default=None,
         description=(
@@ -1500,6 +1511,26 @@ class GatewayConfig(BaseSettings):
         normalized = value.strip().lower()
         if normalized not in STREAM_MISSING_USAGE_POLICIES:
             msg = f"stream_missing_usage_policy must be one of {sorted(STREAM_MISSING_USAGE_POLICIES)}, got '{value}'"
+            raise ValueError(msg)
+        return normalized
+
+    @field_validator("docs_url")
+    @classmethod
+    def _validate_docs_url(cls, value: str | None) -> str | None:
+        """Reject a documentation link that is not an absolute http(s) URL.
+
+        The deployment bootstrap publishes this to the browser as a link target,
+        so a scheme that is not http(s) would be a script URL an operator put in
+        their own config. Rejected at load rather than dropped per request, for
+        the same reason ``platform.management_url`` is: a typo should be a
+        startup error, not a Documentation link that silently goes nowhere.
+        """
+        normalized = (value or "").strip()
+        if not normalized:
+            return None
+        parsed = urlsplit(normalized)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            msg = f"docs_url must be an absolute http(s) URL, got '{value}'"
             raise ValueError(msg)
         return normalized
 

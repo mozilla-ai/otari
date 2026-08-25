@@ -63,6 +63,7 @@ pricing:
 | `port` | int | `8000` | Server bind port |
 | `master_key` | string | none | Master key for management endpoints |
 | `public_base_url` | string | none | This deployment's own externally-reachable URL, no trailing slash. Needed to put an absolute link in outgoing email (see [Mail](#mail)), and to derive the relying-party ID passkeys are bound to (see [Access control](access-control.md#passkeys)). |
+| `docs_url` | string | none | Where this deployment's documentation lives, as an absolute `http(s)` URL. Unset, the dashboard's **Documentation** links open the operator guide bundled with the gateway at `/docs`. See [Documentation links](#documentation-links). |
 | `webauthn_rp_id` | string | host of `public_base_url` | The domain passkeys are bound to: bare, with no scheme, port or path. An override rather than an alternative to `public_base_url`, which is still needed as the origin a ceremony runs from. Changing it orphans every passkey already registered. |
 | `webauthn_rp_name` | string | `otari` | The name an authenticator shows while a passkey is created, and files it under. Cosmetic; nothing verifies it. |
 | `webauthn_allowed_origins` | list | `[public_base_url]` | Origins a ceremony may run from, each with a scheme. Set only when several origins serve one dashboard under one relying-party ID; every entry must be that ID or a subdomain of it, checked at startup. |
@@ -187,6 +188,7 @@ Note the `require_pricing` interaction: it defaults to `true` (fail-closed), so 
 | `OTARI_PORT` | Server bind port |
 | `OTARI_AUTO_MIGRATE` | Auto-run migrations on startup |
 | `OTARI_BOOTSTRAP_API_KEY` | Create first-use API key |
+| `OTARI_DOCS_URL` | Documentation site the dashboard's **Documentation** links point at, as an absolute `http(s)` URL. Unset, they open the bundled operator guide. See [Documentation links](#documentation-links). |
 | `OTARI_BOOTSTRAP` | Composition-root bootstrap for a build that layers its own adapters onto Otari, as a `module:callable` selector. Unrelated to `OTARI_BOOTSTRAP_API_KEY`; see [Extending Otari with a bootstrap module](#extending-otari-with-a-bootstrap-module). |
 
 ### Extending Otari with a bootstrap module
@@ -331,6 +333,31 @@ nothing set and finish configuration in the browser.
 - **Scope.** Providers that authenticate with an API key (OpenAI, Anthropic,
   Mistral, Gemini, and OpenAI-compatible backends) are supported. Providers that
   use ADC/IAM (Vertex AI, Bedrock) remain config-file only.
+
+### Documentation links
+
+The dashboard's **Documentation** links, in the top bar and in the account menu
+on a phone, open the operator guide bundled with the gateway at `/#/docs`. That
+is the right destination for a self-hosted deployment: the guide ships with the
+build, so it always describes the version you are running.
+
+A deployment that has documentation of its own points them at it instead:
+
+```yaml
+docs_url: "https://docs.otari.ai/en/"
+```
+
+or `OTARI_DOCS_URL=https://docs.otari.ai/en/`. Both links then open that URL in
+a new tab. The value travels to the browser through `GET /v1/bootstrap`, so one
+image serves deployments pointed at different documentation and no rebuild is
+involved; it is validated at startup as an absolute `http(s)` URL, and the
+gateway refuses to start on anything else rather than serving a link that goes
+nowhere. The URL is used exactly as configured, with no path appended and no
+trailing slash trimmed.
+
+**The bundled guide stays served at `/#/docs` either way.** Only the links move,
+so a URL somebody bookmarked keeps working and an operator on a hosted
+deployment can still read the guide for the gateway in front of them.
 
 ### otari.ai variables
 

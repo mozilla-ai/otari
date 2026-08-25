@@ -9,7 +9,8 @@ which mode the gateway is in.
 Registered in both modes, and unauthenticated by necessity: this is what tells a
 browser whether a sign-in screen is even the right thing to show. It therefore
 carries no secret. In particular it never carries the platform token, and
-``management_url`` is a link target an operator configured, not a credential.
+``management_url`` and ``docs_url`` are link targets an operator configured, not
+credentials.
 
 The contract is shared with otari.ai, which serves the same shape for its hosted
 deployment (mozilla-ai/otari-ai#1591). That is why ``deployment_type`` and
@@ -114,6 +115,15 @@ class DeploymentBootstrap(BaseModel):
             "Set for a hybrid gateway so its landing page can link to otari.ai; null otherwise."
         )
     )
+    docs_url: str | None = Field(
+        description=(
+            "Where this deployment's documentation lives, when it is not the operator guide "
+            "bundled with the gateway. Set, the dashboard's Documentation links open it in a "
+            "new tab; null, they go to the bundled guide at /docs, which stays served either "
+            "way. A link target an operator configured, validated at startup as an absolute "
+            "http(s) URL."
+        )
+    )
     sign_in_methods: list[SignInMethod] = Field(
         description=(
             "How POST /v1/auth/session may be authenticated right now, sorted. 'master_key' is the "
@@ -182,6 +192,7 @@ async def get_bootstrap(
             surfaces=[],
             sign_in_methods=[],
             management_url=config.platform_management_url,
+            docs_url=config.docs_url,
             maintenance_mode=False,
             passkeys_ready=False,
             mail_ready=False,
@@ -193,6 +204,7 @@ async def get_bootstrap(
         surfaces=sorted(STANDALONE_SURFACES),
         sign_in_methods=await _sign_in_methods(db, config),
         management_url=None,
+        docs_url=config.docs_url,
         maintenance_mode=await _maintenance_mode(db),
         passkeys_ready=config.webauthn_enabled,
         mail_ready=config.mail_ready,

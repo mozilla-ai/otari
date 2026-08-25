@@ -13,10 +13,13 @@ import { renderWithRouter } from "@/tests/router"
 // mounts it at "/" and resolves the first location before the assertions run.
 async function openMenu(
   signInMethods: ("master_key" | "password")[] = ["master_key"],
+  overrides: Partial<{ docs_url: string | null }> = {},
 ) {
   await renderWithRouter(
     <AppProviders>
-      <DeploymentProvider value={bootstrap({ sign_in_methods: signInMethods })}>
+      <DeploymentProvider
+        value={bootstrap({ sign_in_methods: signInMethods, ...overrides })}
+      >
         <AccountMenu collapsed={false} />
       </DeploymentProvider>
     </AppProviders>,
@@ -52,6 +55,26 @@ describe("AccountMenu", () => {
 
     expect(await screen.findByText("Password sign-in")).toBeInTheDocument()
     expect(screen.queryByText("Unclaimed deployment")).not.toBeInTheDocument()
+  })
+
+  it("keeps the bundled guide reachable on a phone when no docs site is configured", async () => {
+    await openMenu()
+
+    const link = await screen.findByRole("link", { name: "Documentation" })
+    expect(link).toHaveAttribute("href", "/docs")
+    expect(link).not.toHaveAttribute("target")
+  })
+
+  it("retargets the phone's Documentation row at the deployment's own docs site", async () => {
+    await openMenu(["master_key"], { docs_url: "https://docs.otari.ai/en/" })
+
+    const link = await screen.findByRole("link", { name: "Documentation" })
+    expect(link).toHaveAttribute("href", "https://docs.otari.ai/en/")
+    expect(link).toHaveAttribute("target", "_blank")
+    // Still the row the top bar hands off to below `md`, not a second entry
+    // point: retargeting it must not make it visible where the cluster already
+    // draws one.
+    expect(link).toHaveClass("md:hidden")
   })
 })
 

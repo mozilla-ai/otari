@@ -11,6 +11,7 @@ from pathlib import Path
 
 import pytest
 from fastapi.testclient import TestClient
+from pydantic import ValidationError
 from sqlalchemy.exc import SQLAlchemyError
 
 from gateway.api.deps import reset_config
@@ -24,17 +25,19 @@ PLATFORM_TOKEN = "gw_test_token"
 MASTER_KEY = "sk-master-not-in-the-bootstrap"
 
 
-def _standalone(tmp_path: Path) -> GatewayConfig:
+def _standalone(tmp_path: Path, **fields: str) -> GatewayConfig:
     return GatewayConfig(
         database_url=f"sqlite:///{tmp_path / 'bootstrap.db'}",
         master_key=MASTER_KEY,
+        **fields,
     )
 
 
-def _hybrid(**platform: str) -> GatewayConfig:
+def _hybrid(*, fields: dict[str, str] | None = None, **platform: str) -> GatewayConfig:
     return GatewayConfig(
         mode="hybrid",
         platform={"base_url": "http://localhost:8100/api/v1", **platform},
+        **(fields or {}),
     )
 
 
@@ -51,6 +54,7 @@ def test_standalone_reports_a_local_operator_and_the_full_surface_set(tmp_path: 
         "surfaces": sorted(STANDALONE_SURFACES),
         "sign_in_methods": ["master_key"],
         "management_url": None,
+        "docs_url": None,
         "maintenance_mode": False,
         "passkeys_ready": False,
         "mail_ready": False,
@@ -187,6 +191,7 @@ def test_hybrid_reports_no_session_no_surfaces_and_the_hosted_url(monkeypatch: p
         "surfaces": [],
         "sign_in_methods": [],
         "management_url": "https://otari.ai",
+        "docs_url": None,
         "maintenance_mode": False,
         "passkeys_ready": False,
         "mail_ready": False,
@@ -245,3 +250,77 @@ def test_a_management_url_that_is_not_an_http_link_fails_at_startup(
 
     reset_config()
     reset_db()
+
+
+def test_a_deployment_with_no_docs_url_points_at_the_bundled_guide(tmp_path: Path) -> None:
+    """Null is the answer the dashboard reads as "use /docs", not a missing field."""
+    app = create_app(_standalone(tmp_path))
+
+    with TestClient(app) as client:
+        response = client.get("/v1/bootstrap")
+
+    assert response.json()["docs_url"] is None
+
+    reset_config()
+    reset_db()
+
+
+def test_docs_url_is_published_to_a_standalone_dashboard(tmp_path: Path) -> None:
+    """The retargeted Documentation link, published exactly as configured.
+
+    No trailing slash is trimmed and no path is appended: unlike ``management_url``,
+    which the dashboard suffixes to reach ``/terms`` and ``/playground``, this is
+    the whole destination, and a docs site can need its trailing slash to resolve.
+    """
+    app = create_app(_standalone(tmp_path, docs_url="https://docs.otari.ai/en/"))
+
+    with TestClient(app) as client:
+        response = client.get("/v1/bootstrap")
+
+    assert response.json()["docs_url"] == "https://docs.otari.ai/en/"
+
+    reset_config()
+    reset_db()
+
+
+def test_a_hybrid_gateway_carries_the_hosted_docs_link_too(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The setting is deployment-wide, not standalone-only.
+
+    A gateway attached to otari.ai serves the same shell, and its operator reads
+    the hosted documentation rather than the guide bundled for a self-hosted one.
+    """
+    monkeypatch.setenv("OTARI_AI_TOKEN", PLATFORM_TOKEN)
+    app = create_app(_hybrid(fields={"docs_url": "https://docs.otari.ai/en/"}))
+
+    with TestClient(app) as client:
+        response = client.get("/v1/bootstrap")
+
+    assert response.json()["docs_url"] == "https://docs.otari.ai/en/"
+
+    reset_config()
+    reset_db()
+
+
+def test_docs_url_is_read_from_the_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """OTARI_DOCS_URL is the whole configuration surface a container needs."""
+    monkeypatch.setenv("OTARI_DOCS_URL", "https://docs.otari.ai/en/")
+
+    assert GatewayConfig(database_url=f"sqlite:///{tmp_path / 'env.db'}").docs_url == "https://docs.otari.ai/en/"
+
+
+@pytest.mark.parametrize("configured", ["javascript:alert(1)", "docs.otari.ai", "/docs"])
+def test_a_docs_url_that_is_not_an_http_link_is_refused_at_load(configured: str) -> None:
+    """The browser turns this into an anchor, so a bad scheme is a config error.
+
+    Refused where the config is built rather than where the app is, which is the
+    one difference from ``platform.management_url``: that one is a key inside a
+    free-form dict, while this is a field of its own and pydantic can validate it.
+    """
+    with pytest.raises(ValidationError, match="docs_url"):
+        GatewayConfig(docs_url=configured)
+
+
+@pytest.mark.parametrize("configured", ["", "   "])
+def test_a_blank_docs_url_is_an_unset_one(configured: str) -> None:
+    """A container templating an empty value has not configured a docs site."""
+    assert GatewayConfig(docs_url=configured).docs_url is None

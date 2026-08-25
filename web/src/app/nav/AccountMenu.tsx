@@ -189,17 +189,19 @@ function MenuExternalLink({
   label,
   icon: Icon,
   href,
+  className = "",
 }: {
   label: string
   icon: IconType
   href: string
+  className?: string
 }) {
   return (
     <a
       href={href}
       target="_blank"
       rel="noopener noreferrer"
-      className={`${MENU_ROW} ${MENU_ROW_RESTING}`}
+      className={`${MENU_ROW} ${MENU_ROW_RESTING} ${className}`}
     >
       <Icon aria-hidden="true" className={MENU_ICON_CLASS} />
       <span className="min-w-0 flex-1 truncate">{label}</span>
@@ -247,7 +249,8 @@ function AppearanceControl() {
 
 export function AccountMenu({ collapsed }: { collapsed: boolean }) {
   const { logout } = useAuth()
-  const { session_type, sign_in_methods, management_url } = useDeployment()
+  const { session_type, sign_in_methods, management_url, docs_url } =
+    useDeployment()
   const [open, setOpen] = useState(false)
   const identity = sessionIdentity(session_type, sign_in_methods)
 
@@ -296,16 +299,27 @@ export function AccountMenu({ collapsed }: { collapsed: boolean }) {
           <div className={MENU_DIVIDER} />
           {/* The top bar owns Documentation above `md` (that cluster is
               `hidden md:flex`), and this menu is the one surface that renders
-              inside the mobile drawer, so this row is what keeps the bundled
-              guide reachable on a phone. Hidden from `md` up rather than shown
-              everywhere, because the design's menu draws no such row. */}
-          <MenuLink
-            label="Documentation"
-            icon={FiBookOpen}
-            to="/docs"
-            onNavigate={() => setOpen(false)}
-            className="md:hidden"
-          />
+              inside the mobile drawer, so this row is what keeps documentation
+              reachable on a phone. Hidden from `md` up rather than shown
+              everywhere, because the design's menu draws no such row.
+              It follows the top bar's target: the deployment's own docs site
+              when it named one, the bundled guide otherwise. */}
+          {docs_url ? (
+            <MenuExternalLink
+              label="Documentation"
+              icon={FiBookOpen}
+              href={docs_url}
+              className="md:hidden"
+            />
+          ) : (
+            <MenuLink
+              label="Documentation"
+              icon={FiBookOpen}
+              to="/docs"
+              onNavigate={() => setOpen(false)}
+              className="md:hidden"
+            />
+          )}
           {/* Hosted-only, and gated twice over: the entitlement says the
               deployment has terms to show, and `management_url` is where they
               are. A self-hosted gateway is neither, so the row is absent rather
