@@ -302,7 +302,7 @@ def _effective_output_cap(max_tokens: int | None, max_completion_tokens: int | N
     (this is what any-llm's own SDK does).
 
     any-llm's OpenAI layer remaps ``max_tokens`` to ``max_completion_tokens`` on
-    the way out, so nothing is lost by folding everything into ``max_tokens`` and a 
+    the way out, so nothing is lost by folding everything into ``max_tokens`` and a
     reasoning model still receives the field it requires. On the other hand,
     folding the other way would break every provider that never learned the new
     name.
