@@ -25,19 +25,19 @@ PLATFORM_TOKEN = "gw_test_token"
 MASTER_KEY = "sk-master-not-in-the-bootstrap"
 
 
-def _standalone(tmp_path: Path, **fields: str) -> GatewayConfig:
+def _standalone(tmp_path: Path, docs_url: str | None = None) -> GatewayConfig:
     return GatewayConfig(
         database_url=f"sqlite:///{tmp_path / 'bootstrap.db'}",
         master_key=MASTER_KEY,
-        **fields,
+        docs_url=docs_url,
     )
 
 
-def _hybrid(*, fields: dict[str, str] | None = None, **platform: str) -> GatewayConfig:
+def _hybrid(*, docs_url: str | None = None, **platform: str) -> GatewayConfig:
     return GatewayConfig(
         mode="hybrid",
         platform={"base_url": "http://localhost:8100/api/v1", **platform},
-        **(fields or {}),
+        docs_url=docs_url,
     )
 
 
@@ -290,7 +290,7 @@ def test_a_hybrid_gateway_carries_the_hosted_docs_link_too(monkeypatch: pytest.M
     the hosted documentation rather than the guide bundled for a self-hosted one.
     """
     monkeypatch.setenv("OTARI_AI_TOKEN", PLATFORM_TOKEN)
-    app = create_app(_hybrid(fields={"docs_url": "https://docs.otari.ai/en/"}))
+    app = create_app(_hybrid(docs_url="https://docs.otari.ai/en/"))
 
     with TestClient(app) as client:
         response = client.get("/v1/bootstrap")
