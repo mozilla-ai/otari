@@ -1,6 +1,7 @@
 """OpenAI-compatible models listing endpoint with auto-discovery."""
 
 import calendar
+import uuid
 from collections.abc import Sequence
 from typing import TYPE_CHECKING, Annotated
 
@@ -316,7 +317,7 @@ def _dynamic_policy_model(policy_name: str) -> ModelObject:
 
 
 def _policy_catalog_entries(
-    config: GatewayConfig, caller_user_id: str | None
+    config: GatewayConfig, caller_user_id: str | None, caller_workspace_id: uuid.UUID | None
 ) -> tuple[dict[str, str], dict[str, PolicySpec]]:
     """Split the policies in force into ``{name: target}`` and dynamic ones.
 
@@ -333,7 +334,7 @@ def _policy_catalog_entries(
     """
     static: dict[str, str] = {}
     dynamic: dict[str, PolicySpec] = {}
-    for name, spec in effective_policies(config, caller_user_id).items():
+    for name, spec in effective_policies(config, caller_user_id, workspace_id=caller_workspace_id).items():
         if spec.is_dynamic:
             dynamic[name] = spec
         else:
@@ -430,10 +431,13 @@ async def list_models(
     pricing data from the model_pricing table when available. Models that only
     exist in the pricing table are also included for backward compatibility.
     """
-    # Aliases are scoped, so the catalog is too: a caller sees the global and
-    # configured ones plus their own, never another user's. A master-key caller
-    # has no user, so it sees the unscoped layers only.
+    # Aliases are scoped, so the catalog is too: a caller sees their workspace's
+    # aliases and the configured ones, plus their own user-scoped layer, never
+    # another user's and never another workspace's. A master-key caller has no key
+    # to read either off, so it sees the configured layer plus the default
+    # workspace's, which is where its own writes land.
     caller_user_id = auth[0].user_id if auth[0] is not None else None
+    caller_workspace_id = auth[0].workspace_id if auth[0] is not None else None
     pricing_map = await _get_pricing_map(db, provider_filter=provider)
     # Snapshot before phase 1 mutates ``pricing_map`` (it pops matched keys), so
     # alias pricing can still be looked up by the target's canonical key. Keys are
@@ -448,8 +452,8 @@ async def list_models(
     # priced from the target), so it joins the alias map and is listed the same
     # way. Startup validation refuses a policy that collides with an alias name,
     # so this merge cannot silently shadow one.
-    configured_aliases = effective_aliases(config, caller_user_id)
-    static_policies, dynamic_policies = _policy_catalog_entries(config, caller_user_id)
+    configured_aliases = effective_aliases(config, caller_user_id, workspace_id=caller_workspace_id)
+    static_policies, dynamic_policies = _policy_catalog_entries(config, caller_user_id, caller_workspace_id)
     aliases = {**configured_aliases, **static_policies}
     # Alias targets are withheld from every phase that could surface the real
     # model, discovery (phase 1) as well as pricing-only (phase 2): publishing the
@@ -659,9 +663,14 @@ async def get_model(
 ) -> ModelObject:
     """Get details for a specific model."""
     api_key, is_master_key = auth
-    # Same scoping as the listing: the caller's own aliases, plus the global and
-    # configured ones. None for a master-key caller.
-    aliases = effective_aliases(config, api_key.user_id if api_key is not None else None)
+    # Same scoping as the listing: the caller's own aliases, plus their
+    # workspace's and the configured ones. A master-key caller has neither, so it
+    # reads the configured layer and the default workspace's.
+    aliases = effective_aliases(
+        config,
+        api_key.user_id if api_key is not None else None,
+        workspace_id=api_key.workspace_id if api_key is not None else None,
+    )
 
     # Model access control: a denied model returns 404, indistinguishable from a
     # missing one, so this endpoint cannot be used to probe which models exist
