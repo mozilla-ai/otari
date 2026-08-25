@@ -433,6 +433,48 @@ def test_set_price_by_ids_recomputes_cost(
     assert meters["output"]["units"] == 500
 
 
+def test_set_price_clears_the_provenance_of_the_amount_it_replaced(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """A repriced row's amount no longer comes from the source recorded against it."""
+    log = _make_log(
+        db_session,
+        log_id="imp-prov",
+        counts_toward_budget=False,
+        prompt_tokens=1000,
+        completion_tokens=500,
+        cost=None,
+    )
+    log.pricing_source = "genai_prices"
+    log.pricing_reference = "openai:gpt-4"
+    log.pricing_effective_at = datetime(2026, 5, 20, tzinfo=UTC)
+    log.pricing_version = "0.0.30"
+    log.calculated_at = datetime(2026, 7, 2, tzinfo=UTC)
+    db_session.commit()
+
+    resp = client.post(
+        SET_PRICE_PATH,
+        json={
+            "ids": ["imp-prov"],
+            "input_price_per_million": 3.0,
+            "output_price_per_million": 15.0,
+        },
+        headers=master_key_header,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["updated"] == 1
+
+    db_session.expire_all()
+    row = _get(db_session, "imp-prov")
+    assert row is not None
+    assert row.cost == Decimal("0.0105")
+    assert row.pricing_source is None
+    assert row.pricing_reference is None
+    assert row.pricing_effective_at is None
+    assert row.pricing_version is None
+    assert row.calculated_at is None
+
+
 def test_set_price_with_cache_rates(
     client: TestClient, master_key_header: dict[str, str], db_session: Session
 ) -> None:

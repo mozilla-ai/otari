@@ -271,7 +271,8 @@ async def set_usage_price(db: AsyncSession, request: UsageSetPriceRequest) -> Us
 
     Builds a transient ``ModelPricing`` from the supplied rates and reprices each
     matched row against its own token counts, writing ``cost`` / ``billing_meters`` /
-    ``pricing_breakdown`` back. Only imported rows are touched (see
+    ``pricing_breakdown`` back and clearing the row's pricing provenance, which the
+    old amount's source no longer explains. Only imported rows are touched (see
     ``_selection_conditions``), so recomputing cost can never desync ``users.spend``.
     Rows whose recomputed cost equals the stored value are reported ``unchanged``.
 
@@ -317,6 +318,16 @@ async def set_usage_price(db: AsyncSession, request: UsageSetPriceRequest) -> Us
                 row.cost = cost
                 row.billing_meters = meters
                 row.pricing_breakdown = breakdown
+                # The amount no longer comes from whatever priced it before, so the
+                # provenance recorded against it would now be a lie. Cleared rather
+                # than rewritten: a manual per-1M rate an operator typed is not an
+                # entry in any price list, so there is no source to name and NULL is
+                # the honest answer (see ``UsageLog.pricing_source``).
+                row.pricing_source = None
+                row.pricing_reference = None
+                row.pricing_effective_at = None
+                row.pricing_version = None
+                row.calculated_at = None
                 result.updated += 1
             last_id = rows[-1].id
             # Flush this page's UPDATEs into the (still open) transaction, then detach
