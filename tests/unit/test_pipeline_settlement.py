@@ -53,6 +53,7 @@ from gateway.api.routes._pipeline import (
 )
 from gateway.api.routes._platform import ResolvedAttempt, ResolvedRoute, SettledCost
 from gateway.core.config import GatewayConfig
+from gateway.models.mcp import McpServerConfig
 from gateway.rate_limit import RateLimitInfo
 from gateway.services.budget_service import ReservationHandle
 from gateway.services.tenancy.errors import WorkspaceMcpServerNotFoundError
@@ -1125,6 +1126,50 @@ async def test_unknown_mcp_server_id_releases_reservation(monkeypatch: pytest.Mo
         )
 
     assert exc_info.value.status_code == 404
+    assert settlement.refunded == 1
+
+
+@pytest.mark.asyncio
+async def test_duplicate_inline_mcp_server_name_releases_reservation(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Two request-body servers sharing a name are refused, not silently collapsed (otari#591)."""
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation(), workspace_id=uuid.uuid4())
+    dupes = [
+        McpServerConfig(name="tools", url="https://93.184.216.34/mcp"),
+        McpServerConfig(name="tools", url="https://93.184.216.35/mcp"),
+    ]
+    with pytest.raises(HTTPException) as exc_info:
+        await _call_prepare_gateway_tools(ctx, mcp_servers=dupes)
+
+    assert exc_info.value.status_code == 400
+    assert "tools" in str(exc_info.value.detail)
+    assert settlement.refunded == 1
+
+
+@pytest.mark.asyncio
+async def test_duplicate_mcp_server_name_against_a_stored_server_releases_reservation(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An inline server whose name matches a workspace's stored server is refused, not silently dropped."""
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    async def stored(*args: Any, **kwargs: Any) -> list[McpServerConfig]:
+        return [McpServerConfig(name="tools", url="https://93.184.216.35/mcp")]
+
+    monkeypatch.setattr(pipeline, "resolve_workspace_mcp_servers", stored)
+
+    ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation(), workspace_id=uuid.uuid4())
+    with pytest.raises(HTTPException) as exc_info:
+        await _call_prepare_gateway_tools(
+            ctx,
+            mcp_servers=[McpServerConfig(name="tools", url="https://93.184.216.34/mcp")],
+            mcp_server_ids=[cast(Any, "11111111-1111-1111-1111-111111111111")],
+        )
+
+    assert exc_info.value.status_code == 400
     assert settlement.refunded == 1
 
 

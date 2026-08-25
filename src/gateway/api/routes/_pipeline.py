@@ -1261,6 +1261,15 @@ def policy_in_hybrid_mode_detail(model_selector: str) -> str:
     )
 
 
+def duplicate_mcp_server_name_detail(name: str) -> str:
+    """400 detail for two mcp_servers entries sharing a name."""
+    return (
+        f"Duplicate MCP server name {name!r}. mcp_servers entries (including a workspace's stored "
+        "servers) must have unique names: MCPClientPool keys its connected sessions by name, so a "
+        "duplicate silently drops one server's tools and routes its tool calls to the other server."
+    )
+
+
 async def _compile_request_plan(
     *,
     adapter: FormatAdapter[Any, Any],
@@ -2236,6 +2245,14 @@ async def prepare_gateway_tools(
                 adapter, stored_servers, stored=True, workspace_id=ctx.workspace_id
             )
             mcp_servers = (mcp_servers or []) + stored_servers
+        if mcp_servers:
+            # MCPClientPool keys sessions by `name`; a duplicate silently collapses two
+            # servers into one and misroutes tool calls (otari#591). Reject it here.
+            seen_names: set[str] = set()
+            for server in mcp_servers:
+                if server.name in seen_names:
+                    raise adapter.error(400, duplicate_mcp_server_name_detail(server.name), ErrorKind.INVALID_REQUEST)
+                seen_names.add(server.name)
 
         sandbox_tool_entry, tools_after_sandbox = _extract_code_execution_tool(tools)
         # Read the effective config value (dashboard override / env / YAML), falling
