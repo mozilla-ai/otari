@@ -676,6 +676,13 @@ class UsageLog(Base):
     # row, and null reads correctly as "not recorded". The lengths mirror that
     # table's columns rather than this file's usual unbounded strings, so a value
     # copied across always fits.
+    #
+    # ``pricing_source`` speaks the platform's settlement vocabulary, the values
+    # ``_platform.SettledCost.pricing_source`` already carries on the hybrid wire
+    # (echoed to callers as ``usage.pricing_source``). It is not the same field as
+    # the one on a listed model in ``api/routes/models.py`` ("configured",
+    # "default", "dynamic", "none"), which says where a price list entry came from
+    # in this deployment rather than what settled one row's amount.
     pricing_source: Mapped[str | None] = mapped_column(String(32))
     pricing_reference: Mapped[str | None] = mapped_column(String(511))
     pricing_effective_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
