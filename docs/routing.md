@@ -362,10 +362,14 @@ candidate actually answers, send the prompt to each of them through
 `POST /v1/chat/completions`; those calls are budget-checked and land in the usage log
 like any other request.
 
-**Memory is per user, even for a global policy.** The examples are that user's own
-prompts, so sharing them across users would let one caller's traffic steer another's.
-A policy every caller resolves therefore warms once per caller, and `user_id` is
-required on both `rank` and `status` because there is no aggregate answer.
+**Memory is per user and per workspace, even for a workspace-wide policy.** The
+examples are that user's own prompts, so sharing them across users would let one
+caller's traffic steer another's, and sharing them across workspaces would do the
+same across tenants for a user who holds keys in both. A policy every caller
+resolves therefore warms once per caller in each workspace. `user_id` is required
+on both `rank` and `status` because there is no aggregate answer; `workspace_id`
+is optional there and means the deployment's default workspace, so a
+single-workspace deployment never names one.
 
 **Teaching cannot be undone through the API yet.** There is no route that lists or
 deletes recorded examples, so `rank` refuses a score key that no learned policy could
@@ -498,7 +502,8 @@ dashboard's **Routing** page, and take effect on the worker that served the writ
 immediately; other workers and replicas converge within 30 seconds.
 
 ```bash
-# Create or update. Omit user_id for a policy every caller sees.
+# Create or update. Omit user_id for a policy every caller in the workspace sees,
+# and workspace_id for the deployment's default workspace.
 curl -X POST http://localhost:8000/v1/routing/policies \
   -H "Otari-Key: Bearer <master-key>" \
   -H "Content-Type: application/json" \
@@ -510,7 +515,9 @@ curl -X POST http://localhost:8000/v1/routing/policies \
         }
       }'
 
-# What is in force, from config.yml and storage alike, in every scope.
+# What is in force, from config.yml and storage alike, in every scope and every
+# workspace. Add ?workspace_id=<id> to narrow the stored ones to one workspace;
+# config.yml policies are deployment-wide, so they are always listed.
 curl http://localhost:8000/v1/routing/policies -H "Otari-Key: Bearer <master-key>"
 
 # Rename one. `rename_from` names the policy to move; `name` is what it becomes.
@@ -524,18 +531,26 @@ curl -X POST http://localhost:8000/v1/routing/policies \
         "spec": {"select": [{"default": "openai:gpt-5-mini"}]}
       }'
 
-# Delete one. user_id selects the scope; omit it for the global policy.
+# Delete one. user_id and workspace_id select the scope; omit user_id for the
+# workspace-wide policy and workspace_id for the default workspace.
 curl -X DELETE http://localhost:8000/v1/routing/policies/fast \
   -H "Otari-Key: Bearer <master-key>"
 ```
 
-A stored policy scoped to a user takes precedence over a `config.yml` policy of
-the same name, and a global stored policy is refused if one already exists in
-`config.yml`, because config wins during resolution and the stored one would be
-dead config.
+A stored policy resolves only for requests in its own workspace, which is read
+off the API key that authenticated them. Two workspaces can therefore each define
+`fast` and get their own; neither sees the other's.
+
+Within a workspace, a stored policy scoped to a user takes precedence over a
+`config.yml` policy of the same name, and a workspace-wide stored policy is
+refused if one already exists in `config.yml`, because config wins during
+resolution and the stored one would be dead config. A `config.yml` policy has no
+workspace: it comes from a file the deployment owns, so it is in force in all of
+them.
 
 A rename stays inside one scope, since who a policy applies to is the other half
-of its key; to move a policy between scopes, delete it and create it again. The
+of its key; to move a policy between scopes or workspaces, delete it and create
+it again. The
 new name goes through the same checks a fresh one does, so a rename cannot walk a
 policy into a collision a create would have refused. Two things a rename does not
 do: callers naming the old name start getting a 400, and usage already recorded
