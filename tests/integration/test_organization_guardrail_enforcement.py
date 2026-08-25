@@ -247,7 +247,7 @@ def test_a_request_whose_tenancy_will_not_resolve_is_refused_rather_than_uncheck
     assert guardrails.calls == [], "and the provider was never reached either"
 
 
-def test_an_endpoint_that_stops_resolving_honors_the_entrys_own_fail_open(
+def test_an_entry_whose_endpoint_stops_resolving_still_honors_its_fail_open(
     client: TestClient,
     api_key_header: dict[str, str],
     master_key_header: dict[str, str],
@@ -358,7 +358,7 @@ def test_a_disabled_entry_stops_running_without_being_deleted(
     assert guardrails.calls == []
 
 
-def test_the_entrys_endpoint_and_credential_are_what_the_check_is_sent_with(
+def test_the_configured_endpoint_and_credential_are_what_the_check_is_sent_with(
     client: TestClient,
     api_key_header: dict[str, str],
     master_key_header: dict[str, str],
