@@ -646,8 +646,8 @@ function AppShellChrome() {
       <PricingWarning />
       {/* `relative` so the mobile drawer can be offset from *this row* rather
           than from the viewport. The row's top edge is the header's top edge,
-          and the banners above it (the update prompt, the connection status, the
-          pricing alarm) are in flow, so a viewport-relative offset would leave
+          and the banners above it (the update prompt, the connection status) are
+          in flow, so a viewport-relative offset would leave
           the drawer covering the header by however tall they are, taking the
           only control that closes it with them. */}
       <div className="relative flex min-h-0 flex-1">

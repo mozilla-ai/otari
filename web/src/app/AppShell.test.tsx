@@ -7,6 +7,7 @@ import { Provider } from "@/app/provider"
 import type {
   CallerOrganizationMembership,
   DeploymentBootstrap,
+  GatewaySettings,
 } from "@/client"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
@@ -72,6 +73,7 @@ function renderShell(
   options: {
     entitlements?: Partial<Entitlements>
     url?: string
+    settings?: GatewaySettings
     /** The caller's membership, for the controls that gate on their role. */
     context?: Parameters<typeof organizationContext>[0]
     /** The organizations the caller belongs to, for the organization switcher. */
@@ -87,14 +89,19 @@ function renderShell(
   // The shell reads the organization context to decide whether to offer the way
   // into that rail, and the switcher reads it for the names it shows. The
   // switcher additionally reads the caller's own memberships, which is a
-  // different shape (`{ data, count }`), so this answers per path rather than
-  // handing every request one body.
+  // different shape (`{ data, count }`), and the pricing alarm reads settings,
+  // so this answers per path rather than handing every request one body.
   const memberships = options.memberships ?? [callerOrganizationMembership()]
-  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
-    String(input).startsWith("/v1/organizations/me/memberships")
-      ? Response.json({ data: memberships, count: memberships.length })
-      : Response.json(organizationContext(options.context)),
-  )
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const path = String(input)
+    if (path.startsWith("/v1/organizations/me/memberships")) {
+      return Response.json({ data: memberships, count: memberships.length })
+    }
+    if (path.includes("/v1/settings")) {
+      return Response.json(options.settings ?? SETTINGS_WITH_PRICING)
+    }
+    return Response.json(organizationContext(options.context))
+  })
   return renderWithRouter(<div>PAGE CONTENT</div>, {
     url,
     shell: (
@@ -116,6 +123,24 @@ function renderShell(
       (route) => route.path !== url,
     ),
   })
+}
+
+const SETTINGS_WITH_PRICING: GatewaySettings = {
+  mode: "standalone",
+  version: "1.0.0",
+  model_discovery: true,
+  default_pricing: true,
+  require_pricing: false,
+  master_key_source: "configured",
+  secret_key_configured: true,
+  config: [],
+}
+
+// require_pricing on with default_pricing off is what raises the alarm.
+const SETTINGS_NEEDING_PRICING: GatewaySettings = {
+  ...SETTINGS_WITH_PRICING,
+  default_pricing: false,
+  require_pricing: true,
 }
 
 describe("AppShell responsive layout", () => {
@@ -150,6 +175,25 @@ describe("AppShell responsive layout", () => {
       screen.getByRole("button", { name: "Close navigation" }),
     ).toHaveAttribute("aria-expanded", "true")
     expect(aside?.className).toContain("translate-x-0")
+  })
+
+  it("keeps the mobile drawer controls usable while pricing needs attention", async () => {
+    mockMatchMedia(true)
+    const user = userEvent.setup()
+    await renderShell(undefined, { settings: SETTINGS_NEEDING_PRICING })
+
+    const warning = await screen.findByText(
+      /Requests are rejected until pricing/,
+    )
+    // Out of flow, so the alarm overlays the shell rather than displacing it.
+    expect(warning.closest("main")).toBeNull()
+
+    await user.click(screen.getByRole("button", { name: "Open navigation" }))
+    await user.click(screen.getByRole("button", { name: "Close navigation" }))
+
+    expect(
+      screen.getByRole("button", { name: "Open navigation" }),
+    ).toBeInTheDocument()
   })
 
   it("dismisses the mobile drawer after navigating to a destination", async () => {
