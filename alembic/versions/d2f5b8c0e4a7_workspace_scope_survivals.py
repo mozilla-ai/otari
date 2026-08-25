@@ -49,40 +49,39 @@ DEFAULT_WORKSPACE_NAME = "Default workspace"
 
 SCOPED_TABLES = ("routing_memory", "router_preferences", "file_objects")
 
-# Old name -> (new name, columns). Renamed because the workspace now leads every
-# read of these tables.
-RENAMED_INDEXES: dict[str, tuple[str, list[str]]] = {
-    "ix_routing_memory_user_model": (
+# The composite indexes that move. Each is dropped before the column arrives and
+# recreated after it, rather than being extended in place, because every read of
+# these tables now leads with the workspace.
+RENAMED_INDEXES: tuple[tuple[str, str, list[str], str, list[str]], ...] = (
+    (
+        "routing_memory",
+        "ix_routing_memory_user_model",
+        ["user_id", "embedding_model"],
         "ix_routing_memory_workspace_user_model",
         ["workspace_id", "user_id", "embedding_model"],
     ),
-    "ix_routing_memory_user_created": (
+    (
+        "routing_memory",
+        "ix_routing_memory_user_created",
+        ["user_id", "created_at"],
         "ix_routing_memory_workspace_user_created",
         ["workspace_id", "user_id", "created_at"],
     ),
-    "ix_routing_memory_user_model_task": (
+    (
+        "routing_memory",
+        "ix_routing_memory_user_model_task",
+        ["user_id", "embedding_model", "task_id"],
         "ix_routing_memory_workspace_user_model_task",
         ["workspace_id", "user_id", "embedding_model", "task_id"],
     ),
-    "ix_router_preferences_user_created": (
+    (
+        "router_preferences",
+        "ix_router_preferences_user_created",
+        ["user_id", "created_at"],
         "ix_router_preferences_workspace_user_created",
         ["workspace_id", "user_id", "created_at"],
     ),
-}
-
-_INDEX_TABLE = {
-    "ix_routing_memory_user_model": "routing_memory",
-    "ix_routing_memory_user_created": "routing_memory",
-    "ix_routing_memory_user_model_task": "routing_memory",
-    "ix_router_preferences_user_created": "router_preferences",
-}
-
-_OLD_INDEX_COLUMNS: dict[str, list[str]] = {
-    "ix_routing_memory_user_model": ["user_id", "embedding_model"],
-    "ix_routing_memory_user_created": ["user_id", "created_at"],
-    "ix_routing_memory_user_model_task": ["user_id", "embedding_model", "task_id"],
-    "ix_router_preferences_user_created": ["user_id", "created_at"],
-}
+)
 
 
 def _uuid_literal(bind: sa.engine.Connection, value: uuid.UUID) -> str:
@@ -178,8 +177,8 @@ def upgrade() -> None:
     bind = op.get_bind()
     literal = _uuid_literal(bind, _default_workspace_id(bind))
 
-    for old_name in RENAMED_INDEXES:
-        op.drop_index(old_name, table_name=_INDEX_TABLE[old_name])
+    for table, old_name, _old_columns, _new_name, _new_columns in RENAMED_INDEXES:
+        op.drop_index(old_name, table_name=table)
 
     for table in SCOPED_TABLES:
         op.add_column(
@@ -200,13 +199,13 @@ def upgrade() -> None:
                 ondelete="RESTRICT",
             )
 
-    for old_name, (new_name, columns) in RENAMED_INDEXES.items():
-        op.create_index(new_name, _INDEX_TABLE[old_name], columns)
+    for table, _old_name, _old_columns, new_name, new_columns in RENAMED_INDEXES:
+        op.create_index(new_name, table, new_columns)
 
 
 def downgrade() -> None:
-    for old_name, (new_name, _columns) in RENAMED_INDEXES.items():
-        op.drop_index(new_name, table_name=_INDEX_TABLE[old_name])
+    for table, _old_name, _old_columns, new_name, _new_columns in RENAMED_INDEXES:
+        op.drop_index(new_name, table_name=table)
 
     for table in SCOPED_TABLES:
         with op.batch_alter_table(table) as batch:
@@ -216,5 +215,5 @@ def downgrade() -> None:
         op.drop_index(op.f(f"ix_{table}_workspace_id"), table_name=table)
         op.drop_column(table, "workspace_id")
 
-    for old_name, columns in _OLD_INDEX_COLUMNS.items():
-        op.create_index(old_name, _INDEX_TABLE[old_name], columns)
+    for table, old_name, old_columns, _new_name, _new_columns in RENAMED_INDEXES:
+        op.create_index(old_name, table, old_columns)
