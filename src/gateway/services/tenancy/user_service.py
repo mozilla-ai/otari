@@ -325,8 +325,20 @@ async def verify_email(db: AsyncSession, *, token: str) -> User:
     just the one ``authenticate`` itself checks. Single-use is the hash and
     expiry columns going back to ``NULL`` on success: a replayed token then
     matches no row at all.
+
+    Locked, then re-resolved, before any write: two concurrent verifications
+    of the same token could otherwise both read a live, unexpired hash
+    (nothing has committed yet to see) and both proceed, which is harmless
+    here (the same identity gets verified twice), but leaves the second racer
+    through the lock re-resolving to nothing and correctly raising instead.
+    Same pattern as ``organization_service.accept_invitation``.
     """
-    identity = await UserRepository(db).get_by_verification_token_hash(hash_token(token))
+    users = UserRepository(db)
+    identity = await users.get_by_verification_token_hash(hash_token(token))
+    if identity is None or identity.email_verification_token_expires_at is None or not identity.is_active:
+        raise VerificationTokenInvalidError
+    await users.lock(identity.id)
+    identity = await users.get_by_verification_token_hash(hash_token(token))
     if identity is None or identity.email_verification_token_expires_at is None or not identity.is_active:
         raise VerificationTokenInvalidError
     if identity.email_verification_token_expires_at < datetime.now(UTC):
@@ -432,8 +444,20 @@ async def reset_password(db: AsyncSession, *, token: str, new_password: str) -> 
     back. A deactivated identity's token is refused the same way an unknown or
     expired one is, matching ``verify_email``: deactivation has to end every
     road back in, not just the one ``authenticate`` itself checks.
+
+    Locked, then re-resolved, before any write: two concurrent resets of the
+    same token could otherwise both read a live, unexpired hash (nothing has
+    committed yet to see) and both proceed, each setting a different password
+    and each receiving success, with the last write winning. The second racer
+    through the lock re-resolves to nothing and raises instead. Same pattern
+    as ``organization_service.accept_invitation`` and ``verify_email`` above.
     """
-    identity = await UserRepository(db).get_by_reset_token_hash(hash_token(token))
+    users = UserRepository(db)
+    identity = await users.get_by_reset_token_hash(hash_token(token))
+    if identity is None or identity.password_reset_token_expires_at is None or not identity.is_active:
+        raise ResetTokenInvalidError
+    await users.lock(identity.id)
+    identity = await users.get_by_reset_token_hash(hash_token(token))
     if identity is None or identity.password_reset_token_expires_at is None or not identity.is_active:
         raise ResetTokenInvalidError
     if identity.password_reset_token_expires_at < datetime.now(UTC):
