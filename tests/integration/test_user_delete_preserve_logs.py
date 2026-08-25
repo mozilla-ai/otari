@@ -9,8 +9,9 @@ from fastapi.testclient import TestClient
 from sqlalchemy import text
 from sqlalchemy.orm import Session
 
+from gateway.adapters.telemetry_storage_adapter import DatabaseTelemetryStorageAdapter
 from gateway.core.config import API_KEY_HEADER
-from gateway.models.entities import APIKey, BudgetResetLog, UsageLog
+from gateway.models.entities import APIKey, BudgetResetLog, UsageLog, User
 
 from .conftest import MODEL_NAME
 
@@ -262,3 +263,35 @@ def test_cascade_delete_api_keys_on_hard_delete(
 
     key = db_session.query(APIKey).filter(APIKey.id == key_id).first()
     assert key is None, "API key should be cascade-deleted when user row is hard-deleted"
+
+
+def test_delete_user_leaves_the_user_active_when_telemetry_erasure_fails(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session: Session,
+) -> None:
+    """A store that cannot erase must not leave a deleted user's telemetry behind.
+
+    The erasure runs before the soft-delete for exactly this case: the whole
+    request fails, the user stays active, and the operator can retry. Were it
+    the other way round, the retry would meet a 404 (the user is no longer
+    active) and nothing would ever erase what was left behind.
+    """
+    client.post("/v1/users", json={"user_id": "erase-fail-user"}, headers=master_key_header)
+
+    async def _boom(*, user_id: str) -> int:
+        raise RuntimeError("telemetry store unreachable")
+
+    with patch.object(DatabaseTelemetryStorageAdapter, "purge_user", _boom):
+        response = client.delete("/v1/users/erase-fail-user", headers=master_key_header)
+
+    assert response.status_code == 500
+    assert "telemetry" in response.json()["detail"].lower()
+
+    db_session.expire_all()
+    user = db_session.query(User).filter(User.user_id == "erase-fail-user").first()
+    assert user is not None
+    assert user.deleted_at is None, "the user must stay active so the erasure can be retried"
+
+    # The retry succeeds once the store recovers, which is the point of the order.
+    assert client.delete("/v1/users/erase-fail-user", headers=master_key_header).status_code == 204

@@ -123,6 +123,11 @@ class TelemetryFilter:
     inclusive and ``end`` exclusive, matching the half-open windows the usage
     endpoints already report. Several values in ``user_ids`` or ``api_key_ids``
     match any of them.
+
+    A naive bound means UTC. The date query parameters advertise ISO 8601 and
+    parse to a naive value when the caller omits the offset, so an adapter that
+    resolved one against its own local time would select a different set of
+    rows per deployment, and two adapters would disagree about the same filter.
     """
 
     start: datetime | None = None
@@ -240,12 +245,18 @@ class TelemetryStoragePort(Protocol):
 
         Idempotent on ``(source, dedup_key)``: a record already stored counts
         as ``duplicate`` and is not stored twice, so an exporter that resends a
-        batch after a timeout does not double count. The caller has already
-        dropped repeats within this batch, so collisions here are against what
-        is already stored.
+        batch after a timeout does not double count. Repeats *within* this
+        batch are the store's to collapse as well, and count the same way: the
+        stored projection is lossy by design, so one export can carry two
+        records that land on one key.
 
         Settles before returning: a caller cannot roll this back, and a
-        successful return means the accepted records are durable.
+        successful return means the accepted records are durable. It is not
+        all-or-nothing. An adapter may settle in pieces, so a call that raises
+        can leave some records stored, and this port asks for idempotency
+        rather than atomicity precisely so that resolves itself: the honest
+        recovery is to send the batch again, and whatever landed comes back as
+        ``duplicate``.
         """
         ...
 

@@ -121,7 +121,7 @@ flowchart LR
     SVC --> TP
 ```
 
-> **Where the ports are today.** `src/gateway/ports/` holds four of them, `ModelProviderPort`, `BillingPort`, `EntitlementPort` and `GrowthSignalPort`, each with a working core adapter in `src/gateway/adapters/`. They are the seam's mechanism rather than its whole surface: nothing on the request path calls one yet, so the choices those four describe (which credential to use, when to meter) are still made by the mode switch and the hand-wired dependencies described next. The remaining ports in the table above arrive as they gain callers.
+> **Where the ports are today.** `src/gateway/ports/` holds five of them, `ModelProviderPort`, `BillingPort`, `EntitlementPort`, `GrowthSignalPort` and `TelemetryStoragePort`, each with a working core adapter in `src/gateway/adapters/`. Only the last has core callers: the OTLP receiver, the telemetry read endpoints, and the purge paths all resolve it. The other four are still the seam's mechanism rather than its surface, so the choices they describe (which credential to use, when to meter) are made by the mode switch and the hand-wired dependencies described next. The remaining ports in the table above arrive as they gain callers.
 
 ## How a port is resolved
 

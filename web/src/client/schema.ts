@@ -3079,7 +3079,7 @@ export interface paths {
         post?: never;
         /**
          * Delete User
-         * @description Delete a user.
+         * @description Delete a user, and erase the telemetry captured under their name.
          */
         delete: operations["delete_user_v1_users__user_id__delete"];
         options?: never;
