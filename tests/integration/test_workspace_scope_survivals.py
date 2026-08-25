@@ -24,7 +24,6 @@ from fastapi.testclient import TestClient
 
 from gateway.services.file_store import LocalDirFileStore
 
-MASTER = "master"
 ALIASES = "/v1/aliases"
 POLICIES = "/v1/routing/policies"
 NOWHERE = "00000000-0000-0000-0000-000000000000"
