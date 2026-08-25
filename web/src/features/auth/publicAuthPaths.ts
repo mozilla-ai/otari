@@ -1,3 +1,5 @@
+import type { OAuthProvider } from "./oauthProviders"
+
 /**
  * The hash paths that answer in front of a session, and what each one needs
  * from the deployment before it can work.
@@ -41,6 +43,25 @@
  */
 type PublicAuthRequirement = "mail" | "oauth" | "none"
 
+/**
+ * The callback path every OAuth provider this dashboard renders must have.
+ *
+ * Derived from the `OAuthProvider` union rather than written out, so the table
+ * below cannot fall behind `oauthProviders.ts`. Forgetting an entry used to be
+ * silent and expensive: the sign-in screen renders the button, the gateway
+ * redirects to `#/auth/<provider>/callback`, `publicAuthPath` answers `null`,
+ * `DeploymentRoot` falls through to the auth gate, and the person lands back on
+ * the sign-in screen with their authorization code silently unspent and nothing
+ * anywhere saying why.
+ *
+ * The gateway guards its own half of the same pair at import
+ * (`assert set(_PROVIDERS) == set(OAUTH_PROVIDERS)` in `services/oauth_service.py`),
+ * and the nav registry guards its capability pair the same way. This is that
+ * check, moved from a test into the type: adding a provider without its callback
+ * path is a compile error rather than a runtime dead end.
+ */
+type OAuthCallbackPath = `/auth/${OAuthProvider}/callback`
+
 export const PUBLIC_AUTH_PAGES = {
   "/signup": "mail",
   "/check-email": "mail",
@@ -50,10 +71,12 @@ export const PUBLIC_AUTH_PAGES = {
   "/reset-password": "none",
   // Spelled out per provider rather than matched with a parameter, so this
   // table stays the single closed list of what renders in front of a session
-  // and `publicAuthPath` keeps answering on an exact lookup.
+  // and `publicAuthPath` keeps answering on an exact lookup. The `satisfies`
+  // below is what keeps that spelling-out honest.
   "/auth/google/callback": "oauth",
   "/auth/github/callback": "oauth",
-} as const satisfies Record<string, PublicAuthRequirement>
+} as const satisfies Record<string, PublicAuthRequirement> &
+  Record<OAuthCallbackPath, "oauth">
 
 export type PublicAuthPath = keyof typeof PUBLIC_AUTH_PAGES
 

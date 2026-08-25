@@ -53,6 +53,22 @@ async function withMailReady(page: Page): Promise<void> {
   })
 }
 
+// The OAuth callbacks (otari#651) gate on their own provider rather than on
+// mail, so they get the same treatment for the same reason: `e2e/otari.yml`
+// registers no OAuth client, and `parity.bootstrap.spec.ts` asserts an empty
+// `oauth_providers` as part of what this fixture is. One field, on the one
+// response the shell reads before it mounts.
+async function withGoogleConfigured(page: Page): Promise<void> {
+  await page.route("**/v1/bootstrap", async (route) => {
+    const response = await route.fetch()
+    const bootstrap = await response.json()
+    await route.fulfill({
+      response,
+      json: { ...bootstrap, oauth_providers: ["google", "github"] },
+    })
+  })
+}
+
 test("signup", async ({ page }) => {
   await withMailReady(page)
   await page.goto("/#/signup")
@@ -115,4 +131,43 @@ test("reset password", async ({ page }) => {
     page.getByRole("heading", { name: "Set a new password" }),
   ).toBeVisible()
   await captureScreenshot(page, "reset-password")
+})
+
+test("sign-in screen offering OAuth", async ({ page }) => {
+  // The buttons are absent on the unstubbed fixture, which is what the plain
+  // "sign-in" capture above already shows. This is the other state.
+  await withGoogleConfigured(page)
+  await page.goto("/")
+  await expect(
+    page.getByRole("button", { name: "Sign in with Google" }),
+  ).toBeVisible()
+  await expect(
+    page.getByRole("button", { name: "Sign in with GitHub" }),
+  ).toBeVisible()
+  await captureScreenshot(page, "sign-in-oauth")
+})
+
+test("OAuth callback that did not complete", async ({ page }) => {
+  // No stored state, so the page refuses before it calls anything. That is the
+  // ending somebody actually sees when a link is stale or opened in the wrong
+  // tab; the success ending leaves for the dashboard and has no screen to hold.
+  await withGoogleConfigured(page)
+  await page.goto("/#/auth/google/callback?code=not-a-real-code&state=stale")
+  await expect(
+    page.getByRole("heading", { name: "That sign-in did not complete" }),
+  ).toBeVisible()
+  await captureScreenshot(page, "oauth-callback-failed")
+})
+
+test("OAuth callback on a gateway that configures no provider", async ({
+  page,
+}) => {
+  // The hidden-rather-than-broken half, the same shape the mail-gated pages
+  // have: the sign-in screen offers no button here, and this is what a bookmark
+  // or a provider redirect still reaches.
+  await page.goto("/#/auth/github/callback?code=c&state=s")
+  await expect(
+    page.getByRole("heading", { name: "Not available on this gateway" }),
+  ).toBeVisible()
+  await captureScreenshot(page, "oauth-callback-unavailable")
 })

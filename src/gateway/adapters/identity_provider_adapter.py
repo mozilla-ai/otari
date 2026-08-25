@@ -66,8 +66,19 @@ class RosterIdentityProviderAdapter:
         - The provider is recorded on an identity that had none, which is what
           "linking" means on this schema. An identity that already names a
           different provider is *not* rewritten: a second provider vouching for
-          the same address still signs the same person in, and the column holds
-          how they first arrived rather than how they arrived last.
+          the same address still signs the same person in, and the column keeps
+          the provider that arrived first.
+
+          "First" here means the first to commit, and this is a read-then-write
+          on an unlocked row, so two sign-ins racing on one identity with two
+          *different* providers can both see NULL and the later commit wins.
+          That is left unguarded deliberately rather than overlooked. Nothing in
+          this edition reads ``oauth_provider``: it is carried for schema parity
+          with the platform (``models/tenancy.py``), no route publishes it, and
+          no decision consults it. Locking the identity row would put a
+          ``SELECT ... FOR UPDATE`` on every OAuth sign-in to protect a value
+          with no reader. If something ever does read it, this is the line to
+          revisit.
         - A provider-verified address stamps ``email_verified_at`` if it is
           unset, which lifts the local sign-in gate the password path enforces
           (``user_service.authenticate``). That is not a shortcut around

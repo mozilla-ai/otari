@@ -250,13 +250,19 @@ async def callback(
         record_auth_failure("invalid_oauth")
         raise
 
-    token, expires_at = await create_dashboard_session(
-        session, config.dashboard_session_ttl_hours, user_id=identity.id
-    )
     try:
+        # Staging the session row is inside this block, not just the commit:
+        # ``create_dashboard_session`` prunes expired rows with a DELETE before
+        # it stages anything, so it is a statement that can fail on its own. Left
+        # outside, that failure would skip the rollback and the log line below
+        # and surface as a bare 500 from the generic handler.
+        #
         # One commit for the whole sign-in: the adapter's link and verification
         # stamp are on this same session, so they land with the session row or
         # with neither.
+        token, expires_at = await create_dashboard_session(
+            session, config.dashboard_session_ttl_hours, user_id=identity.id
+        )
         await session.commit()
     except SQLAlchemyError:
         await session.rollback()

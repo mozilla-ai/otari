@@ -16,6 +16,7 @@ from urllib.parse import parse_qs, urlsplit
 
 import pytest
 from fastapi.testclient import TestClient
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import Session
 from sqlmodel import col, select
 
@@ -379,6 +380,37 @@ def test_an_oversized_code_is_refused_before_any_outbound_call(
 
     assert response.status_code == 422
     assert spent == []
+
+
+def test_a_database_failure_while_staging_the_session_rolls_back_and_says_nothing_more(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    oauth_configured: None,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Staging the session row is inside the route's error handling, not beside it.
+
+    ``create_dashboard_session`` prunes expired rows with a DELETE before it
+    stages anything, so it can fail on its own rather than only at commit time.
+    Outside the handled block that failure skipped the rollback and surfaced as
+    a bare 500 from the generic handler.
+    """
+    add_member(client, master_key_header, email="ada@example.com")
+    stub_exchange(monkeypatch)
+
+    async def _explode(*_args: Any, **_kwargs: Any) -> tuple[str, Any]:
+        raise SQLAlchemyError("pruning failed")
+
+    monkeypatch.setattr("gateway.api.routes.auth_oauth.create_dashboard_session", _explode)
+
+    response = client.post("/v1/auth/oauth/google/callback", json={"code": "c"})
+
+    assert response.status_code == 500
+    # The generic wording, not the exception: the error-detail boundary holds on
+    # this path the way it does on the commit path beside it.
+    assert response.json()["detail"] == "Database error"
+    assert "pruning failed" not in response.text
+    assert SESSION_COOKIE_NAME not in response.cookies
 
 
 # ---------- the redirect a provider actually lands on ----------

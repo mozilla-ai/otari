@@ -1,8 +1,10 @@
 import { describe, expect, it } from "vitest"
 
+import { OAUTH_PROVIDER_LABELS } from "@/features/auth/oauthProviders"
 import {
   isPublicAuthPageAvailable,
   oauthCallbackProvider,
+  PUBLIC_AUTH_PAGES,
   publicAuthPath,
 } from "@/features/auth/publicAuthPaths"
 
@@ -101,5 +103,30 @@ describe("oauthCallbackProvider", () => {
   it("answers null for every page that is not one", () => {
     expect(oauthCallbackProvider("/signup")).toBeNull()
     expect(oauthCallbackProvider("/reset-password")).toBeNull()
+  })
+})
+
+describe("every renderable provider has a callback page", () => {
+  it("holds an /auth/{provider}/callback entry for each OAuthProvider", () => {
+    // `PUBLIC_AUTH_PAGES` is already type-linked to the `OAuthProvider` union,
+    // so a forgotten entry is a compile error. This asserts the same rule at
+    // runtime, because the type annotation is one edit away from being widened
+    // back to a plain `Record<string, …>` and the failure it prevents is silent
+    // and expensive: the sign-in screen renders the button, the gateway
+    // redirects to the callback hash, `publicAuthPath` answers null,
+    // `DeploymentRoot` falls through to the auth gate, and the person lands
+    // back on sign-in with their authorization code unspent and no error shown.
+    //
+    // The gateway asserts its own half of the same pair at import
+    // (`set(_PROVIDERS) == set(OAUTH_PROVIDERS)`); this is the browser's half.
+    for (const provider of Object.keys(OAUTH_PROVIDER_LABELS)) {
+      const path = `/auth/${provider}/callback`
+      expect(Object.hasOwn(PUBLIC_AUTH_PAGES, path)).toBe(true)
+      expect(PUBLIC_AUTH_PAGES[path as keyof typeof PUBLIC_AUTH_PAGES]).toBe(
+        "oauth",
+      )
+      // And the hash a provider actually redirects to resolves to it.
+      expect(publicAuthPath(`#${path}?code=c&state=s`)).toBe(path)
+    }
   })
 })
