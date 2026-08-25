@@ -237,6 +237,10 @@ PROVIDER_BILLING_DETAIL = (
     "Top up the provider account, or route this model to a provider that has credit."
 )
 PROVIDER_RATE_LIMITED_DETAIL = "The provider rate-limited this request"
+PROVIDER_NONSTREAMING_MAX_TOKENS_DETAIL = (
+    "max_tokens is too large for a non-streaming request to this provider; lower max_tokens "
+    "or set stream: true"
+)
 ALL_PROVIDERS_FAILED_DETAIL = "All upstream providers failed"
 ALL_PROVIDERS_TIMED_OUT_DETAIL = "All upstream providers timed out"
 SANDBOX_NOT_CONFIGURED_DETAIL = (
@@ -343,6 +347,20 @@ def _unsupported_feature_detail(exc: BaseException) -> str:
     return _caller_fault_detail(exc, PROVIDER_BAD_REQUEST_DETAIL)
 
 
+# The anthropic SDK's non-streaming pre-flight guard message (otari#533); status-less,
+# so this classifier has to name it explicitly or it falls through to a generic 502.
+# Matched as a substring: the SDK message also links a docs anchor that has moved.
+_ANTHROPIC_NONSTREAMING_TIMEOUT_GUARD_MESSAGE = "Streaming is required for operations that may take longer"
+
+
+def _is_anthropic_nonstreaming_timeout_guard(exc: BaseException) -> bool:
+    """True when a status-less ``ValueError`` is the anthropic SDK's own pre-flight guard."""
+    return any(
+        isinstance(candidate, ValueError) and _ANTHROPIC_NONSTREAMING_TIMEOUT_GUARD_MESSAGE in str(candidate)
+        for candidate in upstream_exception_chain(exc)
+    )
+
+
 def _redacted_caller_fault_detail(message: str, fallback: str) -> str:
     """Return redacted explanatory text, or a fixed detail when none remains."""
     redacted = redact_upstream_message(message)
@@ -403,6 +421,10 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
     # whole signal here, and its message names the unsupported feature.
     if _is_unsupported_feature_error(exc):
         return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, _unsupported_feature_detail(exc))
+    # Defense in depth for otari#533: an operator-supplied timeout equal to the
+    # SDK's own default re-arms this same status-less guard.
+    if _is_anthropic_nonstreaming_timeout_guard(exc):
+        return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, PROVIDER_NONSTREAMING_MAX_TOKENS_DETAIL)
     if status_code is None:
         return None
     # Account billing exhaustion, which several providers report as a 400/422

@@ -20,6 +20,7 @@ from typing import Any
 from unittest.mock import patch
 
 import pytest
+from anthropic import APIConnectionError
 from any_llm import acompletion
 
 from gateway.api.routes._platform import ResolvedAttempt, default_attempt_kwargs
@@ -98,3 +99,73 @@ async def test_bedrock_bearer_shape_uses_custom_client_not_flat_kwargs() -> None
         # client and skips constructing its own; Session.client() is
         # untouched for the runtime client in this shape.
         fake_boto3_client.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_anthropic_default_timeout_reaches_the_real_sdk_client() -> None:
+    """otari#533: with no extra_params, the anthropic client used to be built
+    with the SDK's own default timeout, which makes AsyncAnthropic's
+    non-streaming pre-flight guard raise a bare ValueError for a large
+    max_tokens before any request is even attempted. default_attempt_kwargs now
+    carries an explicit timeout through client_args, which the real SDK's guard
+    treats identically to an operator-supplied one and skips."""
+    attempt = ResolvedAttempt(
+        attempt_id="a0",
+        position=0,
+        provider="anthropic",
+        model="claude-opus-5",
+        api_key="sk-test",
+        managed=False,
+        extra_params=None,
+    )
+    kwargs = default_attempt_kwargs(
+        attempt,
+        {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 65536, "stream": False},
+    )
+
+    class _Sentinel(Exception):
+        pass
+
+    async def fake_send(*_args: Any, **_kwargs: Any) -> Any:
+        raise _Sentinel
+
+    # any-llm/anthropic wraps a non-HTTP send failure in APIConnectionError after
+    # retries; reaching that (rather than the pre-flight ValueError) is what
+    # proves the guard was skipped and the request reached the transport layer.
+    with patch("httpx.AsyncClient.send", side_effect=fake_send):
+        with pytest.raises(APIConnectionError):
+            await acompletion(**kwargs)
+
+
+@pytest.mark.asyncio
+async def test_anthropic_default_timeout_reaches_the_real_sdk_client_in_hybrid_mode() -> None:
+    """otari#533 point 1: an attempt with its own extra_params (the hybrid-mode
+    shape) took a different branch of build_attempt_client_args than the bare
+    no-extra_params case above, and that branch never filled in a default
+    timeout, so a platform-routed Anthropic attempt with any extra_params at
+    all (e.g. a base_url override) still hit the pre-flight guard."""
+    attempt = ResolvedAttempt(
+        attempt_id="a0",
+        position=0,
+        provider="anthropic",
+        model="claude-opus-5",
+        api_key="sk-test",
+        managed=False,
+        extra_params={"auth_token": "operator-supplied-bearer-token"},
+    )
+    kwargs = default_attempt_kwargs(
+        attempt,
+        {"messages": [{"role": "user", "content": "hi"}], "max_tokens": 65536, "stream": False},
+    )
+    assert kwargs["client_args"]["timeout"] == 600.0
+    assert kwargs["client_args"]["auth_token"] == "operator-supplied-bearer-token"
+
+    class _Sentinel(Exception):
+        pass
+
+    async def fake_send(*_args: Any, **_kwargs: Any) -> Any:
+        raise _Sentinel
+
+    with patch("httpx.AsyncClient.send", side_effect=fake_send):
+        with pytest.raises(APIConnectionError):
+            await acompletion(**kwargs)

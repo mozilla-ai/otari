@@ -17,12 +17,14 @@ from gateway.services.provider_kwargs import (
     _AMBIENT_CREDENTIAL_PROVIDERS,
     _KEYLESS_PLACEHOLDER_API_KEY,
     _KEYLESS_SELF_HOSTED_PROVIDERS,
+    ANTHROPIC_DEFAULT_TIMEOUT_SECONDS,
     get_provider_kwargs,
     keyless_placeholder_api_key,
     normalize_pricing_key,
     provider_key,
     resolve_provider_selector,
     split_selector,
+    with_anthropic_default_timeout,
 )
 
 # ---------------------------------------------------------------------------
@@ -403,6 +405,47 @@ def test_get_provider_kwargs_strips_provider_type_and_models() -> None:
     assert "provider_type" not in kwargs
     assert "models" not in kwargs
     assert kwargs == {"api_base": "http://x/v1", "api_key": "k"}
+
+
+# ---------------------------------------------------------------------------
+# get_provider_kwargs / with_anthropic_default_timeout (otari#533)
+# ---------------------------------------------------------------------------
+
+
+def test_get_provider_kwargs_fills_a_default_anthropic_timeout() -> None:
+    config = GatewayConfig(providers={"anthropic": {"api_key": "sk-test"}})
+    kwargs = get_provider_kwargs(config, LLMProvider.ANTHROPIC, instance="anthropic")
+    assert kwargs["client_args"] == {"timeout": ANTHROPIC_DEFAULT_TIMEOUT_SECONDS}
+
+
+def test_get_provider_kwargs_preserves_an_operator_configured_anthropic_timeout() -> None:
+    config = GatewayConfig(providers={"anthropic": {"api_key": "sk-test", "client_args": {"timeout": 900}}})
+    kwargs = get_provider_kwargs(config, LLMProvider.ANTHROPIC, instance="anthropic")
+    assert kwargs["client_args"] == {"timeout": 900}
+
+
+def test_get_provider_kwargs_leaves_other_providers_client_args_untouched() -> None:
+    config = GatewayConfig(providers={"openai": {"api_key": "sk-test"}})
+    kwargs = get_provider_kwargs(config, LLMProvider.OPENAI, instance="openai")
+    assert "client_args" not in kwargs
+
+
+def test_with_anthropic_default_timeout_is_a_no_op_for_other_providers() -> None:
+    assert with_anthropic_default_timeout(LLMProvider.OPENAI, None) is None
+    assert with_anthropic_default_timeout(LLMProvider.OPENAI, {"timeout": 5}) == {"timeout": 5}
+
+
+def test_with_anthropic_default_timeout_fills_a_missing_default() -> None:
+    assert with_anthropic_default_timeout(LLMProvider.ANTHROPIC, None) == {
+        "timeout": ANTHROPIC_DEFAULT_TIMEOUT_SECONDS
+    }
+    assert with_anthropic_default_timeout(LLMProvider.ANTHROPIC, {}) == {
+        "timeout": ANTHROPIC_DEFAULT_TIMEOUT_SECONDS
+    }
+
+
+def test_with_anthropic_default_timeout_never_overrides_an_explicit_value() -> None:
+    assert with_anthropic_default_timeout(LLMProvider.ANTHROPIC, {"timeout": 42}) == {"timeout": 42}
 
 
 # ---------------------------------------------------------------------------
