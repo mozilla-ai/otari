@@ -21859,7 +21859,7 @@
     },
     "/v1/users/{user_id}": {
       "delete": {
-        "description": "Delete a user.",
+        "description": "Delete a user, and erase the telemetry captured under their name.",
         "operationId": "delete_user_v1_users__user_id__delete",
         "parameters": [
           {

@@ -4,13 +4,13 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, select, update
+from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, verify_master_key
+from gateway.api.deps import TelemetryStoragePortDep, get_config, get_db, verify_master_key
 from gateway.core.config import GatewayConfig
-from gateway.models.entities import AgentTelemetry, APIKey, Budget, UsageLog, User
+from gateway.models.entities import APIKey, Budget, UsageLog, User
 from gateway.models.money import as_float
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.budget_periods import budget_window
@@ -294,8 +294,9 @@ async def update_user(
 async def delete_user(
     user_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
+    storage: TelemetryStoragePortDep,
 ) -> None:
-    """Delete a user."""
+    """Delete a user, and erase the telemetry captured under their name."""
     user = await get_active_user(db, user_id)
 
     if not user:
@@ -310,16 +311,29 @@ async def delete_user(
         .values(is_active=False)
         .execution_options(synchronize_session=False)
     )
-    # Explicit removal, not a database ON DELETE cascade: this endpoint soft-deletes
-    # the user (deleted_at), so the users row is never hard-deleted and the FK's
-    # SET NULL never fires here regardless of its setting.
-    await db.execute(delete(AgentTelemetry).where(AgentTelemetry.user_id == user_id))
     user.deleted_at = datetime.now(UTC)
 
     try:
         await db.commit()
     except SQLAlchemyError:
         await db.rollback()
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Database error",
+        ) from None
+
+    # Explicit erasure, not a database ON DELETE cascade: this endpoint
+    # soft-deletes the user (deleted_at), so the users row is never hard-deleted
+    # and the telemetry FK's SET NULL never fires here regardless of its setting.
+    #
+    # After the commit rather than inside it, because telemetry storage settles
+    # its own writes and a deployment can be storing it out of process, where no
+    # transaction of ours reaches. Ordered this way, a failed soft-delete never
+    # destroys a live user's telemetry; a failed erasure leaves the user deleted
+    # and is retryable by deleting again, which is the direction worth failing in.
+    try:
+        await storage.purge_user(user_id=user_id)
+    except SQLAlchemyError:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
             detail="Database error",

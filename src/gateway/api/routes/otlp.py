@@ -61,14 +61,14 @@ from opentelemetry.proto.collector.trace.v1.trace_service_pb2 import (
 from opentelemetry.proto.metrics.v1.metrics_pb2 import AggregationTemporality
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, verify_api_key_or_master_key
+from gateway.api.deps import TelemetryStoragePortDep, get_config, get_db, verify_api_key_or_master_key
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import APIKey
+from gateway.ports.telemetry_storage_port import TelemetryRecord
 from gateway.services.agent_telemetry_service import (
     CUMULATIVE,
     DELTA,
-    TelemetryRecord,
     map_behavioral_event,
     map_metric_point,
 )
@@ -477,6 +477,7 @@ async def receive_logs(
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    storage: TelemetryStoragePortDep,
 ) -> Response:
     """Ingest LLM usage from OTLP log events (Claude Code, Codex, or GenAI logs)."""
     api_key = _require_import_key(auth_result[0])
@@ -522,7 +523,7 @@ async def receive_logs(
     response = ExportLogsServiceResponse()
     rejected = await _ingest(pairs, api_key=api_key, db=db, config=config) if pairs else 0
     if telemetry:
-        rejected += (await ingest_telemetry(db, telemetry, api_key=api_key)).rejected
+        rejected += (await ingest_telemetry(db, telemetry, api_key=api_key, storage=storage)).rejected
     if rejected:
         response.partial_success.rejected_log_records = rejected
         response.partial_success.error_message = f"{rejected} log record(s) rejected (see gateway logs)"
@@ -535,6 +536,7 @@ async def receive_metrics(
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    storage: TelemetryStoragePortDep,
 ) -> Response:
     """Ingest content-free coding-agent outcome metrics from OTLP metric points.
 
@@ -606,7 +608,7 @@ async def receive_metrics(
 
     response = ExportMetricsServiceResponse()
     if telemetry:
-        result = await ingest_telemetry(db, telemetry, api_key=api_key)
+        result = await ingest_telemetry(db, telemetry, api_key=api_key, storage=storage)
         logger.info(
             "otlp metrics ingest: accepted=%d duplicate=%d rejected=%d",
             result.accepted,

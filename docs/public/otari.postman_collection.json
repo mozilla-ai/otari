@@ -5440,7 +5440,7 @@
         {
           "name": "Delete User",
           "request": {
-            "description": "Delete a user.",
+            "description": "Delete a user, and erase the telemetry captured under their name.",
             "header": [],
             "method": "DELETE",
             "url": {
