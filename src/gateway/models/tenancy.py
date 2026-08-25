@@ -315,6 +315,87 @@ class User(UserBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
         ondelete="SET NULL",
         index=True,
     )
+    # When this identity last had a dashboard session minted for it. Stamped in
+    # one place, ``dashboard_session_service.create_dashboard_session``, so every
+    # sign-in flow that mints a session records it and none of them has to
+    # remember to; see that function for why a re-mint counts.
+    #
+    # A column rather than ``max(dashboard_sessions.created_at)``, which would
+    # have needed no migration and would have been wrong: session rows are pruned
+    # once they expire, so the derived answer decays from "signed in three weeks
+    # ago" to "never signed in" with nothing to distinguish the two. NULL here
+    # means never, and keeps meaning it.
+    last_sign_in_at: datetime | None = _timestamp_field(default=None, column_kwargs={})
+
+
+class DeploymentUserOrganizationPublic(SQLModel):
+    """One organization an identity belongs to, as the operator surface lists it."""
+
+    organization_id: uuid.UUID
+    name: str
+    slug: str
+    role: str
+    status: str
+
+
+class DeploymentUserPublic(SQLModel):
+    """An identity on this deployment, whatever organization it belongs to.
+
+    Not ``ActiveOrganizationMemberPublic``: that shape is a *membership* joined
+    to an identity, scoped to one organization and hiding the suspended rows.
+    This one is the identity itself, and its ``organizations`` list carries every
+    membership at whatever status, because an account whose only membership is
+    suspended is precisely what an operator comes here to find.
+
+    ``is_bootstrap_operator`` and ``is_self`` are the two rows an operator may
+    not deactivate or demote, and they travel on the row so the page can disable
+    those controls rather than offering ones the server refuses. Neither is an
+    authorization: the server refuses either way. ``is_self`` is answered here
+    because nothing else the dashboard fetches names the caller's identity, so
+    without it the page could not tell which row is the reader's own.
+    """
+
+    id: uuid.UUID
+    email: str | None = None
+    full_name: str | None = None
+    is_active: bool
+    is_superuser: bool
+    is_bootstrap_operator: bool = False
+    is_self: bool = False
+    last_sign_in_at: datetime | None = None
+    created_at: datetime
+    organizations: list[DeploymentUserOrganizationPublic] = Field(default_factory=list)
+
+
+class DeploymentUsersPublic(SQLModel):
+    data: list[DeploymentUserPublic]
+    count: int
+
+
+class DeploymentUserUpdateRequest(SQLModel):
+    """The two flags the operator surface may flip, each optional.
+
+    Omitting a field leaves it alone, so deactivating an account and changing
+    what it may administer stay separate decisions even though one endpoint
+    carries both. A body that sets neither is refused rather than treated as a
+    no-op: it is a request that meant something and lost it.
+    """
+
+    is_active: bool | None = None
+    is_superuser: bool | None = None
+
+
+class DeploymentAdminAccessPublic(SQLModel):
+    """Whether the caller may reach the deployment administration surface.
+
+    The one endpoint in that surface that answers 200 for everybody, and
+    deliberately: the rest refuse with 404 so they do not confirm they exist,
+    which leaves the dashboard nothing to gate its navigation on but a failed
+    request. This says the same thing a caller could learn by trying, without
+    the try.
+    """
+
+    granted: bool
 
 
 # =============================================================================
@@ -1083,6 +1164,11 @@ class WebAuthnChallenge(SQLModel, table=True):
         return _validate_membership(value, allowed=WEBAUTHN_CEREMONIES, kind="WebAuthn ceremony")
 
 __all__ = [
+    "DeploymentAdminAccessPublic",
+    "DeploymentUserOrganizationPublic",
+    "DeploymentUserPublic",
+    "DeploymentUserUpdateRequest",
+    "DeploymentUsersPublic",
     "INVITATION_STATUSES",
     "MAX_CREDENTIAL_ID_LENGTH",
     "MAX_WEBAUTHN_CREDENTIAL_NAME",

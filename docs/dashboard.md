@@ -713,6 +713,25 @@ password. Configure mail before you expect members to sign in.
   browser even while sign-ins are frozen. Keep that key to hand before you set
   this, because it is what lifts the freeze once your own session is gone;
   without it the recovery is setting `OTARI_MASTER_KEY` and restarting.
+- **Accounts**: every account on the deployment, across all its organizations,
+  which is what **Members & roles** above cannot show: that page is one
+  organization's roster, and an account whose memberships are all suspended
+  leaves it. Each row carries the organizations the account belongs to and at
+  what standing, whether it is active, whether it holds operator access, and
+  when it last signed in to the dashboard ("never" if it never has). Deactivate
+  an account and its dashboard sessions end straight away, which is the control
+  for a lost laptop or a departure; its memberships, keys and usage history are
+  left alone, and reactivating gives back the sign-in and not the old sessions.
+  Operator access is what reaches this page, and it can be granted and taken
+  here.
+  Two rows keep their controls disabled, with the reason on the control: your
+  own, because deactivating yourself or dropping your own access ends the
+  session you are doing it from, and the bootstrap operator, because that is the
+  identity master-key sign-in reaches this deployment through. Another operator
+  can make either change on you; granting access back is never blocked. The row
+  is absent from the rail for anyone who is not an operator, and the page says
+  so if they reach it by URL. See
+  [Access control](access-control.md#deployment-wide-account-administration).
 
 ## Install it on your phone
 

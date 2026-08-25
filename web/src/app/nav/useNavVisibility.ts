@@ -8,12 +8,15 @@
  *
  * The axes are independent and compose as AND, in the order they are cheapest to
  * be wrong about: a deployment that does not host the surface has no page to
- * show whatever the entitlement says. See ARCHITECTURE.md for why they stay two
- * mechanisms rather than one.
+ * show whatever the entitlement says. See ARCHITECTURE.md for why the first two
+ * stay two mechanisms rather than one. The third, `operatorOnly`, is not about
+ * the deployment at all but about who is signed in, and it is answered by the
+ * surface it gates rather than by a rule of its own.
  */
 
 import { useMemo } from "react"
 
+import { useDeploymentAdminAccess } from "@/shared/api/hooks"
 import { useSurfaces } from "@/shared/hooks/useDeployment"
 import { useEntitlements } from "@/shared/hooks/useEntitlements"
 
@@ -21,8 +24,9 @@ import type { NavItem } from "./types"
 
 /**
  * A predicate over registry entries: true when this deployment hosts the
- * surface and is entitled to the capability. An axis the entry does not
- * declare is not a gate.
+ * surface, is entitled to the capability, and (for an operator-only row) the
+ * caller operates the deployment. An axis the entry does not declare is not a
+ * gate.
  *
  * Client-side only, so it can hide a destination and never grant one; the
  * server still authorizes every request the page behind it makes.
@@ -30,13 +34,21 @@ import type { NavItem } from "./types"
 export function useNavVisibility(): (item: NavItem) => boolean {
   const hostsSurface = useSurfaceVisibility()
   const { capabilities } = useEntitlements()
+  // The caller axis. Asked unconditionally rather than only when a row declares
+  // it, because a hook cannot be called from inside the predicate; it is one
+  // cached read that every other row ignores. Undefined while it resolves and
+  // false when the surface refused, so an operator-only row is absent until the
+  // answer is yes, which is the safe direction for a destination that would
+  // otherwise render its own refusal.
+  const operator = useDeploymentAdminAccess()
 
   return useMemo(() => {
     const entitled = new Set(capabilities)
     return (item: NavItem) =>
       hostsSurface(item) &&
-      (item.capability === undefined || entitled.has(item.capability))
-  }, [hostsSurface, capabilities])
+      (item.capability === undefined || entitled.has(item.capability)) &&
+      (item.operatorOnly === undefined || operator.data === true)
+  }, [hostsSurface, capabilities, operator.data])
 }
 
 /**

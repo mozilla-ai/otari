@@ -30,6 +30,8 @@ import type {
   CreateWorkspaceMcpServerRequest,
   CreateWorkspaceRequest,
   DashboardBuild,
+  DeploymentAdminAccess,
+  DeploymentUser,
   DiscoverableModelsResponse,
   ExplainPolicyRequest,
   ExplainPolicyResponse,
@@ -86,6 +88,7 @@ import type {
   ToolSettingsResponse,
   ToolsResponse,
   UpdateBudgetRequest,
+  UpdateDeploymentUserRequest,
   UpdateKeyRequest,
   UpdateOrganizationGuardrailRequest,
   UpdateOrganizationMemberRequest,
@@ -163,6 +166,7 @@ const ORGANIZATIONS = "organizations"
 // organizations invalidates both, but a role change invalidates only the roster,
 // and nesting would re-read the context (and every page gated on it) as well.
 const ORGANIZATION_MEMBERS = "organization-members"
+const DEPLOYMENT_ADMIN = "deployment-admin"
 // Its own key rather than a child of ORGANIZATIONS, for the reason the members
 // key is: the organization context is read on nearly every page, and a rate
 // edit should not make all of them refetch.
@@ -2743,6 +2747,66 @@ export function useDeleteOrganizationPricing() {
         method: "DELETE",
       }),
     onSuccess: () => invalidateOrganizationPricing(queryClient),
+  })
+}
+
+// ---------------------------------------------------------------------------
+// Deployment administration
+//
+// The one management surface scoped to the deployment rather than to an
+// organization. `useDeploymentAdminAccess` is its gate and is read by the
+// sidebar, which is why it answers 200 with a boolean where the rest of the
+// prefix refuses a non-operator with 404: a nav gate cannot be built on a
+// failed request, and hiding a destination grants nothing either way.
+// ---------------------------------------------------------------------------
+
+export function useDeploymentAdminAccess(enabled = true) {
+  return useQuery({
+    queryKey: [DEPLOYMENT_ADMIN, "access"],
+    queryFn: () =>
+      apiFetch<DeploymentAdminAccess>("/v1/admin/access").then(
+        (body) => body.granted,
+      ),
+    staleTime: 60_000,
+    enabled,
+    // Same guard the tenancy reads carry: a gateway older than this bundle does
+    // not serve the route, and a hybrid one answers 404 for the whole
+    // management plane. Neither is something a retry fixes, and the answer for
+    // both is "no such surface", which is what an errored query renders as.
+    retry: (failureCount, error) =>
+      !(error instanceof ApiError && error.status === 404) && failureCount < 3,
+  })
+}
+
+export function useDeploymentUsers(enabled = true) {
+  return useQuery({
+    queryKey: [DEPLOYMENT_ADMIN, "users"],
+    queryFn: () => fetchAllPaged<DeploymentUser>("/v1/admin/users"),
+    staleTime: 60_000,
+    enabled,
+  })
+}
+
+export function useUpdateDeploymentUser() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      id,
+      body,
+    }: {
+      id: string
+      body: UpdateDeploymentUserRequest
+    }) =>
+      apiFetch<DeploymentUser>(`/v1/admin/users/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [DEPLOYMENT_ADMIN] })
+      // Deactivating an account ends its sessions and changes what the
+      // organization roster may offer it, so the tenancy reads go stale with it.
+      void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_MEMBERS] })
+    },
   })
 }
 

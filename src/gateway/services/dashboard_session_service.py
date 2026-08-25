@@ -21,7 +21,8 @@ not survive the rehome (see ``docs/access-control.md``).
 Sessions live in the database, not process memory, so every worker and replica
 accepts them and a revocation is seen everywhere. They expire on a TTL
 (``dashboard_session_ttl_hours``) and are revoked on sign-out, on master-key
-rotation, and (through the foreign key) when their identity is deleted.
+rotation, when their identity is deactivated, and (through the foreign key) when
+it is deleted.
 """
 
 import hashlib
@@ -72,12 +73,19 @@ async def create_dashboard_session(
     required rather than defaulted: a session that names nobody cannot resolve a
     caller, which is the reason the column exists.
 
+    ``user.last_sign_in_at`` is stamped here rather than at the four sign-in
+    routes that call this, so a fifth cannot forget to. The one call that is not
+    a sign-in in the ordinary sense is the re-mint after a master-key rotation
+    (``routes/settings.py``), and it is stamped too: the operator proved the new
+    key to get the new session, which is the event the column records.
+
     Expired rows are pruned opportunistically here, so the table stays small
     without a background task. The caller owns the transaction and must commit
     before handing the token to the browser.
     """
     now = datetime.now(UTC)
     await db.execute(delete(DashboardSession).where(DashboardSession.expires_at < now))
+    await db.execute(update(User).where(col(User.id) == user_id).values(last_sign_in_at=now))
     token = f"{_SESSION_TOKEN_PREFIX}{secrets.token_urlsafe(32)}"
     expires_at = now + timedelta(hours=ttl_hours)
     db.add(
@@ -137,11 +145,12 @@ async def _revoke_deactivated_identity_sessions(user_id: uuid.UUID) -> None:
     Refusing a session without deleting it leaves the row alive, so
     re-activating an identity hands back the access of every cookie it held,
     which is the opposite of what deactivating it for a lost laptop was for.
-    Nothing in this tree deactivates a tenancy identity yet (``is_active`` is
-    only ever set at creation), so this read path is the one place the
-    revocation can hang; a flow that does deactivate should call
-    ``revoke_user_dashboard_sessions`` on its own transaction instead of
-    waiting for the cookie to come back.
+    ``DeploymentUserService.update_user`` is the flow that deactivates one, and
+    it does call ``revoke_user_dashboard_sessions`` in its own transaction rather
+    than leaving the rows to be found here: this path only runs when the browser
+    next presents the cookie, and until then a session that should be gone is
+    alive. This stays the backstop for a row deactivated some other way, an
+    operator's own SQL among them.
 
     A short-lived session rather than the request's, following
     ``deps._bump_last_used_at``, which is the other best-effort write on the

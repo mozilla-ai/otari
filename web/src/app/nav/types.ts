@@ -4,7 +4,8 @@
  * Deliberately the same vocabulary as `otari-ai/frontend/src/app/nav/types.ts`,
  * because that tree's pages move into this one at M5 and the two registries have
  * to compose rather than be reconciled. Two fields, two independent gates:
- * `surface` is the deployment axis and `capability` the entitlement axis. See
+ * `surface` is the deployment axis and `capability` the entitlement axis, and
+ * `operatorOnly` is a third that neither tree had: who is calling. See
  * ARCHITECTURE.md.
  */
 
@@ -46,6 +47,21 @@ interface NavItemBase {
    * ungated, which is the ordinary case in this build.
    */
   capability?: string
+  /**
+   * Whether this destination is only for an operator of the deployment.
+   *
+   * The third axis, and the only one that is about *who is calling* rather than
+   * about the deployment: `surface` asks whether the process hosts the page and
+   * `capability` whether the deployment is licensed for it, and both answer the
+   * same for everyone signed in. Resolved through
+   * `shared/api/hooks.useDeploymentAdminAccess`, which is the surface's own
+   * gate reported back rather than a second rule that could disagree with it.
+   *
+   * A missing one is ungated, which is every other row: this build has exactly
+   * one operator-only destination. Client-side only, like the other two, and the
+   * server refuses the page's requests with 404 regardless.
+   */
+  operatorOnly?: true
 }
 
 /** One sidebar link with its deployment and entitlement gating. */

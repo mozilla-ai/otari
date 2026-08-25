@@ -2,6 +2,7 @@ from fastapi import Depends, FastAPI
 
 from gateway.api.deps import require_capability
 from gateway.api.routes import (
+    admin,
     agent_telemetry,
     aliases,
     audio,
@@ -110,6 +111,7 @@ def _register_core_routers(app: FastAPI, config: GatewayConfig) -> None:
         # contributed routers; see the note there.
         return  # Remaining routers (including batches) are standalone-mode only
 
+    app.include_router(admin.router)
     app.include_router(auth_session.router)
     app.include_router(auth_password.router)
     app.include_router(auth_signup.router)

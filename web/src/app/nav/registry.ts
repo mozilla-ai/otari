@@ -15,6 +15,7 @@ import {
   FiSliders,
   FiTag,
   FiTool,
+  FiUserCheck,
   FiUsers,
 } from "react-icons/fi"
 import { OVERLAY_NAV_LABEL_OVERRIDES } from "@/app/nav/overlayLabelOverrides"
@@ -314,6 +315,19 @@ const ORGANIZATION_NAV_SECTIONS = [
         label: "Settings",
         surface: "settings",
         icon: FiSliders,
+      },
+      // Every account on the deployment, which is not the Members & roles row
+      // above: that one is this organization's roster and stops at its
+      // boundary, while this reaches an account in any organization, or in none
+      // that still admits it. The only row in either rail that declares
+      // `operatorOnly`, and it sits beside Settings because both are the
+      // deployment talking about itself rather than the tenant.
+      {
+        to: "/admin/accounts",
+        label: "Accounts",
+        surface: "admin",
+        operatorOnly: true,
+        icon: FiUserCheck,
       },
     ],
   },
