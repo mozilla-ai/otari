@@ -230,7 +230,7 @@ def _authorize_record(
     credential before ever learning the batch is not theirs. Only the
     strict, record-based check needs to run this early; the legacy,
     metadata-anchored fallback (:func:`_authorize_legacy_batch`) has no such
-    risk, because a record-less batch has no stored workspace to leak --
+    risk, because a record-less batch has no stored workspace to leak:
     credentials there already resolve to the caller's own.
 
     Both the owning user and the owning workspace have to match. The workspace
