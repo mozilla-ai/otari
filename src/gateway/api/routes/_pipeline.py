@@ -91,6 +91,7 @@ from gateway.api.routes._platform import (
 from gateway.api.routes._platform import (
     default_attempt_kwargs as default_attempt_kwargs,  # explicit re-export for the route modules
 )
+from gateway.api.routes._schema_derive import SENSITIVE_PARAM_FIELDS
 from gateway.api.routes._tools import (
     _build_web_search_backend,
     _extract_code_execution_tool,
@@ -335,13 +336,25 @@ _UNEXPECTED_KWARG = re.compile(r"unexpected keyword argument '([^']+)'")
 # formats that share this classifier. Derived from any-llm's ``*Params`` for the
 # same reason the request schemas are (see ``_schema_derive``): a param any-llm
 # grows is picked up here without an edit, and nothing else can pass the gate.
+#
+# Derived the same way means derived *minus* ``SENSITIVE_PARAM_FIELDS``, not
+# merely from the same models. ``derive_request_base`` skips those names because
+# a future any-llm version could add a credential or provider-selection field to
+# a typed ``*Params``, and exposing one as caller-settable would let a request
+# override the operator's value (#160). A name the schema refuses to accept is by
+# definition a name no caller sent, so it must not pass the caller-fault gate
+# either: the two definitions of "settable by a caller" are one definition, and
+# spelling it twice is how they drift.
 _FORWARDED_PARAMS: frozenset[str] = frozenset(
-    set(CompletionParams.model_fields)
-    | set(MessagesParams.model_fields)
-    | set(ResponsesParams.model_fields)
-    # Declared on the chat request rather than derived, and forwarded through
-    # any-llm's ``**kwargs`` (see ``chat.ChatCompletionRequest.service_tier``).
-    | {"service_tier"}
+    (
+        set(CompletionParams.model_fields)
+        | set(MessagesParams.model_fields)
+        | set(ResponsesParams.model_fields)
+        # Declared on the chat request rather than derived, and forwarded through
+        # any-llm's ``**kwargs`` (see ``chat.ChatCompletionRequest.service_tier``).
+        | {"service_tier"}
+    )
+    - SENSITIVE_PARAM_FIELDS
 )
 
 

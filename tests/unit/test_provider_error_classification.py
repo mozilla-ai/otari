@@ -19,6 +19,7 @@ from anthropic import APITimeoutError as AnthropicAPITimeoutError
 from openai import APITimeoutError as OpenAIAPITimeoutError
 
 from gateway.api.routes._pipeline import (
+    _FORWARDED_PARAMS,
     PROVIDER_BAD_REQUEST_DETAIL,
     PROVIDER_BILLING_DETAIL,
     PROVIDER_CREDENTIALS_DETAIL,
@@ -33,6 +34,7 @@ from gateway.api.routes._platform import (
     _provider_failure_http_exc,
     redact_upstream_message,
 )
+from gateway.api.routes._schema_derive import SENSITIVE_PARAM_FIELDS
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
 
 _RAW = "raw provider detail SECRET token=abc123"
@@ -395,6 +397,24 @@ def test_param_the_gateway_never_forwards_stays_unclassified() -> None:
     """A name outside the request-body surface cannot have come from the caller,
     whatever raised it."""
     assert classify_provider_error(TypeError("post() got an unexpected keyword argument 'proxies'")) is None
+
+
+def test_the_caller_fault_gate_excludes_the_params_the_schema_refuses() -> None:
+    """The gate's name set is the request schema's, carve-out included.
+
+    ``derive_request_base`` skips ``SENSITIVE_PARAM_FIELDS`` so a credential or
+    provider-selection field any-llm adds to a typed ``*Params`` can never become
+    caller-settable (mozilla-ai/otari#160). A name the schema will not accept
+    cannot have come from a caller, so it must not pass this gate either. No
+    ``*Params`` declares one today, which is exactly why this is pinned: the two
+    sets agree by luck right now and by construction after this.
+    """
+    assert not _FORWARDED_PARAMS & SENSITIVE_PARAM_FIELDS
+
+    sensitive = min(SENSITIVE_PARAM_FIELDS)
+    exc = TypeError(f"acompletion() got an unexpected keyword argument '{sensitive}'")
+    assert classify_provider_error(exc) is None
+    assert failure_status_code(exc) == 502
 
 
 def test_unrelated_type_error_stays_unclassified() -> None:
