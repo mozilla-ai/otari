@@ -17,6 +17,7 @@ test("the deployment bootstrap is served unauthenticated", async ({
     // Spelled out rather than derived: this is the list the sidebar gates on,
     // and a surface that quietly appears or disappears should fail here.
     surfaces: [
+      "admin",
       "budgets",
       "keys",
       "models",
