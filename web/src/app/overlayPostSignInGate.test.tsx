@@ -15,10 +15,15 @@ import { renderWithRouter } from "@/tests/router"
 // dead zone. That is also what lets each test choose what the replacement does:
 // the factory reads `.current` when it renders rather than closing over what it
 // was at import.
-const { OVERLAY_CAPABILITY, replacement } = vi.hoisted(() => ({
+const { OVERLAY_CAPABILITY, capabilities, replacement } = vi.hoisted(() => ({
   // Overlay-only by ARCHITECTURE.md's table, so no build of this repository
   // grants it and nothing else in the suite can be supplying it.
   OVERLAY_CAPABILITY: "billing",
+  // What the mocked resolver answers, and empty unless a test says otherwise:
+  // the mock below is file-wide, so a granted capability would be granted to the
+  // test that pins the OSS baseline too. Inert today, since no base nav entry
+  // gates on a capability, and that is the point at which it would stop being.
+  capabilities: { current: [] as string[] },
   replacement: {
     current: null as ((children: ReactNode) => ReactNode) | null,
   },
@@ -41,7 +46,7 @@ vi.mock("@/app/overlayEntitlementResolver", async () => {
   return {
     EntitlementResolver: ({ children }: { children: ReactNode }) => (
       <EntitlementProvider
-        value={{ capabilities: [OVERLAY_CAPABILITY], isLoading: false }}
+        value={{ capabilities: capabilities.current, isLoading: false }}
       >
         {children}
       </EntitlementProvider>
@@ -71,6 +76,7 @@ describe("the base post-sign-in gate", () => {
 describe("the shell's mount point", () => {
   afterEach(() => {
     replacement.current = null
+    capabilities.current = []
     vi.restoreAllMocks()
     window.localStorage.clear()
   })
@@ -127,6 +133,7 @@ describe("the shell's mount point", () => {
       const { capabilities } = useEntitlements()
       return <p>{`gate sees:${capabilities.join(",") || "none"}`}</p>
     }
+    capabilities.current = [OVERLAY_CAPABILITY]
     replacement.current = () => <CapabilityProbe />
     await renderShell(<p>PAGE</p>)
 
