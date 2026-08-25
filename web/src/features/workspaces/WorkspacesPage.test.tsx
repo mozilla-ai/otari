@@ -185,6 +185,31 @@ describe("WorkspacesPage", () => {
     expect(screen.getByText(/You become its owner/)).toBeInTheDocument()
   })
 
+  it("keeps a failure the name cannot fix off the name", async () => {
+    // A 500 or a dropped connection is not something the operator can retype
+    // their way out of, so reddening the field would tell them (and assistive
+    // tech) that the name was the problem.
+    mockApi({
+      createRefusal: { status: 500, detail: "Internal server error" },
+    })
+    const user = userEvent.setup()
+    renderPage(<WorkspacesPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Create workspace" }),
+    )
+    await user.type(screen.getByLabelText("Name"), "test")
+    await user.click(screen.getByRole("button", { name: "Create workspace" }))
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(/server error/i)
+    expect(screen.getByLabelText("Name")).not.toHaveAttribute(
+      "aria-invalid",
+      "true",
+    )
+    // The field keeps its own description rather than borrowing the failure.
+    expect(screen.getByText(/You become its owner/)).toBeInTheDocument()
+  })
+
   it("confirms before deleting a workspace", async () => {
     // Two, because the last workspace cannot be deleted and its button says so.
     const requests = mockApi({

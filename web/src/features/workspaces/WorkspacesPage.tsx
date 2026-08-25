@@ -3,6 +3,7 @@ import { useEffect, useMemo, useRef, useState } from "react"
 
 import type { Budget, Workspace, WorkspaceBudgetDefault } from "@/client"
 import { canManage } from "@/features/organization/roles"
+import { ApiError } from "@/shared/api/client"
 import {
   useAllWorkspaceBudgetDefaults,
   useBudgets,
@@ -273,19 +274,33 @@ export function CreateWorkspaceForm({
   // two this fixes.
   const entersWorkspace = onCreated !== undefined
   const pending = create.isPending || createDefault.isPending || holding
+  // Only a refusal *about the name* belongs on the name. These three are the
+  // ones this endpoint answers with when the input is the problem: taken (409),
+  // malformed (400), or rejected by the schema (422). A 403, a 500 or a dropped
+  // connection is not something the operator can fix by retyping, and reddening
+  // the field for it would tell them, and assistive tech, that it was.
+  const nameRefusal =
+    create.error instanceof ApiError &&
+    [400, 409, 422].includes(create.error.status)
+      ? create.error
+      : null
+  // Everything else the form can fail on, in the one place that is not a field:
+  // a create that failed for another reason, and the default-budget call, which
+  // fails after the workspace already exists.
+  const bannerError = createDefault.error ?? (nameRefusal ? null : create.error)
   return (
     <Card>
       <Card.Content className="flex flex-col gap-4 p-5">
         <div className="text-sm font-semibold text-foreground">
           Create workspace
         </div>
-        {/* Only the default's failure is a banner now. Every way the create
-            itself is refused is about the name (taken, empty, too long), so it
-            belongs on the field that caused it rather than in a block above the
-            form that resizes whatever frames it. The default budget is a
-            separate call about a different control, and it fails after the
-            workspace already exists, which no field state can say. */}
-        <ErrorBanner error={createDefault.error} />
+        {/* A refusal about the name is carried by the name, not by a block above
+            the form that resizes whatever frames it. What is left here is what
+            no field state can honestly say: a failure the operator cannot
+            retype their way out of, and the default-budget call, which is a
+            separate call about a different control and fails after the
+            workspace already exists. */}
+        <ErrorBanner error={bannerError} />
         <Field
           label="Name"
           value={name}
@@ -294,14 +309,16 @@ export function CreateWorkspaceForm({
             // The refusal was about the name that produced it, so editing the
             // name retires it. Without this the field stays red while the
             // operator types the correction, and the button they press next
-            // looks like it is retrying a rejected name.
+            // looks like it is retrying a rejected name. Reset on any create
+            // error, not just a name one: the banner's copy is about the
+            // attempt, and the attempt is what editing the name replaces.
             if (create.error) create.reset()
           }}
           placeholder="Production"
           isRequired
           autoFocus
-          isInvalid={create.error !== null}
-          errorMessage={create.error ? errorMessage(create.error) : undefined}
+          isInvalid={nameRefusal !== null}
+          errorMessage={nameRefusal ? errorMessage(nameRefusal) : undefined}
           description="Unique within this organization. You become its owner."
         />
         <Field
