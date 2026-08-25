@@ -158,6 +158,7 @@ async def test_completion_params_reach_provider(
         raise _MockCompletionError
 
     params: dict[str, Any] = {
+        "prompt_cache_key": "tenant-session-123",
         "reasoning_effort": "high",
         "seed": 42,
         "stop": ["STOP"],

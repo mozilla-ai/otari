@@ -4581,6 +4581,8 @@ export interface components {
             parallel_tool_calls?: boolean | null;
             /** Presence Penalty */
             presence_penalty?: number | null;
+            /** Prompt Cache Key */
+            prompt_cache_key?: string | null;
             /**
              * Reasoning Effort
              * @default auto
@@ -5904,6 +5906,8 @@ export interface components {
             output_format?: {
                 [key: string]: unknown;
             } | null;
+            /** Prompt Cache Key */
+            prompt_cache_key?: string | null;
             /**
              * Session Label
              * @description Optional caller-supplied label for cost attribution (per run, experiment, or conversation). In hybrid mode it is forwarded onto the platform usage report so spend can be sliced by session without standing up OpenTelemetry. Stripped before the request is forwarded upstream to the provider. Has no effect in standalone mode, where there is no platform to report it to.

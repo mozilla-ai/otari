@@ -1835,6 +1835,17 @@
             ],
             "title": "Presence Penalty"
           },
+          "prompt_cache_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Cache Key"
+          },
           "reasoning_effort": {
             "anyOf": [
               {
@@ -4747,6 +4758,17 @@
               }
             ],
             "title": "Output Format"
+          },
+          "prompt_cache_key": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Prompt Cache Key"
           },
           "session_label": {
             "anyOf": [

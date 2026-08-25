@@ -36,11 +36,13 @@ def test_messages_endpoint_basic_completion(
     test_user: dict[str, Any],
     messages_request_body: dict[str, Any],
 ) -> None:
-    """Test basic non-streaming message completion."""
+    """Test basic non-streaming message completion and prompt-cache-key forwarding."""
     mock_response = _make_message_response()
     messages_request_body["metadata"] = {"user_id": "test-user"}
+    messages_request_body["prompt_cache_key"] = "tenant-session-123"
+    mock_amessages = AsyncMock(return_value=mock_response)
 
-    with patch("gateway.api.routes.messages.amessages", new_callable=AsyncMock, return_value=mock_response):
+    with patch("gateway.api.routes.messages.amessages", new=mock_amessages):
         response = client.post(
             "/v1/messages",
             json=messages_request_body,
@@ -48,6 +50,8 @@ def test_messages_endpoint_basic_completion(
         )
 
     assert response.status_code == 200
+    assert mock_amessages.await_args is not None
+    assert mock_amessages.await_args.kwargs["prompt_cache_key"] == "tenant-session-123"
     data = response.json()
     assert data["type"] == "message"
     assert data["role"] == "assistant"

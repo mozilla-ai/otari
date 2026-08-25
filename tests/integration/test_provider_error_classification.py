@@ -10,6 +10,7 @@ from typing import Any
 from unittest.mock import AsyncMock, patch
 
 import pytest
+from any_llm.exceptions import UnsupportedParameterError
 from fastapi.testclient import TestClient
 
 from gateway.api.routes._pipeline import (
@@ -82,6 +83,31 @@ def test_chat_classifies_provider_error(
     assert response.json()["detail"] == expected_detail
     if expected_detail != _RAW:
         assert "SECRET" not in response.text
+
+
+def test_chat_surfaces_unsupported_prompt_cache_key_as_client_error(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    test_user: dict[str, Any],
+) -> None:
+    """A final provider that cannot honor the key returns an actionable 400."""
+    with patch(
+        "gateway.api.routes.chat.acompletion",
+        new_callable=AsyncMock,
+        side_effect=UnsupportedParameterError("prompt_cache_key", "anthropic"),
+    ):
+        response = client.post(
+            "/v1/chat/completions",
+            json={
+                "model": "anthropic:claude-3-5-sonnet",
+                "messages": [{"role": "user", "content": "Hi"}],
+                "prompt_cache_key": "tenant-session-123",
+            },
+            headers=api_key_header,
+        )
+
+    assert response.status_code == 400
+    assert response.json()["detail"] == "'prompt_cache_key' is not supported for anthropic"
 
 
 def test_chat_unknown_status_stays_generic_502(

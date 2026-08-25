@@ -73,6 +73,13 @@ def test_request_schema_covers_any_llm_params(endpoint: str) -> None:
     )
 
 
+@pytest.mark.parametrize("request_model", [ChatCompletionRequest, MessagesRequest])
+def test_prompt_cache_key_is_exposed_on_chat_and_messages(request_model: type[BaseModel]) -> None:
+    """The two schema-derived chat APIs expose any-llm's prompt cache key."""
+    assert "prompt_cache_key" in request_model.model_fields
+    assert "prompt_cache_key" in request_model.model_json_schema()["properties"]
+
+
 @pytest.mark.parametrize("endpoint", sorted(DERIVED_SCHEMAS))
 def test_renamed_params_are_exposed_under_the_wire_name(endpoint: str) -> None:
     """A renamed any-llm param (e.g. ``model_id`` -> ``model``) is exposed under the wire name."""

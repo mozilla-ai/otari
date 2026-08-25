@@ -46,7 +46,7 @@ from typing import Any, Generic, Literal, NamedTuple, NoReturn, Protocol, TypeVa
 from urllib.parse import ParseResult, urlparse
 
 from any_llm import LLMProvider
-from any_llm.exceptions import AnyLLMError
+from any_llm.exceptions import AnyLLMError, UnsupportedParameterError
 from any_llm.types.completion import (
     ChatCompletion,
     ChatCompletionChunk,
@@ -317,12 +317,23 @@ class _PendingUsageReport(NamedTuple):
 def _is_unsupported_feature_error(exc: BaseException) -> bool:
     """True when any-llm refused a request feature its backend cannot express.
 
-    Unwraps ``original_exception`` as well: once
-    ``ANY_LLM_UNIFIED_EXCEPTIONS=1`` becomes the default, the raw
-    ``NotImplementedError`` arrives wrapped in a generic ``ProviderError`` and a
-    check against ``exc`` alone would stop matching.
+    Newer any-llm releases use ``UnsupportedParameterError`` for typed provider
+    capability checks, while older feature checks still raise
+    ``NotImplementedError``. Unwrap ``original_exception`` as well so either
+    signal survives the unified-exception wrapper.
     """
-    return any(isinstance(candidate, NotImplementedError) for candidate in upstream_exception_chain(exc))
+    unsupported_types = (NotImplementedError, UnsupportedParameterError)
+    return any(isinstance(candidate, unsupported_types) for candidate in upstream_exception_chain(exc))
+
+
+def _unsupported_feature_detail(exc: BaseException) -> str:
+    """Return one actionable reason for a locally rejected request feature."""
+    for candidate in upstream_exception_chain(exc):
+        if isinstance(candidate, UnsupportedParameterError):
+            # AnyLLMError.__str__ prefixes the provider to ``message``. Feeding
+            # both through upstream_error_message would repeat the same reason.
+            return redact_upstream_message(candidate.message)
+    return _caller_fault_detail(exc, PROVIDER_BAD_REQUEST_DETAIL)
 
 
 def _caller_fault_detail(exc: BaseException, fallback: str) -> str:
@@ -372,16 +383,14 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
     kind, status_code = upstream_exception_shape(exc)
     if kind == "timeout":
         return ProviderErrorMapping(status.HTTP_504_GATEWAY_TIMEOUT, PROVIDER_TIMEOUT_DETAIL)
-    # any-llm raises NotImplementedError when a request asks a provider for
-    # something its backend cannot express: context_management/betas against a
-    # provider with no native Anthropic Messages API is the case that surfaced
-    # this (#530). It carries no HTTP status, so it would otherwise fall through
-    # to the generic 502/500 and tell the caller a guaranteed-permanent failure
-    # was a transient one. The exception type is the whole signal here, so this
-    # needs no probe into any-llm's wording, and the message it carries already
-    # names the unsupported feature.
+    # any-llm raises UnsupportedParameterError for typed provider-capability
+    # checks and still uses NotImplementedError for older feature checks such as
+    # context_management/betas (#530). Neither carries an HTTP status, so either
+    # would otherwise fall through to a generic 502/500 and tell the caller a
+    # guaranteed-permanent failure was transient. The exception type is the
+    # whole signal here, and its message names the unsupported feature.
     if _is_unsupported_feature_error(exc):
-        return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, _caller_fault_detail(exc, PROVIDER_BAD_REQUEST_DETAIL))
+        return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, _unsupported_feature_detail(exc))
     if status_code is None:
         return None
     # Account billing exhaustion, which several providers report as a 400/422

@@ -196,7 +196,7 @@ wheels = [
 
 [[package]]
 name = "any-llm-sdk"
-version = "1.24.0"
+version = "1.25.0"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "anthropic" },
@@ -207,9 +207,9 @@ dependencies = [
     { name = "rich" },
     { name = "typing-extensions" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/54/38/da47437de8f3447f8aa1acee55f71d3a9a0c4f53369ad0355cf6d1871c1f/any_llm_sdk-1.24.0.tar.gz", hash = "sha256:06391e27e0d81a0ea70580d8f8535c308d943079a8be62e65ffeb621dcb92ea9", size = 180139, upload-time = "2026-08-05T14:37:39.96Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/b1/3b/baf9f17c3eb945f735de942550509bab0b03b2ba98ad64e9905c170dfe73/any_llm_sdk-1.25.0.tar.gz", hash = "sha256:af5671e8dedfed271485190e10f1517aff53ad0a234c6d5a1bf357629f9f4e85", size = 192367, upload-time = "2026-08-11T11:23:47.583Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/0d/72/ab48a0e533669f483ef97018f664ba8dec659a8446c9ca3c7d3d2d519137/any_llm_sdk-1.24.0-py3-none-any.whl", hash = "sha256:bfdc633172330b2a76f178dd0fbb207b87cf2bed06bbe9460c0691c24435f597", size = 233211, upload-time = "2026-08-05T14:37:38.495Z" },
+    { url = "https://files.pythonhosted.org/packages/25/42/b89c812352589b1c7330a08a96440185925e124c77ecb786c7d1c743ed9c/any_llm_sdk-1.25.0-py3-none-any.whl", hash = "sha256:fc1bdf7db5d314e3a26c0b8e95c2fac6a7ae478446534d023b3e61ab5ad6ef41", size = 246498, upload-time = "2026-08-11T11:23:45.93Z" },
 ]
 
 [package.optional-dependencies]
@@ -1066,7 +1066,7 @@ dev = [
 requires-dist = [
     { name = "aiosqlite", specifier = ">=0.19.0" },
     { name = "alembic", specifier = ">=1.13.0" },
-    { name = "any-llm-sdk", extras = ["all"], specifier = ">=1.24.0" },
+    { name = "any-llm-sdk", extras = ["all"], specifier = ">=1.25.0" },
     { name = "apron-auth", specifier = ">=0.15.1,<0.16.0" },
     { name = "asyncpg", specifier = ">=0.29.0" },
     { name = "bcrypt", specifier = ">=5.0.0" },

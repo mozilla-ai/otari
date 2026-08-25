@@ -9,7 +9,7 @@ else in ``**kwargs`` goes to the completion *call* instead). A test that
 monkeypatches ``acompletion`` directly (as the hybrid-mode integration tests
 do) can't catch a regression back to flat kwargs, because the fake
 ``acompletion`` never exercises any-llm's own kwarg-splitting logic. These
-tests call into the real SDK, stopping only at boto3's own client
+tests call into the real SDK, stopping only at boto3's own session client
 construction (patched so no network call or real AWS credentials are
 needed), to verify the values actually land where boto3 expects them.
 """
@@ -30,9 +30,9 @@ async def test_bedrock_classic_shape_client_args_reach_real_boto3_client() -> No
     """Reproduces the exact bug this test guards against: merging
     region_name/aws_access_key_id flat into acompletion()'s kwargs still
     raises botocore's NoRegionError, because any-llm forwards unrecognized
-    flat kwargs to the completion call, not boto3.client(). Nesting them
-    under client_args (what default_attempt_kwargs now does) is the only
-    way they reach boto3.client()'s own constructor kwargs."""
+    flat kwargs to the completion call, not boto3's client constructor.
+    Nesting them under client_args (what default_attempt_kwargs now does) is
+    the only way they reach the dedicated Session.client() kwargs."""
     attempt = ResolvedAttempt(
         attempt_id="a0",
         position=0,
@@ -54,7 +54,7 @@ async def test_bedrock_classic_shape_client_args_reach_real_boto3_client() -> No
         captured.update(client_kwargs)
         raise _StopBeforeNetworkCall
 
-    with patch("boto3.client", side_effect=fake_boto3_client):
+    with patch("boto3.session.Session.client", side_effect=fake_boto3_client):
         with pytest.raises(_StopBeforeNetworkCall):
             await acompletion(**kwargs)
 
@@ -67,7 +67,7 @@ async def test_bedrock_classic_shape_client_args_reach_real_boto3_client() -> No
 @pytest.mark.asyncio
 async def test_bedrock_bearer_shape_uses_custom_client_not_flat_kwargs() -> None:
     """The bearer-token shape's pre-built client (client_args["client"]) is
-    what any-llm's BedrockProvider actually uses; boto3.client() is never
+    what any-llm's BedrockProvider actually uses; Session.client() is never
     called a second time for it."""
     attempt = ResolvedAttempt(
         attempt_id="a0",
@@ -90,11 +90,11 @@ async def test_bedrock_bearer_shape_uses_custom_client_not_flat_kwargs() -> None
     def fake_converse(**_call_kwargs: Any) -> Any:
         raise _StopBeforeNetworkCall
 
-    with patch("boto3.client") as fake_boto3_client:
+    with patch("boto3.session.Session.client") as fake_boto3_client:
         with patch.object(injected_client, "converse", side_effect=fake_converse):
             with pytest.raises(_StopBeforeNetworkCall):
                 await acompletion(**kwargs)
         # any-llm-sdk's BedrockProvider._init_client honors the pre-built
-        # client and skips constructing its own; boto3.client() is
+        # client and skips constructing its own; Session.client() is
         # untouched for the runtime client in this shape.
         fake_boto3_client.assert_not_called()
