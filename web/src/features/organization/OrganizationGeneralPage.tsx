@@ -19,11 +19,11 @@ import { canManage } from "./roles"
 // The organization this deployment is, and the one thing an operator does to
 // it: rename it.
 //
-// A self-hosted gateway is one tenant with several people in it, not several
-// tenants, so the organization is provisioned at first boot and fixed: the
-// gateway mounts no endpoint to create, switch between, or delete one, and this
-// page offers none. Adding those surfaces is additive and belongs behind the
-// entitlement gate an overlay contributes, not here. The roster is its own page
+// Creating an organization and moving between them live in the scope switcher
+// above the rail, not here: they are about which organization you are looking
+// at, where this page is about the one you are in. Deleting one is nowhere,
+// because the gateway mounts no endpoint for it (every historical attribution
+// resolves through rows hanging off an organization). The roster is its own page
 // (Members), which is how otari.ai splits the same surface.
 
 function OrganizationDetails({
@@ -94,7 +94,7 @@ export function OrganizationGeneralPage() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Organization"
-        description={`The tenant this gateway's workspaces, members, and roles belong to. There is one per deployment, provisioned on first boot. Your role here is ${role}.`}
+        description={`The organization you are acting in, and what this page renames. The first one is provisioned on first boot; the switcher above the rail is where you create another or move between them. Your role here is ${role}.`}
       />
 
       {canEdit ? null : (

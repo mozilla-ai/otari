@@ -76,9 +76,9 @@ def _add_identity(
 def _other_tenant(session_factory: Callable[[], Session]) -> tuple[uuid.UUID, uuid.UUID]:
     """Insert a second organization with a workspace, and return both ids.
 
-    Written directly because this edition mounts no endpoint that creates an
-    organization: a standalone deployment has exactly one. The rows still have
-    to exist, because they are what the cross-tenant assertions here point at.
+    Written directly rather than through ``POST /v1/organizations``, which makes
+    the caller its owner: these rows exist to be the organization the operator
+    is *not* in, which is what every cross-tenant assertion here points at.
     """
     session = session_factory()
     try:
@@ -222,6 +222,232 @@ def test_rename_the_active_organization(client: TestClient, master_key_header: d
     assert response.status_code == 200, response.text
     assert response.json()["organization"]["name"] == "Acme"
     assert _context(client, master_key_header)["organization"]["name"] == "Acme"
+
+
+# =============================================================================
+# Creating an organization, and switching the active one
+# =============================================================================
+
+
+def test_creating_an_organization_makes_the_caller_its_owner(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """The three rows a usable organization needs: itself, an owner, a workspace."""
+    response = client.post("/v1/organizations", json={"name": "Research"}, headers=master_key_header)
+
+    assert response.status_code == 201, response.text
+    created = response.json()
+    assert created["name"] == "Research"
+    # The slug is derived rather than sent, and carries a random suffix, so it
+    # can never be the literal "default" that first boot adopts.
+    assert created["slug"].startswith("research-")
+    assert created["slug"] != "default"
+
+    switched = client.post(
+        "/v1/organizations/me/switch",
+        json={"organization_id": created["id"]},
+        headers=master_key_header,
+    )
+    assert switched.status_code == 200, switched.text
+    assert switched.json()["role"] == "owner"
+
+    workspaces = client.get("/v1/workspaces", headers=master_key_header)
+    assert workspaces.status_code == 200, workspaces.text
+    assert [row["name"] for row in workspaces.json()["data"]] == [DEFAULT_WORKSPACE_NAME]
+
+
+def test_creating_an_organization_does_not_switch_into_it(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """Creating and switching are two calls, so a create cannot move the caller."""
+    before = _context(client, master_key_header)["organization"]["id"]
+
+    client.post("/v1/organizations", json={"name": "Research"}, headers=master_key_header)
+
+    assert _context(client, master_key_header)["organization"]["id"] == before
+
+
+def test_two_organizations_can_share_a_name(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """The slug is unique, the name is not: the random suffix is what allows it."""
+    first = client.post("/v1/organizations", json={"name": "Research"}, headers=master_key_header)
+    second = client.post("/v1/organizations", json={"name": "Research"}, headers=master_key_header)
+
+    assert first.status_code == 201, first.text
+    assert second.status_code == 201, second.text
+    assert first.json()["slug"] != second.json()["slug"]
+
+
+def test_a_whitespace_only_name_creates_nothing(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """The same refusal the rename path gives, for the same reason."""
+    response = client.post("/v1/organizations", json={"name": "   "}, headers=master_key_header)
+
+    assert response.status_code == 400
+    memberships = client.get("/v1/organizations/me/memberships", headers=master_key_header)
+    assert memberships.json()["count"] == 1
+
+
+def test_the_membership_list_names_the_organizations_the_caller_is_in(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """What a switcher renders, including which row is the current one."""
+    created = client.post("/v1/organizations", json={"name": "Research"}, headers=master_key_header).json()
+
+    response = client.get("/v1/organizations/me/memberships", headers=master_key_header)
+
+    assert response.status_code == 200, response.text
+    body = response.json()
+    assert body["count"] == 2
+    by_id = {row["organization"]["id"]: row for row in body["data"]}
+    assert by_id[created["id"]]["role"] == "owner"
+    assert by_id[created["id"]]["is_active_organization"] is False
+    active = _context(client, master_key_header)["organization"]["id"]
+    assert by_id[active]["is_active_organization"] is True
+
+
+def test_the_membership_list_omits_an_organization_the_caller_is_only_invited_to(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """An invited or suspended membership is not a destination, so it is not offered."""
+    # First, so the deployment provisions its own tenancy before a second
+    # organization exists: ``_refuse_to_shadow_existing_tenancy`` refuses to
+    # provision beside organizations it did not create.
+    active_id = _context(client, master_key_header)["organization"]["id"]
+    elsewhere_id, _ = _other_tenant(db_session_factory)
+    session = db_session_factory()
+    try:
+        marker = session.get(RuntimeSetting, BOOTSTRAP_IDENTITY_KEY)
+        assert marker is not None
+        session.add(
+            OrganizationMember(
+                organization_id=elsewhere_id,
+                user_id=uuid.UUID(marker.value),
+                role="member",
+                status="invited",
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    response = client.get("/v1/organizations/me/memberships", headers=master_key_header)
+
+    assert response.status_code == 200, response.text
+    assert [row["organization"]["id"] for row in response.json()["data"]] == [active_id]
+
+
+def test_switching_scopes_every_later_read(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """The pointer is what every scoped read resolves through, so they all follow it."""
+    default_workspaces = client.get("/v1/workspaces", headers=master_key_header).json()
+    created = client.post("/v1/organizations", json={"name": "Research"}, headers=master_key_header).json()
+    client.post(
+        "/v1/workspaces",
+        json={"name": "Only in the default organization"},
+        headers=master_key_header,
+    )
+
+    response = client.post(
+        "/v1/organizations/me/switch",
+        json={"organization_id": created["id"]},
+        headers=master_key_header,
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["organization"]["id"] == created["id"]
+    assert _context(client, master_key_header)["organization"]["id"] == created["id"]
+    # The workspace created a moment ago is in the organization left behind, so
+    # it is gone from this list rather than filtered out of it.
+    after = client.get("/v1/workspaces", headers=master_key_header).json()
+    assert after["count"] == 1
+    assert after["data"][0]["id"] != default_workspaces["data"][0]["id"]
+
+
+def test_switching_back_returns_the_original_scope(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """Switching is a pointer move, so nothing is lost by moving it twice."""
+    original = _context(client, master_key_header)["organization"]["id"]
+    created = client.post("/v1/organizations", json={"name": "Research"}, headers=master_key_header).json()
+    client.post(
+        "/v1/organizations/me/switch",
+        json={"organization_id": created["id"]},
+        headers=master_key_header,
+    )
+
+    response = client.post(
+        "/v1/organizations/me/switch",
+        json={"organization_id": original},
+        headers=master_key_header,
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["organization"]["id"] == original
+    assert response.json()["organization"]["name"] == DEFAULT_ORGANIZATION_NAME
+
+
+def test_switching_to_the_current_organization_is_allowed(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """A switcher that re-sent the row it is already on is not an error."""
+    current = _context(client, master_key_header)["organization"]["id"]
+
+    response = client.post(
+        "/v1/organizations/me/switch",
+        json={"organization_id": current},
+        headers=master_key_header,
+    )
+
+    assert response.status_code == 200, response.text
+    assert response.json()["organization"]["id"] == current
+
+
+def test_switching_to_an_organization_the_caller_is_not_in_is_not_found(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """404 and not 403: an organization the caller may not reach must not be confirmable."""
+    # Read first, for the reason the invited-membership test above gives.
+    before = _context(client, master_key_header)["organization"]["id"]
+    organization_id, _ = _other_tenant(db_session_factory)
+
+    response = client.post(
+        "/v1/organizations/me/switch",
+        json={"organization_id": str(organization_id)},
+        headers=master_key_header,
+    )
+
+    assert response.status_code == 404
+    assert _context(client, master_key_header)["organization"]["id"] == before
+
+
+def test_switching_to_an_unknown_organization_is_not_found(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """The same answer an organization that exists elsewhere gets, which is the point."""
+    response = client.post(
+        "/v1/organizations/me/switch",
+        json={"organization_id": str(uuid.uuid4())},
+        headers=master_key_header,
+    )
+
+    assert response.status_code == 404
 
 
 # =============================================================================

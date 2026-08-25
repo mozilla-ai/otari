@@ -468,3 +468,216 @@ def test_an_unresolvable_workspace_refuses_rather_than_running_the_sandbox(
     detail = response.json()["detail"]
     assert detail["error"]["message"] == "Code execution policy could not be resolved for this request"
     assert seen.max_iterations is None, "the tool loop must never have run"
+
+
+# ---------------------------------------------------------------------------
+# The sandbox image and the exposed tool set (#740)
+# ---------------------------------------------------------------------------
+
+_IMAGE = "mzdotai/otari-sandbox-container:latest"
+_OTHER_IMAGE = "ghcr.io/acme/sandbox:2"
+
+
+def test_no_policy_and_no_deployment_image_asks_the_backend_for_nothing(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SANDBOX_URL", _SANDBOX_URL)
+
+    response, seen = _post_with_sandbox_patched(client, api_key_header, _REQUEST)
+
+    assert response.status_code == 200
+    assert seen.backend_kwargs["image"] is None
+    assert seen.backend_kwargs["allowed_tools"] is None
+
+
+def test_the_deployment_image_is_used_when_the_workspace_pins_none(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The fallback half: a policy that says nothing about images changes nothing."""
+    monkeypatch.setenv("OTARI_SANDBOX_URL", _SANDBOX_URL)
+    monkeypatch.setenv("OTARI_SANDBOX_SESSION_IMAGE", _IMAGE)
+    workspace_id = _default_workspace_id(client, master_key_header)
+    _set_policy(client, master_key_header, workspace_id, enabled=True)
+
+    response, seen = _post_with_sandbox_patched(client, api_key_header, _REQUEST)
+
+    assert response.status_code == 200
+    assert seen.backend_kwargs["image"] == _IMAGE
+
+
+def test_the_workspace_image_wins_over_the_deployments(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SANDBOX_URL", _SANDBOX_URL)
+    monkeypatch.setenv("OTARI_SANDBOX_SESSION_IMAGE", _IMAGE)
+    monkeypatch.setenv("OTARI_SANDBOX_ALLOWED_SESSION_IMAGES", _OTHER_IMAGE)
+    workspace_id = _default_workspace_id(client, master_key_header)
+    stored = _set_policy(client, master_key_header, workspace_id, enabled=True, image=_OTHER_IMAGE)
+    assert stored["image"] == _OTHER_IMAGE
+
+    response, seen = _post_with_sandbox_patched(client, api_key_header, _REQUEST)
+
+    assert response.status_code == 200
+    assert seen.backend_kwargs["image"] == _OTHER_IMAGE
+
+
+def test_an_image_the_operator_no_longer_allows_refuses_the_request(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The write-time guard is not the only one: an operator can shrink the list later.
+
+    Refusing beats quietly falling back to the deployment image, which would
+    leave a workspace believing its pin was in force.
+    """
+    monkeypatch.setenv("OTARI_SANDBOX_URL", _SANDBOX_URL)
+    monkeypatch.setenv("OTARI_SANDBOX_ALLOWED_SESSION_IMAGES", _OTHER_IMAGE)
+    workspace_id = _default_workspace_id(client, master_key_header)
+    _set_policy(client, master_key_header, workspace_id, enabled=True, image=_OTHER_IMAGE)
+
+    monkeypatch.delenv("OTARI_SANDBOX_ALLOWED_SESSION_IMAGES")
+    response, seen = _post_with_sandbox_patched(client, api_key_header, _REQUEST)
+
+    assert response.status_code == 403
+    assert seen.max_iterations is None, "the tool loop must never have run"
+
+
+def test_an_image_the_operator_never_allowed_cannot_be_stored(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SANDBOX_URL", _SANDBOX_URL)
+    workspace_id = _default_workspace_id(client, master_key_header)
+
+    response = client.put(
+        f"/v1/workspaces/{workspace_id}/code-execution-policy",
+        json={"enabled": True, "image": "ghcr.io/attacker/pwn:latest"},
+        headers=master_key_header,
+    )
+
+    assert response.status_code == 400
+
+
+def test_a_tool_list_that_keeps_code_execution_narrows_the_backend(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("OTARI_SANDBOX_URL", _SANDBOX_URL)
+    workspace_id = _default_workspace_id(client, master_key_header)
+    _set_policy(client, master_key_header, workspace_id, enabled=True, tools=["code_execution"])
+
+    response, seen = _post_with_sandbox_patched(client, api_key_header, _REQUEST)
+
+    assert response.status_code == 200
+    assert seen.backend_kwargs["allowed_tools"] == frozenset({"code_execution"})
+
+
+def test_a_tool_list_this_deployment_cannot_run_is_refused_at_the_write(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The management surface refuses it, so no request ever meets one through the API."""
+    monkeypatch.setenv("OTARI_SANDBOX_URL", _SANDBOX_URL)
+    workspace_id = _default_workspace_id(client, master_key_header)
+
+    response = client.put(
+        f"/v1/workspaces/{workspace_id}/code-execution-policy",
+        json={"enabled": True, "tools": ["bash_code_execution"]},
+        headers=master_key_header,
+    )
+
+    assert response.status_code == 400
+
+
+def test_a_stored_tool_list_without_code_execution_refuses_rather_than_serving_nothing(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    db_session_factory: Any,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The admission backstop, reached by writing the row past the service.
+
+    Unreachable through the API since the write refuses it, which is why the row
+    is planted directly: what this pins is that the *request* path fails closed
+    too, for the row that was valid when written and stopped being runnable when
+    a deployment's backend changed under it. Handing the model a sandbox that
+    advertises no tools would return a perfectly successful response that
+    silently never ran any code, which is the failure a policy exists to make
+    loud.
+    """
+    monkeypatch.setenv("OTARI_SANDBOX_URL", _SANDBOX_URL)
+    workspace_id = _default_workspace_id(client, master_key_header)
+    _set_policy(client, master_key_header, workspace_id, enabled=True)
+
+    session = db_session_factory()
+    try:
+        session.execute(
+            text("UPDATE workspace_code_execution_policies SET tools = :tools WHERE workspace_id = :ws"),
+            {"tools": '["bash_code_execution"]', "ws": workspace_id},
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    response, seen = _post_with_sandbox_patched(client, api_key_header, _REQUEST)
+
+    assert response.status_code == 403
+    assert seen.max_iterations is None, "the tool loop must never have run"
+
+
+def test_a_streaming_request_gets_the_same_image_and_tool_set(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The eager-open streaming path builds its own backend, so it needs its own case."""
+    monkeypatch.setenv("OTARI_SANDBOX_URL", _SANDBOX_URL)
+    monkeypatch.setenv("OTARI_SANDBOX_ALLOWED_SESSION_IMAGES", _IMAGE)
+    workspace_id = _default_workspace_id(client, master_key_header)
+    _set_policy(
+        client,
+        master_key_header,
+        workspace_id,
+        enabled=True,
+        image=_IMAGE,
+        tools=["code_execution"],
+    )
+
+    seen: dict[str, Any] = {}
+
+    def fake_sandbox(**kwargs: Any) -> Any:
+        seen.update(kwargs)
+        backend = AsyncMock()
+        backend.purpose_hints = lambda: []
+        backend.__aenter__ = AsyncMock(return_value=backend)
+        backend.__aexit__ = AsyncMock(return_value=None)
+        return backend
+
+    async def fake_stream(*_args: Any, **_kwargs: Any) -> AsyncIterator[MessageStreamEvent]:
+        yield cast(Any, MessageStopEvent(type="message_stop"))
+
+    with (
+        patch("gateway.api.routes._pipeline.SandboxBackend", new=fake_sandbox),
+        patch("gateway.api.routes.messages.anthropic_tool_loop_stream", new=fake_stream),
+    ):
+        response = client.post("/v1/messages", json={**_REQUEST, "stream": True}, headers=api_key_header)
+
+    assert response.status_code == 200
+    assert seen["image"] == _IMAGE
+    assert seen["allowed_tools"] == frozenset({"code_execution"})

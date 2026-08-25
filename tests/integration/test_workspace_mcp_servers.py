@@ -13,6 +13,7 @@ hostname through DNS, so a test naming one would pass or fail on whether the
 runner has egress.
 """
 
+import ipaddress
 import time
 import uuid
 from collections.abc import Iterator
@@ -677,6 +678,60 @@ async def test_prepare_gateway_tools_is_unchanged_when_nothing_is_configured(asy
 
     assert tool_ctx.mcp_server_configs is not None
     assert [server.name for server in tool_ctx.mcp_server_configs] == ["inline"]
+
+
+async def test_a_stored_servers_unsafe_url_is_not_named_to_the_caller(
+    async_db: AsyncSession, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A workspace's stored endpoint is not the caller's to see, so the refusal does not name it.
+
+    The rows are master-key gated even for reading, because they name the
+    endpoints this gateway connects to. A URL that was safe when it was stored
+    and resolves privately later would otherwise hand the host and the range it
+    landed in to any key holder, through a 400 on the completion path.
+    """
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, owner=owner)
+    service = WorkspaceMcpServerService(async_db)
+
+    # A hostname rather than the IP literal the other cases use, since a literal
+    # never reaches a resolver. Safe when the row is written and not when the
+    # request arrives, which is the shape this actually takes: an endpoint that
+    # was fine at configuration time and has since moved.
+    async def public(_host: str) -> list[object]:
+        return [ipaddress.ip_address("93.184.216.34")]
+
+    monkeypatch.setattr("gateway.services.url_safety._resolve_all_async", public)
+    stored = await service.create_server(
+        user=owner,
+        workspace_id=workspace.id,
+        request=_create(name="internal", url="https://mcp.internal.corp.example/mcp"),
+    )
+
+    async def private(_host: str) -> list[object]:
+        return [ipaddress.ip_address("10.11.12.13")]
+
+    monkeypatch.setattr("gateway.services.url_safety._resolve_all_async", private)
+
+    with pytest.raises(HTTPException) as exc_info:
+        await prepare_gateway_tools(
+            adapter=chat._ADAPTER,
+            ctx=_request_context(async_db, workspace.id, organization.id),
+            response=Response(),
+            guardrails=None,
+            guardrail_text="",
+            tools=None,
+            mcp_servers=None,
+            mcp_server_ids=[stored.id],
+            max_tool_iterations=None,
+            tools_header=None,
+        )
+
+    assert exc_info.value.status_code == 500
+    detail = str(exc_info.value.detail)
+    assert "10.11.12.13" not in detail
+    assert "mcp.internal.corp.example" not in detail
 
 
 async def test_prepare_gateway_tools_refuses_an_unknown_id(async_db: AsyncSession) -> None:

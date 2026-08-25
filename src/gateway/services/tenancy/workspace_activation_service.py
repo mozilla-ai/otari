@@ -48,6 +48,7 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.auth.models import generate_api_key, hash_key, key_prefix
 from gateway.core.config import GatewayConfig
+from gateway.core.usage_source import served_here
 from gateway.models.entities import APIKey, UsageLog, WorkspaceActivationState
 from gateway.models.money import as_float
 from gateway.models.tenancy import User, Workspace
@@ -63,12 +64,6 @@ from gateway.services.tenancy.organization_service import OrganizationService
 # every deployment, so an operator who finds it there can tell where it came
 # from without a lookup.
 ACTIVATION_KEY_NAME = "Setup guide"
-
-# Only gateway-served requests count. Imported usage
-# (``POST /v1/usage/external-events``) is somebody else's traffic recorded here
-# for cost reporting, so a workspace whose only rows came from an import has
-# still never called this gateway, and the guide would be lying to close.
-_GATEWAY_SOURCE = "gateway"
 
 # ``absorbed`` is excluded on purpose: it marks a failed attempt a routing
 # policy recovered from, so the request it belongs to also wrote the
@@ -462,12 +457,19 @@ class WorkspaceActivationService:
         return await self.db.get(APIKey, state.api_key_id)
 
     async def _first_successful_request(self, workspace_id: uuid.UUID) -> UsageLog | None:
-        """The oldest successful gateway request in the workspace, which is the activation."""
+        """The oldest successful gateway request in the workspace, which is the activation.
+
+        Only requests this deployment served count, migrated hosted history
+        included. Imported usage (``POST /v1/usage/external-events``) is somebody
+        else's traffic recorded here for cost reporting, so a workspace whose only
+        rows came from an import has still never called this gateway, and the guide
+        would be lying to close.
+        """
         statement = (
             select(UsageLog)
             .where(
                 UsageLog.workspace_id == workspace_id,
-                UsageLog.source == _GATEWAY_SOURCE,
+                served_here(UsageLog.source),
                 UsageLog.status == "success",
             )
             # Tie-broken on the id so two rows sharing a timestamp still name one
@@ -478,12 +480,16 @@ class WorkspaceActivationService:
         return (await self.db.execute(statement)).scalars().first()
 
     async def _latest_request(self, workspace_id: uuid.UUID) -> UsageLog | None:
-        """The most recent gateway request in the workspace, successful or not."""
+        """The most recent gateway request in the workspace, successful or not.
+
+        Scoped to what this deployment served, for the reason in
+        :meth:`_first_successful_request`.
+        """
         statement = (
             select(UsageLog)
             .where(
                 UsageLog.workspace_id == workspace_id,
-                UsageLog.source == _GATEWAY_SOURCE,
+                served_here(UsageLog.source),
                 UsageLog.status.in_(_ATTEMPT_STATUSES),
             )
             .order_by(UsageLog.timestamp.desc(), UsageLog.id.desc())

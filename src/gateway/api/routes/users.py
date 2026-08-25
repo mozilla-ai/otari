@@ -4,13 +4,14 @@ from typing import Annotated, Any
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
-from sqlalchemy import delete, select, update
+from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, verify_master_key
+from gateway.api.deps import TelemetryStoragePortDep, get_config, get_db, verify_master_key
 from gateway.core.config import GatewayConfig
-from gateway.models.entities import AgentTelemetry, APIKey, Budget, UsageLog, User
+from gateway.log_config import logger
+from gateway.models.entities import APIKey, Budget, UsageLog, User
 from gateway.models.money import as_float
 from gateway.repositories.users_repository import get_active_user
 from gateway.services.budget_periods import budget_window
@@ -294,8 +295,9 @@ async def update_user(
 async def delete_user(
     user_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
+    storage: TelemetryStoragePortDep,
 ) -> None:
-    """Delete a user."""
+    """Delete a user, and erase the telemetry captured under their name."""
     user = await get_active_user(db, user_id)
 
     if not user:
@@ -304,16 +306,40 @@ async def delete_user(
             detail=f"User with id '{user_id}' not found",
         )
 
+    # Explicit erasure, not a database ON DELETE cascade: this endpoint
+    # soft-deletes the user (deleted_at), so the users row is never hard-deleted
+    # and the telemetry FK's SET NULL never fires here regardless of its setting.
+    #
+    # First, and outside the soft-delete's transaction. Telemetry storage settles
+    # its own writes and a deployment can be storing them out of process, where
+    # no transaction of ours reaches, so the two cannot be made atomic and the
+    # order is a choice about which way to fail. This way a failed erasure
+    # commits nothing else and answers 5xx, leaving the user active and the whole
+    # request retryable. The other order strands it: the repeat request would
+    # meet the 404 above, because the user is no longer active, so nothing would
+    # ever erase what was left behind. The cost is the narrow window where a
+    # later failure leaves an active user whose telemetry is gone, which is
+    # analytics lost rather than an erasure silently not performed, and the
+    # operator asked for that user's deletion either way.
+    #
+    # Broad on purpose: what this raises depends on the store this build bound,
+    # so an out-of-process adapter's transport error must not escape as a 500
+    # with a stack trace.
+    try:
+        await storage.purge_user(user_id=user_id)
+    except Exception:
+        logger.exception("Telemetry erasure failed for user %s; user was not deleted", user_id)
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Could not erase this user's telemetry; the user was not deleted",
+        ) from None
+
     await db.execute(
         update(APIKey)
         .where(APIKey.user_id == user_id)
         .values(is_active=False)
         .execution_options(synchronize_session=False)
     )
-    # Explicit removal, not a database ON DELETE cascade: this endpoint soft-deletes
-    # the user (deleted_at), so the users row is never hard-deleted and the FK's
-    # SET NULL never fires here regardless of its setting.
-    await db.execute(delete(AgentTelemetry).where(AgentTelemetry.user_id == user_id))
     user.deleted_at = datetime.now(UTC)
 
     try:

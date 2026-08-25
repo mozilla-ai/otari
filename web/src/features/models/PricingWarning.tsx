@@ -45,7 +45,9 @@ export function PricingWarning() {
   }
 
   return (
-    <div className="shrink-0 px-6 pt-3">
+    // Out of flow, pinned to the top of the shell: in flow it pushed the whole
+    // shell down on every page the alarm is up on. Under the mobile drawer's z-40.
+    <div className="absolute inset-x-0 top-0 z-30 px-6 pt-4">
       <InfoBanner tone="warning">
         <div className="flex flex-wrap items-center justify-between gap-3">
           <span>

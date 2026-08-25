@@ -39,6 +39,7 @@ import {
 } from "@/shared/api/hooks"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import { Field } from "@/shared/components/Field"
+import { SecretField } from "@/shared/components/SecretField"
 import {
   ConfirmButton,
   ErrorBanner,
@@ -47,45 +48,6 @@ import {
   PageHeader,
 } from "@/shared/components/ui"
 import { formatRelative } from "@/shared/helpers/format"
-
-// A masked, never-prefilled secret input. Native password masking protects
-// Firefox users; self-hosted deployments should use HTTPS to avoid browser warnings.
-function SecretField({
-  value,
-  onChange,
-  label,
-  placeholder,
-  description,
-}: {
-  value: string
-  onChange: (next: string) => void
-  label: string
-  placeholder?: string
-  description?: string
-}) {
-  return (
-    <TextField
-      value={value}
-      onChange={onChange}
-      className="flex max-w-md flex-col gap-1"
-    >
-      <Label className="text-sm font-medium text-foreground">{label}</Label>
-      <Input
-        type="password"
-        placeholder={placeholder ?? "sk-…"}
-        autoComplete="off"
-        autoCorrect="off"
-        autoCapitalize="off"
-        spellCheck={false}
-        data-1p-ignore
-        data-lpignore="true"
-      />
-      {description ? (
-        <Description className="text-xs text-muted">{description}</Description>
-      ) : null}
-    </TextField>
-  )
-}
 
 // client_args is whatever the provider's SDK client constructor takes (timeouts,
 // custom headers), so it has no fixed schema and the form edits it as JSON. Blank

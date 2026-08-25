@@ -83,6 +83,7 @@ A **port** is a domain-named interface (a Python `Protocol`), named for what it 
 | `CodeExecutionPort` | Running model-generated code in a sandbox. |
 | `BillingPort` | Metering and charging for usage. |
 | `GrowthSignalPort` | Telling an outside CRM or support messenger about a user's lifecycle. |
+| `TelemetryStoragePort` | Where captured agent telemetry is stored and read back. |
 
 The cardinal property: **every port ships with a working adapter in Otari's core**, a real lightweight implementation or an honest [Null Object](https://en.wikipedia.org/wiki/Null_object_pattern). Otari must stand alone with no overlay present. `BillingPort`, for example, is a Null Object in the core: it is present and callable, and does nothing, so nothing in the core needs to know whether real billing exists anywhere.
 
@@ -106,6 +107,7 @@ flowchart LR
         CP[CodeExecutionPort]
         BP[BillingPort]
         GP[GrowthSignalPort]
+        TP[TelemetryStoragePort]
     end
     UI --> API --> SVC --> REPO --> MOD
     SVC --> AP
@@ -116,9 +118,12 @@ flowchart LR
     SVC --> CP
     SVC --> BP
     SVC --> GP
+    SVC --> TP
 ```
 
-> **Where the ports are today.** `src/gateway/ports/` holds four of them, `ModelProviderPort`, `BillingPort`, `EntitlementPort` and `GrowthSignalPort`, each with a working core adapter in `src/gateway/adapters/`. They are the seam's mechanism rather than its whole surface: nothing on the request path calls one yet, so the choices those four describe (which credential to use, when to meter) are still made by the mode switch and the hand-wired dependencies described next. The remaining ports in the table above arrive as they gain callers.
+> **Where the ports are today.** `src/gateway/ports/` holds six of them, `ModelProviderPort`, `BillingPort`, `EntitlementPort`, `GrowthSignalPort`, `TelemetryStoragePort` and `IdentityProviderPort`, each with a working core adapter in `src/gateway/adapters/`. Three have core callers. `TelemetryStoragePort` is resolved by the OTLP receiver, the telemetry read endpoints and the purge paths. `ModelProviderPort` is asked on the standalone dispatch path (`resolve_dispatch_provider` in `api/routes/_pipeline.py`) for a candidate the credential ladder could not serve, after an organization's key, a stored instance and `config.yml` have all missed; a routed multi-candidate chain does not reach it yet, because those candidates are credentialed by the routing compiler, which is synchronous and does no I/O. `IdentityProviderPort` is resolved by the OAuth sign-in route, whose core adapter answers with the base build's roster policy (sign in as an account an operator already added; never provision one). The other three are still the seam's mechanism rather than its surface, so the choices they describe (when to meter, what a deployment is entitled to) are made by the mode switch and the hand-wired dependencies described next. The remaining ports in the table above arrive as they gain callers.
+>
+> `IdentityProviderPort` is also where the table's own wording is narrower than it reads. It is listed as "authenticating users/sign-in", but authenticating is not behind it: proving somebody controls a Google or GitHub account is protocol work that does not vary by edition, so it stays a plain service. What the port carries is the *policy* applied to a proven identity, which is the half an overlay replaces.
 
 ## How a port is resolved
 
@@ -167,12 +172,13 @@ This is the open-core line: for each capability, what Otari's core ships and wha
 
 | Capability | Where it lives | Notes |
 |---|---|---|
-| Users, orgs, workspaces, teams, invitations, budgets, usage and traces, BYO provider keys | **Core** (plain, no port) | The management plane: plain CRUD, one implementation each. Routing has its own row below because, unlike these, it sits behind a port. |
+| Users, orgs, workspaces, teams, invitations, budgets, usage, BYO provider keys | **Core** (plain, no port) | The management plane: plain CRUD, one implementation each. Routing and telemetry storage have their own rows below because, unlike these, they sit behind a port. Usage rows stay here in every build: they are the money path, not analytics. |
 | RBAC | **Core base + overlay adapter** *(provisional)* | Base roles and org scoping in the core; deeper roles, fine-grained permissions, and audit from an overlay adapter. Split pending an open decision. |
 | SSO | **Core base + overlay adapter** *(provisional)* | Social sign-in and passkeys in the core; enterprise SSO (for example SAML, enterprise OIDC, directory provisioning) from an overlay adapter. Split pending an open decision. |
 | Routing | **Core base + overlay adapter** *(provisional)* | Ordered fallback and policies in the core; a richer model-selection strategy from an overlay adapter. Split pending an open decision. |
 | Model inference | **Core port + hosted adapter** | Self-hosting your own backends is a first-class path in the core; a hosted, metered inference backend comes from an overlay. See the managed-models section of [docs/modes.md](docs/modes.md). |
 | Code execution | **Core port + hardened adapter** *(provisional)* | A basic local sandbox in the core; a hardened, managed sandbox from an overlay. Interface still provisional. |
+| Telemetry storage | **Core port + scale-out adapter** | The OTLP receiver's captured telemetry goes to this deployment's own database in the core; a store built for many tenants' retention and query volume comes from an overlay. The read endpoints resolve the same port, so binding one moves both halves. |
 | Billing (wallet/payments) | **Overlay-only** | A Null Object (no-op) adapter in the core; real billing exists only in an overlay. |
 
 The **provisional** rows (RBAC, SSO, routing) share one open question: how deep the core base goes before an overlay adapter takes over. That is an open design decision for the project maintainers, not settled yet and not a contributor's to assume; treat those lines as a working assumption until it is decided and recorded here.
@@ -192,7 +198,7 @@ In the dashboard both meet on one nav entry, which is where the vocabulary earns
 
 Be clear about how much of that is built. The surface axis is real and served: `GET /v1/bootstrap` answers it. `EntitlementPort` now exists on both sides of the wire, but **no endpoint serves entitlements to the browser**, so the two halves answer independently:
 
-- **In the browser**, the axis resolves from the constant that is the default value of the context in `web/src/shared/hooks/useEntitlements.tsx`. It grants `BASE_CAPABILITIES` and reports everything else absent. An overlay answers it for real by rendering `EntitlementProvider`.
+- **In the browser**, the axis resolves from the constant that is the default value of the context in `web/src/shared/hooks/useEntitlements.tsx`. It grants `BASE_CAPABILITIES` and reports everything else absent. An overlay answers it for real by rendering `EntitlementProvider`, through `web/src/app/overlayEntitlementResolver.tsx`: the seam the shell mounts above the navigation and the routes, whose base default renders its children unchanged so this build falls through to the constant. A resolver that answers asynchronously reports `isLoading` and the shell waits on it, rather than telling a visitor an entitled page is not served here while the answer is still in flight.
 - **On the server**, `EntitlementPort` resolves through the container, and its core adapter (`src/gateway/adapters/entitlement_adapter.py`) answers with its own `BASE_CAPABILITIES`. That is what `require_capability` gates a contributed router on, so a route an overlay mounts into this process refuses for itself rather than trusting a hidden link. Hiding a link is not authorization; this is the half that is.
 
 Both constants are empty, and deliberately so: no base nav entry and no base route is gated on a capability, because the one candidate is routing, whose split this document still marks provisional. They are meant to agree, so a capability the base grows is added to both at once.

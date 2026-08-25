@@ -45,12 +45,17 @@ test.describe("hybrid deployment", () => {
       // renders the landing page rather than a sign-in screen.
       sign_in_methods: [],
       management_url: MANAGEMENT_URL,
+      // Deployment-wide rather than standalone-only, and unset here: a hybrid
+      // gateway may carry a hosted documentation link, and this one configures
+      // none, so the bundled guide stays the target.
+      docs_url: null,
       // Never frozen, because the freeze is on a sign-in this deployment does
       // not serve: a hybrid gateway mints no session for maintenance mode to
       // refuse. Its control plane owns that, as it owns the sign-in itself.
       maintenance_mode: false,
       // No session of its own to protect, so no ceremony to run either.
       passkeys_ready: false,
+      oauth_providers: [],
       // Its control plane sends the mail that carries links back to it.
       mail_ready: false,
     })

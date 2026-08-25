@@ -119,7 +119,274 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
       default_purpose_hint: null,
       max_iterations: 4,
       exec_timeout_s: null,
+      image: null,
+      tools: null,
     })
+  })
+
+  it("offers only the images the operator approved, plus the deployment default", async () => {
+    mockApi({
+      policy: workspaceCodeExecutionPolicy({
+        workspace_id: ALPHA,
+        allowed_images: ["mzdotai/otari-sandbox-container:latest"],
+      }),
+    })
+    await renderLoaded()
+
+    const select = screen.getByLabelText("Sandbox image") as HTMLSelectElement
+    expect([...select.options].map((option) => option.value)).toEqual([
+      "",
+      "mzdotai/otari-sandbox-container:latest",
+    ])
+  })
+
+  it("says so rather than showing a picker when the operator approved no images", async () => {
+    mockApi()
+    await renderLoaded()
+
+    expect(screen.queryByLabelText("Sandbox image")).not.toBeInTheDocument()
+    expect(screen.getByText(/approved no sandbox images/i)).toBeInTheDocument()
+  })
+
+  it("saves the image the operator chose", async () => {
+    const calls = mockApi({
+      policy: workspaceCodeExecutionPolicy({
+        workspace_id: ALPHA,
+        allowed_images: ["mzdotai/otari-sandbox-container:latest"],
+      }),
+    })
+    const user = userEvent.setup()
+    await renderLoaded()
+
+    await user.selectOptions(screen.getByLabelText("Code execution"), "allowed")
+    await user.selectOptions(
+      screen.getByLabelText("Sandbox image"),
+      "mzdotai/otari-sandbox-container:latest",
+    )
+    await user.click(screen.getByRole("button", { name: "Save" }))
+
+    const put = calls.find((call) => call.method === "PUT")
+    expect(put?.body).toMatchObject({
+      image: "mzdotai/otari-sandbox-container:latest",
+      tools: null,
+    })
+  })
+
+  it("offers no tool checkboxes when the sandbox serves a single tool", async () => {
+    // Ticking and unticking one box would both mean "narrow nothing", so the
+    // card says what is served instead of rendering a control that cannot
+    // express anything.
+    mockApi()
+    await renderLoaded()
+
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
+    expect(screen.getByText(/serves code_execution/i)).toBeInTheDocument()
+  })
+
+  it("offers a checkbox per tool once the sandbox serves more than one", async () => {
+    mockApi({
+      policy: workspaceCodeExecutionPolicy({
+        workspace_id: ALPHA,
+        available_tools: ["code_execution", "bash_code_execution"],
+        configured: true,
+        enabled: true,
+        tools: ["code_execution"],
+      }),
+    })
+    await renderLoaded()
+
+    expect(
+      screen.getByRole("checkbox", { name: "code_execution" }),
+    ).toBeChecked()
+    expect(
+      screen.getByRole("checkbox", { name: "bash_code_execution" }),
+    ).not.toBeChecked()
+  })
+
+  it("normalizes a full tool selection back to no narrowing", async () => {
+    // Every tool ticked narrows nothing, and an empty list is refused by the
+    // server, so both ends save `null` rather than a list.
+    const calls = mockApi({
+      policy: workspaceCodeExecutionPolicy({
+        workspace_id: ALPHA,
+        available_tools: ["code_execution", "bash_code_execution"],
+        configured: true,
+        enabled: true,
+        tools: ["code_execution"],
+      }),
+    })
+    const user = userEvent.setup()
+    await renderLoaded()
+
+    await user.click(
+      screen.getByRole("checkbox", { name: "bash_code_execution" }),
+    )
+    await user.click(screen.getByRole("button", { name: "Save" }))
+
+    const put = calls.find((call) => call.method === "PUT")
+    expect(put?.body).toMatchObject({ tools: null })
+  })
+
+  it("preserves a stored tool policy this deployment no longer serves", async () => {
+    // The escalation this guards: admission refuses a policy naming only kinds
+    // the sandbox no longer serves, so silently dropping it on an unrelated
+    // save would turn that refusal into permission. Comparing list lengths read
+    // one stale entry against one served tool as "the full set" and sent null.
+    const calls = mockApi({
+      policy: workspaceCodeExecutionPolicy({
+        workspace_id: ALPHA,
+        configured: true,
+        enabled: true,
+        available_tools: ["code_execution"],
+        tools: ["bash_code_execution"],
+      }),
+    })
+    const user = userEvent.setup()
+    await renderLoaded()
+
+    // The operator came here to change something else entirely.
+    await user.type(screen.getByLabelText("Max tool-loop iterations"), "4")
+    await user.click(screen.getByRole("button", { name: "Save" }))
+
+    const put = calls.find((call) => call.method === "PUT")
+    expect(put?.body).toMatchObject({
+      max_iterations: 4,
+      tools: ["bash_code_execution"],
+    })
+  })
+
+  it("names a stale tool policy and offers a way out of it", async () => {
+    mockApi({
+      policy: workspaceCodeExecutionPolicy({
+        workspace_id: ALPHA,
+        configured: true,
+        enabled: true,
+        available_tools: ["code_execution"],
+        tools: ["bash_code_execution"],
+      }),
+    })
+    await renderLoaded()
+
+    expect(
+      screen.getByRole("checkbox", {
+        name: "bash_code_execution (no longer served)",
+      }),
+    ).toBeChecked()
+    expect(
+      screen.getByRole("checkbox", { name: "code_execution" }),
+    ).not.toBeChecked()
+    expect(
+      screen.getByText(/no longer serves, so its requests are refused/i),
+    ).toBeInTheDocument()
+  })
+
+  it("clears the restriction once the stale tool is unticked and a served one is not", async () => {
+    const calls = mockApi({
+      policy: workspaceCodeExecutionPolicy({
+        workspace_id: ALPHA,
+        configured: true,
+        enabled: true,
+        available_tools: ["code_execution"],
+        tools: ["bash_code_execution"],
+      }),
+    })
+    const user = userEvent.setup()
+    await renderLoaded()
+
+    await user.click(screen.getByRole("checkbox", { name: "code_execution" }))
+    await user.click(
+      screen.getByRole("checkbox", {
+        name: "bash_code_execution (no longer served)",
+      }),
+    )
+    await user.click(screen.getByRole("button", { name: "Save" }))
+
+    // Everything served, nothing else: narrows nothing, so no list is stored.
+    const put = calls.find((call) => call.method === "PUT")
+    expect(put?.body).toMatchObject({ tools: null })
+  })
+
+  it("names a withdrawn pin instead of showing it as the deployment default", async () => {
+    // The scenario the server guards twice: the operator dropped the image from
+    // the allow-list after the workspace pinned it. Without an option matching
+    // the stored value the native select falls back to its first option, which
+    // would show "Deployment default" over a policy that is nothing of the
+    // kind, and a save would earn a 400 naming a value never on screen.
+    mockApi({
+      policy: workspaceCodeExecutionPolicy({
+        workspace_id: ALPHA,
+        configured: true,
+        enabled: true,
+        allowed_images: ["mzdotai/otari-sandbox-container:latest"],
+        image: "ghcr.io/acme/withdrawn:1",
+      }),
+    })
+    await renderLoaded()
+
+    const select = screen.getByLabelText("Sandbox image") as HTMLSelectElement
+    expect(select).toHaveValue("ghcr.io/acme/withdrawn:1")
+    expect(
+      screen.getByRole("option", {
+        name: "ghcr.io/acme/withdrawn:1 (no longer approved)",
+      }),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByText(/no longer approves, so its requests are refused/i),
+    ).toBeInTheDocument()
+  })
+
+  it("offers the withdrawn pin even when the operator approved nothing else", async () => {
+    mockApi({
+      policy: workspaceCodeExecutionPolicy({
+        workspace_id: ALPHA,
+        configured: true,
+        enabled: true,
+        allowed_images: [],
+        image: "ghcr.io/acme/withdrawn:1",
+      }),
+    })
+    await renderLoaded()
+
+    expect(screen.getByLabelText("Sandbox image")).toHaveValue(
+      "ghcr.io/acme/withdrawn:1",
+    )
+  })
+
+  it("lets the operator move a withdrawn pin back to the deployment default", async () => {
+    const calls = mockApi({
+      policy: workspaceCodeExecutionPolicy({
+        workspace_id: ALPHA,
+        configured: true,
+        enabled: true,
+        allowed_images: ["mzdotai/otari-sandbox-container:latest"],
+        image: "ghcr.io/acme/withdrawn:1",
+      }),
+    })
+    const user = userEvent.setup()
+    await renderLoaded()
+
+    await user.selectOptions(screen.getByLabelText("Sandbox image"), "")
+    await user.click(screen.getByRole("button", { name: "Save" }))
+
+    const put = calls.find((call) => call.method === "PUT")
+    expect(put?.body).toMatchObject({ image: null })
+  })
+
+  it("shows a stored image", async () => {
+    mockApi({
+      policy: workspaceCodeExecutionPolicy({
+        workspace_id: ALPHA,
+        configured: true,
+        enabled: true,
+        allowed_images: ["ghcr.io/acme/sandbox:2"],
+        image: "ghcr.io/acme/sandbox:2",
+      }),
+    })
+    await renderLoaded()
+
+    expect(screen.getByLabelText("Sandbox image")).toHaveValue(
+      "ghcr.io/acme/sandbox:2",
+    )
   })
 
   it("clears the policy rather than storing one when set back to the deployment default", async () => {

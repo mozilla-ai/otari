@@ -56,7 +56,7 @@ used only by clients that move files in or out of a session.
 
 | Operation | Purpose | Request | Response |
 |---|---|---|---|
-| `CreateSession` | Lease a session | Optional lifetime hints | A session handle |
+| `CreateSession` | Lease a session | Optional lifetime and image hints | A session handle |
 | `Execute` | Run one tool call in a session | A tool call | A result block, plus execution metadata |
 | `DestroySession` | Release a session | A session id | Empty |
 | `ListFiles` | Enumerate a session's workspace | A session id, a path | File metadata |
@@ -67,10 +67,11 @@ used only by clients that move files in or out of a session.
 
 Leases a session and returns a handle.
 
-Request fields, both OPTIONAL lifetime hints:
+Request fields, all OPTIONAL:
 
 | Field | Meaning |
 |---|---|
+| `image` | The image this session should run |
 | `idle_timeout_seconds` | Reclaim the session after this long without activity |
 | `max_lifetime_seconds` | Reclaim the session this long after creation |
 
@@ -90,6 +91,15 @@ session without reformatting it.
 A backend MAY accept the client's lifetime hints or clamp them to its own
 ceilings, and reports what is in force. A client MUST NOT assume a session
 outlives the values the handle reports.
+
+`image` is a hint in the same sense and a weaker one: a backend that leases from
+a fixed pre-baked pool MAY ignore it, and MUST NOT fail the request because it
+was sent. Otari sends it when a workspace's code-execution policy pins an image,
+or when the deployment names one in `sandbox_session_image`, and omits the field
+entirely otherwise, so a backend built before this field existed sees the body it
+always saw. Which images a workspace may pin is the operator's decision, not the
+backend's: Otari refuses one that is not on the operator's allow-list before any
+session is leased.
 
 A backend MAY refuse when at capacity. This is a retryable condition in
 principle, distinct from a malformed request, and a backend SHOULD signal it

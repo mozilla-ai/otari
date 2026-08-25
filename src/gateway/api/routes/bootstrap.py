@@ -9,7 +9,8 @@ which mode the gateway is in.
 Registered in both modes, and unauthenticated by necessity: this is what tells a
 browser whether a sign-in screen is even the right thing to show. It therefore
 carries no secret. In particular it never carries the platform token, and
-``management_url`` is a link target an operator configured, not a credential.
+``management_url`` and ``docs_url`` are link targets an operator configured, not
+credentials.
 
 The contract is shared with otari.ai, which serves the same shape for its hosted
 deployment (mozilla-ai/otari-ai#1591). That is why ``deployment_type`` and
@@ -44,6 +45,11 @@ SessionType = Literal["local_operator", "hosted_user", "none"]
 # because a hybrid gateway offers none. "passkey" is the first of those to land,
 # and it is genuinely additive: it appears beside whichever of the two
 # credentials is current, never instead of one.
+#
+# #651's OAuth sign-in is deliberately *not* a fourth value here. A method name
+# cannot say which provider, and "oauth" plus a separate list of providers would
+# be one fact published twice, so it travels as ``oauth_providers`` below and
+# this list stays the set of methods that need no further qualification.
 SignInMethod = Literal["master_key", "password", "passkey"]
 
 # The management API groups a standalone gateway serves, one name per ``/v1/``
@@ -114,6 +120,15 @@ class DeploymentBootstrap(BaseModel):
             "Set for a hybrid gateway so its landing page can link to otari.ai; null otherwise."
         )
     )
+    docs_url: str | None = Field(
+        description=(
+            "Where this deployment's documentation lives, when it is not the operator guide "
+            "bundled with the gateway. Set, the dashboard's Documentation links open it in a "
+            "new tab; null, they go to the bundled guide at /#/docs, which stays served either "
+            "way. A link target an operator configured, validated at startup as an absolute "
+            "http(s) URL."
+        )
+    )
     sign_in_methods: list[SignInMethod] = Field(
         description=(
             "How POST /v1/auth/session may be authenticated right now, sorted. 'master_key' is the "
@@ -142,6 +157,17 @@ class DeploymentBootstrap(BaseModel):
             "registered passkey could sign somebody in *right now*: an operator with none yet needs "
             "this one, or the page that registers the first would be hidden from them. False for a "
             "hybrid gateway, which issues no session of its own."
+        )
+    )
+    oauth_providers: list[str] = Field(
+        description=(
+            "OAuth providers this deployment can sign somebody in with, sorted, one entry per "
+            "provider with a client ID, a client secret and a public_base_url to build a redirect "
+            "URI from. The sign-in screen renders a button per entry and none at all when the list "
+            "is empty, so a provider nobody configured is absent rather than offered and then "
+            "refused. Additive to sign_in_methods rather than part of it: an OAuth sign-in coexists "
+            "with whichever typed credential is current, the way a passkey does. Empty for a hybrid "
+            "gateway, which issues no session."
         )
     )
     mail_ready: bool = Field(
@@ -182,8 +208,10 @@ async def get_bootstrap(
             surfaces=[],
             sign_in_methods=[],
             management_url=config.platform_management_url,
+            docs_url=config.docs_url,
             maintenance_mode=False,
             passkeys_ready=False,
+            oauth_providers=[],
             mail_ready=False,
         )
     assert db is not None  # get_db_if_needed yields a session outside hybrid mode
@@ -193,8 +221,10 @@ async def get_bootstrap(
         surfaces=sorted(STANDALONE_SURFACES),
         sign_in_methods=await _sign_in_methods(db, config),
         management_url=None,
+        docs_url=config.docs_url,
         maintenance_mode=await _maintenance_mode(db),
         passkeys_ready=config.webauthn_enabled,
+        oauth_providers=list(config.oauth_providers),
         mail_ready=config.mail_ready,
     )
 

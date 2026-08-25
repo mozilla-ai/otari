@@ -248,6 +248,107 @@ class PasskeySignInFailedError(TenancyError):
         super().__init__("That passkey did not sign you in")
 
 
+class OAuthNotConfiguredError(TenancyValidationError):
+    """This deployment configures no client credentials for the named provider.
+
+    503 rather than the 400 its base carries, for the reason
+    ``PasskeysNotConfiguredError`` gives: nothing is wrong with the request, the
+    deployment is not set up to answer it. The message names the settings,
+    because the only caller who reaches this meant to offer that provider and
+    needs to know which two lines are missing.
+
+    Reachable at all only because the dashboard hides a provider this deployment
+    does not configure: the affordance is absent rather than disabled
+    (``GET /v1/bootstrap``'s ``oauth_providers``), so this answers a bookmark or
+    a hand-made request rather than a button somebody was offered.
+    """
+
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+
+    def __init__(self, provider: str) -> None:
+        super().__init__(
+            f"{provider} sign-in is not configured on this deployment. "
+            f"Set oauth_{provider}_client_id and oauth_{provider}_client_secret, and public_base_url, then restart."
+        )
+
+
+class OAuthExchangeError(TenancyValidationError):
+    """The authorization code did not exchange for an identity.
+
+    One error for every way the exchange can fail (a code already spent, a code
+    that expired, a redirect URI the provider does not recognize, the provider
+    being unreachable), carrying a fixed sentence to the caller.
+
+    The provider's own reason is deliberately not interpolated into the message.
+    apron-auth's exchange errors carry the provider's RFC 6749 ``error`` and
+    ``error_description`` verbatim, and this message reaches both the HTTP
+    client and the log aggregator (CWE-532). Chaining keeps that payload on the
+    traceback, which is where debugging needs it and where the error-detail
+    boundary in ``gateway.main`` leaves it.
+    """
+
+    def __init__(self, provider: str) -> None:
+        super().__init__(f"{provider} did not complete the sign-in. Try again.")
+
+
+class OAuthEmailNotVerifiedError(TenancyError):
+    """The provider returned an address it will not vouch for.
+
+    401, and named rather than collapsed into the refusal below, for the reason
+    ``InvalidCredentialsError``'s own docstring carves out: the distinctions
+    survive where a caller has already authenticated. By the time this is
+    raised the provider has confirmed the person at the browser holds that
+    account, so naming the reason tells them about themselves and nobody else,
+    and it is the one refusal here they can act on without an operator.
+
+    An address the provider simply did not speak to (apron-auth reports
+    ``email_verified`` as tri-state, and silence is not an assertion) lands
+    here too. That is the point: an unasserted address is treated as
+    unverified rather than laundered into a verified identity.
+    """
+
+    status_code = status.HTTP_401_UNAUTHORIZED
+
+    def __init__(self, provider: str) -> None:
+        super().__init__(
+            f"{provider} did not confirm that address is yours, so it cannot sign you in here. "
+            f"Verify your email address with {provider} and try again."
+        )
+
+
+class OAuthIdentityUnknownError(TenancyError):
+    """No account on this deployment signs in as that external identity.
+
+    401, and the message says what to do, because the caller has already proven
+    to the provider that they hold the address: the enumeration risk
+    ``InvalidCredentialsError`` exists to close is a caller asking about
+    *other people's* addresses, and nobody can complete a consent screen for an
+    address they do not control.
+
+    A deactivated identity is refused here rather than in an error of its own.
+    Deactivating somebody has to close every road in, and "your account is
+    switched off" and "there is no account" are the same instruction to the same
+    person: talk to whoever administers this gateway. Saying which would let
+    somebody an operator has already shut out keep confirming their account is
+    still on file.
+
+    This is the base build's roster policy speaking, not a property of OAuth.
+    Otari's signup claims an identity an operator already added and never
+    creates one from nothing (``user_service.create_user_for_signup``), and
+    social sign-in does not get to be the exception that lets any holder of a
+    Google account in. An overlay that provisions on first sight binds its own
+    ``IdentityProviderPort`` adapter and never raises this.
+    """
+
+    status_code = status.HTTP_401_UNAUTHORIZED
+
+    def __init__(self, provider: str) -> None:
+        super().__init__(
+            f"That {provider} account is not registered on this gateway. "
+            "Ask whoever administers it to add your email address, then sign in again."
+        )
+
+
 class CurrentPasswordIncorrectError(TenancyValidationError):
     """The current password given with a password change does not match.
 
@@ -365,6 +466,21 @@ class OrganizationNameRequiredError(TenancyValidationError):
 
     def __init__(self) -> None:
         super().__init__("An organization name is required")
+
+
+class OrganizationSlugUnavailableError(TenancyConflictError):
+    """A created organization's derived slug collided with one already stored.
+
+    The slug is the name reduced to a stem plus four random bytes, so two
+    organizations may share a name and a collision needs the same stem *and*
+    the same suffix. Reported rather than retried because retrying means
+    rolling back the whole unit of work (the organization, the owner
+    membership, and the first workspace) to change one column, and the caller
+    can simply send the request again.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("Could not allocate a unique organization slug; retry the request")
 
 
 class WorkspaceInUseError(TenancyConflictError):
@@ -793,6 +909,33 @@ class OrganizationGuardrailLimitReachedError(TenancyValidationError):
         super().__init__(f"This organization already configures the maximum of {limit} guardrails")
 
 
+class SandboxToolsUnrunnableError(TenancyValidationError):
+    """A code-execution policy's tool list names nothing this deployment serves.
+
+    The list intersects what the sandbox backend offers, so this one resolves to
+    an empty set and every request would answer 403. Refused at the write rather
+    than stored, because a policy that reads as a refinement and behaves as a
+    refusal is the failure the surface exists to prevent, and the operator's only
+    signal would be users reporting 403s days later.
+    """
+
+    def __init__(self, served: tuple[str, ...]):
+        super().__init__(
+            "A code-execution tool list must name at least one tool this deployment serves "
+            f"({', '.join(served)}). Use enabled=false to refuse the workspace instead."
+        )
+
+
+class SandboxImageNotAllowedError(TenancyValidationError):
+    """A workspace code-execution policy named a sandbox image the operator has not curated.
+
+    A 400 rather than a 403: the caller has the role to set the policy, and the
+    value they sent is the thing being refused. The message names the allowed
+    set, which is not a disclosure worth withholding, because that set is
+    already reported on the policy itself so the dashboard can offer it.
+    """
+
+
 __all__ = [
     "CurrentPasswordIncorrectError",
     "CurrentPasswordRequiredError",
@@ -829,8 +972,13 @@ __all__ = [
     "OrganizationMemberAlreadyExistsError",
     "OrganizationMemberNotFoundError",
     "OrganizationNameRequiredError",
+    "OAuthEmailNotVerifiedError",
+    "OAuthExchangeError",
+    "OAuthIdentityUnknownError",
+    "OAuthNotConfiguredError",
     "OrganizationNotFoundError",
     "OrganizationPricingNotFoundError",
+    "OrganizationSlugUnavailableError",
     "OrganizationPricingOverlapError",
     "PasskeyAlreadyRegisteredError",
     "PasskeyCeremonyError",
@@ -842,6 +990,8 @@ __all__ = [
     "PasswordNotSetError",
     "PasswordPolicyError",
     "ResetTokenInvalidError",
+    "SandboxImageNotAllowedError",
+    "SandboxToolsUnrunnableError",
     "SecretBoxUnavailableTenancyError",
     "SignInAddressRequiredError",
     "TenancyConflictError",

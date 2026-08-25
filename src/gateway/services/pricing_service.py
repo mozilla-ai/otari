@@ -1,9 +1,10 @@
 """Shared pricing lookup utilities."""
 
 import uuid
-from collections.abc import Callable
+from collections.abc import Callable, Iterable, Sequence
 from datetime import UTC, date, datetime
 from decimal import Decimal
+from typing import NamedTuple
 
 from genai_prices import Usage, calc_price
 from genai_prices.types import PriceCalculation, TieredPrices
@@ -17,6 +18,10 @@ from gateway.models.entities import ModelPricing, OrganizationModelPricing
 # A zero-token usage is enough to resolve a model's per-million rates from
 # genai-prices without depending on real token counts.
 _ZERO_USAGE = Usage(input_tokens=0, output_tokens=0)
+
+# Bound on the model keys named in one ``IN()`` list, so a batched override load
+# stays under SQLite's default limit of 999 bind parameters in a statement.
+_KEY_CHUNK = 500
 
 
 # Process-wide toggle for the genai-prices default fallback, set once at startup
@@ -361,9 +366,7 @@ def _override_as_model_pricing(override: OrganizationModelPricing) -> ModelPrici
     is naive, and a caller comparing it against an aware timestamp would raise
     rather than compare.
     """
-    effective_at = override.effective_from
-    if effective_at.tzinfo is None:
-        effective_at = effective_at.replace(tzinfo=UTC)
+    effective_at = normalize_effective_at(override.effective_from)
     return ModelPricing(
         model_key=override.model_key,
         effective_at=effective_at,
@@ -426,6 +429,91 @@ async def _find_organization_override(
     )
     override = (await db.execute(stmt)).scalar_one_or_none()
     return _override_as_model_pricing(override) if override is not None else None
+
+
+class OverridePeriod(NamedTuple):
+    """One organization override, normalized for in-memory resolution.
+
+    The stored row carries a period and a rate; this carries the period beside
+    the rate already presented as a ``ModelPricing``, so a caller resolving many
+    timestamps against one preloaded set does the conversion once per row rather
+    than once per timestamp.
+    """
+
+    effective_from: datetime
+    effective_to: datetime | None
+    pricing: ModelPricing
+
+
+async def load_organization_override_index(
+    db: AsyncSession,
+    organization_id: uuid.UUID,
+    model_keys: Iterable[str],
+) -> dict[str, list[OverridePeriod]]:
+    """Every override period this organization holds for ``model_keys``.
+
+    The bulk counterpart to :func:`_find_organization_override`, for a caller
+    pricing a batch of events that share an organization but each carry their own
+    timestamp: one query for the whole batch instead of one per event. The
+    periods are returned rather than a rate, because which one applies is decided
+    per event by :func:`resolve_organization_override`.
+
+    Chunked over the key list for the same reason the batch's other ``IN()``
+    lookups are: a batch naming many models would otherwise exceed SQLite's
+    default bound on bind parameters in one statement.
+    """
+    keys = sorted(set(model_keys))
+    index: dict[str, list[OverridePeriod]] = {}
+    for start in range(0, len(keys), _KEY_CHUNK):
+        chunk = keys[start : start + _KEY_CHUNK]
+        stmt = select(OrganizationModelPricing).where(
+            OrganizationModelPricing.organization_id == organization_id,
+            OrganizationModelPricing.model_key.in_(chunk),
+        )
+        for row in (await db.execute(stmt)).scalars():
+            # ``effective_to`` keeps its ``None``: an open-ended period means "no
+            # end", where ``normalize_effective_at`` would read it as "ends now".
+            effective_to = normalize_effective_at(row.effective_to) if row.effective_to is not None else None
+            index.setdefault(row.model_key, []).append(
+                OverridePeriod(
+                    normalize_effective_at(row.effective_from), effective_to, _override_as_model_pricing(row)
+                )
+            )
+    for periods in index.values():
+        periods.sort(key=lambda period: period.effective_from)
+    return index
+
+
+def resolve_organization_override(
+    index: dict[str, list[OverridePeriod]],
+    model_keys: Sequence[str],
+    as_of: datetime,
+) -> ModelPricing | None:
+    """The override applying at ``as_of``, resolved from a preloaded index.
+
+    The in-memory statement of the same rule :func:`_find_organization_override`
+    expresses in SQL, and it has to stay the same rule: an event priced through
+    this path and the same event priced through the request path must resolve to
+    one rate (``tests/unit/test_organization_pricing_resolution.py`` pins that).
+
+    Key preference before period: ``model_keys`` is ordered (canonical
+    ``provider:model`` before the legacy ``provider/model``), and the first key
+    holding *any* applicable period wins, exactly as the SQL ``CASE`` plus
+    ``LIMIT 1`` decides it. The period test is half-open, ``effective_from``
+    inclusive and ``effective_to`` exclusive, so two adjacent periods that share
+    an instant resolve to the later one. Within a key the newest applicable
+    period wins, which is the in-memory form of ``effective_from DESC``.
+    """
+    for model_key in model_keys:
+        match: ModelPricing | None = None
+        for period in index.get(model_key, ()):
+            if period.effective_from > as_of:
+                break
+            if period.effective_to is None or period.effective_to > as_of:
+                match = period.pricing
+        if match is not None:
+            return match
+    return None
 
 
 async def _find_by_model_key(db: AsyncSession, model_key: str, as_of: datetime) -> ModelPricing | None:

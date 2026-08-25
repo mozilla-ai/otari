@@ -15,6 +15,13 @@ dependencies = [
     "any-llm-sdk[all]>=1.24.0",
     "alembic>=1.13.0",
     "aiosqlite>=0.19.0",
+    # OAuth protocol mechanics for dashboard sign-in: provider endpoints, the
+    # code exchange, and the userinfo fetch that normalizes a provider response
+    # into an identity profile. The platform moved onto it in otari-ai#1740 and
+    # this edition follows, so the two do not keep separate copies of a protocol
+    # neither of us owns. What stays ours is which providers are configured,
+    # which scopes are asked for, and how a fetched identity maps onto a user.
+    "apron-auth>=0.15.1,<0.16.0",
     "asyncpg>=0.29.0",
     # Password hashing for the dashboard sign-in (docs/access-control.md).
     # The library directly rather than passlib, which the platform wraps it in:
@@ -102,6 +109,22 @@ environments = [
     "sys_platform == 'linux'",
     "sys_platform == 'darwin'",
 ]
+# authlib is imported nowhere here: apron-auth owns the OAuth mechanics and
+# pulls it in. It stays floored rather than listed as a direct dependency,
+# which would claim an import that does not exist. The floor is above
+# apron-auth's own >=1.6.12 because authlib has a dense advisory history,
+# including a signature-verification bypass fixed in 1.6.9. Matches the floor
+# the platform sets for the same dependency (otari-ai backend/pyproject.toml).
+#
+# **This binds uv, not every installer.** It governs `uv lock` and `uv sync`, so
+# it covers `uv.lock`, CI, and the Docker image, which is every way Otari is
+# actually built here. It does *not* reach a plain `pip install gateway`, where
+# apron-auth's own `>=1.6.12` is the only floor. That is accepted rather than
+# overlooked: promoting authlib to a direct dependency would claim an import
+# this tree does not have, and the advisory is in a transitive dependency whose
+# own maintainer sets the real floor. Revisit if Otari is ever published as a
+# wheel people pip-install directly.
+constraint-dependencies = ["authlib>=1.7.2"]
 
 [tool.setuptools]
 package-dir = {"" = "src"}

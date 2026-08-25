@@ -139,6 +139,14 @@ POST /v1/auth/webauthn/authenticate             # dashboard-only
 GET /v1/auth/webauthn/credentials               # dashboard-only
 PATCH /v1/auth/webauthn/credentials/{credential_id}    # dashboard-only
 DELETE /v1/auth/webauthn/credentials/{credential_id}   # dashboard-only
+# OAuth sign-in (otari#651): the flow is a browser redirect through a third
+# party. The authorization URL has to be navigated to, the consent screen
+# completed by a person, and the CSRF state kept by the browser that started it
+# and checked when the provider sends it back. None of that is something an SDK
+# can drive, and the session it ends by minting is an HttpOnly cookie the
+# dashboard uses rather than a token an SDK could hold.
+GET /v1/auth/oauth/{provider}/authorize         # dashboard-only
+POST /v1/auth/oauth/{provider}/callback         # dashboard-only
 # OTLP ingest: OpenTelemetry collector receivers, not an SDK surface.
 POST /v1/logs                                   # otel ingest
 POST /v1/traces                                 # otel ingest
@@ -199,8 +207,11 @@ DELETE /v1/scoped-budgets/{budget_id}                       # not yet wrapped
 # tenancy pages are the consumer; an SDK caller acts inside one workspace with a
 # key that already names it, so none of these is an SDK surface yet. Move to
 # [covered] if a shell grows an admin client.
+POST /v1/organizations                                      # dashboard-only
 GET /v1/organizations/me                                    # dashboard-only
 PATCH /v1/organizations/me                                  # dashboard-only
+GET /v1/organizations/me/memberships                        # dashboard-only
+POST /v1/organizations/me/switch                            # dashboard-only
 GET /v1/organizations/me/members                            # dashboard-only
 POST /v1/organizations/me/members                           # dashboard-only
 PATCH /v1/organizations/me/members/{organization_member_id} # dashboard-only

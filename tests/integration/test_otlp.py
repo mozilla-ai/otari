@@ -476,3 +476,16 @@ def test_otlp_gateway_client_name_falls_back_to_otel_source(
     assert resp.status_code == 200, resp.text
     row = db_session.query(UsageLog).filter(UsageLog.source_event_id == "resp_reserved_1").one()
     assert row.source == "otel"
+
+
+def test_otlp_otari_ai_client_name_falls_back_to_otel_source(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """otari.ai writes `otari-ai:`-prefixed tags itself, so an exporter claiming one is
+    downgraded to the default source instead of 422-ing the whole export."""
+    headers = _exempt_key(client, master_key_header)
+    span = _span_record(**{"otari.client_name": "otari-ai:gateway", "gen_ai.response.id": "resp_reserved_2"})
+    resp = client.post("/v1/traces", json=_otlp_traces(span), headers=headers)
+    assert resp.status_code == 200, resp.text
+    row = db_session.query(UsageLog).filter(UsageLog.source_event_id == "resp_reserved_2").one()
+    assert row.source == "otel"

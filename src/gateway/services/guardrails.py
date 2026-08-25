@@ -27,13 +27,13 @@ from __future__ import annotations
 
 import asyncio
 import logging
-from collections.abc import Mapping
+from collections.abc import Collection, Mapping
 from dataclasses import dataclass, field
 
 import httpx
 
 from gateway.models.guardrails import GuardrailConfig
-from gateway.services.url_safety import validate_mcp_url
+from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 
 logger = logging.getLogger(__name__)
 
@@ -174,8 +174,21 @@ async def run_input_guardrails(
     *,
     default_url: str | None,
     credentials: Mapping[str, str] | None = None,
+    mandated: Collection[str] | None = None,
 ) -> GuardrailVerdict:
     """Run every input-direction guardrail and return the aggregate verdict.
+
+    ``mandated`` names the profiles that came from a layer above the caller (an
+    organization entry or a routing policy) rather than from the request body.
+    It decides what an unsafe or unresolvable URL *means*, which is not the same
+    question for the two sources: a caller who sent a bad URL sent a malformed
+    request and is told so, while a mandated entry's URL is stored
+    configuration the caller cannot see or fix, so failing to validate it is the
+    guardrail being unevaluable and is governed by ``mode`` and
+    ``on_unavailable`` like any other evaluation failure. Without this a
+    transient DNS failure on an organization's endpoint refused every request
+    from every workspace it was scoped to, including entries explicitly
+    configured to fail open.
 
     ``credentials`` maps a profile name to the bearer credential its entry
     carries, and is populated only for guardrails an organization mandates
@@ -195,8 +208,12 @@ async def run_input_guardrails(
     even though it isn't evaluated yet. This intentionally preserves the
     coverage the removed parse-time Pydantic validator had (see
     :mod:`gateway.models.guardrails`): when output enforcement is built, its
-    code path can assume the URL was already validated instead of needing to
-    remember to add the check itself.
+    code path can assume a *caller's* URL was already validated instead of
+    needing to remember to add the check itself. A ``mandated`` entry's failure
+    is the exception, because it is not an outright rejection: it is held until
+    the per-entry loop below reaches that profile, so an output-only mandate's
+    failure has nowhere to land yet and is dropped. Output enforcement has to
+    consume it the way the input loop does rather than assume it never happened.
 
     Failure handling depends on the guardrail's ``mode`` and its
     ``on_unavailable``:
@@ -222,26 +239,48 @@ async def run_input_guardrails(
         GuardrailsNotReachableError: if a ``block``-mode guardrail with
             ``on_unavailable="block"`` can't be evaluated.
     """
-    # A caller-supplied `url` override is SSRF-checked here rather than at
-    # request-body-parse time (the check does a DNS lookup that must be
-    # awaited). Covers every configured guardrail regardless of `on`
-    # direction (see docstring above): deliberately runs before the
-    # input-only filter/early-return below, so an output-only guardrail's
-    # url is validated even though it isn't evaluated yet. Unlike
-    # GuardrailsNotReachableError below, an unsafe URL is a malformed
-    # request, not a runtime failure: it always rejects the request
-    # (mode-independent) via UnsafeURLError, which this function
-    # deliberately does not catch; the caller (apply_input_guardrails)
-    # maps it to a 400.
+    # A `url` override is SSRF-checked here rather than at request-body-parse
+    # time (the check does a DNS lookup that must be awaited). Covers every
+    # configured guardrail regardless of `on` direction (see docstring above):
+    # deliberately runs before the input-only filter/early-return below, so an
+    # output-only guardrail's url is validated even though it isn't evaluated
+    # yet.
+    #
+    # What a failure *means* then depends on where the URL came from.
+    # `return_exceptions=True` is what lets that be decided per entry rather
+    # than by whichever check happened to fail first:
+    #
+    # * A caller's own URL is a malformed request, so it rejects the request
+    #   mode-independently and the reason travels back to them. That is the
+    #   pre-existing behavior and the message names a host they supplied.
+    # * A *mandated* entry's URL is stored configuration the caller can neither
+    #   see nor fix, so the same failure is the guardrail being unevaluable and
+    #   goes through the `mode` / `on_unavailable` handling below. Its message
+    #   names an endpoint an organization configured, so it stays out of the
+    #   response for the same reason the 502 path keeps it out (otari#654).
+    #
+    # Either way the unsafe endpoint is never actually called.
     credentials = credentials or {}
+    mandated = frozenset(mandated or ())
+    unsafe: dict[str, UnsafeURLError] = {}
     if guardrails:
-        await asyncio.gather(
+        # Paired with its URL rather than filtered in place, so what reaches
+        # `validate_mcp_url` is a `str` and not a `str | None` narrowed by
+        # inspection.
+        checked = [(g.profile, g.url) for g in guardrails if g.url is not None]
+        outcomes = await asyncio.gather(
             *(
-                validate_mcp_url(g.url, has_authorization_token=bool(credentials.get(g.profile)))
-                for g in guardrails
-                if g.url is not None
-            )
+                validate_mcp_url(url, has_authorization_token=bool(credentials.get(profile)))
+                for profile, url in checked
+            ),
+            return_exceptions=True,
         )
+        for (profile, _), outcome in zip(checked, outcomes, strict=True):
+            if not isinstance(outcome, BaseException):
+                continue
+            if not isinstance(outcome, UnsafeURLError) or profile not in mandated:
+                raise outcome
+            unsafe[profile] = outcome
 
     input_guardrails = [g for g in guardrails if "input" in g.on]
     if not input_guardrails:
@@ -252,6 +291,12 @@ async def run_input_guardrails(
         for cfg in input_guardrails:
             base_url = (cfg.url or default_url or "").rstrip("/")
             try:
+                if (unsafe_url := unsafe.get(cfg.profile)) is not None:
+                    raise GuardrailsNotReachableError(
+                        f"guardrail profile {cfg.profile!r} names an endpoint that failed the "
+                        f"safety check: {unsafe_url}",
+                        public_detail=_unevaluated_detail(cfg.profile),
+                    )
                 if not base_url:
                     raise GuardrailsNotReachableError(
                         f"guardrail profile {cfg.profile!r} requested but no guardrails service is "
@@ -265,14 +310,21 @@ async def run_input_guardrails(
                     input_text=input_text,
                     credential=credentials.get(cfg.profile),
                 )
-            except GuardrailsNotReachableError:
+            except GuardrailsNotReachableError as exc:
                 if cfg.mode == "block" and cfg.on_unavailable == "block":
                     raise  # fail closed: an enforcing guardrail must not be skipped
+                # The reason belongs here and nowhere else: the fail-closed arm
+                # above hands its message to `apply_input_guardrails`, which logs
+                # it, but this arm serves the request, so this line is the only
+                # record that a check an organization mandated did not run. It
+                # names the endpoint for the same reason that one does, and for
+                # the same audience.
                 logger.warning(
-                    "guardrail %r could not be evaluated (mode=%s on_unavailable=%s); failing open",
+                    "guardrail %r could not be evaluated (mode=%s on_unavailable=%s); failing open: %s",
                     cfg.profile,
                     cfg.mode,
                     cfg.on_unavailable,
+                    exc,
                 )
                 results.append(
                     GuardrailResult(

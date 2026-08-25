@@ -754,6 +754,25 @@ h6 {
   overflow: visible;
 }
 
+/* Backdrop dimming — HeroUI's default backdrop variant is `opaque`, and that
+ * modifier applies `bg-backdrop` at full strength. `--color-backdrop` is pure
+ * black in both themes on purpose (see its comment above: a fixed alpha then
+ * dims rather than inverting), so the default renders a solid black sheet that
+ * hides the page instead of dimming it. Every dialog in the app was affected.
+ *
+ * Patched here rather than at the call sites because there are seven of them
+ * and a future one would start out wrong again, and rather than in the token
+ * because the two backdrops that already pass their own alpha
+ * (`WorkspaceSwitcher`'s `/50`, `KeysPage`'s `/40`) would then compound it and
+ * come out at a quarter strength. This is the last resort the frontend
+ * standards describe, a rule against the library's own class, and it is here
+ * because nothing above it reaches the value. */
+.alert-dialog__backdrop--opaque,
+.modal__backdrop--opaque,
+.drawer__backdrop--opaque {
+  background-color: color-mix(in srgb, var(--color-backdrop) 50%, transparent);
+}
+
 /* Card outlines — HeroUI v3 ships with shadow-only Cards. On a white
  * body + white card surface the shadow alone reads as a faint blur,
  * not a clear section edge — reviewers flagged the dashboard widgets

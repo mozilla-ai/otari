@@ -84,6 +84,7 @@ class UpdateToolSettingsRequest(BaseModel):
     web_search_intercept: bool | None = None
     sandbox_url: str | None = None
     sandbox_purpose_hint: str | None = None
+    sandbox_session_image: str | None = None
     guardrails_url: str | None = None
 
 

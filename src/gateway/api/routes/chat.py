@@ -14,7 +14,7 @@ from fastapi.responses import StreamingResponse
 from pydantic import Field, field_validator
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db_if_needed, get_log_writer
+from gateway.api.deps import ModelProviderPortDep, get_config, get_db_if_needed, get_log_writer
 from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages
 from gateway.api.routes._normalize import normalize_request_messages
 from gateway.api.routes._pipeline import (
@@ -338,6 +338,7 @@ async def chat_completions(
     db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     log_writer: Annotated[LogWriter, Depends(get_log_writer)],
+    model_provider: ModelProviderPortDep,
 ) -> ChatCompletion | StreamingResponse:
     """OpenAI-compatible chat completions endpoint.
 
@@ -463,7 +464,9 @@ async def chat_completions(
         # Standalone path: single attempt, no fallback (no `route.attempts`).
         # Resolve the instance to its implementation; dispatch any-llm against
         # ``implementation:model`` while billing/logging key on the instance.
-        resolved = await resolve_dispatch_provider(ctx, config, request.model, adapter=_ADAPTER)
+        resolved = await resolve_dispatch_provider(
+            ctx, config, request.model, adapter=_ADAPTER, model_provider=model_provider
+        )
         call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
         return await run_single_attempt_stream(
             adapter=_ADAPTER,
@@ -501,7 +504,9 @@ async def chat_completions(
             session_label=request.session_label,
         )
 
-    resolved = await resolve_dispatch_provider(ctx, config, request.model, adapter=_ADAPTER)
+    resolved = await resolve_dispatch_provider(
+        ctx, config, request.model, adapter=_ADAPTER, model_provider=model_provider
+    )
     call_kwargs = {**resolved.kwargs, **request_fields, "model": resolved.dispatch_model}
     return await run_standalone_non_stream(
         adapter=_ADAPTER,

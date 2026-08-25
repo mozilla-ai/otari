@@ -9,6 +9,7 @@
 import type {
   ActivationAttempt,
   Budget,
+  CallerOrganizationMembership,
   DeploymentBootstrap,
   Organization,
   OrganizationContext,
@@ -23,6 +24,7 @@ import type {
   WorkspaceActivation,
   WorkspaceBudgetDefault,
   WorkspaceCodeExecutionPolicy,
+  WorkspaceMcpServer,
   WorkspaceMember,
   WorkspaceWebSearchConfig,
 } from "@/client"
@@ -109,12 +111,19 @@ export function bootstrap(
     // describes by default; a test about the password login overrides it.
     sign_in_methods: ["master_key"],
     management_url: null,
+    // Null, because a fixture describes a deployment whose documentation is the
+    // bundled guide; the tests about an operator-configured docs site set it.
+    docs_url: null,
     // Not frozen, because a fixture describes a deployment somebody can sign
     // in to; the maintenance-mode tests override it.
     maintenance_mode: false,
     // Off by default, matching a deployment that has not set public_base_url:
     // the passkey tests turn it on rather than every other test turning it off.
     passkeys_ready: false,
+    // Empty by default, matching a deployment that registered no OAuth client:
+    // the OAuth tests name the providers they need rather than every other test
+    // clearing a list it does not care about.
+    oauth_providers: [],
     mail_ready: false,
     ...overrides,
   }
@@ -153,6 +162,26 @@ export function organizationContext(
     // shell treats absent and empty the same way.
     workspace_memberships: [],
     byo_provider_keys_allowed: true,
+    ...overrides,
+  }
+}
+
+/**
+ * One row of the caller's own organization memberships, as the switcher reads them.
+ *
+ * The active one by default, so a single-membership fixture describes the
+ * ordinary deployment: one organization, provisioned at first boot, and the
+ * caller in it.
+ */
+export function callerOrganizationMembership(
+  overrides: Partial<CallerOrganizationMembership> = {},
+): CallerOrganizationMembership {
+  return {
+    organization_member_id: "22222222-2222-2222-2222-222222222222",
+    organization: organization(),
+    role: "owner",
+    status: "active",
+    is_active_organization: true,
     ...overrides,
   }
 }
@@ -376,10 +405,17 @@ export function workspaceCodeExecutionPolicy(
     // policy: nothing configured, nothing narrowed.
     configured: false,
     sandbox_configured: true,
+    // The default deployment has curated no images, so a workspace may pin
+    // none. `available_tools` is what this deployment's sandbox serves, which
+    // is one tool today, not the wider vocabulary a policy may be written in.
+    allowed_images: [],
+    available_tools: ["code_execution"],
     enabled: true,
     default_purpose_hint: null,
     max_iterations: null,
     exec_timeout_s: null,
+    image: null,
+    tools: null,
     created_at: null,
     updated_at: null,
     ...overrides,
@@ -403,6 +439,28 @@ export function workspaceWebSearchConfig(
     provider_options: null,
     created_at: null,
     updated_at: null,
+    ...overrides,
+  }
+}
+
+export function workspaceMcpServer(
+  overrides: Partial<WorkspaceMcpServer> = {},
+): WorkspaceMcpServer {
+  return {
+    id: "55555555-5555-5555-5555-555555555555",
+    workspace_id: "44444444-4444-4444-4444-444444444444",
+    name: "github",
+    url: "https://mcp.example.com/github",
+    purpose_hint: null,
+    // Null is how "no allow-list" is stored, which is the neutral state a
+    // builder wants. Not interchangeable with `[]` as a stored value, even
+    // though `mcp_client` happens to read both as "expose everything".
+    allowed_tools: null,
+    enabled: true,
+    // The token is write-only, so this is all a response ever says about it.
+    has_token: false,
+    created_at: "2026-08-01T00:00:00+00:00",
+    updated_at: "2026-08-01T00:00:00+00:00",
     ...overrides,
   }
 }

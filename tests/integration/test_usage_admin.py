@@ -251,6 +251,66 @@ def test_ops_skip_budget_exempt_gateway_rows(
     assert _get(db_session, "gw-exempt").cost == Decimal("0.5")  # type: ignore[union-attr]
 
 
+def test_ops_skip_backfilled_gateway_rows(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """A hosted row brought in by the history backfill is still a gateway row.
+
+    Migrated rows keep their origin behind a legacy prefix (``otari-ai:gateway``),
+    and they are budget-exempt like every imported row, so the source guard is the
+    only thing standing between a settled hosted cost and a reprice.
+    """
+    _make_log(db_session, log_id="imp", counts_toward_budget=False, source="claude_code", cost=None)
+    _make_log(db_session, log_id="gw-migrated", counts_toward_budget=False, source="otari-ai:gateway", cost=0.5)
+    db_session.commit()
+
+    # Named explicitly on a delete: the backfilled row does not match.
+    resp = client.request(
+        "DELETE", DELETE_PATH, json={"ids": ["imp", "gw-migrated"]}, headers=master_key_header
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"deleted": 1}
+    db_session.expire_all()
+    assert _get(db_session, "imp") is None
+    assert _get(db_session, "gw-migrated") is not None
+
+    # Nor on an unfiltered reprice, which is what otari-ai#1768 exists to prevent.
+    resp = client.post(
+        SET_PRICE_PATH,
+        json={"by_filter": True, "input_price_per_million": 3.0, "output_price_per_million": 15.0},
+        headers=master_key_header,
+    )
+    assert resp.json() == {"matched": 0, "updated": 0, "unchanged": 0}
+    db_session.expire_all()
+    assert _get(db_session, "gw-migrated").cost == Decimal("0.5")  # type: ignore[union-attr]
+
+
+def test_set_price_still_reaches_a_backfilled_import(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """The legacy prefix does not shield an import; only the slug behind it decides.
+
+    ``otari-ai:claude_code`` is imported usage that happens to have been migrated,
+    and repricing imported usage is what this endpoint is for. A blanket match on the
+    prefix would quietly take every migrated import out of reach.
+    """
+    _make_log(
+        db_session, log_id="cc-migrated", counts_toward_budget=False, source="otari-ai:claude_code", cost=None
+    )
+    db_session.commit()
+
+    resp = client.post(
+        SET_PRICE_PATH,
+        json={"by_filter": True, "input_price_per_million": 3.0, "output_price_per_million": 15.0},
+        headers=master_key_header,
+    )
+    assert resp.status_code == 200
+    assert resp.json() == {"matched": 1, "updated": 1, "unchanged": 0}
+    db_session.expire_all()
+    # 1000 in at $3/M plus 500 out at $15/M.
+    assert _get(db_session, "cc-migrated").cost == Decimal("0.0105")  # type: ignore[union-attr]
+
+
 def test_delete_by_filter_scopes_to_the_named_models_only(
     client: TestClient, master_key_header: dict[str, str], db_session: Session
 ) -> None:
@@ -431,6 +491,48 @@ def test_set_price_by_ids_recomputes_cost(
     meters = {line["meter"]: line for line in row.pricing_breakdown}
     assert meters["input"]["units"] == 1000
     assert meters["output"]["units"] == 500
+
+
+def test_set_price_clears_the_provenance_of_the_amount_it_replaced(
+    client: TestClient, master_key_header: dict[str, str], db_session: Session
+) -> None:
+    """A repriced row's amount no longer comes from the source recorded against it."""
+    log = _make_log(
+        db_session,
+        log_id="imp-prov",
+        counts_toward_budget=False,
+        prompt_tokens=1000,
+        completion_tokens=500,
+        cost=None,
+    )
+    log.pricing_source = "genai_prices"
+    log.pricing_reference = "openai:gpt-4"
+    log.pricing_effective_at = datetime(2026, 5, 20, tzinfo=UTC)
+    log.pricing_version = "0.0.30"
+    log.calculated_at = datetime(2026, 7, 2, tzinfo=UTC)
+    db_session.commit()
+
+    resp = client.post(
+        SET_PRICE_PATH,
+        json={
+            "ids": ["imp-prov"],
+            "input_price_per_million": 3.0,
+            "output_price_per_million": 15.0,
+        },
+        headers=master_key_header,
+    )
+    assert resp.status_code == 200
+    assert resp.json()["updated"] == 1
+
+    db_session.expire_all()
+    row = _get(db_session, "imp-prov")
+    assert row is not None
+    assert row.cost == Decimal("0.0105")
+    assert row.pricing_source is None
+    assert row.pricing_reference is None
+    assert row.pricing_effective_at is None
+    assert row.pricing_version is None
+    assert row.calculated_at is None
 
 
 def test_set_price_with_cache_rates(

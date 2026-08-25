@@ -5,6 +5,7 @@
 // POST /v1/auth/session, and is never written to browser storage: it lives in
 // the sign-in form's state until the request goes out and is gone on reload.
 
+import type { OAuthAuthorizeResponse, OAuthCallbackRequest } from "@/client"
 import { getPasskeyAssertion } from "@/shared/helpers/webauthn"
 
 export class ApiError extends Error {
@@ -172,6 +173,116 @@ export async function signInWithPasskey(): Promise<SignInResult> {
   return verified.ok
     ? { ok: true }
     : { ok: false, message: verified.message, status: verified.status }
+}
+
+// Where to send the browser, or why the gateway would not say.
+//
+// A discriminated union on a *literal* `ok`, deliberately not
+// `{ok: true, ...} | SignInResult`: `SignInResult.ok` is a plain `boolean`, so
+// that shape does not discriminate and `if (!result.ok) return` narrows
+// nothing, leaving the success fields unreachable to a caller. The failure arm
+// therefore restates the two fields it shares with `SignInResult` rather than
+// reusing the type.
+export type OAuthStartResult =
+  | { ok: true; authorizationUrl: string; state: string }
+  | { ok: false; message?: string; status?: number }
+
+// Start an OAuth sign-in: ask the gateway where to send the browser.
+//
+// The `state` that comes back is a CSRF value this deployment does not keep. It
+// is stored in `sessionStorage` here and compared when the provider redirects
+// back, so the round trip is checked by the browser that started it; see
+// `src/gateway/services/oauth_service.py` on why nothing is held server-side.
+//
+// Hand-written beside the other two sign-in calls, and for the same reason:
+// `apiFetch` treats a 401 as an expired session and bounces to the sign-in
+// screen, which is exactly wrong on the screen somebody is signing in from.
+export async function startOAuthSignIn(
+  provider: string,
+): Promise<OAuthStartResult> {
+  const started = await publicGet(
+    `/v1/auth/oauth/${encodeURIComponent(provider)}/authorize`,
+  )
+  if (!started.ok) {
+    return { ok: false, message: started.message, status: started.status }
+  }
+  // Typed from the spec, but still checked at runtime: the type says what the
+  // gateway promises, and this call is unauthenticated and reached before the
+  // app trusts anything, so a proxy or an error page answering in its place
+  // must not flow into a navigation as `undefined`.
+  const body = started.body as Partial<OAuthAuthorizeResponse>
+  if (
+    typeof body.authorization_url !== "string" ||
+    typeof body.state !== "string"
+  ) {
+    throw new ApiError(0, "The gateway did not return an authorization URL.")
+  }
+  return {
+    ok: true,
+    authorizationUrl: body.authorization_url,
+    state: body.state,
+  }
+}
+
+// Finish an OAuth sign-in: spend the authorization code for a session cookie.
+//
+// The code travels alone. The redirect URI is the gateway's own, derived from
+// its configured public base URL rather than sent from here, and the `state`
+// was already checked in this browser against the value it stored: posting it
+// would only let the gateway compare a value to itself.
+export async function completeOAuthSignIn(
+  provider: string,
+  code: string,
+): Promise<SignInResult> {
+  const payload: OAuthCallbackRequest = { code }
+  const finished = await publicPost(
+    `/v1/auth/oauth/${encodeURIComponent(provider)}/callback`,
+    payload,
+  )
+  return finished.ok
+    ? { ok: true }
+    : { ok: false, message: finished.message, status: finished.status }
+}
+
+// One unauthenticated GET, with the same error handling `publicPost` gives its
+// own: a refusal the gateway wrote is an answer rather than an exception.
+async function publicGet(path: string): Promise<{
+  ok: boolean
+  message?: string
+  status?: number
+  body?: unknown
+}> {
+  let response: Response
+  try {
+    response = await fetch(path, {
+      method: "GET",
+      headers: { Accept: "application/json" },
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    })
+  } catch (error) {
+    if (isTimeout(error)) {
+      throw new ApiError(0, TIMEOUT_MESSAGE)
+    }
+    throw new ApiError(0, "Network error: could not reach the gateway.")
+  }
+  if (
+    response.status === 401 ||
+    response.status === 403 ||
+    response.status === 503
+  ) {
+    // 503 joins the two refusal statuses here rather than throwing, because on
+    // this route it is the gateway saying the provider is not configured, and
+    // the message names the settings an operator has to add.
+    return {
+      ok: false,
+      message: await extractErrorMessage(response),
+      status: response.status,
+    }
+  }
+  if (!response.ok) {
+    throw new ApiError(response.status, await extractErrorMessage(response))
+  }
+  return { ok: true, body: await response.json() }
 }
 
 // One unauthenticated POST, with the sign-in screen's error handling: a 401 or

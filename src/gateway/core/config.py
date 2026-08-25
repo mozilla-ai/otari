@@ -18,6 +18,7 @@ from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_valid
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from gateway.core.addresses import normalized_address
+from gateway.core.env import otari_env
 from gateway.log_config import logger
 from gateway.models.routing import RoutingConfig
 
@@ -32,6 +33,18 @@ PROVIDER_TYPE_ALIASES = {
     "anthropic_compatible": "anthropic",
 }
 X_API_KEY_HEADER = "x-api-key"  # Anthropic-native clients send credentials here (no Bearer prefix).
+
+# The OAuth providers a deployment may configure dashboard sign-in with, in the
+# spelling that appears in a config key (``oauth_google_client_id``), on the
+# wire (``GET /v1/bootstrap``'s ``oauth_providers``, the route path segment),
+# and in the ``user.oauth_provider`` column. One vocabulary rather than four,
+# and it lives here because the config fields are what make a provider real on
+# a deployment; ``services.oauth_service`` holds what each one means.
+#
+# Not an enum: the column stores a plain string so an overlay binding its own
+# ``IdentityProviderPort`` can record a connection this tuple never named, and
+# a closed enum here would make that value unrepresentable.
+OAUTH_PROVIDERS: tuple[str, ...] = ("github", "google")
 # Per-request opt-out for a policy's learned router: "off" serves the policy's
 # default target and skips the router entirely. There is no "force on": the
 # router is enabled by the policy, not by the caller.
@@ -74,6 +87,8 @@ ENV_BRIDGED_FIELDS = (
     "guardrails_url",
     "tools_header",
     "sandbox_purpose_hint",
+    "sandbox_session_image",
+    "sandbox_allowed_session_images",
     "web_search_url",
     "web_search_purpose_hint",
     "web_search_engines",
@@ -414,6 +429,17 @@ class GatewayConfig(BaseSettings):
             "address, since every other reference is relative to the request."
         ),
     )
+    docs_url: str | None = Field(
+        default=None,
+        description=(
+            "Where this deployment's documentation lives, as an absolute http(s) URL "
+            "(e.g. 'https://docs.otari.ai/en/'). Unset, the dashboard's Documentation links "
+            "point at the operator guide bundled with the gateway at /#/docs, which is the "
+            "right default for a self-hosted deployment. Set it to retarget those links at "
+            "a product documentation site instead; the bundled guide stays reachable at "
+            "/#/docs either way."
+        ),
+    )
     webauthn_rp_id: str | None = Field(
         default=None,
         description=(
@@ -442,6 +468,32 @@ class GatewayConfig(BaseSettings):
             "relying-party ID; every entry must be the relying-party ID or a subdomain of it, "
             "which is checked at startup."
         ),
+    )
+    oauth_google_client_id: str | None = Field(
+        default=None,
+        description=(
+            "The Google OAuth client ID dashboard sign-in uses. Set this and "
+            "oauth_google_client_secret to offer 'Sign in with Google'; with either missing, the "
+            "provider is absent from the sign-in screen rather than offered and then refused. "
+            "public_base_url has to be set too, because the redirect URI is derived from it."
+        ),
+    )
+    oauth_google_client_secret: str | None = Field(
+        default=None,
+        description="The Google OAuth client secret paired with oauth_google_client_id.",
+    )
+    oauth_github_client_id: str | None = Field(
+        default=None,
+        description=(
+            "The GitHub OAuth client ID dashboard sign-in uses. Set this and "
+            "oauth_github_client_secret to offer 'Sign in with GitHub'; with either missing, the "
+            "provider is absent from the sign-in screen rather than offered and then refused. "
+            "public_base_url has to be set too, because the redirect URI is derived from it."
+        ),
+    )
+    oauth_github_client_secret: str | None = Field(
+        default=None,
+        description="The GitHub OAuth client secret paired with oauth_github_client_id.",
     )
     mail_transport: str = Field(
         default="auto",
@@ -863,6 +915,35 @@ class GatewayConfig(BaseSettings):
             "tool entry does not supply its own."
         ),
     )
+    # "session_image" rather than the more obvious "image": ``OTARI_SANDBOX_IMAGE``
+    # is already taken. ``docker-compose.yml`` documents it as the Docker tag of the
+    # sandbox *container* to boot, and both names are read from the operator's own
+    # environment, so a field spelled ``sandbox_image`` would silently make one
+    # variable mean two things. The near-miss is what makes it dangerous: an
+    # operator overriding the container tag would also start pinning that tag onto
+    # every leased session, and (via ``pinnable_sandbox_images``) offering it to
+    # workspaces. This names the narrower thing it actually is: the image a leased
+    # session runs, not the image the backend process is.
+    sandbox_session_image: str | None = Field(
+        default=None,
+        max_length=255,
+        description=(
+            "Sandbox image this deployment asks the code-execution backend to run "
+            "(e.g. 'mzdotai/otari-sandbox-container:latest'). When unset, nothing is asked for and "
+            "the backend runs whatever it runs by default. A workspace policy may name a different "
+            "image only if sandbox_allowed_session_images lists it."
+        ),
+    )
+    sandbox_allowed_session_images: str | None = Field(
+        default=None,
+        description=(
+            "Comma-separated sandbox images a workspace's code-execution policy may pin "
+            "(e.g. 'mzdotai/otari-sandbox-container:latest,ghcr.io/acme/sandbox:2'). Deliberately "
+            "not editable from the dashboard: it is the operator's supply-chain allow-list, and "
+            "sandbox_session_image is always pinnable whether or not it appears here. When unset, a "
+            "workspace may not pin an image at all."
+        ),
+    )
     web_search_url: str | None = Field(
         default=None,
         description=(
@@ -1099,6 +1180,39 @@ class GatewayConfig(BaseSettings):
         if not self.public_base_url:
             missing.append("public_base_url")
         return tuple(missing)
+
+    def oauth_client_credentials(self, provider: str) -> tuple[str, str] | None:
+        """The client ID and secret configured for ``provider``, or None.
+
+        None is a deployment that did not configure this provider, which is a
+        setting and not a failure: the sign-in screen simply does not offer it
+        (``GET /v1/bootstrap``'s ``oauth_providers``).
+
+        ``public_base_url`` is part of being configured rather than a separate
+        check, because the redirect URI is derived from it
+        (``services.oauth_service.redirect_uri``) and a provider whose
+        authorization URL cannot be built is not on offer. Half a pair (an ID
+        with no secret) reads as unconfigured for the same reason: the exchange
+        would fail at the provider, and offering the button would be a promise
+        this deployment cannot keep.
+        """
+        if not self.public_base_url:
+            return None
+        client_id = getattr(self, f"oauth_{provider}_client_id", None)
+        client_secret = getattr(self, f"oauth_{provider}_client_secret", None)
+        if not client_id or not client_secret:
+            return None
+        return client_id, client_secret
+
+    @property
+    def oauth_providers(self) -> tuple[str, ...]:
+        """Which OAuth providers this deployment can sign somebody in with, sorted.
+
+        Empty on a deployment that configured none, which is the default, and
+        which is why the sign-in screen carries no OAuth affordance out of the
+        box rather than a pair of dead buttons.
+        """
+        return tuple(sorted(name for name in OAUTH_PROVIDERS if self.oauth_client_credentials(name) is not None))
 
     @property
     def webauthn_relying_party(self) -> RelyingParty | None:
@@ -1485,6 +1599,39 @@ class GatewayConfig(BaseSettings):
             and not entry.get("api_base")
         ]
 
+    def effective_sandbox_image(self) -> str | None:
+        """The image this deployment asks a sandbox session for, or ``None``.
+
+        Resolved the way every other tool field is: the config value (which a
+        dashboard override has already been written onto) and then the env var,
+        because clearing an override sets the attribute to ``None`` and the
+        deployment should fall back to what it was configured with rather than
+        to nothing (``services/tool_settings_service``).
+        """
+        return (self.sandbox_session_image or "").strip() or otari_env("SANDBOX_SESSION_IMAGE") or None
+
+    def pinnable_sandbox_images(self) -> tuple[str, ...]:
+        """The sandbox images a workspace's code-execution policy may name.
+
+        The operator's curated list, plus this deployment's own
+        ``sandbox_session_image``: a workspace naming the image every request already
+        gets is asking for nothing it did not already have, so refusing it would
+        only be confusing. Order is the operator's, with the deployment image
+        first, and duplicates collapse.
+
+        Empty is the meaningful default. An operator who has curated nothing has
+        not vetted anything for a workspace to pin, and a workspace-settable
+        image is a supply-chain surface rather than a string, so the answer to
+        "which images may they choose from" is *none* until one is named.
+        """
+        curated = self.sandbox_allowed_session_images or otari_env("SANDBOX_ALLOWED_SESSION_IMAGES") or ""
+        images: list[str] = []
+        for candidate in (self.effective_sandbox_image(), *curated.split(",")):
+            image = (candidate or "").strip()
+            if image and image not in images:
+                images.append(image)
+        return tuple(images)
+
     def validate_search_tools(self) -> None:
         """Validate the ``search_tools`` map at startup so misconfig fails fast.
 
@@ -1500,6 +1647,26 @@ class GatewayConfig(BaseSettings):
         normalized = value.strip().lower()
         if normalized not in STREAM_MISSING_USAGE_POLICIES:
             msg = f"stream_missing_usage_policy must be one of {sorted(STREAM_MISSING_USAGE_POLICIES)}, got '{value}'"
+            raise ValueError(msg)
+        return normalized
+
+    @field_validator("docs_url")
+    @classmethod
+    def _validate_docs_url(cls, value: str | None) -> str | None:
+        """Reject a documentation link that is not an absolute http(s) URL.
+
+        The deployment bootstrap publishes this to the browser as a link target,
+        so a scheme that is not http(s) would be a script URL an operator put in
+        their own config. Rejected at load rather than dropped per request, for
+        the same reason ``platform.management_url`` is: a typo should be a
+        startup error, not a Documentation link that silently goes nowhere.
+        """
+        normalized = (value or "").strip()
+        if not normalized:
+            return None
+        parsed = urlsplit(normalized)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            msg = f"docs_url must be an absolute http(s) URL, got '{value}'"
             raise ValueError(msg)
         return normalized
 
@@ -1617,6 +1784,46 @@ class GatewayConfig(BaseSettings):
         if self.mail_from_email and normalized_address(self.mail_from_email) is None:
             msg = f"mail_from_email is not a valid email address: {self.mail_from_email!r}"
             raise ValueError(msg)
+
+    def warn_about_half_configured_oauth(self) -> None:
+        """Say so when OAuth client credentials were set but cannot be used.
+
+        A warning rather than a refusal, unlike
+        :meth:`validate_webauthn_relying_party`: nothing here is *wrong*, and
+        refusing to boot would take a gateway offline over a sign-in method
+        that is optional. But the failure is otherwise completely silent. The
+        provider is absent from ``GET /v1/bootstrap``, the sign-in screen simply
+        does not draw its button, and an operator who set two of the three
+        settings has nothing anywhere telling them why the button they
+        configured never appeared.
+
+        A deployment that configured nothing says nothing, for the reason
+        ``validate_webauthn_relying_party`` gives about its own absent case:
+        that is the ordinary state, not a mistake.
+        """
+        for provider in OAUTH_PROVIDERS:
+            client_id = getattr(self, f"oauth_{provider}_client_id", None)
+            client_secret = getattr(self, f"oauth_{provider}_client_secret", None)
+            if not client_id and not client_secret:
+                continue
+            missing = [
+                name
+                for name, value in (
+                    (f"oauth_{provider}_client_id", client_id),
+                    (f"oauth_{provider}_client_secret", client_secret),
+                    ("public_base_url", self.public_base_url),
+                )
+                if not value
+            ]
+            if missing:
+                logger.warning(
+                    "%s sign-in is configured but will not be offered: %s %s not set. "
+                    "The sign-in screen shows no %s button until it is.",
+                    provider,
+                    ", ".join(missing),
+                    "is" if len(missing) == 1 else "are",
+                    provider,
+                )
 
     def validate_webauthn_relying_party(self) -> None:
         """Refuse a passkey configuration a browser would reject anyway.
@@ -1796,6 +2003,7 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     config.validate_search_tools()
     config.validate_mail_transport()
     config.validate_webauthn_relying_party()
+    config.warn_about_half_configured_oauth()
     _bridge_yaml_fields_to_env(config, yaml_bridged_fields)
     return config
 

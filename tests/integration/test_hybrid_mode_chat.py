@@ -1984,10 +1984,18 @@ def test_hybrid_mode_streaming_falls_through_on_provider_400(
 
 
 class _FakeSandboxBackend:
-    """Minimal SandboxBackend duck-type that records the purpose_hint it was built
-    with and resolves the tool loop in a single round (no real sandbox call)."""
+    """Minimal SandboxBackend duck-type that records what it was built with and
+    resolves the tool loop in a single round (no real sandbox call).
+
+    The keyword list mirrors the real ``SandboxBackend.__init__`` rather than
+    only the arguments these tests assert on: the dispatch site passes every one
+    of them, so a double that is narrower raises ``TypeError`` there and the
+    request surfaces as a 502 with nothing naming the double.
+    """
 
     last_purpose_hint: str | None = None
+    last_image: str | None = None
+    last_allowed_tools: frozenset[str] | None = None
 
     def __init__(
         self,
@@ -1996,9 +2004,13 @@ class _FakeSandboxBackend:
         purpose_hint: str | None = None,
         timeout_s: float = 0.0,
         auth_token: str | None = None,
+        image: str | None = None,
+        allowed_tools: frozenset[str] | None = None,
         tally: Any = None,
     ) -> None:
         type(self).last_purpose_hint = purpose_hint
+        type(self).last_image = image
+        type(self).last_allowed_tools = allowed_tools
         self._tally = tally
 
     async def __aenter__(self) -> "_FakeSandboxBackend":
@@ -2104,6 +2116,126 @@ def test_platform_mode_sandbox_applies_workspace_default_purpose_hint(
 
     assert response.status_code == 200
     assert _FakeSandboxBackend.last_purpose_hint == "workspace hint"
+
+
+def test_platform_mode_sandbox_uses_the_deployments_own_image_and_no_tool_allow_list(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Hybrid keeps its own arrangement for the two columns #740 added.
+
+    ``image`` still comes from this gateway's config, because a hybrid gateway
+    may be pointed at a sandbox of its own and the platform's resolve carries no
+    image. ``tools`` comes back on that resolve but is deliberately *not*
+    enforced here: the /v1/sandbox proxy re-enforces the allow-list, and
+    enforcing it twice would let this gateway refuse a tool the platform admits.
+    """
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://sandbox:8080")
+    monkeypatch.setenv("OTARI_SANDBOX_SESSION_IMAGE", "mzdotai/otari-sandbox-container:latest")
+    _FakeSandboxBackend.last_image = None
+    _FakeSandboxBackend.last_allowed_tools = frozenset()
+
+    async def fake_post_platform(
+        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return _single_attempt_resolve_response(request_id="sbx-image")
+        if url.endswith("/gateway/code-execution/resolve"):
+            return httpx.Response(200, json={"enabled": True, "tools": ["code_execution"]})
+        return httpx.Response(204)
+
+    async def fake_loop_acompletion(**kwargs: Any) -> ChatCompletion:
+        return _sandbox_loop_completion()
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes._pipeline.SandboxBackend", _FakeSandboxBackend)
+    monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
+
+    response = platform_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "anything",
+            "messages": [{"role": "user", "content": "hi"}],
+            "tools": [{"type": "otari_code_execution"}],
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 200
+    assert _FakeSandboxBackend.last_image == "mzdotai/otari-sandbox-container:latest"
+    assert _FakeSandboxBackend.last_allowed_tools is None
+
+
+def test_platform_mode_streaming_sandbox_gets_the_same_image(
+    platform_client: TestClient,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The fallback-walking stream builds a backend of its own, so it needs its own case.
+
+    Its own, and a third one: there are three places a ``SandboxBackend`` is
+    opened (non-streaming dispatch, the eager-open stream, and this one), and
+    this was the site that kept sending the old session body after ``image`` was
+    added to the other two. They now share ``ToolContext.build_sandbox_backend``,
+    and this pins the site the shared factory was introduced for.
+    """
+    from collections.abc import AsyncIterator
+
+    from any_llm.types.completion import ChatCompletionChunk
+
+    monkeypatch.setenv("OTARI_SANDBOX_URL", "http://sandbox:8080")
+    monkeypatch.setenv("OTARI_SANDBOX_SESSION_IMAGE", "mzdotai/otari-sandbox-container:latest")
+    _FakeSandboxBackend.last_image = None
+
+    async def fake_post_platform(
+        url: str, headers: dict[str, str], body: dict[str, Any], timeout_seconds: float
+    ) -> httpx.Response:
+        if url.endswith("/gateway/provider-keys/resolve"):
+            return _single_attempt_resolve_response(request_id="sbx-stream-image")
+        if url.endswith("/gateway/code-execution/resolve"):
+            return httpx.Response(200, json={"enabled": True})
+        return httpx.Response(204)
+
+    async def fake_loop_acompletion(**kwargs: Any) -> Any:
+        async def _stream() -> AsyncIterator[ChatCompletionChunk]:
+            yield ChatCompletionChunk.model_validate(
+                {
+                    "id": "chunk-1",
+                    "object": "chat.completion.chunk",
+                    "created": 1700000000,
+                    "model": "openai:gpt-4o-mini",
+                    "choices": [{"index": 0, "delta": {"content": "hello"}, "finish_reason": None}],
+                }
+            )
+            yield ChatCompletionChunk.model_validate(
+                {
+                    "id": "chunk-2",
+                    "object": "chat.completion.chunk",
+                    "created": 1700000000,
+                    "model": "openai:gpt-4o-mini",
+                    "choices": [{"index": 0, "delta": {}, "finish_reason": "stop"}],
+                    "usage": {"prompt_tokens": 3, "completion_tokens": 1, "total_tokens": 4},
+                }
+            )
+
+        return _stream()
+
+    monkeypatch.setattr("gateway.api.routes._platform._post_platform", fake_post_platform)
+    monkeypatch.setattr("gateway.api.routes._pipeline.SandboxBackend", _FakeSandboxBackend)
+    monkeypatch.setattr("gateway.services.mcp_loop.acompletion", fake_loop_acompletion)
+
+    response = platform_client.post(
+        "/v1/chat/completions",
+        json={
+            "model": "anything",
+            "messages": [{"role": "user", "content": "hi"}],
+            "stream": True,
+            "tools": [{"type": "otari_code_execution"}],
+        },
+        headers={"Authorization": "Bearer user_test_token"},
+    )
+
+    assert response.status_code == 200
+    assert _FakeSandboxBackend.last_image == "mzdotai/otari-sandbox-container:latest"
 
 
 def test_platform_mode_sandbox_per_request_hint_wins(

@@ -117,6 +117,7 @@ from gateway.models.entities import ModelPricing, UsageLog
 from gateway.models.guardrails import GuardrailConfig
 from gateway.models.mcp import McpServerConfig
 from gateway.models.money import to_usd
+from gateway.ports.model_provider_port import HostedAccessDeniedError, ModelProviderPort
 from gateway.rate_limit import RateLimitInfo, check_rate_limit
 from gateway.services.budget_service import (
     ZERO,
@@ -146,7 +147,7 @@ from gateway.services.pricing_service import (
     price_tool_calls,
     pricing_required_but_missing,
 )
-from gateway.services.provider_kwargs import ResolvedProvider, resolve_provider_selector
+from gateway.services.provider_kwargs import ResolvedProvider, credential_ladder_exhausted, resolve_provider_selector
 from gateway.services.routing import (
     BudgetState,
     CompiledPlan,
@@ -174,6 +175,7 @@ from gateway.services.tenancy.organization_guardrail_service import (
     resolve_organization_guardrails,
 )
 from gateway.services.tenancy.workspace_code_execution_policy_service import (
+    SERVED_TOOL_NAMES,
     resolve_workspace_code_execution_policy,
 )
 from gateway.services.tenancy.workspace_mcp_server_service import resolve_workspace_mcp_servers
@@ -214,6 +216,7 @@ API_KEY_VALIDATION_FAILED_DETAIL = "API key validation failed"
 API_KEY_NO_USER_DETAIL = "API key has no associated user"
 MCP_SERVER_IDS_UNAVAILABLE_DETAIL = "mcp_server_ids is unavailable for this request"
 MCP_SERVER_TOKEN_UNREADABLE_DETAIL = "A configured MCP server's authorization token could not be read"
+MCP_SERVER_URL_UNSAFE_DETAIL = "A configured MCP server's URL failed its safety check"
 NO_RESOLVABLE_PROVIDER_DETAIL = "Authorization service returned no resolvable provider"
 PROVIDER_ERROR_DETAIL = "LLM provider error"
 PROVIDER_TIMEOUT_DETAIL = "LLM provider timeout"
@@ -250,6 +253,15 @@ WEB_SEARCH_CONFLICT_DETAIL = (
 )
 WEB_SEARCH_NOT_ENABLED_DETAIL = "web search is not enabled for this workspace"
 SANDBOX_NOT_ENABLED_DETAIL = "code execution is not enabled for this workspace"
+SANDBOX_TOOLS_EXCLUDED_DETAIL = (
+    "code execution is not available to this workspace: its policy's tool list excludes "
+    "every tool kind this gateway's sandbox serves."
+)
+# Says what happened and nothing an API caller cannot act on. The setting to
+# change is named on the management surface, which the operator reaches; naming
+# it here would send an operator instruction to a data-plane caller, which is the
+# boundary ``SANDBOX_NOT_ENABLED_DETAIL`` next door already respects.
+SANDBOX_IMAGE_NOT_ALLOWED_DETAIL = "this workspace's code-execution policy pins a sandbox image that is not allowed"
 MALFORMED_CODE_EXEC_POLICY_DETAIL = "Authorization service returned a malformed code-execution policy"
 CODE_EXEC_POLICY_UNRESOLVABLE_DETAIL = "Code execution policy could not be resolved for this request"
 WEB_SEARCH_CONFIG_UNRESOLVABLE_DETAIL = "Web search configuration could not be resolved for this request"
@@ -257,6 +269,11 @@ ORGANIZATION_GUARDRAILS_UNRESOLVABLE_DETAIL = "Organization guardrails could not
 ORGANIZATION_GUARDRAIL_CREDENTIAL_UNREADABLE_DETAIL = (
     "A configured organization guardrail's credential could not be read"
 )
+# The bound ``ModelProviderPort`` adapter answered with an upstream any-llm has
+# no implementation for, so there is nothing to dispatch against. Deliberately
+# says nothing about hosted inference or about which adapter answered: that is a
+# defect in this build, not something a caller can act on.
+HOSTED_CREDENTIAL_UNUSABLE_DETAIL = "No upstream provider is available to serve this model"
 SANDBOX_UNREACHABLE_DETAIL = (
     "code_execution sandbox unreachable. Check the sandbox URL in the dashboard's "
     "Tools settings, or OTARI_SANDBOX_URL, and that the container is running."
@@ -776,6 +793,7 @@ async def resolve_dispatch_provider(
     model_selector: str,
     *,
     adapter: FormatAdapter[Any, Any],
+    model_provider: ModelProviderPort,
 ) -> ResolvedProvider:
     """Get the ``ResolvedProvider`` for dispatch, reusing the one computed for
     the pricing/budget gate (``ctx.resolved_provider``) instead of resolving
@@ -787,11 +805,16 @@ async def resolve_dispatch_provider(
     check couldn't parse the selector (an unparseable selector has no
     pricing, but dispatch still needs its own resolution attempt so any-llm's
     own error surfaces instead of a stale gate-check failure).
+
+    Whichever of the two produced it, the result then passes through
+    :func:`_serve_from_hosted_credential`, which is where ``model_provider`` is
+    asked to serve a candidate no stored credential could. That is the last rung
+    and never displaces an earlier one; see that function.
     """
     if ctx.resolved_provider is not None:
-        return ctx.resolved_provider
+        return await _serve_from_hosted_credential(ctx, ctx.resolved_provider, adapter=adapter, port=model_provider)
     try:
-        return resolve_provider_selector(config, model_selector, ctx.user_id, workspace_id=ctx.workspace_id)
+        resolved = resolve_provider_selector(config, model_selector, ctx.user_id, workspace_id=ctx.workspace_id)
     except (ValueError, AnyLLMError) as exc:
         # The preamble deliberately tolerated this selector, so a reservation is
         # already held: refund it, then record the drop. The hold is not always
@@ -825,6 +848,242 @@ async def resolve_dispatch_provider(
             started_at=ctx.started_at,
         )
         _raise_for_unresolvable_model(model_selector, exc)
+    return await _serve_from_hosted_credential(ctx, resolved, adapter=adapter, port=model_provider)
+
+
+async def _warn_if_hosted_upstream_is_unpriced(
+    ctx: RequestContext,
+    resolved: ResolvedProvider,
+    upstream: str,
+) -> None:
+    """Record that a re-keyed request is about to settle free, if it is.
+
+    The pricing and budget gates ran in the preamble against the name the caller
+    asked for, and settlement reprices on the instance the request actually
+    served under. So an overlay returning a ``response_provider`` it has not
+    priced settles the request at ``cost=NULL`` and releases the whole hold,
+    which is ``require_pricing`` bypassed rather than enforced. Refusing here is
+    deliberately not done (see the caller), but the routed-chain hazard this
+    resembles at least has a guard, and an operator should not have to infer this
+    one from a usage report. The settlement warning alone does not distinguish
+    it: an unpriced re-key looks exactly like an ordinary unpriced model there.
+
+    Best-effort, like the rejection log: observability must not be able to fail a
+    request that is otherwise about to succeed.
+    """
+    if ctx.db is None:
+        return
+    try:
+        pricing = await find_model_pricing(
+            ctx.db,
+            upstream,
+            resolved.model,
+            organization_id=ctx.organization_id,
+        )
+    except SQLAlchemyError:
+        logger.warning(
+            "Could not check pricing for hosted upstream %s:%s; it may settle at no cost",
+            upstream,
+            resolved.model,
+        )
+        return
+    if pricing is None:
+        logger.warning(
+            "ModelProviderPort re-keyed %s:%s onto %s:%s, which resolves no pricing: this "
+            "request will settle at no cost and release its whole budget hold. Price the "
+            "upstreams this build's adapter returns.",
+            resolved.instance,
+            resolved.model,
+            upstream,
+            resolved.model,
+        )
+
+
+async def _serve_from_hosted_credential(
+    ctx: RequestContext,
+    resolved: ResolvedProvider,
+    *,
+    adapter: FormatAdapter[Any, Any],
+    port: ModelProviderPort,
+) -> ResolvedProvider:
+    """Ask ``ModelProviderPort`` to serve a candidate no stored credential could.
+
+    The last rung of the credential ladder and only the last. An organization's
+    own key, a stored provider instance and a ``config.yml`` entry are all
+    resolved upstream of here (``services/provider_kwargs.py``), and a candidate
+    any of them served comes back untouched, so BYO precedence is unchanged: the
+    port is asked when the ladder is exhausted and never before it. The core
+    adapter answers ``None`` for every candidate, which is what makes a build
+    with no overlay behave exactly as it did, rung for rung.
+
+    On a resolved credential the dispatch is re-keyed onto
+    ``response_provider``, the upstream that usage and telemetry name (which the
+    port documents as possibly differing from the public name the caller asked
+    for), and carries that credential alone: the ladder produced nothing to
+    merge with.
+    """
+    if ctx.organization_id is None:
+        # The port keys its access decision on the organization alone, so a
+        # request with no organization (no workspace resolved for it) has
+        # nothing to ask about.
+        return resolved
+    if ctx.plan is not None and len(ctx.plan.attempts) > 1:
+        # A multi-candidate plan dispatches from ``ctx.plan.attempts``, whose
+        # kwargs the routing compiler built; what this function returns is not
+        # what those candidates are called with. Asking anyway would meter a
+        # resolve that never serves, so a routed chain keeps the ladder's own
+        # answer for now. Reaching the port from the compiler is separate work:
+        # the compiler is synchronous and documented as doing no I/O.
+        return resolved
+    if not credential_ladder_exhausted(resolved.provider, resolved.kwargs):
+        return resolved
+
+    try:
+        credential = await port.resolve_hosted_credential(
+            organization_id=ctx.organization_id,
+            workspace_id=ctx.workspace_id,
+            # The instance rather than the implementation: that is the name
+            # pricing, budgets and usage key on, and for a bare selector it is
+            # the one the caller wrote. (An alias resolves to its target first,
+            # so an aliased request names the target's instance here, never the
+            # alias.) ``response_provider`` comes back naming whichever upstream
+            # actually serves it.
+            provider=resolved.instance,
+            model=resolved.model,
+        )
+    except HostedAccessDeniedError as exc:
+        # The port owns this refusal precisely so a caller need not name the
+        # adapter that raised it, and the adapter's own wording is internal, so
+        # the response carries the same detail an organization-scoped model
+        # restriction already uses. A reservation is held by this point, so it
+        # is released here exactly as the unresolvable-selector branch above
+        # does; nothing outside this function refunds for it.
+        logger.info(
+            "Hosted inference refused for %s:%s workspace=%s: %s",
+            resolved.instance,
+            resolved.model,
+            exc.workspace_id,
+            exc,
+        )
+        # Named to the caller the way every other ``model_not_allowed_detail``
+        # site names it: the selector they wrote. For an alias that is the alias,
+        # because keeping its target out of what a caller can see is the whole
+        # point of one (``docs/models.md``, "Target-hiding"); the log line above
+        # carries the resolved target for the operator.
+        denied_detail = model_not_allowed_detail(resolved.alias or f"{resolved.instance}:{resolved.model}")
+        await release_reservation(ctx)
+        await log_gateway_rejection(
+            db=ctx.db,
+            log_writer=ctx.log_writer,
+            api_key_id=ctx.api_key_id,
+            user_id=ctx.user_id,
+            model=resolved.model,
+            provider=resolved.instance,
+            endpoint=adapter.endpoint,
+            detail=denied_detail,
+            status_code=status.HTTP_403_FORBIDDEN,
+            started_at=ctx.started_at,
+        )
+        raise adapter.error(403, denied_detail, ErrorKind.PERMISSION) from exc
+    except Exception as exc:
+        # Everything an adapter can fail at that is not its own refusal. Resolving
+        # a hosted credential is expected to be a network call (that is what an
+        # overlay binds this port to do), so a timeout, a connection reset or a
+        # database error is ordinary here rather than exotic. Nothing above this
+        # would catch one: all three routes call ``resolve_dispatch_provider``
+        # outside any ``try`` that takes a bare exception, and ``gateway.main``
+        # registers handlers only for ``TenancyError`` and
+        # ``RequestValidationError``. Without this the reservation the preamble
+        # took stays on ``users.reserved`` until the budget resets, which for a
+        # budget with no period is forever.
+        #
+        # ``Exception`` and not ``BaseException``: ``asyncio.CancelledError`` is a
+        # disconnected client rather than a failed lookup, and swallowing it would
+        # both mislabel the outcome and mark a cancelled task as handled.
+        logger.error(
+            "ModelProviderPort failed to resolve a credential for %s:%s: %s",
+            resolved.instance,
+            resolved.model,
+            exc,
+            exc_info=True,
+        )
+        await release_reservation(ctx)
+        await log_gateway_rejection(
+            db=ctx.db,
+            log_writer=ctx.log_writer,
+            api_key_id=ctx.api_key_id,
+            user_id=ctx.user_id,
+            model=resolved.model,
+            provider=resolved.instance,
+            endpoint=adapter.endpoint,
+            detail=HOSTED_CREDENTIAL_UNUSABLE_DETAIL,
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            started_at=ctx.started_at,
+        )
+        # The same detail the unusable-``response_provider`` branch below returns:
+        # from the caller's side both are "this build could not put an upstream
+        # behind your request", and which internal step failed is not theirs.
+        raise adapter.error(502, HOSTED_CREDENTIAL_UNUSABLE_DETAIL, ErrorKind.API) from exc
+
+    if credential is None:
+        # This build has no hosted path for the candidate. The candidate is
+        # genuinely unserved, which is what it already was, so it goes to
+        # any-llm uncredentialed and fails there exactly as it does today.
+        return resolved
+
+    try:
+        upstream = LLMProvider(credential.response_provider)
+    except ValueError as exc:
+        # The adapter named an upstream any-llm does not implement, so nothing
+        # can be dispatched. That is a defect in this build rather than caller
+        # input: log it in full, refund, and surface a non-leaky 502.
+        logger.error(
+            "ModelProviderPort returned unknown response_provider %r for %s:%s",
+            credential.response_provider,
+            resolved.instance,
+            resolved.model,
+        )
+        await release_reservation(ctx)
+        # Logged like the 400 and 403 refusals beside it: an operator watching
+        # the activity log during an overlay rollout would otherwise see dropped
+        # traffic as nothing at all.
+        await log_gateway_rejection(
+            db=ctx.db,
+            log_writer=ctx.log_writer,
+            api_key_id=ctx.api_key_id,
+            user_id=ctx.user_id,
+            model=resolved.model,
+            provider=resolved.instance,
+            endpoint=adapter.endpoint,
+            detail=HOSTED_CREDENTIAL_UNUSABLE_DETAIL,
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            started_at=ctx.started_at,
+        )
+        raise adapter.error(502, HOSTED_CREDENTIAL_UNUSABLE_DETAIL, ErrorKind.API) from exc
+
+    # Re-keying moves what settlement prices on. The pricing and budget gates
+    # ran in the preamble against the name the caller asked for, and settlement
+    # reprices on ``instance``, so an overlay owes a pricing row for every
+    # ``response_provider`` it returns: without one the row's cost is NULL and
+    # the request settles free, which is `require_pricing` bypassed rather than
+    # enforced. A routed fallover to a differently priced candidate has an
+    # explicit guard for the same hazard (`top_up_reservation_for_attempt`
+    # refuses an unpriced candidate with a 402); this path has none, because the
+    # substitution is the adapter's decision rather than a plan's and refusing it
+    # here would make a build's own fleet unusable until it were priced. An
+    # overlay binding this port owns that.
+    await _warn_if_hosted_upstream_is_unpriced(ctx, resolved, credential.response_provider)
+
+    kwargs: dict[str, Any] = {"api_key": credential.api_key}
+    if credential.api_base is not None:
+        kwargs["api_base"] = credential.api_base
+    return ResolvedProvider(
+        instance=credential.response_provider,
+        provider=upstream,
+        model=resolved.model,
+        kwargs=kwargs,
+        alias=resolved.alias,
+    )
 
 
 async def _bill_vision_side_call(
@@ -1590,6 +1849,8 @@ class ToolContext:
         sandbox_url: str | None,
         sandbox_auth_token: str | None,
         sandbox_exec_timeout_s: int | None = None,
+        sandbox_session_image: str | None = None,
+        sandbox_allowed_tools: frozenset[str] | None = None,
         use_web_search: bool,
         web_search_tool_entry: dict[str, Any] | None,
         web_search_url: str | None,
@@ -1609,6 +1870,12 @@ class ToolContext:
         # lower it, so the deployment's default is the ceiling rather than a value
         # a policy replaces.
         self.sandbox_timeout_s = min(DEFAULT_EXEC_TIMEOUT_S, float(sandbox_exec_timeout_s or DEFAULT_EXEC_TIMEOUT_S))
+        # The image the sandbox session is leased against (the workspace's pin,
+        # else the deployment's, else nothing) and the tool kinds the backend may
+        # expose (None for "whatever it serves"). Both are resolved at admission,
+        # where the request's session is live, and read again at dispatch.
+        self.sandbox_session_image = sandbox_session_image
+        self.sandbox_allowed_tools = sandbox_allowed_tools
         self.use_web_search = use_web_search
         self.web_search_tool_entry = web_search_tool_entry
         self.web_search_url = web_search_url
@@ -1624,6 +1891,26 @@ class ToolContext:
         # request shares one tally across attempts: every executed call was paid
         # for, whether or not its attempt won.
         self.tally = ToolUsageTally()
+
+    def build_sandbox_backend(self) -> SandboxBackend:
+        """The one place a ``SandboxBackend`` is constructed for this request.
+
+        Three call sites open one (non-streaming dispatch, the eager-open stream,
+        and the fallback-walking stream), and each needs every value resolved at
+        admission. Spelling the argument list once is not tidiness: it was
+        spelled three times, a fourth field was added to two of them, and the
+        third silently kept sending the old session body.
+        """
+        assert self.sandbox_url is not None  # guaranteed past the missing-URL 400 in prepare_gateway_tools
+        return SandboxBackend(
+            sandbox_url=self.sandbox_url,
+            purpose_hint=_resolve_sandbox_purpose_hint(self.sandbox_tool_entry, self.config),
+            timeout_s=self.sandbox_timeout_s,
+            auth_token=self.sandbox_auth_token,
+            image=self.sandbox_session_image,
+            allowed_tools=self.sandbox_allowed_tools,
+            tally=self.tally,
+        )
 
     @property
     def tools_extracted(self) -> bool:
@@ -1662,11 +1949,32 @@ class ToolContext:
         return bool(self.mcp_server_configs) or self.use_sandbox or self.use_web_search
 
 
-async def _validate_mcp_server_urls(adapter: FormatAdapter[Any, Any], mcp_servers: list[McpServerConfig]) -> None:
-    """SSRF/scheme safety check for every MCP server URL in this request.
+async def _validate_mcp_server_urls(
+    adapter: FormatAdapter[Any, Any],
+    mcp_servers: list[McpServerConfig],
+    *,
+    stored: bool = False,
+    workspace_id: uuid.UUID | None = None,
+) -> None:
+    """SSRF/scheme safety check for the MCP server URLs in this request.
 
-    Covers both request-body-supplied servers and platform-resolved ones
-    (``mcp_server_ids``): both land in the same merged list before this runs.
+    Called once per source rather than over the merged list, because a failure
+    means different things for the two and the caller is owed a different
+    answer:
+
+    * A **request-body** server is the caller's own, so a rejection is their
+      malformed request and the reason travels back to them, naming the URL they
+      sent. That is the pre-existing behavior.
+    * A **stored** server (resolved from ``mcp_server_ids``) is workspace
+      configuration the caller can neither see nor fix, and the rejection names
+      the host and the range it resolved into. ``routes/workspace_mcp_servers``
+      gates even the *read* of those rows behind the master key, on the grounds
+      that they name the endpoints this gateway connects to, so echoing one to
+      any key holder gives away what that gate is there to withhold. It answers
+      the way an unreadable stored token already does: a fixed 500 detail, with
+      the reason and the workspace in the log, since a stored endpoint that
+      fails its check is the operator's problem and not the caller's.
+
     Runs concurrently since each check does an independent DNS lookup;
     ``asyncio.gather`` (default ``return_exceptions=False``) propagates the
     first ``UnsafeURLError`` it sees as soon as it's raised. Note this does
@@ -1689,7 +1997,10 @@ async def _validate_mcp_server_urls(adapter: FormatAdapter[Any, Any], mcp_server
             )
         )
     except UnsafeURLError as exc:
-        raise adapter.error(400, str(exc), ErrorKind.INVALID_REQUEST) from exc
+        if not stored:
+            raise adapter.error(400, str(exc), ErrorKind.INVALID_REQUEST) from exc
+        logger.error("Configured MCP server URL failed its safety check for workspace %s: %s", workspace_id, exc)
+        raise adapter.error(500, MCP_SERVER_URL_UNSAFE_DETAIL, ErrorKind.API) from exc
 
 
 def _overlay_mandate(merged: dict[str, GuardrailConfig], mandated: Iterable[GuardrailConfig]) -> None:
@@ -1719,11 +2030,27 @@ def _overlay_mandate(merged: dict[str, GuardrailConfig], mandated: Iterable[Guar
         )
 
 
+@dataclass(frozen=True)
+class EffectiveGuardrails:
+    """The guardrails a request runs, and what the runner needs to know about them.
+
+    Three fields rather than a list, because two of the three answer questions
+    the list cannot: which entries carry a credential, and which came from a
+    layer the caller does not control. The second decides how a URL that fails
+    its safety check is reported, so it has to survive the merge rather than be
+    re-derived from a config the merge has already flattened.
+    """
+
+    configs: list[GuardrailConfig] | None
+    credentials: dict[str, str]
+    mandated: frozenset[str]
+
+
 def merge_guardrail_layers(
     ctx: RequestContext,
     requested: list[GuardrailConfig] | None,
     organization: Sequence[ResolvedOrganizationGuardrail],
-) -> tuple[list[GuardrailConfig] | None, dict[str, str]]:
+) -> EffectiveGuardrails:
     """The effective guardrails for this request, and the credentials they need.
 
     Three layers fold in one order, each able to add a check or tighten one and
@@ -1739,26 +2066,30 @@ def merge_guardrail_layers(
     secret on would be sending it somewhere it was never meant for.
 
     Returns the caller's own list unchanged, `None` included, when no layer
-    mandated anything, alongside an empty credential map: that is the shape
-    `apply_input_guardrails` treats as "no guardrails ran", and it is what keeps
-    a deployment that configures nothing behaving exactly as it did.
+    mandated anything, alongside an empty credential map and an empty mandated
+    set: that is the shape `apply_input_guardrails` treats as "no guardrails
+    ran", and it is what keeps a deployment that configures nothing behaving
+    exactly as it did.
     """
-    mandated = ctx.plan.guardrails if ctx.plan is not None else []
-    if not organization and not mandated:
-        return requested, {}
+    policy = ctx.plan.guardrails if ctx.plan is not None else []
+    if not organization and not policy:
+        return EffectiveGuardrails(requested, {}, frozenset())
 
     # Caller entries first, so a mandating layer of the same profile overwrites them.
     merged: dict[str, GuardrailConfig] = {guardrail.profile: guardrail for guardrail in requested or []}
     credentials: dict[str, str] = {}
+    mandated: set[str] = set()
     for entry in organization:
         _overlay_mandate(merged, (entry.config,))
+        mandated.add(entry.config.profile)
         if entry.credential:
             credentials[entry.config.profile] = entry.credential
-    if mandated:
-        _overlay_mandate(merged, mandated)
-        for guardrail in mandated:
+    if policy:
+        _overlay_mandate(merged, policy)
+        for guardrail in policy:
+            mandated.add(guardrail.profile)
             credentials.pop(guardrail.profile, None)
-    return list(merged.values()), credentials
+    return EffectiveGuardrails(list(merged.values()), credentials, frozenset(mandated))
 
 
 async def _resolve_organization_guardrails(
@@ -1886,22 +2217,27 @@ async def prepare_gateway_tools(
         # rather than at each route, so every completion endpoint enforces a
         # mandate identically and none can forget to. `guardrails` as passed is
         # the caller's own list.
-        effective_guardrails, guardrail_credentials = merge_guardrail_layers(
-            ctx, guardrails, await _resolve_organization_guardrails(adapter, ctx)
-        )
+        effective = merge_guardrail_layers(ctx, guardrails, await _resolve_organization_guardrails(adapter, ctx))
         await apply_input_guardrails(
-            effective_guardrails,
+            effective.configs,
             guardrail_text,
             response=response,
             config=ctx.config,
-            credentials=guardrail_credentials,
+            credentials=effective.credentials,
+            mandated=effective.mandated,
         )
 
-        if mcp_server_ids:
-            mcp_servers = (mcp_servers or []) + await _resolve_mcp_server_ids(adapter, ctx, mcp_server_ids)
-
+        # Checked per source, not over the merged list: see
+        # `_validate_mcp_server_urls` for why a stored server's rejection cannot
+        # carry the same body a caller's own does.
         if mcp_servers:
             await _validate_mcp_server_urls(adapter, mcp_servers)
+        if mcp_server_ids:
+            stored_servers = await _resolve_mcp_server_ids(adapter, ctx, mcp_server_ids)
+            await _validate_mcp_server_urls(
+                adapter, stored_servers, stored=True, workspace_id=ctx.workspace_id
+            )
+            mcp_servers = (mcp_servers or []) + stored_servers
 
         sandbox_tool_entry, tools_after_sandbox = _extract_code_execution_tool(tools)
         # Read the effective config value (dashboard override / env / YAML), falling
@@ -1925,6 +2261,11 @@ async def prepare_gateway_tools(
         sandbox_auth_token: str | None = None
         sandbox_max_iterations: int | None = None
         sandbox_exec_timeout_s: int | None = None
+        # The image the session is leased against, and the tool kinds the backend
+        # may expose. Both start at the deployment's own answer and are only ever
+        # replaced by a *narrower* workspace one below.
+        sandbox_session_image: str | None = ctx.config.effective_sandbox_image()
+        sandbox_allowed_tools: frozenset[str] | None = None
         if use_sandbox and ctx.hybrid_mode:
             assert ctx.user_token is not None  # guaranteed by the hybrid-mode preamble
             assert sandbox_tool_entry is not None  # use_sandbox implies the entry is present
@@ -1985,6 +2326,34 @@ async def prepare_gateway_tools(
                     sandbox_tool_entry["purpose_hint"] = workspace_policy.default_purpose_hint
                 sandbox_max_iterations = workspace_policy.max_iterations
                 sandbox_exec_timeout_s = workspace_policy.exec_timeout_s
+                if workspace_policy.tools is not None:
+                    # An intersection, so it only ever removes. Nothing left to run
+                    # is refused here rather than handed to a backend advertising an
+                    # empty tool list, which the model would answer by not calling
+                    # the tool at all: an unusable-but-successful request is the
+                    # failure mode a policy exists to make loud.
+                    #
+                    # Against ``SERVED_TOOL_NAMES``, which is the same set
+                    # ``_require_runnable_tools`` refuses a write against, so the
+                    # storable rule and the admission rule are one rule. Naming
+                    # ``CODE_EXECUTION_TOOL_NAME`` here instead would agree only
+                    # while that tuple has one entry: the day a second tool kind
+                    # joins it, a policy naming only that one becomes storable and
+                    # then 403s on every request, which is the state both guards
+                    # exist to prevent.
+                    if not set(workspace_policy.tools) & set(SERVED_TOOL_NAMES):
+                        raise adapter.error(403, SANDBOX_TOOLS_EXCLUDED_DETAIL, ErrorKind.PERMISSION)
+                    sandbox_allowed_tools = workspace_policy.tools
+                if workspace_policy.image is not None:
+                    # Re-checked against the operator's list, which the write
+                    # already checked once: an operator may shrink that list after
+                    # a workspace pinned from it, and running the un-curated image
+                    # anyway is precisely the supply-chain hole the column is
+                    # guarded for. Refuse rather than quietly serve the deployment
+                    # default, so the workspace learns its pin is dead.
+                    if workspace_policy.image not in ctx.config.pinnable_sandbox_images():
+                        raise adapter.error(403, SANDBOX_IMAGE_NOT_ALLOWED_DETAIL, ErrorKind.PERMISSION)
+                    sandbox_session_image = workspace_policy.image
 
         web_search_url: str | None = ctx.config.web_search_url or otari_env("WEB_SEARCH_URL") or None
         # Interception (claiming the provider-named web_search keywords) is opt-in and
@@ -2108,10 +2477,10 @@ async def prepare_gateway_tools(
         await release_reservation(ctx)
         raise
     except SQLAlchemyError:
-        # Four reads in this block touch the database (the workspace MCP servers,
-        # the workspace code-execution policy and the workspace web-search
-        # configuration above, and `_require_tool_pricing`), and a failure in any
-        # of them is not an
+        # Five reads in this block touch the database (the organization's
+        # guardrails, the workspace MCP servers, the workspace code-execution
+        # policy and the workspace web-search configuration above, and
+        # `_require_tool_pricing`), and a failure in any of them is not an
         # `HTTPException`, so without this arm it would leave `users.reserved`
         # holding the estimate until the budget's next reset, or forever for a
         # budget with no reset period. The rollback comes first because a failed
@@ -2135,6 +2504,8 @@ async def prepare_gateway_tools(
         sandbox_url=sandbox_url,
         sandbox_auth_token=sandbox_auth_token,
         sandbox_exec_timeout_s=sandbox_exec_timeout_s,
+        sandbox_session_image=sandbox_session_image,
+        sandbox_allowed_tools=sandbox_allowed_tools,
         use_web_search=use_web_search,
         web_search_tool_entry=web_search_tool_entry,
         web_search_url=web_search_url,
@@ -2684,15 +3055,7 @@ async def dispatch_non_stream(
             return await adapter.run_tool_loop(kwargs, pool, tool_ctx.max_tool_iterations, on_first_response)
 
     if tool_ctx.use_sandbox:
-        assert tool_ctx.sandbox_url is not None  # guaranteed past the missing-URL 400 in prepare_gateway_tools
-        sandbox_hint = _resolve_sandbox_purpose_hint(tool_ctx.sandbox_tool_entry, tool_ctx.config)
-        async with SandboxBackend(
-            sandbox_url=tool_ctx.sandbox_url,
-            purpose_hint=sandbox_hint,
-            timeout_s=tool_ctx.sandbox_timeout_s,
-            auth_token=tool_ctx.sandbox_auth_token,
-            tally=tool_ctx.tally,
-        ) as backend:
+        async with tool_ctx.build_sandbox_backend() as backend:
             kwargs = adapter.inject_hints(call_kwargs, backend.purpose_hints(), header=tool_ctx.tools_header)
             return await adapter.run_tool_loop(kwargs, backend, tool_ctx.max_tool_iterations, on_first_response)
 
@@ -2775,15 +3138,7 @@ async def open_stream(
         return _lazy_mcp_stream(adapter, kwargs, tool_ctx.mcp_server_configs, tool_ctx)
 
     if tool_ctx.use_sandbox:
-        assert tool_ctx.sandbox_url is not None  # guaranteed past the missing-URL 400 in prepare_gateway_tools
-        sandbox_hint = _resolve_sandbox_purpose_hint(tool_ctx.sandbox_tool_entry, tool_ctx.config)
-        sandbox_backend = SandboxBackend(
-            sandbox_url=tool_ctx.sandbox_url,
-            purpose_hint=sandbox_hint,
-            timeout_s=tool_ctx.sandbox_timeout_s,
-            auth_token=tool_ctx.sandbox_auth_token,
-            tally=tool_ctx.tally,
-        )
+        sandbox_backend = tool_ctx.build_sandbox_backend()
         await sandbox_backend.__aenter__()  # may raise SandboxNotReachableError
         return _eager_backend_stream(adapter, kwargs, sandbox_backend, tool_ctx)
 
@@ -3410,17 +3765,7 @@ async def run_streaming_with_fallback(
                 MCPClientPool(tool_ctx.mcp_server_configs, tally=tool_ctx.tally)
             )
         elif tool_ctx.use_sandbox:
-            assert tool_ctx.sandbox_url is not None  # guaranteed past the missing-URL 400 in prepare_gateway_tools
-            sandbox_hint = _resolve_sandbox_purpose_hint(tool_ctx.sandbox_tool_entry, tool_ctx.config)
-            pool_for_loop = await backend_stack.enter_async_context(
-                SandboxBackend(
-                    sandbox_url=tool_ctx.sandbox_url,
-                    purpose_hint=sandbox_hint,
-                    timeout_s=tool_ctx.sandbox_timeout_s,
-                    auth_token=tool_ctx.sandbox_auth_token,
-                    tally=tool_ctx.tally,
-                ),
-            )
+            pool_for_loop = await backend_stack.enter_async_context(tool_ctx.build_sandbox_backend())
         elif tool_ctx.use_web_search:
             assert tool_ctx.web_search_url is not None  # guaranteed past the missing-URL 400
             assert tool_ctx.web_search_tool_entry is not None  # guaranteed by the web_search opt-in

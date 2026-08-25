@@ -9,6 +9,7 @@ import type {
 import { OrganizationGuardrailsCard } from "@/features/tools/OrganizationGuardrailsCard"
 import { SearchToolsCard } from "@/features/tools/SearchToolsCard"
 import { WorkspaceCodeExecutionPolicyCard } from "@/features/tools/WorkspaceCodeExecutionPolicyCard"
+import { WorkspaceMcpServersCard } from "@/features/tools/WorkspaceMcpServersCard"
 import { WorkspaceWebSearchCard } from "@/features/tools/WorkspaceWebSearchCard"
 import {
   usePricing,
@@ -74,7 +75,7 @@ const SERVICES: {
       "Backend for otari_code_execution tools (the sandbox that runs generated code).",
     pricingKey: "otari:code_execution",
     toolId: "otari_code_execution",
-    order: ["sandbox_url", "sandbox_purpose_hint"],
+    order: ["sandbox_url", "sandbox_session_image", "sandbox_purpose_hint"],
   },
   {
     key: "guardrails",
@@ -806,6 +807,11 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
           )
         },
       )}
+
+      {/* Beside the services rather than under one of them, and left out of
+        every narrowed view, each of which is one service. `/tools/mcp-servers`
+        renders the same card. */}
+      {only ? null : <WorkspaceMcpServersCard />}
 
       <SaveToast message={toast} />
     </div>

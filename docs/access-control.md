@@ -100,7 +100,15 @@ The enforcement strategy is configurable with `OTARI_BUDGET_STRATEGY` (`for_upda
 
 Otari is growing a tenancy layer above the users, keys, and budgets described here: an **organization** owns **workspaces**, and identities join both as members with a fixed role (`owner`, `admin`, `member`, or `viewer`). It is available over the API (`/v1/organizations/*` and `/v1/workspaces/*`, master-key authenticated like the rest of this guide) and in the dashboard, under Organization in the sidebar; see [Admin dashboard](dashboard.md#organization).
 
-A self-hosted deployment is **one organization with several people in it**, not several tenants: the organization is provisioned for you and cannot be created, switched or deleted, and workspaces are the unit you separate teams and projects by. Hosting mutually isolated tenants on one deployment is what a hosted control plane is for.
+A self-hosted deployment is **one organization with several people in it**: the organization is provisioned for you, and workspaces are the unit you separate teams and projects by. That is the shape almost every deployment keeps, and hosting mutually isolated tenants on one deployment is still what a hosted control plane is for.
+
+A second organization is possible, though, because it is already reachable: invite an address that belongs to an organization elsewhere on this deployment and they end up in two. So three endpoints exist for it, all of them scoped to the caller:
+
+- `POST /v1/organizations` creates one, with the caller as its owner and a default workspace to work in. Only a name is sent; the slug is derived from it with a random suffix, so two organizations may share a name and a later rename does not move the slug. It does **not** move the caller into the new organization.
+- `GET /v1/organizations/me/memberships` lists the organizations the caller is an active member of, with their role in each and which one is current. It is the caller's own memberships, not a directory of the deployment's organizations.
+- `POST /v1/organizations/me/switch` points the caller's identity at another organization they belong to. Everything scoped follows it: workspaces, keys, budgets and usage all resolve through that pointer. An organization the caller holds no active membership in answers `404`, whether or not it exists.
+
+Switching is not renaming: `PATCH /v1/organizations/me` renames the organization already active. And there is no delete: every historical attribution resolves through rows that hang off an organization.
 
 Nothing is required to set it up. The first request to one of those endpoints provisions a default organization, a default workspace, and one owner identity representing the operator, and every later request resolves that same identity. Organization owners and admins can create further workspaces, add members, and manage roles; a workspace's own owners and admins can manage the workspace they belong to.
 
@@ -227,7 +235,7 @@ curl -X POST http://localhost:8000/v1/auth/password/reset/confirm \
   -d '{"token": "<the token from the link>", "new_password": "<a new password>"}'
 ```
 
-**Forgot your password?** on the dashboard's sign-in screen is the same pair of calls, and the reset link lands on a page that asks for the new password. The request answers the same message whether or not the address holds a password, for the same enumeration-safety reason resending a verification link does. The reset token expires (`password_reset_expiry_hours`, default 2) and is single-use: unlike a stateless token, it is cleared the moment it is spent, so it cannot be replayed even inside its own expiry window. It is also cleared the moment the identity's password changes through any other channel (an ordinary self-service change, an operator recovery through the master key) while it is still live, so a reset link generated and then overtaken elsewhere cannot undo that change later. Completing a reset revokes every other session the identity holds, the same as an ordinary password change. Both routes share the sign-in rate limiter and the same `503`-when-unconfigured behavior signup does.
+**Forgot your password?** on the dashboard's sign-in screen is the same pair of calls, and the reset link lands on a page that asks for the new password. The request answers the same message whether or not the address holds a password, for the same enumeration-safety reason resending a verification link does. The reset token expires (`password_reset_expiry_hours`, default 2) and is single-use: unlike a stateless token, it is cleared the moment it is spent, so it cannot be replayed even inside its own expiry window, including by a second request racing the first: the identity row is locked before the clear, so only one concurrent redemption spends it. That last part needs PostgreSQL. SQLite, the default for a single-node deployment, has no row locks, so two redemptions of one token arriving together can both land there. It is also cleared the moment the identity's password changes through any other channel (an ordinary self-service change, an operator recovery through the master key) while it is still live, so a reset link generated and then overtaken elsewhere cannot undo that change later. Completing a reset revokes every other session the identity holds, the same as an ordinary password change. Both routes share the sign-in rate limiter and the same `503`-when-unconfigured behavior signup does.
 
 #### Passkeys
 
@@ -271,9 +279,48 @@ Set `webauthn_rp_id` explicitly to bind passkeys to a **parent** domain of the o
 
 Because a relying-party ID cannot move, one constraint outlives this document. [mozilla-ai/otari-ai#1716](https://github.com/mozilla-ai/otari-ai/issues/1716) settled that migrating otari.ai users **import their credentials rather than claiming new accounts**; an imported row's `rp_id` is `otari.ai`, so that import holds exactly while the hosted origin stays `otari.ai`. Moving it re-scopes every imported passkey and the people holding them have to register again.
 
+#### OAuth sign-in (Google and GitHub)
+
+Sign in with a Google or GitHub account instead of typing a credential. Off by default: a deployment that registers no OAuth client offers no OAuth affordance at all, and the sign-in screen has no dead buttons on it.
+
+**It widens how a member signs in, never who may.** An OAuth identity signs in as an account an operator already put on the roster, matched on the address the provider vouches for. An address nobody added is refused rather than provisioned, which is the same rule signup already follows: enabling Google sign-in must not mean that every holder of a Google account can get into your gateway. The decision sits behind `IdentityProviderPort`, so an edition that wants to provision on first sight binds its own adapter and Otari's own is left alone.
+
+Turning it on takes a registered OAuth client and three settings:
+
+| Setting | Meaning |
+| --- | --- |
+| `oauth_google_client_id` / `oauth_google_client_secret` | The Google OAuth client. Both, or Google is not offered. |
+| `oauth_github_client_id` / `oauth_github_client_secret` | The GitHub OAuth client. Both, or GitHub is not offered. |
+| `public_base_url` | This deployment's own address. The redirect URI is derived from it, so without one neither provider is offered. |
+
+Register the redirect URI with the provider as exactly `{public_base_url}/auth/{provider}/callback`, for example `https://otari.example.com/auth/google/callback`. It is **not** a dashboard hash path, and cannot be: a redirection URI may not carry a fragment ([RFC 6749 §3.1.2](https://www.rfc-editor.org/rfc/rfc6749#section-3.1.2), and Google rejects one outright). The gateway serves that plain path and redirects it into the dashboard page that finishes the sign-in. Otari derives both the URI it sends with the authorization request and the one it sends with the exchange from this single setting, so the two cannot disagree with each other; they can still disagree with what you registered, which is the usual cause of an `invalid_grant` from the provider.
+
+`GET /v1/bootstrap` reports the configured providers in `oauth_providers`, and the sign-in screen renders one button per entry. Like passkeys this is **additive**: it sits beside whichever typed credential the deployment currently takes, and never replaces one.
+
+```bash
+# 1. Ask where to send the browser. The state comes back for the browser to keep.
+curl http://localhost:8000/v1/auth/oauth/google/authorize
+
+# 2. The person completes the consent screen and lands back on
+#    /auth/google/callback?code=...&state=..., which redirects into the
+#    dashboard. Once the dashboard has checked the state it spends the code:
+curl -X POST http://localhost:8000/v1/auth/oauth/google/callback \
+  -H "Content-Type: application/json" -d '{"code": "<the code>"}'
+```
+
+The exchange mints the same HttpOnly session cookie a password does, so nothing downstream of a sign-in behaves differently. Three refusals are worth knowing, and each says what to do: a provider that will not vouch for the address (`401`), an address no active identity here holds (`401`), and a provider this deployment did not configure (`503`, naming the settings). A deactivated identity is refused as unknown rather than told its account is switched off.
+
+**A verified provider address lifts the local verification gate.** A member an operator added has never confirmed their address to this gateway, and the password login hard-blocks that. The provider's assertion is a stronger proof of the same fact, so an OAuth sign-in stamps the verification and lets them in. On a deployment with no outgoing mail, that is the only way a member can get in without an operator setting something up for them.
+
+**PKCE is deliberately off**, and turning it on is a real change rather than a default to restore. Authorizing and calling back are two independent requests with nothing kept server-side between them, so a PKCE verifier minted while building the authorization URL would have nowhere to live until the exchange. The CSRF `state` survives that gap by living in the browser instead: the dashboard stores it in `sessionStorage` when it sends somebody to the provider and compares it when the provider sends them back, and a callback whose state does not match is abandoned without the code ever reaching this gateway. Enabling PKCE needs a shared server-side store first.
+
+**`email_verified` is read strictly.** The provider reports it as three states, not two: vouched for, explicitly not, or never mentioned. Otari treats the third as unverified, so an address a provider merely returned is never laundered into a verified identity. ([mozilla-ai/otari-ai#1551](https://github.com/mozilla-ai/otari-ai/issues/1551) moves identity resolution onto that three-state model and onto keying by provider subject rather than by address.)
+
+The protocol mechanics come from [apron-auth](https://pypi.org/project/apron-auth/), which owns the provider endpoints, the code exchange and the userinfo fetch. What Otari keeps is which providers are configured, which scopes are asked for (`openid email profile` for Google; `read:user user:email` for GitHub), and how a fetched identity maps onto an account here.
+
 #### Who can sign in
 
-An identity with a password can sign in once it has verified its address: the operator gets one by claiming the deployment (verified automatically, since the master key proved it), and a roster member gets one by signing up (verified by the link). There is still no way for an admin to set a password on somebody else's identity; a member added or invited by address holds a role and can be placed in workspaces, but only that address's own signup or reset gives it a way in. Passkeys are described above, and are added to an identity that can already sign in rather than being a way in of their own. OAuth sign-in is the rest of the identity track.
+An identity with a password can sign in once it has verified its address: the operator gets one by claiming the deployment (verified automatically, since the master key proved it), and a roster member gets one by signing up (verified by the link). There is still no way for an admin to set a password on somebody else's identity; a member added or invited by address holds a role and can be placed in workspaces, but only that address's own signup or reset gives it a way in. Passkeys and OAuth are described above, and neither is a way in of its own: a passkey is added to an identity that can already sign in, and an OAuth account signs in as a roster identity that already exists. So the roster is still the whole answer to who may sign in, whichever credential they use.
 
 A session is revoked on sign-out, on a password change as described above, on master-key rotation (every session, with the rotating tab's own re-minted for the same identity), when the master key changes across a restart, and when the identity it names is deleted or deactivated. A deactivated identity also stops being able to sign in, rather than keeping access until its cookie expires. Deactivation is enforced when the session is read, and the identity's sessions are deleted at that point rather than only refused, so re-activating it later does not hand back the access of any cookie that was presented while it was off. Nothing sweeps the rest: a cookie that is never presented in that window survives to its TTL, because no flow here deactivates an identity and none therefore revokes ahead of the read.
 
@@ -281,7 +328,7 @@ An opaque session token is the settled shape here, not a stopgap: it is revocabl
 
 ### Adopting an existing tenancy
 
-Provisioning adopts an organization whose slug is `default`, which is the one it would have created itself. It cannot adopt any other, because every route is scoped to the organization the operator identity is currently pointed at, and there is no route to list, switch, or fetch an organization by id. So an organization this deployment did not provision is unreachable through the API until the operator identity points at it.
+Provisioning adopts an organization whose slug is `default`, which is the one it would have created itself. It cannot adopt any other, because every route is scoped to the organization the operator identity is currently pointed at. `POST /v1/organizations/me/switch` is no way in either: it refuses an organization the caller holds no active membership in, and a freshly provisioned operator identity holds none in an imported one. So an organization this deployment did not provision is unreachable through the API until the operator identity points at it.
 
 That is the state a database restored or imported from elsewhere arrives in: those slugs are `{name}-{suffix}` and never the literal `default`. Otari refuses rather than shadowing it, and the tenancy endpoints answer `500` with `Internal server error` while the specific organizations are named in the gateway's log.
 

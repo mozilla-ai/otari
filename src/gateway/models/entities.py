@@ -9,6 +9,7 @@ from sqlalchemy import (
     DateTime,
     ForeignKey,
     Index,
+    String,
     Text,
     UniqueConstraint,
     Uuid,
@@ -620,7 +621,10 @@ class UsageLog(Base):
     endpoint: Mapped[str] = mapped_column()
 
     # Provenance. "gateway" for requests Otari served itself; a source slug (e.g.
-    # "claude_code") for usage imported through POST /v1/usage/external-events.
+    # "claude_code") for usage imported through POST /v1/usage/external-events. A row
+    # backfilled from hosted history keeps its origin's slug behind a legacy prefix
+    # ("otari-ai:gateway", "otari-ai:claude_code"), so asking whether this deployment
+    # served a row means asking about the slug behind that prefix: core/usage_source.
     # source_event_id is the upstream event id used for idempotent import (NULL for
     # gateway rows); source_label carries optional session/project attribution.
     source: Mapped[str] = mapped_column(default="gateway", index=True)
@@ -659,6 +663,34 @@ class UsageLog(Base):
     # (mozilla-ai/otari-ai#1751). Exact to the micro-dollar; see
     # ``models/money.py`` for what that costs on each engine.
     cost: Mapped[Decimal | None] = mapped_column(UsdCost())
+
+    # Why ``cost`` is the amount it is, which the row cannot re-derive on its own:
+    # ``pricing_source`` names the price list that settled it ("organization",
+    # "managed", "genai_prices"), ``pricing_reference`` identifies the entry in it
+    # (a pricing row's id, or a ``provider:model`` key), ``pricing_effective_at``
+    # is when that rate took effect, and ``pricing_version`` pins the revision of
+    # the list. ``calculated_at`` is when the amount was priced, which is not
+    # ``timestamp`` (when the request ran): usage settled or repriced later moves
+    # the two apart.
+    #
+    # All nullable with no backfill. The gateway's own settlement does not record
+    # provenance, so these are written by the hosted-usage backfill
+    # (mozilla-ai/otari-ai#1798) from the platform's ``gateway_usage_settlement``
+    # row, and null reads correctly as "not recorded". The lengths mirror that
+    # table's columns rather than this file's usual unbounded strings, so a value
+    # copied across always fits.
+    #
+    # ``pricing_source`` speaks the platform's settlement vocabulary, the values
+    # ``_platform.SettledCost.pricing_source`` already carries on the hybrid wire
+    # (echoed to callers as ``usage.pricing_source``). It is not the same field as
+    # the one on a listed model in ``api/routes/models.py`` ("configured",
+    # "default", "dynamic", "none"), which says where a price list entry came from
+    # in this deployment rather than what settled one row's amount.
+    pricing_source: Mapped[str | None] = mapped_column(String(32))
+    pricing_reference: Mapped[str | None] = mapped_column(String(511))
+    pricing_effective_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
+    pricing_version: Mapped[str | None] = mapped_column(String(255))
+    calculated_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
 
     # "success", "error", or "absorbed". ``absorbed`` is a failed attempt that a
     # routing policy recovered from by trying the next candidate: the request
@@ -1461,11 +1493,13 @@ class WorkspaceCodeExecutionPolicy(Base):
     with ``CASCADE``, like ``workspace_budget_defaults``: nothing else names
     the row, so it rides the workspace's own delete.
 
-    There is deliberately no per-tool allow-list, which the hosted policy
-    carries as ``tools``: the gateway's own sandbox backend exposes exactly one
-    tool (``code_execution``), so a list here would be either a no-op or a
-    second spelling of ``enabled``. The hosted proxy, which fronts more than
-    one, keeps enforcing its own.
+    ``image`` and ``tools`` reach the same two decisions the hosted
+    ``CodeExecutionConfig`` carries (#740). Neither breaks the rule above:
+    ``image`` may only name something the deployment's operator has already
+    curated into ``sandbox_allowed_session_images``, so a workspace picks from an
+    operator's shelf rather than pointing the gateway at an image of its own,
+    and ``tools`` may only remove tool kinds from what the sandbox backend
+    already serves.
     """
 
     __tablename__ = "workspace_code_execution_policies"
@@ -1497,6 +1531,18 @@ class WorkspaceCodeExecutionPolicy(Base):
     # nothing rather than raising it.
     max_iterations: Mapped[int | None] = mapped_column(default=None)
     exec_timeout_s: Mapped[int | None] = mapped_column(default=None)
+    # NULL means "no workspace image": whatever the deployment names in
+    # ``sandbox_session_image``, and failing that whatever the sandbox backend runs by
+    # default, which is what every request got before this column existed.
+    # ``String(255)`` rather than ``Text`` to match the hosted column's own
+    # bound; an image reference that long is already pathological.
+    image: Mapped[str | None] = mapped_column(String(255), default=None)
+    # NULL means "no workspace tool allow-list": the backend offers what it
+    # offers. A stored list is an intersection, never a union, so it can only
+    # take tool kinds away. JSON rather than a child table for the same reason
+    # ``WorkspaceWebSearchConfig`` stores its domain lists that way: short, read
+    # whole, and nothing queries into it.
+    tools: Mapped[list[str] | None] = mapped_column(JSON, default=None)
     # ``UtcDateTime`` for the same reason ``WorkspaceBudgetDefault`` uses it:
     # these are serialized with ``.isoformat()`` for the dashboard, and a plain
     # ``DateTime(timezone=True)`` round-trips naive on SQLite.
@@ -1643,7 +1689,7 @@ class OrganizationGuardrail(Base):
     # and the scope rows below are not consulted. False means it runs only in
     # the workspaces named there, and a new workspace inherits nothing.
     applies_to_all_workspaces: Mapped[bool] = mapped_column(default=False, nullable=False)
-    # ``UtcDateTime`` for the reason its neighbours use it: these are serialized
+    # ``UtcDateTime`` for the reason its neighbors use it: these are serialized
     # with ``.isoformat()`` for the dashboard, and a plain ``DateTime(timezone=True)``
     # round-trips naive on SQLite.
     created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))

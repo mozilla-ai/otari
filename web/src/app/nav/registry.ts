@@ -10,6 +10,7 @@ import {
   FiKey,
   FiLayers,
   FiRepeat,
+  FiServer,
   FiShield,
   FiSliders,
   FiTag,
@@ -117,12 +118,11 @@ const BASE_NAV_SECTIONS = [
         label: "Tools",
         surface: "tools",
         icon: FiTool,
-        // Two of the three services the page configures; Guardrails is grouped
-        // under Routing, where the prototype puts it. The prototype lists MCP
-        // servers here too, and the gateway has no MCP server registry to
-        // manage (only per-request config a caller passes in, plus two safety
-        // toggles on Settings), so it is left out rather than linked to an
-        // empty page.
+        // Two of the three services the page configures, plus MCP servers;
+        // Guardrails is grouped under Routing, where the prototype puts it.
+        // MCP is the row that is not a tool-service view, so it has a page of
+        // its own rather than a filter over the settings page; web/AGENTS.md
+        // says why.
         //
         // `to` gates and names the group; it is not somewhere the rail
         // navigates. A group with more than one visible child is a disclosure
@@ -140,6 +140,7 @@ const BASE_NAV_SECTIONS = [
             label: "Code execution",
             icon: FiCode,
           },
+          { to: "/tools/mcp-servers", label: "MCP servers", icon: FiServer },
         ],
       },
     ],

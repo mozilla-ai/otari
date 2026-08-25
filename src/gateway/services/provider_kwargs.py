@@ -53,6 +53,51 @@ _INSTANCE_META_KEYS = ("provider_type", "models")
 # tolerance (mozilla-ai/any-llm#1198).
 _KEYLESS_PLACEHOLDER_API_KEY = "otari-no-key-required"
 
+# Two sets of providers any-llm calls without an otari-visible credential, even
+# though each *declares* a credential environment variable.
+# ``provider_credential_env_names`` sees only the declaration, so it cannot tell
+# them from a keyed provider the way it can ollama/llamacpp/llamafile (which
+# declare the literal ``"None"``) or Vertex AI (which declares an empty name).
+# Both are written out by hand and both are drift-guarded in
+# ``tests/unit/test_provider_instances.py``.
+#
+# Local and LAN backends that never require a key: each overrides
+# ``_verify_and_set_api_key`` to return without raising and defaults to a
+# localhost or LAN base URL, so a bare ``vllm:my-model`` reaches a self-hosted
+# server today with nothing configured in otari at all.
+_KEYLESS_SELF_HOSTED_PROVIDERS = frozenset({"vllm", "lmstudio", "cascadia", "otari"})
+# Providers authenticating from cloud SDK credentials this gateway cannot see:
+# an EC2 instance profile, an SSO session, or an ambient boto3 chain. They are
+# the same category as Vertex AI's application default credentials, which
+# ``docs/configuration.md`` already groups with Bedrock, and they only reach here
+# with nothing configured, which is precisely the ambient case. Splitting the
+# category on whether any-llm happens to declare a variable name would be an
+# accident of upstream spelling rather than a difference in kind.
+#
+# Deliberately *not* here: gemini (raises ``MissingApiKeyError`` outright when no
+# key resolves, so it genuinely needs one) and azure/azureopenai (an Entra ID
+# deployment still needs an endpoint from config, so an empty ``kwargs`` means
+# nothing is configured and nothing can serve it anyway).
+_AMBIENT_CREDENTIAL_PROVIDERS = frozenset({"bedrock", "sagemaker"})
+
+# Keys ``get_provider_kwargs`` can return that credential nothing on their own:
+# transport tuning an operator attached to an instance. An instance carrying only
+# these has been *described* and not credentialed, so it must not count as a rung
+# that answered. ``api_base`` is deliberately absent: an instance with a base URL
+# and no key takes the keyless placeholder, so it never reaches a caller alone.
+_NON_CREDENTIAL_KWARGS = frozenset({"client_args"})
+
+
+def _kwargs_carry_a_credential(kwargs: dict[str, Any]) -> bool:
+    """Whether anything in a resolved provider's kwargs could authenticate a call.
+
+    Emptiness is not the question: ``providers.openai: {client_args: {timeout:
+    60}}`` resolves a non-empty dict with no credential in it, and a key written
+    as ``api_key:`` with no value resolves ``None``. Both mean the ladder found a
+    provider entry and no way to call it.
+    """
+    return any(value for key, value in kwargs.items() if key not in _NON_CREDENTIAL_KWARGS)
+
 
 def _provider_env_key_present(provider: LLMProvider) -> bool:
     """Whether the provider's native API-key env var (e.g. OPENAI_API_KEY) is set.
@@ -77,6 +122,48 @@ def keyless_placeholder_api_key(provider: LLMProvider, api_base: Any, api_key: A
     if api_base and not api_key and not _provider_env_key_present(provider):
         return _KEYLESS_PLACEHOLDER_API_KEY
     return None
+
+
+def credential_ladder_exhausted(provider: LLMProvider, kwargs: dict[str, Any]) -> bool:
+    """Whether a credential was needed for ``provider`` and none was found.
+
+    For a caller that has somewhere else to ask once every rung has missed; the
+    ladder itself is unchanged and still the only thing consulted first.
+
+    Both halves of that sentence are load-bearing. **None was found** means
+    :func:`get_provider_kwargs` produced no credential for the candidate: no
+    organization-scoped key, no stored instance, nothing usable from a
+    ``config.yml`` entry (one declaring only ``provider_type``/``models`` leaves
+    nothing behind once the meta keys are stripped, and one carrying only
+    ``client_args`` leaves nothing that can authenticate a call, per
+    :func:`_kwargs_carry_a_credential`), and so no keyless placeholder either,
+    *and* the provider's own SDK environment variable is
+    unset, which any-llm would otherwise fall back to before raising. That env
+    check is the same one the keyless placeholder makes, so both agree on what
+    counts as a credential already in hand.
+
+    **Was needed** excludes the providers any-llm calls with no credential at
+    all, because an empty ``kwargs`` for one of those is not a missing key, and
+    reporting it as exhausted would hand a request that already works to a
+    caller that might serve it from somewhere else. A deployment pointing at its
+    own backends is served upstream of anything reading this. They come in two
+    shapes: those declaring no credential variable at all (the keyless local
+    backends ollama, llamacpp and llamafile, and Vertex AI, which authenticates
+    through the cloud SDK), and those declaring one any-llm does not insist on
+    (``_KEYLESS_SELF_HOSTED_PROVIDERS`` and ``_AMBIENT_CREDENTIAL_PROVIDERS``).
+
+    ``provider_credential_env_names`` returns ``None`` rather than ``()`` for a
+    provider it cannot inspect at all, and that stays exhausted: nothing is known
+    to serve the candidate, which is the same position an uncredentialed provider
+    with a declared variable is in.
+    """
+    if _kwargs_carry_a_credential(kwargs):
+        return False
+    if provider.value in _KEYLESS_SELF_HOSTED_PROVIDERS or provider.value in _AMBIENT_CREDENTIAL_PROVIDERS:
+        return False
+    if provider_credential_env_names(provider.value) == ():
+        return False
+    return not _provider_env_key_present(provider)
 
 
 def get_provider_kwargs(
@@ -269,9 +356,7 @@ def resolve_provider_selector(
     )
 
 
-def resolve_static_policy_target(
-    config: GatewayConfig, model_selector: str, user_id: str | None = None
-) -> str | None:
+def resolve_static_policy_target(config: GatewayConfig, model_selector: str, user_id: str | None = None) -> str | None:
     """The single target of a static routing policy, or ``None``.
 
     ``None`` for a name that is not a policy, for a dynamic policy (whose target

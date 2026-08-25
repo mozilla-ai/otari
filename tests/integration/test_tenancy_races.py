@@ -10,6 +10,7 @@ with separate sessions rather than asserting the branch in isolation.
 import asyncio
 import uuid
 from collections.abc import Callable
+from datetime import UTC, datetime, timedelta
 
 import pytest
 from sqlalchemy import select
@@ -38,6 +39,7 @@ from gateway.repositories.tenancy import (
     WorkspaceMemberRepository,
     WorkspaceRepository,
 )
+from gateway.services.password_service import verify_password_async
 from gateway.services.tenancy import OrganizationService, WorkspaceService, user_service
 from gateway.services.tenancy.errors import (
     EmailAlreadyInUseError,
@@ -47,6 +49,8 @@ from gateway.services.tenancy.errors import (
     LastWorkspaceError,
     MembershipUpdateError,
     OrganizationMemberAlreadyExistsError,
+    ResetTokenInvalidError,
+    VerificationTokenInvalidError,
     WorkspaceAlreadyExistsError,
     WorkspaceMemberAlreadyExistsError,
 )
@@ -54,6 +58,7 @@ from gateway.services.tenancy.provisioning_service import (
     BOOTSTRAP_IDENTITY_KEY,
     ensure_bootstrap_identity,
 )
+from gateway.services.tenancy.tokens import generate_token, hash_token
 from gateway.services.tenancy.user_service import set_password
 from gateway.services.tenancy.workspace_activation_service import (
     ACTIVATION_KEY_NAME,
@@ -583,6 +588,93 @@ async def test_concurrent_accept_and_revoke_of_one_invitation_produce_one_consis
         ("accepted", "active"),
         ("cancelled", "suspended"),
     }
+
+
+async def test_concurrent_verifications_of_one_token_verify_exactly_once(
+    async_db: AsyncSession,
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """verify_email's token lookup is check-then-act too, same shape as accept_invitation.
+
+    Without locking before the re-check, two concurrent verifications of the
+    same token both read a live, unexpired hash (nothing has committed yet to
+    see) and both proceed, so the loser's write silently re-runs the same
+    columns the winner already cleared instead of raising the mapped
+    ``VerificationTokenInvalidError`` every other double-use path answers with.
+    """
+    organization, _ = await _seed_owner(async_db)
+    users = UserRepository(async_db)
+    identity = await users.create_local_identity(
+        full_name="Vera", active_organization_id=organization.id, email="vera@example.com"
+    )
+    identity_id = identity.id
+    token = generate_token()
+    identity.email_verification_token_hash = hash_token(token)
+    identity.email_verification_token_expires_at = datetime.now(UTC) + timedelta(hours=1)
+    await async_db.commit()
+
+    async def attempt(session: AsyncSession) -> object:
+        return await user_service.verify_email(session, token=token)
+
+    outcomes = await _race(sessions, attempt)
+
+    verified = [outcome for outcome in outcomes if not isinstance(outcome, Exception)]
+    invalid = [outcome for outcome in outcomes if isinstance(outcome, VerificationTokenInvalidError)]
+    assert len(verified) == 1
+    assert len(invalid) == _RACERS - 1
+
+    async_db.expire_all()
+    row = await users.get(identity_id)
+    assert row is not None
+    assert row.email_verified_at is not None
+    assert row.email_verification_token_hash is None
+    assert row.email_verification_token_expires_at is None
+
+
+async def test_concurrent_resets_of_one_token_change_the_password_exactly_once(
+    async_db: AsyncSession,
+    sessions: async_sessionmaker[AsyncSession],
+) -> None:
+    """reset_password's token lookup races the same way, with a worse failure mode.
+
+    Under READ COMMITTED, two concurrent resets of the same token both read a
+    live, unexpired hash and both proceed, each hashing a different new
+    password and each receiving success: the last write wins, and the caller
+    who reset it first has no way to know their password did not stick.
+    """
+    organization, _ = await _seed_owner(async_db)
+    users = UserRepository(async_db)
+    identity = await users.create_local_identity(
+        full_name="Rex", active_organization_id=organization.id, email="rex@example.com"
+    )
+    identity_id = identity.id
+    token = generate_token()
+    identity.password_reset_token_hash = hash_token(token)
+    identity.password_reset_token_expires_at = datetime.now(UTC) + timedelta(hours=1)
+    await async_db.commit()
+
+    async def run_one(index: int) -> object:
+        async with sessions() as session:
+            try:
+                await user_service.reset_password(session, token=token, new_password=f"racer-password-{index}")
+                return index
+            except Exception as exc:  # noqa: BLE001 - the outcome is the assertion
+                return exc
+
+    outcomes = list(await asyncio.gather(*(run_one(index) for index in range(_RACERS))))
+
+    won = [outcome for outcome in outcomes if isinstance(outcome, int)]
+    invalid = [outcome for outcome in outcomes if isinstance(outcome, ResetTokenInvalidError)]
+    assert len(won) == 1
+    assert len(invalid) == _RACERS - 1
+
+    async_db.expire_all()
+    row = await users.get(identity_id)
+    assert row is not None
+    assert row.password_reset_token_hash is None
+    assert row.password_reset_token_expires_at is None
+    assert row.hashed_password is not None
+    assert await verify_password_async(f"racer-password-{won[0]}", row.hashed_password)
 
 
 async def test_concurrent_first_issuance_leaves_one_setup_key(

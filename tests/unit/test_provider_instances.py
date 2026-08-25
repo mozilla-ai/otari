@@ -14,7 +14,9 @@ from gateway.core.config import GatewayConfig, ModelCapabilityConfig, provider_c
 from gateway.log_config import logger as gateway_logger
 from gateway.services.model_capabilities import resolve_capabilities
 from gateway.services.provider_kwargs import (
+    _AMBIENT_CREDENTIAL_PROVIDERS,
     _KEYLESS_PLACEHOLDER_API_KEY,
+    _KEYLESS_SELF_HOSTED_PROVIDERS,
     get_provider_kwargs,
     keyless_placeholder_api_key,
     normalize_pricing_key,
@@ -226,6 +228,61 @@ def test_credential_env_names_empty_for_keyless_backends() -> None:
 def test_credential_env_names_none_for_unknown_provider() -> None:
     # Not "keyless": unknowable, which callers treat as no basis for a warning.
     assert provider_credential_env_names("not-a-real-provider") is None
+
+
+# Providers that override `_verify_and_set_api_key` and still genuinely require a
+# credential, so `credential_ladder_exhausted` is right to treat them as keyed.
+# gemini raises `MissingApiKeyError` when neither GEMINI_API_KEY nor
+# GOOGLE_API_KEY resolves; azure and azureopenai tolerate a missing key only for
+# an Entra ID deployment, which still needs an endpoint from config and so never
+# reaches the port with empty kwargs.
+_KEYED_DESPITE_OVERRIDING = frozenset({"gemini", "azure", "azureopenai"})
+
+
+def test_the_uncredentialed_provider_roster_has_not_drifted() -> None:
+    """Pin which providers any-llm calls without a credential otari can see.
+
+    `credential_ladder_exhausted` decides whether a candidate that resolved no
+    credential is genuinely unserved, and a wrong answer is not visible from
+    otari: on a build with an overlay bound to `ModelProviderPort` it silently
+    routes a working self-hosted or IAM-authenticated request to somebody else's
+    fleet. `provider_credential_env_names` cannot answer it, because it sees the
+    *declaration* and these providers declare a variable they do not insist on,
+    so the two sets are written out by hand in `provider_kwargs.py`.
+
+    This is the drift guard for both directions, which is why it asserts on the
+    whole roster rather than only on the names already listed. A provider that
+    stops overriding fails here (it now demands a key, and treating it as keyless
+    would break it); more importantly, an any-llm release that adds a *new*
+    keyless provider also fails here, instead of leaving a request that works
+    today quietly claimed by a fleet. Either way the fix is a human deciding
+    which set the name belongs in.
+
+    It reads a private method because that is where the fact lives: the public
+    surface reports the declaration, and the declaration is what misleads.
+    """
+    overriding = {
+        provider.value
+        for provider in LLMProvider
+        if AnyLLM.get_provider_class(provider.value)._verify_and_set_api_key is not AnyLLM._verify_and_set_api_key
+    }
+    # The `()`-declaring providers are handled by `provider_credential_env_names`
+    # itself and need no hand-written entry, so they are expected here but not in
+    # either set.
+    declares_nothing = {name for name in overriding if provider_credential_env_names(name) == ()}
+    classified = _KEYLESS_SELF_HOSTED_PROVIDERS | _AMBIENT_CREDENTIAL_PROVIDERS | _KEYED_DESPITE_OVERRIDING
+
+    assert overriding - declares_nothing == classified, (
+        "any-llm's uncredentialed-provider roster changed. Every provider overriding "
+        "_verify_and_set_api_key must be classified in provider_kwargs.py "
+        "(_KEYLESS_SELF_HOSTED_PROVIDERS / _AMBIENT_CREDENTIAL_PROVIDERS) or here "
+        "(_KEYED_DESPITE_OVERRIDING). Unclassified names are treated as keyed, which is "
+        "the direction that hands a working request to a hosted fleet."
+    )
+    # And nothing in either set has quietly started demanding a key.
+    for name in _KEYLESS_SELF_HOSTED_PROVIDERS | _AMBIENT_CREDENTIAL_PROVIDERS:
+        assert provider_credential_env_names(name), f"{name} no longer declares a credential variable"
+        assert name in overriding, f"any-llm now unconditionally requires a credential for {name}"
 
 
 def test_validate_rejects_instance_name_with_separator() -> None:
