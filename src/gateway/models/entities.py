@@ -254,18 +254,20 @@ class ModelAlias(Base):
     meaning, but writable through the API. Pricing, budgets, and usage all key
     on the resolved target, so nothing here is billed against ``name``.
 
-    ``user_id`` is the scope. ``NULL`` means the alias is global (every caller
-    sees it), which is what every row predating this column is. A non-null
-    ``user_id`` scopes the alias to that user, so two users can point the same
-    display name at different models, and a user-scoped row shadows a global one
-    of the same name for that user only.
+    There are two scopes, and they are independent. ``workspace_id`` says which
+    tenant owns the alias: it resolves only for requests in that workspace, so
+    two workspaces can each point ``fast`` somewhere different. Within a
+    workspace, ``user_id`` narrows it further: ``NULL`` means every caller in
+    that workspace sees it, which is what every row predating the column is, and
+    a non-null ``user_id`` scopes it to that user, shadowing the workspace-wide
+    row of the same name for them alone.
 
     Uniqueness needs two constraints rather than one because SQLite and
     PostgreSQL both treat NULLs as distinct in a unique index: the composite
-    constraint keeps one row per (name, user), and the partial index keeps one
-    global row per name (which the composite one cannot, its ``user_id`` being
-    NULL). The surrogate ``id`` exists only because the natural key contains a
-    nullable column, which a primary key cannot.
+    constraint keeps one row per (workspace, name, user), and the partial index
+    keeps one workspace-wide row per (workspace, name), which the composite one
+    cannot, its ``user_id`` being NULL. The surrogate ``id`` exists only because
+    the natural key contains a nullable column, which a primary key cannot.
     """
 
     __tablename__ = "model_aliases"
@@ -327,11 +329,12 @@ class RoutingPolicy(Base):
     so a row that predates a schema change surfaces as a startup warning rather
     than as a request-time crash.
 
-    Scoping mirrors :class:`ModelAlias` exactly, including the two-constraint
-    uniqueness (SQLite and PostgreSQL both treat NULLs as distinct in a unique
-    index, so the composite constraint cannot keep one *global* row per name).
-    A policy and an alias are the same concept at different complexities, so it
-    would be strange for their scoping rules to differ.
+    Scoping mirrors :class:`ModelAlias` exactly, workspace included, and so does
+    the two-constraint uniqueness (SQLite and PostgreSQL both treat NULLs as
+    distinct in a unique index, so the composite constraint cannot keep one
+    *workspace-wide* row per name). A policy and an alias are the same concept at
+    different complexities, so it would be strange for their scoping rules to
+    differ.
     """
 
     __tablename__ = "routing_policies"
