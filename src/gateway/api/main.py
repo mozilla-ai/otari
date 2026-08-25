@@ -1,5 +1,6 @@
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI
 
+from gateway.api.deps import require_capability
 from gateway.api.routes import (
     agent_telemetry,
     aliases,
@@ -8,6 +9,7 @@ from gateway.api.routes import (
     auth_password_reset,
     auth_session,
     auth_signup,
+    auth_webauthn,
     batches,
     bootstrap,
     budgets,
@@ -20,10 +22,12 @@ from gateway.api.routes import (
     invitations,
     keys,
     mail,
+    maintenance_mode,
     messages,
     models,
     moderations,
     org_provider_keys,
+    organization_guardrails,
     organization_pricing,
     organizations,
     otlp,
@@ -45,12 +49,50 @@ from gateway.api.routes import (
     workspace_code_execution_policy,
     workspace_mcp_servers,
     workspace_member_budget_policies,
+    workspace_web_search,
     workspaces,
 )
+from gateway.container import Container
 from gateway.core.config import GatewayConfig
 
 
 def register_routers(app: FastAPI, config: GatewayConfig) -> None:
+    """Mount Otari's own routers, then whatever the bootstrap contributed."""
+    _register_core_routers(app, config)
+    _register_contributed_routers(app)
+    if config.is_hybrid_mode:
+        # Last, and after the contributed routers on purpose. These are
+        # ``{path:path}`` catch-alls over whole management prefixes
+        # (/v1/organizations, /v1/usage, ...), and FastAPI serves the first
+        # route that matches, so registering them earlier would swallow an
+        # overlay route under any of those prefixes and answer "manage this via
+        # the platform UI" instead. They are a fallback for a path nothing else
+        # serves, so they are mounted like one.
+        app.include_router(hybrid_mode.router)
+
+
+def _register_contributed_routers(app: FastAPI) -> None:
+    """Mount the routers this build's bootstrap contributed, each behind its gate.
+
+    The additive half of the extension seam: an overlay records a router on the
+    container and Otari mounts it, gated on the capability it names. Mounted in
+    both modes, because an overlay may extend the data plane as readily as the
+    management plane. With no bootstrap configured there are none, so this is a
+    no-op for the plain build.
+
+    Mounted after Otari's own routers and before the hybrid stubs, so a
+    contribution cannot take a path the core already serves and the hybrid
+    stubs' catch-alls cannot take one the contribution serves.
+    """
+    container: Container = app.state.container
+    for contribution in container.router_contributions():
+        app.include_router(
+            contribution.router,
+            dependencies=[Depends(require_capability(contribution.capability))],
+        )
+
+
+def _register_core_routers(app: FastAPI, config: GatewayConfig) -> None:
     app.include_router(chat.router)
     app.include_router(health.router)
     # Registered in both modes on purpose: the deployment bootstrap is how a
@@ -63,13 +105,15 @@ def register_routers(app: FastAPI, config: GatewayConfig) -> None:
     app.include_router(responses.router)
 
     if config.is_hybrid_mode:
-        app.include_router(hybrid_mode.router)
+        # The hybrid stub router is mounted by register_routers, after the
+        # contributed routers; see the note there.
         return  # Remaining routers (including batches) are standalone-mode only
 
     app.include_router(auth_session.router)
     app.include_router(auth_password.router)
     app.include_router(auth_signup.router)
     app.include_router(auth_password_reset.router)
+    app.include_router(auth_webauthn.router)
     app.include_router(embeddings.router)
     app.include_router(images.router)
     app.include_router(audio.router)
@@ -84,12 +128,14 @@ def register_routers(app: FastAPI, config: GatewayConfig) -> None:
     app.include_router(users.router)
     app.include_router(organizations.router)
     app.include_router(organization_pricing.router)
+    app.include_router(organization_guardrails.router)
     app.include_router(workspaces.router)
     app.include_router(invitations.router)
     app.include_router(workspace_member_budget_policies.router)
     app.include_router(workspace_activation.router)
     app.include_router(workspace_mcp_servers.router)
     app.include_router(workspace_code_execution_policy.router)
+    app.include_router(workspace_web_search.router)
     app.include_router(org_provider_keys.org_router)
     app.include_router(org_provider_keys.workspace_router)
     app.include_router(budgets.router)
@@ -103,6 +149,7 @@ def register_routers(app: FastAPI, config: GatewayConfig) -> None:
     app.include_router(otlp.router)
     app.include_router(settings.router)
     app.include_router(mail.router)
+    app.include_router(maintenance_mode.router)
     app.include_router(tool_settings.router)
     app.include_router(search_tools.router)
     app.include_router(tools.router)

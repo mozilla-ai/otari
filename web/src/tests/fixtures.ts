@@ -12,6 +12,7 @@ import type {
   DeploymentBootstrap,
   Organization,
   OrganizationContext,
+  OrganizationGuardrail,
   OrganizationMember,
   PricingResponse,
   ScopedBudget,
@@ -23,6 +24,7 @@ import type {
   WorkspaceBudgetDefault,
   WorkspaceCodeExecutionPolicy,
   WorkspaceMember,
+  WorkspaceWebSearchConfig,
 } from "@/client"
 
 export function usageTotals(overrides: Partial<UsageTotals> = {}): UsageTotals {
@@ -107,6 +109,12 @@ export function bootstrap(
     // describes by default; a test about the password login overrides it.
     sign_in_methods: ["master_key"],
     management_url: null,
+    // Not frozen, because a fixture describes a deployment somebody can sign
+    // in to; the maintenance-mode tests override it.
+    maintenance_mode: false,
+    // Off by default, matching a deployment that has not set public_base_url:
+    // the passkey tests turn it on rather than every other test turning it off.
+    passkeys_ready: false,
     mail_ready: false,
     ...overrides,
   }
@@ -336,6 +344,29 @@ export function workspaceActivation(
   }
 }
 
+export function organizationGuardrail(
+  overrides: Partial<OrganizationGuardrail> = {},
+): OrganizationGuardrail {
+  return {
+    id: "55555555-5555-5555-5555-555555555555",
+    organization_id: "11111111-1111-1111-1111-111111111111",
+    profile: "prompt-injection",
+    // The ordinary entry: no endpoint of its own, so it is sent to the
+    // deployment's guardrails URL, and no credential to authenticate with.
+    url: null,
+    has_credential: false,
+    mode: "monitor",
+    on_unavailable: "block",
+    validate_kwargs: null,
+    enabled: true,
+    applies_to_all_workspaces: false,
+    workspace_ids: [],
+    created_at: "2026-08-24T00:00:00+00:00",
+    updated_at: "2026-08-24T00:00:00+00:00",
+    ...overrides,
+  }
+}
+
 export function workspaceCodeExecutionPolicy(
   overrides: Partial<WorkspaceCodeExecutionPolicy> = {},
 ): WorkspaceCodeExecutionPolicy {
@@ -349,6 +380,27 @@ export function workspaceCodeExecutionPolicy(
     default_purpose_hint: null,
     max_iterations: null,
     exec_timeout_s: null,
+    created_at: null,
+    updated_at: null,
+    ...overrides,
+  }
+}
+
+export function workspaceWebSearchConfig(
+  overrides: Partial<WorkspaceWebSearchConfig> = {},
+): WorkspaceWebSearchConfig {
+  return {
+    workspace_id: "44444444-4444-4444-4444-444444444444",
+    // The zero-rows state, which is what a workspace has until somebody sets
+    // one: nothing configured, nothing narrowed.
+    configured: false,
+    web_search_configured: true,
+    enabled: true,
+    max_results: null,
+    purpose_hint: null,
+    allowed_domains: null,
+    blocked_domains: null,
+    provider_options: null,
     created_at: null,
     updated_at: null,
     ...overrides,

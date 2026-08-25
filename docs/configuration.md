@@ -62,7 +62,10 @@ pricing:
 | `host` | string | `0.0.0.0` | Server bind host |
 | `port` | int | `8000` | Server bind port |
 | `master_key` | string | none | Master key for management endpoints |
-| `public_base_url` | string | none | This deployment's own externally-reachable URL, no trailing slash. Needed to put an absolute link in outgoing email; see [Mail](#mail). |
+| `public_base_url` | string | none | This deployment's own externally-reachable URL, no trailing slash. Needed to put an absolute link in outgoing email (see [Mail](#mail)), and to derive the relying-party ID passkeys are bound to (see [Access control](access-control.md#passkeys)). |
+| `webauthn_rp_id` | string | host of `public_base_url` | The domain passkeys are bound to: bare, with no scheme, port or path. An override rather than an alternative to `public_base_url`, which is still needed as the origin a ceremony runs from. Changing it orphans every passkey already registered. |
+| `webauthn_rp_name` | string | `otari` | The name an authenticator shows while a passkey is created, and files it under. Cosmetic; nothing verifies it. |
+| `webauthn_allowed_origins` | list | `[public_base_url]` | Origins a ceremony may run from, each with a scheme. Set only when several origins serve one dashboard under one relying-party ID; every entry must be that ID or a subdomain of it, checked at startup. |
 | `mail_transport` | string | `auto` | Which transport delivers outgoing mail: `auto`, `smtp`, `console`, or `none`. See [Mail](#mail). |
 | `smtp_host` | string | none | SMTP server host for outgoing mail. Unset disables mail entirely under the default `auto` transport. |
 | `smtp_port` | int | `587` | SMTP server port |
@@ -184,6 +187,53 @@ Note the `require_pricing` interaction: it defaults to `true` (fail-closed), so 
 | `OTARI_PORT` | Server bind port |
 | `OTARI_AUTO_MIGRATE` | Auto-run migrations on startup |
 | `OTARI_BOOTSTRAP_API_KEY` | Create first-use API key |
+| `OTARI_BOOTSTRAP` | Composition-root bootstrap for a build that layers its own adapters onto Otari, as a `module:callable` selector. Unrelated to `OTARI_BOOTSTRAP_API_KEY`; see [Extending Otari with a bootstrap module](#extending-otari-with-a-bootstrap-module). |
+
+### Extending Otari with a bootstrap module
+
+Most deployments never set this. It exists for a build that layers its own
+implementations onto Otari (an in-process **overlay**, in the vocabulary of
+[ARCHITECTURE.md](../ARCHITECTURE.md)) without forking or editing Otari's source.
+
+`OTARI_BOOTSTRAP=my_overlay.bootstrap:register` names a module and a callable in
+it. Otari imports the module once at startup, after binding its own default
+implementation for every port, and calls it with the composition-root container.
+The callable can rebind a port to its own implementation and contribute routers
+of its own, each mounted behind the capability it names:
+
+```python
+from gateway.container import Container, RouterContribution
+from gateway.ports.billing_port import BillingPort
+
+
+def register(container: Container) -> None:
+    container.bind(BillingPort, _wallet_billing_adapter)
+    container.contribute_router(RouterContribution(capability="billing", router=wallet_router))
+```
+
+Leave it unset and nothing is imported: Otari's own defaults stand and the
+gateway behaves exactly as it does today. Set it to something that cannot be
+imported and the gateway refuses to start, rather than quietly running the plain
+build, since a deployment that meant to load an overlay should not serve traffic
+without it. The module has to be importable by the gateway process, so install it
+into the same environment or put it on `PYTHONPATH`.
+
+A contributed router is mounted behind its capability gate and nothing else.
+That gate answers "is this deployment licensed for this surface", which names no
+caller, so **authentication is the contribution's own job**: declare the
+credential each route needs on the route, the way Otari's own routers do. Otari
+mounts no router-level default, because the right answer differs per route, a
+contributed route may be deliberately public, and the header check needs a
+database session a hybrid gateway does not have.
+
+Treat this like a credential rather than a feature flag: naming a module here
+runs that module's code inside the gateway process at startup. It is read only
+from the environment or `config.yml`, never from the dashboard, so whoever can
+set it already owns the process; keep it under the same control as
+`OTARI_SECRET_KEY` and `OTARI_MASTER_KEY`.
+
+The interfaces this exposes are not frozen while Otari is pre-1.0. Pin a released
+tag and expect the shapes to move.
 
 ### Mail
 

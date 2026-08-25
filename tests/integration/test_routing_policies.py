@@ -1277,7 +1277,9 @@ def test_a_blocking_policy_guardrail_refuses_the_request(guarded_client: TestCli
     _create_user(guarded_client)
     provider = AsyncMock(return_value=_completion("gpt-5-mini"))
 
-    async def flagged(guardrails: Any, input_text: str, *, default_url: str | None) -> Any:
+    async def flagged(
+        guardrails: Any, input_text: str, *, default_url: str | None, credentials: Any = None
+    ) -> Any:
         from gateway.services.guardrails import GuardrailResult, GuardrailVerdict
 
         return GuardrailVerdict(

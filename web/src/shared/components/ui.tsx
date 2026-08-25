@@ -747,6 +747,38 @@ export function ConfirmButton({
   )
 }
 
+/** The bare text/password input the feature cards use where a HeroUI field is too much. */
+export const INPUT_CLASS =
+  "rounded-md border border-border bg-surface px-2 py-1 text-sm focus:border-accent focus:outline-none disabled:opacity-50"
+
+/**
+ * A small status pill for a row that has something to say about itself.
+ *
+ * Two tones and no more: `muted` states a fact about the row (which provider,
+ * which scope, whether a credential is set), `warn` says the row is not doing
+ * what its neighbours are. Lives here rather than in a feature folder because
+ * the Tools cards each grew an identical copy.
+ */
+export function Badge({
+  tone,
+  children,
+}: {
+  tone: "muted" | "warn"
+  children: string
+}) {
+  const className =
+    tone === "warn"
+      ? "border-warning bg-warning-subtle text-warning"
+      : "border-border bg-surface text-muted"
+  return (
+    <span
+      className={`rounded-full border px-2 py-0.5 text-xs font-medium ${className}`}
+    >
+      {children}
+    </span>
+  )
+}
+
 const FILTER_SELECT_CLASS =
   "rounded-lg border border-border bg-surface-alt px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
 

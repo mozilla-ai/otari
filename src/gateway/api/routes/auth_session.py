@@ -28,6 +28,11 @@ API credential. So:
 accepting, so the login page asks for the credential that will work rather than
 discovering it from a 403.
 
+**Maintenance mode freezes this endpoint and nothing else.** While it is on,
+every credential here is refused with 503 so nobody starts a session during a
+redeploy, but a session already minted keeps working and the management API and
+the data plane are untouched. See ``services/maintenance_mode_service.py``.
+
 #651 and #652 add further credentials (OAuth, WebAuthn). Both are redirect or
 ceremony flows with more than one round trip, so they get their own endpoints
 rather than another field here; what they share with this one is the session
@@ -57,6 +62,7 @@ from gateway.services.dashboard_session_service import (
     request_is_https,
     revoke_dashboard_session,
 )
+from gateway.services.maintenance_mode_service import is_maintenance_mode
 from gateway.services.password_service import MAX_PASSWORD_BYTES
 from gateway.services.tenancy.email_address import MAX_EMAIL_LENGTH
 from gateway.services.tenancy.errors import EmailNotVerifiedError, InvalidCredentialsError
@@ -68,6 +74,11 @@ router = APIRouter(prefix="/v1/auth/session", tags=["auth"])
 MASTER_KEY_SIGN_IN_RETIRED = (
     "Master-key sign-in is retired on this deployment: it has been claimed with a password. "
     "Sign in with your email and password. The master key still authenticates the management API."
+)
+
+MAINTENANCE_MODE_REFUSAL = (
+    "This gateway is in maintenance mode and is not starting new dashboard sessions right now. "
+    "Try again shortly. The management API is unaffected and still accepts the master key."
 )
 
 
@@ -271,7 +282,29 @@ async def create_session(
     one is burned against a stand-in hash even for an address nobody holds)
     before the limit is consulted, so a 429 costs the same as a 401. A gateway
     exposed to the internet should rate-limit this path at the proxy as well.
+
+    The maintenance-mode check runs before either credential is verified, and
+    refuses both. Before, because a frozen deployment should not spend a bcrypt
+    verification per attempt and the refusal is not about the credential
+    anyway; both, because the way back out is the master key against
+    ``PATCH /v1/settings/maintenance-mode`` through the header, which never
+    passes through this door. That is what keeps the way back out off the frozen
+    path, and it is why no identity needs an exemption here; an operator who no
+    longer holds the master key recovers by setting ``OTARI_MASTER_KEY`` and
+    restarting, which is a restart rather than a click. It leaks nothing
+    either: ``GET /v1/bootstrap`` already publishes the same flag
+    unauthenticated, so the sign-in screen can render the right page.
     """
+    if await is_maintenance_mode(db):
+        # Deliberately not counted in ``AUTH_FAILURES``: nobody failed to
+        # authenticate here, because the check runs before either credential is
+        # verified and the gateway declined to try. Counting it would also put a
+        # maintenance window's worth of refusals into the metric an operator
+        # alerts on for credential attacks, and page them for their own redeploy.
+        raise HTTPException(
+            status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
+            detail=MAINTENANCE_MODE_REFUSAL,
+        )
     if body.master_key is not None:
         identity = await _sign_in_with_master_key(body.master_key, request, db, config)
     else:

@@ -16,6 +16,7 @@ import type {
   CreateBudgetRequest,
   CreateKeyRequest,
   CreateKeyResponse,
+  CreateOrganizationGuardrailRequest,
   CreateOrganizationMemberRequest,
   CreateOrganizationMemberResult,
   CreateOrganizationPricingOverride,
@@ -38,11 +39,15 @@ import type {
   KnownProvider,
   KnownProviderSummary,
   MailSettings,
+  MaintenanceMode,
   ModelListResponse,
   ModelMetadataResponse,
   OrganizationContext,
+  OrganizationGuardrail,
   OrganizationMember,
   OrganizationPricingOverride,
+  Passkey,
+  PasskeysResponse,
   PasswordResponse,
   PricingRefreshPreview,
   PricingResponse,
@@ -51,6 +56,7 @@ import type {
   RankCandidatesRequest,
   RankCandidatesResponse,
   ReencryptProviderCredentialsResult,
+  RenamePasskeyRequest,
   RequestPasswordResetResponse,
   ResendVerificationResponse,
   ResetPasswordRequest,
@@ -76,6 +82,7 @@ import type {
   ToolsResponse,
   UpdateBudgetRequest,
   UpdateKeyRequest,
+  UpdateOrganizationGuardrailRequest,
   UpdateOrganizationMemberRequest,
   UpdateOrganizationPricingOverride,
   UpdateOrganizationRequest,
@@ -88,6 +95,7 @@ import type {
   UpdateWorkspaceBudgetDefaultRequest,
   UpdateWorkspaceCodeExecutionPolicyRequest,
   UpdateWorkspaceRequest,
+  UpdateWorkspaceWebSearchConfigRequest,
   UsageBucket,
   UsageCount,
   UsageDeleteResult,
@@ -107,14 +115,19 @@ import type {
   WorkspaceCodeExecutionPolicy,
   WorkspaceMember,
   WorkspaceMemberRole,
+  WorkspaceWebSearchConfig,
 } from "@/client"
 import { ApiError, apiFetch, longRequestSignal } from "@/shared/api/client"
 import { isoAgo } from "@/shared/helpers/timeRange"
+import { createPasskey } from "@/shared/helpers/webauthn"
 
 const MODELS = "models"
 const PRICING = "pricing"
 const SETTINGS = "settings"
 const MAIL_SETTINGS = "mail-settings"
+const MAINTENANCE_MODE = "maintenance-mode"
+// One indexed single-row read, and only while the settings page is mounted.
+const MAINTENANCE_MODE_POLL_MS = 30_000
 const TOOL_SETTINGS = "tool-settings"
 const TOOLS = "tools"
 const SEARCH_TOOLS = "search-tools"
@@ -146,12 +159,17 @@ const ORGANIZATION_MEMBERS = "organization-members"
 // key is: the organization context is read on nearly every page, and a rate
 // edit should not make all of them refetch.
 const ORGANIZATION_PRICING = "organization-pricing"
+const ORGANIZATION_GUARDRAILS = "organization-guardrails"
 const WORKSPACES = "workspaces"
 // The first-request setup guide's state. Its own key rather than a child of
 // WORKSPACES: the guide polls while it is on screen, and nesting it would make
 // every one of those ticks invalidate (or be invalidated by) the workspace list
 // and its rosters.
 const ACTIVATION = "workspace-activation"
+// The signed-in identity's own passkeys. Its own key and not a child of any
+// organization key: a passkey belongs to a person, not to the organization they
+// happen to be acting in, and switching organizations does not change the list.
+const PASSKEYS = "passkeys"
 
 // How often an open tab asks whether the app it is running is still the one the
 // gateway serves. Cheap (a hash of one small file) and only while the tab is
@@ -620,6 +638,53 @@ export function useUpdateSettings() {
   })
 }
 
+/**
+ * Whether this deployment is refusing new dashboard sign-ins.
+ *
+ * Not read from the bootstrap, which carries the same flag: that one is fetched
+ * once per page load and cached for the life of the tab, which is right for the
+ * sign-in screen (it renders before there is anything to poll with) and wrong
+ * for the switch that changes it. This is the live value the card renders.
+ */
+export function useMaintenanceMode() {
+  return useQuery({
+    queryKey: [MAINTENANCE_MODE],
+    queryFn: () => apiFetch<MaintenanceMode>("/v1/settings/maintenance-mode"),
+    // Polled and refreshed on focus, unlike every other settings read here.
+    // A `staleTime` alone schedules nothing, and this app turns
+    // `refetchOnWindowFocus` off globally, so a card left open would keep
+    // showing whatever it fetched on mount. That is the one wrong answer this
+    // card can give: another operator or an API client can flip the freeze, and
+    // reporting a deployment open when it is frozen (or frozen when it is back)
+    // is worse than a moment's blank. Same treatment as `useDashboardBuild`,
+    // for the same reason: the value changes underneath the tab.
+    refetchInterval: MAINTENANCE_MODE_POLL_MS,
+    refetchOnWindowFocus: true,
+    staleTime: 0,
+  })
+}
+
+/**
+ * Freeze or unfreeze dashboard sign-ins.
+ *
+ * Nothing else is invalidated: the freeze changes no data any other page shows,
+ * and it deliberately does not touch the caller's own session, so the tab that
+ * flipped it keeps working either way.
+ */
+export function useSetMaintenanceMode() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (enabled: boolean) =>
+      apiFetch<MaintenanceMode>("/v1/settings/maintenance-mode", {
+        method: "PATCH",
+        body: JSON.stringify({ enabled }),
+      }),
+    onSuccess: (data) => {
+      queryClient.setQueryData([MAINTENANCE_MODE], data)
+    },
+  })
+}
+
 export function useRotateMasterKey() {
   return useMutation({
     mutationFn: () =>
@@ -659,6 +724,95 @@ export function useSetPassword() {
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [ORGANIZATION_MEMBERS] })
+    },
+  })
+}
+
+/**
+ * The signed-in identity's own passkeys, for the account page.
+ *
+ * Only ever the caller's own: the endpoint scopes to the session's identity, so
+ * there is nothing to pass and nothing to filter here.
+ *
+ * `NO_RETRY` because the two ways this fails are both settled answers rather
+ * than blips: a deployment with no relying party configured refuses with a 503
+ * naming the setting, and that will refuse again on a retry.
+ */
+export function usePasskeys() {
+  return useQuery({
+    queryKey: [PASSKEYS],
+    queryFn: () => apiFetch<PasskeysResponse>("/v1/auth/webauthn/credentials"),
+    staleTime: 60_000,
+    ...NO_RETRY,
+  })
+}
+
+/**
+ * Register a passkey: two calls with a browser ceremony between them.
+ *
+ * The whole ceremony is one mutation rather than two hooks and a component
+ * holding the options in state. The options are useless on their own, they
+ * expire, and the challenge they carry is spent by the second call, so exposing
+ * the halves separately would let a component keep something that is already
+ * void.
+ *
+ * A dismissed prompt throws `PasskeyCancelledError` out of `createPasskey`, and
+ * is deliberately left to reach the caller: it is not a failed registration and
+ * the card says nothing about it.
+ *
+ * Registering the first passkey is also what makes the gateway start publishing
+ * `passkey` in `sign_in_methods`. That correction is not made here: the
+ * deployment bootstrap is a context rather than a query, so it is reported by
+ * the card through `useOfferPasskeySignIn`, exactly as claiming a deployment is
+ * reported through `useRetireMasterKeySignIn` from `PasswordCard`.
+ */
+export function useRegisterPasskey() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: async (name: string | undefined) => {
+      const options = await apiFetch<Record<string, unknown>>(
+        "/v1/auth/webauthn/register/options",
+        { method: "POST" },
+      )
+      const credential = await createPasskey(
+        options as Parameters<typeof createPasskey>[0],
+      )
+      return apiFetch<Passkey>("/v1/auth/webauthn/register", {
+        method: "POST",
+        body: JSON.stringify({ credential, name }),
+      })
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [PASSKEYS] })
+    },
+  })
+}
+
+/** Relabel one of the caller's passkeys, which is all that is editable. */
+export function useRenamePasskey() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ id, name }: { id: string; name: string }) =>
+      apiFetch<Passkey>(`/v1/auth/webauthn/credentials/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name } satisfies RenamePasskeyRequest),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [PASSKEYS] })
+    },
+  })
+}
+
+/** Remove one of the caller's passkeys. */
+export function useDeletePasskey() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (id: string) =>
+      apiFetch<void>(`/v1/auth/webauthn/credentials/${id}`, {
+        method: "DELETE",
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({ queryKey: [PASSKEYS] })
     },
   })
 }
@@ -2135,6 +2289,74 @@ export function useDeleteWorkspaceBudgetDefault() {
   })
 }
 
+// The guardrails the caller's organization mandates over its workspaces. A
+// small hand-edited list rather than a growing table, but paged through like
+// the rest of the tenancy surface so a backend that ignored `skip` cannot spin
+// this either.
+export function useOrganizationGuardrails(enabled = true) {
+  return useQuery({
+    queryKey: [ORGANIZATION_GUARDRAILS],
+    queryFn: () =>
+      fetchAllPaged<OrganizationGuardrail>("/v1/organizations/me/guardrails"),
+    staleTime: 60_000,
+    enabled,
+  })
+}
+
+export function useCreateOrganizationGuardrail() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: CreateOrganizationGuardrailRequest) =>
+      apiFetch<OrganizationGuardrail>("/v1/organizations/me/guardrails", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: [ORGANIZATION_GUARDRAILS],
+      })
+    },
+  })
+}
+
+export function useUpdateOrganizationGuardrail() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      guardrailId,
+      body,
+    }: {
+      guardrailId: string
+      body: UpdateOrganizationGuardrailRequest
+    }) =>
+      apiFetch<OrganizationGuardrail>(
+        `/v1/organizations/me/guardrails/${encodeURIComponent(guardrailId)}`,
+        { method: "PATCH", body: JSON.stringify(body) },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: [ORGANIZATION_GUARDRAILS],
+      })
+    },
+  })
+}
+
+export function useDeleteOrganizationGuardrail() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (guardrailId: string) =>
+      apiFetch<{ message: string }>(
+        `/v1/organizations/me/guardrails/${encodeURIComponent(guardrailId)}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: () => {
+      void queryClient.invalidateQueries({
+        queryKey: [ORGANIZATION_GUARDRAILS],
+      })
+    },
+  })
+}
+
 // A workspace's code-execution policy over the deployment-wide sandbox. One
 // object or none, so it is a plain read rather than a paged list, and it is
 // nested under the workspaces key for the same reason the budget defaults are.
@@ -2186,6 +2408,63 @@ export function useClearWorkspaceCodeExecutionPolicy() {
     onSuccess: (_data, { workspaceId }) => {
       void queryClient.invalidateQueries({
         queryKey: [WORKSPACES, workspaceId, "code-execution-policy"],
+      })
+    },
+  })
+}
+
+// A workspace's web-search configuration over the deployment-wide backend. One
+// object or none, so it is a plain read rather than a paged list, and it is
+// nested under the workspaces key for the same reason the code-execution policy
+// next door is.
+export function useWorkspaceWebSearchConfig(workspaceId: string | null) {
+  return useQuery({
+    queryKey: [WORKSPACES, workspaceId, "web-search"],
+    queryFn: () =>
+      apiFetch<WorkspaceWebSearchConfig>(
+        `/v1/workspaces/${encodeURIComponent(workspaceId as string)}/web-search`,
+      ),
+    enabled: workspaceId !== null,
+    staleTime: 60_000,
+  })
+}
+
+export function useSetWorkspaceWebSearchConfig() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      workspaceId,
+      body,
+    }: {
+      workspaceId: string
+      body: UpdateWorkspaceWebSearchConfigRequest
+    }) =>
+      apiFetch<WorkspaceWebSearchConfig>(
+        `/v1/workspaces/${encodeURIComponent(workspaceId)}/web-search`,
+        { method: "PUT", body: JSON.stringify(body) },
+      ),
+    onSuccess: (_data, { workspaceId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: [WORKSPACES, workspaceId, "web-search"],
+      })
+    },
+  })
+}
+
+// Drops the row, which returns the workspace to the deployment's own behavior.
+// Not the same as saving `enabled: true`: that is a stored decision not to
+// narrow, while this is no decision at all.
+export function useClearWorkspaceWebSearchConfig() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({ workspaceId }: { workspaceId: string }) =>
+      apiFetch<WorkspaceWebSearchConfig>(
+        `/v1/workspaces/${encodeURIComponent(workspaceId)}/web-search`,
+        { method: "DELETE" },
+      ),
+    onSuccess: (_data, { workspaceId }) => {
+      void queryClient.invalidateQueries({
+        queryKey: [WORKSPACES, workspaceId, "web-search"],
       })
     },
   })

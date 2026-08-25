@@ -423,6 +423,18 @@ export interface paths {
          *     one is burned against a stand-in hash even for an address nobody holds)
          *     before the limit is consulted, so a 429 costs the same as a 401. A gateway
          *     exposed to the internet should rate-limit this path at the proxy as well.
+         *
+         *     The maintenance-mode check runs before either credential is verified, and
+         *     refuses both. Before, because a frozen deployment should not spend a bcrypt
+         *     verification per attempt and the refusal is not about the credential
+         *     anyway; both, because the way back out is the master key against
+         *     ``PATCH /v1/settings/maintenance-mode`` through the header, which never
+         *     passes through this door. That is what keeps the way back out off the frozen
+         *     path, and it is why no identity needs an exemption here; an operator who no
+         *     longer holds the master key recovers by setting ``OTARI_MASTER_KEY`` and
+         *     restarting, which is a restart rather than a click. It leaks nothing
+         *     either: ``GET /v1/bootstrap`` already publishes the same flag
+         *     unauthenticated, so the sign-in screen can render the right page.
          */
         post: operations["create_session_v1_auth_session_post"];
         /**
@@ -479,6 +491,170 @@ export interface paths {
          * @description Confirm an address from its verification link, lifting the sign-in gate.
          */
         post: operations["verify_email_route_v1_auth_verify_email_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/webauthn/authenticate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Authenticate Passkey
+         * @description Verify an assertion and set the HttpOnly session cookie.
+         *
+         *     The session is bound to the identity whose passkey signed, exactly as a
+         *     password sign-in binds one to the identity that authenticated, so every
+         *     request it later authenticates resolves the same caller.
+         *
+         *     A refusal is counted like the other sign-in failures
+         *     (``record_auth_failure``) and answered as a 401 by the tenancy error
+         *     handler. Unlike the password path there is no separate post-failure
+         *     throttle: this route is throttled unconditionally on the way in, because
+         *     unlike a password there is no legitimate caller here whose correct
+         *     credential must never be blocked (a passkey ceremony is one round trip a
+         *     browser drives, not something a person retries by hand).
+         *
+         *     **Maintenance mode freezes this the way it freezes the password sign-in.**
+         *     The freeze is on starting a session, not on a credential, so a passkey has
+         *     to answer to it or the switch is bypassable by anybody holding one, which is
+         *     the whole population it exists to hold off during a redeploy. Refused before
+         *     the assertion is verified, so a frozen deployment does no crypto and counts
+         *     no auth failure: nobody failed to authenticate, the gateway declined to try.
+         */
+        post: operations["authenticate_passkey_v1_auth_webauthn_authenticate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/webauthn/authenticate/options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Authentication Options
+         * @description Start a passkey sign-in. Public, throttled, and names no credentials.
+         *
+         *     The options carry no ``allowCredentials``, so this publishes nothing about
+         *     who holds a passkey here; see ``webauthn_service.begin_authentication``.
+         */
+        post: operations["authentication_options_v1_auth_webauthn_authenticate_options_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/webauthn/credentials": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Passkeys
+         * @description The caller's own passkeys. Never anybody else's, and never key material.
+         *
+         *     Deliberately *not* behind ``require_passkey_support``, and not filtered to
+         *     the current relying-party ID. A deployment that has changed or lost that ID
+         *     still holds the rows registered under the old one, and refusing to list them
+         *     would leave somebody looking at an empty page with no way to clean up and no
+         *     hint as to why. Each row carries ``is_usable`` instead, so an orphan is
+         *     visible, explained, and deletable.
+         */
+        get: operations["list_passkeys_v1_auth_webauthn_credentials_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/webauthn/credentials/{credential_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Passkey
+         * @description Remove one of the caller's passkeys.
+         *
+         *     Removing the last one is allowed: an email and password is still this
+         *     deployment's login, so this is not a lockout, and refusing would strand
+         *     whoever lost the authenticator.
+         */
+        delete: operations["delete_passkey_v1_auth_webauthn_credentials__credential_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Rename Passkey
+         * @description Relabel one of the caller's passkeys, which is all that is editable.
+         *
+         *     Ungated like the list, and for the same reason: naming an orphan before
+         *     deleting it is not something a lost relying-party ID should prevent.
+         */
+        patch: operations["rename_passkey_v1_auth_webauthn_credentials__credential_id__patch"];
+        trace?: never;
+    };
+    "/v1/auth/webauthn/register": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Register Passkey
+         * @description Verify a registration ceremony and store the passkey it produced.
+         */
+        post: operations["register_passkey_v1_auth_webauthn_register_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/auth/webauthn/register/options": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Registration Options
+         * @description Start registering a passkey for the signed-in identity.
+         *
+         *     A POST rather than a GET even though it reads like one: it issues a
+         *     server-side challenge and writes it, so it is not safe to repeat, cache, or
+         *     prefetch.
+         */
+        post: operations["registration_options_v1_auth_webauthn_register_options_post"];
         delete?: never;
         options?: never;
         head?: never;
@@ -1227,6 +1403,73 @@ export interface paths {
          * @description Rename the caller's active organization.
          */
         patch: operations["update_active_organization_v1_organizations_me_patch"];
+        trace?: never;
+    };
+    "/v1/organizations/me/guardrails": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Organization Guardrails
+         * @description List the guardrails the caller's organization mandates.
+         *
+         *     Organization owners and admins only, unlike the pricing overrides next door
+         *     that any member may read: these rows name the endpoints this gateway
+         *     connects to and say which of them carry a credential. A credential is never
+         *     returned, only whether one is set.
+         */
+        get: operations["list_organization_guardrails_v1_organizations_me_guardrails_get"];
+        put?: never;
+        /**
+         * Create Organization Guardrail
+         * @description Mandate a guardrail across the organization. Organization owners and admins only.
+         *
+         *     The guardrail runs on every request from the workspaces it is scoped to, in
+         *     addition to whatever the caller asked for, with the stricter of the two
+         *     settings applying to a profile both name. Set
+         *     ``applies_to_all_workspaces`` for it to cover workspaces created later;
+         *     otherwise a new workspace inherits nothing and the entry runs only in the
+         *     workspaces ``workspace_ids`` lists.
+         */
+        post: operations["create_organization_guardrail_v1_organizations_me_guardrails_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/organizations/me/guardrails/{guardrail_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Organization Guardrail
+         * @description Stop mandating a guardrail, discarding its credential and scope.
+         *
+         *     Organization owners and admins only. Use ``enabled: false`` instead to stop
+         *     it everywhere while keeping both.
+         */
+        delete: operations["delete_organization_guardrail_v1_organizations_me_guardrails__guardrail_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Organization Guardrail
+         * @description Change a guardrail's profile, endpoint, credential, modes, or scope.
+         *
+         *     Organization owners and admins only. Omitted fields are left as they are;
+         *     ``workspace_ids`` replaces the scope whole when sent, and ``url`` and
+         *     ``credential`` are cleared by sending an empty string rather than null.
+         */
+        patch: operations["update_organization_guardrail_v1_organizations_me_guardrails__guardrail_id__patch"];
         trace?: never;
     };
     "/v1/organizations/me/member-invitations": {
@@ -2393,6 +2636,34 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/settings/maintenance-mode": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Maintenance Mode
+         * @description Report whether new dashboard sign-ins are frozen.
+         */
+        get: operations["get_maintenance_mode_v1_settings_maintenance_mode_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Maintenance Mode
+         * @description Freeze or unfreeze dashboard sign-ins, for this and every other replica.
+         *
+         *     The new state is persisted and nothing is applied to the running worker,
+         *     because every reader goes back to the stored row. That is what makes one
+         *     call enough for a deployment running more than one of them.
+         */
+        patch: operations["update_maintenance_mode_v1_settings_maintenance_mode_patch"];
+        trace?: never;
+    };
     "/v1/settings/master-key/rotate": {
         parameters: {
             query?: never;
@@ -3268,6 +3539,49 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/workspaces/{workspace_id}/web-search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Workspace Web Search Config
+         * @description Read a workspace's web-search configuration.
+         *
+         *     Takes the same role as setting it (an organization owner/admin, or an
+         *     owner/admin of this workspace), because the row describes the workspace's
+         *     posture rather than one member's allowance. A workspace with no row answers
+         *     with the unconfigured shape (``configured: false``), which is the
+         *     deployment's own behavior described in the same shape rather than a 404.
+         */
+        get: operations["get_workspace_web_search_config_v1_workspaces__workspace_id__web_search_get"];
+        /**
+         * Set Workspace Web Search Config
+         * @description Set a workspace's web-search configuration, replacing any existing one.
+         *
+         *     An organization owner/admin, or an owner/admin of this workspace, may write
+         *     it. The configuration can only narrow what the deployment permits: turning
+         *     web search off for the workspace, lowering the result ceiling, and adding to
+         *     the domains a search may not reach. It never turns on a backend the
+         *     deployment has not configured, and it carries no credential.
+         */
+        put: operations["set_workspace_web_search_config_v1_workspaces__workspace_id__web_search_put"];
+        post?: never;
+        /**
+         * Clear Workspace Web Search Config
+         * @description Drop a workspace's configuration, returning it to the deployment's behavior.
+         *
+         *     Idempotent: a workspace that has no configuration is already in the state
+         *     this asks for, so it answers with the unconfigured shape rather than a 404.
+         */
+        delete: operations["clear_workspace_web_search_config_v1_workspaces__workspace_id__web_search_delete"];
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
 }
 export type webhooks = Record<string, never>;
 export interface components {
@@ -3835,6 +4149,19 @@ export interface components {
             /** Voice */
             voice: string;
         };
+        /**
+         * AuthenticatePasskeyRequest
+         * @description A completed sign-in ceremony.
+         */
+        AuthenticatePasskeyRequest: {
+            /**
+             * Credential
+             * @description The browser's PublicKeyCredential assertion, serialized.
+             */
+            credential: {
+                [key: string]: unknown;
+            };
+        };
         /** BatchRequestItem */
         BatchRequestItem: {
             /** Body */
@@ -3996,6 +4323,20 @@ export interface components {
             position: number;
             /** Selection Reason */
             selection_reason: string;
+        };
+        /**
+         * CeremonyOptions
+         * @description The `PublicKeyCredentialCreationOptions`/`RequestOptions` a browser needs.
+         *
+         *     Passed through as an opaque object rather than modeled field by field. The
+         *     shape is the W3C's, the browser is the only consumer, and it is what
+         *     ``navigator.credentials`` is handed verbatim after the two base64url fields
+         *     are decoded. Restating it here would produce a second, slightly wrong copy
+         *     of a spec this deployment does not own, and every field the library adds
+         *     later would have to be added again to keep the client from dropping it.
+         */
+        CeremonyOptions: {
+            [key: string]: unknown;
         };
         /**
          * ChatCompletionRequest
@@ -4528,10 +4869,20 @@ export interface components {
              */
             mail_ready: boolean;
             /**
+             * Maintenance Mode
+             * @description Whether this deployment is refusing new dashboard sign-ins while an operator redeploys it. The sign-in screen says so rather than presenting a form whose only outcome is a 503. Sessions already issued keep working, and the management API and the data plane are unaffected. False for a hybrid gateway, which issues no session.
+             */
+            maintenance_mode: boolean;
+            /**
              * Management Url
              * @description Where the authoritative control plane lives when it is not this deployment. Set for a hybrid gateway so its landing page can link to otari.ai; null otherwise.
              */
             management_url: string | null;
+            /**
+             * Passkeys Ready
+             * @description Whether this deployment can run a passkey ceremony at all: it has a relying-party ID (webauthn_rp_id, or derived from public_base_url) and an origin to serve one from. Distinct from 'passkey' in sign_in_methods, which is narrower and answers whether a registered passkey could sign somebody in *right now*: an operator with none yet needs this one, or the page that registers the first would be hidden from them. False for a hybrid gateway, which issues no session of its own.
+             */
+            passkeys_ready: boolean;
             /**
              * Session Type
              * @description The kind of session this deployment issues, not whether the caller holds one. 'local_operator' is the standalone operator sign-in (see sign_in_methods for which credential it currently accepts), 'hosted_user' an otari.ai account, and 'none' a deployment that issues no management session at all.
@@ -4540,9 +4891,9 @@ export interface components {
             session_type: "local_operator" | "hosted_user" | "none";
             /**
              * Sign In Methods
-             * @description How POST /v1/auth/session may be authenticated right now, sorted. 'master_key' is the first-boot credential and is offered until the operator identity has a password, which is what claiming the deployment means; 'password' replaces it from then on, and the master key stays the credential for the management API. Empty for a hybrid gateway, which issues no session. The login page renders from this rather than trying a credential to find out.
+             * @description How POST /v1/auth/session may be authenticated right now, sorted. 'master_key' is the first-boot credential and is offered until the operator identity has a password, which is what claiming the deployment means; 'password' replaces it from then on, and the master key stays the credential for the management API. 'passkey' appears alongside either one when this deployment is configured for WebAuthn and holds at least one passkey that its current relying-party ID can assert. Empty for a hybrid gateway, which issues no session. The login page renders from this rather than trying a credential to find out.
              */
-            sign_in_methods: ("master_key" | "password")[];
+            sign_in_methods: ("master_key" | "password" | "passkey")[];
             /**
              * Surfaces
              * @description Management API groups this deployment serves, sorted, which is what its dashboard pages gate on. Named surfaces, not capabilities: capability is otari.ai's word for the entitlement (licensing) axis, and this is the deployment (topology) axis. Empty for a hybrid gateway.
@@ -5209,6 +5560,17 @@ export interface components {
             transport: string;
         };
         /**
+         * MaintenanceMode
+         * @description Whether this deployment is currently refusing new dashboard sign-ins.
+         */
+        MaintenanceMode: {
+            /**
+             * Enabled
+             * @description When true, POST /v1/auth/session refuses every credential with 503 so nobody starts a new dashboard session during a redeploy. Sessions already issued keep working, and the management API and the data plane are unaffected: a caller presenting the master key or an API key through the header is never frozen out.
+             */
+            enabled: boolean;
+        };
+        /**
          * ManagedTool
          * @description One tool the gateway can run itself.
          */
@@ -5656,6 +6018,185 @@ export interface components {
             data: components["schemas"]["OrgProviderKeyPublic"][];
         };
         /**
+         * OrganizationGuardrailCreate
+         * @description Request body for mandating a guardrail across an organization.
+         *
+         *     ``credential`` is never stored as sent: it is encrypted with
+         *     ``OTARI_SECRET_KEY`` and only the ciphertext is kept, the same convention
+         *     `entities.WorkspaceMcpServer` and `entities.ProviderCredential` use. It is
+         *     sent to the endpoint as ``Authorization: Bearer`` when the guardrail runs,
+         *     so it authenticates this gateway to the guardrails service the entry names.
+         *     A guardrail *vendor's* own key is not this: the guardrails service builds
+         *     its guardrails from the operator's YAML and holds those itself.
+         *
+         *     A credential therefore requires ``url``. The deployment's ``guardrails_url``
+         *     is not necessarily encrypted (the shipped compose file makes it a same-host
+         *     ``http://`` sidecar) and this row cannot see what it is set to, so an entry
+         *     that fell back to it could not promise the bearer was sent over https. See
+         *     `_require_url_for_credential`.
+         *
+         *     ``on`` is not offered. This plane mandates input-direction checks, which is
+         *     the only direction the request path enforces
+         *     (`services.guardrails.run_input_guardrails`); an organization that could
+         *     store an output-direction mandate would be storing one nothing runs.
+         * @example {
+         *       "applies_to_all_workspaces": true,
+         *       "credential": "sk-guardrails-...",
+         *       "mode": "block",
+         *       "profile": "prompt-injection",
+         *       "url": "https://guardrails.internal.example/validate"
+         *     }
+         */
+        OrganizationGuardrailCreate: {
+            /**
+             * Applies To All Workspaces
+             * @description True runs this in every workspace of the organization, including one created later; false runs it only in the workspaces named by workspace_ids
+             * @default false
+             */
+            applies_to_all_workspaces: boolean;
+            /**
+             * Credential
+             * @description Bearer credential for this entry's endpoint. Requires url to be set, and https: an entry with no endpoint of its own falls back to the deployment's guardrails_url, which is commonly a same-host http sidecar. Encrypted at rest, never returned
+             */
+            credential?: string | null;
+            /**
+             * Enabled
+             * @description False stops the guardrail everywhere without discarding it
+             * @default true
+             */
+            enabled: boolean;
+            /**
+             * Mode
+             * @description block rejects a flagged request with 403; monitor annotates the response and forwards it
+             * @default monitor
+             * @enum {string}
+             */
+            mode: "block" | "monitor";
+            /**
+             * On Unavailable
+             * @description What a block-mode entry does when the guardrails service cannot be reached at all
+             * @default block
+             * @enum {string}
+             */
+            on_unavailable: "block" | "monitor";
+            /**
+             * Profile
+             * @description Profile name configured on the guardrails service, unique within the organization
+             */
+            profile: string;
+            /**
+             * Url
+             * @description Guardrails endpoint for this entry; null uses the deployment's guardrails_url
+             */
+            url?: string | null;
+            /**
+             * Validate Kwargs
+             * @description Extra kwargs forwarded to the guardrails service /validate call
+             */
+            validate_kwargs?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Workspace Ids
+             * @description Workspaces this guardrail runs in. Must be empty when applies_to_all_workspaces is true
+             */
+            workspace_ids?: string[];
+        };
+        /**
+         * OrganizationGuardrailPublic
+         * @description The API-facing shape. Never carries the credential, only whether one is set.
+         */
+        OrganizationGuardrailPublic: {
+            /** Applies To All Workspaces */
+            applies_to_all_workspaces: boolean;
+            /** Created At */
+            created_at: string;
+            /** Enabled */
+            enabled: boolean;
+            /** Has Credential */
+            has_credential: boolean;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Mode */
+            mode: string;
+            /** On Unavailable */
+            on_unavailable: string;
+            /**
+             * Organization Id
+             * Format: uuid
+             */
+            organization_id: string;
+            /** Profile */
+            profile: string;
+            /** Updated At */
+            updated_at: string;
+            /** Url */
+            url: string | null;
+            /** Validate Kwargs */
+            validate_kwargs: {
+                [key: string]: unknown;
+            } | null;
+            /** Workspace Ids */
+            workspace_ids: string[];
+        };
+        /**
+         * OrganizationGuardrailUpdate
+         * @description Partial update. Only the fields the caller sets are applied.
+         *
+         *     ``credential`` and ``url`` have three states rather than two, which is what
+         *     a write-only field and its nullable partner need: omit to leave the stored
+         *     value alone, send ``""`` to clear it, send a value to replace it. An
+         *     explicit ``null`` also leaves them alone, matching
+         *     `WorkspaceMcpServerUpdate`: a client that serializes its whole form back,
+         *     with an empty credential box it never filled in, must not destroy a
+         *     credential it was never shown.
+         *
+         *     ``workspace_ids`` replaces the scope whole when sent; ``[]`` clears it.
+         * @example {
+         *       "credential": "sk-guardrails-...",
+         *       "mode": "monitor",
+         *       "url": "https://guardrails.internal.example/validate"
+         *     }
+         */
+        OrganizationGuardrailUpdate: {
+            /** Applies To All Workspaces */
+            applies_to_all_workspaces?: boolean;
+            /** Credential */
+            credential?: string | null;
+            /** Enabled */
+            enabled?: boolean;
+            /**
+             * Mode
+             * @enum {string}
+             */
+            mode?: "block" | "monitor";
+            /**
+             * On Unavailable
+             * @enum {string}
+             */
+            on_unavailable?: "block" | "monitor";
+            /** Profile */
+            profile?: string;
+            /** Url */
+            url?: string | null;
+            /** Validate Kwargs */
+            validate_kwargs?: {
+                [key: string]: unknown;
+            } | null;
+            /** Workspace Ids */
+            workspace_ids?: string[] | null;
+        };
+        /** OrganizationGuardrailsPublic */
+        OrganizationGuardrailsPublic: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["OrganizationGuardrailPublic"][];
+        };
+        /**
          * OrganizationMembershipContextPublic
          * @description An organization plus the caller's standing in it.
          *
@@ -5879,6 +6420,33 @@ export interface components {
             slug: string;
             /** Updated At */
             updated_at?: string | null;
+        };
+        /**
+         * PasskeySessionResponse
+         * @description A dashboard session minted by a passkey (the token travels only in the cookie).
+         *
+         *     The same three fields ``POST /v1/auth/session`` answers, deliberately: the
+         *     dashboard's sign-in path does not care which credential got it here.
+         */
+        PasskeySessionResponse: {
+            /**
+             * Active Organization Id
+             * Format: uuid
+             * @description The organization that identity is acting in, which scopes every tenancy surface.
+             */
+            active_organization_id: string;
+            /**
+             * Expires At
+             * Format: date-time
+             * @description When the session cookie stops being accepted.
+             */
+            expires_at: string;
+            /**
+             * User Id
+             * Format: uuid
+             * @description The identity this session speaks for.
+             */
+            user_id: string;
         };
         /**
          * PasswordResponse
@@ -6253,6 +6821,24 @@ export interface components {
              * @description Number of encrypted keys left untouched because they could not be decrypted.
              */
             unreadable: number;
+        };
+        /**
+         * RegisterPasskeyRequest
+         * @description A completed registration ceremony, with the label to file it under.
+         */
+        RegisterPasskeyRequest: {
+            /**
+             * Credential
+             * @description The browser's PublicKeyCredential, serialized.
+             */
+            credential: {
+                [key: string]: unknown;
+            };
+            /**
+             * Name
+             * @description What to call this passkey in the credential list. Optional: an unnamed one is numbered rather than refused, so a browser that offers no prompt still works.
+             */
+            name?: string | null;
         };
         /** RequestPasswordResetRequest */
         RequestPasswordResetRequest: {
@@ -7134,6 +7720,17 @@ export interface components {
             reject_user_mismatch?: boolean | null;
         };
         /**
+         * UpdateMaintenanceModeRequest
+         * @description Turn the sign-in freeze on or off.
+         */
+        UpdateMaintenanceModeRequest: {
+            /**
+             * Enabled
+             * @description True to freeze new dashboard sign-ins, false to allow them again.
+             */
+            enabled: boolean;
+        };
+        /**
          * UpdateScopedBudgetRequest
          * @description Request model for updating a scoped budget.
          */
@@ -7847,6 +8444,60 @@ export interface components {
             email: string;
         };
         /**
+         * WebAuthnCredentialPublic
+         * @description A passkey as the settings page lists it.
+         *
+         *     Carries no key material. ``credential_id`` is here because the browser needs
+         *     it to tell the passkey it just used from the others in the list, and it is
+         *     a public identifier the authenticator hands to any site that asks: it is
+         *     what ``allowCredentials`` publishes to an unauthenticated caller during a
+         *     ceremony.
+         */
+        WebAuthnCredentialPublic: {
+            /** Backed Up */
+            backed_up: boolean;
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Credential Id */
+            credential_id: string;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Is Usable */
+            is_usable: boolean;
+            /** Last Used At */
+            last_used_at: string | null;
+            /** Name */
+            name: string;
+            /** Rp Id */
+            rp_id: string;
+            /** Transports */
+            transports: string[];
+        };
+        /**
+         * WebAuthnCredentialUpdate
+         * @description Renaming a passkey, which is the only thing about one that is editable.
+         *
+         *     Everything else on the row is what the authenticator asserted, so there is
+         *     nothing else a person could correct.
+         */
+        WebAuthnCredentialUpdate: {
+            /** Name */
+            name: string;
+        };
+        /** WebAuthnCredentialsPublic */
+        WebAuthnCredentialsPublic: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["WebAuthnCredentialPublic"][];
+        };
+        /**
          * WorkspaceActivationPublic
          * @description Where a workspace stands on its first successful request.
          */
@@ -8258,6 +8909,81 @@ export interface components {
             description?: string | null;
             /** Name */
             name?: string | null;
+        };
+        /**
+         * WorkspaceWebSearchConfigPublic
+         * @description A workspace's web-search configuration, or the unconfigured one it has without a row.
+         */
+        WorkspaceWebSearchConfigPublic: {
+            /** Allowed Domains */
+            allowed_domains: string[] | null;
+            /** Blocked Domains */
+            blocked_domains: string[] | null;
+            /** Configured */
+            configured: boolean;
+            /** Created At */
+            created_at: string | null;
+            /** Enabled */
+            enabled: boolean;
+            /** Max Results */
+            max_results: number | null;
+            /** Provider Options */
+            provider_options: {
+                [key: string]: unknown;
+            } | null;
+            /** Purpose Hint */
+            purpose_hint: string | null;
+            /** Updated At */
+            updated_at: string | null;
+            /** Web Search Configured */
+            web_search_configured: boolean;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
+        };
+        /**
+         * WorkspaceWebSearchConfigUpdate
+         * @description The configuration to store for a workspace, as a whole.
+         *
+         *     ``PUT`` semantics, ported from the hosted ``WorkspaceWebSearchConfigUpdate``:
+         *     what is sent is what the workspace has afterwards, so an omitted field is
+         *     cleared rather than left as it was.
+         */
+        WorkspaceWebSearchConfigUpdate: {
+            /**
+             * Allowed Domains
+             * @description Results are kept only from these domains; intersected with any list the request sends
+             */
+            allowed_domains?: string[] | null;
+            /**
+             * Blocked Domains
+             * @description Results from these domains are dropped; added to any list the request sends
+             */
+            blocked_domains?: string[] | null;
+            /**
+             * Enabled
+             * @description False refuses web search for this workspace, both the otari_web_search tool and POST /v1/search. The fields below narrow the tool only.
+             */
+            enabled: boolean;
+            /**
+             * Max Results
+             * @description Ceiling on results one search returns; only ever lowers the effective limit, so at most 20
+             */
+            max_results?: number | null;
+            /**
+             * Provider Options
+             * @description Provider-specific knobs forwarded to the search backend; a request's own keys win
+             */
+            provider_options?: {
+                [key: string]: unknown;
+            } | null;
+            /**
+             * Purpose Hint
+             * @description Hint used when a request declares otari_web_search without one of its own
+             */
+            purpose_hint?: string | null;
         };
         /** WorkspacesPublic */
         WorkspacesPublic: {
@@ -8910,6 +9636,196 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    authenticate_passkey_v1_auth_webauthn_authenticate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["AuthenticatePasskeyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PasskeySessionResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    authentication_options_v1_auth_webauthn_authenticate_options_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CeremonyOptions"];
+                };
+            };
+        };
+    };
+    list_passkeys_v1_auth_webauthn_credentials_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebAuthnCredentialsPublic"];
+                };
+            };
+        };
+    };
+    delete_passkey_v1_auth_webauthn_credentials__credential_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                credential_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rename_passkey_v1_auth_webauthn_credentials__credential_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                credential_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WebAuthnCredentialUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebAuthnCredentialPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    register_passkey_v1_auth_webauthn_register_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["RegisterPasskeyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebAuthnCredentialPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    registration_options_v1_auth_webauthn_register_options_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CeremonyOptions"];
                 };
             };
         };
@@ -10133,6 +11049,139 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OrganizationMembershipContextPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_organization_guardrails_v1_organizations_me_guardrails_get: {
+        parameters: {
+            query?: {
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationGuardrailsPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_organization_guardrail_v1_organizations_me_guardrails_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrganizationGuardrailCreate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            201: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationGuardrailPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_organization_guardrail_v1_organizations_me_guardrails__guardrail_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                guardrail_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["Message"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_organization_guardrail_v1_organizations_me_guardrails__guardrail_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                guardrail_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["OrganizationGuardrailUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["OrganizationGuardrailPublic"];
                 };
             };
             /** @description Validation Error */
@@ -11980,6 +13029,59 @@ export interface operations {
             };
         };
     };
+    get_maintenance_mode_v1_settings_maintenance_mode_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MaintenanceMode"];
+                };
+            };
+        };
+    };
+    update_maintenance_mode_v1_settings_maintenance_mode_patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateMaintenanceModeRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["MaintenanceMode"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
     rotate_master_key_v1_settings_master_key_rotate_post: {
         parameters: {
             query?: never;
@@ -13712,6 +14814,103 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["Message"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    get_workspace_web_search_config_v1_workspaces__workspace_id__web_search_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceWebSearchConfigPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    set_workspace_web_search_config_v1_workspaces__workspace_id__web_search_put: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["WorkspaceWebSearchConfigUpdate"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceWebSearchConfigPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    clear_workspace_web_search_config_v1_workspaces__workspace_id__web_search_delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                workspace_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WorkspaceWebSearchConfigPublic"];
                 };
             };
             /** @description Validation Error */

@@ -570,7 +570,7 @@
               },
               "raw": "{\n  \"email\": \"operator@example.com\",\n  \"password\": \"a-real-password\"\n}"
             },
-            "description": "Verify a sign-in credential and set the HttpOnly session cookie.\n\nThe session is bound to the identity that authenticated, so every request it\nlater authenticates resolves a user and that user's active organization\nrather than only \"a credential was presented once\". The response names both,\nso a client knows who it is signed in as without a second call.\n\nThe rate-limit check deliberately runs only after a failed verification,\nnot before it: a pre-verification gate can't know whether *this* attempt\nwould have succeeded, so once an IP has used up its failure quota it\nwould end up blocking that IP's legitimate owner too, not just further\nattackers. Running after verification also means the throttle bounds how\nmany verdicts an IP gets, not how much work it can cause: a password attempt\npays for a bcrypt verification (cost 12, on the order of 200ms of CPU, and\none is burned against a stand-in hash even for an address nobody holds)\nbefore the limit is consulted, so a 429 costs the same as a 401. A gateway\nexposed to the internet should rate-limit this path at the proxy as well.",
+            "description": "Verify a sign-in credential and set the HttpOnly session cookie.\n\nThe session is bound to the identity that authenticated, so every request it\nlater authenticates resolves a user and that user's active organization\nrather than only \"a credential was presented once\". The response names both,\nso a client knows who it is signed in as without a second call.\n\nThe rate-limit check deliberately runs only after a failed verification,\nnot before it: a pre-verification gate can't know whether *this* attempt\nwould have succeeded, so once an IP has used up its failure quota it\nwould end up blocking that IP's legitimate owner too, not just further\nattackers. Running after verification also means the throttle bounds how\nmany verdicts an IP gets, not how much work it can cause: a password attempt\npays for a bcrypt verification (cost 12, on the order of 200ms of CPU, and\none is burned against a stand-in hash even for an address nobody holds)\nbefore the limit is consulted, so a 429 costs the same as a 401. A gateway\nexposed to the internet should rate-limit this path at the proxy as well.\n\nThe maintenance-mode check runs before either credential is verified, and\nrefuses both. Before, because a frozen deployment should not spend a bcrypt\nverification per attempt and the refusal is not about the credential\nanyway; both, because the way back out is the master key against\n``PATCH /v1/settings/maintenance-mode`` through the header, which never\npasses through this door. That is what keeps the way back out off the frozen\npath, and it is why no identity needs an exemption here; an operator who no\nlonger holds the master key recovers by setting ``OTARI_MASTER_KEY`` and\nrestarting, which is a restart rather than a click. It leaks nothing\neither: ``GET /v1/bootstrap`` already publishes the same flag\nunauthenticated, so the sign-in screen can render the right page.",
             "header": [
               {
                 "key": "Content-Type",
@@ -673,6 +673,206 @@
                 "verify-email"
               ],
               "raw": "{{baseUrl}}/v1/auth/verify-email"
+            }
+          }
+        },
+        {
+          "name": "Authenticate Passkey",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"credential\": {}\n}"
+            },
+            "description": "Verify an assertion and set the HttpOnly session cookie.\n\nThe session is bound to the identity whose passkey signed, exactly as a\npassword sign-in binds one to the identity that authenticated, so every\nrequest it later authenticates resolves the same caller.\n\nA refusal is counted like the other sign-in failures\n(``record_auth_failure``) and answered as a 401 by the tenancy error\nhandler. Unlike the password path there is no separate post-failure\nthrottle: this route is throttled unconditionally on the way in, because\nunlike a password there is no legitimate caller here whose correct\ncredential must never be blocked (a passkey ceremony is one round trip a\nbrowser drives, not something a person retries by hand).\n\n**Maintenance mode freezes this the way it freezes the password sign-in.**\nThe freeze is on starting a session, not on a credential, so a passkey has\nto answer to it or the switch is bypassable by anybody holding one, which is\nthe whole population it exists to hold off during a redeploy. Refused before\nthe assertion is verified, so a frozen deployment does no crypto and counts\nno auth failure: nobody failed to authenticate, the gateway declined to try.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "webauthn",
+                "authenticate"
+              ],
+              "raw": "{{baseUrl}}/v1/auth/webauthn/authenticate"
+            }
+          }
+        },
+        {
+          "name": "Authentication Options",
+          "request": {
+            "description": "Start a passkey sign-in. Public, throttled, and names no credentials.\n\nThe options carry no ``allowCredentials``, so this publishes nothing about\nwho holds a passkey here; see ``webauthn_service.begin_authentication``.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "webauthn",
+                "authenticate",
+                "options"
+              ],
+              "raw": "{{baseUrl}}/v1/auth/webauthn/authenticate/options"
+            }
+          }
+        },
+        {
+          "name": "List Passkeys",
+          "request": {
+            "description": "The caller's own passkeys. Never anybody else's, and never key material.\n\nDeliberately *not* behind ``require_passkey_support``, and not filtered to\nthe current relying-party ID. A deployment that has changed or lost that ID\nstill holds the rows registered under the old one, and refusing to list them\nwould leave somebody looking at an empty page with no way to clean up and no\nhint as to why. Each row carries ``is_usable`` instead, so an orphan is\nvisible, explained, and deletable.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "webauthn",
+                "credentials"
+              ],
+              "raw": "{{baseUrl}}/v1/auth/webauthn/credentials"
+            }
+          }
+        },
+        {
+          "name": "Rename Passkey",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"name\": \"string\"\n}"
+            },
+            "description": "Relabel one of the caller's passkeys, which is all that is editable.\n\nUngated like the list, and for the same reason: naming an orphan before\ndeleting it is not something a lost relying-party ID should prevent.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "webauthn",
+                "credentials",
+                ":credential_id"
+              ],
+              "raw": "{{baseUrl}}/v1/auth/webauthn/credentials/:credential_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "credential_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Passkey",
+          "request": {
+            "description": "Remove one of the caller's passkeys.\n\nRemoving the last one is allowed: an email and password is still this\ndeployment's login, so this is not a lockout, and refusing would strand\nwhoever lost the authenticator.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "webauthn",
+                "credentials",
+                ":credential_id"
+              ],
+              "raw": "{{baseUrl}}/v1/auth/webauthn/credentials/:credential_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "credential_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Register Passkey",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"credential\": {}\n}"
+            },
+            "description": "Verify a registration ceremony and store the passkey it produced.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "webauthn",
+                "register"
+              ],
+              "raw": "{{baseUrl}}/v1/auth/webauthn/register"
+            }
+          }
+        },
+        {
+          "name": "Registration Options",
+          "request": {
+            "description": "Start registering a passkey for the signed-in identity.\n\nA POST rather than a GET even though it reads like one: it issues a\nserver-side challenge and writes it, so it is not safe to repeat, cache, or\nprefetch.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "auth",
+                "webauthn",
+                "register",
+                "options"
+              ],
+              "raw": "{{baseUrl}}/v1/auth/webauthn/register/options"
             }
           }
         }
@@ -2152,6 +2352,149 @@
         }
       ],
       "name": "organizations"
+    },
+    {
+      "item": [
+        {
+          "name": "List Organization Guardrails",
+          "request": {
+            "description": "List the guardrails the caller's organization mandates.\n\nOrganization owners and admins only, unlike the pricing overrides next door\nthat any member may read: these rows name the endpoints this gateway\nconnects to and say which of them carry a credential. A credential is never\nreturned, only whether one is set.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "guardrails"
+              ],
+              "query": [
+                {
+                  "description": "Number of records to skip",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "Maximum number of records to return",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/guardrails?skip=&limit="
+            }
+          }
+        },
+        {
+          "name": "Create Organization Guardrail",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"applies_to_all_workspaces\": true,\n  \"credential\": \"sk-guardrails-...\",\n  \"mode\": \"block\",\n  \"profile\": \"prompt-injection\",\n  \"url\": \"https://guardrails.internal.example/validate\"\n}"
+            },
+            "description": "Mandate a guardrail across the organization. Organization owners and admins only.\n\nThe guardrail runs on every request from the workspaces it is scoped to, in\naddition to whatever the caller asked for, with the stricter of the two\nsettings applying to a profile both name. Set\n``applies_to_all_workspaces`` for it to cover workspaces created later;\notherwise a new workspace inherits nothing and the entry runs only in the\nworkspaces ``workspace_ids`` lists.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "guardrails"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/guardrails"
+            }
+          }
+        },
+        {
+          "name": "Update Organization Guardrail",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"credential\": \"sk-guardrails-...\",\n  \"mode\": \"monitor\",\n  \"url\": \"https://guardrails.internal.example/validate\"\n}"
+            },
+            "description": "Change a guardrail's profile, endpoint, credential, modes, or scope.\n\nOrganization owners and admins only. Omitted fields are left as they are;\n``workspace_ids`` replaces the scope whole when sent, and ``url`` and\n``credential`` are cleared by sending an empty string rather than null.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "guardrails",
+                ":guardrail_id"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/guardrails/:guardrail_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "guardrail_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Organization Guardrail",
+          "request": {
+            "description": "Stop mandating a guardrail, discarding its credential and scope.\n\nOrganization owners and admins only. Use ``enabled: false`` instead to stop\nit everywhere while keeping both.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "guardrails",
+                ":guardrail_id"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/guardrails/:guardrail_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "guardrail_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "organization-guardrails"
     },
     {
       "item": [
@@ -4059,6 +4402,58 @@
           }
         },
         {
+          "name": "Get Maintenance Mode",
+          "request": {
+            "description": "Report whether new dashboard sign-ins are frozen.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "settings",
+                "maintenance-mode"
+              ],
+              "raw": "{{baseUrl}}/v1/settings/maintenance-mode"
+            }
+          }
+        },
+        {
+          "name": "Update Maintenance Mode",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"enabled\": false\n}"
+            },
+            "description": "Freeze or unfreeze dashboard sign-ins, for this and every other replica.\n\nThe new state is persisted and nothing is applied to the running worker,\nbecause every reader goes back to the stored row. That is what makes one\ncall enough for a deployment running more than one of them.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "settings",
+                "maintenance-mode"
+              ],
+              "raw": "{{baseUrl}}/v1/settings/maintenance-mode"
+            }
+          }
+        },
+        {
           "name": "Rotate Master Key",
           "request": {
             "description": "Regenerate the database-backed master key and invalidate the old one.\n\nOnly the first-run generated master key can be rotated here. When a master\nkey is supplied through config or ``OTARI_MASTER_KEY``, the dashboard cannot\ninvalidate it; the operator must change that value and restart instead.\n\nEvery dashboard session is revoked with the rotation (a session only proves\npossession of the now-dead key); the caller's own session is re-minted under\nthe new key, for the same identity it named, so the tab that performed the\nrotation stays signed in as who it was. A caller that authenticated with a\nheader key has no session identity to re-mint for, so it is not handed one:\nit was not signed in to the dashboard to begin with.",
@@ -5950,6 +6345,106 @@
         }
       ],
       "name": "workspace-member-budget-policies"
+    },
+    {
+      "item": [
+        {
+          "name": "Get Workspace Web Search Config",
+          "request": {
+            "description": "Read a workspace's web-search configuration.\n\nTakes the same role as setting it (an organization owner/admin, or an\nowner/admin of this workspace), because the row describes the workspace's\nposture rather than one member's allowance. A workspace with no row answers\nwith the unconfigured shape (``configured: false``), which is the\ndeployment's own behavior described in the same shape rather than a 404.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "web-search"
+              ],
+              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/web-search",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Set Workspace Web Search Config",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"enabled\": false\n}"
+            },
+            "description": "Set a workspace's web-search configuration, replacing any existing one.\n\nAn organization owner/admin, or an owner/admin of this workspace, may write\nit. The configuration can only narrow what the deployment permits: turning\nweb search off for the workspace, lowering the result ceiling, and adding to\nthe domains a search may not reach. It never turns on a backend the\ndeployment has not configured, and it carries no credential.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PUT",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "web-search"
+              ],
+              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/web-search",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Clear Workspace Web Search Config",
+          "request": {
+            "description": "Drop a workspace's configuration, returning it to the deployment's behavior.\n\nIdempotent: a workspace that has no configuration is already in the state\nthis asks for, so it answers with the unconfigured shape rather than a 404.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "workspaces",
+                ":workspace_id",
+                "web-search"
+              ],
+              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/web-search",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "workspace-web-search"
     }
   ],
   "variable": [

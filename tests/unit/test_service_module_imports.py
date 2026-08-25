@@ -42,6 +42,11 @@ _MODULES = [
     # the same way, and is additionally imported from the request pipeline, which
     # is a second entry point into the graph.
     "gateway.services.tenancy.workspace_mcp_server_service",
+    # workspace_web_search_service is here for the same two reasons, plus a
+    # third: it reaches `services.web_search_backend` for the result ceiling it
+    # validates against, which is the first edge from the tenancy graph into the
+    # tool backends.
+    "gateway.services.tenancy.workspace_web_search_service",
 ]
 
 

@@ -99,6 +99,8 @@ GET /v1/settings                                # not yet wrapped
 PATCH /v1/settings                              # not yet wrapped
 GET /v1/settings/mail                           # not yet wrapped
 POST /v1/settings/mail/test                     # not yet wrapped
+GET /v1/settings/maintenance-mode               # not yet wrapped
+PATCH /v1/settings/maintenance-mode             # not yet wrapped
 # Model discovery / metadata
 GET /v1/models/discoverable                     # not yet wrapped
 GET /v1/models/metadata                         # not yet wrapped
@@ -126,6 +128,17 @@ POST /v1/auth/verify-email                      # dashboard-only
 POST /v1/auth/resend-verification               # dashboard-only
 POST /v1/auth/password/reset                    # dashboard-only
 POST /v1/auth/password/reset/confirm            # dashboard-only
+# Passkeys (otari#652): both ceremonies need a WebAuthn authenticator, which is
+# a browser API. An SDK cannot produce an attestation or an assertion, so there
+# is nothing here for one to wrap, including the credential list: it exists to
+# render the account page's passkey rows.
+POST /v1/auth/webauthn/register/options         # dashboard-only
+POST /v1/auth/webauthn/register                 # dashboard-only
+POST /v1/auth/webauthn/authenticate/options     # dashboard-only
+POST /v1/auth/webauthn/authenticate             # dashboard-only
+GET /v1/auth/webauthn/credentials               # dashboard-only
+PATCH /v1/auth/webauthn/credentials/{credential_id}    # dashboard-only
+DELETE /v1/auth/webauthn/credentials/{credential_id}   # dashboard-only
 # OTLP ingest: OpenTelemetry collector receivers, not an SDK surface.
 POST /v1/logs                                   # otel ingest
 POST /v1/traces                                 # otel ingest
@@ -205,6 +218,10 @@ GET /v1/organizations/me/pricing                            # dashboard-only
 POST /v1/organizations/me/pricing                           # dashboard-only
 PUT /v1/organizations/me/pricing/{pricing_id}               # dashboard-only
 DELETE /v1/organizations/me/pricing/{pricing_id}            # dashboard-only
+GET /v1/organizations/me/guardrails                         # operator surface
+POST /v1/organizations/me/guardrails                        # operator surface
+PATCH /v1/organizations/me/guardrails/{guardrail_id}        # operator surface
+DELETE /v1/organizations/me/guardrails/{guardrail_id}       # operator surface
 POST /v1/organizations/me/member-invitations                # dashboard-only
 DELETE /v1/organizations/me/member-invitations/{invitation_id} # dashboard-only
 # The invitation accept flow is reached by a browser following an emailed
@@ -229,6 +246,14 @@ POST /v1/workspaces/{workspace_id}/activation/dismiss       # dashboard-only
 GET /v1/workspaces/{workspace_id}/code-execution-policy                  # dashboard-only
 PUT /v1/workspaces/{workspace_id}/code-execution-policy                  # dashboard-only
 DELETE /v1/workspaces/{workspace_id}/code-execution-policy               # dashboard-only
+# The workspace's web-search configuration (otari#656) is the same shape of
+# surface for the same reason: whoever administers the workspace decides whether
+# it may search and how far, not the key-holder searching inside it. An SDK
+# caller sees its effect on `otari_web_search` and on `POST /v1/search` (a 403, a
+# lower result ceiling, a domain filter), never the row.
+GET /v1/workspaces/{workspace_id}/web-search                            # dashboard-only
+PUT /v1/workspaces/{workspace_id}/web-search                            # dashboard-only
+DELETE /v1/workspaces/{workspace_id}/web-search                         # dashboard-only
 # Organization-scoped provider keys (otari-ai#1748, otari#643): the same
 # tenancy-admin surface as the organization/workspace rows just above, and
 # excluded for the same reason. An SDK caller acts inside one workspace with a

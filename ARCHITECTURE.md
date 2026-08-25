@@ -8,7 +8,7 @@ This document is for contributors changing the *shape* of the system. It explain
 
 ## Status: this is a north-star document
 
-This describes the architecture the codebase is **heading toward**, not the whole of what exists today. Otari today is the gateway (the data plane) plus a standalone management API; the ports, the composition container, and the control-plane UI described below arrive as Otari grows into the full open-source base.
+This describes the architecture the codebase is **heading toward**, not the whole of what exists today. Otari today is the gateway (the data plane) plus a standalone management API; the ports package, the composition container, and the bootstrap hook are in the tree, and the rest, including the control-plane UI described below, arrives as Otari grows into the full open-source base.
 
 Read it with that in mind:
 
@@ -79,9 +79,10 @@ A **port** is a domain-named interface (a Python `Protocol`), named for what it 
 | `EntitlementPort` | Which capabilities a deployment is entitled to. |
 | `IdentityProviderPort` | Authenticating users/sign-in. |
 | `RoutingPort` | Choosing the provider/model attempts for a request. |
-| `ModelProviderPort` | Executing the model inference call. |
+| `ModelProviderPort` | Resolving the deployment-owned credential that serves a request bringing none. |
 | `CodeExecutionPort` | Running model-generated code in a sandbox. |
 | `BillingPort` | Metering and charging for usage. |
+| `GrowthSignalPort` | Telling an outside CRM or support messenger about a user's lifecycle. |
 
 The cardinal property: **every port ships with a working adapter in Otari's core**, a real lightweight implementation or an honest [Null Object](https://en.wikipedia.org/wiki/Null_object_pattern). Otari must stand alone with no overlay present. `BillingPort`, for example, is a Null Object in the core: it is present and callable, and does nothing, so nothing in the core needs to know whether real billing exists anywhere.
 
@@ -104,6 +105,7 @@ flowchart LR
         MP[ModelProviderPort]
         CP[CodeExecutionPort]
         BP[BillingPort]
+        GP[GrowthSignalPort]
     end
     UI --> API --> SVC --> REPO --> MOD
     SVC --> AP
@@ -113,9 +115,10 @@ flowchart LR
     SVC --> MP
     SVC --> CP
     SVC --> BP
+    SVC --> GP
 ```
 
-> **Planned.** A `ports` package and its default adapters do not exist in `src/gateway/` yet. Today the equivalent choices (which credential to use, how to authenticate) are made by the mode switch and hand-wired dependencies described next. The ports formalize those seams as the control plane grows into this repository.
+> **Where the ports are today.** `src/gateway/ports/` holds four of them, `ModelProviderPort`, `BillingPort`, `EntitlementPort` and `GrowthSignalPort`, each with a working core adapter in `src/gateway/adapters/`. They are the seam's mechanism rather than its whole surface: nothing on the request path calls one yet, so the choices those four describe (which credential to use, when to meter) are still made by the mode switch and the hand-wired dependencies described next. The remaining ports in the table above arrive as they gain callers.
 
 ## How a port is resolved
 
@@ -124,20 +127,37 @@ Ports are resolved through a **composition root** and a small **container**, not
 - The **container** is a process-level registry of `Port -> factory` bindings, built **once at startup**. It is a plain Python object (a mapping of port to factory), not a third-party dependency-injection framework and not entry-point auto-discovery. Only a handful of ports ever need swapping, and only at startup, so a thin explicit registry is preferred: a contributor can read the whole wiring in one file, and there is no install-time magic to trace.
 - The **composition root** is the single place allowed to name a concrete adapter. It binds the defaults at startup. Everywhere else refers to the *port*, and asks the container for whichever adapter is bound.
 
-Illustrative shape of a resolution (planned; not yet in the tree):
+Shape of a resolution:
 
 ```python
-# composition root, at startup: bind the default adapters
-container.bind(RoutingPort, lambda session: FallbackRoutingAdapter(session))
+# composition root (src/gateway/container.py), at startup: bind the core adapters
+def _billing_adapter(session: AsyncSession | None) -> BillingPort:
+    return NullBillingAdapter(session)
 
-# dependency: refers to the port and the container, never a concrete adapter
-def get_routing(session: SessionDep, container: ContainerDep) -> RoutingPort:
-    return container.routing(session)
+container.bind(BillingPort, _billing_adapter)
+
+# dependency (src/gateway/api/deps.py): names the port and the container, never an adapter
+def get_billing_port(db: PortSessionDep, container: ContainerDep) -> BillingPort:
+    return container.resolve(BillingPort, db)
 ```
 
-An overlay (or your own deployment) rebinds ports to its own adapters **without editing any Otari source file**, by supplying a bootstrap module that the container invokes at startup, selected declaratively by configuration (a planned `OTARI_BOOTSTRAP` setting pointing at a registration function). With nothing configured, the defaults stand and Otari boots standalone.
+The session a factory receives is the request's, and it is `None` in hybrid mode, where the gateway has no local database at all. An adapter that needs one has to say what it does without.
 
-> **Where this lives in the tree.** Today, composition is hand-wired as FastAPI dependencies in `src/gateway/api/deps.py`, and shared resources are attached to `app.state` when the app is built in `create_app` (`src/gateway/main.py`). The container formalizes exactly that hand-wiring: it is built once in `create_app` and resolved through the dependencies in `deps.py`. When the control plane grows into this repository, this is where the composition root lands. It replaces the hand-wiring in `deps.py` rather than living somewhere new.
+An overlay (or your own deployment) rebinds ports to its own adapters **without editing any Otari source file**, by supplying a bootstrap module that the container invokes at startup, selected declaratively by configuration: `OTARI_BOOTSTRAP=module:callable`. The callable is imported once, after the core defaults are bound, and receives the container:
+
+```python
+def register(container: Container) -> None:
+    container.bind(BillingPort, _wallet_billing_adapter)
+    container.contribute_router(RouterContribution(capability="billing", router=wallet_router))
+```
+
+With nothing configured nothing is imported, the defaults stand, and Otari boots standalone. A selector that is set but cannot be loaded fails startup rather than quietly falling back, because a build nobody chose is worse than a gateway that will not start.
+
+A contributed router is the additive half of the seam, and it is gated rather than swapped: Otari mounts it behind `require_capability(...)`, which resolves `EntitlementPort` and answers a request for an unentitled capability with the same 404 a path nothing serves gets. That gate is the server-side half of the entitlement axis; hiding a nav item in the dashboard is not authorization.
+
+Entitlement is not authentication either, and the mount point adds none. A capability names no caller, so on an entitled deployment a contributed route is reachable by anyone unless the router says otherwise. A contribution declares the credential each of its routes needs on the route, the way Otari's own routers do; there is no router-level default to mount, because the right answer differs per route, a contributed route may be deliberately public, and the header check resolves a database session a hybrid gateway does not have.
+
+> **Where this lives in the tree.** The composition root is `src/gateway/container.py`; it is built once per app in `create_app` (`src/gateway/main.py`) and attached to `app.state` beside the other shared resources, so two apps in one process never share one. Ports are resolved from it through dependencies in `src/gateway/api/deps.py`, which is also where the rest of composition is still hand-wired: the container took over the ports, not every dependency, and a plain single-implementation service stays wired directly.
 
 Not every service goes through a port. Most code has a single implementation and stays plain (see [when a capability earns a port](#cardinal-rules-for-contributors)); only capabilities with a real second implementation are resolved through the container.
 
@@ -168,11 +188,16 @@ Two gates decide whether a piece of behavior runs. They **compose but never merg
 
 The first is about *where the code is running* and the second about *what this customer bought*. Both are client-side conveniences over server-side authorization: hiding a surface never grants access to it, and the server authorizes every request behind one regardless.
 
-In the dashboard both meet on one nav entry, which is where the vocabulary earns its keep: `web/src/app/nav/registry.ts` declares a destination's `surface` and `capability`, and `useNavVisibility` composes them as AND, so either one hides the link and the shell answers the route behind it with a panel rather than a page. An overlay replaces `web/src/app/nav/overlaySections.ts` to register its own destinations, without editing a base source file.
+In the dashboard both meet on one nav entry, which is where the vocabulary earns its keep: `web/src/app/nav/registry.ts` declares a destination's `surface` and `capability`, and `useNavVisibility` composes them as AND, so either one hides the link and the shell answers the route behind it with a panel rather than a page. An overlay replaces `web/src/app/nav/overlaySections.ts` (or `overlayNavItems.ts`, for a destination that belongs inside a section the base owns) to register its own destinations, without editing a base source file. The same build-time module override carries a contribution that is not a destination at all but something inside a piece of chrome the base owns: `web/src/app/nav/overlayWalletSlot.tsx` is the slot the top bar mounts for a balance this gateway has none of, and rule 6 is why it exists, since a chip there could otherwise be contributed only by editing the top bar itself. [web/AGENTS.md](web/AGENTS.md) lists the seams and the rule that a base module reaches one by its `@/…` specifier rather than relatively.
 
-Be clear about how much of that is built. The surface axis is real and served: `GET /v1/bootstrap` answers it. **`EntitlementPort` is not implemented anywhere in `src/gateway/`, and no endpoint serves entitlements**, so the entitlement axis resolves entirely in the browser, from the constant that is the default value of the context in `web/src/shared/hooks/useEntitlements.tsx`. It grants `BASE_CAPABILITIES` and reports everything else absent, which is the behavior the core adapter above describes, in the only place there is currently anything to put it. That constant is itself empty, because no base nav entry is gated on a capability: the one candidate is routing, whose split this document still marks provisional. An overlay answers it for real by rendering `EntitlementProvider`.
+Be clear about how much of that is built. The surface axis is real and served: `GET /v1/bootstrap` answers it. `EntitlementPort` now exists on both sides of the wire, but **no endpoint serves entitlements to the browser**, so the two halves answer independently:
 
-That is sound while every capability the axis gates belongs to an overlay, since a deployment with no overlay has nothing to withhold. It stops being sound when an overlay mounts a router into this process, because hiding a link is not authorization and that route has to refuse for itself, on `EntitlementPort` and a `require_capability` dependency. The axis does not enforce against the operator, who owns the process; do not let a surface built on the client gate assume a resolver exists.
+- **In the browser**, the axis resolves from the constant that is the default value of the context in `web/src/shared/hooks/useEntitlements.tsx`. It grants `BASE_CAPABILITIES` and reports everything else absent. An overlay answers it for real by rendering `EntitlementProvider`.
+- **On the server**, `EntitlementPort` resolves through the container, and its core adapter (`src/gateway/adapters/entitlement_adapter.py`) answers with its own `BASE_CAPABILITIES`. That is what `require_capability` gates a contributed router on, so a route an overlay mounts into this process refuses for itself rather than trusting a hidden link. Hiding a link is not authorization; this is the half that is.
+
+Both constants are empty, and deliberately so: no base nav entry and no base route is gated on a capability, because the one candidate is routing, whose split this document still marks provisional. They are meant to agree, so a capability the base grows is added to both at once.
+
+The axis does not enforce against the operator, who owns the process; do not let a surface built on the client gate assume a resolver exists.
 
 ## Cardinal rules for contributors
 
@@ -186,18 +211,18 @@ These are the rules that keep the boundary from eroding. They apply to anyone ad
 6. **An overlay never edits an Otari source file.** It registers into the extension points Otari exposes (the container, the router list, the nav registry) and supplies configuration. If extending an overlay *requires* editing an Otari file, that is a missing seam, and the seam belongs in Otari. Supplying configuration or a bootstrap module is not editing the core.
 7. **Introduce a port only when it earns one.** A port that will only ever have one implementation is ceremony with no benefit. A capability earns a port only when a genuine second implementation is real, or a hard boundary (intellectual property, or a hosted service) runs through it. Plain CRUD and infrastructure (user, team, and trace management, and the bulk of orgs/workspaces management) stay concrete in the core. "Most of the management plane is core" and "most services are not ports" are the same statement.
 
-These rules are meant to be enforced mechanically, not only in review. A boundary check (planned: a `check_architecture.py` script run in CI) asserts the layering, for example: ports may import models, exceptions, and core, but not services, API, or any adapter; services may import ports but not a concrete adapter; only the composition root may import an adapter. This document is the human-readable companion to that check; the two are kept in step so the boundary the doc describes is the boundary CI enforces.
+These rules are enforced mechanically, not only in review. The boundary check (`scripts/check_architecture.py`, run by `make lint` in CI) asserts the layering: ports may import models, exceptions, and core, but not services, the API, or any adapter; services may import ports but not a concrete adapter; only the composition root may import an adapter. This document is the human-readable companion to that check; the two are kept in step so the boundary the doc describes is the boundary CI enforces.
 
 ## How to add a capability
 
 A step-by-step recipe for adding a capability without crossing the boundary. The `AuthzPort` seam is the reference template every later capability copies.
 
 1. **Decide whether you need a port at all.** Apply rule 7. If the capability is plain management CRUD with no second implementation on the horizon, skip the ceremony: write a normal service and repository in the core and stop here. Only continue if a second implementation is genuinely on the table, or a hard boundary runs through it.
-2. **Define the port.** Add a domain-named `Protocol` to the core `ports` package (planned location: `src/gateway/ports/`). It may depend on models, exceptions, and core only, never on services, the API, or an adapter.
+2. **Define the port.** Add a domain-named `Protocol` to `src/gateway/ports/`, one module per port. Its methods are `async`. It may depend on models, exceptions, and core only, never on services, the API, or an adapter.
 3. **Route callers through the port.** Services depend on the port, resolved from the container; they never name a concrete adapter.
-4. **Ship a working core adapter.** Add a real lightweight implementation, or an honest Null Object, to the core adapters package. Verify the capability behaves correctly with only this adapter present.
-5. **Bind the default in the composition root.** Register `Port -> core factory` in the container built at startup in `create_app`, and resolve it through a dependency in `deps.py`.
-6. **If the capability has API or UI surface, add and gate it.** Add its router to the central additive router list (a planned mechanism) and register its nav item into the nav registry (`web/src/app/nav/registry.ts`), each gated by an entitlement. Do not swap anything on this side; add surface and make it conditional.
+4. **Ship a working core adapter.** Add a real lightweight implementation, or an honest Null Object, to `src/gateway/adapters/`. Verify the capability behaves correctly with only this adapter present.
+5. **Bind the default in the composition root.** Register `Port -> core factory` in `build_container` (`src/gateway/container.py`), through a named factory function whose return type is the port, so the type checker verifies the adapter satisfies it. Resolve it through a dependency in `deps.py`.
+6. **If the capability has API or UI surface, add and gate it.** A core router is registered in `register_routers` (`src/gateway/api/main.py`); an overlay's is recorded on the container with `contribute_router` and mounted behind the capability it names. Register its nav item into the nav registry (`web/src/app/nav/registry.ts`), gated by the same entitlement. Do not swap anything on this side; add surface and make it conditional.
 7. **Verify Otari still stands alone.** It must boot standalone with only the core adapters bound (no overlay bootstrap configured) and pass its smoke suite, and the boundary check must pass. Both are automated: `uv run --frozen --no-dev python scripts/oss_edition_smoke.py` is the smoke suite (run by `.github/workflows/otari-oss-edition.yml` on any pull request that touches the app, the migrations, or dependency resolution), and `make check-architecture` is the boundary check.
 
 Once the seam exists, an overlay adds its own adapter by registering it through these same extension points, with zero edits to Otari's source. Building the seam is core work; using it is overlay work.

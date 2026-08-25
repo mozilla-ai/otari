@@ -1,5 +1,8 @@
 import { Link } from "@tanstack/react-router"
 
+// By its `@/…` specifier, never as `./overlayWalletSlot`: that specifier is the
+// seam's alias key, and the module says what a relative import would cost.
+import { WalletNavSlot } from "@/app/nav/overlayWalletSlot"
 import { EntitlementGate } from "@/shared/components/EntitlementGate"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
@@ -17,11 +20,11 @@ import { useDeployment } from "@/shared/hooks/useDeployment"
 // both the entitlement and a `management_url` to point at, which only a gateway
 // attached to otari.ai has.
 //
-// The design also draws a balance here. It is not built: this gateway meters
-// spend but holds no wallet, and there is no seam that could feed one, since an
-// overlay replaces `overlaySections.ts` / `overlayLabelOverrides.ts` and not
-// this file. A prop and a component that nothing can reach read as wired, so
-// they wait for the deployment that has a figure to report.
+// The design also draws a balance at the end of the cluster, and this build has
+// none to draw: this gateway meters spend but holds no wallet. `WalletNavSlot`
+// is the seam a build that does hold one replaces to contribute the chip, so
+// the gap is reachable rather than something an overlay would have to edit this
+// file to fill. It renders nothing here.
 
 const ACTION =
   "flex min-h-[2.125rem] items-center rounded-md px-1 text-chrome-row font-medium text-muted transition-colors hover:text-foreground"
@@ -32,7 +35,9 @@ export function TopBarActions() {
 
   return (
     // Hidden below the md breakpoint, where the mobile header has room for the
-    // dismiss control and the trail and nothing else.
+    // dismiss control and the trail and nothing else. The slot is inside the
+    // cluster and so inherits that, which is what otari.ai's own navbar does
+    // with the balance.
     <div className="hidden shrink-0 items-center gap-5 md:flex">
       <Link to="/docs" className={ACTION}>
         Documentation
@@ -49,6 +54,7 @@ export function TopBarActions() {
           </a>
         </EntitlementGate>
       ) : null}
+      <WalletNavSlot />
     </div>
   )
 }

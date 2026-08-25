@@ -1,12 +1,22 @@
 import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { useAuth } from "@/features/auth/AuthContext"
 import { Login } from "@/features/auth/Login"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
+import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { bootstrap } from "@/tests/fixtures"
 import { AppProviders } from "@/tests/providers"
+import { recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
+
+// The telemetry seam, replaced the way a superset build's alias replaces it.
+// The base module records nothing, so the funnel this screen fires is only
+// observable through a stand-in.
+vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
+  const { telemetrySpy } = await import("@/tests/telemetry")
+  return { useTelemetry: vi.fn(() => telemetrySpy) }
+})
 
 // The sign-in screen picks its form from the bootstrap, so every render here
 // goes through a DeploymentProvider. Unclaimed (master key) is the default
@@ -16,10 +26,12 @@ function Mounted({
   children,
   signInMethods = ["master_key"],
   mailReady = false,
+  maintenanceMode = false,
 }: {
   children: React.ReactNode
-  signInMethods?: ("master_key" | "password")[]
+  signInMethods?: ("master_key" | "password" | "passkey")[]
   mailReady?: boolean
+  maintenanceMode?: boolean
 }) {
   return (
     <AppProviders>
@@ -27,6 +39,7 @@ function Mounted({
         value={bootstrap({
           sign_in_methods: signInMethods,
           mail_ready: mailReady,
+          maintenance_mode: maintenanceMode,
         })}
       >
         {children}
@@ -414,6 +427,51 @@ describe("Login", () => {
     ).not.toBeInTheDocument()
   })
 
+  it("says the gateway is under maintenance instead of offering a doomed form", async () => {
+    // The freeze refuses both credentials, so a form here could only ever be
+    // refused, and a master-key refusal reads as "wrong key" to anyone who does
+    // not already know a redeploy is under way.
+    render(
+      <Mounted maintenanceMode>
+        <Harness />
+      </Mounted>,
+    )
+
+    expect(screen.getByText("Otari is under maintenance")).toBeInTheDocument()
+    expect(screen.queryByLabelText("Master key")).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Sign in" }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("renders the gateway's own 503 wording for a tab that was open before the freeze", async () => {
+    // This tab loaded its bootstrap while sign-ins were still open, so it has
+    // the form. The refusal has to arrive as a refusal and not as a fault.
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse(
+        {
+          detail:
+            "This gateway is in maintenance mode and is not starting new dashboard sessions right now.",
+        },
+        503,
+      ),
+    )
+    const user = userEvent.setup()
+
+    render(
+      <Mounted>
+        <Harness />
+      </Mounted>,
+    )
+
+    await user.type(screen.getByLabelText("Master key"), "sk-correct")
+    await user.click(screen.getByRole("button", { name: "Sign in" }))
+
+    expect(await screen.findByText(/maintenance mode/)).toBeInTheDocument()
+    expect(screen.queryByText("SIGNED IN")).not.toBeInTheDocument()
+    expect(fetchMock).toHaveBeenCalled()
+  })
+
   it("refuses a new credential while a prior sign-out's revocation is still in flight (#557)", async () => {
     window.localStorage.setItem("otari.dashboard.hasSession", "1")
 
@@ -472,5 +530,498 @@ describe("Login", () => {
       ([, init]) => init?.method === "POST",
     )
     expect(postCall?.[1]?.body).toBe(JSON.stringify({ master_key: "sk-new" }))
+  })
+})
+
+describe("the telemetry the sign-in screen records", () => {
+  beforeEach(() => {
+    resetTelemetrySpy()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    window.localStorage.clear()
+  })
+
+  it("records a master-key sign-in under the credential it used", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ expires_at: "2026-07-30T00:00:00Z" }),
+    )
+
+    render(
+      <Mounted>
+        <Harness />
+      </Mounted>,
+    )
+    await userEvent.type(screen.getByLabelText("Master key"), "otari-mk-secret")
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }))
+
+    await waitFor(() => {
+      expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.LOGIN_SUCCESS, {
+        authentication_method: "master_key",
+      })
+    })
+  })
+
+  it("separates a password sign-in from a master-key one", async () => {
+    // The two credentials a deployment can offer are one funnel with two paths,
+    // and a claim (otari#649) moves every later sign-in from one to the other.
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ expires_at: "2026-07-30T00:00:00Z" }),
+    )
+
+    render(
+      <Mounted signInMethods={["password"]}>
+        <Harness />
+      </Mounted>,
+    )
+    await userEvent.type(screen.getByLabelText("Email"), "ops@example.com")
+    await userEvent.type(screen.getByLabelText("Password"), "hunter22")
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }))
+
+    await waitFor(() => {
+      expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.LOGIN_SUCCESS, {
+        authentication_method: "password",
+      })
+    })
+  })
+
+  it("records a refused credential without recording the credential", async () => {
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ detail: "Invalid master key." }, 401),
+    )
+
+    render(
+      <Mounted>
+        <Harness />
+      </Mounted>,
+    )
+    await userEvent.type(screen.getByLabelText("Master key"), "wrong-key")
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }))
+
+    await waitFor(() => {
+      expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.LOGIN_FAILED, {
+        authentication_method: "master_key",
+        error_code: "http_401",
+      })
+    })
+    // Nothing typed into the form reaches an event: not the key, and not the
+    // gateway's own sentence about it.
+    for (const [, properties] of recordEvent.mock.calls) {
+      expect(JSON.stringify(properties ?? {})).not.toContain("wrong-key")
+    }
+  })
+
+  it("records a failed request under its status rather than its message", async () => {
+    // 500 rather than 503: a 503 the gateway wrote is maintenance mode and
+    // comes back as a refusal, not a throw (see `createSession`). This is the
+    // fault path.
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ detail: "Gateway is unwell." }, 500),
+    )
+
+    render(
+      <Mounted>
+        <Harness />
+      </Mounted>,
+    )
+    await userEvent.type(screen.getByLabelText("Master key"), "otari-mk-secret")
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }))
+
+    await waitFor(() => {
+      expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.LOGIN_FAILED, {
+        authentication_method: "master_key",
+        error_code: "http_500",
+        status: 500,
+      })
+    })
+  })
+
+  it("records a refusal the form made itself, before any request", async () => {
+    // This screen deliberately leaves its button enabled on an empty box and
+    // validates on submit, which is the moment there is something to record.
+    const fetchMock = vi.spyOn(globalThis, "fetch")
+
+    render(
+      <Mounted signInMethods={["password"]}>
+        <Harness />
+      </Mounted>,
+    )
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }))
+
+    expect(recordEvent).toHaveBeenCalledWith(
+      TELEMETRY_EVENTS.FORM_VALIDATION_FAILED,
+      { form_name: "login", errors: ["email_required"] },
+    )
+    expect(fetchMock).not.toHaveBeenCalled()
+  })
+
+  it("names a malformed address as a different refusal from a missing one", async () => {
+    render(
+      <Mounted signInMethods={["password"]}>
+        <Harness />
+      </Mounted>,
+    )
+    await userEvent.type(screen.getByLabelText("Email"), "not-an-address")
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }))
+
+    expect(recordEvent).toHaveBeenCalledWith(
+      TELEMETRY_EVENTS.FORM_VALIDATION_FAILED,
+      { form_name: "login", errors: ["email_invalid_format"] },
+    )
+  })
+
+  it("names an empty master key on the unclaimed form", async () => {
+    render(
+      <Mounted>
+        <Harness />
+      </Mounted>,
+    )
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }))
+
+    expect(recordEvent).toHaveBeenCalledWith(
+      TELEMETRY_EVENTS.FORM_VALIDATION_FAILED,
+      { form_name: "login", errors: ["master_key_required"] },
+    )
+  })
+
+  it("names a missing password, the one reason with no coverage before", async () => {
+    render(
+      <Mounted signInMethods={["password"]}>
+        <Harness />
+      </Mounted>,
+    )
+    await userEvent.type(screen.getByLabelText("Email"), "ops@example.com")
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }))
+
+    expect(recordEvent).toHaveBeenCalledWith(
+      TELEMETRY_EVENTS.FORM_VALIDATION_FAILED,
+      { form_name: "login", errors: ["password_required"] },
+    )
+  })
+
+  it("separates a retired master key from a wrong one", async () => {
+    // 401 is a wrong credential and 403 is a master key presented to a
+    // deployment that has retired it, a distinction this screen already calls
+    // load-bearing. One bucket for both would throw it away.
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ detail: "Master-key sign-in has been retired." }, 403),
+    )
+
+    render(
+      <Mounted>
+        <Harness />
+      </Mounted>,
+    )
+    await userEvent.type(screen.getByLabelText("Master key"), "otari-mk-old")
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }))
+
+    await waitFor(() => {
+      expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.LOGIN_FAILED, {
+        authentication_method: "master_key",
+        error_code: "http_403",
+      })
+    })
+  })
+
+  it("keeps a maintenance freeze apart from a rejected credential", async () => {
+    // A 503 the gateway wrote is a deliberate refusal rather than a fault, and
+    // it is the one refusal where nothing was wrong with the credential. Under
+    // one bucket with a wrong password it would read as a spike in failed
+    // sign-ins every time a deployment froze for a redeploy.
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      jsonResponse({ detail: "This gateway is paused for maintenance." }, 503),
+    )
+
+    render(
+      <Mounted>
+        <Harness />
+      </Mounted>,
+    )
+    await userEvent.type(screen.getByLabelText("Master key"), "otari-mk-secret")
+    await userEvent.click(screen.getByRole("button", { name: "Sign in" }))
+
+    await waitFor(() => {
+      expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.LOGIN_FAILED, {
+        authentication_method: "master_key",
+        error_code: "http_503",
+      })
+    })
+  })
+})
+describe("Login with a passkey", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+    // A successful sign-in is remembered in localStorage, so without this the
+    // next test in this block mounts already authenticated and renders no form
+    // at all. The block above clears it for the same reason.
+    window.localStorage.clear()
+  })
+
+  // A browser that can run the ceremony. `supportsPasskeys` is read on render,
+  // so this has to be stubbed before one.
+  function stubAuthenticator(get: ReturnType<typeof vi.fn>) {
+    // A secure context as well as the API: `supportsPasskeys` gates on both, and
+    // jsdom reports `isSecureContext` false by default.
+    vi.stubGlobal("isSecureContext", true)
+    vi.stubGlobal("PublicKeyCredential", function PublicKeyCredential() {})
+    vi.stubGlobal("navigator", {
+      ...globalThis.navigator,
+      credentials: { get },
+    })
+  }
+
+  function assertion() {
+    return {
+      id: "Y3JlZA",
+      rawId: new Uint8Array([1, 2, 3]).buffer,
+      type: "public-key",
+      response: {
+        clientDataJSON: new Uint8Array([4, 5]).buffer,
+        authenticatorData: new Uint8Array([6, 7]).buffer,
+        signature: new Uint8Array([8, 9]).buffer,
+        userHandle: null,
+      },
+      getClientExtensionResults: () => ({}),
+    }
+  }
+
+  function mockCeremony(verify: () => Response) {
+    return vi
+      .spyOn(globalThis, "fetch")
+      .mockImplementation((input: RequestInfo | URL) => {
+        const url = String(input)
+        if (url === "/v1/auth/webauthn/authenticate/options") {
+          return Promise.resolve(jsonResponse({ challenge: "Y2hhbGxlbmdl" }))
+        }
+        if (url === "/v1/auth/webauthn/authenticate") {
+          return Promise.resolve(verify())
+        }
+        // Anything else the shell asks for (the build poll, say) answers
+        // benignly rather than throwing: a throw here surfaces as an unhandled
+        // rejection that fails whichever test happens to run next, which is a
+        // failure with nothing to do with the one being written.
+        return Promise.resolve(jsonResponse({}))
+      })
+  }
+
+  it("blocks a password sign-in while a ceremony is still open", async () => {
+    // The system sheet covers the page but the form behind it is still live and
+    // Enter still submits, so without a guard a passkey and a password sign-in
+    // race and whichever cookie lands second wins. The same hazard the
+    // sign-out guard exists for (#557), arriving from the other direction.
+    let releaseCeremony: (value: unknown) => void = () => {}
+    const get = vi.fn(
+      () =>
+        new Promise((resolve) => {
+          releaseCeremony = resolve
+        }),
+    )
+    stubAuthenticator(get)
+    const fetchMock = mockCeremony(() =>
+      jsonResponse({ expires_at: "2026-09-01T00:00:00Z" }),
+    )
+    const user = userEvent.setup()
+
+    render(
+      <Mounted signInMethods={["passkey", "password"]}>
+        <Harness />
+      </Mounted>,
+    )
+    await user.click(screen.getByRole("button", { name: "Use a passkey" }))
+    await waitFor(() => expect(get).toHaveBeenCalled())
+
+    // The ceremony is open. Fill the form and submit it anyway.
+    await user.type(screen.getByLabelText("Email"), "operator@example.com")
+    await user.type(screen.getByLabelText("Password"), "a-real-password")
+    expect(screen.getByRole("button", { name: /Sign in/ })).toBeDisabled()
+    await user.keyboard("{Enter}")
+
+    expect(
+      fetchMock.mock.calls.some(([url]) => String(url) === "/v1/auth/session"),
+    ).toBe(false)
+
+    releaseCeremony(assertion())
+  })
+
+  it("is not offered when the gateway does not publish the method", () => {
+    stubAuthenticator(vi.fn())
+    render(
+      <Mounted signInMethods={["password"]}>
+        <Harness />
+      </Mounted>,
+    )
+    expect(
+      screen.queryByRole("button", { name: "Use a passkey" }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("is not offered in a browser that cannot run the ceremony", () => {
+    vi.stubGlobal("PublicKeyCredential", undefined)
+    render(
+      <Mounted signInMethods={["password", "passkey"]}>
+        <Harness />
+      </Mounted>,
+    )
+    // Published by the gateway, but the button would be a dead end here.
+    expect(
+      screen.queryByRole("button", { name: "Use a passkey" }),
+    ).not.toBeInTheDocument()
+    // The form it sits beside is unaffected.
+    expect(screen.getByLabelText("Email")).toBeInTheDocument()
+  })
+
+  it("signs in and leaves the password form in place beside it", async () => {
+    const get = vi.fn().mockResolvedValue(assertion())
+    stubAuthenticator(get)
+    mockCeremony(() =>
+      jsonResponse({
+        expires_at: "2026-08-25T10:00:00Z",
+        user_id: "11111111-1111-1111-1111-111111111111",
+        active_organization_id: "22222222-2222-2222-2222-222222222222",
+      }),
+    )
+    const user = userEvent.setup()
+    render(
+      <Mounted signInMethods={["password", "passkey"]}>
+        <Harness />
+      </Mounted>,
+    )
+
+    // Additive: the passkey never replaces the credential form.
+    expect(screen.getByLabelText("Email")).toBeInTheDocument()
+    await user.click(screen.getByRole("button", { name: "Use a passkey" }))
+
+    expect(await screen.findByText("SIGNED IN")).toBeInTheDocument()
+    expect(get).toHaveBeenCalled()
+  })
+
+  it("reports the gateway's refusal without signing in", async () => {
+    stubAuthenticator(vi.fn().mockResolvedValue(assertion()))
+    mockCeremony(() =>
+      jsonResponse({ detail: "That passkey did not sign you in" }, 401),
+    )
+    const user = userEvent.setup()
+    render(
+      <Mounted signInMethods={["password", "passkey"]}>
+        <Harness />
+      </Mounted>,
+    )
+
+    await user.click(screen.getByRole("button", { name: "Use a passkey" }))
+
+    expect(
+      await screen.findByText("That passkey did not sign you in"),
+    ).toBeInTheDocument()
+    expect(screen.queryByText("SIGNED IN")).not.toBeInTheDocument()
+  })
+
+  it("says nothing when the prompt is dismissed", async () => {
+    const get = vi
+      .fn()
+      .mockRejectedValue(new DOMException("denied", "NotAllowedError"))
+    stubAuthenticator(get)
+    mockCeremony(() => jsonResponse({}, 200))
+    const user = userEvent.setup()
+    render(
+      <Mounted signInMethods={["password", "passkey"]}>
+        <Harness />
+      </Mounted>,
+    )
+
+    await user.click(screen.getByRole("button", { name: "Use a passkey" }))
+
+    await waitFor(() => expect(get).toHaveBeenCalled())
+    // Pressing Escape is a decision, not a refused credential, so the screen
+    // returns to its resting state with nothing said.
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Use a passkey" }),
+      ).toBeInTheDocument(),
+    )
+    expect(screen.queryByText(/did not sign you in/)).not.toBeInTheDocument()
+  })
+
+  // The sign-in funnel landed while this branch was in flight, so the passkey
+  // path has to report into it too or a whole authentication method is missing
+  // from the one place sign-in success is measurable.
+  describe("the telemetry it records", () => {
+    beforeEach(() => {
+      resetTelemetrySpy()
+    })
+
+    it("names the method on a success", async () => {
+      const get = vi.fn().mockResolvedValue(assertion())
+      stubAuthenticator(get)
+      mockCeremony(() => jsonResponse({ expires_at: "2026-09-01T00:00:00Z" }))
+      const user = userEvent.setup()
+
+      render(
+        <Mounted signInMethods={["passkey", "password"]}>
+          <Harness />
+        </Mounted>,
+      )
+      await user.click(screen.getByRole("button", { name: "Use a passkey" }))
+
+      expect(await screen.findByText("SIGNED IN")).toBeInTheDocument()
+      expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.LOGIN_SUCCESS, {
+        authentication_method: "passkey",
+      })
+    })
+
+    it("records a refusal with the gateway's status and none of its wording", async () => {
+      const get = vi.fn().mockResolvedValue(assertion())
+      stubAuthenticator(get)
+      mockCeremony(() =>
+        jsonResponse({ detail: "That passkey did not sign you in" }, 401),
+      )
+      const user = userEvent.setup()
+
+      render(
+        <Mounted signInMethods={["passkey", "password"]}>
+          <Harness />
+        </Mounted>,
+      )
+      await user.click(screen.getByRole("button", { name: "Use a passkey" }))
+
+      await waitFor(() =>
+        expect(recordEvent).toHaveBeenCalledWith(
+          TELEMETRY_EVENTS.LOGIN_FAILED,
+          {
+            authentication_method: "passkey",
+            error_code: "http_401",
+          },
+        ),
+      )
+    })
+
+    it("counts a dismissed prompt as its own outcome", async () => {
+      // Neither silence nor a generic failure: it is the most common way this
+      // button ends, and both alternatives misreport it.
+      const get = vi
+        .fn()
+        .mockRejectedValue(new DOMException("dismissed", "NotAllowedError"))
+      stubAuthenticator(get)
+      mockCeremony(() => jsonResponse({}))
+      const user = userEvent.setup()
+
+      render(
+        <Mounted signInMethods={["passkey", "password"]}>
+          <Harness />
+        </Mounted>,
+      )
+      await user.click(screen.getByRole("button", { name: "Use a passkey" }))
+
+      await waitFor(() =>
+        expect(recordEvent).toHaveBeenCalledWith(
+          TELEMETRY_EVENTS.LOGIN_FAILED,
+          {
+            authentication_method: "passkey",
+            error_code: "passkey_cancelled",
+          },
+        ),
+      )
+    })
   })
 })

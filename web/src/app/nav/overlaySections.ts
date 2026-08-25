@@ -18,11 +18,14 @@ export const OVERLAY_NAV_SECTIONS: readonly NavSection[] = []
  * Nav sections contributed on top of the organization rail.
  *
  * The second rail needs its own seam, because the destinations an overlay adds
- * are not all workspace-scoped: Billing is ARCHITECTURE.md's canonical
- * overlay-only capability and it belongs to the tenant, not to one workspace,
- * as do the other three the navigation prototype shows and this build leaves
- * out (Gateways, Guardrail ceiling, and an org-scoped provider-credentials
- * view). Without this an overlay would have to edit `registry.ts` to register
- * any of them, which rule 6 rules out.
+ * are not all workspace-scoped: some belong to the tenant rather than to one
+ * workspace. Without this an overlay would have to edit `registry.ts` to
+ * register one, which rule 6 rules out.
+ *
+ * A whole section is the coarser of the two contribution seams, and suits a
+ * destination an overlay owns outright. A destination with base neighbors goes
+ * through `overlayNavItems.ts` instead: Billing sits inside "Cost & billing" and
+ * Gateways inside "Gateway", so contributing either as a section of its own
+ * would put a second heading of that name on the rail (otari#737).
  */
 export const OVERLAY_ORG_NAV_SECTIONS: readonly NavSection[] = []

@@ -157,12 +157,20 @@ Three more things to know before you do it:
   the one you claimed from if you claimed with `curl`.
 
 Signup and password reset by email have since landed, so a member an admin adds
-by address can set a password of their own; OAuth and passkey sign-in are the
-rest of this track and are not here yet. Setting one claims that member's
+by address can set a password of their own. Setting one claims that member's
 account and not the deployment, so it does not retire master-key sign-in: only
-the operator identity's own password does that. See
+the operator identity's own password does that. **Account settings** also
+manages
+passkeys: sign in with your device instead of typing a password, once the
+deployment knows its own address. Setting `public_base_url` is enough on its
+own; `webauthn_rp_id` only overrides which domain the passkey is bound to and
+still needs an address to serve the ceremony from. A
+passkey is added to an identity that can already sign in rather than being a way
+in of its own, and it never replaces the password. OAuth sign-in is the rest of
+this track. See
 [Access control](access-control.md#dashboard-sessions-and-identity) for the full
-picture.
+picture, including why a passkey is bound to one domain and what happens if that
+domain changes.
 
 ### 6. Add a provider
 
@@ -513,7 +521,12 @@ the sidebar expands to:
 
 **Guardrails** is the third view, and it sits under Gateway → Routing rather
 than here, because a guardrail decides what a request may do rather than adding
-a capability to it.
+a capability to it. Under the deployment-wide settings there, **Organization
+guardrails** is the layer above them: an entry runs on every request from the
+workspaces you scope it to whether the caller asked for it or not, and an entry
+marked for every workspace covers ones created later. It may name an https guardrails
+endpoint of its own, with a credential to authenticate to it, or leave both
+blank and use the URL set just above. See [Guardrails](guardrails.md#organization-guardrails).
 
 Two things are true of every one of these views:
 
@@ -658,6 +671,17 @@ password. Configure mail before you expect members to sign in.
   ready to log. Mail is optional, so a gateway with none configured says which
   settings would turn it on (see [Configuration](configuration.md#mail)) and
   disables the test send rather than offering one that would fail.
+  **Maintenance mode**, below it, freezes new dashboard sign-ins so you can
+  redeploy without anyone starting a session mid-migration. It is deliberately
+  narrow: sessions already open keep working, so it never signs you out of the
+  tab you flipped it in, and it does not touch the API, so keys and completions
+  carry on serving. The switch is stored rather than held in memory, so one
+  toggle freezes every replica at once and the freeze survives a restart. The
+  way back out does not depend on signing in: the master key still authenticates
+  the management API through the header, so you can turn it off from a fresh
+  browser even while sign-ins are frozen. Keep that key to hand before you set
+  this, because it is what lifts the freeze once your own session is gone;
+  without it the recovery is setting `OTARI_MASTER_KEY` and restarting.
 
 ## Install it on your phone
 

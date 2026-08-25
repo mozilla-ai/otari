@@ -9,6 +9,11 @@ layering, the budget/reservation lifecycle, migrations, config/logging), read
 The two runtime modes and the OSS/enterprise seam are in the root `AGENTS.md`;
 read that first if a change touches mode selection.
 
+## Ports, container, bootstrap
+`ports/` holds the domain-named `Protocol` interfaces the core depends on, `adapters/` holds Otari's own implementation of each, and `container.py` is the composition root that binds them, built once per app in `create_app` and read through the port dependencies in `api/deps.py`. `OTARI_BOOTSTRAP=module:callable` points at an overlay's register function, imported after the defaults are bound; unset, nothing is imported. Why the seam is shaped this way, and the rules for keeping it, are in [../../ARCHITECTURE.md](../../ARCHITECTURE.md); `scripts/check_architecture.py` enforces them.
+
+Two local consequences worth knowing before you use it. A port factory receives `AsyncSession | None`, because hybrid mode runs with no local database and an adapter resolved on a hybrid request has to say what it does without one. And nothing on the request path calls a port yet: the four that exist are the mechanism, and a capability earns its port when a second implementation is real, not before.
+
 ## Request lifecycle (chat completions)
 Read these together before changing request behavior, the flow spans several files.
 
@@ -89,16 +94,19 @@ wired into the lifespan, standalone-only.
 
 Their pages are in [../../web/AGENTS.md](../../web/AGENTS.md).
 
-Neither store becomes workspace-keyed. Per-workspace tool configuration (guardrails, web
-search, code execution, MCP servers) is resolved at admission in `prepare_gateway_tools`
-off `RequestContext.workspace_id`, never from a header, and lands on `ToolContext` for the
-tool loop to read. A lower layer may only narrow what the layer above it permits, so a
-workspace row is a veto and a refinement and never a grant, and no row means no narrowing
-(MCP, which has no deployment-level server list to narrow, is the stated exception). The
+Neither store becomes workspace-keyed. Per-tenant tool configuration (web search, code
+execution, MCP servers, guardrails) is resolved at admission in `prepare_gateway_tools`
+off `RequestContext.workspace_id` and `organization_id`, never from a header, and lands on
+`ToolContext` for the tool loop to read (guardrails, which never enter that loop, go
+straight into the pre-provider check instead). A lower layer may only narrow what the
+layer above it permits, so a workspace row is a veto and a refinement and never a grant,
+and no row means no narrowing (MCP, which has no deployment-level server list to narrow,
+is the stated exception). The
 question is [#655](https://github.com/mozilla-ai/otari/issues/655) and the reasoning is in
 the PR that answered it,
-[#678](https://github.com/mozilla-ai/otari/pull/678). Read both before building
-either of #654 or #656, each of which settles its own surface under the rule above.
+[#678](https://github.com/mozilla-ai/otari/pull/678). All four surfaces the decision
+covers have landed now, and each is described below as a worked example of it; read both
+before adding a fifth.
 
 MCP's own surface is the one that has landed (#658). `workspace_mcp_servers`
 (`models/entities.py`) holds a workspace's configured servers, with the bearer token
@@ -120,6 +128,56 @@ that `prepare_gateway_tools` calls. The row carries no URL and no credential: th
 sandbox stays deployment-scoped on `/v1/tool-settings`, and the row only refuses it,
 lowers its two ceilings, or supplies a hint the request omitted. No row means no
 narrowing.
+
+Web search is the third (#656), and the one whose narrowing is not just a number.
+`workspace_web_search_configs` (`models/entities.py`) holds one row per workspace
+or none, managed over `/v1/workspaces/{workspace_id}/web-search` through
+`services/tenancy/workspace_web_search_service.py`, whose halves are the
+role-gated CRUD, the identity-free `resolve_workspace_web_search_config`, and the
+pure `narrow_web_search_tool_entry` that composes a row onto a request's tool
+entry. It carries no URL and no credential: the backend stays deployment-scoped
+on `/v1/tool-settings`, and the `/v1/search` tools stay on `/v1/search-tools`.
+
+Two things about it are worth knowing before editing either side.
+
+- **It narrows where the hybrid path defaults.** `prepare_gateway_tools`'s hybrid
+  arm applies the policy it resolves from otari.ai as a set of defaults a request
+  overrides, which is the platform's own contract and is left alone. The
+  standalone arm floors `max_results`, unions `blocked_domains` and intersects
+  `allowed_domains` instead, because under default-only precedence a request
+  sheds a workspace's block-list simply by sending one of its own. An empty
+  intersection is refused (`WorkspaceWebSearchDomainsExcludedError`) rather than
+  stored as `[]`, which `_build_web_search_backend` would read as *no* allow-list.
+- **`POST /v1/search` honors the veto too**, in `routes/search.py`, and only the
+  veto. It is a second door into the same capability, and leaving it open would
+  make the switch bypassable by any key in the workspace; the row's other fields
+  shape the in-loop backend's own request and have no counterpart in that
+  endpoint's provider adapters.
+
+Guardrails are the fourth and last (#654), and the one exception to the direction
+of the other three: the plane sits *above* the deployment rather than below it, because a
+guardrail is a restriction a tenant accepts and not a capability it acquires, so
+adding one can only make fewer requests succeed. `organization_guardrails` plus
+`organization_guardrail_workspaces` (`models/entities.py`) hold what an
+organization mandates and which of its workspaces run it, managed over
+`/v1/organizations/me/guardrails` through
+`services/tenancy/organization_guardrail_service.py`. Three consequences follow
+from the direction, and none of them generalize to the other three:
+
+- **An entry may carry its own `url` and credential**, where a workspace code-execution
+  policy may not. A caller can already point a request-body guardrail at an endpoint of
+  their own (`models/guardrails.GuardrailConfig.url`, SSRF-checked on the request path),
+  so storing one reaches nothing new. The credential is encrypted with the same
+  `secret_box` and sent as `Authorization: Bearer` by `run_input_guardrails`, keyed by
+  profile rather than carried on `GuardrailConfig`, which is a request-body model.
+- **The scope is org-controlled and a workspace has no veto**, since a veto is the one
+  thing that would widen what succeeds.
+- **The resolve is unconditional**, unlike the MCP and code-execution ones, which run
+  only when a request opts into the feature: a mandate that ran only when the caller
+  asked for it would not be a mandate. `_pipeline._resolve_organization_guardrails` is
+  one indexed read per completion request, folded in by `merge_guardrail_layers`
+  alongside a routing policy's mandate, with the operator's layer outermost. No entry in
+  scope means nothing runs, and `guardrails_url` stays a `runtime_settings` concern.
 
 ## The first-request setup guide
 `services/tenancy/workspace_activation_service.py` is the state behind the dashboard's setup guide (`routes/workspace_activation.py`, `/v1/workspaces/{id}/activation`): whether to offer it, the API key it hands out, what the workspace's traffic says about the attempt, and the dismissal that retires it. Ported from the platform's `WorkspaceActivationService`, and the one departure to know is that **activation is derived, not recorded**: the first successful `source="gateway"` row in `usage_logs` for the workspace *is* the evidence, read through `ix_usage_logs_workspace_source_status_timestamp`. The platform stores that telemetry in columns because its usage pipeline is asynchronous and crosses services; here the row is written by this process into this database, so a second copy could only drift. `workspace_activation_state` therefore holds one row per workspace carrying what cannot be observed elsewhere (the dismissal, when a key was last issued, and which key it was).

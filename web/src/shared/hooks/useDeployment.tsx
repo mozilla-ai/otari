@@ -13,7 +13,9 @@
  * without a reload, and it must survive the cache clear a sign-out performs.
  *
  * One field is the exception, and it is the reason this provider holds state at
- * all. Claiming a deployment retires master-key sign-in
+ * all: `sign_in_methods`, which the app itself can change. Two acts change it.
+ *
+ * Claiming a deployment retires master-key sign-in
  * (`PUT /v1/auth/password`, otari#649), which is the app changing the server's
  * answer rather than the server changing it underneath: `sign_in_methods` goes
  * from `["master_key"]` to `["password"]` the moment that call succeeds, and
@@ -27,6 +29,12 @@
  * already claimed. So the claim
  * reports itself through `useRetireMasterKeySignIn` and this provider serves
  * the corrected bootstrap from then on.
+ *
+ * Registering the first passkey, or deleting the last one, is the second
+ * (otari#652): the gateway publishes `passkey` exactly while some credential
+ * could answer a sign-in, so the account page reports the change through
+ * `useOfferPasskeySignIn`. Unlike the claim this one is reversible, because
+ * deleting a passkey is, so it carries the value rather than being one-way.
  */
 
 import type { ReactNode } from "react"
@@ -36,11 +44,18 @@ import type { DeploymentBootstrap } from "@/client"
 
 const DeploymentContext = createContext<DeploymentBootstrap | null>(null)
 const RetireMasterKeySignInContext = createContext<(() => void) | null>(null)
+const OfferPasskeySignInContext = createContext<
+  ((offered: boolean) => void) | null
+>(null)
 
 // What `_sign_in_methods` answers once the operator identity holds a password
 // (`api/routes/bootstrap.py`). Named rather than inlined so the override is
 // visibly the server's own value and not a shape invented here.
 const PASSWORD_ONLY: DeploymentBootstrap["sign_in_methods"] = ["password"]
+// The gateway sorts `sign_in_methods`, so a corrected list is sorted too rather
+// than appended to: a consumer comparing the array, not just probing it with
+// `includes`, should not be able to tell a corrected bootstrap from a fetched one.
+const PASSKEY: DeploymentBootstrap["sign_in_methods"][number] = "passkey"
 
 export function DeploymentProvider({
   value,
@@ -50,20 +65,41 @@ export function DeploymentProvider({
   children: ReactNode
 }) {
   const [masterKeyRetired, setMasterKeyRetired] = useState(false)
+  // null until this tab changes it, so the server's own answer stands: a
+  // boolean seeded from `value` would make a re-render after a reload look like
+  // a correction.
+  const [passkeysOffered, setPasskeysOffered] = useState<boolean | null>(null)
 
-  // Identity-stable in the case that always holds before a claim and forever
-  // after a reload: `effective` *is* `value` unless this tab did the claiming,
-  // so the context does not hand every consumer a new object on each render.
-  const effective = masterKeyRetired
-    ? { ...value, sign_in_methods: PASSWORD_ONLY }
-    : value
+  // Identity-stable in the case that always holds before either correction and
+  // forever after a reload: `effective` *is* `value` unless this tab did the
+  // claiming or changed its passkeys, so the context does not hand every
+  // consumer a new object on each render.
+  const effective = useMemo(() => {
+    if (!masterKeyRetired && passkeysOffered === null) {
+      return value
+    }
+    const typed = masterKeyRetired ? PASSWORD_ONLY : value.sign_in_methods
+    const withoutPasskey = typed.filter((method) => method !== PASSKEY)
+    const offered =
+      passkeysOffered === null
+        ? value.sign_in_methods.includes(PASSKEY)
+        : passkeysOffered
+    return {
+      ...value,
+      sign_in_methods: offered
+        ? [...withoutPasskey, PASSKEY].sort()
+        : withoutPasskey,
+    }
+  }, [value, masterKeyRetired, passkeysOffered])
 
   return (
     <DeploymentContext.Provider value={effective}>
       <RetireMasterKeySignInContext.Provider
         value={() => setMasterKeyRetired(true)}
       >
-        {children}
+        <OfferPasskeySignInContext.Provider value={setPasskeysOffered}>
+          {children}
+        </OfferPasskeySignInContext.Provider>
       </RetireMasterKeySignInContext.Provider>
     </DeploymentContext.Provider>
   )
@@ -85,6 +121,24 @@ export function useRetireMasterKeySignIn(): () => void {
     )
   }
   return retire
+}
+
+/**
+ * Report whether this deployment now holds a passkey that could sign somebody in.
+ *
+ * Called by the account page after registering the first one or deleting the
+ * last, so the sign-in screen a later sign-out lands on offers the button (or
+ * stops offering it) without a reload. Carries the value rather than being
+ * one-way, because unlike claiming a deployment this is reversible.
+ */
+export function useOfferPasskeySignIn(): (offered: boolean) => void {
+  const offer = useContext(OfferPasskeySignInContext)
+  if (!offer) {
+    throw new Error(
+      "useOfferPasskeySignIn must be used within a DeploymentProvider",
+    )
+  }
+  return offer
 }
 
 /** The bootstrap this page was served with. Throws outside the provider. */

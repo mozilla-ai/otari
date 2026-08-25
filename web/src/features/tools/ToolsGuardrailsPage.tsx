@@ -6,8 +6,10 @@ import type {
   ToolSettingField,
   UpdateToolSettingsRequest,
 } from "@/client"
+import { OrganizationGuardrailsCard } from "@/features/tools/OrganizationGuardrailsCard"
 import { SearchToolsCard } from "@/features/tools/SearchToolsCard"
 import { WorkspaceCodeExecutionPolicyCard } from "@/features/tools/WorkspaceCodeExecutionPolicyCard"
+import { WorkspaceWebSearchCard } from "@/features/tools/WorkspaceWebSearchCard"
 import {
   usePricing,
   useSetPricing,
@@ -20,6 +22,7 @@ import {
   ErrorBanner,
   errorMessage,
   FilterSelect,
+  INPUT_CLASS,
   PageHeader,
   PageLoading,
 } from "@/shared/components/ui"
@@ -122,9 +125,6 @@ function SaveToast({ message }: { message: string | null }) {
     </div>
   )
 }
-
-const INPUT_CLASS =
-  "rounded-md border border-border bg-surface px-2 py-1 text-sm focus:border-accent focus:outline-none disabled:opacity-50"
 
 // Every field renders as one grid row with three fixed-width tracks:
 // label | input (16rem) | actions (10rem). Because the input and action tracks
@@ -781,14 +781,26 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
               {/* Directly below the in-loop web-search settings, because a searxng
                 search tool that declares no backend URL of its own inherits the
                 one set just above it. */}
+              {/* The workspace card goes below both, because it narrows the
+                backend set above it and the /v1/search tools beside it: a
+                workspace switched off may use neither. */}
               {service.key === "web_search" ? (
-                <SearchToolsCard onSaved={showToast} />
+                <>
+                  <SearchToolsCard onSaved={showToast} />
+                  <WorkspaceWebSearchCard onSaved={showToast} />
+                </>
               ) : null}
               {/* And directly below the sandbox settings, for the same reason:
                 the workspace policy narrows the deployment-wide sandbox set
                 just above it, and reads as nonsense apart from it. */}
               {service.key === "sandbox" ? (
                 <WorkspaceCodeExecutionPolicyCard onSaved={showToast} />
+              ) : null}
+              {/* And directly below the guardrail settings, which are the
+                deployment-wide half of the same feature: an entry with no
+                endpoint of its own is sent to the URL set just above it. */}
+              {service.key === "guardrails" ? (
+                <OrganizationGuardrailsCard onSaved={showToast} />
               ) : null}
             </Fragment>
           )

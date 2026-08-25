@@ -1234,6 +1234,22 @@
         "title": "AudioSpeechRequest",
         "type": "object"
       },
+      "AuthenticatePasskeyRequest": {
+        "description": "A completed sign-in ceremony.",
+        "properties": {
+          "credential": {
+            "additionalProperties": true,
+            "description": "The browser's PublicKeyCredential assertion, serialized.",
+            "title": "Credential",
+            "type": "object"
+          }
+        },
+        "required": [
+          "credential"
+        ],
+        "title": "AuthenticatePasskeyRequest",
+        "type": "object"
+      },
       "BatchRequestItem": {
         "properties": {
           "body": {
@@ -1569,6 +1585,13 @@
           "dispatch_model"
         ],
         "title": "CandidateResponse",
+        "type": "object"
+      },
+      "CeremonyOptions": {
+        "additionalProperties": true,
+        "description": "The `PublicKeyCredentialCreationOptions`/`RequestOptions` a browser needs.\n\nPassed through as an opaque object rather than modeled field by field. The\nshape is the W3C's, the browser is the only consumer, and it is what\n``navigator.credentials`` is handed verbatim after the two base64url fields\nare decoded. Restating it here would produce a second, slightly wrong copy\nof a spec this deployment does not own, and every field the library adds\nlater would have to be added again to keep the client from dropping it.",
+        "properties": {},
+        "title": "CeremonyOptions",
         "type": "object"
       },
       "ChatCompletionRequest": {
@@ -2926,6 +2949,11 @@
             "title": "Mail Ready",
             "type": "boolean"
           },
+          "maintenance_mode": {
+            "description": "Whether this deployment is refusing new dashboard sign-ins while an operator redeploys it. The sign-in screen says so rather than presenting a form whose only outcome is a 503. Sessions already issued keep working, and the management API and the data plane are unaffected. False for a hybrid gateway, which issues no session.",
+            "title": "Maintenance Mode",
+            "type": "boolean"
+          },
           "management_url": {
             "anyOf": [
               {
@@ -2938,6 +2966,11 @@
             "description": "Where the authoritative control plane lives when it is not this deployment. Set for a hybrid gateway so its landing page can link to otari.ai; null otherwise.",
             "title": "Management Url"
           },
+          "passkeys_ready": {
+            "description": "Whether this deployment can run a passkey ceremony at all: it has a relying-party ID (webauthn_rp_id, or derived from public_base_url) and an origin to serve one from. Distinct from 'passkey' in sign_in_methods, which is narrower and answers whether a registered passkey could sign somebody in *right now*: an operator with none yet needs this one, or the page that registers the first would be hidden from them. False for a hybrid gateway, which issues no session of its own.",
+            "title": "Passkeys Ready",
+            "type": "boolean"
+          },
           "session_type": {
             "description": "The kind of session this deployment issues, not whether the caller holds one. 'local_operator' is the standalone operator sign-in (see sign_in_methods for which credential it currently accepts), 'hosted_user' an otari.ai account, and 'none' a deployment that issues no management session at all.",
             "enum": [
@@ -2949,11 +2982,12 @@
             "type": "string"
           },
           "sign_in_methods": {
-            "description": "How POST /v1/auth/session may be authenticated right now, sorted. 'master_key' is the first-boot credential and is offered until the operator identity has a password, which is what claiming the deployment means; 'password' replaces it from then on, and the master key stays the credential for the management API. Empty for a hybrid gateway, which issues no session. The login page renders from this rather than trying a credential to find out.",
+            "description": "How POST /v1/auth/session may be authenticated right now, sorted. 'master_key' is the first-boot credential and is offered until the operator identity has a password, which is what claiming the deployment means; 'password' replaces it from then on, and the master key stays the credential for the management API. 'passkey' appears alongside either one when this deployment is configured for WebAuthn and holds at least one passkey that its current relying-party ID can assert. Empty for a hybrid gateway, which issues no session. The login page renders from this rather than trying a credential to find out.",
             "items": {
               "enum": [
                 "master_key",
-                "password"
+                "password",
+                "passkey"
               ],
               "type": "string"
             },
@@ -2975,6 +3009,8 @@
           "surfaces",
           "management_url",
           "sign_in_methods",
+          "maintenance_mode",
+          "passkeys_ready",
           "mail_ready"
         ],
         "title": "DeploymentBootstrap",
@@ -4330,6 +4366,21 @@
         "title": "MailSettings",
         "type": "object"
       },
+      "MaintenanceMode": {
+        "description": "Whether this deployment is currently refusing new dashboard sign-ins.",
+        "properties": {
+          "enabled": {
+            "description": "When true, POST /v1/auth/session refuses every credential with 503 so nobody starts a new dashboard session during a redeploy. Sessions already issued keep working, and the management API and the data plane are unaffected: a caller presenting the master key or an API key through the header is never frozen out.",
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "MaintenanceMode",
+        "type": "object"
+      },
       "ManagedTool": {
         "description": "One tool the gateway can run itself.",
         "properties": {
@@ -5451,6 +5502,321 @@
         "title": "OrgProviderKeysPublic",
         "type": "object"
       },
+      "OrganizationGuardrailCreate": {
+        "description": "Request body for mandating a guardrail across an organization.\n\n``credential`` is never stored as sent: it is encrypted with\n``OTARI_SECRET_KEY`` and only the ciphertext is kept, the same convention\n`entities.WorkspaceMcpServer` and `entities.ProviderCredential` use. It is\nsent to the endpoint as ``Authorization: Bearer`` when the guardrail runs,\nso it authenticates this gateway to the guardrails service the entry names.\nA guardrail *vendor's* own key is not this: the guardrails service builds\nits guardrails from the operator's YAML and holds those itself.\n\nA credential therefore requires ``url``. The deployment's ``guardrails_url``\nis not necessarily encrypted (the shipped compose file makes it a same-host\n``http://`` sidecar) and this row cannot see what it is set to, so an entry\nthat fell back to it could not promise the bearer was sent over https. See\n`_require_url_for_credential`.\n\n``on`` is not offered. This plane mandates input-direction checks, which is\nthe only direction the request path enforces\n(`services.guardrails.run_input_guardrails`); an organization that could\nstore an output-direction mandate would be storing one nothing runs.",
+        "example": {
+          "applies_to_all_workspaces": true,
+          "credential": "sk-guardrails-...",
+          "mode": "block",
+          "profile": "prompt-injection",
+          "url": "https://guardrails.internal.example/validate"
+        },
+        "properties": {
+          "applies_to_all_workspaces": {
+            "default": false,
+            "description": "True runs this in every workspace of the organization, including one created later; false runs it only in the workspaces named by workspace_ids",
+            "title": "Applies To All Workspaces",
+            "type": "boolean"
+          },
+          "credential": {
+            "anyOf": [
+              {
+                "maxLength": 8192,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Bearer credential for this entry's endpoint. Requires url to be set, and https: an entry with no endpoint of its own falls back to the deployment's guardrails_url, which is commonly a same-host http sidecar. Encrypted at rest, never returned",
+            "title": "Credential"
+          },
+          "enabled": {
+            "default": true,
+            "description": "False stops the guardrail everywhere without discarding it",
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "mode": {
+            "default": "monitor",
+            "description": "block rejects a flagged request with 403; monitor annotates the response and forwards it",
+            "enum": [
+              "block",
+              "monitor"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "on_unavailable": {
+            "default": "block",
+            "description": "What a block-mode entry does when the guardrails service cannot be reached at all",
+            "enum": [
+              "block",
+              "monitor"
+            ],
+            "title": "On Unavailable",
+            "type": "string"
+          },
+          "profile": {
+            "description": "Profile name configured on the guardrails service, unique within the organization",
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Profile",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Guardrails endpoint for this entry; null uses the deployment's guardrails_url",
+            "title": "Url"
+          },
+          "validate_kwargs": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Extra kwargs forwarded to the guardrails service /validate call",
+            "title": "Validate Kwargs"
+          },
+          "workspace_ids": {
+            "description": "Workspaces this guardrail runs in. Must be empty when applies_to_all_workspaces is true",
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "maxItems": 500,
+            "title": "Workspace Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "profile"
+        ],
+        "title": "OrganizationGuardrailCreate",
+        "type": "object"
+      },
+      "OrganizationGuardrailPublic": {
+        "description": "The API-facing shape. Never carries the credential, only whether one is set.",
+        "properties": {
+          "applies_to_all_workspaces": {
+            "title": "Applies To All Workspaces",
+            "type": "boolean"
+          },
+          "created_at": {
+            "title": "Created At",
+            "type": "string"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "has_credential": {
+            "title": "Has Credential",
+            "type": "boolean"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "mode": {
+            "title": "Mode",
+            "type": "string"
+          },
+          "on_unavailable": {
+            "title": "On Unavailable",
+            "type": "string"
+          },
+          "organization_id": {
+            "format": "uuid",
+            "title": "Organization Id",
+            "type": "string"
+          },
+          "profile": {
+            "title": "Profile",
+            "type": "string"
+          },
+          "updated_at": {
+            "title": "Updated At",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "validate_kwargs": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validate Kwargs"
+          },
+          "workspace_ids": {
+            "items": {
+              "format": "uuid",
+              "type": "string"
+            },
+            "title": "Workspace Ids",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "organization_id",
+          "profile",
+          "url",
+          "has_credential",
+          "mode",
+          "on_unavailable",
+          "validate_kwargs",
+          "enabled",
+          "applies_to_all_workspaces",
+          "workspace_ids",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "OrganizationGuardrailPublic",
+        "type": "object"
+      },
+      "OrganizationGuardrailUpdate": {
+        "description": "Partial update. Only the fields the caller sets are applied.\n\n``credential`` and ``url`` have three states rather than two, which is what\na write-only field and its nullable partner need: omit to leave the stored\nvalue alone, send ``\"\"`` to clear it, send a value to replace it. An\nexplicit ``null`` also leaves them alone, matching\n`WorkspaceMcpServerUpdate`: a client that serializes its whole form back,\nwith an empty credential box it never filled in, must not destroy a\ncredential it was never shown.\n\n``workspace_ids`` replaces the scope whole when sent; ``[]`` clears it.",
+        "example": {
+          "credential": "sk-guardrails-...",
+          "mode": "monitor",
+          "url": "https://guardrails.internal.example/validate"
+        },
+        "properties": {
+          "applies_to_all_workspaces": {
+            "title": "Applies To All Workspaces",
+            "type": "boolean"
+          },
+          "credential": {
+            "anyOf": [
+              {
+                "maxLength": 8192,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Credential"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "mode": {
+            "enum": [
+              "block",
+              "monitor"
+            ],
+            "title": "Mode",
+            "type": "string"
+          },
+          "on_unavailable": {
+            "enum": [
+              "block",
+              "monitor"
+            ],
+            "title": "On Unavailable",
+            "type": "string"
+          },
+          "profile": {
+            "maxLength": 128,
+            "minLength": 1,
+            "title": "Profile",
+            "type": "string"
+          },
+          "url": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Url"
+          },
+          "validate_kwargs": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Validate Kwargs"
+          },
+          "workspace_ids": {
+            "anyOf": [
+              {
+                "items": {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                "maxItems": 500,
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Ids"
+          }
+        },
+        "title": "OrganizationGuardrailUpdate",
+        "type": "object"
+      },
+      "OrganizationGuardrailsPublic": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/OrganizationGuardrailPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "OrganizationGuardrailsPublic",
+        "type": "object"
+      },
       "OrganizationMembershipContextPublic": {
         "description": "An organization plus the caller's standing in it.\n\nWhat every tenancy page reads first: which organization it is looking at,\nand what the caller may do there.",
         "properties": {
@@ -5888,6 +6254,36 @@
           "created_at"
         ],
         "title": "OrganizationPublic",
+        "type": "object"
+      },
+      "PasskeySessionResponse": {
+        "description": "A dashboard session minted by a passkey (the token travels only in the cookie).\n\nThe same three fields ``POST /v1/auth/session`` answers, deliberately: the\ndashboard's sign-in path does not care which credential got it here.",
+        "properties": {
+          "active_organization_id": {
+            "description": "The organization that identity is acting in, which scopes every tenancy surface.",
+            "format": "uuid",
+            "title": "Active Organization Id",
+            "type": "string"
+          },
+          "expires_at": {
+            "description": "When the session cookie stops being accepted.",
+            "format": "date-time",
+            "title": "Expires At",
+            "type": "string"
+          },
+          "user_id": {
+            "description": "The identity this session speaks for.",
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "expires_at",
+          "user_id",
+          "active_organization_id"
+        ],
+        "title": "PasskeySessionResponse",
         "type": "object"
       },
       "PasswordResponse": {
@@ -6654,6 +7050,35 @@
           "unreadable"
         ],
         "title": "ReencryptSearchToolsResponse",
+        "type": "object"
+      },
+      "RegisterPasskeyRequest": {
+        "description": "A completed registration ceremony, with the label to file it under.",
+        "properties": {
+          "credential": {
+            "additionalProperties": true,
+            "description": "The browser's PublicKeyCredential, serialized.",
+            "title": "Credential",
+            "type": "object"
+          },
+          "name": {
+            "anyOf": [
+              {
+                "maxLength": 255,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "What to call this passkey in the credential list. Optional: an unnamed one is numbered rather than refused, so a browser that offers no prompt still works.",
+            "title": "Name"
+          }
+        },
+        "required": [
+          "credential"
+        ],
+        "title": "RegisterPasskeyRequest",
         "type": "object"
       },
       "RequestPasswordResetRequest": {
@@ -8714,6 +9139,21 @@
           }
         },
         "title": "UpdateKeyRequest",
+        "type": "object"
+      },
+      "UpdateMaintenanceModeRequest": {
+        "description": "Turn the sign-in freeze on or off.",
+        "properties": {
+          "enabled": {
+            "description": "True to freeze new dashboard sign-ins, false to allow them again.",
+            "title": "Enabled",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "UpdateMaintenanceModeRequest",
         "type": "object"
       },
       "UpdateScopedBudgetRequest": {
@@ -10866,6 +11306,110 @@
         "title": "VerifyEmailResponse",
         "type": "object"
       },
+      "WebAuthnCredentialPublic": {
+        "description": "A passkey as the settings page lists it.\n\nCarries no key material. ``credential_id`` is here because the browser needs\nit to tell the passkey it just used from the others in the list, and it is\na public identifier the authenticator hands to any site that asks: it is\nwhat ``allowCredentials`` publishes to an unauthenticated caller during a\nceremony.",
+        "properties": {
+          "backed_up": {
+            "title": "Backed Up",
+            "type": "boolean"
+          },
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "credential_id": {
+            "title": "Credential Id",
+            "type": "string"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "is_usable": {
+            "title": "Is Usable",
+            "type": "boolean"
+          },
+          "last_used_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Used At"
+          },
+          "name": {
+            "maxLength": 255,
+            "title": "Name",
+            "type": "string"
+          },
+          "rp_id": {
+            "title": "Rp Id",
+            "type": "string"
+          },
+          "transports": {
+            "items": {
+              "type": "string"
+            },
+            "title": "Transports",
+            "type": "array"
+          }
+        },
+        "required": [
+          "name",
+          "id",
+          "credential_id",
+          "rp_id",
+          "is_usable",
+          "transports",
+          "backed_up",
+          "created_at",
+          "last_used_at"
+        ],
+        "title": "WebAuthnCredentialPublic",
+        "type": "object"
+      },
+      "WebAuthnCredentialUpdate": {
+        "description": "Renaming a passkey, which is the only thing about one that is editable.\n\nEverything else on the row is what the authenticator asserted, so there is\nnothing else a person could correct.",
+        "properties": {
+          "name": {
+            "maxLength": 255,
+            "title": "Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name"
+        ],
+        "title": "WebAuthnCredentialUpdate",
+        "type": "object"
+      },
+      "WebAuthnCredentialsPublic": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/WebAuthnCredentialPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "WebAuthnCredentialsPublic",
+        "type": "object"
+      },
       "WorkspaceActivationPublic": {
         "description": "Where a workspace stands on its first successful request.",
         "properties": {
@@ -11805,6 +12349,212 @@
           }
         },
         "title": "WorkspaceUpdate",
+        "type": "object"
+      },
+      "WorkspaceWebSearchConfigPublic": {
+        "description": "A workspace's web-search configuration, or the unconfigured one it has without a row.",
+        "properties": {
+          "allowed_domains": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Domains"
+          },
+          "blocked_domains": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Blocked Domains"
+          },
+          "configured": {
+            "title": "Configured",
+            "type": "boolean"
+          },
+          "created_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Created At"
+          },
+          "enabled": {
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "max_results": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Max Results"
+          },
+          "provider_options": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Provider Options"
+          },
+          "purpose_hint": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Purpose Hint"
+          },
+          "updated_at": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Updated At"
+          },
+          "web_search_configured": {
+            "title": "Web Search Configured",
+            "type": "boolean"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "workspace_id",
+          "configured",
+          "web_search_configured",
+          "enabled",
+          "max_results",
+          "purpose_hint",
+          "allowed_domains",
+          "blocked_domains",
+          "provider_options",
+          "created_at",
+          "updated_at"
+        ],
+        "title": "WorkspaceWebSearchConfigPublic",
+        "type": "object"
+      },
+      "WorkspaceWebSearchConfigUpdate": {
+        "description": "The configuration to store for a workspace, as a whole.\n\n``PUT`` semantics, ported from the hosted ``WorkspaceWebSearchConfigUpdate``:\nwhat is sent is what the workspace has afterwards, so an omitted field is\ncleared rather than left as it was.",
+        "properties": {
+          "allowed_domains": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Results are kept only from these domains; intersected with any list the request sends",
+            "title": "Allowed Domains"
+          },
+          "blocked_domains": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Results from these domains are dropped; added to any list the request sends",
+            "title": "Blocked Domains"
+          },
+          "enabled": {
+            "description": "False refuses web search for this workspace, both the otari_web_search tool and POST /v1/search. The fields below narrow the tool only.",
+            "title": "Enabled",
+            "type": "boolean"
+          },
+          "max_results": {
+            "anyOf": [
+              {
+                "exclusiveMinimum": 0.0,
+                "maximum": 20.0,
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Ceiling on results one search returns; only ever lowers the effective limit, so at most 20",
+            "title": "Max Results"
+          },
+          "provider_options": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Provider-specific knobs forwarded to the search backend; a request's own keys win",
+            "title": "Provider Options"
+          },
+          "purpose_hint": {
+            "anyOf": [
+              {
+                "maxLength": 2048,
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Hint used when a request declares otari_web_search without one of its own",
+            "title": "Purpose Hint"
+          }
+        },
+        "required": [
+          "enabled"
+        ],
+        "title": "WorkspaceWebSearchConfigUpdate",
         "type": "object"
       },
       "WorkspacesPublic": {
@@ -12938,7 +13688,7 @@
         ]
       },
       "post": {
-        "description": "Verify a sign-in credential and set the HttpOnly session cookie.\n\nThe session is bound to the identity that authenticated, so every request it\nlater authenticates resolves a user and that user's active organization\nrather than only \"a credential was presented once\". The response names both,\nso a client knows who it is signed in as without a second call.\n\nThe rate-limit check deliberately runs only after a failed verification,\nnot before it: a pre-verification gate can't know whether *this* attempt\nwould have succeeded, so once an IP has used up its failure quota it\nwould end up blocking that IP's legitimate owner too, not just further\nattackers. Running after verification also means the throttle bounds how\nmany verdicts an IP gets, not how much work it can cause: a password attempt\npays for a bcrypt verification (cost 12, on the order of 200ms of CPU, and\none is burned against a stand-in hash even for an address nobody holds)\nbefore the limit is consulted, so a 429 costs the same as a 401. A gateway\nexposed to the internet should rate-limit this path at the proxy as well.",
+        "description": "Verify a sign-in credential and set the HttpOnly session cookie.\n\nThe session is bound to the identity that authenticated, so every request it\nlater authenticates resolves a user and that user's active organization\nrather than only \"a credential was presented once\". The response names both,\nso a client knows who it is signed in as without a second call.\n\nThe rate-limit check deliberately runs only after a failed verification,\nnot before it: a pre-verification gate can't know whether *this* attempt\nwould have succeeded, so once an IP has used up its failure quota it\nwould end up blocking that IP's legitimate owner too, not just further\nattackers. Running after verification also means the throttle bounds how\nmany verdicts an IP gets, not how much work it can cause: a password attempt\npays for a bcrypt verification (cost 12, on the order of 200ms of CPU, and\none is burned against a stand-in hash even for an address nobody holds)\nbefore the limit is consulted, so a 429 costs the same as a 401. A gateway\nexposed to the internet should rate-limit this path at the proxy as well.\n\nThe maintenance-mode check runs before either credential is verified, and\nrefuses both. Before, because a frozen deployment should not spend a bcrypt\nverification per attempt and the refusal is not about the credential\nanyway; both, because the way back out is the master key against\n``PATCH /v1/settings/maintenance-mode`` through the header, which never\npasses through this door. That is what keeps the way back out off the frozen\npath, and it is why no identity needs an exemption here; an operator who no\nlonger holds the master key recovers by setting ``OTARI_MASTER_KEY`` and\nrestarting, which is a restart rather than a click. It leaks nothing\neither: ``GET /v1/bootstrap`` already publishes the same flag\nunauthenticated, so the sign-in screen can render the right page.",
         "operationId": "create_session_v1_auth_session_post",
         "requestBody": {
           "content": {
@@ -13057,6 +13807,285 @@
           }
         },
         "summary": "Verify Email Route",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/webauthn/authenticate": {
+      "post": {
+        "description": "Verify an assertion and set the HttpOnly session cookie.\n\nThe session is bound to the identity whose passkey signed, exactly as a\npassword sign-in binds one to the identity that authenticated, so every\nrequest it later authenticates resolves the same caller.\n\nA refusal is counted like the other sign-in failures\n(``record_auth_failure``) and answered as a 401 by the tenancy error\nhandler. Unlike the password path there is no separate post-failure\nthrottle: this route is throttled unconditionally on the way in, because\nunlike a password there is no legitimate caller here whose correct\ncredential must never be blocked (a passkey ceremony is one round trip a\nbrowser drives, not something a person retries by hand).\n\n**Maintenance mode freezes this the way it freezes the password sign-in.**\nThe freeze is on starting a session, not on a credential, so a passkey has\nto answer to it or the switch is bypassable by anybody holding one, which is\nthe whole population it exists to hold off during a redeploy. Refused before\nthe assertion is verified, so a frozen deployment does no crypto and counts\nno auth failure: nobody failed to authenticate, the gateway declined to try.",
+        "operationId": "authenticate_passkey_v1_auth_webauthn_authenticate_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/AuthenticatePasskeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/PasskeySessionResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "summary": "Authenticate Passkey",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/webauthn/authenticate/options": {
+      "post": {
+        "description": "Start a passkey sign-in. Public, throttled, and names no credentials.\n\nThe options carry no ``allowCredentials``, so this publishes nothing about\nwho holds a passkey here; see ``webauthn_service.begin_authentication``.",
+        "operationId": "authentication_options_v1_auth_webauthn_authenticate_options_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CeremonyOptions"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "summary": "Authentication Options",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/webauthn/credentials": {
+      "get": {
+        "description": "The caller's own passkeys. Never anybody else's, and never key material.\n\nDeliberately *not* behind ``require_passkey_support``, and not filtered to\nthe current relying-party ID. A deployment that has changed or lost that ID\nstill holds the rows registered under the old one, and refusing to list them\nwould leave somebody looking at an empty page with no way to clean up and no\nhint as to why. Each row carries ``is_usable`` instead, so an orphan is\nvisible, explained, and deletable.",
+        "operationId": "list_passkeys_v1_auth_webauthn_credentials_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebAuthnCredentialsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Passkeys",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/webauthn/credentials/{credential_id}": {
+      "delete": {
+        "description": "Remove one of the caller's passkeys.\n\nRemoving the last one is allowed: an email and password is still this\ndeployment's login, so this is not a lockout, and refusing would strand\nwhoever lost the authenticator.",
+        "operationId": "delete_passkey_v1_auth_webauthn_credentials__credential_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "credential_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Credential Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Passkey",
+        "tags": [
+          "auth"
+        ]
+      },
+      "patch": {
+        "description": "Relabel one of the caller's passkeys, which is all that is editable.\n\nUngated like the list, and for the same reason: naming an orphan before\ndeleting it is not something a lost relying-party ID should prevent.",
+        "operationId": "rename_passkey_v1_auth_webauthn_credentials__credential_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "credential_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Credential Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WebAuthnCredentialUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebAuthnCredentialPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Rename Passkey",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/webauthn/register": {
+      "post": {
+        "description": "Verify a registration ceremony and store the passkey it produced.",
+        "operationId": "register_passkey_v1_auth_webauthn_register_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RegisterPasskeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WebAuthnCredentialPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Register Passkey",
+        "tags": [
+          "auth"
+        ]
+      }
+    },
+    "/v1/auth/webauthn/register/options": {
+      "post": {
+        "description": "Start registering a passkey for the signed-in identity.\n\nA POST rather than a GET even though it reads like one: it issues a\nserver-side challenge and writes it, so it is not safe to repeat, cache, or\nprefetch.",
+        "operationId": "registration_options_v1_auth_webauthn_register_options_post",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CeremonyOptions"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Registration Options",
         "tags": [
           "auth"
         ]
@@ -15118,6 +16147,235 @@
         "summary": "Update Active Organization",
         "tags": [
           "organizations"
+        ]
+      }
+    },
+    "/v1/organizations/me/guardrails": {
+      "get": {
+        "description": "List the guardrails the caller's organization mandates.\n\nOrganization owners and admins only, unlike the pricing overrides next door\nthat any member may read: these rows name the endpoints this gateway\nconnects to and say which of them carry a credential. A credential is never\nreturned, only whether one is set.",
+        "operationId": "list_organization_guardrails_v1_organizations_me_guardrails_get",
+        "parameters": [
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of records to return",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationGuardrailsPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Organization Guardrails",
+        "tags": [
+          "organization-guardrails"
+        ]
+      },
+      "post": {
+        "description": "Mandate a guardrail across the organization. Organization owners and admins only.\n\nThe guardrail runs on every request from the workspaces it is scoped to, in\naddition to whatever the caller asked for, with the stricter of the two\nsettings applying to a profile both name. Set\n``applies_to_all_workspaces`` for it to cover workspaces created later;\notherwise a new workspace inherits nothing and the entry runs only in the\nworkspaces ``workspace_ids`` lists.",
+        "operationId": "create_organization_guardrail_v1_organizations_me_guardrails_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationGuardrailCreate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "201": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationGuardrailPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Organization Guardrail",
+        "tags": [
+          "organization-guardrails"
+        ]
+      }
+    },
+    "/v1/organizations/me/guardrails/{guardrail_id}": {
+      "delete": {
+        "description": "Stop mandating a guardrail, discarding its credential and scope.\n\nOrganization owners and admins only. Use ``enabled: false`` instead to stop\nit everywhere while keeping both.",
+        "operationId": "delete_organization_guardrail_v1_organizations_me_guardrails__guardrail_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "guardrail_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Guardrail Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Message"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Organization Guardrail",
+        "tags": [
+          "organization-guardrails"
+        ]
+      },
+      "patch": {
+        "description": "Change a guardrail's profile, endpoint, credential, modes, or scope.\n\nOrganization owners and admins only. Omitted fields are left as they are;\n``workspace_ids`` replaces the scope whole when sent, and ``url`` and\n``credential`` are cleared by sending an empty string rather than null.",
+        "operationId": "update_organization_guardrail_v1_organizations_me_guardrails__guardrail_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "guardrail_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Guardrail Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/OrganizationGuardrailUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/OrganizationGuardrailPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Organization Guardrail",
+        "tags": [
+          "organization-guardrails"
         ]
       }
     },
@@ -18184,6 +19442,84 @@
           }
         ],
         "summary": "Send Test Mail",
+        "tags": [
+          "settings"
+        ]
+      }
+    },
+    "/v1/settings/maintenance-mode": {
+      "get": {
+        "description": "Report whether new dashboard sign-ins are frozen.",
+        "operationId": "get_maintenance_mode_v1_settings_maintenance_mode_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaintenanceMode"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Maintenance Mode",
+        "tags": [
+          "settings"
+        ]
+      },
+      "patch": {
+        "description": "Freeze or unfreeze dashboard sign-ins, for this and every other replica.\n\nThe new state is persisted and nothing is applied to the running worker,\nbecause every reader goes back to the stored row. That is what makes one\ncall enough for a deployment running more than one of them.",
+        "operationId": "update_maintenance_mode_v1_settings_maintenance_mode_patch",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateMaintenanceModeRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/MaintenanceMode"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Maintenance Mode",
         "tags": [
           "settings"
         ]
@@ -22569,6 +23905,168 @@
         "summary": "Remove Workspace Provider Key Model Restriction",
         "tags": [
           "provider-keys"
+        ]
+      }
+    },
+    "/v1/workspaces/{workspace_id}/web-search": {
+      "delete": {
+        "description": "Drop a workspace's configuration, returning it to the deployment's behavior.\n\nIdempotent: a workspace that has no configuration is already in the state\nthis asks for, so it answers with the unconfigured shape rather than a 404.",
+        "operationId": "clear_workspace_web_search_config_v1_workspaces__workspace_id__web_search_delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceWebSearchConfigPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Clear Workspace Web Search Config",
+        "tags": [
+          "workspace-web-search"
+        ]
+      },
+      "get": {
+        "description": "Read a workspace's web-search configuration.\n\nTakes the same role as setting it (an organization owner/admin, or an\nowner/admin of this workspace), because the row describes the workspace's\nposture rather than one member's allowance. A workspace with no row answers\nwith the unconfigured shape (``configured: false``), which is the\ndeployment's own behavior described in the same shape rather than a 404.",
+        "operationId": "get_workspace_web_search_config_v1_workspaces__workspace_id__web_search_get",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceWebSearchConfigPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Workspace Web Search Config",
+        "tags": [
+          "workspace-web-search"
+        ]
+      },
+      "put": {
+        "description": "Set a workspace's web-search configuration, replacing any existing one.\n\nAn organization owner/admin, or an owner/admin of this workspace, may write\nit. The configuration can only narrow what the deployment permits: turning\nweb search off for the workspace, lowering the result ceiling, and adding to\nthe domains a search may not reach. It never turns on a backend the\ndeployment has not configured, and it carries no credential.",
+        "operationId": "set_workspace_web_search_config_v1_workspaces__workspace_id__web_search_put",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "workspace_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "Workspace Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/WorkspaceWebSearchConfigUpdate"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/WorkspaceWebSearchConfigPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Set Workspace Web Search Config",
+        "tags": [
+          "workspace-web-search"
         ]
       }
     }

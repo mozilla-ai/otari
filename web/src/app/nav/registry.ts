@@ -3,7 +3,6 @@ import {
   FiBarChart2,
   FiBox,
   FiCode,
-  FiCreditCard,
   FiDollarSign,
   FiGlobe,
   FiGrid,
@@ -11,19 +10,24 @@ import {
   FiKey,
   FiLayers,
   FiRepeat,
-  FiServer,
   FiShield,
   FiSliders,
   FiTag,
   FiTool,
   FiUsers,
 } from "react-icons/fi"
-import { OVERLAY_NAV_LABEL_OVERRIDES } from "./overlayLabelOverrides"
+import { OVERLAY_NAV_LABEL_OVERRIDES } from "@/app/nav/overlayLabelOverrides"
+import { OVERLAY_NAV_ITEMS } from "@/app/nav/overlayNavItems"
 import {
   OVERLAY_NAV_SECTIONS,
   OVERLAY_ORG_NAV_SECTIONS,
-} from "./overlaySections"
-import type { NavItem, NavLabelOverride, NavSection } from "./types"
+} from "@/app/nav/overlaySections"
+import type {
+  NavItem,
+  NavItemContribution,
+  NavLabelOverride,
+  NavSection,
+} from "./types"
 
 /**
  * The sidebar the base build ships, and the only place a destination is
@@ -178,13 +182,26 @@ const BASE_NAV_SECTIONS = [
  * provisioned for itself. The gate is written anyway because it is the thing
  * that becomes load-bearing the moment per-user sign-in lands (otari-ai#1716).
  *
- * Four of the design's rows are destinations this gateway does not serve:
- * Billing, Gateways, the organization's own provider credentials, and the
- * organization guardrail ceiling. Each is **declared and gated on a surface the
- * standalone bootstrap does not report** (`STANDALONE_SURFACES` in
+ * Two of the design's rows are destinations this gateway does not serve: the
+ * organization's own provider credentials, and the organization guardrail
+ * ceiling. Each is **declared and gated on a surface the standalone bootstrap
+ * does not report** (`STANDALONE_SURFACES` in
  * `src/gateway/api/routes/bootstrap.py` is that list), so the row is absent here
  * and present on a deployment that serves it, and a group whose every row is
  * gated drops entirely, heading included.
+ *
+ * The design draws two more, Billing and Gateways, and neither is declared here
+ * at all, because neither is this build's to declare: Billing is
+ * ARCHITECTURE.md's canonical overlay-only capability, and the attached-gateway
+ * surface behind Gateways is hosted depth (otari-ai#1779), so an overlay owns
+ * both rows together with the pages under them and contributes them through
+ * `overlayNavItems.ts`. Declaring either here would be worse than redundant: a
+ * base route file at a path the overlay also serves is not shadowed by the
+ * overlay's, it collides with it. The generator refuses the pair ("Conflicting
+ * configuration paths were found") instead of choosing between them, so the
+ * composed tree is never written: the Vite plugin logs that error and keeps
+ * building against the tree already on disk, where the overlay's page has no
+ * route at all, and a step that generates the tree on its own fails outright.
  *
  * The surface axis rather than the capability one, and that is a constraint
  * rather than a preference: `registry.test.ts` requires every capability a base
@@ -192,8 +209,8 @@ const BASE_NAV_SECTIONS = [
  * capability gate cannot express "declared but not served" without relaxing that
  * invariant. A surface gate says exactly this and needs no test change.
  *
- * Two of the four have a page on the *workspace* rail that looks like them and
- * is not: `/providers` is this process's credentials, and `/tools/guardrails` is
+ * Both have a page on the *workspace* rail that looks like them and is not:
+ * `/providers` is this process's credentials, and `/tools/guardrails` is
  * what this process refuses. The organization copies would be a tenant-wide
  * credential set and a ceiling over every workspace, which are different tables
  * behind different endpoints. Pointing the organization rows at the workspace
@@ -243,12 +260,6 @@ const ORGANIZATION_NAV_SECTIONS = [
         surface: "budgets",
         icon: FiDollarSign,
       },
-      {
-        to: "/organization/billing",
-        label: "Billing",
-        surface: "billing",
-        icon: FiCreditCard,
-      },
       // Tenant-scoped in fact as well as in the design: a rate applies to every
       // workspace and every key in the deployment. The catalog had no home
       // before (its refresh flow sat in the gateway's runtime Settings next to
@@ -280,12 +291,6 @@ const ORGANIZATION_NAV_SECTIONS = [
         label: "Guardrails",
         surface: "organization_guardrails",
         icon: FiShield,
-      },
-      {
-        to: "/organization/gateways",
-        label: "Gateways",
-        surface: "gateways",
-        icon: FiServer,
       },
     ],
   },
@@ -361,6 +366,37 @@ export function applyNavLabelOverrides(
 }
 
 /**
+ * Append an overlay's contributed rows to the base sections they name.
+ *
+ * The finer of the two composition seams: `composeNavSections` adds a section,
+ * this adds rows inside one the base declares, which is what a destination like
+ * Billing needs (it belongs under "Cost & billing", among base rows, and a
+ * section of its own would put a second heading of that name on the rail).
+ *
+ * Appended after the section's base rows, in the order the contribution lists
+ * them: an overlay orders its own rows and does not interleave them with the
+ * base's, the same rule `composeNavSections` follows one grain coarser. A
+ * contribution naming a section this registry does not declare is dropped, as a
+ * stale `NavLabelOverride` is, so a section renamed or removed here costs an
+ * overlay the rows it put there rather than the whole sidebar. Two contributions
+ * naming one section both land, in list order.
+ */
+export function composeNavItems(
+  sections: readonly NavSection[],
+  contributions: readonly NavItemContribution[],
+): readonly NavSection[] {
+  if (contributions.length === 0) return sections
+  return sections.map((section) => {
+    const items = contributions
+      .filter((contribution) => contribution.sectionId === section.id)
+      .flatMap((contribution) => contribution.items)
+    return items.length === 0
+      ? section
+      : { ...section, items: [...section.items, ...items] }
+  })
+}
+
+/**
  * Compose the base sections with an overlay build's contributions.
  *
  * Base first, then overlay, so an overlay appends its own sections without
@@ -376,11 +412,19 @@ export function composeNavSections(
 /**
  * The composed workspace sidebar.
  *
+ * Three seams, applied in that order: rename what the base declares, add rows
+ * inside a base section, then append the overlay's own sections. Renaming runs
+ * first so a `disclosureLabels` entry addresses base groups only, which is what
+ * it is for; a contributed row carries the label the overlay gave it.
+ *
  * This build renames nothing and appends nothing, so it is the base sections
  * alone.
  */
 export const NAV_SECTIONS: readonly NavSection[] = composeNavSections(
-  applyNavLabelOverrides(BASE_NAV_SECTIONS, OVERLAY_NAV_LABEL_OVERRIDES),
+  composeNavItems(
+    applyNavLabelOverrides(BASE_NAV_SECTIONS, OVERLAY_NAV_LABEL_OVERRIDES),
+    OVERLAY_NAV_ITEMS,
+  ),
   OVERLAY_NAV_SECTIONS,
 )
 
@@ -391,16 +435,24 @@ export const NAV_SECTIONS: readonly NavSection[] = composeNavSections(
  * is the canonical overlay-only capability (ARCHITECTURE.md's capability table)
  * and it belongs on this rail, so an overlay that could only contribute to the
  * workspace one would have to edit this file to register it, which is what
- * cardinal rule 6 rules out. This build appends nothing.
+ * cardinal rule 6 rules out. Both rails need the row seam as well as the section
+ * one, and this rail is why: Billing lands inside "Cost & billing" and Gateways
+ * inside "Gateway", among rows the base declares, so appending a section could
+ * only put a second heading of the same name below the first. This build appends
+ * nothing.
  *
- * Label overrides come from the same list the workspace rail reads: a section id
- * is unique across the two rails (`registry.test.ts` pins that), so one list
- * addresses both and an overlay has one module to replace rather than two.
+ * Label overrides and row contributions come from the same lists the workspace
+ * rail reads: a section id is unique across the two rails (`registry.test.ts`
+ * pins that), so one list addresses both and an overlay has one module to
+ * replace rather than two.
  */
 export const ORG_NAV_SECTIONS: readonly NavSection[] = composeNavSections(
-  applyNavLabelOverrides(
-    ORGANIZATION_NAV_SECTIONS,
-    OVERLAY_NAV_LABEL_OVERRIDES,
+  composeNavItems(
+    applyNavLabelOverrides(
+      ORGANIZATION_NAV_SECTIONS,
+      OVERLAY_NAV_LABEL_OVERRIDES,
+    ),
+    OVERLAY_NAV_ITEMS,
   ),
   OVERLAY_ORG_NAV_SECTIONS,
 )

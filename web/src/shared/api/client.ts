@@ -5,6 +5,8 @@
 // POST /v1/auth/session, and is never written to browser storage: it lives in
 // the sign-in form's state until the request goes out and is gone on reload.
 
+import { getPasskeyAssertion } from "@/shared/helpers/webauthn"
+
 export class ApiError extends Error {
   status: number
 
@@ -23,19 +25,37 @@ export function setUnauthorizedHandler(handler: (() => void) | null): void {
   unauthorizedHandler = handler
 }
 
-async function extractErrorMessage(response: Response): Promise<string> {
+// Reads the body once and reports both what to show and who wrote it. `detail`
+// is non-null only when the body is JSON carrying a string `detail`, which is
+// the shape every refusal this gateway writes has and the shape an intermediary
+// answering for it does not. Callers that only need something to display take
+// `message`; the one caller that has to tell a gateway refusal from a proxy's
+// own status takes `detail`.
+async function readRefusal(
+  response: Response,
+): Promise<{ detail: string | null; message: string }> {
+  let detail: string | null = null
+  let message: string | null = null
   try {
-    const data = (await response.json()) as { detail?: unknown }
+    const data = JSON.parse(await response.text()) as { detail?: unknown }
     if (typeof data.detail === "string") {
-      return data.detail
-    }
-    if (data.detail != null) {
-      return JSON.stringify(data.detail)
+      detail = data.detail
+      message = data.detail
+    } else if (data.detail != null) {
+      message = JSON.stringify(data.detail)
     }
   } catch {
     // Body was not JSON; fall through to the status text.
   }
-  return response.statusText || `Request failed (${response.status})`
+  return {
+    detail,
+    message:
+      message ?? (response.statusText || `Request failed (${response.status})`),
+  }
+}
+
+async function extractErrorMessage(response: Response): Promise<string> {
+  return (await readRefusal(response)).message
 }
 
 // The credentials POST /v1/auth/session accepts. Exactly one form per request:
@@ -47,21 +67,31 @@ export type SignInCredential =
   | { email: string; password: string }
 
 // A refusal carries the gateway's own explanation rather than a bare false,
-// because the two refusals mean different things and only the server knows
-// which applies: a 401 is a wrong credential, while a 403 is the master key
-// being presented to a deployment that has retired it as a sign-in. Rendering
-// "Invalid master key." over the second one, as this did before there was a
-// second credential, tells the operator to retry the thing that cannot work.
+// because the refusals mean different things and only the server knows which
+// applies: a 401 is a wrong credential, a 403 is the master key presented to a
+// deployment that has retired it as a sign-in, and a 503 is maintenance mode
+// freezing every credential while the gateway is redeployed. Rendering
+// "Invalid master key." over any of the last two, as this did before there was
+// a second credential, tells the operator to retry the thing that cannot work.
 export interface SignInResult {
   ok: boolean
   message?: string
+  /**
+   * The refusal's status, on a refusal. Present so a caller can tell the two
+   * apart without re-reading the message: the wording is the gateway's and is
+   * the one part of a refusal that must not be recorded anywhere.
+   */
+  status?: number
 }
 
 // Exchange a credential for a server-issued session: the gateway verifies it and
 // answers with an HttpOnly cookie holding an opaque session token, so the
 // credential itself never needs to be stored (or even kept in memory)
-// afterwards. Refusals (401/403) come back as `ok: false` with the gateway's
-// message; network and other failures throw ApiError so the UI can explain them.
+// afterwards. Refusals come back as `ok: false` with the gateway's message:
+// 401 and 403 always, and 503 when the gateway wrote the body (maintenance
+// mode) rather than an intermediary answering for it. Network faults, an
+// unreachable gateway, and other failures throw ApiError so the UI can explain
+// them.
 export async function createSession(
   credential: SignInCredential,
 ): Promise<SignInResult> {
@@ -87,12 +117,106 @@ export async function createSession(
     throw new ApiError(0, "Network error: could not reach the gateway.")
   }
   if (response.status === 401 || response.status === 403) {
-    return { ok: false, message: await extractErrorMessage(response) }
+    return {
+      ok: false,
+      message: await extractErrorMessage(response),
+      status: response.status,
+    }
+  }
+  // 503 is maintenance mode, and a refusal the gateway wrote belongs with the
+  // other two rather than on the throw path: it is a deliberate answer, in
+  // wording meant for the person reading it, not a fault. The sign-in screen
+  // normally renders a notice instead of the form on a frozen deployment (it
+  // reads the same flag from the bootstrap); this is the tab that was already
+  // open when the freeze started.
+  //
+  // Gated on the gateway having written it, not on the status alone. The
+  // redeploy this feature exists for is exactly when a proxy with no healthy
+  // upstream answers 503 itself, and that body carries no `detail`. Treating it
+  // as a refusal would render "Service Unavailable" on a credential's label
+  // row, which says the credential was rejected by a gateway that never saw it.
+  // Those take the ApiError path and are explained as the fault they are.
+  if (response.status === 503) {
+    const refusal = await readRefusal(response)
+    if (refusal.detail !== null) {
+      return { ok: false, message: refusal.detail, status: response.status }
+    }
+    throw new ApiError(response.status, refusal.message)
   }
   if (!response.ok) {
     throw new ApiError(response.status, await extractErrorMessage(response))
   }
   return { ok: true }
+}
+
+// Sign in with a passkey: two calls with a browser ceremony between them.
+//
+// Hand-written here beside `createSession`, and for the same reason: `apiFetch`
+// treats a 401 as an expired session and bounces to the sign-in screen, which
+// is exactly wrong on the screen somebody is signing in *from*. A refused
+// passkey comes back as `ok: false` carrying the gateway's own message.
+//
+// A dismissed prompt is not a refusal and is not reported as one: the ceremony
+// throws `PasskeyCancelledError`, which the caller distinguishes.
+export async function signInWithPasskey(): Promise<SignInResult> {
+  const options = await publicPost("/v1/auth/webauthn/authenticate/options")
+  if (!options.ok) {
+    return { ok: false, message: options.message, status: options.status }
+  }
+  const assertion = await getPasskeyAssertion(
+    options.body as Parameters<typeof getPasskeyAssertion>[0],
+  )
+  const verified = await publicPost("/v1/auth/webauthn/authenticate", {
+    credential: assertion,
+  })
+  return verified.ok
+    ? { ok: true }
+    : { ok: false, message: verified.message, status: verified.status }
+}
+
+// One unauthenticated POST, with the sign-in screen's error handling: a 401 or
+// 403 is the gateway's answer rather than an exception, and anything else is a
+// failure the screen cannot explain away.
+async function publicPost(
+  path: string,
+  body?: unknown,
+): Promise<{
+  ok: boolean
+  message?: string
+  status?: number
+  body?: unknown
+}> {
+  let response: Response
+  try {
+    response = await fetch(path, {
+      method: "POST",
+      headers: {
+        Accept: "application/json",
+        ...(body === undefined ? {} : { "Content-Type": "application/json" }),
+      },
+      body: body === undefined ? undefined : JSON.stringify(body),
+      signal: AbortSignal.timeout(REQUEST_TIMEOUT_MS),
+    })
+  } catch (error) {
+    if (isTimeout(error)) {
+      throw new ApiError(0, TIMEOUT_MESSAGE)
+    }
+    throw new ApiError(0, "Network error: could not reach the gateway.")
+  }
+  if (response.status === 401 || response.status === 403) {
+    // The status travels with the refusal for the reason `SignInResult.status`
+    // documents: the caller records which refusal happened without touching the
+    // message, which is the gateway's wording and the one part that must not be.
+    return {
+      ok: false,
+      message: await extractErrorMessage(response),
+      status: response.status,
+    }
+  }
+  if (!response.ok) {
+    throw new ApiError(response.status, await extractErrorMessage(response))
+  }
+  return { ok: true, body: await response.json() }
 }
 
 // Best-effort server-side sign-out: revokes the cookie's session and expires

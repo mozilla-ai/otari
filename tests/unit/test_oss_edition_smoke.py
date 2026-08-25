@@ -57,7 +57,7 @@ def _post(url: str, *, headers: dict[str, str] | None = None) -> tuple[int, Any]
     [
         "OTARI_MODE",  # selects hybrid mode outright
         "OTARI_AI_TOKEN",  # a platform token selects hybrid mode when mode is unset
-        "OTARI_BOOTSTRAP",  # the planned overlay selector
+        "OTARI_BOOTSTRAP",  # the overlay selector, which would boot a build nobody chose
         "OTARI_PLATFORM_BASE_URL",  # the platform block, which only hybrid reads
         "OTARI_DATABASE_URL",  # would smoke a database nobody chose
         # A name the scrub has never heard of, so a regression from the prefix

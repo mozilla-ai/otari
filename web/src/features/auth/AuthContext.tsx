@@ -11,6 +11,8 @@ import {
 } from "react"
 
 import { deleteSession, setUnauthorizedHandler } from "@/shared/api/client"
+import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
+import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 
 // Non-secret marker that a session cookie was minted for this browser. The
 // credential itself is an HttpOnly cookie the page cannot read, so this flag is
@@ -43,6 +45,7 @@ function readStoredMarker(): boolean {
 
 export function AuthProvider({ children }: { children: ReactNode }) {
   const queryClient = useQueryClient()
+  const { recordEvent, identify } = useTelemetry()
 
   const [isAuthenticated, setAuthenticated] =
     useState<boolean>(readStoredMarker)
@@ -54,8 +57,34 @@ export function AuthProvider({ children }: { children: ReactNode }) {
   // unconditionally, means isSigningOut only drops once every pending one has
   // settled - not just whichever happens to resolve first.
   const pendingSignOutsRef = useRef(0)
+  // Whether a session is open as far as telemetry is concerned, seeded from the
+  // same marker the rendered state is. `logout` is deliberately re-entrant (a
+  // manual sign-out racing a 401-triggered one, and one 401 per in-flight
+  // request when a session expires), so recording unconditionally would count
+  // one session ending several times, and a 401 arriving after sign-out would
+  // invent an ending that never happened.
+  const sessionOpenRef = useRef(readStoredMarker())
+  // Whether there is still a session for a sign-out to end. A ref rather than
+  // `isAuthenticated` because the recording below happens during the call, not
+  // after the re-render it schedules, and because the counting above is the
+  // proof this matters: logout() runs once per 401 as well as from the account
+  // menu, so a session that expires with several requests in flight reaches it
+  // several times. The funnel counts a sign-out, not the calls that performed
+  // one.
+  const hasSessionRef = useRef(isAuthenticated)
 
   const logout = useCallback(() => {
+    // Recorded before anything is torn down, and from here rather than from the
+    // account menu, because this is also the path a 401 takes: a session that
+    // expired or was revoked ends the same funnel a deliberate sign-out does.
+    // `identify(null)` is the other half of it, and it is what stops the next
+    // session in this tab from being attributed to the identity that just left.
+    // Once per session, not once per call, for the reason the ref names.
+    if (hasSessionRef.current) {
+      recordEvent(TELEMETRY_EVENTS.LOGOUT)
+      identify(null)
+    }
+    hasSessionRef.current = false
     // Local sign-out is unconditional and synchronous, exactly as before:
     // the UI returns to the sign-in screen at once regardless of how the
     // server-side revocation below turns out.
@@ -79,7 +108,7 @@ export function AuthProvider({ children }: { children: ReactNode }) {
         setSigningOut(false)
       }
     })
-  }, [queryClient])
+  }, [queryClient, recordEvent, identify])
 
   // Called after POST /v1/auth/session succeeded, i.e. the browser already
   // holds the session cookie; this only flips the rendered state.
@@ -87,6 +116,9 @@ export function AuthProvider({ children }: { children: ReactNode }) {
     // Clear any cache from a prior session before the new session's queries run.
     queryClient.clear()
     setAuthenticated(true)
+    // A new session to end: the next `logout` records again.
+    sessionOpenRef.current = true
+    hasSessionRef.current = true
     try {
       window.localStorage.setItem(STORAGE_KEY, "1")
     } catch {

@@ -1,6 +1,11 @@
+import { useEffect, useRef } from "react"
+
+import { ApiError } from "@/shared/api/client"
 import { useVerifyEmail } from "@/shared/api/hooks"
 import { ErrorBanner } from "@/shared/components/ui"
 import { tokenFromHash } from "@/shared/helpers/hashParams"
+import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
+import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 
 import { PublicAuthLayout, PublicAuthLink } from "./PublicAuthLayout"
 
@@ -16,12 +21,42 @@ import { PublicAuthLayout, PublicAuthLink } from "./PublicAuthLayout"
  * Verifying on arrival is what makes `useVerifyEmail` a query rather than a
  * mutation: the token is single-use, so the call has to happen exactly once
  * per token, and the query cache is what guarantees that through StrictMode's
- * development-only remount. See the hook for the rest. There is deliberately
- * no effect here at all.
+ * development-only remount. See the hook for the rest.
+ *
+ * The one effect here records the outcome and does nothing else. The page has
+ * no other moment to record from: the verification runs on arrival rather than
+ * behind a control, so there is no handler, and TanStack Query v5 dropped the
+ * `onSuccess` a query used to carry. It fires once per mounted page, which the
+ * ref is what guarantees: the remount StrictMode performs in development runs
+ * effects a second time against the already-settled cache, and a funnel counted
+ * twice in development is a funnel nobody can read.
  */
 export function VerifyEmailPage({ hash }: { hash: string }) {
   const token = tokenFromHash(hash)
   const verify = useVerifyEmail(token ?? "")
+  const { recordEvent } = useTelemetry()
+
+  const outcome = verify.data ? "verified" : verify.error ? "refused" : null
+  const status =
+    verify.error instanceof ApiError ? verify.error.status : undefined
+  const recorded = useRef(false)
+  useEffect(() => {
+    if (outcome === null || recorded.current) {
+      return
+    }
+    recorded.current = true
+    if (outcome === "verified") {
+      recordEvent(TELEMETRY_EVENTS.EMAIL_VERIFICATION_SUCCESS)
+      return
+    }
+    // The gateway's wording is not recorded, only its status: a single-use
+    // token that had already been spent and one that never existed answer the
+    // same way, and neither sentence is this event's business.
+    recordEvent(TELEMETRY_EVENTS.EMAIL_VERIFICATION_FAILED, {
+      error_code: "verification_rejected",
+      status,
+    })
+  }, [outcome, status, recordEvent])
 
   if (token === null) {
     return (

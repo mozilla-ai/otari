@@ -13,10 +13,12 @@ import {
   useUpdateSearchTool,
 } from "@/shared/api/hooks"
 import {
+  Badge,
   ConfirmButton,
   ErrorBanner,
   errorMessage,
   FilterSelect,
+  INPUT_CLASS,
 } from "@/shared/components/ui"
 
 // Search tools are what POST /v1/search dispatches against. They used to be
@@ -24,29 +26,6 @@ import {
 // the dashboard could not use that endpoint at all. This card is the route in:
 // stored tools are editable here, config-file tools are shown read-only so the
 // operator can see every tool a caller could name.
-
-const INPUT_CLASS =
-  "rounded-md border border-border bg-surface px-2 py-1 text-sm focus:border-accent focus:outline-none disabled:opacity-50"
-
-function Badge({
-  tone,
-  children,
-}: {
-  tone: "muted" | "warn"
-  children: string
-}) {
-  const className =
-    tone === "warn"
-      ? "border-warning bg-warning-subtle text-warning"
-      : "border-border bg-surface text-muted"
-  return (
-    <span
-      className={`rounded-full border px-2 py-0.5 text-xs font-medium ${className}`}
-    >
-      {children}
-    </span>
-  )
-}
 
 // The endpoint a tool with no api_base of its own will actually call, so a blank
 // box reads as "inherits X" rather than as "unconfigured".

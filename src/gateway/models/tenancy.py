@@ -846,14 +846,203 @@ class Invitation(InvitationBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin
     workspace_assignments: list[dict[str, str]] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
     expires_at: datetime = Field(sa_type=UtcDateTime())  # type: ignore[call-overload]
 
+# =============================================================================
+# WebAuthn (passkeys)
+# =============================================================================
+
+# The longest label a passkey may be given. A label, not a name anybody else
+# sees: it exists so an operator holding three passkeys can tell which one is
+# the laptop, so it is bounded generously and validated for emptiness rather
+# than for shape.
+MAX_WEBAUTHN_CREDENTIAL_NAME = 255
+# How long an issued ceremony challenge stays consumable. The spec sets no
+# floor; browsers surface a `timeout` hint of 60s, and an authenticator that
+# needs a user to find their phone routinely runs past it, so this is longer
+# than the hint on purpose. It is still short: the row is a single-use nonce,
+# and every one of them that outlives its ceremony is a row a sweep has to
+# reach.
+WEBAUTHN_CHALLENGE_TTL_SECONDS = 300
+# base64url of the 1023 bytes the spec caps a credential ID at, which is the
+# widest value an authenticator may hand back. Sized to the spec rather than to
+# the ~20 bytes real authenticators emit: a row that cannot be written is a
+# passkey that cannot be registered, and the column is text either way.
+MAX_CREDENTIAL_ID_LENGTH = 1364
+
+WebAuthnCeremony = Literal["registration", "authentication"]
+WEBAUTHN_CEREMONIES: set[str] = {"registration", "authentication"}
+
+
+class WebAuthnCredentialBase(SQLModel):
+    """The fields a registered passkey carries on the wire."""
+
+    name: str = Field(max_length=MAX_WEBAUTHN_CREDENTIAL_NAME)
+
+
+class WebAuthnCredentialUpdate(SQLModel):
+    """Renaming a passkey, which is the only thing about one that is editable.
+
+    Everything else on the row is what the authenticator asserted, so there is
+    nothing else a person could correct.
+    """
+
+    name: str = Field(max_length=MAX_WEBAUTHN_CREDENTIAL_NAME)
+
+    @field_validator("name")
+    @classmethod
+    def _non_empty(cls, value: str) -> str:
+        stripped = value.strip()
+        if not stripped:
+            msg = "A passkey name cannot be blank"
+            raise ValueError(msg)
+        return stripped
+
+
+class WebAuthnCredentialPublic(WebAuthnCredentialBase):
+    """A passkey as the settings page lists it.
+
+    Carries no key material. ``credential_id`` is here because the browser needs
+    it to tell the passkey it just used from the others in the list, and it is
+    a public identifier the authenticator hands to any site that asks: it is
+    what ``allowCredentials`` publishes to an unauthenticated caller during a
+    ceremony.
+    """
+
+    id: uuid.UUID
+    credential_id: str
+    rp_id: str
+    # Whether this row can still answer a ceremony on this deployment *right
+    # now*, which is not something the client could work out for itself: it
+    # would need the deployment's current relying-party ID, and publishing that
+    # to say "no" would be a worse trade than answering the question here. False
+    # means the passkey is orphaned, by the ID having moved or by the deployment
+    # no longer being configured for passkeys at all, and the only thing left to
+    # do with it is delete it.
+    is_usable: bool
+    transports: list[str]
+    backed_up: bool
+    created_at: datetime
+    last_used_at: datetime | None
+
+
+class WebAuthnCredentialsPublic(SQLModel):
+    data: list[WebAuthnCredentialPublic]
+    count: int
+
+
+class WebAuthnCredential(WebAuthnCredentialBase, PrimaryKeyMixin, CreatedAtMixin, table=True):
+    """A passkey bound to one identity, one relying party, and one authenticator.
+
+    **The relying-party ID is stored, not assumed.** A passkey is scoped by the
+    authenticator to the ``rp_id`` it was created under, so a credential
+    registered under one ID is unusable under another and asking its
+    authenticator for it under a different one gets nothing back. Recording the
+    ID the row was made under is what lets this deployment say so: a credential
+    whose ``rp_id`` is not the one currently configured is filtered out of the
+    ceremonies rather than offered and then failing in the browser with a
+    ``SecurityError`` nothing on the server can explain.
+
+    It is also the column that carries mozilla-ai/otari-ai#1716's standing
+    constraint. Migrating otari.ai users import their credentials rather than
+    claiming new accounts, and an imported row's ``rp_id`` is ``otari.ai``. That
+    import therefore holds exactly while the hosted origin stays ``otari.ai``:
+    moving it re-scopes every passkey and no amount of data migration recovers
+    them, because the key material never left the authenticator. See
+    `docs/access-control.md`.
+
+    ``credential_id`` and ``public_key`` are base64url text rather than
+    ``LargeBinary``. Both cross the wire in that encoding in every WebAuthn
+    payload, the import above arrives in it, and it reads the same on SQLite and
+    PostgreSQL, where a bytes column does not (``BLOB`` versus ``BYTEA``, with
+    drivers differing on what comes back). Unique on ``credential_id`` alone,
+    not per user: a credential ID that resolved to two identities would make
+    a usernameless sign-in ambiguous, which is the one thing that flow cannot
+    tolerate.
+
+    ``sign_count`` is the authenticator's own monotonic counter, updated on each
+    assertion. Not every authenticator keeps one (a platform passkey synced
+    across devices reports 0 forever), so it is recorded and compared but a
+    non-increase is not by itself proof of a clone; see
+    `services.webauthn_service` for what is actually done with it.
+    """
+
+    __tablename__ = "webauthn_credential"
+    __table_args__ = (UniqueConstraint("user_id", "name", name="uq_webauthn_credential_user_name"),)
+
+    user_id: uuid.UUID = Field(
+        sa_column=Column(Uuid, ForeignKey("user.id", ondelete="CASCADE"), nullable=False, index=True)
+    )
+    credential_id: str = Field(unique=True, index=True, max_length=MAX_CREDENTIAL_ID_LENGTH)
+    # Unbounded, for the reason ``user.hashed_password`` is: a COSE key carries
+    # its own algorithm, and an RSA credential's key is an order of magnitude
+    # longer than the EC one a platform passkey emits, so a ceiling here would
+    # be a bet on which algorithm an authenticator picks.
+    public_key: str
+    rp_id: str = Field(index=True, max_length=255)
+    sign_count: int = Field(default=0)
+    transports: list[str] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
+    # What the authenticator said about the credential at registration, kept
+    # because it is what a person recognizes their passkey by: a backed-up
+    # credential is one their phone or password manager syncs, and a
+    # single-device one dies with the device. Nothing enforces on it.
+    backed_up: bool = Field(default=False)
+    aaguid: str | None = Field(default=None, max_length=64)
+    last_used_at: datetime | None = _timestamp_field(default=None, column_kwargs={})
+
+
+class WebAuthnChallenge(SQLModel, table=True):
+    """A single-use nonce issued for one ceremony and consumed by its answer.
+
+    In the database rather than in process memory for the same reason
+    ``dashboard_sessions`` is: a deployment runs more than one worker, and a
+    challenge issued by one of them is answered against whichever one the next
+    request lands on. An in-memory store works exactly until a deployment scales
+    past one process, and then fails as an intermittent, unreproducible sign-in
+    refusal.
+
+    The challenge is its own primary key. It is 32 random bytes generated by the
+    server, it is handed to the browser in the clear (that is what a challenge
+    *is*), and nothing is stored under it, so there is nothing here that hashing
+    would protect. What matters is that it is used once: the row is deleted as
+    it is consumed, so a replayed assertion matches nothing.
+
+    ``user_id`` is null for an authentication challenge, and that is the
+    usernameless sign-in this deployment offers: the browser picks the passkey
+    and the assertion names which credential answered, so the ceremony starts
+    without knowing who is signing in. A registration challenge always names the
+    identity that asked for it, because registration is done from inside a
+    session.
+    """
+
+    __tablename__ = "webauthn_challenge"
+
+    challenge: str = Field(primary_key=True, max_length=255)
+    ceremony: str = Field(max_length=32)
+    user_id: uuid.UUID | None = Field(
+        default=None,
+        sa_column=Column(Uuid, ForeignKey("user.id", ondelete="CASCADE"), nullable=True, index=True),
+    )
+    created_at: datetime = _timestamp_field(
+        default_factory=lambda: datetime.now(UTC),
+        column_kwargs={"server_default": func.now()},
+    )
+    expires_at: datetime = Field(sa_type=UtcDateTime(), index=True)  # type: ignore[call-overload]
+
+    @field_validator("ceremony")
+    @classmethod
+    def _known_ceremony(cls, value: str) -> str:
+        return _validate_membership(value, allowed=WEBAUTHN_CEREMONIES, kind="WebAuthn ceremony")
 
 __all__ = [
     "INVITATION_STATUSES",
+    "MAX_CREDENTIAL_ID_LENGTH",
+    "MAX_WEBAUTHN_CREDENTIAL_NAME",
     "MANAGEMENT_ROLES",
     "MAX_WORKSPACE_ASSIGNMENTS",
     "ORGANIZATION_MEMBER_ROLES",
     "ORGANIZATION_MEMBER_STATUSES",
     "WORKSPACE_MEMBER_ROLES",
+    "WEBAUTHN_CEREMONIES",
+    "WEBAUTHN_CHALLENGE_TTL_SECONDS",
     "WORKSPACE_MEMBER_STATUSES",
     "AcceptInvitationRequest",
     "AcceptInvitationResultPublic",
@@ -886,6 +1075,12 @@ __all__ = [
     "User",
     "UserCreate",
     "ValidateInvitationRequest",
+    "WebAuthnCeremony",
+    "WebAuthnChallenge",
+    "WebAuthnCredential",
+    "WebAuthnCredentialPublic",
+    "WebAuthnCredentialUpdate",
+    "WebAuthnCredentialsPublic",
     "Workspace",
     "WorkspaceActivationClassification",
     "WorkspaceAssignmentRequest",

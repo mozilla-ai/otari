@@ -1,6 +1,6 @@
 import { act, screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
-import { afterEach, describe, expect, it, vi } from "vitest"
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest"
 
 import { AppShell } from "@/app/AppShell"
 import { Provider } from "@/app/provider"
@@ -12,8 +12,18 @@ import {
   BASE_CAPABILITIES,
   EntitlementProvider,
 } from "@/shared/hooks/useEntitlements"
+import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
 import { bootstrap, organizationContext } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
+import { recordEvent, resetTelemetrySpy } from "@/tests/telemetry"
+
+// The telemetry seam, replaced the way a superset build's alias replaces it: the
+// base module records nothing, so a navigation is only observable through a
+// stand-in.
+vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
+  const { telemetrySpy } = await import("@/tests/telemetry")
+  return { useTelemetry: vi.fn(() => telemetrySpy) }
+})
 
 // jsdom has no layout engine, so `md:hidden` / responsive classes never take
 // effect. The mobile-vs-desktop branch keys off window.matchMedia instead, which
@@ -446,11 +456,12 @@ describe("AppShell surface gating", () => {
       "Org settings",
       "Settings",
     ])
-    // The design's rail has four more rows (the organization's own Providers,
-    // Billing, Guardrails and Gateways), and each is gated on a surface a
-    // standalone gateway does not report, so none of them is here. The Gateway
-    // group is all four's worst case: both its rows are gated, so the heading
-    // goes with them.
+    // The design's rail has two more rows (the organization's own Providers and
+    // Guardrails), and each is gated on a surface a standalone gateway does not
+    // report, so neither is here. The Gateway group is their worst case: its one
+    // row is gated, so the heading goes with it. Billing and Gateways are not
+    // missing rows but overlay-owned ones this registry no longer declares at
+    // all (otari#737).
     expect(screen.queryByText("Gateway")).toBeNull()
   })
 
@@ -999,5 +1010,101 @@ describe("AppShell entitlement gating", () => {
       .filter((link) => link.getAttribute("aria-current") === "page")
       .map((link) => link.textContent)
     expect(current).toEqual(["Members & roles"])
+  })
+})
+
+describe("the telemetry the sidebar records", () => {
+  beforeEach(() => {
+    resetTelemetrySpy()
+  })
+
+  afterEach(() => {
+    vi.restoreAllMocks()
+    vi.unstubAllGlobals()
+    window.localStorage.clear()
+  })
+
+  it("records a move to another destination", async () => {
+    mockMatchMedia(false)
+    const user = userEvent.setup()
+    await renderShell()
+
+    await user.click(screen.getByRole("link", { name: "Providers" }))
+
+    expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.TAB_CHANGED, {
+      tab_name: "providers",
+      context: "workspace_sidebar",
+    })
+  })
+
+  it("names the rail the destination belongs to, not the one on screen", async () => {
+    // The organization rail is a context switch rather than a section, and the
+    // row that crosses into it is on the workspace rail. Reading the context
+    // from the destination is what puts that move on the rail it landed on.
+    mockMatchMedia(false)
+    const user = userEvent.setup()
+    await renderShell(bootstrap(), { url: "/organization/members" })
+
+    await user.click(screen.getByRole("link", { name: "Model pricing" }))
+
+    expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.TAB_CHANGED, {
+      tab_name: "pricing",
+      context: "organization_settings",
+    })
+  })
+
+  it("does not record a click on the row you are already on", async () => {
+    // Counting those would inflate whichever page people sit on longest.
+    mockMatchMedia(false)
+    const user = userEvent.setup()
+    await renderShell(bootstrap(), { url: "/providers" })
+
+    await user.click(screen.getByRole("link", { name: "Providers" }))
+
+    expect(recordEvent).not.toHaveBeenCalled()
+  })
+
+  it("names the index rather than reporting it as an empty string", async () => {
+    mockMatchMedia(false)
+    const user = userEvent.setup()
+    await renderShell(bootstrap(), { url: "/providers" })
+
+    await user.click(screen.getByRole("link", { name: "Overview" }))
+
+    expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.TAB_CHANGED, {
+      tab_name: "index",
+      context: "workspace_sidebar",
+    })
+  })
+
+  it("records entering the organization rail from the footer row", async () => {
+    // The row that crosses into the other rail does not go through
+    // `NavRowLink`, so tracking the rows alone left every entry to and exit
+    // from that rail unrecorded while every row inside it was recorded.
+    mockMatchMedia(false)
+    const user = userEvent.setup()
+    await renderShell()
+
+    // `findByRole`, as the sibling test above does: this row appears only once
+    // the organization context resolves, since it gates on the caller's role.
+    await user.click(await screen.findByRole("link", { name: "Organization" }))
+
+    expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.TAB_CHANGED, {
+      tab_name: "members",
+      context: "organization_settings",
+    })
+  })
+
+  it("records leaving it by the way back", async () => {
+    mockMatchMedia(false)
+    const user = userEvent.setup()
+    await renderShell(bootstrap(), { url: "/organization/members" })
+
+    await user.click(await screen.findByRole("link", { name: /^Back to/ }))
+
+    expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.TAB_CHANGED, {
+      tab_name: "index",
+      context: "workspace_sidebar",
+    })
   })
 })

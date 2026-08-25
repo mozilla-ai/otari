@@ -55,6 +55,63 @@ operator can also mandate a guardrail on a [routing policy](routing.md), in whic
 case the stricter of the operator's and the caller's settings applies and a caller
 cannot weaken the mandate.
 
+## Organization guardrails
+
+Everything above is one caller opting one request in. An **organization** can also
+mandate a guardrail, so that it runs on every request from the workspaces it
+chooses whether the caller asked for it or not. The two layers compose; they do
+not replace each other, and an organization that configures nothing leaves every
+request checked exactly as it was.
+
+Entries are managed over `/v1/organizations/me/guardrails` (master key, and an
+organization owner or admin), and each one carries:
+
+| Field | Meaning |
+| --- | --- |
+| `profile` | The profile on the guardrails service. One entry per profile per organization. |
+| `mode`, `on_unavailable` | The same two settings a request-body entry has, with the same meanings. |
+| `url` | An endpoint of the organization's own. Omit it to use the deployment's `guardrails_url`. |
+| `credential` | Sent to that endpoint as `Authorization: Bearer`. Requires `url`, which must then be `https`, so the credential is never sent to the deployment URL, which may be a plain-http sidecar. Encrypted at rest, never returned. |
+| `validate_kwargs` | Forwarded to the guardrails service `/validate` call. |
+| `enabled` | `false` stops the guardrail everywhere without discarding the entry. |
+| `applies_to_all_workspaces` | `true` runs it in every workspace, including any created later. |
+| `workspace_ids` | The workspaces it runs in, when it does not apply to all of them. |
+
+```bash
+curl -X POST http://localhost:8000/v1/organizations/me/guardrails \
+  -H "Authorization: Bearer <master-key>" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "profile": "prompt-injection",
+    "mode": "block",
+    "applies_to_all_workspaces": true
+  }'
+```
+
+### How the layers compose
+
+Three layers can name a guardrail: the caller's request, the caller's
+organization, and a [routing policy](routing.md) the operator wrote. They are
+merged by profile, and each layer may add a check or tighten one but never
+weaken what another asked for: `block` beats `monitor` for both `mode` and
+`on_unavailable`. So a caller who sends `"mode": "monitor"` for a profile their
+organization mandates in `block` mode still gets `block`.
+
+Where two layers name one profile, the outer layer owns the endpoint the check
+is sent to, so a caller cannot point a mandated check at a service of their
+choosing. The operator's routing policy is the outermost of the three; an
+organization's entry loses its credential where a policy has taken over the
+profile, because that credential was stored for the endpoint the organization
+named.
+
+A new workspace inherits the entries marked `applies_to_all_workspaces` and
+nothing else. A workspace cannot opt out of an entry scoped to it: the scope is
+the organization's to set.
+
+Organization guardrails are a standalone-mode feature. In [hybrid
+mode](modes.md) tenancy lives on the platform, and requests are checked exactly
+as they were before this layer existed.
+
 ## Runnable walkthrough
 
 A full end-to-end demo is in `demo/guardrails/`.

@@ -2,9 +2,19 @@ import { Button, Card, Input, Label, Link, TextField } from "@heroui/react"
 import { useState } from "react"
 import { useAuth } from "@/features/auth/AuthContext"
 import type { SignInCredential } from "@/shared/api/client"
-import { createSession } from "@/shared/api/client"
+import { ApiError, createSession, signInWithPasskey } from "@/shared/api/client"
 import { errorMessage } from "@/shared/components/ui"
+import {
+  PasskeyCancelledError,
+  supportsPasskeys,
+} from "@/shared/helpers/webauthn"
 import { useDeployment } from "@/shared/hooks/useDeployment"
+import {
+  analyticsErrorCode,
+  analyticsStatusCode,
+} from "@/shared/telemetry/errorCode"
+import { TELEMETRY_EVENTS } from "@/shared/telemetry/events"
+import { useTelemetry } from "@/shared/telemetry/overlayTelemetry"
 
 import { PublicAuthLink } from "./PublicAuthLayout"
 
@@ -231,8 +241,10 @@ function LabelRow({
  * case this screen does not serve: it offers the master-key box, and they sign
  * in by calling `POST /v1/auth/session` until the operator claims it.
  *
- * The OAuth buttons and the passkey affordances are still #651's and #652's,
- * and are absent rather than disabled: their backends have not landed.
+ * A passkey signs in beside the form rather than instead of it (otari#652),
+ * offered only when the gateway publishes `passkey` *and* this browser can run
+ * the ceremony. The OAuth buttons are still #651's, and are absent rather than
+ * disabled: that backend has not landed.
  *
  * Three decisions here are load-bearing rather than cosmetic, and each carries
  * its own note where it is made: the card is anchored instead of centered, a
@@ -242,7 +254,8 @@ function LabelRow({
  */
 export function Login() {
   const { login, isSigningOut } = useAuth()
-  const { sign_in_methods, mail_ready } = useDeployment()
+  const { recordEvent } = useTelemetry()
+  const { sign_in_methods, mail_ready, maintenance_mode } = useDeployment()
   const usesPassword = sign_in_methods.includes("password")
   // An empty list is the gateway saying it cannot mint a session at all right
   // now, which is what `/v1/bootstrap` answers when it cannot reach its
@@ -259,6 +272,11 @@ export function Login() {
   // caller who needs a resend being left without one.
   const offersSignup = mail_ready
   const offersRecovery = mail_ready && usesPassword
+  // Two independent conditions, and both have to hold. The gateway publishes
+  // `passkey` only while some credential could actually answer, and a browser
+  // that cannot run the ceremony would turn the button into a dead end.
+  const offersPasskey =
+    sign_in_methods.includes("passkey") && supportsPasskeys()
 
   const [masterKey, setMasterKey] = useState("")
   const [isKeyVisible, setIsKeyVisible] = useState(false)
@@ -267,6 +285,11 @@ export function Login() {
   const [error, setError] = useState<unknown>(null)
   const [errorField, setErrorField] = useState<CredentialField | null>(null)
   const [isSubmitting, setIsSubmitting] = useState(false)
+  // Separate from `isSubmitting` because the two say different things while
+  // they are true: the form's button reads "Signing in…", and this one has to
+  // say the browser is waiting on an authenticator, which is a wait the person
+  // has to act on rather than one they watch.
+  const [isPasskeyPending, setIsPasskeyPending] = useState(false)
 
   const clearError = () => {
     if (error) {
@@ -281,30 +304,76 @@ export function Login() {
   }
 
   /**
+   * A refusal this form made itself, before any request went out.
+   *
+   * Recorded separately from a refusal the gateway made, because they are
+   * different steps of the same funnel: this one is a form that could not be
+   * sent, and `LOGIN_FAILED` is a credential the gateway would not take. The
+   * reason is a code from a fixed set, never the box's contents.
+   */
+  const failValidation = (
+    field: CredentialField,
+    message: string,
+    reason: string,
+  ) => {
+    recordEvent(TELEMETRY_EVENTS.FORM_VALIDATION_FAILED, {
+      form_name: "login",
+      errors: [reason],
+    })
+    fail(field, message)
+  }
+
+  /**
    * The credential, or `null` with the missing box already named. Emptiness is
    * checked here rather than by disabling the button: a disabled primary button
    * is white on the brand tint at 1.95:1, and an empty form is this screen's
    * resting state, so that unreadable pairing was the first thing an operator
    * saw on every visit. Submitting says which box to fill instead.
    */
+  /**
+   * Which credential an attempt actually presented, read off the credential
+   * itself rather than off what the deployment offers.
+   *
+   * `sign_in_methods.includes("password")` answers the same question only while
+   * that list has exactly two values. #652 adds `passkey`, and on a deployment
+   * publishing `["password", "passkey"]` a passkey sign-in would report itself
+   * as a password one with nothing failing. The platform's own vocabulary for
+   * this property, minus the OAuth values whose buttons are still #651's.
+   */
+  const authenticationMethod = (credential: SignInCredential) =>
+    "masterKey" in credential ? "master_key" : "password"
+
+  // The third value the other two are drawn from `SignInCredential` for. A
+  // passkey sign-in carries no credential object to derive it from: the whole
+  // point is that nothing is typed, so the method is named rather than read.
+  const PASSKEY_METHOD = "passkey"
+
   const readCredential = (): SignInCredential | null => {
     if (usesPassword) {
       if (!email.trim()) {
-        fail("email", "Enter your email.")
+        failValidation("email", "Enter your email.", "email_required")
         return null
       }
       if (!EMAIL_PATTERN.test(email.trim())) {
-        fail("email", "Enter a valid email address.")
+        failValidation(
+          "email",
+          "Enter a valid email address.",
+          "email_invalid_format",
+        )
         return null
       }
       if (!password) {
-        fail("password", "Enter your password.")
+        failValidation("password", "Enter your password.", "password_required")
         return null
       }
       return { email: email.trim(), password }
     }
     if (!masterKey.trim()) {
-      fail("masterKey", "Enter your master key.")
+      failValidation(
+        "masterKey",
+        "Enter your master key.",
+        "master_key_required",
+      )
       return null
     }
     return { masterKey: masterKey.trim() }
@@ -314,7 +383,12 @@ export function Login() {
     // isSigningOut blocks a new sign-in until a prior sign-out's server-side
     // revocation has finished (or timed out): otherwise its expiring cookie
     // could land after this one mints a fresh session and clobber it (#557).
-    if (isSubmitting || isSigningOut) {
+    //
+    // isPasskeyPending is the same hazard from the other direction. A ceremony
+    // in flight has the system sheet open over this page, but the form is still
+    // live behind it and Enter still submits, so without this a passkey and a
+    // password sign-in race and whichever cookie lands second wins.
+    if (isSubmitting || isSigningOut || isPasskeyPending) {
       return
     }
     setError(null)
@@ -327,8 +401,19 @@ export function Login() {
     try {
       const result = await createSession(credential)
       if (result.ok) {
+        recordEvent(TELEMETRY_EVENTS.LOGIN_SUCCESS, {
+          authentication_method: authenticationMethod(credential),
+        })
         login()
       } else {
+        // The status, not a bucket of our own: a 401 is a wrong credential and
+        // a 403 is a master key presented to a deployment that has retired it,
+        // a distinction this screen already calls load-bearing, and collapsing
+        // the two would throw it away in the one place it is measurable.
+        recordEvent(TELEMETRY_EVENTS.LOGIN_FAILED, {
+          authentication_method: authenticationMethod(credential),
+          error_code: analyticsStatusCode(result.status),
+        })
         // The gateway's own wording, not a guess: it distinguishes a wrong
         // credential from a master key presented to a deployment that has
         // retired it as a sign-in, and only it knows which happened. It is
@@ -343,10 +428,77 @@ export function Login() {
         )
       }
     } catch (caught) {
+      // The gateway's message is not recorded, only its status: a refusal's
+      // wording is the one part of it that can carry something the operator
+      // typed.
+      recordEvent(TELEMETRY_EVENTS.LOGIN_FAILED, {
+        authentication_method: authenticationMethod(credential),
+        error_code: analyticsErrorCode(caught),
+        status: caught instanceof ApiError ? caught.status : undefined,
+      })
       setErrorField(usesPassword ? "password" : "masterKey")
       setError(caught)
     } finally {
       setIsSubmitting(false)
+    }
+  }
+
+  /**
+   * Sign in with a passkey: options, the browser ceremony, then the assertion.
+   *
+   * A dismissed prompt clears back to the resting state and says nothing. It is
+   * not a refused credential, and the person who pressed Escape does not need
+   * the screen to tell them what they just did.
+   *
+   * A refusal lands on the credential row above the button, where the form's
+   * own refusals land, for the same reason: it is about the credential rather
+   * than about one box.
+   */
+  const submitPasskey = async () => {
+    if (isSubmitting || isSigningOut || isPasskeyPending) {
+      return
+    }
+    setError(null)
+    setErrorField(null)
+    setIsPasskeyPending(true)
+    try {
+      const result = await signInWithPasskey()
+      if (result.ok) {
+        recordEvent(TELEMETRY_EVENTS.LOGIN_SUCCESS, {
+          authentication_method: PASSKEY_METHOD,
+        })
+        login()
+      } else {
+        recordEvent(TELEMETRY_EVENTS.LOGIN_FAILED, {
+          authentication_method: PASSKEY_METHOD,
+          error_code: analyticsStatusCode(result.status),
+        })
+        fail(
+          usesPassword ? "password" : "masterKey",
+          result.message ?? "That passkey did not sign you in.",
+        )
+      }
+    } catch (caught) {
+      // A dismissed prompt is recorded as its own outcome rather than as a
+      // failure or not at all: it is the most common way this button ends, and
+      // counting it as a failure would make the passkey path look broken while
+      // dropping it would hide how often people back out of the sheet.
+      if (caught instanceof PasskeyCancelledError) {
+        recordEvent(TELEMETRY_EVENTS.LOGIN_FAILED, {
+          authentication_method: PASSKEY_METHOD,
+          error_code: "passkey_cancelled",
+        })
+        return
+      }
+      recordEvent(TELEMETRY_EVENTS.LOGIN_FAILED, {
+        authentication_method: PASSKEY_METHOD,
+        error_code: analyticsErrorCode(caught),
+        status: caught instanceof ApiError ? caught.status : undefined,
+      })
+      setErrorField(usesPassword ? "password" : "masterKey")
+      setError(caught)
+    } finally {
+      setIsPasskeyPending(false)
     }
   }
 
@@ -370,6 +522,42 @@ export function Login() {
             <p className="text-sm text-muted">
               The management API is unaffected by this screen and still accepts
               the master key.
+            </p>
+          </Card.Content>
+        </Card>
+      </div>
+    )
+  }
+
+  // An operator has frozen sign-ins to redeploy this gateway. Rendering the
+  // form instead would offer a credential whose only outcome is a 503, and one
+  // whose refusal reads as "wrong key" to anyone who does not already know a
+  // freeze is on. Read from the bootstrap, so this is what the page shows on a
+  // fresh load; a tab that was already open when the freeze started still has
+  // the form, and submitting it renders the gateway's own 503 wording on the
+  // label row, the same way every other refusal arrives.
+  //
+  // Checked after `signInUnavailable` because the two cannot both be true: the
+  // database failure that empties `sign_in_methods` is also what makes the
+  // bootstrap report no freeze, and "cannot reach its database" is the more
+  // actionable of the two if they ever did collide.
+  if (maintenance_mode) {
+    return (
+      <div className={PAGE_FLAT}>
+        <Card className="w-full max-w-md">
+          <Card.Content className={CARD_FLAT}>
+            <div className="flex flex-col items-center gap-4">
+              <img src="/favicon.svg" alt="" className="h-10 w-11" />
+              <h1 className={HEADING}>Otari is under maintenance</h1>
+            </div>
+            <p className="text-sm text-muted">
+              This gateway is not starting new dashboard sessions while it is
+              being updated. It should be back shortly, so reload this page to
+              try again.
+            </p>
+            <p className="text-sm text-muted">
+              The API is unaffected by this screen and still serves requests,
+              and the management API still accepts the master key.
             </p>
           </Card.Content>
         </Card>
@@ -543,7 +731,7 @@ export function Login() {
               type="submit"
               variant="primary"
               fullWidth
-              isDisabled={isSubmitting || isSigningOut}
+              isDisabled={isSubmitting || isSigningOut || isPasskeyPending}
               className="h-11"
             >
               {isSigningOut
@@ -553,6 +741,34 @@ export function Login() {
                   : "Sign in"}
             </Button>
           </form>
+
+          {offersPasskey ? (
+            <div className="flex flex-col gap-3">
+              {/* A rule with the word on it, rather than a bare divider: the
+                  passkey is an alternative to the form above, not a second step
+                  of it, and an unlabeled line reads as the latter. */}
+              <div
+                className="flex items-center gap-3 text-xs text-muted"
+                aria-hidden
+              >
+                <span className="h-px flex-1 bg-border" />
+                or
+                <span className="h-px flex-1 bg-border" />
+              </div>
+              <Button
+                type="button"
+                variant="secondary"
+                fullWidth
+                isDisabled={isSubmitting || isSigningOut}
+                onPress={() => void submitPasskey()}
+                className="h-11"
+              >
+                {isPasskeyPending
+                  ? "Waiting for your passkey…"
+                  : "Use a passkey"}
+              </Button>
+            </div>
+          ) : null}
 
           <div className="flex flex-col items-center gap-3">
             <p className="text-center text-xs text-balance text-muted">

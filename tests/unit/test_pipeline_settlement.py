@@ -21,7 +21,7 @@ import uuid
 from collections.abc import AsyncIterator
 from decimal import Decimal
 from typing import Any, cast
-from unittest.mock import AsyncMock
+from unittest.mock import AsyncMock, patch
 
 import pytest
 from any_llm import LLMProvider
@@ -84,6 +84,14 @@ def _tool_ctx(**overrides: Any) -> ToolContext:
     return ToolContext(**defaults)
 
 
+# The preamble resolves the organization from the workspace on every standalone
+# request, so a context without one is a shape production never builds; the
+# organization-guardrail resolve refuses it (fail closed) rather than skipping
+# the mandates. Defaulted here so these tests keep exercising the refusals they
+# are about instead of that one.
+_ORGANIZATION_ID = uuid.UUID("99999999-9999-9999-9999-999999999999")
+
+
 def _ctx(
     config: GatewayConfig,
     *,
@@ -92,6 +100,7 @@ def _ctx(
     reservation: ReservationHandle | None = None,
     rate_limit_info: RateLimitInfo | None = None,
     workspace_id: uuid.UUID | None = None,
+    organization_id: uuid.UUID | None = _ORGANIZATION_ID,
 ) -> RequestContext:
     return RequestContext(
         config=config,
@@ -106,6 +115,7 @@ def _ctx(
         reservation=reservation,
         started_at=time.monotonic(),
         workspace_id=workspace_id,
+        organization_id=organization_id,
     )
 
 
@@ -1049,7 +1059,10 @@ async def _call_prepare_gateway_tools(ctx: RequestContext, **overrides: Any) -> 
         "tools_header": None,
     }
     kwargs.update(overrides)
-    return await prepare_gateway_tools(**kwargs)
+    # Stubbed rather than fed a session: every case here is about a *different*
+    # admission refusal, and the organization plane resolves before all of them.
+    with patch("gateway.api.routes._pipeline.resolve_organization_guardrails", new=AsyncMock(return_value=[])):
+        return await prepare_gateway_tools(**kwargs)
 
 
 @pytest.mark.asyncio
@@ -1058,7 +1071,7 @@ async def test_tool_misconfiguration_400_releases_reservation(monkeypatch: pytes
     settlement.install(monkeypatch)
     monkeypatch.delenv("OTARI_SANDBOX_URL", raising=False)
 
-    ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation())
+    ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation(), workspace_id=uuid.uuid4())
     with pytest.raises(HTTPException) as exc_info:
         await _call_prepare_gateway_tools(ctx, tools=[{"type": "otari_code_execution"}])
 
@@ -1067,8 +1080,20 @@ async def test_tool_misconfiguration_400_releases_reservation(monkeypatch: pytes
 
 
 @pytest.mark.asyncio
-async def test_mcp_server_ids_without_a_workspace_releases_reservation(monkeypatch: pytest.MonkeyPatch) -> None:
-    """Standalone resolution needs a workspace; with none, the ids are refused rather than dropped."""
+async def test_a_request_without_a_workspace_is_refused_before_any_tool_resolves(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Standalone tool resolution needs a workspace; with none the request is refused, not served.
+
+    Every gate in this block fails closed on a context carrying no workspace,
+    and the organization-guardrail resolve is the first of them (otari#654), so
+    it is the one that answers: a 500, because an unresolvable tenancy is a
+    server invariant rather than something the caller sent wrong. What the case
+    is really about is that the request is refused rather than served with its
+    tool configuration silently dropped, and that the hold does not survive it.
+    `_resolve_mcp_server_ids` keeps its own guard on the same condition; it is
+    simply no longer the first to run.
+    """
     settlement = _Settlement()
     settlement.install(monkeypatch)
 
@@ -1078,7 +1103,7 @@ async def test_mcp_server_ids_without_a_workspace_releases_reservation(monkeypat
             ctx, mcp_server_ids=[cast(Any, "11111111-1111-1111-1111-111111111111")]
         )
 
-    assert exc_info.value.status_code == 400
+    assert exc_info.value.status_code == 500
     assert settlement.refunded == 1
 
 
@@ -1164,7 +1189,7 @@ async def test_guardrail_block_releases_reservation(monkeypatch: pytest.MonkeyPa
 
     monkeypatch.setattr(pipeline, "apply_input_guardrails", blocking_guardrails)
 
-    ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation())
+    ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation(), workspace_id=uuid.uuid4())
     with pytest.raises(HTTPException) as exc_info:
         await _call_prepare_gateway_tools(ctx)
 

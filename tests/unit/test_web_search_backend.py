@@ -633,10 +633,10 @@ def test_max_results_clamps_subone_to_one(bad_value: int) -> None:
 
 def test_max_results_clamps_above_cap_to_max_results_cap() -> None:
     """Values above the cap clamp down (existing behavior, regression guard)."""
-    from gateway.services.web_search_backend import _MAX_RESULTS_CAP
+    from gateway.services.web_search_backend import MAX_RESULTS_CAP
 
     backend = WebSearchBackend(base_url="http://searxng:8080", max_results=10_000)
-    assert backend._max_results == _MAX_RESULTS_CAP  # noqa: SLF001
+    assert backend._max_results == MAX_RESULTS_CAP  # noqa: SLF001
 
 
 @pytest.mark.asyncio

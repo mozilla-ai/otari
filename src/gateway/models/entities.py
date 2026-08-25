@@ -3,7 +3,19 @@ from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
-from sqlalchemy import JSON, CheckConstraint, DateTime, ForeignKey, Index, Text, UniqueConstraint, Uuid, text
+from sqlalchemy import (
+    JSON,
+    CheckConstraint,
+    DateTime,
+    ForeignKey,
+    Index,
+    Text,
+    UniqueConstraint,
+    Uuid,
+    func,
+    text,
+    true,
+)
 from sqlalchemy.orm import DeclarativeBase, Mapped, mapped_column, relationship
 from sqlmodel import SQLModel
 
@@ -787,7 +799,9 @@ class FileObject(Base):
     bytes: Mapped[int] = mapped_column()
     purpose: Mapped[str] = mapped_column(default="user_data")
     storage_ref: Mapped[str] = mapped_column()
-    created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True)
+    created_at: Mapped[datetime] = mapped_column(
+        DateTime(timezone=True), default=lambda: datetime.now(UTC), index=True
+    )
     expires_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True))
     deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), default=None, index=True)
 
@@ -830,7 +844,9 @@ class BatchRecord(Base):
     # this record is the strict ownership anchor, so it must always name an owner.
     # CASCADE: deleting the user drops the ownership record (the user's keys are
     # gone too, and usage_logs remain the billing history).
-    user_id: Mapped[str] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True)
+    user_id: Mapped[str] = mapped_column(
+        ForeignKey("users.user_id", ondelete="CASCADE"), nullable=False, index=True
+    )
     # SET NULL: a key may be revoked while its batch is still in flight.
     api_key_id: Mapped[str | None] = mapped_column(ForeignKey("api_keys.id", ondelete="SET NULL"), index=True)
     # The workspace this batch was CREATED in (otari#643 follow-up), so
@@ -1490,3 +1506,176 @@ class WorkspaceCodeExecutionPolicy(Base):
         default=lambda: datetime.now(UTC),
         onupdate=lambda: datetime.now(UTC),
     )
+
+
+class WorkspaceWebSearchConfig(Base):
+    """A workspace's configuration over the deployment-wide web-search backend.
+
+    The backend itself stays deployment-wide (``web_search_url`` and the
+    credential the adapter in front of it holds are operator concerns and never
+    move here, see ``src/gateway/AGENTS.md``); this row says which workspaces
+    may reach it and how their searches are constrained. Resolved at admission
+    by ``prepare_gateway_tools``, the standalone counterpart of the hybrid
+    path's ``/gateway/web-search/resolve``.
+
+    A row may only *narrow*: ``enabled=False`` refuses ``otari_web_search`` for
+    the workspace, ``max_results`` is floored against what the request asked
+    for, ``blocked_domains`` is added to the request's own block-list, and
+    ``allowed_domains`` intersects the request's. No row means no narrowing,
+    which is what keeps a deployment that configures nothing behaving as it did
+    (#655/#678).
+
+    ``workspace_id`` is the primary key, and a real foreign key with
+    ``CASCADE``, for the same reasons as :class:`WorkspaceCodeExecutionPolicy`
+    next door: one row per workspace, and nothing else names it.
+
+    There is deliberately no ``provider`` column, which the hosted config
+    carries: on this deployment the operator picks the backend by pointing
+    ``web_search_url`` somewhere, so a provider named here would either be inert
+    or would ask the gateway to reach an endpoint the operator did not choose,
+    which is the one thing the narrowing rule forbids.
+    """
+
+    __tablename__ = "workspace_web_search_configs"
+    __table_args__ = (
+        # ``max_results`` is floored into an effective value, so zero or less is
+        # a storage error rather than a stricter policy: it would ask for a
+        # search that can return nothing while reading as configured. The
+        # request schema refuses it first; this is the backstop for a writer
+        # that is not the service.
+        CheckConstraint(
+            "max_results IS NULL OR max_results > 0",
+            name="ck_workspace_web_search_configs_max_results_positive",
+        ),
+    )
+
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), primary_key=True
+    )
+    # ``server_default`` mirrors the migration so autogenerate sees no drift, and
+    # so a row written by anything other than this mapping still gets a value.
+    enabled: Mapped[bool] = mapped_column(default=True, nullable=False, server_default=true())
+    # NULL means "no workspace ceiling": the request's own value, then the
+    # deployment's, then the backend's built-in, exactly as today.
+    max_results: Mapped[int | None] = mapped_column(default=None)
+    # NULL means "no workspace default": the request's own hint, then the
+    # deployment's, then the backend's built-in.
+    purpose_hint: Mapped[str | None] = mapped_column(Text, default=None)
+    # Two domain lists and an opaque provider bag, stored as JSON for the same
+    # reason the hosted table does: they are short, they are read whole, and
+    # nothing queries into them. ``JSON`` rather than ``JSONB`` to match every
+    # other JSON column here, which has to work on SQLite too.
+    allowed_domains: Mapped[list[str] | None] = mapped_column(JSON, default=None)
+    blocked_domains: Mapped[list[str] | None] = mapped_column(JSON, default=None)
+    # Provider-specific knobs (Tavily's ``search_depth``, say). Opaque here and
+    # forwarded to the backend, which is what lets a new provider need no
+    # migration; the adapter in front of it whitelists what it understands.
+    provider_options: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    # ``UtcDateTime`` for the same reason ``WorkspaceCodeExecutionPolicy`` uses
+    # it: these are serialized with ``.isoformat()`` for the dashboard, and a
+    # plain ``DateTime(timezone=True)`` round-trips naive on SQLite. The Python
+    # default is what every write here uses; ``server_default`` is the backstop
+    # for a writer that is not this mapping, matching ``workspace`` itself.
+    created_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(), default=lambda: datetime.now(UTC), server_default=func.now()
+    )
+    updated_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+        server_default=func.now(),
+    )
+
+
+class OrganizationGuardrail(Base):
+    """A guardrail an organization runs over the requests of its workspaces.
+
+    The plane *above* the deployment-wide guardrail settings, not a replacement
+    for them: ``guardrails_url`` stays in ``runtime_settings`` and a deployment
+    that configures no organization guardrails behaves exactly as it did
+    (otari#654). A row here is a check the organization mandates; it is merged
+    into the effective guardrail list at admission by ``prepare_gateway_tools``
+    the same way a routing policy's mandate already is, so an organization can
+    only ever add a check or tighten one a caller asked for.
+
+    That is what keeps this inside the rule ``src/gateway/AGENTS.md`` records
+    from #655/#678: a mandated guardrail can only make *fewer* requests succeed,
+    never more, whichever endpoint it names. Which is also why the entry may
+    carry its own ``url`` and credential where a workspace code-execution policy
+    may not: the sandbox is a capability a workspace would be acquiring, and a
+    guardrail is a restriction the organization is accepting. A caller can
+    already point a request-body guardrail at a URL of their own
+    (``models/guardrails.GuardrailConfig.url``, SSRF-checked on the request
+    path), so storing one here grants nothing that was not already reachable.
+
+    ``profile`` is unique per organization rather than a nickname being unique,
+    which is where this parts company with the hosted
+    ``organization_guardrail_key`` (unique on ``(organization_id, nickname)``,
+    so one profile may be configured twice). The effective guardrail set on this
+    request path is keyed by profile, because ``merge_guardrail_layers`` has
+    always merged that way; two rows of one profile could therefore never both
+    run, and one would silently win.
+    """
+
+    __tablename__ = "organization_guardrails"
+    __table_args__ = (UniqueConstraint("organization_id", "profile", name="uq_organization_guardrails_org_profile"),)
+
+    id: Mapped[uuid.UUID] = mapped_column(Uuid, primary_key=True, default=uuid.uuid4)
+    organization_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("organization.id", ondelete="CASCADE"), nullable=False, index=True
+    )
+    profile: Mapped[str] = mapped_column(nullable=False)
+    # NULL means "use the deployment's guardrails_url", which is the ordinary
+    # case: an organization that runs its own any-guardrail deployment names it
+    # here, and then the credential below is what authenticates to it.
+    url: Mapped[str | None] = mapped_column(default=None)
+    encrypted_credential: Mapped[str | None] = mapped_column(Text, default=None)
+    mode: Mapped[str] = mapped_column(default="monitor", nullable=False)
+    on_unavailable: Mapped[str] = mapped_column(default="block", nullable=False)
+    validate_kwargs: Mapped[dict[str, Any] | None] = mapped_column(JSON, default=None)
+    # The organization's own kill switch. A disabled entry runs nowhere,
+    # whatever its scope says, so an organization can stop a guardrail without
+    # losing the credential and the workspace list it took to set up.
+    enabled: Mapped[bool] = mapped_column(default=True, nullable=False)
+    # The inheritance rule otari#654 asks for, and the hosted plane's
+    # ``is_org_default`` under a name that says what it does: true means every
+    # workspace of the organization runs this, including one created tomorrow,
+    # and the scope rows below are not consulted. False means it runs only in
+    # the workspaces named there, and a new workspace inherits nothing.
+    applies_to_all_workspaces: Mapped[bool] = mapped_column(default=False, nullable=False)
+    # ``UtcDateTime`` for the reason its neighbours use it: these are serialized
+    # with ``.isoformat()`` for the dashboard, and a plain ``DateTime(timezone=True)``
+    # round-trips naive on SQLite.
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))
+    updated_at: Mapped[datetime] = mapped_column(
+        UtcDateTime(),
+        default=lambda: datetime.now(UTC),
+        onupdate=lambda: datetime.now(UTC),
+    )
+
+
+class OrganizationGuardrailWorkspace(Base):
+    """One workspace an organization guardrail is scoped to.
+
+    Membership only: a row means "this guardrail runs in this workspace", and
+    its absence means it does not. The hosted plane instead carries a
+    ``disabled`` flag on the equivalent row and admits three states, two of
+    which resolve to off; there is nothing here for a third state to record,
+    because the scope is the organization's to set and a workspace has no veto
+    over it (a veto would widen what succeeds, which #655/#678 does not allow).
+
+    Ignored entirely when the guardrail's ``applies_to_all_workspaces`` is set,
+    so rows left behind by flipping that on are inert rather than contradictory.
+
+    Both sides cascade: the pairing has no meaning once either end is gone.
+    """
+
+    __tablename__ = "organization_guardrail_workspaces"
+
+    organization_guardrail_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("organization_guardrails.id", ondelete="CASCADE"), primary_key=True
+    )
+    workspace_id: Mapped[uuid.UUID] = mapped_column(
+        Uuid, ForeignKey("workspace.id", ondelete="CASCADE"), primary_key=True, index=True
+    )
+    created_at: Mapped[datetime] = mapped_column(UtcDateTime(), default=lambda: datetime.now(UTC))

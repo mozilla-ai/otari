@@ -102,8 +102,14 @@ _RESERVED_SEARCH_PARAMS = frozenset({"q", "format", "engines"})
 
 _DEFAULT_SEARCH_TIMEOUT_S = 15.0
 _DEFAULT_FETCH_TIMEOUT_S = 5.0
-_DEFAULT_MAX_RESULTS = 5
-_MAX_RESULTS_CAP = 20
+# Public alongside the cap below: `routes/_tools.web_search_max_results_baseline`
+# needs the value a request gets when neither the deployment nor the request
+# names one, because that is what a workspace ceiling is floored against.
+DEFAULT_MAX_RESULTS = 5
+# Public because a workspace's stored web-search ceiling is validated against it
+# (`services/tenancy/workspace_web_search_service.py`): a value above what this
+# backend will honor could never take effect, so it is refused at the write.
+MAX_RESULTS_CAP = 20
 _DEFAULT_EXTRACT_CONCURRENCY = 5
 # Hard cap on bytes we'll read from a single fetched page before passing to
 # trafilatura. A huge response (compromised host, content-bomb, or just a
@@ -189,7 +195,7 @@ class WebSearchBackend:
         *,
         base_url: str,
         engines: tuple[str, ...] = _DEFAULT_ENGINES,
-        max_results: int = _DEFAULT_MAX_RESULTS,
+        max_results: int = DEFAULT_MAX_RESULTS,
         allowed_domains: tuple[str, ...] = (),
         blocked_domains: tuple[str, ...] = (),
         extract_content: bool = True,
@@ -206,12 +212,12 @@ class WebSearchBackend:
         # backend runs outside a billed request (tests, direct use).
         self._tally = tally
         self._engines = engines
-        # Clamp to [1, _MAX_RESULTS_CAP]. Sub-1 values (e.g. ``0`` or ``-1``
+        # Clamp to [1, MAX_RESULTS_CAP]. Sub-1 values (e.g. ``0`` or ``-1``
         # from a misconfigured env var) would otherwise reach
         # ``results[: self._max_results]`` and produce surprising slicing
         # behavior (empty list or "drop the last hit") instead of a useful
         # bound.
-        self._max_results = max(1, min(max_results, _MAX_RESULTS_CAP))
+        self._max_results = max(1, min(max_results, MAX_RESULTS_CAP))
         self._allowed_domains = tuple(d.lower() for d in allowed_domains)
         self._blocked_domains = tuple(d.lower() for d in blocked_domains)
         self._extract_content = extract_content

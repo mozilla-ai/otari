@@ -27,6 +27,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+from collections.abc import Mapping
 from dataclasses import dataclass, field
 
 import httpx
@@ -39,8 +40,32 @@ logger = logging.getLogger(__name__)
 _DEFAULT_TIMEOUT_S = 30.0
 
 
+def _unevaluated_detail(profile: str) -> str:
+    """What a caller is told when a guardrail could not run.
+
+    Names the profile, which the caller either asked for or is subject to, and
+    nothing about where it would have run or what the endpoint said back.
+    """
+    return f"guardrail profile {profile!r} could not be evaluated"
+
+
 class GuardrailsNotReachableError(RuntimeError):
-    """Raised when the guardrails service can't be reached or returns malformed data."""
+    """Raised when the guardrails service can't be reached or returns malformed data.
+
+    Carries two messages, because the two audiences are different. ``str(exc)``
+    is for the log and names the endpoint and the underlying failure;
+    :attr:`public_detail` is what reaches the caller in the 502 body and
+    deliberately does not. Since otari#654 that endpoint may be one an
+    organization configured, which the caller was never told about and cannot
+    act on, and the root ``AGENTS.md`` rule against leaking internals in a
+    public error response covers exactly that. The one message that stays whole
+    is the no-URL-configured case: it names an environment variable rather than
+    an address, and it is the only one a reader can actually act on.
+    """
+
+    def __init__(self, message: str, *, public_detail: str | None = None) -> None:
+        super().__init__(message)
+        self.public_detail = public_detail if public_detail is not None else message
 
 
 @dataclass
@@ -86,18 +111,26 @@ async def _validate_one(
     base_url: str,
     cfg: GuardrailConfig,
     input_text: str,
+    credential: str | None = None,
 ) -> GuardrailResult:
     payload: dict[str, object] = {"profile": cfg.profile, "input_text": input_text}
     if cfg.validate_kwargs:
         payload["validate_kwargs"] = cfg.validate_kwargs
+    # An organization guardrail may carry a credential for the endpoint it names
+    # (otari#654). It goes in the header rather than the body: `/validate` forbids
+    # unknown body fields, and a guardrail's *vendor* key is not this in any case;
+    # the guardrails service constructs its guardrails from the operator's own
+    # config and holds those itself. Never logged, here or by the caller.
+    headers = {"Authorization": f"Bearer {credential}"} if credential else None
     try:
-        response = await client.post(f"{base_url}/validate", json=payload)
+        response = await client.post(f"{base_url}/validate", json=payload, headers=headers)
         response.raise_for_status()
         body = response.json()
         result = body["result"]
     except (httpx.HTTPError, KeyError, ValueError) as exc:
         raise GuardrailsNotReachableError(
-            f"guardrail profile {cfg.profile!r} failed against {base_url}: {exc}"
+            f"guardrail profile {cfg.profile!r} failed against {base_url}: {exc}",
+            public_detail=_unevaluated_detail(cfg.profile),
         ) from exc
 
     # `result` may be a list when the service runs the guardrail over a list of
@@ -106,7 +139,8 @@ async def _validate_one(
         result = result[0] if result else {}
     if not isinstance(result, dict):
         raise GuardrailsNotReachableError(
-            f"guardrail profile {cfg.profile!r} returned an unexpected result shape: {result!r}"
+            f"guardrail profile {cfg.profile!r} returned an unexpected result shape: {result!r}",
+            public_detail=_unevaluated_detail(cfg.profile),
         )
 
     # Treat a missing or non-boolean `valid` as malformed and raise, so the
@@ -115,12 +149,14 @@ async def _validate_one(
     # explicit `valid: null` is a legitimate inconclusive verdict (not flagged).
     if "valid" not in result:
         raise GuardrailsNotReachableError(
-            f"guardrail profile {cfg.profile!r} returned no 'valid' field: {result!r}"
+            f"guardrail profile {cfg.profile!r} returned no 'valid' field: {result!r}",
+            public_detail=_unevaluated_detail(cfg.profile),
         )
     valid = result["valid"]
     if valid is not None and not isinstance(valid, bool):
         raise GuardrailsNotReachableError(
-            f"guardrail profile {cfg.profile!r} returned a non-boolean 'valid': {valid!r}"
+            f"guardrail profile {cfg.profile!r} returned a non-boolean 'valid': {valid!r}",
+            public_detail=_unevaluated_detail(cfg.profile),
         )
 
     return GuardrailResult(
@@ -137,8 +173,17 @@ async def run_input_guardrails(
     input_text: str,
     *,
     default_url: str | None,
+    credentials: Mapping[str, str] | None = None,
 ) -> GuardrailVerdict:
     """Run every input-direction guardrail and return the aggregate verdict.
+
+    ``credentials`` maps a profile name to the bearer credential its entry
+    carries, and is populated only for guardrails an organization mandates
+    (`services/tenancy/organization_guardrail_service.py`). It is a separate
+    argument rather than a field on :class:`GuardrailConfig` because that model
+    is parsed from the request body: a credential field there would be one a
+    caller could set, which would turn the guardrail list into a way to make
+    this gateway send a secret to an endpoint of the caller's choosing.
 
     Only guardrails with ``"input"`` in :attr:`GuardrailConfig.on` are
     *evaluated* here (``"output"`` is accepted but not yet enforced — see the
@@ -188,9 +233,14 @@ async def run_input_guardrails(
     # (mode-independent) via UnsafeURLError, which this function
     # deliberately does not catch; the caller (apply_input_guardrails)
     # maps it to a 400.
+    credentials = credentials or {}
     if guardrails:
         await asyncio.gather(
-            *(validate_mcp_url(g.url, has_authorization_token=False) for g in guardrails if g.url is not None)
+            *(
+                validate_mcp_url(g.url, has_authorization_token=bool(credentials.get(g.profile)))
+                for g in guardrails
+                if g.url is not None
+            )
         )
 
     input_guardrails = [g for g in guardrails if "input" in g.on]
@@ -208,7 +258,13 @@ async def run_input_guardrails(
                         "configured. Set OTARI_GUARDRAILS_URL on the gateway or pass `url` on the "
                         "guardrail entry."
                     )
-                result = await _validate_one(client, base_url=base_url, cfg=cfg, input_text=input_text)
+                result = await _validate_one(
+                    client,
+                    base_url=base_url,
+                    cfg=cfg,
+                    input_text=input_text,
+                    credential=credentials.get(cfg.profile),
+                )
             except GuardrailsNotReachableError:
                 if cfg.mode == "block" and cfg.on_unavailable == "block":
                     raise  # fail closed: an enforcing guardrail must not be skipped

@@ -104,6 +104,12 @@ def test_hybrid_mode_disables_dashboard_management_endpoints(monkeypatch: pytest
             # than left to the `/v1/workspaces` entry above: this is a distinct
             # router, so re-mounting it would not show up in that check.
             "/v1/workspaces/11111111-1111-1111-1111-111111111111/mcp-servers",
+            # A workspace's web-search configuration lives on the platform in
+            # hybrid mode, where `prepare_gateway_tools` resolves it from
+            # otari.ai rather than from a local row. Listed for the same reason
+            # as the servers above: its own router, so re-mounting it would not
+            # show up in the `/v1/workspaces` check.
+            "/v1/workspaces/11111111-1111-1111-1111-111111111111/web-search",
         ):
             response = client.get(path)
             assert response.status_code == 404, path

@@ -2,8 +2,10 @@ import { FiBox } from "react-icons/fi"
 import { describe, expect, it } from "vitest"
 import { BASE_CAPABILITIES } from "@/shared/hooks/useEntitlements"
 import { OVERLAY_NAV_LABEL_OVERRIDES } from "./overlayLabelOverrides"
+import { OVERLAY_NAV_ITEMS } from "./overlayNavItems"
 import {
   applyNavLabelOverrides,
+  composeNavItems,
   composeNavSections,
   isPathVisible,
   NAV_ITEMS,
@@ -13,7 +15,12 @@ import {
   ORG_NAV_SECTIONS,
   visibleNavSections,
 } from "./registry"
-import type { NavItem, NavLabelOverride, NavSection } from "./types"
+import type {
+  NavItem,
+  NavItemContribution,
+  NavLabelOverride,
+  NavSection,
+} from "./types"
 
 describe("nav registry", () => {
   it("exposes the base sections in display order", () => {
@@ -62,10 +69,8 @@ describe("nav registry", () => {
       "Members & roles",
       "Providers",
       "Spend & budgets",
-      "Billing",
       "Model pricing",
       "Guardrails",
-      "Gateways",
       "Org settings",
       "Settings",
     ])
@@ -105,7 +110,6 @@ describe("nav registry", () => {
     const money = ORG_NAV_SECTIONS.find((section) => section.id === "org-money")
     expect(money?.items.map((item) => [item.label, item.surface])).toEqual([
       ["Spend & budgets", "budgets"],
-      ["Billing", "billing"],
       ["Model pricing", "pricing"],
     ])
     // No row gates on `users` any more. The gateway still serves that surface
@@ -199,18 +203,16 @@ describe("nav registry", () => {
   })
 
   it("gates every declared-but-unserved destination on a surface", () => {
-    // The design's organization rail draws four rows this gateway has no endpoint
-    // for. Each is declared so the rail matches on a deployment that does serve
-    // them, and gated on a surface `STANDALONE_SURFACES` does not report so the
-    // row is absent here. Pinned as the whole set, because the failure mode is
-    // silent in both directions: a missing gate ships a link to a page that
-    // cannot work, and a gate on a surface the bootstrap *does* report hides a
-    // page that can.
+    // The design's organization rail draws two rows this gateway has no endpoint
+    // for and still declares. Each is declared so the rail matches on a
+    // deployment that does serve them, and gated on a surface
+    // `STANDALONE_SURFACES` does not report so the row is absent here. Pinned as
+    // the whole set, because the failure mode is silent in both directions: a
+    // missing gate ships a link to a page that cannot work, and a gate on a
+    // surface the bootstrap *does* report hides a page that can.
     const unserved = new Map([
       ["/organization/provider-keys", "organization_providers"],
-      ["/organization/billing", "billing"],
       ["/organization/guardrails", "organization_guardrails"],
-      ["/organization/gateways", "gateways"],
     ])
     for (const [to, surface] of unserved) {
       expect(navItemForPath(to)?.surface).toBe(surface)
@@ -234,6 +236,24 @@ describe("nav registry", () => {
     for (const surface of unserved.values()) {
       expect(standalone).not.toContain(surface)
     }
+  })
+
+  it("declares no destination an overlay owns", () => {
+    // Billing and Gateways are the two rows the design draws that this registry
+    // deliberately does not declare: Billing is ARCHITECTURE.md's overlay-only
+    // capability, and the attached-gateway surface behind Gateways is hosted
+    // depth (otari-ai#1779). Declaring either back is not the harmless
+    // redundancy it looks like. The route file a nav entry needs would sit at a
+    // path the overlay's own route file also claims, and the generator refuses
+    // that pair ("Conflicting configuration paths were found") rather than
+    // letting the overlay shadow the base, so the composed build gets no route
+    // tree for the overlay's page. An overlay contributes both through
+    // `OVERLAY_NAV_ITEMS`.
+    const paths = NAV_ITEMS.map((item) => item.to)
+    expect(paths).not.toContain("/organization/billing")
+    expect(paths).not.toContain("/organization/gateways")
+    expect(NAV_ITEMS.map((item) => item.surface)).not.toContain("billing")
+    expect(NAV_ITEMS.map((item) => item.surface)).not.toContain("gateways")
   })
 
   it("appends overlay sections after the base sections", () => {
@@ -272,8 +292,9 @@ describe("nav registry", () => {
   })
 
   it("keeps section ids unique across the two rails", () => {
-    // What lets one override list address both rails: an id that appeared on
-    // each would rename two sections from one entry.
+    // What lets one override list and one contribution list address both
+    // rails: an id that appeared on each would rename two sections, or land one
+    // contribution's rows twice, from a single entry.
     const ids = [...NAV_SECTIONS, ...ORG_NAV_SECTIONS].map(
       (section) => section.id,
     )
@@ -281,8 +302,9 @@ describe("nav registry", () => {
   })
 
   it("appends nothing in this build", () => {
-    // The overlay tree lives in another repo; the seam here stays empty.
+    // The overlay tree lives in another repo; the seams here stay empty.
     expect(composeNavSections(NAV_SECTIONS, [])).toEqual(NAV_SECTIONS)
+    expect(OVERLAY_NAV_ITEMS).toEqual([])
   })
 })
 
@@ -486,6 +508,84 @@ describe("applyNavLabelOverrides", () => {
     expect(section.items.map((item) => item.label)).toEqual([
       "Models",
       "Routing",
+    ])
+  })
+})
+
+describe("composeNavItems", () => {
+  const base: NavSection[] = [
+    {
+      id: "org-money",
+      label: "Cost & billing",
+      items: [
+        { to: "/budgets", label: "Spend & budgets", icon: FiBox },
+        { to: "/organization/pricing", label: "Model pricing", icon: FiBox },
+      ],
+    },
+    { id: "org-general", label: "General", items: [] },
+  ]
+
+  // The contribution the seam exists for: a row inside a section the base owns.
+  // Its real `to` is a path only the composed build has a route for, and
+  // `NavPath` resolves against *this* build's route tree, so the fixture borrows
+  // a base path. What is under test is where the row lands, not where it points.
+  const billing: NavItemContribution = {
+    sectionId: "org-money",
+    items: [{ to: "/organization", label: "Billing", icon: FiBox }],
+  }
+
+  it("is a no-op with no contributions", () => {
+    // Identity, not a copy: this build contributes nothing, so the seam must
+    // cost the base sections nothing at all.
+    expect(composeNavItems(base, [])).toBe(base)
+  })
+
+  it("appends contributed rows after the section's own", () => {
+    const composed = composeNavItems(base, [billing])
+    expect(composed[0].items.map((item) => item.label)).toEqual([
+      "Spend & budgets",
+      "Model pricing",
+      "Billing",
+    ])
+    // The section keeps everything else it declared, heading included.
+    expect(composed[0].label).toBe("Cost & billing")
+  })
+
+  it("leaves a section no contribution names untouched", () => {
+    // The same object, not a rebuilt one, so an overlay contributing to one
+    // section does not churn the rest of the rail.
+    expect(composeNavItems(base, [billing])[1]).toBe(base[1])
+  })
+
+  it("drops a contribution whose section the registry does not declare", () => {
+    // A stale contribution costs an overlay the rows it named, as a stale
+    // NavLabelOverride costs it a rename. It does not throw and it does not
+    // invent a section, which would put an unheaded group on the rail.
+    const composed = composeNavItems(base, [
+      { sectionId: "org-nope", items: [{ to: "/", label: "X", icon: FiBox }] },
+    ])
+    expect(composed.map((section) => section.id)).toEqual([
+      "org-money",
+      "org-general",
+    ])
+    expect(composed.flatMap((section) => section.items)).toEqual(
+      base.flatMap((section) => section.items),
+    )
+  })
+
+  it("lands two contributions naming one section in list order", () => {
+    const composed = composeNavItems(base, [
+      billing,
+      {
+        sectionId: "org-money",
+        items: [{ to: "/settings", label: "Invoices", icon: FiBox }],
+      },
+    ])
+    expect(composed[0].items.map((item) => item.label)).toEqual([
+      "Spend & budgets",
+      "Model pricing",
+      "Billing",
+      "Invoices",
     ])
   })
 })

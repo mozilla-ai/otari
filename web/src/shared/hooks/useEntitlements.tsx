@@ -51,6 +51,11 @@ export interface Entitlements {
  * entry gated on a capability that is not listed disappears from every
  * deployment, and the two lists live in different files, so `registry.test.ts`
  * fails when they disagree.
+ *
+ * This has a server-side twin in `src/gateway/adapters/entitlement_adapter.py`,
+ * which is what gates a route rather than a link. The two are meant to agree,
+ * and nothing checks that they do, so a capability the base grows is added to
+ * both at once.
  */
 export const BASE_CAPABILITIES: readonly string[] = []
 

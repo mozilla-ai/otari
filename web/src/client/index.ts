@@ -86,6 +86,19 @@ export type RequestPasswordResetResponse =
 export type ResetPasswordRequest = Schemas["ResetPasswordRequest"]
 
 // ---------------------------------------------------------------------------
+// Passkeys (otari#652)
+//
+// The two ceremony payloads are deliberately absent. A ceremony's options and
+// the browser's answer are W3C shapes the gateway passes through as free-form
+// objects, and the only consumer is `navigator.credentials`, which types them
+// itself through the DOM lib. Naming a second, looser copy of them here would
+// make it possible to pass the wrong one.
+// ---------------------------------------------------------------------------
+export type Passkey = Schemas["WebAuthnCredentialPublic"]
+export type PasskeysResponse = Schemas["WebAuthnCredentialsPublic"]
+export type RenamePasskeyRequest = Schemas["WebAuthnCredentialUpdate"]
+
+// ---------------------------------------------------------------------------
 // Usage and analytics
 // ---------------------------------------------------------------------------
 export type UsageEntry = Schemas["UsageEntry"]
@@ -314,6 +327,9 @@ export type RotateMasterKeyResponse = Schemas["RotateMasterKeyResponse"]
 export type MailSettings = Schemas["MailSettings"]
 export type SendTestMailRequest = Schemas["SendTestMailRequest"]
 export type SendTestMailResponse = Schemas["SendTestMailResponse"]
+export type MaintenanceMode = Schemas["MaintenanceMode"]
+export type UpdateMaintenanceModeRequest =
+  Schemas["UpdateMaintenanceModeRequest"]
 export type ManagedTool = Schemas["ManagedTool"]
 export type ToolsResponse = Schemas["ToolsResponse"]
 export type ToolSettingField = Schemas["ToolSettingField"]
@@ -435,5 +451,23 @@ export type WorkspaceCodeExecutionPolicy =
   Schemas["WorkspaceCodeExecutionPolicyPublic"]
 export type UpdateWorkspaceCodeExecutionPolicyRequest =
   Schemas["WorkspaceCodeExecutionPolicyUpdate"]
+
+// The per-workspace web-search configuration over the deployment-wide backend;
+// see `src/gateway/services/tenancy/workspace_web_search_service.py`.
+export type WorkspaceWebSearchConfig = Schemas["WorkspaceWebSearchConfigPublic"]
+export type UpdateWorkspaceWebSearchConfigRequest =
+  Schemas["WorkspaceWebSearchConfigUpdate"]
+// The organization-level guardrail plane above the deployment-wide guardrail
+// settings; see `src/gateway/services/tenancy/organization_guardrail_service.py`.
+export type OrganizationGuardrail = Schemas["OrganizationGuardrailPublic"]
+// `enabled`, `on_unavailable`, `mode` and `applies_to_all_workspaces` all carry
+// schema defaults, which the generator emits as required; the add form omits the
+// two the operator has no control for, so `Defaulted` puts them back.
+export type CreateOrganizationGuardrailRequest = Defaulted<
+  Schemas["OrganizationGuardrailCreate"],
+  "enabled" | "on_unavailable" | "mode" | "applies_to_all_workspaces"
+>
+export type UpdateOrganizationGuardrailRequest =
+  Schemas["OrganizationGuardrailUpdate"]
 
 export type * from "./local"

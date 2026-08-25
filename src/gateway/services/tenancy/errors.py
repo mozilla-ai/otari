@@ -154,6 +154,100 @@ class InvalidCredentialsError(TenancyError):
         super().__init__("Incorrect email or password")
 
 
+class PasskeysNotConfiguredError(TenancyValidationError):
+    """This deployment has no relying-party ID, so it cannot run a ceremony.
+
+    503 rather than the 400 its base carries: nothing is wrong with the request,
+    the deployment is not set up to answer it, and that is the same shape
+    `api.routes.mail` gives an unconfigured mailer. The message names the
+    setting, because an operator who reached this endpoint meant to offer
+    passkeys and needs to know which line is missing rather than that something
+    was refused.
+    """
+
+    status_code = status.HTTP_503_SERVICE_UNAVAILABLE
+
+    def __init__(self) -> None:
+        super().__init__(
+            "Passkeys are unavailable on this deployment: it does not know its own address. "
+            "Set public_base_url (or webauthn_rp_id) and restart."
+        )
+
+
+class PasskeyNotFoundError(TenancyNotFoundError):
+    def __init__(self, credential_id: object):
+        super().__init__(f"Passkey {credential_id} not found")
+
+
+class PasskeyNameTakenError(TenancyConflictError):
+    def __init__(self, name: str):
+        super().__init__(f"You already have a passkey named '{name}'")
+
+
+class PasskeyAlreadyRegisteredError(TenancyConflictError):
+    """This authenticator already has a row, possibly on another identity.
+
+    Said plainly rather than hidden, and the wording does not reveal *whose*.
+    A caller performing this ceremony is signed in and holds the authenticator
+    that just answered, so telling them it is already known here costs nothing;
+    telling them which identity holds it would be somebody else's business.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("That passkey is already registered on this deployment")
+
+
+class PasskeyLimitReachedError(TenancyValidationError):
+    """This identity already holds as many passkeys as it may.
+
+    A ceiling on a table an authenticated caller writes in a loop they control,
+    not a policy about how many devices a person should have; see
+    ``MAX_PASSKEYS_PER_IDENTITY``. The message says the number, because the only
+    useful action is to delete one and the caller cannot count what they cannot
+    see.
+    """
+
+    def __init__(self, limit: int):
+        super().__init__(
+            f"You already have {limit} passkeys, which is the most one identity may hold. Delete one first."
+        )
+
+
+class PasskeyCeremonyError(TenancyValidationError):
+    """A registration or authentication ceremony did not verify.
+
+    One error for every way the ceremony can fail (an unknown or expired
+    challenge, a mismatched origin or relying-party ID, a signature that does
+    not check out, an authenticator answering somebody else's challenge),
+    carrying the library's reason in the log and a fixed sentence to the caller.
+
+    Undifferentiated on purpose, for the reason ``InvalidCredentialsError``
+    gives: the sign-in half of this is reachable unauthenticated, and each
+    distinct refusal would answer a question about which credentials this
+    deployment holds. The registration half is authenticated and could afford
+    to say more, but a caller there cannot act on the distinction either: every
+    branch means "try the ceremony again".
+    """
+
+    def __init__(self) -> None:
+        super().__init__("That passkey could not be verified. Try again.")
+
+
+class PasskeySignInFailedError(TenancyError):
+    """A passkey sign-in that did not succeed, without saying which part failed.
+
+    401 for the reason ``InvalidCredentialsError`` is: nothing is known about
+    the caller. Separate from that class only because the message names the
+    credential the caller actually used, and being told to check an email and
+    password after tapping a passkey is a dead end.
+    """
+
+    status_code = status.HTTP_401_UNAUTHORIZED
+
+    def __init__(self) -> None:
+        super().__init__("That passkey did not sign you in")
+
+
 class CurrentPasswordIncorrectError(TenancyValidationError):
     """The current password given with a password change does not match.
 
@@ -608,6 +702,97 @@ class WorkspaceMcpServerLimitReachedError(TenancyValidationError):
         super().__init__(f"Workspace {workspace_id} already has the maximum of {limit} MCP servers")
 
 
+class WorkspaceWebSearchDomainsExcludedError(TenancyForbiddenError):
+    """A request's search allow-list shares no domain with its workspace's.
+
+    The two lists are intersected rather than overridden, so this is the empty
+    intersection: every domain the request asked for is one the workspace does
+    not permit. Refused rather than run, because an empty effective allow-list
+    is read by ``_build_web_search_backend`` as *no* allow-list (an empty list
+    is falsy), which would turn the narrowest possible policy into no policy at
+    all.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("The requested search domains are not permitted for this workspace")
+
+
+class OrganizationGuardrailNotFoundError(TenancyNotFoundError):
+    def __init__(self, guardrail_id: object):
+        super().__init__(f"Organization guardrail {guardrail_id} not found")
+
+
+class OrganizationGuardrailAlreadyExistsError(TenancyConflictError):
+    """The organization already mandates this guardrail profile.
+
+    One row per profile, not per nickname: the effective guardrail set on the
+    request path is keyed by profile, so a second row of the same profile could
+    never run alongside the first. Refused at the write rather than silently
+    losing at admission.
+    """
+
+    def __init__(self, profile: object):
+        super().__init__(f"This organization already configures the guardrail profile '{profile}'")
+
+
+class OrganizationGuardrailScopeConflictError(TenancyValidationError):
+    """A workspace list was sent for a guardrail that applies to every workspace.
+
+    The two say different things about the same guardrail and the flag wins at
+    resolve time, so accepting both would store a list that never decides
+    anything while reading as though it does. The create path refuses the same
+    pair in its request model; an update can reach it by setting only one half,
+    which is why the rule also lives here.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("workspace_ids must be empty when applies_to_all_workspaces is true")
+
+
+class OrganizationGuardrailCredentialNeedsUrlError(TenancyValidationError):
+    """A credential was stored on an entry that names no endpoint of its own.
+
+    Without a ``url`` the credential rides to whatever the deployment's
+    ``guardrails_url`` points at, which the shipped compose file makes a
+    same-host ``http://`` sidecar, so the bearer would cross the wire in clear.
+    Naming the endpoint is what puts it through ``validate_mcp_url``, which
+    refuses ``http`` once a credential is in play, so requiring one here is what
+    makes "a credential is sent over https" true rather than aspirational.
+    """
+
+    def __init__(self) -> None:
+        super().__init__(
+            "A guardrail credential requires the entry to name its own https url; "
+            "the deployment's guardrails_url is not necessarily encrypted"
+        )
+
+
+class OrganizationGuardrailUnsafeUrlError(TenancyValidationError):
+    """The endpoint failed the same SSRF and TLS checks a request-body guardrail faces.
+
+    Carries the reason from `services.url_safety.UnsafeURLError` verbatim, for
+    the reason `WorkspaceMcpServerUnsafeUrlError` does: it names the host and the
+    range it resolved into, and this surface is management-gated rather than
+    caller-supplied.
+    """
+
+    def __init__(self, reason: str):
+        super().__init__(reason)
+
+
+class OrganizationGuardrailLimitReachedError(TenancyValidationError):
+    """The organization already mandates as many guardrails as it may.
+
+    Every mandated guardrail in scope for a workspace is one more sequential
+    call the guardrails service makes before the provider is reached, on every
+    request that workspace sends, so the list is latency an organization spends
+    rather than only rows it stores.
+    """
+
+    def __init__(self, limit: int):
+        super().__init__(f"This organization already configures the maximum of {limit} guardrails")
+
+
 __all__ = [
     "CurrentPasswordIncorrectError",
     "CurrentPasswordRequiredError",
@@ -635,12 +820,25 @@ __all__ = [
     "OrgProviderKeyNotFoundError",
     "OrgProviderKeyUnknownProviderError",
     "OrgProviderKeyUnsafeApiBaseError",
+    "OrganizationGuardrailAlreadyExistsError",
+    "OrganizationGuardrailCredentialNeedsUrlError",
+    "OrganizationGuardrailLimitReachedError",
+    "OrganizationGuardrailNotFoundError",
+    "OrganizationGuardrailScopeConflictError",
+    "OrganizationGuardrailUnsafeUrlError",
     "OrganizationMemberAlreadyExistsError",
     "OrganizationMemberNotFoundError",
     "OrganizationNameRequiredError",
     "OrganizationNotFoundError",
     "OrganizationPricingNotFoundError",
     "OrganizationPricingOverlapError",
+    "PasskeyAlreadyRegisteredError",
+    "PasskeyCeremonyError",
+    "PasskeyLimitReachedError",
+    "PasskeyNameTakenError",
+    "PasskeyNotFoundError",
+    "PasskeySignInFailedError",
+    "PasskeysNotConfiguredError",
     "PasswordNotSetError",
     "PasswordPolicyError",
     "ResetTokenInvalidError",
@@ -669,4 +867,5 @@ __all__ = [
     "WorkspaceNameRequiredError",
     "WorkspaceNotFoundError",
     "WorkspaceProviderKeyOverrideConflictError",
+    "WorkspaceWebSearchDomainsExcludedError",
 ]

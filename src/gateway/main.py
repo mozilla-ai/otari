@@ -14,6 +14,7 @@ from typing_extensions import override
 
 from gateway.api.deps import set_config
 from gateway.api.main import register_routers
+from gateway.container import build_container
 from gateway.core.config import API_KEY_HEADER, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import create_session, init_db
 from gateway.dashboard import DASHBOARD_PACKAGE_PATH, get_dashboard_build_id, get_dashboard_dir
@@ -106,6 +107,15 @@ _UNAUTHENTICATED_PATHS = frozenset(
         "/v1/auth/resend-verification",
         "/v1/auth/password/reset",
         "/v1/auth/password/reset/confirm",
+        # The passkey sign-in ceremony, both halves. Unauthenticated for the
+        # reason the sign-in endpoint is: they are how a caller who holds no
+        # credential obtains a session. The signed assertion in the second call
+        # is the credential, and it is not one of the header schemes below.
+        # Registering, listing, renaming and deleting a passkey are *not* here:
+        # those are done from inside a session and are stamped like the rest of
+        # the management surface.
+        "/v1/auth/webauthn/authenticate/options",
+        "/v1/auth/webauthn/authenticate",
     }
 )
 # Public, unauthenticated static assets that shared caches may keep. Paths here
@@ -647,6 +657,13 @@ def create_app(config: GatewayConfig) -> FastAPI:
 
     app.state.config = config
     app.state.gateway_mode = config.effective_mode
+
+    # The composition root, built before the routers because a bootstrap may
+    # contribute some of them. Per app rather than module-global, for the same
+    # reason config is: two apps in one process must not share one. A bootstrap
+    # that cannot be loaded raises here, so a deployment that named one and got
+    # it wrong fails to start instead of quietly running the plain build.
+    app.state.container = build_container(config.bootstrap)
 
     register_routers(app, config)
     app.add_exception_handler(TenancyError, _tenancy_error_handler)
