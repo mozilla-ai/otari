@@ -218,6 +218,12 @@ function NarrowedDefaults({
   )
 }
 
+// How long the submit holds before a create that navigates hands the page over.
+// Long enough for the spinner to register as this press having done something,
+// short enough not to be a wait: the operator should read it as the button
+// acknowledging them, not as the gateway being slow.
+const ENTER_HOLD_MS = 800
+
 /**
  * The one form that creates a workspace, wherever it is offered from.
  *
@@ -226,12 +232,6 @@ function NarrowedDefaults({
  * one endpoint drift: one of them grows the description field, or the ownership
  * note, and the other does not.
  */
-// How long the submit holds before a create that navigates hands the page over.
-// Long enough for the spinner to register as this press having done something,
-// short enough not to be a wait: the operator should read it as the button
-// acknowledging them, not as the gateway being slow.
-const ENTER_HOLD_MS = 800
-
 export function CreateWorkspaceForm({
   onClose,
   onCreated,
