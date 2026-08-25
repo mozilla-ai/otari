@@ -15,7 +15,7 @@ narrowing" state that #725 established for the columns beside them, so a
 deployment upgrading onto this revision keeps behaving exactly as it did.
 
 Revision ID: a7f3c9e2b481
-Revises: d8b3f1c6a4e9
+Revises: a9c4e2b6d8f1
 Create Date: 2026-08-24
 """
 
@@ -25,7 +25,7 @@ import sqlalchemy as sa
 from alembic import op
 
 revision: str = "a7f3c9e2b481"
-down_revision: str | Sequence[str] | None = "d8b3f1c6a4e9"
+down_revision: str | Sequence[str] | None = "a9c4e2b6d8f1"
 branch_labels: str | Sequence[str] | None = None
 depends_on: str | Sequence[str] | None = None
 
