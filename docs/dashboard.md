@@ -725,10 +725,11 @@ password. Configure mail before you expect members to sign in.
   Operator access is what reaches this page, and it can be granted and taken
   here.
   Two rows keep their controls disabled, with the reason on the control: your
-  own, because deactivating yourself or dropping your own access ends the
-  session you are doing it from, and the bootstrap operator, because that is the
-  identity master-key sign-in reaches this deployment through. Another operator
-  can make either change on you; granting access back is never blocked. The row
+  own, because deactivating yourself ends the session you are doing it from and
+  dropping your own access takes away the page you did it on, and the bootstrap
+  operator, because that is the identity master-key sign-in reaches this
+  deployment through. Another operator can make either change on you; granting
+  access back is never blocked. The row
   is absent from the rail for anyone who is not an operator, and the page says
   so if they reach it by URL. See
   [Access control](access-control.md#deployment-wide-account-administration).

@@ -54,7 +54,10 @@ function mockApi(opts: { granted?: boolean; accounts?: DeploymentUser[] }) {
 
 function renderPage(ui: ReactElement) {
   const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
+    // `retryDelay` as well as `retry`, because the access hook brings a retry
+    // predicate of its own that overrides the default: without a zero delay the
+    // failed-gate case below would back off for seconds before it settled.
+    defaultOptions: { queries: { retry: false, retryDelay: 0 } },
   })
   return render(
     <DeploymentProvider value={bootstrap()}>
@@ -215,6 +218,20 @@ describe("DeploymentAccountsPage", () => {
       await screen.findByText("Accounts is not available to you"),
     ).toBeInTheDocument()
     expect(screen.queryByRole("grid")).not.toBeInTheDocument()
+  })
+
+  it("reports a gate that failed rather than calling the page not yours", async () => {
+    // A 500 leaves `granted` false the same way a refusal does, and the two are
+    // not the same thing to tell an operator.
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+      String(input).includes("/v1/admin/access")
+        ? jsonResponse({ detail: "Database error" }, 500)
+        : jsonResponse({}),
+    )
+    renderPage(<DeploymentAccountsPage />)
+
+    expect(await screen.findByText("Database error")).toBeInTheDocument()
+    expect(screen.queryByText("Accounts is not available to you")).toBeNull()
   })
 
   it("does not fetch the list before the gate has answered yes", async () => {

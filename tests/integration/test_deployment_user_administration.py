@@ -1,11 +1,13 @@
 """Deployment-wide account administration (`/v1/admin`), end to end and at the service.
 
 Split the way `test_tenancy_authorization.py` explains: a master-key request is
-always the one bootstrap operator, who is a superuser, so the routes can only
-exercise the allowed path and the guards that fire on *self*. The refusals that
-depend on being somebody else, the 404 for a non-operator and the protection of
-the bootstrap identity from another operator, are reachable only by calling the
-service with identities built for the case.
+always the one bootstrap operator, who is a superuser, so a header-authenticated
+route test can only exercise the allowed path and the guards that fire on *self*.
+The refusals that depend on being somebody else are reached two ways here. The
+one that decides what an outsider sees, the 404, is asserted through the routes
+as well, on a dashboard session cookie minted for an identity built for the case,
+because the status is the whole point of it and only the HTTP layer reports one.
+The rest are asserted at the service, which is where the rule lives.
 """
 
 import uuid
@@ -33,6 +35,7 @@ from gateway.repositories.tenancy import (
     UserRepository,
 )
 from gateway.services.dashboard_session_service import (
+    SESSION_COOKIE_NAME,
     create_dashboard_session,
     hash_session_token,
 )
@@ -335,6 +338,107 @@ def test_the_operator_probe_answers_for_the_bootstrap_caller(
 
     assert response.status_code == 200, response.text
     assert response.json() == {"granted": True}
+
+
+def _session_for(
+    session_factory: Callable[[], Session],
+    *,
+    organization_id: uuid.UUID,
+    email: str,
+    is_superuser: bool = False,
+) -> tuple[uuid.UUID, str]:
+    """An identity holding a live dashboard session, and the cookie that names it."""
+    session = session_factory()
+    try:
+        user = User(
+            email=email,
+            full_name=email.split("@")[0].title(),
+            active_organization_id=organization_id,
+            is_superuser=is_superuser,
+        )
+        session.add(user)
+        session.commit()
+        session.refresh(user)
+        session.add(
+            OrganizationMember(organization_id=organization_id, user_id=user.id, role="member", status="active")
+        )
+        token = f"otari-sess-{email}"
+        session.add(
+            DashboardSession(
+                token_hash=hash_session_token(token),
+                user_id=user.id,
+                created_at=datetime.now(UTC),
+                expires_at=datetime.now(UTC) + timedelta(hours=12),
+            )
+        )
+        session.commit()
+        return user.id, token
+    finally:
+        session.close()
+
+
+def test_a_non_operator_session_is_refused_with_404_by_every_route(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """The status, not only the exception: a 403 here would sign the caller out.
+
+    Reachable through the routes because a session cookie names whoever it was
+    minted for, unlike the master key, which is always the bootstrap operator.
+    ``/access`` is the one endpoint that answers rather than hides, which is what
+    leaves the sidebar something to gate on.
+    """
+    assert client.get("/v1/organizations/me", headers=master_key_header).status_code == 200
+    organization_id = _default_organization_id(db_session_factory)
+    member_id, token = _session_for(db_session_factory, organization_id=organization_id, email="ada@example.com")
+
+    client.cookies.set(SESSION_COOKIE_NAME, token)
+    try:
+        listed = client.get("/v1/admin/users")
+        access = client.get("/v1/admin/access")
+        patched = client.patch(f"/v1/admin/users/{member_id}", json={"is_superuser": True})
+    finally:
+        client.cookies.clear()
+
+    assert listed.status_code == 404, listed.text
+    assert patched.status_code == 404, patched.text
+    assert access.status_code == 200, access.text
+    assert access.json() == {"granted": False}
+
+
+def test_an_operator_session_that_is_not_the_bootstrap_one_administers(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """The other side of the cookie path: `is_self` names the caller, not the marker."""
+    assert client.get("/v1/organizations/me", headers=master_key_header).status_code == 200
+    organization_id = _default_organization_id(db_session_factory)
+    operator_id, token = _session_for(
+        db_session_factory,
+        organization_id=organization_id,
+        email="operator@example.com",
+        is_superuser=True,
+    )
+
+    client.cookies.set(SESSION_COOKIE_NAME, token)
+    try:
+        listed = client.get("/v1/admin/users")
+        own = client.patch(f"/v1/admin/users/{operator_id}", json={"is_active": False})
+        anchor = client.patch(
+            f"/v1/admin/users/{_bootstrap_user_id(db_session_factory)}",
+            json={"is_active": False},
+        )
+    finally:
+        client.cookies.clear()
+
+    assert listed.status_code == 200, listed.text
+    assert _row(listed.json(), operator_id)["is_self"] is True
+    assert _row(listed.json(), _bootstrap_user_id(db_session_factory))["is_bootstrap_operator"] is True
+    # Both lockout guards, at the status the dashboard renders.
+    assert own.status_code == 400, own.text
+    assert anchor.status_code == 400, anchor.text
 
 
 # =============================================================================

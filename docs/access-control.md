@@ -157,7 +157,7 @@ curl -X PATCH -H "Otari-Key: $OTARI_MASTER_KEY" -H "Content-Type: application/js
 
 **Who may use it.** A superuser, or the identity the `tenancy_bootstrap_user_id` marker names, which the master key resolves to. Anyone else gets `404` rather than `403`, so the surface does not confirm it exists to a caller who may not use it, and the dashboard does not read the refusal as an expired session. The marker arm is what keeps the deployment reachable if a superuser flag is cleared by hand.
 
-**Two changes are refused, in one direction each.** An operator cannot deactivate their own account or drop their own operator access, since either ends the session they are holding; and neither can be taken from the bootstrap operator, which is the identity master-key sign-in resolves to, so deactivating it would turn the fallback credential into a session that dies on arrival. Granting either back is not refused, which is what makes a cleared flag repairable here.
+**Two changes are refused, in one direction each.** An operator cannot deactivate their own account or drop their own operator access: deactivating ends the session they are holding, and dropping the flag takes away the page they would undo it from; and neither can be taken from the bootstrap operator, which is the identity master-key sign-in resolves to, so deactivating it would turn the fallback credential into a session that dies on arrival. Granting either back is not refused, which is what makes a cleared flag repairable here.
 
 Creating an account is not part of this surface: an account with no membership can do nothing, and memberships are the organization surface above. Neither is deleting one, for the reason removing a member suspends rather than deletes: past usage stays attributable.
 

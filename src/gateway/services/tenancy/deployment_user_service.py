@@ -28,8 +28,8 @@ for why the status is the one it is.
 repair is still possible where a foot-gun is not:
 
 - an operator may not deactivate *themselves* or clear their *own* superuser
-  flag, because either ends the session they are holding with nothing on the
-  page to undo it;
+  flag: the first ends the session they are holding, the second takes away the
+  page it was done from, and neither leaves anything there to undo it;
 - neither may be turned off on the bootstrap operator, because master-key
   sign-in mints a session for that identity and ``resolve_dashboard_session``
   refuses a deactivated one, so deactivating it turns the deployment's fallback

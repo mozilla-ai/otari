@@ -2,6 +2,7 @@ import { Button, Chip } from "@heroui/react"
 import { useMemo, useState } from "react"
 
 import type { DeploymentUser } from "@/client"
+import { ApiError } from "@/shared/api/client"
 import {
   useDeploymentAdminAccess,
   useDeploymentUsers,
@@ -201,6 +202,24 @@ export function DeploymentAccountsPage() {
 
   if (access.isLoading) {
     return <PageLoading label="Loading accounts…" />
+  }
+
+  // A gate that failed to answer is not a gate that said no, so a failed request
+  // is reported as one rather than falling into the refusal below, which would
+  // tell an operator the page is not theirs because asking for it 500ed. A 404
+  // is the exception and keeps the refusal: it is a gateway that does not serve
+  // the surface, which is the same answer for the reader as not being an
+  // operator, and it is what `useDeploymentAdminAccess` stops retrying on.
+  if (
+    access.isError &&
+    !(access.error instanceof ApiError && access.error.status === 404)
+  ) {
+    return (
+      <div className="flex flex-col gap-6">
+        <PageHeader title="Accounts" />
+        <ErrorBanner error={access.error} />
+      </div>
+    )
   }
 
   // The API refuses a non-operator with 404 rather than 403, so a caller who is
