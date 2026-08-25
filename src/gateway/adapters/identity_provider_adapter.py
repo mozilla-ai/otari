@@ -69,16 +69,17 @@ class RosterIdentityProviderAdapter:
           the same address still signs the same person in, and the column keeps
           the provider that arrived first.
 
-          "First" here means the first to commit, and this is a read-then-write
-          on an unlocked row, so two sign-ins racing on one identity with two
-          *different* providers can both see NULL and the later commit wins.
-          That is left unguarded deliberately rather than overlooked. Nothing in
-          this edition reads ``oauth_provider``: it is carried for schema parity
-          with the platform (``models/tenancy.py``), no route publishes it, and
-          no decision consults it. Locking the identity row would put a
-          ``SELECT ... FOR UPDATE`` on every OAuth sign-in to protect a value
-          with no reader. If something ever does read it, this is the line to
-          revisit.
+          "First" is enforced rather than hoped for. Both writes below are
+          read-then-write on a row with no unique index to lose to, so two
+          sign-ins racing on one identity with two *different* providers could
+          otherwise both see NULL and the later commit would win. The row is
+          locked before either is decided, which is the shape otari#729 settled
+          for verification and reset redemption on this same table.
+
+          PostgreSQL only, per ``UserRepository.lock``: ``FOR UPDATE`` is a
+          no-op on SQLite. The consequence there is which of two provider names
+          lands in a column this edition never reads, so it is a documented
+          limit rather than a reason to serialize differently.
         - A provider-verified address stamps ``email_verified_at`` if it is
           unset, which lifts the local sign-in gate the password path enforces
           (``user_service.authenticate``). That is not a shortcut around
@@ -106,11 +107,19 @@ class RosterIdentityProviderAdapter:
         except InvalidEmailError as error:
             raise OAuthIdentityUnknownError(provider) from error
 
-        identity = await UserRepository(self._session).get_by_email(address)
+        users = UserRepository(self._session)
+        identity = await users.get_by_email(address)
         # Deactivated collapses into "unknown" deliberately; see
         # ``OAuthIdentityUnknownError``.
         if identity is None or not identity.is_active:
             raise OAuthIdentityUnknownError(provider)
+
+        # Locked before anything below is decided, so the reads the two writes
+        # branch on are still true when they land. Re-read through the lock for
+        # the same reason otari#729 re-resolves after taking it: the row this
+        # transaction is holding may not be the row it first read.
+        await users.lock(identity.id)
+        await self._session.refresh(identity)
 
         if identity.oauth_provider is None:
             identity.oauth_provider = provider

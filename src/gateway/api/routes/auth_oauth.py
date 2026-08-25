@@ -39,7 +39,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import IdentityProviderPortDep, get_config, get_db_if_needed
+from gateway.api.deps import IdentityProviderPortDep, get_config, get_db
 from gateway.api.routes._public_auth import throttle_public_auth
 
 # The same refusal the password and passkey sign-ins carry, imported rather than
@@ -136,18 +136,6 @@ class OAuthSessionResponse(BaseModel):
     )
 
 
-def _session(db: AsyncSession | None) -> AsyncSession:
-    """Narrow the port-shaped optional session this router never actually sees.
-
-    ``get_db_if_needed`` yields ``None`` only in hybrid mode, and this router is
-    standalone-only (``api.main.register_routers``). It is taken in that shape
-    anyway so the handler and ``IdentityProviderPort`` share one session and one
-    transaction; see ``deps.get_identity_provider_port``.
-    """
-    assert db is not None, "the OAuth sign-in routes are mounted in standalone mode only"
-    return db
-
-
 def require_oauth_provider(
     provider: ProviderPath,
     config: Annotated[GatewayConfig, Depends(get_config)],
@@ -207,7 +195,7 @@ async def callback(
     request: Request,
     response: Response,
     identity_provider: IdentityProviderPortDep,
-    db: Annotated[AsyncSession | None, Depends(get_db_if_needed)],
+    db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> OAuthSessionResponse:
     """Exchange an authorization code and set the HttpOnly session cookie.
@@ -232,8 +220,7 @@ async def callback(
     failure: nobody failed to authenticate, the gateway declined to try.
     """
     throttle_public_auth(request)
-    session = _session(db)
-    if await is_maintenance_mode(session):
+    if await is_maintenance_mode(db):
         raise HTTPException(
             status_code=status.HTTP_503_SERVICE_UNAVAILABLE,
             detail=MAINTENANCE_MODE_REFUSAL,
@@ -261,11 +248,11 @@ async def callback(
         # stamp are on this same session, so they land with the session row or
         # with neither.
         token, expires_at = await create_dashboard_session(
-            session, config.dashboard_session_ttl_hours, user_id=identity.id
+            db, config.dashboard_session_ttl_hours, user_id=identity.id
         )
-        await session.commit()
+        await db.commit()
     except SQLAlchemyError:
-        await session.rollback()
+        await db.rollback()
         logger.warning("Failed to persist a dashboard session on a %s sign-in", provider, exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,

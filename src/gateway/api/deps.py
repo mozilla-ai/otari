@@ -476,16 +476,21 @@ def get_growth_signal_port(db: PortSessionDep, container: ContainerDep) -> Growt
     return container.resolve(GrowthSignalPort, db)
 
 
-def get_identity_provider_port(db: PortSessionDep, container: ContainerDep) -> IdentityProviderPort:
-    """Resolve the identity adapter this build bound at startup.
-
-    On ``PortSessionDep`` like every other port, which has a consequence the
-    OAuth sign-in route depends on: the adapter writes (it links a provider and
-    may stamp a verification) and does not commit, so that route takes its own
-    session from ``get_db_if_needed`` as well. Both then hold the one session
-    FastAPI caches per callable, and the adapter's writes commit with the
-    session row the sign-in mints rather than in a transaction of their own.
-    """
+# ``get_db`` rather than ``PortSessionDep``, for the reason
+# ``get_telemetry_storage_port`` below gives: the only surface resolving this is
+# the OAuth sign-in route, which is standalone-only and already holds a session
+# from ``get_db``, and FastAPI caches a dependency per callable. Naming the same
+# one hands the adapter the caller's session instead of opening a second,
+# independent one against the same database for the same request. That sharing
+# is load-bearing here and not just tidy: the adapter writes (it links a
+# provider, and may stamp a verification) and deliberately does not commit, so
+# its writes have to be in the transaction the route commits or they are in one
+# nobody does.
+def get_identity_provider_port(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    container: ContainerDep,
+) -> IdentityProviderPort:
+    """Resolve the identity adapter this build bound at startup."""
     return container.resolve(IdentityProviderPort, db)
 
 
