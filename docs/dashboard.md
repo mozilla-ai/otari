@@ -228,7 +228,10 @@ The dashboard has two sidebars, and only one is on screen at a time.
 The **workspace rail** is the default, and the switcher above it chooses which
 workspace you are looking at. That selection scopes members, API keys, usage,
 and the request log; routing and provider credentials are deployment-wide, and
-the switcher's own popover says which is which.
+the switcher's own popover says which is which. The same popover names the
+organization above the workspaces, and where you belong to more than one it
+switches between them; **Create organization** at its foot makes another, with
+you as its owner and a default workspace inside it.
 
 The **organization rail** holds what belongs to the tenant rather than to one
 workspace. It is reached from the **Organization** entry at the foot of the
@@ -240,7 +243,10 @@ At the very bottom sits the account control, which holds **Account settings**
 system, light, and dark, the hosted legal pages where there are any, and **Log
 out**. The bundled user guide is
 **Documentation**, in the top bar; on a narrow screen, where the top bar has room
-for the trail and nothing else, the account control carries it instead.
+for the trail and nothing else, the account control carries it instead. A
+deployment that has set `docs_url` points both of those at its own documentation
+site instead, and this guide stays served at `/#/docs`; see
+[Documentation links](configuration.md#documentation-links).
 
 The groups below match the current dashboard, rail by rail.
 
@@ -546,10 +552,12 @@ is defined.
 Reached from the **Organization** entry at the foot of the workspace rail, and
 left by the link at its top.
 
-The tenant this deployment's workspaces, members, and roles belong to. There is
-exactly one, provisioned on first boot: a self-hosted gateway is one tenant with
-several people in it, not several tenants, so it can be renamed but not created,
-switched between, or deleted.
+The tenant this deployment's workspaces, members, and roles belong to. One is
+provisioned on first boot, and for most deployments that is the only one: a
+self-hosted gateway is one organization with several people in it. Where there
+is more than one, the switcher above the workspace rail is what moves between
+them and creates another; **General** renames the one you are in and offers no
+delete.
 
 The master key is the bootstrap credential: the first authenticated request
 provisions the organization, one default workspace, and one owner identity, and
@@ -661,7 +669,7 @@ password. Configure mail before you expect members to sign in.
 
 ### General
 
-- **Org settings**: rename the organization. There is exactly one.
+- **Org settings**: rename the organization you are acting in. Creating another, and moving between them, is the switcher above the workspace rail.
 - **Settings**: search and toggle runtime settings, and rotate the generated
   master key. Rotating the master key issues a fresh `otari-mk-…` value and keeps
   your current session signed in. **Email delivery** at the bottom of the page

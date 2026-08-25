@@ -19,6 +19,7 @@ from gateway.adapters.billing_adapter import NullBillingAdapter
 from gateway.adapters.entitlement_adapter import BaseEntitlementAdapter
 from gateway.adapters.growth_signal_adapter import NullGrowthSignalAdapter
 from gateway.adapters.model_provider_adapter import SelfHostedModelProviderAdapter
+from gateway.adapters.telemetry_storage_adapter import DatabaseTelemetryStorageAdapter
 from gateway.container import (
     BootstrapError,
     Container,
@@ -30,6 +31,7 @@ from gateway.ports.billing_port import BillingPort
 from gateway.ports.entitlement_port import EntitlementPort
 from gateway.ports.growth_signal_port import GrowthSignalPort
 from gateway.ports.model_provider_port import ModelProviderPort
+from gateway.ports.telemetry_storage_port import TelemetryStoragePort
 
 # The core adapters ignore the session, so a placeholder stands in for one; a
 # unit test of the wiring has no database and needs none.
@@ -84,6 +86,7 @@ def test_core_defaults_are_bound_for_every_port() -> None:
     assert isinstance(container.resolve(EntitlementPort, NO_SESSION), BaseEntitlementAdapter)
     assert isinstance(container.resolve(ModelProviderPort, NO_SESSION), SelfHostedModelProviderAdapter)
     assert isinstance(container.resolve(GrowthSignalPort, NO_SESSION), NullGrowthSignalAdapter)
+    assert isinstance(container.resolve(TelemetryStoragePort, NO_SESSION), DatabaseTelemetryStorageAdapter)
 
 
 def test_no_selector_contributes_no_routers_and_says_so() -> None:
@@ -91,7 +94,7 @@ def test_no_selector_contributes_no_routers_and_says_so() -> None:
 
     assert container.router_contributions() == ()
     assert container.summary.startswith("no bootstrap, core defaults for ")
-    for port in (BillingPort, EntitlementPort, GrowthSignalPort, ModelProviderPort):
+    for port in (BillingPort, EntitlementPort, GrowthSignalPort, ModelProviderPort, TelemetryStoragePort):
         assert port.__name__ in container.summary
 
 

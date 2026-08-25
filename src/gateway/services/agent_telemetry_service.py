@@ -1,25 +1,24 @@
-"""Content-free coding-agent telemetry mapping, ingestion, and aggregation helpers."""
+"""Content-free coding-agent telemetry mapping, ingestion, and delta arithmetic.
+
+Where the records go is not decided here: ``TelemetryStoragePort`` owns that,
+and this module maps an OTLP payload into records, applies the gates that are
+the caller's rather than the store's, and holds the read-time arithmetic every
+adapter shares.
+"""
 
 import hashlib
-from collections import defaultdict
-from dataclasses import dataclass
 from datetime import UTC, datetime
 from math import isfinite
 from typing import Any, Iterable
 
-from sqlalchemy import select
-from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.models.entities import AgentTelemetry, APIKey
+from gateway.models.entities import APIKey
+from gateway.ports.telemetry_storage_port import IngestResult, TelemetryRecord, TelemetryStoragePort
 from gateway.repositories.users_repository import get_active_user
 
 _MAX_NUMBER = 1_000_000_000
 _EVENTS = {"tool_result", "tool_decision", "user_prompt", "api_error"}
-# TelemetryRecord fields that feed event_dedup_key() but are not their own
-# AgentTelemetry column (the dedup key that derives from them is what's stored).
-_DEDUP_ONLY_FIELDS = ("tool_use_id", "event_sequence")
-
 # The outcome counters a coding agent reports on the metrics signal that Otari has
 # no other source for. Each becomes a content-free, non-billable metric row.
 METRIC_LINES_OF_CODE = "claude_code.lines_of_code.count"
@@ -39,36 +38,6 @@ _SKIPPED_METRICS = frozenset(
 
 CUMULATIVE = "cumulative"
 DELTA = "delta"
-
-
-@dataclass(frozen=True)
-class TelemetryRecord:
-    name: str
-    timestamp: datetime
-    source: str
-    dedup_key: str
-    tool_name: str | None = None
-    decision: str | None = None
-    success: bool | None = None
-    duration_ms: int | None = None
-    status_code: int | None = None
-    prompt_length: int | None = None
-    session_label: str | None = None
-    tool_use_id: str | None = None
-    event_sequence: int | None = None
-    # Metric-point fields; all None on a behavioral event. See AgentTelemetry.
-    kind: str | None = None
-    value: float | None = None
-    temporality: str | None = None
-    series_start: datetime | None = None
-    series_key: str | None = None
-
-
-@dataclass(frozen=True)
-class IngestResult:
-    accepted: int = 0
-    duplicate: int = 0
-    rejected: int = 0
 
 
 def _hash(*parts: object) -> str:
@@ -301,110 +270,25 @@ def compute_series_increment(
 
 
 
-def _build_row(api_key: APIKey, user_id: str | None, record: TelemetryRecord) -> AgentTelemetry:
-    row_fields = {k: v for k, v in record.__dict__.items() if k not in _DEDUP_ONLY_FIELDS}
-    return AgentTelemetry(api_key_id=api_key.id, user_id=user_id, **row_fields)
-
-
-async def _existing_dedup_keys(db: AsyncSession, source: str, dedup_keys: list[str]) -> set[str]:
-    rows = (
-        await db.execute(
-            select(AgentTelemetry.dedup_key).where(
-                AgentTelemetry.source == source,
-                AgentTelemetry.dedup_key.in_(dedup_keys),
-            )
-        )
-    ).scalars().all()
-    return set(rows)
-
-
-async def _insert_same_source_batch(
-    db: AsyncSession, source: str, rows: list[AgentTelemetry]
-) -> IngestResult:
-    """Insert a same-source batch, retrying only rows that don't collide.
-
-    Mirrors ``external_usage_service._insert_rows``: one ``add_all`` + ``commit``
-    for the whole batch; on a uniqueness collision, roll back, re-query which
-    ``(source, dedup_key)`` pairs already exist, and retry only the survivors as
-    one bulk insert; if that also collides, fall back to row-at-a-time for the
-    still-colliding remainder.
-    """
-    db.add_all(rows)
-    try:
-        await db.commit()
-        return IngestResult(accepted=len(rows))
-    except IntegrityError:
-        await db.rollback()
-
-    existing = await _existing_dedup_keys(db, source, [row.dedup_key for row in rows])
-    survivors = [row for row in rows if row.dedup_key not in existing]
-    duplicate = len(rows) - len(survivors)
-    if not survivors:
-        return IngestResult(duplicate=duplicate)
-    db.add_all(survivors)
-    try:
-        await db.commit()
-        return IngestResult(accepted=len(survivors), duplicate=duplicate)
-    except IntegrityError:
-        await db.rollback()
-
-    accepted = still_duplicate = 0
-    for row in survivors:
-        db.add(row)
-        try:
-            await db.commit()
-            accepted += 1
-        except IntegrityError:
-            await db.rollback()
-            still_duplicate += 1
-    return IngestResult(accepted=accepted, duplicate=duplicate + still_duplicate)
-
-
 async def ingest(
     db: AsyncSession,
     records: Iterable[TelemetryRecord],
     *,
     api_key: APIKey,
+    storage: TelemetryStoragePort,
 ) -> IngestResult:
-    """Persist telemetry rows, treating uniqueness collisions as replay duplicates.
+    """Gate an export on its attribution, then hand it to telemetry storage.
 
-    Batch-inserts by source (the unique constraint is ``(source, dedup_key)``)
-    rather than one savepoint per record, so ingesting a large export issues a
-    small, bounded number of database round trips.
+    The active-user check stays here rather than behind the port: a
+    soft-deleted user's exporter can still hold a live key, and whether that
+    export may be kept at all is a question about this deployment's users, not
+    about where telemetry is stored. It is the same gate the usage path
+    applies. Storage owns everything after it, idempotency included.
     """
     records = list(records)
     if not records:
         return IngestResult()
     user_id = api_key.user_id
-    # Same active-user gate the usage path applies: a soft-deleted user's exporter
-    # can still hold a live key, and its events must be rejected, not stored.
     if not user_id or await get_active_user(db, user_id) is None:
         return IngestResult(rejected=len(records))
-
-    # Drop repeats inside this export before touching the database, the same guard
-    # external_usage_service applies with its seen_in_batch set. The stored projection
-    # is lossy by design, so two records can collapse onto one dedup key; letting that
-    # reach the insert fails the whole batch and drops it into the row-at-a-time
-    # fallback, turning one bulk insert into one commit per record.
-    by_source: dict[str, list[TelemetryRecord]] = defaultdict(list)
-    seen: set[tuple[str, str]] = set()
-    duplicate = 0
-    for record in records:
-        identity = (record.source, record.dedup_key)
-        if identity in seen:
-            duplicate += 1
-            continue
-        seen.add(identity)
-        by_source[record.source].append(record)
-
-    accepted = 0
-    try:
-        for source, source_records in by_source.items():
-            rows = [_build_row(api_key, user_id, record) for record in source_records]
-            result = await _insert_same_source_batch(db, source, rows)
-            accepted += result.accepted
-            duplicate += result.duplicate
-    except SQLAlchemyError:
-        await db.rollback()
-        raise
-    return IngestResult(accepted=accepted, duplicate=duplicate)
+    return await storage.record(api_key_id=api_key.id, user_id=user_id, records=tuple(records))

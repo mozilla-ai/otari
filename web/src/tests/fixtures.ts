@@ -9,6 +9,7 @@
 import type {
   ActivationAttempt,
   Budget,
+  CallerOrganizationMembership,
   DeploymentBootstrap,
   Organization,
   OrganizationContext,
@@ -109,6 +110,9 @@ export function bootstrap(
     // describes by default; a test about the password login overrides it.
     sign_in_methods: ["master_key"],
     management_url: null,
+    // Null, because a fixture describes a deployment whose documentation is the
+    // bundled guide; the tests about an operator-configured docs site set it.
+    docs_url: null,
     // Not frozen, because a fixture describes a deployment somebody can sign
     // in to; the maintenance-mode tests override it.
     maintenance_mode: false,
@@ -153,6 +157,26 @@ export function organizationContext(
     // shell treats absent and empty the same way.
     workspace_memberships: [],
     byo_provider_keys_allowed: true,
+    ...overrides,
+  }
+}
+
+/**
+ * One row of the caller's own organization memberships, as the switcher reads them.
+ *
+ * The active one by default, so a single-membership fixture describes the
+ * ordinary deployment: one organization, provisioned at first boot, and the
+ * caller in it.
+ */
+export function callerOrganizationMembership(
+  overrides: Partial<CallerOrganizationMembership> = {},
+): CallerOrganizationMembership {
+  return {
+    organization_member_id: "22222222-2222-2222-2222-222222222222",
+    organization: organization(),
+    role: "owner",
+    status: "active",
+    is_active_organization: true,
     ...overrides,
   }
 }

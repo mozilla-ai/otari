@@ -12,6 +12,7 @@ import type {
   ApiKey,
   Budget,
   BudgetResetLog,
+  CallerOrganizationMembership,
   CreateAliasRequest,
   CreateBudgetRequest,
   CreateKeyRequest,
@@ -20,6 +21,7 @@ import type {
   CreateOrganizationMemberRequest,
   CreateOrganizationMemberResult,
   CreateOrganizationPricingOverride,
+  CreateOrganizationRequest,
   CreateScopedBudgetRequest,
   CreateSearchToolRequest,
   CreateStoredProviderRequest,
@@ -42,6 +44,7 @@ import type {
   MaintenanceMode,
   ModelListResponse,
   ModelMetadataResponse,
+  Organization,
   OrganizationContext,
   OrganizationGuardrail,
   OrganizationMember,
@@ -76,6 +79,7 @@ import type {
   StoredProvider,
   StoredSearchTool,
   SummaryDimension,
+  SwitchOrganizationRequest,
   TestProviderResult,
   TestServiceResponse,
   ToolSettingsResponse,
@@ -1737,6 +1741,75 @@ export function useOrganizationContext() {
     queryKey: [ORGANIZATIONS, "context"],
     queryFn: () => apiFetch<OrganizationContext>("/v1/organizations/me"),
     staleTime: 60_000,
+  })
+}
+
+// The organizations the caller is an active member of, which is what the
+// organization half of the scope switcher renders. Its own read rather than a
+// field on the context: the context is one organization, and a switcher needs
+// the list. Cached for the same minute, because they move at the same rate.
+export function useOrganizationMemberships() {
+  return useQuery({
+    queryKey: [ORGANIZATIONS, "memberships"],
+    queryFn: () =>
+      fetchAllPaged<CallerOrganizationMembership>(
+        "/v1/organizations/me/memberships",
+      ),
+    staleTime: 60_000,
+    // Same guard as `useUsageGroupedSeries` and `useInFlightRequests`, and for
+    // both of their reasons: a gateway older than this bundle does not serve
+    // this route (the process may not have restarted onto the build that ships
+    // it), and a hybrid gateway answers 404 for every `/v1/organizations` path
+    // by design. Neither is something a retry fixes; the switcher falls back to
+    // stating the one organization the context names.
+    retry: (failureCount, error) =>
+      !(error instanceof ApiError && error.status === 404) && failureCount < 3,
+  })
+}
+
+// Creating one makes the caller its owner and provisions a default workspace,
+// and deliberately does not switch into it: the switcher chains this with
+// `useSwitchOrganization` so the two steps stay separately reportable.
+export function useCreateOrganization() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: CreateOrganizationRequest) =>
+      apiFetch<Organization>("/v1/organizations", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => {
+      // The membership list has a new row; nothing else has changed, because
+      // the caller is still acting in the organization they were in.
+      void queryClient.invalidateQueries({ queryKey: [ORGANIZATIONS] })
+    },
+  })
+}
+
+// Switching moves `users.active_organization_id`, which is what every scoped
+// read on the server resolves through, so *everything* cached here is about
+// the organization just left. Hence `invalidateQueries()` with no key rather
+// than a list of them: enumerating the affected keys would mean keeping that
+// list in step with every future query, and the one it missed would render
+// another organization's rows under this one's name.
+export function useSwitchOrganization() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (organizationId: string) => {
+      // Typed against the generated request rather than written inline, so a
+      // field the gateway renames fails here instead of on the wire. The
+      // parameter stays a bare id: both call sites have one, not a body.
+      const body: SwitchOrganizationRequest = {
+        organization_id: organizationId,
+      }
+      return apiFetch<OrganizationContext>("/v1/organizations/me/switch", {
+        method: "POST",
+        body: JSON.stringify(body),
+      })
+    },
+    onSuccess: () => {
+      void queryClient.invalidateQueries()
+    },
   })
 }
 

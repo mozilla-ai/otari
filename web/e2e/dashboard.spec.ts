@@ -117,17 +117,24 @@ test.describe("dashboard core flows", () => {
   })
 
   test("assign the budget to a person", async ({ page }) => {
-    await login(page)
     // There is no page that creates a spend identity any more: one is minted
     // when a member is added or when a key is issued. Seeded over the API here
     // so this spec stays about the assignment, which is the part that moved onto
     // the budget form when the users page went away.
+    //
+    // The seed has to happen before `login(page)`, not after it. Loading the app
+    // fetches `GET /v1/users`, and `useUsers` caches it with `staleTime: 60_000`
+    // (web/src/shared/api/hooks.ts), so a list fetched before alice exists stays
+    // fresh through `BudgetsPage` mounting: no refetch, no alice in the combobox,
+    // and the option click below waits out the 30s test timeout. Seeding first
+    // makes the order deterministic instead of a race with the app's own request.
     const created = await page.request.post("/v1/users", {
       headers: { "Otari-Key": MASTER_KEY },
       data: { user_id: "alice@example.com" },
     })
     expect(created.ok() || created.status() === 409).toBeTruthy()
 
+    await login(page)
     await openOrganization(page)
     await nav(page).getByRole("link", { name: "Spend & budgets" }).click()
     const budgetRow = page.getByRole("row", { name: /e2e-budget/ })

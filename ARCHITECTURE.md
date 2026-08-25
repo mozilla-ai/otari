@@ -83,6 +83,7 @@ A **port** is a domain-named interface (a Python `Protocol`), named for what it 
 | `CodeExecutionPort` | Running model-generated code in a sandbox. |
 | `BillingPort` | Metering and charging for usage. |
 | `GrowthSignalPort` | Telling an outside CRM or support messenger about a user's lifecycle. |
+| `TelemetryStoragePort` | Where captured agent telemetry is stored and read back. |
 
 The cardinal property: **every port ships with a working adapter in Otari's core**, a real lightweight implementation or an honest [Null Object](https://en.wikipedia.org/wiki/Null_object_pattern). Otari must stand alone with no overlay present. `BillingPort`, for example, is a Null Object in the core: it is present and callable, and does nothing, so nothing in the core needs to know whether real billing exists anywhere.
 
@@ -106,6 +107,7 @@ flowchart LR
         CP[CodeExecutionPort]
         BP[BillingPort]
         GP[GrowthSignalPort]
+        TP[TelemetryStoragePort]
     end
     UI --> API --> SVC --> REPO --> MOD
     SVC --> AP
@@ -116,9 +118,10 @@ flowchart LR
     SVC --> CP
     SVC --> BP
     SVC --> GP
+    SVC --> TP
 ```
 
-> **Where the ports are today.** `src/gateway/ports/` holds four of them, `ModelProviderPort`, `BillingPort`, `EntitlementPort` and `GrowthSignalPort`, each with a working core adapter in `src/gateway/adapters/`. They are the seam's mechanism rather than its whole surface: nothing on the request path calls one yet, so the choices those four describe (which credential to use, when to meter) are still made by the mode switch and the hand-wired dependencies described next. The remaining ports in the table above arrive as they gain callers.
+> **Where the ports are today.** `src/gateway/ports/` holds five of them, `ModelProviderPort`, `BillingPort`, `EntitlementPort`, `GrowthSignalPort` and `TelemetryStoragePort`, each with a working core adapter in `src/gateway/adapters/`. Only the last has core callers: the OTLP receiver, the telemetry read endpoints, and the purge paths all resolve it. The other four are still the seam's mechanism rather than its surface, so the choices they describe (which credential to use, when to meter) are made by the mode switch and the hand-wired dependencies described next. The remaining ports in the table above arrive as they gain callers.
 
 ## How a port is resolved
 
@@ -167,12 +170,13 @@ This is the open-core line: for each capability, what Otari's core ships and wha
 
 | Capability | Where it lives | Notes |
 |---|---|---|
-| Users, orgs, workspaces, teams, invitations, budgets, usage and traces, BYO provider keys | **Core** (plain, no port) | The management plane: plain CRUD, one implementation each. Routing has its own row below because, unlike these, it sits behind a port. |
+| Users, orgs, workspaces, teams, invitations, budgets, usage, BYO provider keys | **Core** (plain, no port) | The management plane: plain CRUD, one implementation each. Routing and telemetry storage have their own rows below because, unlike these, they sit behind a port. Usage rows stay here in every build: they are the money path, not analytics. |
 | RBAC | **Core base + overlay adapter** *(provisional)* | Base roles and org scoping in the core; deeper roles, fine-grained permissions, and audit from an overlay adapter. Split pending an open decision. |
 | SSO | **Core base + overlay adapter** *(provisional)* | Social sign-in and passkeys in the core; enterprise SSO (for example SAML, enterprise OIDC, directory provisioning) from an overlay adapter. Split pending an open decision. |
 | Routing | **Core base + overlay adapter** *(provisional)* | Ordered fallback and policies in the core; a richer model-selection strategy from an overlay adapter. Split pending an open decision. |
 | Model inference | **Core port + hosted adapter** | Self-hosting your own backends is a first-class path in the core; a hosted, metered inference backend comes from an overlay. See the managed-models section of [docs/modes.md](docs/modes.md). |
 | Code execution | **Core port + hardened adapter** *(provisional)* | A basic local sandbox in the core; a hardened, managed sandbox from an overlay. Interface still provisional. |
+| Telemetry storage | **Core port + scale-out adapter** | The OTLP receiver's captured telemetry goes to this deployment's own database in the core; a store built for many tenants' retention and query volume comes from an overlay. The read endpoints resolve the same port, so binding one moves both halves. |
 | Billing (wallet/payments) | **Overlay-only** | A Null Object (no-op) adapter in the core; real billing exists only in an overlay. |
 
 The **provisional** rows (RBAC, SSO, routing) share one open question: how deep the core base goes before an overlay adapter takes over. That is an open design decision for the project maintainers, not settled yet and not a contributor's to assume; treat those lines as a working assumption until it is decided and recorded here.

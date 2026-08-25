@@ -192,6 +192,40 @@ async def test_imported_usage_does_not_activate_a_workspace(async_db: AsyncSessi
     assert status.experience_eligible is True
 
 
+async def test_migrated_hosted_history_activates_a_workspace(async_db: AsyncSession) -> None:
+    """A workspace whose traffic was backfilled has called this gateway, on hosted history.
+
+    The backfill keeps a hosted row's origin behind a legacy prefix
+    (``otari-ai:gateway``), so a bare comparison against ``gateway`` would read a
+    long-standing customer as pre-activation and ask them for their first request.
+    """
+    owner, workspace = await _setup(async_db, slug="acme-migrated")
+    first = await _usage(async_db, workspace.id, source="otari-ai:gateway", seconds_ago=120)
+
+    status = await WorkspaceActivationService(async_db, _config()).get_status(user=owner, workspace_id=workspace.id)
+
+    assert status.status == "activated"
+    assert status.activation_attempt is not None
+    assert status.activation_attempt.request_id == first.id
+    assert status.experience_eligible is False
+
+
+async def test_migrated_imported_usage_does_not_activate_a_workspace(async_db: AsyncSession) -> None:
+    """Only the slug behind the legacy prefix decides, not the prefix.
+
+    ``otari-ai:claude_code`` is an import that was migrated, so it stays somebody
+    else's traffic.
+    """
+    owner, workspace = await _setup(async_db, slug="acme-migrated-import")
+    await _usage(async_db, workspace.id, source="otari-ai:claude_code")
+
+    status = await WorkspaceActivationService(async_db, _config()).get_status(user=owner, workspace_id=workspace.id)
+
+    assert status.status == "waiting"
+    assert status.latest_attempt is None
+    assert status.experience_eligible is True
+
+
 async def test_an_absorbed_attempt_is_not_reported_as_a_failure(async_db: AsyncSession) -> None:
     """A failed attempt a routing policy recovered from is not the request's outcome."""
     owner, workspace = await _setup(async_db, slug="acme-absorbed")

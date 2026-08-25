@@ -1,23 +1,28 @@
-"""Organization context and membership (standalone mode only).
+"""Organization context, membership, and switching (standalone mode only).
 
 Thin composition over `gateway.services.tenancy.organization_service`: resolve
 the caller's identity, call the service, return its typed result. The response
 models come from `gateway.models.tenancy` and are the contracts the dashboard's
 generated client is built from, so they keep the platform's shapes.
 
-Every path is scoped to ``/me``, the organization the caller's identity is
-pointed at, and no request can name an organization at all. That is the tenant
-boundary, and in this edition it is also the whole story: a standalone
-deployment has exactly one organization, provisioned at first boot.
+Nearly every path is scoped to ``/me``, the organization the caller's identity
+is pointed at, and cannot name an organization at all. ``POST /me/switch`` is
+the one that can, because moving that pointer is the one operation that has to
+be told where to; it answers 404 for an organization the caller holds no active
+membership in, so the boundary holds there too.
 
-**Why there is no create, switch, delete, or membership list here.** Those are
-what make a deployment host more than one tenant, and a self-hosted gateway is
-one tenant with several people in it: many identities, fixed roles, and
-workspaces as the unit teams are isolated by. The model stays tenancy-shaped
-because the hosted edition needs it and the schema is edition-invariant, so
-those surfaces are the overlay's to contribute, gated on an entitlement the way
-`ARCHITECTURE.md` describes for every capability line. Nothing here has to
-change to allow them; they are simply not mounted.
+**Why create, switch, and the membership list are here.** A standalone
+deployment boots one organization and almost always keeps exactly that, but a
+second one is already reachable: invite an address that belongs to an
+organization elsewhere on this deployment, they accept, and they hold two
+memberships with nothing to switch between them. The tables are this
+repository's, and so are the invariants a second organization needs (who
+becomes its owner, what its slug is, that it has a workspace to work in), so an
+overlay contributing no tables could only fork them. See mozilla-ai/otari#715.
+
+Deleting an organization is still not here, and that is a different question
+rather than an oversight: every historical attribution resolves through rows
+that hang off it.
 """
 
 import uuid
@@ -36,9 +41,13 @@ from gateway.models.tenancy import (
     ActiveOrganizationMembersPublic,
     ActiveOrganizationMemberUpdateRequest,
     ActiveOrganizationUpdateRequest,
+    CallerOrganizationMembershipsPublic,
     InviteOrganizationMemberRequest,
     InviteOrganizationMemberResultPublic,
+    OrganizationCreateRequest,
     OrganizationMembershipContextPublic,
+    OrganizationPublic,
+    SwitchActiveOrganizationRequest,
 )
 from gateway.services.tenancy import OrganizationService
 
@@ -66,6 +75,26 @@ def get_organization_service(db: Annotated[AsyncSession, Depends(get_db)]) -> Or
 OrganizationServiceDep = Annotated[OrganizationService, Depends(get_organization_service)]
 
 
+@router.post("", status_code=status.HTTP_201_CREATED)
+async def create_organization(
+    service: OrganizationServiceDep,
+    current_identity: CurrentIdentity,
+    body: OrganizationCreateRequest,
+) -> OrganizationPublic:
+    """Create an organization with the caller as its owner.
+
+    Takes a name; the slug is derived from it with a random suffix, so two
+    organizations may share a name and a later rename does not move the slug.
+    A default workspace is provisioned alongside, because an organization
+    without one has nowhere to hold a key, a budget or a usage row.
+
+    The caller is **not** moved into it. Switching is a separate call
+    (``POST /me/switch``), so creating an organization does not change what the
+    rest of the caller's session is looking at.
+    """
+    return await service.create_organization_for_user(user=current_identity, request=body)
+
+
 @router.get("/me")
 async def get_active_organization_context(
     service: OrganizationServiceDep,
@@ -85,6 +114,48 @@ async def update_active_organization(
     return await service.update_active_organization_for_user(
         user=current_identity,
         organization_name=body.name,
+    )
+
+
+@router.get("/me/memberships")
+async def list_caller_organization_memberships(
+    service: OrganizationServiceDep,
+    current_identity: CurrentIdentity,
+    skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
+    limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of records to return")] = 100,
+) -> CallerOrganizationMembershipsPublic:
+    """List the organizations the caller belongs to, and their role in each.
+
+    The caller's own active memberships, not a directory of the deployment's
+    organizations: this is what an organization switcher renders, and one row
+    carries ``is_active_organization`` so it can mark the current one. Not to be
+    confused with ``GET /me/members``, which is the active organization's
+    roster.
+    """
+    return await service.list_organization_memberships_for_user(
+        user=current_identity,
+        skip=skip,
+        limit=limit,
+    )
+
+
+@router.post("/me/switch")
+async def switch_active_organization(
+    service: OrganizationServiceDep,
+    current_identity: CurrentIdentity,
+    body: SwitchActiveOrganizationRequest,
+) -> OrganizationMembershipContextPublic:
+    """Point the caller's identity at another organization they belong to.
+
+    Distinct from ``PATCH /me``, which renames the organization already active.
+    This changes which organization every later request is scoped to, so
+    workspaces, keys, budgets and usage all follow it. Answers 404 for an
+    organization the caller holds no active membership in, whether or not it
+    exists.
+    """
+    return await service.switch_active_organization_for_user(
+        user=current_identity,
+        organization_id=body.organization_id,
     )
 
 

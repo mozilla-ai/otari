@@ -297,13 +297,14 @@ class User(UserBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, table=True
     # alone. Provisioning therefore creates the organization first.
     active_organization_id: uuid.UUID = Field(foreign_key="organization.id", index=True)
     # The organization provisioned for this identity, which never moves when the
-    # active one does. Nothing in this edition reads it: a standalone deployment
-    # has one organization and no way to switch, so the two always agree here.
-    # It is carried because the schema is edition-invariant, and the hosted
-    # edition anchors recurring offered credits to it precisely so they cannot
-    # be farmed by creating or switching organizations. A column the hosted
-    # edition needs has to live here or nowhere, and the overlay contributes
-    # adapters and routers, never tables.
+    # active one does. Nothing in this edition reads it, and it is written once,
+    # by ``create_local_identity``: switching (mozilla-ai/otari#715) moves
+    # ``active_organization_id`` and deliberately leaves this where it was,
+    # which is the whole point of there being two columns. The hosted edition
+    # anchors recurring offered credits to it precisely so they cannot be farmed
+    # by creating or switching organizations. A column the hosted edition needs
+    # has to live here or nowhere, and the overlay contributes adapters and
+    # routers, never tables.
     #
     # ``SET NULL`` rather than cascade, matching the platform: deleting the
     # organization it points at forfeits that anchor rather than re-homing it to
@@ -415,6 +416,55 @@ class OrganizationMembershipContextPublic(SQLModel):
 
 class ActiveOrganizationUpdateRequest(SQLModel):
     name: str = Field(min_length=1, max_length=255)
+
+
+class OrganizationCreateRequest(SQLModel):
+    """Create an organization, with the caller as its owner.
+
+    Name only. The slug is derived server-side and never sent, because it is
+    unique where the name is not: two organizations may share a name, and a
+    rename deliberately does not move the slug.
+    """
+
+    name: str = Field(min_length=1, max_length=255)
+
+
+class SwitchActiveOrganizationRequest(SQLModel):
+    """Point the caller's identity at one of the organizations they belong to.
+
+    The one request in this surface that names an organization by id, and it is
+    not a hole in the tenant boundary: an id the caller holds no active
+    membership in answers 404, so it says nothing about whether the
+    organization exists.
+    """
+
+    organization_id: uuid.UUID
+
+
+class CallerOrganizationMembershipPublic(SQLModel):
+    """One organization the caller belongs to, and their standing in it.
+
+    What an organization switcher renders. Deliberately not
+    ``OrganizationMembershipContextPublic``: that one answers "the organization
+    this request is acting in" and carries the caller's workspaces in it, which
+    for an organization they are not currently in would be a second read per
+    row.
+    """
+
+    organization_member_id: uuid.UUID
+    organization: OrganizationPublic
+    role: str
+    status: str
+    # Which row the switcher marks as current. Derived from the caller's
+    # ``active_organization_id`` rather than left to the client to work out,
+    # because the client would have to read the context to know it and the two
+    # answers could then disagree mid-switch.
+    is_active_organization: bool = False
+
+
+class CallerOrganizationMembershipsPublic(SQLModel):
+    data: list[CallerOrganizationMembershipPublic]
+    count: int
 
 
 class OrganizationMemberBase(SQLModel):
@@ -1052,6 +1102,9 @@ __all__ = [
     "ActiveOrganizationMemberUpdateRequest",
     "ActiveOrganizationMembersPublic",
     "ActiveOrganizationUpdateRequest",
+    "CallerOrganizationMembershipPublic",
+    "CallerOrganizationMembershipsPublic",
+    "CallerWorkspaceMembershipPublic",
     "Invitation",
     "InvitationCreate",
     "InvitationPreviewPublic",
@@ -1061,6 +1114,7 @@ __all__ = [
     "InviteOrganizationMemberResultPublic",
     "Organization",
     "OrganizationCreate",
+    "OrganizationCreateRequest",
     "OrganizationMember",
     "OrganizationMemberCreate",
     "OrganizationMemberPublic",
@@ -1072,6 +1126,7 @@ __all__ = [
     "OrganizationPublic",
     "OrganizationUpdate",
     "OrganizationsPublic",
+    "SwitchActiveOrganizationRequest",
     "User",
     "UserCreate",
     "ValidateInvitationRequest",
