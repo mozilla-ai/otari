@@ -82,6 +82,8 @@ class MessagesRequest(derive_request_base(MessagesParams)):  # type: ignore[misc
     """
 
     messages: list[dict[str, Any]] = Field(min_length=1)
+    # Compatibility field until any-llm's MessagesParams includes it.
+    container: str | None = None
     # any-llm types ``stream`` as ``bool | None``; keep the Anthropic wire
     # contract (a non-nullable boolean defaulting to false) for stable SDK
     # generation.

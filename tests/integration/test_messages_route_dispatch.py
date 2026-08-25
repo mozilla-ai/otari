@@ -143,6 +143,33 @@ def test_no_tools_falls_through_to_plain_amessages(
     assert "tools" not in captured
 
 
+def test_container_reaches_plain_amessages_unchanged(
+    client: TestClient,
+    api_key_header: dict[str, str],
+) -> None:
+    """Top-level container continuity reaches the upstream provider call unchanged."""
+    captured: dict[str, Any] = {}
+
+    async def fake_amessages(**kwargs: Any) -> MessageResponse:
+        captured.update(kwargs)
+        return _text_response()
+
+    with patch("gateway.api.routes.messages.amessages", new=fake_amessages):
+        resp = client.post(
+            "/v1/messages",
+            json={
+                "model": "anthropic:claude-sonnet-4-5",
+                "messages": [{"role": "user", "content": "Continue"}],
+                "max_tokens": 100,
+                "container": "container_01ABC",
+            },
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert captured["container"] == "container_01ABC"
+
+
 def test_cache_control_and_non_stream_usage_round_trip(
     client: TestClient,
     api_key_header: dict[str, str],

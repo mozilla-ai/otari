@@ -20,6 +20,9 @@ nothing to derive from or pin against. They stay hand-written and are listed in
 ``NO_TYPED_PARAMS_SOURCE`` for the record.
 """
 
+import json
+from pathlib import Path
+
 import pytest
 from any_llm.types.audio import AudioSpeechParams
 from any_llm.types.completion import CompletionParams
@@ -94,6 +97,30 @@ def test_renamed_params_are_exposed_under_the_wire_name(endpoint: str) -> None:
                 f"{request_model.__name__} should expose any-llm's '{internal_name}' as "
                 f"'{wire_name}', not leak the internal name"
             )
+
+
+def test_messages_request_preserves_container_for_upstream() -> None:
+    """The compatibility field survives validation and request serialization unchanged."""
+    request = MessagesRequest.model_validate(
+        {
+            "model": "anthropic:claude-sonnet-4-5",
+            "messages": [{"role": "user", "content": "Continue"}],
+            "max_tokens": 100,
+            "container": "container_01ABC",
+        }
+    )
+
+    assert request.container == "container_01ABC"
+    assert request.model_dump(exclude_unset=True)["container"] == "container_01ABC"
+
+
+def test_messages_openapi_request_schema_includes_container() -> None:
+    """The published Messages request contract advertises container continuity."""
+    spec_path = Path(__file__).resolve().parents[2] / "docs/public/openapi.json"
+    spec = json.loads(spec_path.read_text())
+
+    container = spec["components"]["schemas"]["MessagesRequest"]["properties"]["container"]
+    assert {variant.get("type") for variant in container["anyOf"]} == {"string", "null"}
 
 
 def test_derived_and_hand_written_endpoints_are_disjoint() -> None:

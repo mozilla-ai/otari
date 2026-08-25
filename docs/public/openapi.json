@@ -5103,6 +5103,17 @@
             ],
             "title": "Cache Control"
           },
+          "container": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Container"
+          },
           "context_management": {
             "anyOf": [
               {
