@@ -486,15 +486,22 @@ class KnnRoutingMemory:
     # -- trace memory ------------------------------------------------------
 
     def _trace_key(self, ctx: RoutingContext) -> str:
-        """Per-(user, task) trace identity for trace-sticky reuse.
+        """Per-(workspace, user, task) trace identity for trace-sticky reuse.
 
         The client-supplied conversation id when present, otherwise a hash of the
-        conversation's opening text. Both are namespaced by user and task, so one
-        conversation id never collides across users or across partitions.
+        conversation's opening text. Both are namespaced by workspace, user and
+        task, so one conversation id never collides across any of the three.
+
+        The workspace belongs here for the same reason it is on
+        :meth:`_load_records`, and is load-bearing rather than tidy: this cache is
+        consulted *before* any record loads, so without it a user sending one
+        conversation id in two workspaces would have workspace A's decision
+        replayed in workspace B, out of process memory, having never read
+        workspace B's examples at all.
         """
         explicit = ctx.trace_key.strip() if ctx.trace_key else ""
         anchor = explicit or ctx.trace_anchor
-        raw = f"{ctx.user_id}\x00{ctx.task_id or ''}\x00{anchor}"
+        raw = f"{ctx.workspace_id or ''}\x00{ctx.user_id}\x00{ctx.task_id or ''}\x00{anchor}"
         return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
     def _remember_trace(self, trace_key: str, model: str) -> None:

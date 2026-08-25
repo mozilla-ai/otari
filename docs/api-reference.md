@@ -254,7 +254,7 @@ into something a text-only local model can read.
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
 | `POST` | `/v1/batches` | Create an async batch of LLM requests. | API key or master key |
-| `GET` | `/v1/batches` | List batches. Query param: `provider`. | API key or master key |
+| `GET` | `/v1/batches` | List batches. Query param: `provider`. A non-master key sees only the batches it owns in its own workspace, plus legacy ones carrying no owner marker or no recorded workspace; the master key sees all of them. Ownership is filtered after the provider call, so a page can come back with fewer items than `limit`. | API key or master key |
 | `GET` | `/v1/batches/{batch_id}` | Get batch status. Query param: `provider`. | API key or master key |
 | `POST` | `/v1/batches/{batch_id}/cancel` | Cancel a batch. Query param: `provider`. | API key or master key |
 | `GET` | `/v1/batches/{batch_id}/results` | Get batch results. Returns 409 if not complete. Query param: `provider`. | API key or master key |

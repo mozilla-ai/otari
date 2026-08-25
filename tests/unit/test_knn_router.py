@@ -428,6 +428,42 @@ async def test_conversation_id_is_namespaced_per_user() -> None:
 
 
 @pytest.mark.asyncio
+async def test_conversation_id_is_namespaced_per_workspace() -> None:
+    """The same user, the same conversation id, two workspaces: no shared decision.
+
+    The trace cache is consulted before any record loads, so a key that omitted
+    the workspace would replay workspace A's pick in workspace B without ever
+    reading workspace B's examples. That is the cross-workspace leak the rest of
+    the scoping closes at the query, and this closes in process memory.
+    """
+    workspace_a = uuid.UUID("00000000-0000-4000-8000-00000000000a")
+    workspace_b = uuid.UUID("00000000-0000-4000-8000-00000000000b")
+    backend = _backend(router_alpha=0.3, router_granularity="trace_sticky")
+
+    _wire(backend, [_both_good(), _both_good()], prices=PRICES)
+    first = await backend.rank(_ctx(user_id="ada", workspace_id=workspace_a, trace_key="conv-1"))
+    assert first.ordered_models[0] == CHEAP
+
+    # Workspace B has no decision under its own namespace, so it routes fresh on
+    # its own neighbors (here cheap fails) rather than reusing A's.
+    _wire(backend, [_cheap_fails(), _cheap_fails()], prices=PRICES)
+    decision = await backend.rank(
+        _ctx(user_id="ada", workspace_id=workspace_b, trace_key="conv-1", is_trace_continuation=True)
+    )
+    assert decision.ordered_models[0] == STRONG
+    assert "trace-sticky" not in decision.rationale
+
+    # And workspace A still has its own, so the namespacing partitions rather
+    # than simply defeating stickiness.
+    _wire(backend, [_cheap_fails(), _cheap_fails()], prices=PRICES)
+    reused = await backend.rank(
+        _ctx(user_id="ada", workspace_id=workspace_a, trace_key="conv-1", is_trace_continuation=True)
+    )
+    assert reused.ordered_models[0] == CHEAP
+    assert "trace-sticky" in reused.rationale
+
+
+@pytest.mark.asyncio
 async def test_distinct_system_preamble_separates_traces_without_a_conversation_id() -> None:
     # Without a conversation id, the opener anchor includes the system turn, so two
     # conversations that share a first user message but differ in system preamble

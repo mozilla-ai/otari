@@ -289,9 +289,9 @@ def usable_candidates(
     which matches on the canonical ``instance:model``.
 
     ``workspace_id`` is passed for the same reason the compiler takes one: a
-    candidate selector can itself name an alias, and resolving it in a different
-    workspace than dispatch will would filter the pool against a canonical key
-    the request never sees.
+    candidate selector can itself name an alias, so resolving it in a workspace
+    other than the one dispatch uses would filter the pool against a canonical
+    key the request never sees.
 
     Public because ``explain`` needs the same pool: a weighted policy's shares are
     normalized over what survived filtering, so computing them from the declared
