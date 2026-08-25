@@ -34,6 +34,7 @@ from __future__ import annotations
 
 import asyncio
 import contextlib
+import re
 import time
 import uuid
 from collections.abc import AsyncIterator, Awaitable, Callable, Coroutine
@@ -291,6 +292,37 @@ def _is_unsupported_feature_error(exc: BaseException) -> bool:
     return any(isinstance(candidate, NotImplementedError) for candidate in upstream_exception_chain(exc))
 
 
+_UNEXPECTED_KWARG = re.compile(r"unexpected keyword argument '([^']+)'")
+
+
+def provider_rejected_param_detail(param: str) -> str:
+    """Detail for a request param the provider serving this model cannot express."""
+    return f"The provider serving this model does not accept the '{param}' parameter"
+
+
+def _rejected_param(exc: BaseException) -> str | None:
+    """The request param a provider SDK refused as an unknown keyword, if any.
+
+    any-llm hands a provider's SDK the params its ``*Params`` model declares, so
+    a param that model carries but the SDK's method does not take arrives as
+    ``TypeError: ...create() got an unexpected keyword argument 'x'``. That is
+    every OpenAI-only chat param against a provider that never grew one
+    (``seed``, ``n``, the penalties, the logprobs family, against Anthropic).
+
+    It carries no HTTP status, so it would otherwise fall through to the generic
+    502 and report a permanent, caller-fixable mismatch between a model and a
+    param as an upstream outage. Only the param name is returned: the SDK's
+    method name is an internal detail and never reaches the client (see
+    ``test_error_detail_leakage``).
+    """
+    for candidate in upstream_exception_chain(exc):
+        if isinstance(candidate, TypeError):
+            match = _UNEXPECTED_KWARG.search(str(candidate))
+            if match:
+                return match.group(1)
+    return None
+
+
 def _caller_fault_detail(exc: BaseException, fallback: str) -> str:
     """The detail for a rejection that is the caller's request to fix.
 
@@ -348,6 +380,13 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
     # names the unsupported feature.
     if _is_unsupported_feature_error(exc):
         return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, _caller_fault_detail(exc, PROVIDER_BAD_REQUEST_DETAIL))
+    # The same shape one layer down: a param any-llm forwards that the resolved
+    # provider's SDK has no parameter for. Also permanent, also the caller's to
+    # fix (by dropping the param or routing to a provider that has it), and the
+    # response names it, since a caller cannot otherwise tell which param the
+    # provider objected to.
+    if (param := _rejected_param(exc)) is not None:
+        return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, provider_rejected_param_detail(param))
     if status_code is None:
         return None
     # Account billing exhaustion, which several providers report as a 400/422
