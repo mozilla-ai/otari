@@ -83,6 +83,17 @@ function renderSwitcher() {
 
 afterEach(() => {
   vi.restoreAllMocks()
+  // The selected workspace is remembered per browser, so without this one
+  // test's choice seeds the next: the dismissal case below would find the
+  // switcher already on the workspace the case above it created, and pass for
+  // the wrong reason (or fail, depending which ran first). Guarded rather than
+  // called plainly because `window.localStorage` is undefined under some Node
+  // versions the suite is run on, where there is nothing to clear anyway.
+  try {
+    window.localStorage.clear()
+  } catch {
+    // No storage to leak between tests.
+  }
 })
 
 // Open the switcher, open the create form from it, and name the workspace. The
