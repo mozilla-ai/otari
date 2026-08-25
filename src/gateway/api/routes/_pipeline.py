@@ -218,6 +218,7 @@ MCP_SERVER_URL_UNSAFE_DETAIL = "A configured MCP server's URL failed its safety 
 MCP_SERVER_NAME_COLLIDES_WITH_STORED_DETAIL = (
     "A request-supplied MCP server name collides with one of this workspace's stored servers"
 )
+MCP_SERVER_NAMES_NOT_UNIQUE_DETAIL = "Configured MCP servers do not have unique names"
 NO_RESOLVABLE_PROVIDER_DETAIL = "Authorization service returned no resolvable provider"
 PROVIDER_ERROR_DETAIL = "LLM provider error"
 PROVIDER_TIMEOUT_DETAIL = "LLM provider timeout"
@@ -2235,31 +2236,46 @@ async def prepare_gateway_tools(
 
         # Checked per source, not over the merged list: see
         # `_validate_mcp_server_urls` for why a stored server's rejection cannot
-        # carry the same body a caller's own does. The duplicate-name check below
-        # follows the same split. Inline-vs-inline is the caller's own request, so
-        # the 400 names the duplicate. Inline-vs-stored gets a fixed detail instead:
-        # echoing the name there would let any key holder learn a stored server's
-        # name by guessing it inline and reading the error, the same existence
-        # oracle `_validate_mcp_server_urls` withholds for a stored host.
+        # carry the same body a caller's own does. `MCPClientPool` keys sessions by
+        # `name`, so a duplicate silently collapses two servers into one and
+        # misroutes tool calls (otari#591); each source refuses one the way it
+        # refuses an unsafe URL.
         inline_names: set[str] = set()
         if mcp_servers:
-            await _validate_mcp_server_urls(adapter, mcp_servers)
-            # MCPClientPool keys sessions by `name`; a duplicate silently collapses two
-            # servers into one and misroutes tool calls (otari#591). Reject it here.
+            # Before the URL check, which spends a DNS lookup per server: a repeat
+            # inside the caller's own list is knowable without any of them.
             for server in mcp_servers:
                 if server.name in inline_names:
                     raise adapter.error(400, duplicate_mcp_server_name_detail(server.name), ErrorKind.INVALID_REQUEST)
                 inline_names.add(server.name)
+            await _validate_mcp_server_urls(adapter, mcp_servers)
         if mcp_server_ids:
             stored_servers = await _resolve_mcp_server_ids(adapter, ctx, mcp_server_ids)
             await _validate_mcp_server_urls(
                 adapter, stored_servers, stored=True, workspace_id=ctx.workspace_id
             )
-            # Stored names are already unique within a workspace
-            # (uq_workspace_mcp_servers_workspace_name) and mcp_server_ids is
-            # de-duplicated by resolve_workspace_mcp_servers, so the only
-            # remaining collision to check is inline vs. stored.
-            if inline_names & {server.name for server in stored_servers}:
+            stored_names = [server.name for server in stored_servers]
+            # Standalone cannot reach this: `uq_workspace_mcp_servers_workspace_name`
+            # makes stored names unique per workspace and `resolve_workspace_mcp_servers`
+            # de-duplicates the ids. Hybrid can, because `_resolve_platform_mcp_servers`
+            # returns the platform's payload verbatim, so that uniqueness is a remote
+            # promise rather than a local invariant. It answers the way an unsafe stored
+            # URL does, since a stored duplicate is workspace configuration the caller
+            # can neither see nor fix: a fixed 500 detail, with the names and the
+            # workspace in the log.
+            if len(set(stored_names)) != len(stored_names):
+                logger.error(
+                    "Stored MCP servers do not have unique names for workspace %s: %s",
+                    ctx.workspace_id,
+                    sorted({name for name in stored_names if stored_names.count(name) > 1}),
+                )
+                raise adapter.error(500, MCP_SERVER_NAMES_NOT_UNIQUE_DETAIL, ErrorKind.API)
+            # Fixed detail rather than the name: a stored name is not the caller's to
+            # read (`routes/workspace_mcp_servers` gates even the read behind the master
+            # key), so the rejection does not repeat one back. It does not pretend to
+            # close the oracle: the probe name is caller-supplied, so a caller holding a
+            # stored id still learns a name by guessing it here and reading the 400.
+            if inline_names & set(stored_names):
                 raise adapter.error(400, MCP_SERVER_NAME_COLLIDES_WITH_STORED_DETAIL, ErrorKind.INVALID_REQUEST)
             mcp_servers = (mcp_servers or []) + stored_servers
 

@@ -1180,6 +1180,68 @@ async def test_duplicate_mcp_server_name_against_a_stored_server_releases_reserv
 
 
 @pytest.mark.asyncio
+async def test_an_inline_duplicate_is_refused_before_the_url_safety_check(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The name check runs first, so a doomed request does not spend a DNS lookup per server."""
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+    monkeypatch.delenv("OTARI_MCP_ALLOW_PRIVATE_HOSTS", raising=False)
+
+    ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation(), workspace_id=uuid.uuid4())
+    # Loopback: both URLs would fail `validate_mcp_url`, so the detail says which
+    # of the two gates answered.
+    dupes = [
+        McpServerConfig(name="tools", url="https://127.0.0.1/mcp"),
+        McpServerConfig(name="tools", url="https://127.0.0.1/other"),
+    ]
+    with pytest.raises(HTTPException) as exc_info:
+        await _call_prepare_gateway_tools(ctx, mcp_servers=dupes)
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == pipeline.duplicate_mcp_server_name_detail("tools")
+    assert settlement.refunded == 1
+
+
+@pytest.mark.asyncio
+async def test_stored_mcp_servers_sharing_a_name_are_an_operator_error(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Two *stored* servers sharing a name is broken workspace config, not a bad request.
+
+    Unreachable in standalone (`uq_workspace_mcp_servers_workspace_name`, plus
+    `resolve_workspace_mcp_servers` de-duplicates the ids), so the resolve is
+    stubbed to produce what hybrid can: `_resolve_platform_mcp_servers` returns
+    the platform's payload verbatim, and that uniqueness is the platform's
+    promise rather than a local invariant (otari#792 review).
+    """
+    settlement = _Settlement()
+    settlement.install(monkeypatch)
+
+    async def stored(*args: Any, **kwargs: Any) -> list[McpServerConfig]:
+        return [
+            McpServerConfig(name="tools", url="https://93.184.216.34/mcp"),
+            McpServerConfig(name="tools", url="https://93.184.216.35/mcp"),
+        ]
+
+    monkeypatch.setattr(pipeline, "resolve_workspace_mcp_servers", stored)
+
+    ctx = _ctx(GatewayConfig(), db=cast(Any, object()), reservation=_reservation(), workspace_id=uuid.uuid4())
+    with pytest.raises(HTTPException) as exc_info:
+        await _call_prepare_gateway_tools(
+            ctx,
+            mcp_server_ids=[cast(Any, "11111111-1111-1111-1111-111111111111")],
+        )
+
+    assert exc_info.value.status_code == 500
+    # The caller can neither see nor fix a stored server, so the name stays in
+    # the log, as it does for a stored URL that fails its safety check.
+    assert exc_info.value.detail == pipeline.MCP_SERVER_NAMES_NOT_UNIQUE_DETAIL
+    assert "tools" not in str(exc_info.value.detail)
+    assert settlement.refunded == 1
+
+
+@pytest.mark.asyncio
 async def test_a_database_failure_releases_the_reservation(monkeypatch: pytest.MonkeyPatch) -> None:
     """A `SQLAlchemyError` is not an `HTTPException`, and must still not leave the hold behind.
 
