@@ -65,42 +65,18 @@ const MENU_ROW_DISABLED = "cursor-not-allowed text-muted opacity-60"
 const MENU_ICON_CLASS = `${NAV_ICON_CLASS} text-muted`
 const MENU_DIVIDER = "h-px shrink-0 bg-border"
 
-// Whose session this is. A standalone gateway issues one, for the operator
-// identity it provisioned itself, and no management route reports the caller's
-// own name or address, so the credential it was minted from is the most this
-// can honestly say. The design's identity block shows a name over an email;
-// there is no email to read here, so the second line names that credential
-// instead of inventing an address.
-//
-// Which credential that is comes from the bootstrap, and the bootstrap answers
-// a question about the deployment rather than about this caller: `master_key`
-// is published exactly while the operator identity holds no password
-// (otari#702). On a claimed deployment that settles it, since the master key is
-// no longer accepted at all and every session is a password one. On an
-// unclaimed one it does not: the session is almost certainly the operator's,
-// but a member who signed up and signed in by calling `POST /v1/auth/session`
-// directly holds one too, and naming a credential here would name theirs
-// wrongly. So the unclaimed case reports the deployment's state, which is the
-// part this actually knows, and the operator reads it as the standing
-// invitation to claim that it is.
-function sessionIdentity(
-  sessionType: string,
-  signInMethods: readonly string[],
-): {
+// Whose session this is, as the trigger at the foot of the rail names it. A
+// standalone gateway issues one, for the operator identity it provisioned
+// itself, and no management route reports the caller's own name or address, so
+// this is the most it can honestly say.
+function sessionIdentity(sessionType: string): {
   name: string
   initials: string
-  detail: string
 } {
   if (sessionType === "local_operator") {
-    return {
-      name: "Operator",
-      initials: "OP",
-      detail: signInMethods.includes("master_key")
-        ? "Unclaimed deployment"
-        : "Password sign-in",
-    }
+    return { name: "Operator", initials: "OP" }
   }
-  return { name: "Signed in", initials: "··", detail: "This gateway" }
+  return { name: "Signed in", initials: "··" }
 }
 
 function MenuItem({
@@ -247,9 +223,9 @@ function AppearanceControl() {
 
 export function AccountMenu({ collapsed }: { collapsed: boolean }) {
   const { logout } = useAuth()
-  const { session_type, sign_in_methods, management_url } = useDeployment()
+  const { session_type, management_url } = useDeployment()
   const [open, setOpen] = useState(false)
-  const identity = sessionIdentity(session_type, sign_in_methods)
+  const identity = sessionIdentity(session_type)
 
   return (
     <Popover isOpen={open} onOpenChange={setOpen}>
@@ -326,22 +302,6 @@ export function AccountMenu({ collapsed }: { collapsed: boolean }) {
             isDisabled
           />
           <div className={MENU_DIVIDER} />
-          {/* Who you are, at the foot of the menu rather than in the trigger:
-              the rail has room for one line, and this is where the design puts
-              the second. */}
-          <div className="flex items-center gap-2.5 px-2.5 py-2">
-            <span className="flex h-[1.875rem] w-[1.875rem] shrink-0 items-center justify-center rounded-full bg-surface-alt text-xs leading-[0.875rem] font-semibold text-muted">
-              {identity.initials}
-            </span>
-            <span className="flex min-w-0 flex-1 flex-col gap-0.5 text-left">
-              <span className="truncate text-chrome-row font-semibold text-foreground">
-                {identity.name}
-              </span>
-              <span className="truncate text-chrome-meta text-muted">
-                {identity.detail}
-              </span>
-            </span>
-          </div>
           {/* Neutral, not danger-colored. Ending a session is reversible by
               signing in again, so red here spends the color that marks the
               deletes on the pages behind this menu. */}
