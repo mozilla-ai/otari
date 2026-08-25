@@ -279,7 +279,10 @@ def test_delete_user_leaves_the_user_active_when_telemetry_erasure_fails(
     """
     client.post("/v1/users", json={"user_id": "erase-fail-user"}, headers=master_key_header)
 
-    async def _boom(*, user_id: str) -> int:
+    # Takes the instance: patched onto the class, this is called as a bound
+    # method, so a keyword-only signature would fail on argument binding and
+    # the test would pass on a TypeError instead of a store failure.
+    async def _boom(_self: DatabaseTelemetryStorageAdapter, *, user_id: str) -> int:
         raise RuntimeError("telemetry store unreachable")
 
     with patch.object(DatabaseTelemetryStorageAdapter, "purge_user", _boom):
