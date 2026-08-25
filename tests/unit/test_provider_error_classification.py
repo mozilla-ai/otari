@@ -324,6 +324,50 @@ def test_unsupported_feature_is_recorded_as_400_on_the_usage_log() -> None:
     assert failure_status_code(NotImplementedError(_CONTEXT_MANAGEMENT_MSG)) == 400
 
 
+def test_rejected_param_maps_to_400_naming_the_param() -> None:
+    """#1062: any-llm forwards every param its ``CompletionParams`` declares, so
+    an OpenAI-only param against a provider that never grew one reaches the SDK
+    and comes back as a TypeError with no HTTP status. It used to read as a
+    generic 502, which reports a permanent mismatch as an upstream outage."""
+    exc = TypeError("AsyncMessages.create() got an unexpected keyword argument 'seed'")
+    mapping = classify_provider_error(exc)
+    assert mapping is not None
+    assert mapping.status_code == 400
+    assert "'seed'" in mapping.detail
+
+
+def test_rejected_param_detail_does_not_name_the_sdk_internals() -> None:
+    """Only the param name crosses the boundary: the SDK's class and method are
+    the gateway's implementation, not something a caller can act on."""
+    exc = TypeError("AsyncMessages.create() got an unexpected keyword argument 'logit_bias'")
+    mapping = classify_provider_error(exc)
+    assert mapping is not None
+    assert "AsyncMessages" not in mapping.detail
+    assert "create()" not in mapping.detail
+
+
+def test_rejected_param_survives_the_unified_exception_wrapper() -> None:
+    """Same unwrapping the other permanent-failure branches get, so the mapping
+    keeps working once ANY_LLM_UNIFIED_EXCEPTIONS=1 wraps the raw SDK error."""
+    wrapped = _WrappedError(500, TypeError("create() got an unexpected keyword argument 'n'"))
+    mapping = classify_provider_error(wrapped)
+    assert mapping is not None
+    assert mapping.status_code == 400
+    assert "'n'" in mapping.detail
+
+
+def test_rejected_param_is_recorded_as_400_on_the_usage_log() -> None:
+    """The usage-log status follows the classification rather than the generic 502."""
+    assert failure_status_code(TypeError("create() got an unexpected keyword argument 'seed'")) == 400
+
+
+def test_unrelated_type_error_stays_unclassified() -> None:
+    """A TypeError that is not a keyword-argument rejection carries no signal a
+    caller could act on, so it keeps the generic 502 rather than becoming a 400
+    that blames the caller for a gateway-side fault."""
+    assert classify_provider_error(TypeError("unsupported operand type(s) for +: 'int' and 'str'")) is None
+
+
 def test_redaction_keeps_the_part_that_explains_the_rejection() -> None:
     """Redaction targets secret shapes, not meaning: the text that tells the
     caller what to change has to survive."""
