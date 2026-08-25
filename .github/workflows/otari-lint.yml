@@ -5,6 +5,7 @@ on:
     branches: [ main, develop ]
     paths:
       - 'src/gateway/**'
+      - 'alembic/**'
       - 'tests/**'
       - 'scripts/**'
       - 'pyproject.toml'
@@ -14,6 +15,7 @@ on:
     branches: [ main ]
     paths:
       - 'src/gateway/**'
+      - 'alembic/**'
       - 'tests/**'
       - 'scripts/**'
       - 'pyproject.toml'
