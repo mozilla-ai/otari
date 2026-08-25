@@ -1098,8 +1098,21 @@
                 "type": "null"
               }
             ],
-            "description": "User this alias belongs to. Omit for a global alias every caller sees. A user-scoped alias resolves only for that user and shadows a global one of the same name.",
+            "description": "User this alias belongs to. Omit for an alias every caller in the workspace sees. A user-scoped alias resolves only for that user and shadows the workspace-wide one of the same name.",
             "title": "User Id"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Workspace this alias belongs to. Omit for the deployment's default workspace. The alias resolves only for requests in that workspace, so two workspaces can each point the same name at a different model.",
+            "title": "Workspace Id"
           }
         },
         "required": [
@@ -1156,6 +1169,18 @@
               }
             ],
             "title": "User Id"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id"
           }
         },
         "required": [
@@ -3397,6 +3422,19 @@
             ],
             "description": "Evaluate conditions as this user.",
             "title": "User Id"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Resolve `name` and the policy's candidate selectors in this workspace. Omit for the deployment's default workspace.",
+            "title": "Workspace Id"
           }
         },
         "title": "ExplainRequest",
@@ -6523,8 +6561,21 @@
                 "type": "null"
               }
             ],
-            "description": "User this policy belongs to. Omit for a global policy every caller sees. A user-scoped policy resolves only for that user and shadows a global one of the same name.",
+            "description": "User this policy belongs to. Omit for a policy every caller in the workspace sees. A user-scoped policy resolves only for that user and shadows the workspace-wide one of the same name.",
             "title": "User Id"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Workspace this policy belongs to. Omit for the deployment's default workspace. The policy resolves only for requests in that workspace, so two workspaces can each define their own 'fast'.",
+            "title": "Workspace Id"
           }
         },
         "required": [
@@ -6587,6 +6638,18 @@
               }
             ],
             "title": "User Id"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Workspace Id"
           }
         },
         "required": [
@@ -7125,6 +7188,19 @@
             "description": "Whose routing memory these examples belong to.",
             "title": "User Id",
             "type": "string"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Which workspace's routing memory these examples belong to. Omit for the deployment's default workspace. Only requests billing to that workspace vote over them.",
+            "title": "Workspace Id"
           }
         },
         "required": [
@@ -7865,7 +7941,7 @@
         "type": "object"
       },
       "RouterStatus": {
-        "description": "How warm this user's routing memory is, and what depends on it.\n\nRouting memory has no single warmth: it is a set of independent pools.\n``default_pool`` is what a request with no ``Otari-Router-Task`` header votes\nover (every record the user has, labeled or not) and ``tasks`` lists each\npartition, which only requests carrying that label use. Each crosses\n``seed_count`` on its own.",
+        "description": "How warm this user's routing memory is, and what depends on it.\n\nRouting memory has no single warmth: it is a set of independent pools.\n``default_pool`` is what a request with no ``Otari-Router-Task`` header votes\nover (every record the user has in this workspace, labeled or not) and\n``tasks`` lists each partition, which only requests carrying that label use.\nEach crosses ``seed_count`` on its own.",
         "properties": {
           "alpha": {
             "title": "Alpha",
@@ -7911,10 +7987,16 @@
           "user_id": {
             "title": "User Id",
             "type": "string"
+          },
+          "workspace_id": {
+            "format": "uuid",
+            "title": "Workspace Id",
+            "type": "string"
           }
         },
         "required": [
           "user_id",
+          "workspace_id",
           "embedding_model",
           "seed_count",
           "granularity",
@@ -13477,11 +13559,11 @@
     },
     "/v1/aliases": {
       "get": {
-        "description": "List every alias in force, from config.yml and from storage.\n\nEvery scope at once, global and user-scoped alike: this is the master-key\nmanagement view, not what any one caller resolves.",
+        "description": "List every alias in force, from config.yml and from storage.\n\nEvery scope at once, workspace-wide and user-scoped alike: this is the\nmaster-key management view, not what any one caller resolves.",
         "operationId": "list_aliases_v1_aliases_get",
         "parameters": [
           {
-            "description": "Only stored entries in this workspace. Config-file entries are always included. Every stored entry is in the deployment's default workspace today, because name uniqueness and the resolution cache are both deployment-wide, so this narrows to one workspace and finds the rest empty until those are scoped (otari-ai#1643).",
+            "description": "Only stored entries in this workspace. Config-file entries are always included, being deployment-wide. Omit to list the stored entries of every workspace.",
             "in": "query",
             "name": "workspace_id",
             "required": false,
@@ -13495,7 +13577,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Only stored entries in this workspace. Config-file entries are always included. Every stored entry is in the deployment's default workspace today, because name uniqueness and the resolution cache are both deployment-wide, so this narrows to one workspace and finds the rest empty until those are scoped (otari-ai#1643).",
+              "description": "Only stored entries in this workspace. Config-file entries are always included, being deployment-wide. Omit to list the stored entries of every workspace.",
               "title": "Workspace Id"
             }
           }
@@ -13540,7 +13622,7 @@
         ]
       },
       "post": {
-        "description": "Create or update a stored alias, global or scoped to one user.",
+        "description": "Create or update a stored alias in one workspace, optionally for one user.",
         "operationId": "set_alias_v1_aliases_post",
         "requestBody": {
           "content": {
@@ -13590,7 +13672,7 @@
     },
     "/v1/aliases/{name}": {
       "delete": {
-        "description": "Delete a stored alias in one scope.\n\nScoped by ``user_id`` for the same reason the upsert is: deleting the global\nalias must not take a user's override with it, and deleting an override must\nleave the global one serving everyone else.",
+        "description": "Delete a stored alias in one scope.\n\nScoped by ``workspace_id`` and ``user_id`` for the same reason the upsert is:\ndeleting one workspace's alias must not touch another's, deleting the\nworkspace-wide alias must not take a user's override with it, and deleting an\noverride must leave the workspace-wide one serving everyone else.",
         "operationId": "delete_alias_v1_aliases__name__delete",
         "parameters": [
           {
@@ -13603,7 +13685,7 @@
             }
           },
           {
-            "description": "Delete the alias scoped to this user. Omit to delete the global alias of that name.",
+            "description": "Delete the alias scoped to this user. Omit to delete the workspace-wide alias of that name.",
             "in": "query",
             "name": "user_id",
             "required": false,
@@ -13616,8 +13698,27 @@
                   "type": "null"
                 }
               ],
-              "description": "Delete the alias scoped to this user. Omit to delete the global alias of that name.",
+              "description": "Delete the alias scoped to this user. Omit to delete the workspace-wide alias of that name.",
               "title": "User Id"
+            }
+          },
+          {
+            "description": "Delete the alias in this workspace. Omit for the deployment's default workspace.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Delete the alias in this workspace. Omit for the deployment's default workspace.",
+              "title": "Workspace Id"
             }
           }
         ],
@@ -14473,7 +14574,7 @@
     },
     "/v1/batches": {
       "get": {
-        "description": "List batches for a provider.\n\nNon-master keys only see batches they own (plus legacy batches without an\nownership marker); the page is filtered after the provider call, so a page\nmay contain fewer than ``limit`` items.",
+        "description": "List batches for a provider.\n\nNon-master keys only see batches they own in their own workspace (plus\nlegacy batches without an ownership marker, or without a recorded\nworkspace); the page is filtered after the provider call, so a page may\ncontain fewer than ``limit`` items.",
         "operationId": "list_batches_v1_batches_get",
         "parameters": [
           {
@@ -15245,7 +15346,7 @@
     },
     "/v1/files": {
       "get": {
-        "description": "List the authenticated user's uploaded files.",
+        "description": "List the authenticated user's uploaded files in the request's workspace.\n\n``workspace_id`` narrows a master-key listing to one workspace; a keyed\nrequest is already confined to its key's own and cannot widen or move it.",
         "operationId": "list_files_v1_files_get",
         "parameters": [
           {
@@ -15278,6 +15379,23 @@
                 }
               ],
               "title": "Purpose"
+            }
+          },
+          {
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "title": "Workspace Id"
             }
           }
         ],
@@ -18845,11 +18963,11 @@
     },
     "/v1/routing/policies": {
       "get": {
-        "description": "List every routing policy in force, from config.yml and from storage.\n\nEvery scope at once, global and user-scoped alike: this is the master-key\nmanagement view, not what any one caller resolves.",
+        "description": "List every routing policy in force, from config.yml and from storage.\n\nEvery scope at once, workspace-wide and user-scoped alike: this is the\nmaster-key management view, not what any one caller resolves.",
         "operationId": "list_policies_v1_routing_policies_get",
         "parameters": [
           {
-            "description": "Only stored policies in this workspace. Config-file policies are always included. Every stored policy is in the deployment's default workspace today, because name uniqueness and the resolution cache are both deployment-wide, so this narrows to one workspace and finds the rest empty until those are scoped (otari-ai#1643).",
+            "description": "Only stored policies in this workspace. Config-file policies are always included, being deployment-wide. Omit to list the stored policies of every workspace.",
             "in": "query",
             "name": "workspace_id",
             "required": false,
@@ -18863,7 +18981,7 @@
                   "type": "null"
                 }
               ],
-              "description": "Only stored policies in this workspace. Config-file policies are always included. Every stored policy is in the deployment's default workspace today, because name uniqueness and the resolution cache are both deployment-wide, so this narrows to one workspace and finds the rest empty until those are scoped (otari-ai#1643).",
+              "description": "Only stored policies in this workspace. Config-file policies are always included, being deployment-wide. Omit to list the stored policies of every workspace.",
               "title": "Workspace Id"
             }
           }
@@ -18908,7 +19026,7 @@
         ]
       },
       "post": {
-        "description": "Create or update a stored policy, global or scoped to one user.\n\nThe spec is validated here and stored as given, so a row can never contain a\nbody this build would refuse at load. The cache is refreshed twice: once before\nvalidating (so the shadowing checks see other writers' policies) and once after\ncommitting (so this worker serves the new policy immediately).\n\n``rename_from`` renames the row instead of keying on ``name``. It is part of\nthis write rather than an endpoint of its own so that an edit which both renames\na policy and re-targets it cannot land half-applied, leaving the old name serving\nthe new spec. The new name is validated exactly as a fresh one is, because a\nrename can walk a policy into every collision a create can. Sending the field\nasserts the named policy is stored, so it never falls back to creating one.",
+        "description": "Create or update a stored policy in one workspace, optionally for one user.\n\nThe spec is validated here and stored as given, so a row can never contain a\nbody this build would refuse at load. The cache is refreshed twice: once before\nvalidating (so the shadowing checks see other writers' policies) and once after\ncommitting (so this worker serves the new policy immediately).\n\n``rename_from`` renames the row instead of keying on ``name``. It is part of\nthis write rather than an endpoint of its own so that an edit which both renames\na policy and re-targets it cannot land half-applied, leaving the old name serving\nthe new spec. The new name is validated exactly as a fresh one is, because a\nrename can walk a policy into every collision a create can. Sending the field\nasserts the named policy is stored, so it never falls back to creating one.",
         "operationId": "set_policy_v1_routing_policies_post",
         "requestBody": {
           "content": {
@@ -19008,7 +19126,7 @@
     },
     "/v1/routing/policies/{name}": {
       "delete": {
-        "description": "Delete a stored policy in one scope.\n\nScoped by ``user_id`` for the same reason the upsert is: deleting the global\npolicy must not take a user's override with it, and deleting an override must\nleave the global one serving everyone else.",
+        "description": "Delete a stored policy in one scope.\n\nScoped by ``workspace_id`` and ``user_id`` for the same reason the upsert is:\ndeleting one workspace's policy must not touch another's, deleting the\nworkspace-wide policy must not take a user's override with it, and deleting an\noverride must leave the workspace-wide one serving everyone else.",
         "operationId": "delete_policy_v1_routing_policies__name__delete",
         "parameters": [
           {
@@ -19021,7 +19139,7 @@
             }
           },
           {
-            "description": "Delete the policy scoped to this user. Omit to delete the global one.",
+            "description": "Delete the policy scoped to this user. Omit to delete the workspace-wide one.",
             "in": "query",
             "name": "user_id",
             "required": false,
@@ -19034,8 +19152,27 @@
                   "type": "null"
                 }
               ],
-              "description": "Delete the policy scoped to this user. Omit to delete the global one.",
+              "description": "Delete the policy scoped to this user. Omit to delete the workspace-wide one.",
               "title": "User Id"
+            }
+          },
+          {
+            "description": "Delete the policy in this workspace. Omit for the deployment's default workspace.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Delete the policy in this workspace. Omit for the deployment's default workspace.",
+              "title": "Workspace Id"
             }
           }
         ],
@@ -19120,7 +19257,7 @@
     },
     "/v1/routing/status": {
       "get": {
-        "description": "Report how warm one user's routing memory is, per pool.\n\n``user_id`` is required rather than optional because there is no aggregate\nanswer: warmth is per user, and a total across users would describe a pool\nthat no request ever votes over.",
+        "description": "Report how warm one user's routing memory is in one workspace, per pool.\n\n``user_id`` is required rather than optional because there is no aggregate\nanswer: warmth is per user, and a total across users would describe a pool\nthat no request ever votes over. The same holds across workspaces, which is\nwhy ``workspace_id`` narrows rather than aggregating; it merely defaults\ninstead of being required, because a single-workspace deployment has one\nanswer.",
         "operationId": "routing_memory_status_v1_routing_status_get",
         "parameters": [
           {
@@ -19132,6 +19269,25 @@
               "description": "Whose routing memory to report on.",
               "title": "User Id",
               "type": "string"
+            }
+          },
+          {
+            "description": "Which workspace's routing memory to report on. Omit for the default workspace.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Which workspace's routing memory to report on. Omit for the default workspace.",
+              "title": "Workspace Id"
             }
           }
         ],

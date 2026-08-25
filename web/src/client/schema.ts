@@ -213,14 +213,14 @@ export interface paths {
          * List Aliases
          * @description List every alias in force, from config.yml and from storage.
          *
-         *     Every scope at once, global and user-scoped alike: this is the master-key
-         *     management view, not what any one caller resolves.
+         *     Every scope at once, workspace-wide and user-scoped alike: this is the
+         *     master-key management view, not what any one caller resolves.
          */
         get: operations["list_aliases_v1_aliases_get"];
         put?: never;
         /**
          * Set Alias
-         * @description Create or update a stored alias, global or scoped to one user.
+         * @description Create or update a stored alias in one workspace, optionally for one user.
          */
         post: operations["set_alias_v1_aliases_post"];
         delete?: never;
@@ -243,9 +243,10 @@ export interface paths {
          * Delete Alias
          * @description Delete a stored alias in one scope.
          *
-         *     Scoped by ``user_id`` for the same reason the upsert is: deleting the global
-         *     alias must not take a user's override with it, and deleting an override must
-         *     leave the global one serving everyone else.
+         *     Scoped by ``workspace_id`` and ``user_id`` for the same reason the upsert is:
+         *     deleting one workspace's alias must not touch another's, deleting the
+         *     workspace-wide alias must not take a user's override with it, and deleting an
+         *     override must leave the workspace-wide one serving everyone else.
          */
         delete: operations["delete_alias_v1_aliases__name__delete"];
         options?: never;
@@ -735,9 +736,10 @@ export interface paths {
          * List Batches
          * @description List batches for a provider.
          *
-         *     Non-master keys only see batches they own (plus legacy batches without an
-         *     ownership marker); the page is filtered after the provider call, so a page
-         *     may contain fewer than ``limit`` items.
+         *     Non-master keys only see batches they own in their own workspace (plus
+         *     legacy batches without an ownership marker, or without a recorded
+         *     workspace); the page is filtered after the provider call, so a page may
+         *     contain fewer than ``limit`` items.
          */
         get: operations["list_batches_v1_batches_get"];
         put?: never;
@@ -987,7 +989,10 @@ export interface paths {
         };
         /**
          * List Files
-         * @description List the authenticated user's uploaded files.
+         * @description List the authenticated user's uploaded files in the request's workspace.
+         *
+         *     ``workspace_id`` narrows a master-key listing to one workspace; a keyed
+         *     request is already confined to its key's own and cannot widen or move it.
          */
         get: operations["list_files_v1_files_get"];
         put?: never;
@@ -2327,14 +2332,14 @@ export interface paths {
          * List Policies
          * @description List every routing policy in force, from config.yml and from storage.
          *
-         *     Every scope at once, global and user-scoped alike: this is the master-key
-         *     management view, not what any one caller resolves.
+         *     Every scope at once, workspace-wide and user-scoped alike: this is the
+         *     master-key management view, not what any one caller resolves.
          */
         get: operations["list_policies_v1_routing_policies_get"];
         put?: never;
         /**
          * Set Policy
-         * @description Create or update a stored policy, global or scoped to one user.
+         * @description Create or update a stored policy in one workspace, optionally for one user.
          *
          *     The spec is validated here and stored as given, so a row can never contain a
          *     body this build would refuse at load. The cache is refreshed twice: once before
@@ -2398,9 +2403,10 @@ export interface paths {
          * Delete Policy
          * @description Delete a stored policy in one scope.
          *
-         *     Scoped by ``user_id`` for the same reason the upsert is: deleting the global
-         *     policy must not take a user's override with it, and deleting an override must
-         *     leave the global one serving everyone else.
+         *     Scoped by ``workspace_id`` and ``user_id`` for the same reason the upsert is:
+         *     deleting one workspace's policy must not touch another's, deleting the
+         *     workspace-wide policy must not take a user's override with it, and deleting an
+         *     override must leave the workspace-wide one serving everyone else.
          */
         delete: operations["delete_policy_v1_routing_policies__name__delete"];
         options?: never;
@@ -2451,11 +2457,14 @@ export interface paths {
         };
         /**
          * Routing Memory Status
-         * @description Report how warm one user's routing memory is, per pool.
+         * @description Report how warm one user's routing memory is in one workspace, per pool.
          *
          *     ``user_id`` is required rather than optional because there is no aggregate
          *     answer: warmth is per user, and a total across users would describe a pool
-         *     that no request ever votes over.
+         *     that no request ever votes over. The same holds across workspaces, which is
+         *     why ``workspace_id`` narrows rather than aggregating; it merely defaults
+         *     instead of being required, because a single-workspace deployment has one
+         *     answer.
          */
         get: operations["routing_memory_status_v1_routing_status_get"];
         put?: never;
@@ -4249,9 +4258,14 @@ export interface components {
             target: string;
             /**
              * User Id
-             * @description User this alias belongs to. Omit for a global alias every caller sees. A user-scoped alias resolves only for that user and shadows a global one of the same name.
+             * @description User this alias belongs to. Omit for an alias every caller in the workspace sees. A user-scoped alias resolves only for that user and shadows the workspace-wide one of the same name.
              */
             user_id?: string | null;
+            /**
+             * Workspace Id
+             * @description Workspace this alias belongs to. Omit for the deployment's default workspace. The alias resolves only for requests in that workspace, so two workspaces can each point the same name at a different model.
+             */
+            workspace_id?: string | null;
         };
         /**
          * AliasResponse
@@ -4270,6 +4284,8 @@ export interface components {
             updated_at?: string | null;
             /** User Id */
             user_id?: string | null;
+            /** Workspace Id */
+            workspace_id?: string | null;
         };
         /**
          * AudioSpeechRequest
@@ -5240,6 +5256,11 @@ export interface components {
              * @description Evaluate conditions as this user.
              */
             user_id?: string | null;
+            /**
+             * Workspace Id
+             * @description Resolve `name` and the policy's candidate selectors in this workspace. Omit for the deployment's default workspace.
+             */
+            workspace_id?: string | null;
         };
         /**
          * ExplainResponse
@@ -6756,9 +6777,14 @@ export interface components {
             };
             /**
              * User Id
-             * @description User this policy belongs to. Omit for a global policy every caller sees. A user-scoped policy resolves only for that user and shadows a global one of the same name.
+             * @description User this policy belongs to. Omit for a policy every caller in the workspace sees. A user-scoped policy resolves only for that user and shadows the workspace-wide one of the same name.
              */
             user_id?: string | null;
+            /**
+             * Workspace Id
+             * @description Workspace this policy belongs to. Omit for the deployment's default workspace. The policy resolves only for requests in that workspace, so two workspaces can each define their own 'fast'.
+             */
+            workspace_id?: string | null;
         };
         /**
          * PolicyResponse
@@ -6784,6 +6810,8 @@ export interface components {
             updated_at?: string | null;
             /** User Id */
             user_id?: string | null;
+            /** Workspace Id */
+            workspace_id?: string | null;
         };
         /** PoolStatus */
         PoolStatus: {
@@ -7036,6 +7064,11 @@ export interface components {
              * @description Whose routing memory these examples belong to.
              */
             user_id: string;
+            /**
+             * Workspace Id
+             * @description Which workspace's routing memory these examples belong to. Omit for the deployment's default workspace. Only requests billing to that workspace vote over them.
+             */
+            workspace_id?: string | null;
         };
         /** RankResponse */
         RankResponse: {
@@ -7318,9 +7351,9 @@ export interface components {
          *
          *     Routing memory has no single warmth: it is a set of independent pools.
          *     ``default_pool`` is what a request with no ``Otari-Router-Task`` header votes
-         *     over (every record the user has, labeled or not) and ``tasks`` lists each
-         *     partition, which only requests carrying that label use. Each crosses
-         *     ``seed_count`` on its own.
+         *     over (every record the user has in this workspace, labeled or not) and
+         *     ``tasks`` lists each partition, which only requests carrying that label use.
+         *     Each crosses ``seed_count`` on its own.
          */
         RouterStatus: {
             /** Alpha */
@@ -7342,6 +7375,11 @@ export interface components {
             tasks: components["schemas"]["TaskPool"][];
             /** User Id */
             user_id: string;
+            /**
+             * Workspace Id
+             * Format: uuid
+             */
+            workspace_id: string;
         };
         /**
          * ScopedBudgetResponse
@@ -9531,7 +9569,7 @@ export interface operations {
     list_aliases_v1_aliases_get: {
         parameters: {
             query?: {
-                /** @description Only stored entries in this workspace. Config-file entries are always included. Every stored entry is in the deployment's default workspace today, because name uniqueness and the resolution cache are both deployment-wide, so this narrows to one workspace and finds the rest empty until those are scoped (otari-ai#1643). */
+                /** @description Only stored entries in this workspace. Config-file entries are always included, being deployment-wide. Omit to list the stored entries of every workspace. */
                 workspace_id?: string | null;
             };
             header?: never;
@@ -9596,8 +9634,10 @@ export interface operations {
     delete_alias_v1_aliases__name__delete: {
         parameters: {
             query?: {
-                /** @description Delete the alias scoped to this user. Omit to delete the global alias of that name. */
+                /** @description Delete the alias scoped to this user. Omit to delete the workspace-wide alias of that name. */
                 user_id?: string | null;
+                /** @description Delete the alias in this workspace. Omit for the deployment's default workspace. */
+                workspace_id?: string | null;
             };
             header?: never;
             path: {
@@ -10666,6 +10706,7 @@ export interface operations {
             query?: {
                 user?: string | null;
                 purpose?: string | null;
+                workspace_id?: string | null;
             };
             header?: never;
             path?: never;
@@ -12815,7 +12856,7 @@ export interface operations {
     list_policies_v1_routing_policies_get: {
         parameters: {
             query?: {
-                /** @description Only stored policies in this workspace. Config-file policies are always included. Every stored policy is in the deployment's default workspace today, because name uniqueness and the resolution cache are both deployment-wide, so this narrows to one workspace and finds the rest empty until those are scoped (otari-ai#1643). */
+                /** @description Only stored policies in this workspace. Config-file policies are always included, being deployment-wide. Omit to list the stored policies of every workspace. */
                 workspace_id?: string | null;
             };
             header?: never;
@@ -12913,8 +12954,10 @@ export interface operations {
     delete_policy_v1_routing_policies__name__delete: {
         parameters: {
             query?: {
-                /** @description Delete the policy scoped to this user. Omit to delete the global one. */
+                /** @description Delete the policy scoped to this user. Omit to delete the workspace-wide one. */
                 user_id?: string | null;
+                /** @description Delete the policy in this workspace. Omit for the deployment's default workspace. */
+                workspace_id?: string | null;
             };
             header?: never;
             path: {
@@ -12980,6 +13023,8 @@ export interface operations {
             query: {
                 /** @description Whose routing memory to report on. */
                 user_id: string;
+                /** @description Which workspace's routing memory to report on. Omit for the default workspace. */
+                workspace_id?: string | null;
             };
             header?: never;
             path?: never;

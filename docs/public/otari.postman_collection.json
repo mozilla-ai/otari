@@ -272,7 +272,7 @@
         {
           "name": "List Aliases",
           "request": {
-            "description": "List every alias in force, from config.yml and from storage.\n\nEvery scope at once, global and user-scoped alike: this is the master-key\nmanagement view, not what any one caller resolves.",
+            "description": "List every alias in force, from config.yml and from storage.\n\nEvery scope at once, workspace-wide and user-scoped alike: this is the\nmaster-key management view, not what any one caller resolves.",
             "header": [],
             "method": "GET",
             "url": {
@@ -285,7 +285,7 @@
               ],
               "query": [
                 {
-                  "description": "Only stored entries in this workspace. Config-file entries are always included. Every stored entry is in the deployment's default workspace today, because name uniqueness and the resolution cache are both deployment-wide, so this narrows to one workspace and finds the rest empty until those are scoped (otari-ai#1643).",
+                  "description": "Only stored entries in this workspace. Config-file entries are always included, being deployment-wide. Omit to list the stored entries of every workspace.",
                   "disabled": true,
                   "key": "workspace_id",
                   "value": ""
@@ -307,7 +307,7 @@
               },
               "raw": "{\n  \"name\": \"string\",\n  \"target\": \"string\"\n}"
             },
-            "description": "Create or update a stored alias, global or scoped to one user.",
+            "description": "Create or update a stored alias in one workspace, optionally for one user.",
             "header": [
               {
                 "key": "Content-Type",
@@ -330,7 +330,7 @@
         {
           "name": "Delete Alias",
           "request": {
-            "description": "Delete a stored alias in one scope.\n\nScoped by ``user_id`` for the same reason the upsert is: deleting the global\nalias must not take a user's override with it, and deleting an override must\nleave the global one serving everyone else.",
+            "description": "Delete a stored alias in one scope.\n\nScoped by ``workspace_id`` and ``user_id`` for the same reason the upsert is:\ndeleting one workspace's alias must not touch another's, deleting the\nworkspace-wide alias must not take a user's override with it, and deleting an\noverride must leave the workspace-wide one serving everyone else.",
             "header": [],
             "method": "DELETE",
             "url": {
@@ -344,13 +344,19 @@
               ],
               "query": [
                 {
-                  "description": "Delete the alias scoped to this user. Omit to delete the global alias of that name.",
+                  "description": "Delete the alias scoped to this user. Omit to delete the workspace-wide alias of that name.",
                   "disabled": true,
                   "key": "user_id",
                   "value": ""
+                },
+                {
+                  "description": "Delete the alias in this workspace. Omit for the deployment's default workspace.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/aliases/:name?user_id=",
+              "raw": "{{baseUrl}}/v1/aliases/:name?user_id=&workspace_id=",
               "variable": [
                 {
                   "description": "path parameter",
@@ -954,7 +960,7 @@
         {
           "name": "List Batches",
           "request": {
-            "description": "List batches for a provider.\n\nNon-master keys only see batches they own (plus legacy batches without an\nownership marker); the page is filtered after the provider call, so a page\nmay contain fewer than ``limit`` items.",
+            "description": "List batches for a provider.\n\nNon-master keys only see batches they own in their own workspace (plus\nlegacy batches without an ownership marker, or without a recorded\nworkspace); the page is filtered after the provider call, so a page may\ncontain fewer than ``limit`` items.",
             "header": [],
             "method": "GET",
             "url": {
@@ -1433,7 +1439,7 @@
         {
           "name": "List Files",
           "request": {
-            "description": "List the authenticated user's uploaded files.",
+            "description": "List the authenticated user's uploaded files in the request's workspace.\n\n``workspace_id`` narrows a master-key listing to one workspace; a keyed\nrequest is already confined to its key's own and cannot widen or move it.",
             "header": [],
             "method": "GET",
             "url": {
@@ -1456,9 +1462,15 @@
                   "disabled": true,
                   "key": "purpose",
                   "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/files?user=&purpose="
+              "raw": "{{baseUrl}}/v1/files?user=&purpose=&workspace_id="
             }
           }
         },
@@ -3867,7 +3879,7 @@
         {
           "name": "List Policies",
           "request": {
-            "description": "List every routing policy in force, from config.yml and from storage.\n\nEvery scope at once, global and user-scoped alike: this is the master-key\nmanagement view, not what any one caller resolves.",
+            "description": "List every routing policy in force, from config.yml and from storage.\n\nEvery scope at once, workspace-wide and user-scoped alike: this is the\nmaster-key management view, not what any one caller resolves.",
             "header": [],
             "method": "GET",
             "url": {
@@ -3881,7 +3893,7 @@
               ],
               "query": [
                 {
-                  "description": "Only stored policies in this workspace. Config-file policies are always included. Every stored policy is in the deployment's default workspace today, because name uniqueness and the resolution cache are both deployment-wide, so this narrows to one workspace and finds the rest empty until those are scoped (otari-ai#1643).",
+                  "description": "Only stored policies in this workspace. Config-file policies are always included, being deployment-wide. Omit to list the stored policies of every workspace.",
                   "disabled": true,
                   "key": "workspace_id",
                   "value": ""
@@ -3903,7 +3915,7 @@
               },
               "raw": "{\n  \"name\": \"string\",\n  \"spec\": {}\n}"
             },
-            "description": "Create or update a stored policy, global or scoped to one user.\n\nThe spec is validated here and stored as given, so a row can never contain a\nbody this build would refuse at load. The cache is refreshed twice: once before\nvalidating (so the shadowing checks see other writers' policies) and once after\ncommitting (so this worker serves the new policy immediately).\n\n``rename_from`` renames the row instead of keying on ``name``. It is part of\nthis write rather than an endpoint of its own so that an edit which both renames\na policy and re-targets it cannot land half-applied, leaving the old name serving\nthe new spec. The new name is validated exactly as a fresh one is, because a\nrename can walk a policy into every collision a create can. Sending the field\nasserts the named policy is stored, so it never falls back to creating one.",
+            "description": "Create or update a stored policy in one workspace, optionally for one user.\n\nThe spec is validated here and stored as given, so a row can never contain a\nbody this build would refuse at load. The cache is refreshed twice: once before\nvalidating (so the shadowing checks see other writers' policies) and once after\ncommitting (so this worker serves the new policy immediately).\n\n``rename_from`` renames the row instead of keying on ``name``. It is part of\nthis write rather than an endpoint of its own so that an edit which both renames\na policy and re-targets it cannot land half-applied, leaving the old name serving\nthe new spec. The new name is validated exactly as a fresh one is, because a\nrename can walk a policy into every collision a create can. Sending the field\nasserts the named policy is stored, so it never falls back to creating one.",
             "header": [
               {
                 "key": "Content-Type",
@@ -3934,7 +3946,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"budget_remaining_usd\": 0,\n  \"budget_used_pct\": 0,\n  \"key_id\": \"string\",\n  \"name\": \"string\",\n  \"spec\": {},\n  \"user_id\": \"string\"\n}"
+              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"budget_remaining_usd\": 0,\n  \"budget_used_pct\": 0,\n  \"key_id\": \"string\",\n  \"name\": \"string\",\n  \"spec\": {},\n  \"user_id\": \"string\",\n  \"workspace_id\": \"00000000-0000-0000-0000-000000000000\"\n}"
             },
             "description": "Compile a policy and return the plan, without dispatching anything.\n\nMaster-key gated, and deliberately so: the response enumerates the policy's\ntargets, which is exactly the information a policy exists to keep off the wire.\nIt is a management surface, not a caller-facing one.\n\nAccepts an unsaved ``spec`` as well as a saved ``name``, so a form can validate\nwhat the operator is about to save. The response includes dropped candidates\nwith reasons, which is the part that catches a \"failover\" policy that has\nquietly compiled down to a single attempt.",
             "header": [
@@ -3961,7 +3973,7 @@
         {
           "name": "Delete Policy",
           "request": {
-            "description": "Delete a stored policy in one scope.\n\nScoped by ``user_id`` for the same reason the upsert is: deleting the global\npolicy must not take a user's override with it, and deleting an override must\nleave the global one serving everyone else.",
+            "description": "Delete a stored policy in one scope.\n\nScoped by ``workspace_id`` and ``user_id`` for the same reason the upsert is:\ndeleting one workspace's policy must not touch another's, deleting the\nworkspace-wide policy must not take a user's override with it, and deleting an\noverride must leave the workspace-wide one serving everyone else.",
             "header": [],
             "method": "DELETE",
             "url": {
@@ -3976,13 +3988,19 @@
               ],
               "query": [
                 {
-                  "description": "Delete the policy scoped to this user. Omit to delete the global one.",
+                  "description": "Delete the policy scoped to this user. Omit to delete the workspace-wide one.",
                   "disabled": true,
                   "key": "user_id",
                   "value": ""
+                },
+                {
+                  "description": "Delete the policy in this workspace. Omit for the deployment's default workspace.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/routing/policies/:name?user_id=",
+              "raw": "{{baseUrl}}/v1/routing/policies/:name?user_id=&workspace_id=",
               "variable": [
                 {
                   "description": "path parameter",
@@ -4030,7 +4048,7 @@
         {
           "name": "Routing Memory Status",
           "request": {
-            "description": "Report how warm one user's routing memory is, per pool.\n\n``user_id`` is required rather than optional because there is no aggregate\nanswer: warmth is per user, and a total across users would describe a pool\nthat no request ever votes over.",
+            "description": "Report how warm one user's routing memory is in one workspace, per pool.\n\n``user_id`` is required rather than optional because there is no aggregate\nanswer: warmth is per user, and a total across users would describe a pool\nthat no request ever votes over. The same holds across workspaces, which is\nwhy ``workspace_id`` narrows rather than aggregating; it merely defaults\ninstead of being required, because a single-workspace deployment has one\nanswer.",
             "header": [],
             "method": "GET",
             "url": {
@@ -4048,9 +4066,15 @@
                   "disabled": false,
                   "key": "user_id",
                   "value": ""
+                },
+                {
+                  "description": "Which workspace's routing memory to report on. Omit for the default workspace.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/routing/status?user_id="
+              "raw": "{{baseUrl}}/v1/routing/status?user_id=&workspace_id="
             }
           }
         }

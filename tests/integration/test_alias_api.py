@@ -144,11 +144,16 @@ def test_create_and_list(client: TestClient) -> None:
         "target": "anthropic:claude-haiku-4",
         "source": "stored",
         "user_id": None,
+        # A write that named no workspace landed in the deployment's default one.
+        "workspace_id": by_name["fast"]["workspace_id"],
         "created_at": by_name["fast"]["created_at"],
         "updated_at": by_name["fast"]["updated_at"],
     }
+    assert by_name["fast"]["workspace_id"] is not None
     assert by_name["configalias"]["source"] == "config"
     assert by_name["configalias"]["target"] == "anthropic:claude-opus-4"
+    # A config.yml alias is deployment-wide, so it belongs to no workspace.
+    assert by_name["configalias"]["workspace_id"] is None
 
 
 def test_create_is_idempotent_and_retargets(client: TestClient) -> None:
