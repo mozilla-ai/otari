@@ -70,9 +70,9 @@ def reserved_source_reason(value: str) -> str | None:
     """
     lowered = value.lower()
     if lowered in RESERVED_SOURCES:
-        return "source 'gateway' is reserved for usage Otari served itself; pick another slug."
+        return f"source '{lowered}' is reserved for usage Otari served itself; pick another slug."
     for prefix in RESERVED_SOURCE_PREFIXES:
-        if lowered.startswith(prefix):
+        if lowered.startswith(prefix.lower()):
             return (
                 f"source prefix '{prefix}' is reserved for provenance tags otari.ai writes itself; "
                 "pick another slug."
