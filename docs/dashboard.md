@@ -240,7 +240,10 @@ At the very bottom sits the account control, which holds **Account settings**
 system, light, and dark, the hosted legal pages where there are any, and **Log
 out**. The bundled user guide is
 **Documentation**, in the top bar; on a narrow screen, where the top bar has room
-for the trail and nothing else, the account control carries it instead.
+for the trail and nothing else, the account control carries it instead. A
+deployment that has set `docs_url` points both of those at its own documentation
+site instead, and this guide stays served at `/#/docs`; see
+[Documentation links](configuration.md#documentation-links).
 
 The groups below match the current dashboard, rail by rail.
 
