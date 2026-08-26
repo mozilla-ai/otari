@@ -46,17 +46,22 @@ management API is not tenant-scoped. Any valid dashboard session authenticates
 a master-key-gated route: `POST /v1/auth/session` issues the cookie, and
 `verify_master_key` accepts that cookie from whoever holds it, checking only
 that the session is unexpired and its identity active. So on a deployment with
-several organizations, any signed-in member can read and write
+several organizations, any signed-in member can read and write `/v1/keys`,
 `/v1/provider-credentials`, `/v1/settings` (master-key rotation included),
 `/v1/pricing`, `/v1/routing` and `/v1/maintenance-mode`, whichever organization
-they belong to. Only `/v1/admin` adds a second gate.
+they belong to. Only `/v1/admin` adds a second gate. `/v1/keys` is the sharpest
+of them: the mint validates its `workspace_id` for existence and not for
+ownership, so a member of one organization can put a key in another's
+workspace, billed to that organization.
 
 That is fine for the single-tenant deployment this base build is written for,
 and it is why hosted mode changes the surface set and nothing else. Do not read
-it as isolation between tenants: a deployment that needs that supplies the
-enforcement itself, through an overlay (see [ARCHITECTURE.md](../ARCHITECTURE.md)),
-and until it does, treat everyone who can sign in to a hosted deployment as an
-operator of the whole thing.
+it as isolation between tenants. Closing the gap is tracked in
+[mozilla-ai/otari-ai#1880](https://github.com/mozilla-ai/otari-ai/issues/1880),
+which scopes the fix to this repository: gating the deployment-wide routers on
+the caller's real authority, and scoping every `/v1/keys` load and the mint's
+`workspace_id` to the caller's organization. Until that lands, treat everyone
+who can sign in to a hosted deployment as an operator of the whole thing.
 
 ## Connected to otari.ai (Hybrid Mode)
 
