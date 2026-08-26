@@ -162,9 +162,10 @@ tool, `isolation: "worktree"`), each executing the cycle above.
   `git rebase origin/main` and `git push --force-with-lease` rather than merging `main` in: the
   PR diff and CI stay about your change.
 - **Poll for reviews centrally**, not inside each agent, since an agent idling on a review burns
-  its run for nothing. Poll for both bots (see [Requesting reviewers](#requesting-reviewers)). Once a wave's PRs are open, poll until each has a review, then route the
-  fixes back to the original agents with `SendMessage` (their worktree and context are intact)
-  rather than starting fresh ones.
+  its run for nothing, and poll for **both** bots (see
+  [Requesting reviewers](#requesting-reviewers)). Once a wave's PRs are open, poll until each has
+  a review, then route the fixes back to the original agents with `SendMessage` (their worktree
+  and context are intact) rather than starting fresh ones.
 - **Resource note.** Each agent running the integration suite boots its own Testcontainers
   Postgres. Stagger them rather than sharing one `TEST_DATABASE_URL`: two suites running at once
   against one server pick the same worker database names and drop each other's database out from
