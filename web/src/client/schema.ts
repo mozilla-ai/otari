@@ -86,6 +86,88 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/admin/access": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Get Administration Access
+         * @description Report whether the caller may use the deployment administration surface.
+         *
+         *     The one endpoint here that answers 200 for everybody. The rest refuse a
+         *     non-operator with 404 so they do not confirm they exist, which leaves a
+         *     dashboard nothing to gate its navigation on but a failed request; this says
+         *     the same thing without one. It publishes only the caller's own standing,
+         *     which they could establish by trying an endpoint anyway.
+         */
+        get: operations["get_administration_access_v1_admin_access_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/users": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Deployment Users
+         * @description List every account on this deployment, with the organizations each belongs to.
+         *
+         *     Deployment-wide, so it is not the same list as ``GET /v1/organizations/me/members``:
+         *     that one is the caller's organization roster and drops a suspended
+         *     membership, while this one carries every identity at whatever standing,
+         *     including one whose memberships are all suspended. Each row also reports when
+         *     the account last signed in to the dashboard, and null there means never.
+         */
+        get: operations["list_deployment_users_v1_admin_users_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/admin/users/{user_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        /**
+         * Update Deployment User
+         * @description Deactivate or reactivate an account, or change whether it may administer this deployment.
+         *
+         *     Both fields are optional and omitting one leaves it alone; a body naming
+         *     neither is refused rather than treated as a no-op. Deactivating also ends
+         *     that account's dashboard sessions immediately, so a lost laptop stops
+         *     working now rather than when its cookie is next presented.
+         *
+         *     Two changes are refused to keep a deployment reachable: an operator may not
+         *     deactivate their own account or drop their own operator access, and neither
+         *     may be taken from the deployment's bootstrap operator, which is the identity
+         *     master-key sign-in resolves to. Granting either is unguarded.
+         */
+        patch: operations["update_deployment_user_v1_admin_users__user_id__patch"];
+        trace?: never;
+    };
     "/v1/agent-telemetry": {
         parameters: {
             query?: never;
@@ -4559,10 +4641,12 @@ export interface components {
          *     (see ``_schema_derive``) so the schema cannot silently drop a param any-llm
          *     forwards. Fields below either tighten a derived field (``messages``,
          *     ``response_format``), declare an OpenAI wire param ``CompletionParams`` does
-         *     not model (``service_tier``, forwarded as an any-llm ``**kwargs`` param), or
-         *     add gateway-internal behavior (``mcp_servers``, ``mcp_server_ids``,
+         *     not model (``service_tier``, forwarded as an any-llm ``**kwargs`` param), add
+         *     gateway-internal behavior (``mcp_servers``, ``mcp_server_ids``,
          *     ``guardrails``, ``tools_header``, ``max_tool_iterations``) that is stripped
-         *     before the request is forwarded upstream.
+         *     before the request is forwarded upstream, or restate a derived field
+         *     unchanged to document it (``max_completion_tokens``), which is only worth
+         *     doing where the wire contract is not guessable from the field itself.
          */
         ChatCompletionRequest: {
             /** Frequency Penalty */
@@ -4575,7 +4659,10 @@ export interface components {
             } | null;
             /** Logprobs */
             logprobs?: boolean | null;
-            /** Max Completion Tokens */
+            /**
+             * Max Completion Tokens
+             * @description Upper bound on generated tokens. OpenAI's current name for the cap `max_tokens` used to carry; either field is accepted, and this one wins when a request sends both.
+             */
             max_completion_tokens?: number | null;
             /** Max Tokens */
             max_tokens?: number | null;
@@ -5065,6 +5152,20 @@ export interface components {
             user_id: string;
         };
         /**
+         * DeploymentAdminAccessPublic
+         * @description Whether the caller may reach the deployment administration surface.
+         *
+         *     The one endpoint in that surface that answers 200 for everybody, and
+         *     deliberately: the rest refuse with 404 so they do not confirm they exist,
+         *     which leaves the dashboard nothing to gate its navigation on but a failed
+         *     request. This says the same thing a caller could learn by trying, without
+         *     the try.
+         */
+        DeploymentAdminAccessPublic: {
+            /** Granted */
+            granted: boolean;
+        };
+        /**
          * DeploymentBootstrap
          * @description What the dashboard shell needs before it can render anything.
          */
@@ -5121,6 +5222,92 @@ export interface components {
              * @description Management API groups this deployment serves, sorted, which is what its dashboard pages gate on. Named surfaces, not capabilities: capability is otari.ai's word for the entitlement (licensing) axis, and this is the deployment (topology) axis. Empty for a hybrid gateway.
              */
             surfaces: string[];
+        };
+        /**
+         * DeploymentUserOrganizationPublic
+         * @description One organization an identity belongs to, as the operator surface lists it.
+         */
+        DeploymentUserOrganizationPublic: {
+            /** Name */
+            name: string;
+            /**
+             * Organization Id
+             * Format: uuid
+             */
+            organization_id: string;
+            /** Role */
+            role: string;
+            /** Slug */
+            slug: string;
+            /** Status */
+            status: string;
+        };
+        /**
+         * DeploymentUserPublic
+         * @description An identity on this deployment, whatever organization it belongs to.
+         *
+         *     Not ``ActiveOrganizationMemberPublic``: that shape is a *membership* joined
+         *     to an identity, scoped to one organization and hiding the suspended rows.
+         *     This one is the identity itself, and its ``organizations`` list carries every
+         *     membership at whatever status, because an account whose only membership is
+         *     suspended is precisely what an operator comes here to find.
+         *
+         *     ``is_bootstrap_operator`` and ``is_self`` are the two rows an operator may
+         *     not deactivate or demote, and they travel on the row so the page can disable
+         *     those controls rather than offering ones the server refuses. Neither is an
+         *     authorization: the server refuses either way. ``is_self`` is answered here
+         *     because nothing else the dashboard fetches names the caller's identity, so
+         *     without it the page could not tell which row is the reader's own.
+         */
+        DeploymentUserPublic: {
+            /**
+             * Created At
+             * Format: date-time
+             */
+            created_at: string;
+            /** Email */
+            email: string | null;
+            /** Full Name */
+            full_name: string | null;
+            /**
+             * Id
+             * Format: uuid
+             */
+            id: string;
+            /** Is Active */
+            is_active: boolean;
+            /** Is Bootstrap Operator */
+            is_bootstrap_operator: boolean;
+            /** Is Self */
+            is_self: boolean;
+            /** Is Superuser */
+            is_superuser: boolean;
+            /** Last Sign In At */
+            last_sign_in_at: string | null;
+            /** Organizations */
+            organizations: components["schemas"]["DeploymentUserOrganizationPublic"][];
+        };
+        /**
+         * DeploymentUserUpdateRequest
+         * @description The two flags the operator surface may flip, each optional.
+         *
+         *     Omitting a field leaves it alone, so deactivating an account and changing
+         *     what it may administer stay separate decisions even though one endpoint
+         *     carries both. A body that sets neither is refused rather than treated as a
+         *     no-op: it is a request that meant something and lost it.
+         */
+        DeploymentUserUpdateRequest: {
+            /** Is Active */
+            is_active?: boolean | null;
+            /** Is Superuser */
+            is_superuser?: boolean | null;
+        };
+        /** DeploymentUsersPublic */
+        DeploymentUsersPublic: {
+            /** Count */
+            count: number;
+            /** Data */
+            data: components["schemas"]["DeploymentUserPublic"][];
         };
         /**
          * DiscoverableModel
@@ -9403,6 +9590,95 @@ export interface operations {
                     "application/json": {
                         [key: string]: unknown;
                     };
+                };
+            };
+        };
+    };
+    get_administration_access_v1_admin_access_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeploymentAdminAccessPublic"];
+                };
+            };
+        };
+    };
+    list_deployment_users_v1_admin_users_get: {
+        parameters: {
+            query?: {
+                /** @description Number of records to skip */
+                skip?: number;
+                /** @description Maximum number of records to return */
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeploymentUsersPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_deployment_user_v1_admin_users__user_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                user_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["DeploymentUserUpdateRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["DeploymentUserPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

@@ -76,6 +76,104 @@
     {
       "item": [
         {
+          "name": "Get Administration Access",
+          "request": {
+            "description": "Report whether the caller may use the deployment administration surface.\n\nThe one endpoint here that answers 200 for everybody. The rest refuse a\nnon-operator with 404 so they do not confirm they exist, which leaves a\ndashboard nothing to gate its navigation on but a failed request; this says\nthe same thing without one. It publishes only the caller's own standing,\nwhich they could establish by trying an endpoint anyway.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "access"
+              ],
+              "raw": "{{baseUrl}}/v1/admin/access"
+            }
+          }
+        },
+        {
+          "name": "List Deployment Users",
+          "request": {
+            "description": "List every account on this deployment, with the organizations each belongs to.\n\nDeployment-wide, so it is not the same list as ``GET /v1/organizations/me/members``:\nthat one is the caller's organization roster and drops a suspended\nmembership, while this one carries every identity at whatever standing,\nincluding one whose memberships are all suspended. Each row also reports when\nthe account last signed in to the dashboard, and null there means never.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "users"
+              ],
+              "query": [
+                {
+                  "description": "Number of records to skip",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "Maximum number of records to return",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/admin/users?skip=&limit="
+            }
+          }
+        },
+        {
+          "name": "Update Deployment User",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"is_active\": false\n}"
+            },
+            "description": "Deactivate or reactivate an account, or change whether it may administer this deployment.\n\nBoth fields are optional and omitting one leaves it alone; a body naming\nneither is refused rather than treated as a no-op. Deactivating also ends\nthat account's dashboard sessions immediately, so a lost laptop stops\nworking now rather than when its cookie is next presented.\n\nTwo changes are refused to keep a deployment reachable: an operator may not\ndeactivate their own account or drop their own operator access, and neither\nmay be taken from the deployment's bootstrap operator, which is the identity\nmaster-key sign-in resolves to. Granting either is unguarded.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "admin",
+                "users",
+                ":user_id"
+              ],
+              "raw": "{{baseUrl}}/v1/admin/users/:user_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "user_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "admin"
+    },
+    {
+      "item": [
+        {
           "name": "Delete Agent Telemetry Rows",
           "request": {
             "description": "Delete agent_telemetry rows by explicit ids or by filter (standalone).\n\nTarget either an explicit selection (`ids`) or everything matching a filter\n(`by_filter: true` plus optional `user_id` / `api_key_id` / `name` / date\nrange). A selection matching zero rows succeeds with `deleted: 0`.\nMaster-key only.",

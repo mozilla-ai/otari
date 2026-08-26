@@ -20,6 +20,7 @@ from any_llm.exceptions import InvalidRequestError, UnsupportedParameterError
 from openai import APITimeoutError as OpenAIAPITimeoutError
 
 from gateway.api.routes._pipeline import (
+    _FORWARDED_PARAMS,
     PROVIDER_BAD_REQUEST_DETAIL,
     PROVIDER_BILLING_DETAIL,
     PROVIDER_CREDENTIALS_DETAIL,
@@ -35,6 +36,7 @@ from gateway.api.routes._platform import (
     _provider_failure_http_exc,
     redact_upstream_message,
 )
+from gateway.api.routes._schema_derive import SENSITIVE_PARAM_FIELDS
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
 
 _RAW = "raw provider detail SECRET token=abc123"
@@ -404,6 +406,104 @@ def test_anthropic_nonstreaming_timeout_guard_via_the_real_any_llm_wrapper() -> 
     assert mapping is not None
     assert mapping.status_code == 400
     assert mapping.detail == PROVIDER_NONSTREAMING_MAX_TOKENS_DETAIL
+
+
+def test_rejected_param_maps_to_400_naming_the_param() -> None:
+    """#1062: any-llm forwards every param its ``CompletionParams`` declares, so
+    an OpenAI-only param against a provider that never grew one reaches the SDK
+    and comes back as a TypeError with no HTTP status. It used to read as a
+    generic 502, which reports a permanent mismatch as an upstream outage."""
+    exc = TypeError("AsyncMessages.create() got an unexpected keyword argument 'seed'")
+    mapping = classify_provider_error(exc)
+    assert mapping is not None
+    assert mapping.status_code == 400
+    assert "'seed'" in mapping.detail
+
+
+def test_rejected_param_detail_does_not_name_the_sdk_internals() -> None:
+    """Only the param name crosses the boundary: the SDK's class and method are
+    the gateway's implementation, not something a caller can act on."""
+    exc = TypeError("AsyncMessages.create() got an unexpected keyword argument 'logit_bias'")
+    mapping = classify_provider_error(exc)
+    assert mapping is not None
+    assert "AsyncMessages" not in mapping.detail
+    assert "create()" not in mapping.detail
+
+
+def test_rejected_param_survives_the_unified_exception_wrapper() -> None:
+    """Same unwrapping the other permanent-failure branches get, so the mapping
+    keeps working once ANY_LLM_UNIFIED_EXCEPTIONS=1 wraps the raw SDK error."""
+    wrapped = _WrappedError(500, TypeError("create() got an unexpected keyword argument 'n'"))
+    mapping = classify_provider_error(wrapped)
+    assert mapping is not None
+    assert mapping.status_code == 400
+    assert "'n'" in mapping.detail
+
+
+def test_rejected_param_is_recorded_as_400_on_the_usage_log() -> None:
+    """The usage-log status follows the classification rather than the generic 502."""
+    assert failure_status_code(TypeError("create() got an unexpected keyword argument 'seed'")) == 400
+
+
+def test_operator_client_args_typo_is_not_the_callers_fault() -> None:
+    """#769 review: ``client_args`` is operator-owned (config.yml or a stored
+    provider credential) and reaches the provider *client's* constructor, so a
+    typo there raises the same wording. Returning it as a 400 would blame the
+    caller for a parameter they cannot remove, and would drop a gateway
+    misconfiguration off the error-rate panel as a 4xx."""
+    exc = TypeError("AsyncOpenAI.__init__() got an unexpected keyword argument 'timeoutt'")
+    assert classify_provider_error(exc) is None
+    assert failure_status_code(exc) == 502
+
+
+def test_gateway_internal_signature_drift_is_not_the_callers_fault() -> None:
+    """The same wording arrives from gateway-internal code, because this
+    classifier is reached from ``except Exception`` arms that wrap the tool
+    backends and the stream opener, not only the provider call. A backend whose
+    constructor drifted (mozilla-ai/otari#766) must not surface as a 400 naming
+    an internal parameter."""
+    exc = TypeError("_FakeSandboxBackend.__init__() got an unexpected keyword argument 'image'")
+    assert classify_provider_error(exc) is None
+    assert failure_status_code(exc) == 502
+
+
+def test_client_args_key_colliding_with_a_real_param_is_still_not_a_400() -> None:
+    """The case the name gate alone cannot see: an operator ``client_args`` key
+    that happens to be a real request param. It is a constructor rejection, so
+    the second gate keeps it a 502."""
+    exc = TypeError("AsyncOpenAI.__init__() got an unexpected keyword argument 'seed'")
+    assert classify_provider_error(exc) is None
+
+
+def test_param_the_gateway_never_forwards_stays_unclassified() -> None:
+    """A name outside the request-body surface cannot have come from the caller,
+    whatever raised it."""
+    assert classify_provider_error(TypeError("post() got an unexpected keyword argument 'proxies'")) is None
+
+
+def test_the_caller_fault_gate_excludes_the_params_the_schema_refuses() -> None:
+    """The gate's name set is the request schema's, carve-out included.
+
+    ``derive_request_base`` skips ``SENSITIVE_PARAM_FIELDS`` so a credential or
+    provider-selection field any-llm adds to a typed ``*Params`` can never become
+    caller-settable (mozilla-ai/otari#160). A name the schema will not accept
+    cannot have come from a caller, so it must not pass this gate either. No
+    ``*Params`` declares one today, which is exactly why this is pinned: the two
+    sets agree by luck right now and by construction after this.
+    """
+    assert not _FORWARDED_PARAMS & SENSITIVE_PARAM_FIELDS
+
+    sensitive = min(SENSITIVE_PARAM_FIELDS)
+    exc = TypeError(f"acompletion() got an unexpected keyword argument '{sensitive}'")
+    assert classify_provider_error(exc) is None
+    assert failure_status_code(exc) == 502
+
+
+def test_unrelated_type_error_stays_unclassified() -> None:
+    """A TypeError that is not a keyword-argument rejection carries no signal a
+    caller could act on, so it keeps the generic 502 rather than becoming a 400
+    that blames the caller for a gateway-side fault."""
+    assert classify_provider_error(TypeError("unsupported operand type(s) for +: 'int' and 'str'")) is None
 
 
 def test_redaction_keeps_the_part_that_explains_the_rejection() -> None:

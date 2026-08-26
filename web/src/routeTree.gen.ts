@@ -26,6 +26,7 @@ import { Route as SettingsRouteImport } from './routes/settings'
 import { Route as ToolsRouteImport } from './routes/tools'
 import { Route as UsageRouteImport } from './routes/usage'
 import { Route as WorkspacesRouteImport } from './routes/workspaces'
+import { Route as AdminAccountsRouteImport } from './routes/admin.accounts'
 import { Route as OrganizationIndexRouteImport } from './routes/organization.index'
 import { Route as OrganizationGuardrailsRouteImport } from './routes/organization.guardrails'
 import { Route as OrganizationMembersRouteImport } from './routes/organization.members'
@@ -122,6 +123,11 @@ const WorkspacesRoute = WorkspacesRouteImport.update({
   path: '/workspaces',
   getParentRoute: () => rootRouteImport,
 } as any)
+const AdminAccountsRoute = AdminAccountsRouteImport.update({
+  id: '/admin/accounts',
+  path: '/admin/accounts',
+  getParentRoute: () => rootRouteImport,
+} as any)
 const OrganizationIndexRoute = OrganizationIndexRouteImport.update({
   id: '/',
   path: '/',
@@ -192,6 +198,7 @@ export interface FileRoutesByFullPath {
   '/tools': typeof ToolsRouteWithChildren
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRoute
+  '/admin/accounts': typeof AdminAccountsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
   '/organization/members': typeof OrganizationMembersRoute
   '/organization/pricing': typeof OrganizationPricingRoute
@@ -219,6 +226,7 @@ export interface FileRoutesByTo {
   '/settings': typeof SettingsRoute
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRoute
+  '/admin/accounts': typeof AdminAccountsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
   '/organization/members': typeof OrganizationMembersRoute
   '/organization/pricing': typeof OrganizationPricingRoute
@@ -249,6 +257,7 @@ export interface FileRoutesById {
   '/tools': typeof ToolsRouteWithChildren
   '/usage': typeof UsageRoute
   '/workspaces': typeof WorkspacesRoute
+  '/admin/accounts': typeof AdminAccountsRoute
   '/organization/guardrails': typeof OrganizationGuardrailsRoute
   '/organization/members': typeof OrganizationMembersRoute
   '/organization/pricing': typeof OrganizationPricingRoute
@@ -280,6 +289,7 @@ export interface FileRouteTypes {
     | '/tools'
     | '/usage'
     | '/workspaces'
+    | '/admin/accounts'
     | '/organization/guardrails'
     | '/organization/members'
     | '/organization/pricing'
@@ -307,6 +317,7 @@ export interface FileRouteTypes {
     | '/settings'
     | '/usage'
     | '/workspaces'
+    | '/admin/accounts'
     | '/organization/guardrails'
     | '/organization/members'
     | '/organization/pricing'
@@ -336,6 +347,7 @@ export interface FileRouteTypes {
     | '/tools'
     | '/usage'
     | '/workspaces'
+    | '/admin/accounts'
     | '/organization/guardrails'
     | '/organization/members'
     | '/organization/pricing'
@@ -366,6 +378,7 @@ export interface RootRouteChildren {
   ToolsRoute: typeof ToolsRouteWithChildren
   UsageRoute: typeof UsageRoute
   WorkspacesRoute: typeof WorkspacesRoute
+  AdminAccountsRoute: typeof AdminAccountsRoute
 }
 
 declare module '@tanstack/react-router' {
@@ -487,6 +500,13 @@ declare module '@tanstack/react-router' {
       path: '/workspaces'
       fullPath: '/workspaces'
       preLoaderRoute: typeof WorkspacesRouteImport
+      parentRoute: typeof rootRouteImport
+    }
+    '/admin/accounts': {
+      id: '/admin/accounts'
+      path: '/admin/accounts'
+      fullPath: '/admin/accounts'
+      preLoaderRoute: typeof AdminAccountsRouteImport
       parentRoute: typeof rootRouteImport
     }
     '/organization/': {
@@ -618,6 +638,7 @@ const rootRouteChildren: RootRouteChildren = {
   ToolsRoute: ToolsRouteWithChildren,
   UsageRoute: UsageRoute,
   WorkspacesRoute: WorkspacesRoute,
+  AdminAccountsRoute: AdminAccountsRoute,
 }
 export const routeTree = rootRouteImport
   ._addFileChildren(rootRouteChildren)

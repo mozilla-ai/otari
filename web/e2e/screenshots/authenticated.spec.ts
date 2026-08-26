@@ -42,6 +42,13 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
     heading: /mcp servers/i,
   },
   { route: "/settings", name: "settings", heading: /settings/i },
+  // Deployment-wide accounts, on the organization rail beside Settings. Not the
+  // members roster above: that one stops at this organization's boundary.
+  {
+    route: "/admin/accounts",
+    name: "admin-accounts",
+    heading: /accounts/i,
+  },
   // Reached from the account menu rather than the rail, and covered here all
   // the same: what this matrix is for is how a page renders on a phone and in
   // the dark, which does not depend on which control opens it.

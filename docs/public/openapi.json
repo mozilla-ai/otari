@@ -1696,7 +1696,7 @@
         "type": "object"
       },
       "ChatCompletionRequest": {
-        "description": "OpenAI-compatible chat completion request.\n\nThe completion-param fields are derived from any-llm's ``CompletionParams``\n(see ``_schema_derive``) so the schema cannot silently drop a param any-llm\nforwards. Fields below either tighten a derived field (``messages``,\n``response_format``), declare an OpenAI wire param ``CompletionParams`` does\nnot model (``service_tier``, forwarded as an any-llm ``**kwargs`` param), or\nadd gateway-internal behavior (``mcp_servers``, ``mcp_server_ids``,\n``guardrails``, ``tools_header``, ``max_tool_iterations``) that is stripped\nbefore the request is forwarded upstream.",
+        "description": "OpenAI-compatible chat completion request.\n\nThe completion-param fields are derived from any-llm's ``CompletionParams``\n(see ``_schema_derive``) so the schema cannot silently drop a param any-llm\nforwards. Fields below either tighten a derived field (``messages``,\n``response_format``), declare an OpenAI wire param ``CompletionParams`` does\nnot model (``service_tier``, forwarded as an any-llm ``**kwargs`` param), add\ngateway-internal behavior (``mcp_servers``, ``mcp_server_ids``,\n``guardrails``, ``tools_header``, ``max_tool_iterations``) that is stripped\nbefore the request is forwarded upstream, or restate a derived field\nunchanged to document it (``max_completion_tokens``), which is only worth\ndoing where the wire contract is not guessable from the field itself.",
         "properties": {
           "frequency_penalty": {
             "anyOf": [
@@ -1758,6 +1758,7 @@
                 "type": "null"
               }
             ],
+            "description": "Upper bound on generated tokens. OpenAI's current name for the cap `max_tokens` used to carry; either field is accepted, and this one wins when a request sends both.",
             "title": "Max Completion Tokens"
           },
           "max_tokens": {
@@ -3042,6 +3043,20 @@
         "title": "CreateUserRequest",
         "type": "object"
       },
+      "DeploymentAdminAccessPublic": {
+        "description": "Whether the caller may reach the deployment administration surface.\n\nThe one endpoint in that surface that answers 200 for everybody, and\ndeliberately: the rest refuse with 404 so they do not confirm they exist,\nwhich leaves the dashboard nothing to gate its navigation on but a failed\nrequest. This says the same thing a caller could learn by trying, without\nthe try.",
+        "properties": {
+          "granted": {
+            "title": "Granted",
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "granted"
+        ],
+        "title": "DeploymentAdminAccessPublic",
+        "type": "object"
+      },
       "DeploymentBootstrap": {
         "description": "What the dashboard shell needs before it can render anything.",
         "properties": {
@@ -3147,6 +3162,177 @@
           "mail_ready"
         ],
         "title": "DeploymentBootstrap",
+        "type": "object"
+      },
+      "DeploymentUserOrganizationPublic": {
+        "description": "One organization an identity belongs to, as the operator surface lists it.",
+        "properties": {
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "organization_id": {
+            "format": "uuid",
+            "title": "Organization Id",
+            "type": "string"
+          },
+          "role": {
+            "title": "Role",
+            "type": "string"
+          },
+          "slug": {
+            "title": "Slug",
+            "type": "string"
+          },
+          "status": {
+            "title": "Status",
+            "type": "string"
+          }
+        },
+        "required": [
+          "organization_id",
+          "name",
+          "slug",
+          "role",
+          "status"
+        ],
+        "title": "DeploymentUserOrganizationPublic",
+        "type": "object"
+      },
+      "DeploymentUserPublic": {
+        "description": "An identity on this deployment, whatever organization it belongs to.\n\nNot ``ActiveOrganizationMemberPublic``: that shape is a *membership* joined\nto an identity, scoped to one organization and hiding the suspended rows.\nThis one is the identity itself, and its ``organizations`` list carries every\nmembership at whatever status, because an account whose only membership is\nsuspended is precisely what an operator comes here to find.\n\n``is_bootstrap_operator`` and ``is_self`` are the two rows an operator may\nnot deactivate or demote, and they travel on the row so the page can disable\nthose controls rather than offering ones the server refuses. Neither is an\nauthorization: the server refuses either way. ``is_self`` is answered here\nbecause nothing else the dashboard fetches names the caller's identity, so\nwithout it the page could not tell which row is the reader's own.",
+        "properties": {
+          "created_at": {
+            "format": "date-time",
+            "title": "Created At",
+            "type": "string"
+          },
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Name"
+          },
+          "id": {
+            "format": "uuid",
+            "title": "Id",
+            "type": "string"
+          },
+          "is_active": {
+            "title": "Is Active",
+            "type": "boolean"
+          },
+          "is_bootstrap_operator": {
+            "title": "Is Bootstrap Operator",
+            "type": "boolean"
+          },
+          "is_self": {
+            "title": "Is Self",
+            "type": "boolean"
+          },
+          "is_superuser": {
+            "title": "Is Superuser",
+            "type": "boolean"
+          },
+          "last_sign_in_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Last Sign In At"
+          },
+          "organizations": {
+            "items": {
+              "$ref": "#/components/schemas/DeploymentUserOrganizationPublic"
+            },
+            "title": "Organizations",
+            "type": "array"
+          }
+        },
+        "required": [
+          "id",
+          "email",
+          "full_name",
+          "is_active",
+          "is_superuser",
+          "is_bootstrap_operator",
+          "is_self",
+          "last_sign_in_at",
+          "created_at",
+          "organizations"
+        ],
+        "title": "DeploymentUserPublic",
+        "type": "object"
+      },
+      "DeploymentUserUpdateRequest": {
+        "description": "The two flags the operator surface may flip, each optional.\n\nOmitting a field leaves it alone, so deactivating an account and changing\nwhat it may administer stay separate decisions even though one endpoint\ncarries both. A body that sets neither is refused rather than treated as a\nno-op: it is a request that meant something and lost it.",
+        "properties": {
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active"
+          },
+          "is_superuser": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Superuser"
+          }
+        },
+        "title": "DeploymentUserUpdateRequest",
+        "type": "object"
+      },
+      "DeploymentUsersPublic": {
+        "properties": {
+          "count": {
+            "title": "Count",
+            "type": "integer"
+          },
+          "data": {
+            "items": {
+              "$ref": "#/components/schemas/DeploymentUserPublic"
+            },
+            "title": "Data",
+            "type": "array"
+          }
+        },
+        "required": [
+          "data",
+          "count"
+        ],
+        "title": "DeploymentUsersPublic",
         "type": "object"
       },
       "DiscoverableModel": {
@@ -13031,6 +13217,167 @@
         "summary": "Health Readiness",
         "tags": [
           "health"
+        ]
+      }
+    },
+    "/v1/admin/access": {
+      "get": {
+        "description": "Report whether the caller may use the deployment administration surface.\n\nThe one endpoint here that answers 200 for everybody. The rest refuse a\nnon-operator with 404 so they do not confirm they exist, which leaves a\ndashboard nothing to gate its navigation on but a failed request; this says\nthe same thing without one. It publishes only the caller's own standing,\nwhich they could establish by trying an endpoint anyway.",
+        "operationId": "get_administration_access_v1_admin_access_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeploymentAdminAccessPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Get Administration Access",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/users": {
+      "get": {
+        "description": "List every account on this deployment, with the organizations each belongs to.\n\nDeployment-wide, so it is not the same list as ``GET /v1/organizations/me/members``:\nthat one is the caller's organization roster and drops a suspended\nmembership, while this one carries every identity at whatever standing,\nincluding one whose memberships are all suspended. Each row also reports when\nthe account last signed in to the dashboard, and null there means never.",
+        "operationId": "list_deployment_users_v1_admin_users_get",
+        "parameters": [
+          {
+            "description": "Number of records to skip",
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "description": "Number of records to skip",
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Maximum number of records to return",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "description": "Maximum number of records to return",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeploymentUsersPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Deployment Users",
+        "tags": [
+          "admin"
+        ]
+      }
+    },
+    "/v1/admin/users/{user_id}": {
+      "patch": {
+        "description": "Deactivate or reactivate an account, or change whether it may administer this deployment.\n\nBoth fields are optional and omitting one leaves it alone; a body naming\nneither is refused rather than treated as a no-op. Deactivating also ends\nthat account's dashboard sessions immediately, so a lost laptop stops\nworking now rather than when its cookie is next presented.\n\nTwo changes are refused to keep a deployment reachable: an operator may not\ndeactivate their own account or drop their own operator access, and neither\nmay be taken from the deployment's bootstrap operator, which is the identity\nmaster-key sign-in resolves to. Granting either is unguarded.",
+        "operationId": "update_deployment_user_v1_admin_users__user_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "user_id",
+            "required": true,
+            "schema": {
+              "format": "uuid",
+              "title": "User Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/DeploymentUserUpdateRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/DeploymentUserPublic"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Deployment User",
+        "tags": [
+          "admin"
         ]
       }
     },

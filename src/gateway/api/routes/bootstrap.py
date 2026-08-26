@@ -73,6 +73,11 @@ SignInMethod = Literal["master_key", "password", "passkey"]
 # the shared shell also runs against a hosted control plane, where the two come
 # apart.
 STANDALONE_SURFACES: tuple[str, ...] = (
+    # The deployment-wide account administration prefix (/v1/admin). The
+    # deployment axis only: it says this process hosts the surface, not that the
+    # caller may use it, which is `GET /v1/admin/access`'s question and the
+    # service's to enforce.
+    "admin",
     "budgets",
     "keys",
     "models",

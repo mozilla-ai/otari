@@ -104,6 +104,27 @@ class UserRepository(BaseRepository[User, UserCreate, UserBase]):
         await self.db.refresh(user)
         return user
 
+    async def list_all(self, *, skip: int = 0, limit: int = 100) -> tuple[list[User], int]:
+        """Return a page of every identity on the deployment, plus the total.
+
+        Deployment-wide and therefore unfiltered by organization: this is what
+        the operator administration surface reads, and an identity that belongs
+        to no organization (a membership suspended everywhere) is exactly the
+        kind the surface exists to find, so a join would hide it.
+
+        Ordered by ``user_alphabetical_order()`` with ``id`` as the tiebreak, for
+        the reason ``get_by_organization_with_users`` orders the roster that way:
+        the sort key is not unique, and a page whose order is not total can
+        return one row twice and another never.
+        """
+        count_result = await self.db.execute(select(func.count()).select_from(User))
+        count = count_result.scalar_one()
+
+        result = await self.db.execute(
+            select(User).order_by(user_alphabetical_order(), col(User.id)).offset(skip).limit(limit)
+        )
+        return list(result.scalars().all()), count
+
     async def get_by_verification_token_hash(self, token_hash: str) -> User | None:
         """Return the identity a hashed email-verification token names, or None.
 

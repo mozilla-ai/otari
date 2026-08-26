@@ -56,6 +56,12 @@ EXAMPLE_BODY_OVERRIDES: dict[tuple[str, str], dict[str, Any]] = {
         "model": "openai:gpt-4o-mini",
         "input": "Hello from Otari!",
     },
+    # Both fields are optional so that deactivating an account and changing what
+    # it may administer stay separate decisions; a derived example fills in every
+    # property, which turns the ready-to-send default into both changes at once.
+    # One field, so the template does the thing its name says and the other is a
+    # line the operator adds on purpose.
+    ("PATCH", "/v1/admin/users/{user_id}"): {"is_active": False},
 }
 
 

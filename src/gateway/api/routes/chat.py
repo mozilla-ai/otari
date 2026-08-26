@@ -72,10 +72,12 @@ class ChatCompletionRequest(derive_request_base(CompletionParams)):  # type: ign
     (see ``_schema_derive``) so the schema cannot silently drop a param any-llm
     forwards. Fields below either tighten a derived field (``messages``,
     ``response_format``), declare an OpenAI wire param ``CompletionParams`` does
-    not model (``service_tier``, forwarded as an any-llm ``**kwargs`` param), or
-    add gateway-internal behavior (``mcp_servers``, ``mcp_server_ids``,
+    not model (``service_tier``, forwarded as an any-llm ``**kwargs`` param), add
+    gateway-internal behavior (``mcp_servers``, ``mcp_server_ids``,
     ``guardrails``, ``tools_header``, ``max_tool_iterations``) that is stripped
-    before the request is forwarded upstream.
+    before the request is forwarded upstream, or restate a derived field
+    unchanged to document it (``max_completion_tokens``), which is only worth
+    doing where the wire contract is not guessable from the field itself.
     """
 
     messages: list[dict[str, Any]] = Field(min_length=1)
@@ -100,6 +102,16 @@ class ChatCompletionRequest(derive_request_base(CompletionParams)):  # type: ign
     # and the SDK pin is bumped (mozilla-ai/any-llm#1269, tracked in #565). Until
     # then it also shadows whatever annotation any-llm picks for it.
     service_tier: str | None = None
+    # Redeclared only to carry a description: the field is derived, but the
+    # relationship between the two output-cap fields is the whole reason a caller
+    # gets a completion instead of a 502, and it is not guessable from the schema.
+    max_completion_tokens: int | None = Field(
+        default=None,
+        description=(
+            "Upper bound on generated tokens. OpenAI's current name for the cap `max_tokens` "
+            "used to carry; either field is accepted, and this one wins when a request sends both."
+        ),
+    )
 
     @field_validator("messages")
     @classmethod
@@ -284,6 +296,38 @@ class _ChatAdapter:
 
 _ADAPTER = _ChatAdapter()
 
+
+def _effective_output_cap(max_tokens: int | None, max_completion_tokens: int | None) -> int | None:
+    """The single output cap to dispatch, given OpenAI's current and legacy fields.
+
+    OpenAI renamed the cap to ``max_completion_tokens`` and deprecated
+    ``max_tokens``, so an OpenAI-compatible client sends the former
+    (this is what any-llm's own SDK does).
+
+    any-llm's OpenAI layer remaps ``max_tokens`` to ``max_completion_tokens`` on
+    the way out, so nothing is lost by folding everything into ``max_tokens`` and a
+    reasoning model still receives the field it requires. On the other hand,
+    folding the other way would break every provider that never learned the new
+    name.
+
+    The current name wins when a request carries both, matching OpenAI's own
+    deprecation and the precedence any-llm's OpenAI layer already applies. The
+    result is what the budget estimate reserves against as well, so the cost
+    reserved and the cap dispatched can never disagree about which field won.
+    Two *different* caps in one request is the caller contradicting itself: the
+    ``max_completion_tokens`` value is the one used, and both are logged.
+    """
+    if max_completion_tokens is None:
+        return max_tokens
+    if max_tokens is not None and max_tokens != max_completion_tokens:
+        logger.warning(
+            "Request sent both output caps; using max_completion_tokens=%s and ignoring max_tokens=%s",
+            max_completion_tokens,
+            max_tokens,
+        )
+    return max_completion_tokens
+
+
 _MASTER_KEY_USER_REQUIRED = "When using master key, 'user' field is required in request body"
 _USER_FORBIDDEN = "'user' field does not match the authenticated API key's user"
 
@@ -340,6 +384,8 @@ async def chat_completions(
         )
         return len(str(request.messages)), stats.vision_usage()
 
+    output_cap = _effective_output_cap(request.max_tokens, request.max_completion_tokens)
+
     ctx = await resolve_request_context(
         adapter=_ADAPTER,
         raw_request=raw_request,
@@ -350,9 +396,7 @@ async def chat_completions(
         model=request.model,
         user_id_from_request=request.user,
         estimate_prompt_chars=len(str(request.messages)),
-        estimate_max_output_tokens=(
-            request.max_tokens if request.max_tokens is not None else request.max_completion_tokens
-        ),
+        estimate_max_output_tokens=output_cap,
         master_key_user_required_detail=_MASTER_KEY_USER_REQUIRED,
         user_forbidden_detail=_USER_FORBIDDEN,
         routing_signal=lambda: routing_signal_from_messages(
@@ -381,6 +425,13 @@ async def chat_completions(
         web_search_declared_name=tool_ctx.web_search_declared_name,
     )
     scope_prompt_cache_key(request_fields, ctx)
+    # Dispatch one cap, under the name any-llm understands and knows how to map to
+    # any provider (via BaseOpenAIProvider._convert_completion_params). Popped
+    # unconditionally so exactly one spelling reaches the provider call, whether
+    # the caller sent a value or an explicit null.
+    request_fields.pop("max_completion_tokens", None)
+    if output_cap is not None:
+        request_fields["max_tokens"] = output_cap
 
     # ------------------------------------------------------------------
     # Streaming path: in hybrid mode, iterate `route.attempts` before any

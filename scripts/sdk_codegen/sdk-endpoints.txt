@@ -203,6 +203,13 @@ POST /v1/scoped-budgets                                     # not yet wrapped
 GET /v1/scoped-budgets/{budget_id}                          # not yet wrapped
 PATCH /v1/scoped-budgets/{budget_id}                        # not yet wrapped
 DELETE /v1/scoped-budgets/{budget_id}                       # not yet wrapped
+# Deployment administration: the accounts on the whole deployment, and the flags
+# an operator flips on one. Refused with 404 for anyone who is not an operator,
+# and an SDK caller holds a workspace key rather than an operator identity, so
+# there is nothing here for a shell to wrap.
+GET /v1/admin/access                                        # dashboard-only
+GET /v1/admin/users                                         # dashboard-only
+PATCH /v1/admin/users/{user_id}                             # dashboard-only
 # Tenancy: organizations, workspaces, and their memberships. The dashboard's
 # tenancy pages are the consumer; an SDK caller acts inside one workspace with a
 # key that already names it, so none of these is an SDK surface yet. Move to

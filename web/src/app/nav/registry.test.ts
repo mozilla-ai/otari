@@ -73,7 +73,17 @@ describe("nav registry", () => {
       "Guardrails",
       "Org settings",
       "Settings",
+      "Accounts",
     ])
+  })
+
+  it("declares the one operator-only destination and no other", () => {
+    // The third gating axis, and the only row on either rail that names it. A
+    // second one would be a design decision rather than a refactor, so this
+    // pins the count as well as the entry.
+    expect(
+      NAV_ITEMS.filter((item) => item.operatorOnly).map((item) => item.to),
+    ).toEqual(["/admin/accounts"])
   })
 
   it("puts each destination on exactly one rail", () => {
@@ -220,6 +230,7 @@ describe("nav registry", () => {
     // And none of those surface names is one a standalone gateway reports, or the
     // gate would be decoration.
     const standalone = [
+      "admin",
       "budgets",
       "keys",
       "models",

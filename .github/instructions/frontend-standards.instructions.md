@@ -96,12 +96,27 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
    account menu below `md`) and `/account` (that menu's first row). The registry is what the
    rails render, so registering either would duplicate into the sidebar a row the design draws
    once. An entry gates on `surface` (the deployment axis, from `GET /v1/bootstrap`
-   via `useDeployment`) and `capability` (the entitlement axis, via `useEntitlements`),
-   composed as AND by `useNavVisibility`. Do not fold one into another, and do not reach past them: a page
+   via `useDeployment`), `capability` (the entitlement axis, via `useEntitlements`), and
+   `operatorOnly` (the caller axis, via `useDeploymentAdminAccess`), composed as AND by
+   `useNavVisibility`. Do not fold one into another, and do not reach past them: a page
    component that reads the gateway's mode itself, or infers it from an endpoint's 404, is
    the scattered mode check this replaced. A new base capability belongs in
    `BASE_CAPABILITIES`; an overlay's belongs in neither. Hiding a surface client-side is a
    convenience, never an authorization; the server still has to enforce it.
+   - The caller axis is the odd one and stays narrow. It is about *who is signed in* where
+     the other two are about the deployment, so it is answered by `GET /v1/admin/access`,
+     the gate of the one surface it hides, rather than by a rule of its own, and that
+     request is itself gated on that surface so a gateway without it is never asked.
+     `/admin/accounts` is the only entry that declares it and `registry.test.ts` pins the
+     count, so a second one is a design decision rather than a refactor. It also resolves
+     asynchronously where the other two do not, so a row naming it is absent until the
+     answer is yes.
+   - It gates the **rail row only**. `useRouteVisibility` is what `AppShell` gates the
+     *route* on, and it composes the two deployment-shaped axes and drops this one: a real
+     operator would otherwise read "not available here" for the length of the query, and a
+     caller who is genuinely not an operator is looking at a page the deployment does
+     serve, which refuses them in its own words. Flag a change that folds the caller axis
+     back into the route gate.
 
 9. **Mobile is not optional.** The dashboard installs to a phone home screen and the shell
    already switches to a drawer below `md`. Touch targets ≥44px on the phone viewport, no

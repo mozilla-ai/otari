@@ -179,6 +179,40 @@ def test_messages_endpoint_provider_error_format(
     assert detail["error"]["type"] == "api_error"
 
 
+def test_messages_endpoint_rejected_param_is_a_400_naming_it(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_user: dict[str, Any],
+    messages_request_body: dict[str, Any],
+) -> None:
+    """A param the resolved provider's SDK has no keyword for is the caller's to
+    fix, so it is a 400 rather than the generic 500 this format falls back to.
+
+    Pinned here as well as on the chat route because the classification is shared
+    (``classify_provider_error``) while the envelope is not: this format renders
+    the mapped status as an Anthropic ``invalid_request_error`` body, which the
+    chat tests cannot show.
+    """
+    messages_request_body["metadata"] = {"user_id": "test-user"}
+
+    with patch(
+        "gateway.api.routes.messages.amessages",
+        new_callable=AsyncMock,
+        side_effect=TypeError("AsyncMessages.create() got an unexpected keyword argument 'seed'"),
+    ):
+        response = client.post(
+            "/v1/messages",
+            json=messages_request_body,
+            headers=master_key_header,
+        )
+
+    assert response.status_code == 400
+    detail = response.json()["detail"]
+    assert detail["error"]["type"] == "invalid_request_error"
+    assert "'seed'" in detail["error"]["message"]
+    assert "AsyncMessages" not in detail["error"]["message"]
+
+
 def test_messages_endpoint_provider_error_streaming(
     client: TestClient,
     master_key_header: dict[str, str],

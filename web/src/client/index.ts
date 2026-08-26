@@ -410,6 +410,22 @@ export type WorkspaceMemberRole = NonNullable<
     operations["add_workspace_member_v1_workspaces__workspace_id__members__user_id__post"]["parameters"]["query"]
   >["role"]
 >
+// ---------------------------------------------------------------------------
+// Deployment administration
+//
+// The one management prefix scoped to the deployment rather than to an
+// organization. Every shape above reads through a membership and so cannot see
+// an account whose memberships are all suspended, which is what this one is for.
+// ---------------------------------------------------------------------------
+/** Whether the caller may use the surface at all: what the sidebar gates on. */
+export type DeploymentAdminAccess = Schemas["DeploymentAdminAccessPublic"]
+/** One account on the deployment, with every organization it belongs to. */
+export type DeploymentUser = Schemas["DeploymentUserPublic"]
+/** One organization an account belongs to, at whatever standing. */
+export type DeploymentUserOrganization =
+  Schemas["DeploymentUserOrganizationPublic"]
+export type UpdateDeploymentUserRequest = Schemas["DeploymentUserUpdateRequest"]
+
 export type Workspace = Schemas["WorkspacePublic"]
 export type CreateWorkspaceRequest = Schemas["WorkspaceCreate"]
 export type UpdateWorkspaceRequest = Schemas["WorkspaceUpdate"]

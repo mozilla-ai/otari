@@ -90,6 +90,62 @@ class NotAuthorizedError(TenancyForbiddenError):
         super().__init__(message)
 
 
+class DeploymentAdministrationUnavailableError(TenancyNotFoundError):
+    """The caller is not an operator of this deployment, so the surface is not there.
+
+    A 404 and not the 403 the condition really is, for two reasons that point the
+    same way. The dashboard's ``apiFetch`` treats a 403 as "this session cannot
+    use the management API" and drops the session, so refusing one page that way
+    signs the caller out of every other page they *are* allowed. And a surface
+    that answers 403 confirms it exists to anyone who asks, which for a
+    deployment-wide account list is a thing worth not confirming. The hosted
+    backends' own admin surface refuses the same way (mozilla-ai/otari-ai#1842).
+    """
+
+    def __init__(self) -> None:
+        super().__init__("Not found")
+
+
+class DeploymentUserNotFoundError(TenancyNotFoundError):
+    def __init__(self, user_id: object):
+        super().__init__(f"User {user_id} not found")
+
+
+class DeploymentUserSelfChangeError(TenancyValidationError):
+    """An operator aiming one of these flags at their own account.
+
+    Deactivating yourself ends the session you are holding, and clearing your own
+    superuser flag takes away the page you did it from. Neither is recoverable
+    from the dashboard, so both are refused rather than confirmed: an operator
+    who really means to stand down has another operator do it, or the deployment
+    still has its bootstrap identity.
+    """
+
+
+class BootstrapOperatorProtectedError(TenancyValidationError):
+    """A change aimed at the identity ``tenancy_bootstrap_user_id`` names.
+
+    That identity is what master-key sign-in mints a session for, and
+    ``resolve_dashboard_session`` refuses a deactivated one, so deactivating it
+    turns the deployment's fallback credential into a session that dies on
+    arrival. Its superuser flag is protected for the matching reason: the marker
+    is the gate that survives a cleared flag, and the two together are what keep
+    a deployment from being locked out of its own administration.
+    """
+
+
+class EmptyDeploymentUserUpdateError(TenancyValidationError):
+    """A change request that names neither flag.
+
+    Refused rather than answered as a no-op: the two fields are optional so that
+    deactivating an account and changing what it may administer stay separate
+    decisions, and a body that set neither is a decision that got lost on the way.
+    """
+
+    def __init__(self) -> None:
+        super().__init__("Set is_active or is_superuser; a change naming neither does nothing")
+
+
 class MembershipUpdateError(TenancyValidationError):
     """A membership change the organization's own rules refuse (e.g. the last owner)."""
 
@@ -937,11 +993,16 @@ class SandboxImageNotAllowedError(TenancyValidationError):
 
 
 __all__ = [
+    "BootstrapOperatorProtectedError",
     "CurrentPasswordIncorrectError",
     "CurrentPasswordRequiredError",
+    "DeploymentAdministrationUnavailableError",
+    "DeploymentUserNotFoundError",
+    "DeploymentUserSelfChangeError",
     "EmailAlreadyInUseError",
     "EmailChangeNotSupportedError",
     "EmailNotVerifiedError",
+    "EmptyDeploymentUserUpdateError",
     "ForeignTenancyError",
     "InvalidCredentialsError",
     "InvalidEmailError",

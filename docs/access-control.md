@@ -132,6 +132,39 @@ Removing a member suspends their membership rather than deleting it, which keeps
 
 Granting the `owner` role is an owner's to give. An admin manages members, workspaces and roles, and cannot promote anyone (themselves included) to owner, nor add one.
 
+### Deployment-wide account administration
+
+Everything above stops at an organization's boundary: the roster lists that organization's members, and a membership suspended everywhere leaves the roster with nowhere else to be found. `/v1/admin` is the surface that does not, and it is for whoever operates the deployment rather than for a tenant.
+
+```bash
+# Every account on the deployment, with the organizations each belongs to and
+# when it last signed in to the dashboard.
+curl -H "Otari-Key: $OTARI_MASTER_KEY" http://localhost:8000/v1/admin/users
+
+# Deactivate one. Its dashboard sessions end immediately. Memberships, keys and
+# usage history are untouched, so any API key this account minted keeps
+# authenticating until it is revoked on its own (`PATCH /v1/keys/{key_id}`):
+# deactivating closes the dashboard, not the API.
+curl -X PATCH -H "Otari-Key: $OTARI_MASTER_KEY" -H "Content-Type: application/json" \
+  -d '{"is_active": false}' \
+  http://localhost:8000/v1/admin/users/$USER_ID
+
+# Grant or remove operator access, which is what reaches this surface.
+curl -X PATCH -H "Otari-Key: $OTARI_MASTER_KEY" -H "Content-Type: application/json" \
+  -d '{"is_superuser": true}' \
+  http://localhost:8000/v1/admin/users/$USER_ID
+```
+
+`last_sign_in_at` is null for an account that has never signed in to the dashboard, and it goes on being null: it is a stored stamp rather than a reading of the live session table, so it does not turn back into "never" when a session expires.
+
+**Who may use it.** A superuser, or the identity the `tenancy_bootstrap_user_id` marker names, which the master key resolves to. Anyone else gets `404` rather than `403`, so the surface does not confirm it exists to a caller who may not use it, and the dashboard does not read the refusal as an expired session. The marker arm is what keeps the deployment reachable if a superuser flag is cleared by hand.
+
+**Two changes are refused, in one direction each.** An operator cannot deactivate their own account or drop their own operator access: deactivating ends the session they are holding, and dropping the flag takes away the page they would undo it from; and neither can be taken from the bootstrap operator, which is the identity master-key sign-in resolves to, so deactivating it would turn the fallback credential into a session that dies on arrival. Granting either back is not refused, which is what makes a cleared flag repairable here.
+
+Creating an account is not part of this surface: an account with no membership can do nothing, and memberships are the organization surface above. Neither is deleting one, for the reason removing a member suspends rather than deletes: past usage stays attributable.
+
+The dashboard renders it at **Accounts**, on the organization rail beside Settings, and the row is absent for a caller the surface would refuse.
+
 ### Dashboard sessions and identity
 
 Signing in to the dashboard exchanges a credential for a session: an opaque token in an HttpOnly cookie, stored only as a SHA-256 hash, revocable server-side, expiring on `dashboard_session_ttl_hours`. Each session names the identity it was minted for, so a cookie-authenticated request resolves a user and, through that user's `active_organization_id`, the organization it is acting in. `POST /v1/auth/session` returns both ids alongside the expiry.

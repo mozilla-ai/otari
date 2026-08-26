@@ -36,6 +36,7 @@ import asyncio
 import contextlib
 import hashlib
 import json
+import re
 import time
 import uuid
 from collections import Counter
@@ -53,8 +54,11 @@ from any_llm.exceptions import AnyLLMError, UnsupportedParameterError
 from any_llm.types.completion import (
     ChatCompletion,
     ChatCompletionChunk,
+    CompletionParams,
     CompletionUsage,
 )
+from any_llm.types.messages import MessagesParams
+from any_llm.types.responses import ResponsesParams
 from fastapi import BackgroundTasks, HTTPException, Request, Response, status
 from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import SQLAlchemyError
@@ -90,6 +94,7 @@ from gateway.api.routes._platform import (
 from gateway.api.routes._platform import (
     default_attempt_kwargs as default_attempt_kwargs,  # explicit re-export for the route modules
 )
+from gateway.api.routes._schema_derive import SENSITIVE_PARAM_FIELDS
 from gateway.api.routes._tools import (
     _build_web_search_backend,
     _extract_code_execution_tool,
@@ -370,6 +375,83 @@ def _redacted_caller_fault_detail(message: str, fallback: str) -> str:
     return redacted
 
 
+_UNEXPECTED_KWARG = re.compile(r"unexpected keyword argument '([^']+)'")
+
+# The params a caller can actually put in a request body, across the three
+# formats that share this classifier. Derived from any-llm's ``*Params`` for the
+# same reason the request schemas are (see ``_schema_derive``): a param any-llm
+# grows is picked up here without an edit, and nothing else can pass the gate.
+#
+# Derived the same way means derived *minus* ``SENSITIVE_PARAM_FIELDS``, not
+# merely from the same models. ``derive_request_base`` skips those names because
+# a future any-llm version could add a credential or provider-selection field to
+# a typed ``*Params``, and exposing one as caller-settable would let a request
+# override the operator's value (#160). A name the schema refuses to accept is by
+# definition a name no caller sent, so it must not pass the caller-fault gate
+# either: the two definitions of "settable by a caller" are one definition, and
+# spelling it twice is how they drift.
+_FORWARDED_PARAMS: frozenset[str] = frozenset(
+    (
+        set(CompletionParams.model_fields)
+        | set(MessagesParams.model_fields)
+        | set(ResponsesParams.model_fields)
+        # Declared on the chat request rather than derived, and forwarded through
+        # any-llm's ``**kwargs`` (see ``chat.ChatCompletionRequest.service_tier``).
+        | {"service_tier"}
+    )
+    - SENSITIVE_PARAM_FIELDS
+)
+
+
+def _provider_rejected_param_detail(param: str) -> str:
+    """Detail for a request param the provider serving this model cannot express."""
+    return f"The provider serving this model does not accept the '{param}' parameter"
+
+
+def _rejected_param(exc: BaseException) -> str | None:
+    """The request param a provider SDK refused as an unknown keyword, if any.
+
+    any-llm hands a provider's SDK the params its ``*Params`` model declares, so
+    a param that model carries but the SDK's method does not take arrives as
+    ``TypeError: ...create() got an unexpected keyword argument 'x'``. That is
+    every OpenAI-only chat param against a provider that never grew one
+    (``seed``, ``n``, the penalties, the logprobs family, against Anthropic).
+
+    It carries no HTTP status, so it would otherwise fall through to the generic
+    502 and report a permanent, caller-fixable mismatch between a model and a
+    param as an upstream outage. Only the param name is returned: the SDK's
+    method name is an internal detail and never reaches the client (see
+    ``test_error_detail_leakage``).
+
+    Two gates keep that from blaming a caller for someone else's fault, because
+    Python raises this same wording for any bad keyword and this classifier is
+    reached from ``except Exception`` arms that wrap more than the provider call:
+
+    * The name has to be one a request body can carry (:data:`_FORWARDED_PARAMS`).
+      An operator's ``client_args`` typo (``timeoutt``) and a gateway-internal
+      signature drift after an SDK bump (a tool backend's ``image``) are neither,
+      so they keep the generic 502 and stay on the error-rate panel as the
+      upstream-or-gateway failures they are.
+    * The failing callable must not be a constructor. ``client_args`` is
+      operator-owned and reaches a provider *client's* ``__init__``, so a key
+      there that happens to collide with a real param name (``client_args={"seed":
+      1}``) would otherwise pass the first gate and read as the caller's ``seed``.
+
+    Both gates key on the same interpreter wording the match already depends on,
+    so neither adds a new assumption about how CPython phrases the error.
+    """
+    for candidate in upstream_exception_chain(exc):
+        if not isinstance(candidate, TypeError):
+            continue
+        message = str(candidate)
+        if "__init__" in message:
+            continue
+        match = _UNEXPECTED_KWARG.search(message)
+        if match and match.group(1) in _FORWARDED_PARAMS:
+            return match.group(1)
+    return None
+
+
 def _caller_fault_detail(exc: BaseException, fallback: str) -> str:
     """The detail for a rejection that is the caller's request to fix.
 
@@ -425,6 +507,10 @@ def classify_provider_error(exc: BaseException) -> ProviderErrorMapping | None:
     # SDK's own default re-arms this same status-less guard.
     if _is_anthropic_nonstreaming_timeout_guard(exc):
         return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, PROVIDER_NONSTREAMING_MAX_TOKENS_DETAIL)
+    # The same shape one layer down: a param any-llm forwards that the resolved
+    # provider's SDK has no parameter for.
+    if (param := _rejected_param(exc)) is not None:
+        return ProviderErrorMapping(status.HTTP_400_BAD_REQUEST, _provider_rejected_param_detail(param))
     if status_code is None:
         return None
     # Account billing exhaustion, which several providers report as a 400/422

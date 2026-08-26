@@ -1,6 +1,7 @@
 """Data access for organization memberships."""
 
 import uuid
+from collections.abc import Iterable
 from typing import Any
 
 from sqlalchemy import func, select
@@ -204,6 +205,43 @@ class OrganizationMemberRepository(
             .limit(limit)
         )
         return [(member, user) for member, user in result.all()], count
+
+    async def get_by_users_with_organizations(
+        self,
+        user_ids: Iterable[uuid.UUID],
+    ) -> dict[uuid.UUID, list[tuple[OrganizationMember, Organization]]]:
+        """Group a page of identities' memberships, joined to their organizations, by user.
+
+        One query for the whole page rather than a lookup per row, the same
+        reason ``get_by_organization_with_users`` joins: the deployment-wide user
+        list shows every organization each identity belongs to, so N rows would
+        otherwise cost N queries.
+
+        Every status, unlike ``LISTABLE_STATUSES`` above: an operator looking at
+        a stuck account needs to see that its one membership is suspended, which
+        is the state the roster deliberately hides. An identity with no
+        membership is absent from the mapping rather than present with an empty
+        list, so the caller's ``.get(user_id, [])`` is the only place that
+        decides what "none" renders as.
+
+        Sorted the way ``get_by_user_with_organizations`` sorts one identity's,
+        ``created_at`` then ``id``, so the organizations under a row do not
+        reorder between reads.
+        """
+        ids = list(user_ids)
+        if not ids:
+            return {}
+
+        result = await self.db.execute(
+            select(OrganizationMember, Organization)
+            .join(Organization, col(OrganizationMember.organization_id) == col(Organization.id))
+            .where(col(OrganizationMember.user_id).in_(ids))
+            .order_by(col(OrganizationMember.created_at), col(OrganizationMember.id))
+        )
+        grouped: dict[uuid.UUID, list[tuple[OrganizationMember, Organization]]] = {}
+        for membership, organization in result.all():
+            grouped.setdefault(membership.user_id, []).append((membership, organization))
+        return grouped
 
     async def get_by_user_with_organizations(
         self,

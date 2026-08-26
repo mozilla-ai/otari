@@ -11,6 +11,7 @@ import type {
   Budget,
   CallerOrganizationMembership,
   DeploymentBootstrap,
+  DeploymentUser,
   Organization,
   OrganizationContext,
   OrganizationGuardrail,
@@ -85,6 +86,7 @@ export function pricingResponse(
 // STANDALONE_SURFACES in src/gateway/api/routes/bootstrap.py. A test that wants
 // a surface hidden overrides `surfaces` rather than editing this.
 const STANDALONE_SURFACES = [
+  "admin",
   "budgets",
   "keys",
   "models",
@@ -207,6 +209,41 @@ export function organizationMember(
     status: "active",
     created_at: "2026-01-01T00:00:00+00:00",
     updated_at: null,
+    ...overrides,
+  }
+}
+
+/**
+ * One account as the deployment administration page lists it.
+ *
+ * An ordinary member by default: active, not an operator, one active
+ * membership, and never signed in. Every case the page is really about (an
+ * operator, the bootstrap row, the caller's own, a deactivated or a suspended
+ * one) is a flag away, and stating them here would make the default row the
+ * exception rather than the norm.
+ */
+export function deploymentUser(
+  overrides: Partial<DeploymentUser> = {},
+): DeploymentUser {
+  return {
+    id: "33333333-3333-3333-3333-333333333333",
+    email: "ada@example.com",
+    full_name: "Ada Lovelace",
+    is_active: true,
+    is_superuser: false,
+    is_bootstrap_operator: false,
+    is_self: false,
+    last_sign_in_at: null,
+    created_at: "2026-01-01T00:00:00+00:00",
+    organizations: [
+      {
+        organization_id: ORGANIZATION_ID,
+        name: "Default organization",
+        slug: "default",
+        role: "member",
+        status: "active",
+      },
+    ],
     ...overrides,
   }
 }
