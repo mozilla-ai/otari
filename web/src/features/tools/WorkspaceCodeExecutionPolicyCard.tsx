@@ -135,11 +135,12 @@ export function WorkspaceCodeExecutionPolicyCard({
   const allowedImages = policy?.allowed_images ?? []
   const availableTools = policy?.available_tools ?? []
   // A pin the operator has since withdrawn is still stored, and the server
-  // refuses it on the next request and on the next save. `FilterSelect` shows
-  // the option whose value matches, so with none matching the control would
-  // read as empty over a policy that is anything but, and a save would earn a
-  // 400 naming a value never on screen. Carry it as an option instead, said out
-  // loud, so the withdrawal is visible and picking something else is one click.
+  // refuses it on the next request and on the next save. `FilterSelect` falls
+  // back to showing an unmatched value bare, so the pin would appear as its own
+  // image string with nothing saying it is refused, and a save would earn a 400
+  // naming a value the screen presented as ordinary. Carry it as an option
+  // instead, said out loud, so the withdrawal is visible and picking something
+  // else is one click.
   const withdrawnImage =
     policy?.image && !allowedImages.includes(policy.image) ? policy.image : null
   // The same shape one field over: tool kinds the stored policy names that this

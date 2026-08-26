@@ -810,6 +810,18 @@ export function FilterSelect({
   options: { value: string; label: string }[]
   disabled?: boolean
 }) {
+  // A value no option carries is a URL naming something the list does not hold
+  // (`/activity?status=bogus`) or a drill-down into a key with no rows in the
+  // window. react-aria answers an unmatched key with its own "Select an item",
+  // which would put library boilerplate where the applied filter belongs, so
+  // the value is carried as its own option instead: the filter bar says what is
+  // actually filtering, the same fallback the pages' own chips make with
+  // `?? value`. A call site whose default is missing from its own options would
+  // land here too, which is a bug at the call site rather than a shape to
+  // design around; every list today carries its own.
+  const items = options.some((option) => option.value === value)
+    ? options
+    : [{ value, label: value }, ...options]
   return (
     <Select.Root
       aria-label={label ? undefined : ariaLabel}
@@ -830,7 +842,7 @@ export function FilterSelect({
         <Select.Indicator />
       </Select.Trigger>
       <Select.Popover>
-        <ListBox items={options} className="max-h-72 overflow-auto">
+        <ListBox items={items} className="max-h-72 overflow-auto">
           {(option: { value: string; label: string }) => (
             <ListBoxItem id={optionKey(option.value)} textValue={option.label}>
               {option.label}

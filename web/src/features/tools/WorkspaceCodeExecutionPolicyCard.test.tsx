@@ -309,11 +309,11 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
     expect(put?.body).toMatchObject({ tools: null })
   })
 
-  it("names a withdrawn pin instead of showing it as the deployment default", async () => {
+  it("names a withdrawn pin instead of showing it bare", async () => {
     // The scenario the server guards twice: the operator dropped the image from
-    // the allow-list after the workspace pinned it. With no option matching the
-    // stored value the control would read as empty over a policy that is
-    // anything but, and a save would earn a 400 naming a value never on screen.
+    // the allow-list after the workspace pinned it. With no option matching it,
+    // the control would show the image bare, with nothing saying it is refused,
+    // and a save would earn a 400 over a value the screen presented as ordinary.
     mockApi({
       policy: workspaceCodeExecutionPolicy({
         workspace_id: ALPHA,

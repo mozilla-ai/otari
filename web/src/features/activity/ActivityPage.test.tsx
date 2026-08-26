@@ -480,6 +480,21 @@ describe("ActivityPage", () => {
     )
   })
 
+  it("names a filter the URL invented rather than react-aria's placeholder", async () => {
+    // A hand-edited or stale link can name a status no option carries. HeroUI's
+    // Select answers an unmatched key with "Select an item", which would put
+    // library boilerplate in the filter bar over a filter that is genuinely
+    // applied; the control carries the value as its own option instead, so the
+    // bar says what is actually filtering.
+    mockApi({ rows: [entry()] })
+    renderPage(<ActivityPage />, "/activity?status=bogus")
+
+    await waitFor(() =>
+      expect(selectTrigger("Status")).toHaveTextContent("bogus"),
+    )
+    expect(selectTrigger("Status")).not.toHaveTextContent("Select an item")
+  })
+
   it("sends the priced filter to the API", async () => {
     const { calls } = mockApi({ rows: [entry()] })
     const user = userEvent.setup()
