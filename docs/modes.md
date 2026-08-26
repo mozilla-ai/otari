@@ -39,6 +39,25 @@ Hiding the page does not disable the deployment-wide credentials. `config.yml`
 and the API still populate them, and they are still resolved on the request
 path; hosted mode only stops offering them a dashboard.
 
+### What hosted mode does not do
+
+It selects a dashboard, not a security posture, and today the gateway's own
+management API is not tenant-scoped. Any valid dashboard session authenticates
+a master-key-gated route: `POST /v1/auth/session` issues the cookie, and
+`verify_master_key` accepts that cookie from whoever holds it, checking only
+that the session is unexpired and its identity active. So on a deployment with
+several organizations, any signed-in member can read and write
+`/v1/provider-credentials`, `/v1/settings` (master-key rotation included),
+`/v1/pricing`, `/v1/routing` and `/v1/maintenance-mode`, whichever organization
+they belong to. Only `/v1/admin` adds a second gate.
+
+That is fine for the single-tenant deployment this base build is written for,
+and it is why hosted mode changes the surface set and nothing else. Do not read
+it as isolation between tenants: a deployment that needs that supplies the
+enforcement itself, through an overlay (see [ARCHITECTURE.md](../ARCHITECTURE.md)),
+and until it does, treat everyone who can sign in to a hosted deployment as an
+operator of the whole thing.
+
 ## Connected to otari.ai (Hybrid Mode)
 
 When connected to [otari.ai](https://otari.ai), Otari delegates provider routing, authentication, and usage tracking to the platform.

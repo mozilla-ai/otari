@@ -401,19 +401,25 @@ export function OverviewPage({
   )
 }
 
-// Where "manage the credentials this gateway calls providers with" lives on
-// this deployment. A standalone one serves the process-wide page; a hosted one
-// serves the organization-scoped page in its place and does not report
-// `providers` at all, so naming `/providers` unconditionally would point an
-// operator at the shell's "not available here" panel.
-function useProvidersRoute(): "/providers" | "/organization/provider-keys" {
+// Where "add a provider credential" lives on this deployment. A standalone one
+// serves the process-wide page; a hosted one serves the organization-scoped
+// page in its place and does not report `providers` at all, so naming
+// `/providers` unconditionally would point an operator at the shell's "not
+// available here" panel.
+//
+// Only correct for *adding* one, which is why provider health does not use it:
+// `/v1/providers/health` reports on `config.providers`, the process-global
+// table, so on a hosted deployment an unreachable instance is not a row the
+// organization page could show. `SystemStatusStrip` drops the link there rather
+// than sending somebody to a page the instance is not on.
+function useAddProviderRoute(): "/providers" | "/organization/provider-keys" {
   const serves = useSurfaces()
   return serves("providers") ? "/providers" : "/organization/provider-keys"
 }
 
 function GettingStartedPanel() {
   const navigate = useNavigate()
-  const providersRoute = useProvidersRoute()
+  const addProviderRoute = useAddProviderRoute()
 
   return (
     <Card>
@@ -430,7 +436,7 @@ function GettingStartedPanel() {
         <div>
           <Button
             variant="primary"
-            onPress={() => navigate({ to: providersRoute })}
+            onPress={() => navigate({ to: addProviderRoute })}
           >
             Add your first provider
           </Button>
@@ -474,7 +480,12 @@ function SystemStatusStrip({
   ready: boolean
   failed: boolean
 }) {
-  const providersRoute = useProvidersRoute()
+  // Provider health is about `config.providers`, which a hosted deployment
+  // serves no page for, so those two entries state the problem without offering
+  // a destination there. Naming one would be worse than naming none: both
+  // candidates are wrong, `/providers` because the shell answers it with "not
+  // available here" and the organization page because the instance is not on it.
+  const providerProblemsAreReachable = useSurfaces()("providers")
   // A failed source deserves a visible status message; while loading, wait for
   // actionable information instead of reserving space for a transient banner.
   if (failed) {
@@ -486,7 +497,9 @@ function SystemStatusStrip({
 
   const problems: {
     text: string
-    to: LinkProps["to"]
+    // Absent where this deployment hosts no page for the problem; the entry
+    // renders as plain text rather than as a link nobody can follow.
+    to?: LinkProps["to"]
     search?: LinkProps["search"]
   }[] = []
   if ((providerHealth === "warn" || providerHealth === "alert") && total > 0) {
@@ -496,13 +509,13 @@ function SystemStatusStrip({
     if (down > 0) {
       problems.push({
         text: `${down} provider${down === 1 ? "" : "s"} unreachable`,
-        to: providersRoute,
+        to: providerProblemsAreReachable ? "/providers" : undefined,
       })
     }
     if (degraded > 0) {
       problems.push({
         text: `${degraded} provider${degraded === 1 ? "" : "s"} without model discovery`,
-        to: providersRoute,
+        to: providerProblemsAreReachable ? "/providers" : undefined,
       })
     }
   }
@@ -545,15 +558,19 @@ function SystemStatusStrip({
               ·
             </span>
           ) : null}
-          <Link
-            to={p.to}
-            search={p.search}
-            // Thicken the underline on hover rather than lightening the text:
-            // the color here is already the one tuned to clear AA on this fill.
-            className="underline underline-offset-2 hover:decoration-2"
-          >
-            {p.text}
-          </Link>
+          {p.to ? (
+            <Link
+              to={p.to}
+              search={p.search}
+              // Thicken the underline on hover rather than lightening the text:
+              // the color here is already the one tuned to clear AA on this fill.
+              className="underline underline-offset-2 hover:decoration-2"
+            >
+              {p.text}
+            </Link>
+          ) : (
+            <span>{p.text}</span>
+          )}
         </span>
       ))}
     </div>

@@ -7,6 +7,7 @@ Unit rather than integration because the one database read the route makes runs
 on the SQLite file each test stands up, so there is no PostgreSQL to wait for.
 """
 
+from collections.abc import Callable
 from pathlib import Path
 
 import pytest
@@ -184,10 +185,24 @@ def test_mail_ready_turns_on_only_with_a_transport_and_a_public_url(tmp_path: Pa
 SURFACE_ROUTE_PREFIXES = {"organization_providers": "/v1/organizations/me/provider-keys"}
 
 
-@pytest.mark.parametrize("surfaces", [STANDALONE_SURFACES, HOSTED_SURFACES], ids=["standalone", "hosted"])
-def test_every_surface_names_a_route_the_gateway_mounts(tmp_path: Path, surfaces: tuple[str, ...]) -> None:
-    """A surface that outlives its API would gate a nav item onto a 404."""
-    app = create_app(_standalone(tmp_path))
+@pytest.mark.parametrize(
+    ("build", "surfaces"),
+    [(_standalone, STANDALONE_SURFACES), (_hosted, HOSTED_SURFACES)],
+    ids=["standalone", "hosted"],
+)
+def test_every_surface_names_a_route_the_gateway_mounts(
+    tmp_path: Path,
+    build: Callable[[Path], GatewayConfig],
+    surfaces: tuple[str, ...],
+) -> None:
+    """A surface that outlives its API would gate a nav item onto a 404.
+
+    Each edition is asked about its own app rather than both about standalone's.
+    They mount the identical router set today, so the two runs are the same
+    assertion twice; the point is that an edition which stopped mounting one
+    would be caught here rather than in a browser.
+    """
+    app = create_app(build(tmp_path))
     mounted = {getattr(route, "path", "") for route in app.routes}
 
     for surface in surfaces:

@@ -297,7 +297,8 @@ export type KnownProviderSummary = Schemas["KnownProviderSummarySchema"]
 // inherits it. Only a hosted deployment shows both concepts, and it shows only
 // this one (`organization_providers` in `GET /v1/bootstrap`'s surfaces).
 export type OrgProviderKey = Schemas["OrgProviderKeyPublic"]
-export type OrgProviderKeysResponse = Schemas["OrgProviderKeysPublic"]
+// No alias for the list wrapper: this surface is read through `fetchAllPaged`,
+// which types the envelope itself, so a name for it would have no consumer.
 export type CreateOrgProviderKeyRequest = Schemas["OrgProviderKeyCreateRequest"]
 export type UpdateOrgProviderKeyRequest = Schemas["OrgProviderKeyUpdateRequest"]
 

@@ -306,6 +306,33 @@ describe("OverviewPage", () => {
     )
   })
 
+  it("states an unreachable provider without a link on a hosted deployment", async () => {
+    // Provider health reports on `config.providers`, the process-global table a
+    // hosted deployment serves no page for, so both candidate destinations are
+    // wrong: `/providers` is answered with "not available here", and the
+    // organization page lists a different table the instance is not on.
+    mockApi({
+      health: {
+        providers: [],
+        healthy: 2,
+        total: 3,
+        checked_at: "2026-07-22T00:00:00Z",
+      },
+    })
+    renderPage(
+      <OverviewPage />,
+      "/overview",
+      bootstrap({ deployment_type: "hosted", surfaces: HOSTED_SURFACES }),
+    )
+
+    expect(
+      await screen.findByText("1 provider unreachable"),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole("link", { name: "1 provider unreachable" }),
+    ).toBeNull()
+  })
+
   it("hides the status strip when nothing needs attention", async () => {
     mockApi({
       health: {
