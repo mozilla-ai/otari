@@ -77,10 +77,22 @@ describe("TrendChip", () => {
     expect(hasArrow(container)).toBe(false)
   })
 
-  it("says the direction in a word, since hue carries good vs bad", () => {
-    render(<TrendChip fraction={-0.021} polarity="down-is-good" />)
-    // A fall that is good and a fall that is bad render the same text and the
-    // same arrow, so the word is all a screen reader has to go on.
+  it("says the judgment, not just the direction, when there is one to make", () => {
+    // The same fall under each polarity: identical text, identical arrow, and
+    // the color is the only visible difference, so the announced phrase is all a
+    // screen reader has to tell the two apart.
+    const good = render(
+      <TrendChip fraction={-0.021} polarity="down-is-good" />,
+    ).container
+    expect(good).toHaveTextContent("down, better")
+    const bad = render(
+      <TrendChip fraction={-0.021} polarity="up-is-good" />,
+    ).container
+    expect(bad).toHaveTextContent("down, worse")
+  })
+
+  it("says the direction alone when the metric has no good direction", () => {
+    render(<TrendChip fraction={-0.021} polarity="neutral" />)
     expect(screen.getByText("down")).toBeInTheDocument()
   })
 
@@ -118,7 +130,7 @@ describe("TrendChip", () => {
     const { container } = render(
       <TrendChip fraction={0.033} className="ml-auto" />,
     )
-    expect(container.querySelector(".chip")?.className).toContain("ml-auto")
+    expect(container.firstElementChild).toHaveClass("ml-auto")
   })
 
   it("hides the arrow from the accessibility tree", () => {

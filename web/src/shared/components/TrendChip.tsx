@@ -52,10 +52,23 @@ const ARROW_SIZE: Record<TrendSize, string> = {
 // what stops a chip from claiming a fall while reading "-0.0%".
 const FLAT_THRESHOLD = 0.0005
 
-const DIRECTION_LABEL: Record<TrendDirection, string> = {
+const DIRECTION_WORD: Record<TrendDirection, string> = {
   up: "up",
   down: "down",
   flat: "no change",
+}
+
+const JUDGMENT_WORD = { success: "better", danger: "worse" } as const
+
+// What the chip says to a reader who sees neither the arrow nor the hue.
+// Direction alone will not do it: the sign already carries direction, while
+// `polarity` puts good and bad in color, so a fall that is an improvement and a
+// fall that is a regression would otherwise announce identically. The judgment
+// is appended only where there is one to make, which is why a `neutral` metric
+// still says just the direction.
+function announce({ direction, color }: TrendState): string {
+  if (color === "default") return DIRECTION_WORD[direction]
+  return `${DIRECTION_WORD[direction]}, ${JUDGMENT_WORD[color]}`
 }
 
 /**
@@ -89,8 +102,10 @@ export function TrendChip({
   variant = "soft",
   size = "sm",
   // Replaces the formatted percentage when the change reads better as an
-  // absolute ("+$1,234"). `fraction` still decides the arrow and the color, so
-  // pass the signed value even when its text is not what is shown. Named `text`
+  // absolute ("+$1,234"). `fraction` still decides the arrow, the color and the
+  // announced phrase, so it has to be the same change this string describes: a
+  // fraction inside the flat threshold announces "no change" whatever the string
+  // beside it says, so agreeing on the sign alone is not enough. Named `text`
   // rather than `value` because `value` on a component means the datum it is
   // about, and this is only what gets printed.
   text,
@@ -114,7 +129,8 @@ export function TrendChip({
   className?: string
 }) {
   if (fraction == null) return null
-  const { direction, color } = trendState(fraction, polarity)
+  const state = trendState(fraction, polarity)
+  const { direction, color } = state
   const Arrow = direction === "up" ? FiArrowUp : FiArrowDown
   // A flat chip prints a bare zero: the sign of a change too small to render is
   // noise ("-0.0%"), and it would contradict the missing arrow beside it.
@@ -127,13 +143,14 @@ export function TrendChip({
         <Arrow className={`${ARROW_SIZE[size]} shrink-0`} aria-hidden="true" />
       )}
       {/* The arrow is decoration a screen reader never sees, and `polarity`
-          puts the good/bad distinction in hue alone, which no reader of the text
-          can recover: a -2.1% that is good and a -2.1% that is bad differ only
-          in green vs red. So direction is also said in a word. It sits outside
+          puts the good/bad distinction in hue alone: a -2.1% that is an
+          improvement and a -2.1% that is a regression print the same text and
+          draw the same arrow, and differ only in green vs red. So `announce`
+          says the judgment as well as the direction. It sits outside
           `Chip.Label` so it does not join the visible label's text, and
           `sr-only` is rendered (clipped) rather than hidden, so `select-none`
           keeps it out of a drag selection over the chip, as in ModelsPage. */}
-      <span className="sr-only select-none">{DIRECTION_LABEL[direction]}</span>
+      <span className="sr-only select-none">{announce(state)}</span>
       <Chip.Label className="tabular-nums">
         {caption ? `${printed} ${caption}` : printed}
       </Chip.Label>
