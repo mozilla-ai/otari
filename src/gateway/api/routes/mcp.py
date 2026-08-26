@@ -101,6 +101,7 @@ async def execute_mcp_tool(
             detail=str(exc),
         ) from exc
 
+    result: CallToolResult | None = None
     try:
         async with MCPClientPool([server]) as pool:
             if not pool.owns_tool(request.tool_name):
@@ -108,12 +109,21 @@ async def execute_mcp_tool(
                     status_code=status.HTTP_404_NOT_FOUND,
                     detail=MCP_TOOL_NOT_FOUND_DETAIL,
                 )
-            return await pool.call_tool_result(request.tool_name, request.arguments)
+            result = await pool.call_tool_result(request.tool_name, request.arguments)
     except HTTPException:
         raise
     except Exception as exc:
-        logger.warning("Stateless MCP request failed error_class=%s", type(exc).__name__)
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=MCP_EXECUTION_FAILED_DETAIL,
-        ) from exc
+        if result is not None:
+            # The tool already returned a definitive result. A transport close
+            # failure must not invite the caller to retry a mutating operation.
+            logger.warning("Stateless MCP cleanup failed error_class=%s", type(exc).__name__)
+        else:
+            logger.warning("Stateless MCP request failed error_class=%s", type(exc).__name__)
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=MCP_EXECUTION_FAILED_DETAIL,
+            ) from exc
+
+    if result is None:
+        raise RuntimeError("MCP tool call completed without a result")
+    return result

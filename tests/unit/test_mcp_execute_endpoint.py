@@ -81,6 +81,7 @@ class _FakePool:
     owns = True
     enter_error: Exception | None = None
     call_error: Exception | None = None
+    exit_error: Exception | None = None
     instances: list[_FakePool] = []
 
     def __init__(self, configs: list[Any]) -> None:
@@ -94,7 +95,8 @@ class _FakePool:
         return self
 
     async def __aexit__(self, *exc: object) -> None:
-        return None
+        if self.exit_error is not None:
+            raise self.exit_error
 
     def owns_tool(self, name: str) -> bool:
         return self.owns
@@ -112,6 +114,7 @@ def fake_pool(monkeypatch: pytest.MonkeyPatch) -> type[_FakePool]:
     _FakePool.owns = True
     _FakePool.enter_error = None
     _FakePool.call_error = None
+    _FakePool.exit_error = None
     _FakePool.result = CallToolResult(
         content=[TextContent(type="text", text="two open issues")],
         structuredContent={"count": 2},
@@ -156,6 +159,30 @@ def test_server_reported_error_remains_a_typed_success(
     assert response.status_code == 200, response.text
     assert response.json()["isError"] is True
     assert response.json()["content"] == [{"type": "text", "text": "permission denied"}]
+
+
+def test_cleanup_failure_does_not_hide_a_successful_mutating_call(
+    tmp_path: Path,
+    fake_pool: type[_FakePool],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    warning = Mock()
+    monkeypatch.setattr(log_config.logger, "warning", warning)
+    fake_pool.exit_error = RuntimeError("server-secret cleanup failure")
+
+    with _standalone_client(tmp_path) as client:
+        warning.reset_mock()
+        response = client.post("/v1/mcp/execute", headers=AUTH, json=_body())
+
+    assert response.status_code == 200, response.text
+    assert response.json()["content"] == [{"type": "text", "text": "two open issues"}]
+    assert fake_pool.instances[0].calls == [
+        ("list_issues", {"repository": "mozilla-ai/otari"})
+    ]
+    warning.assert_called_once_with(
+        "Stateless MCP cleanup failed error_class=%s",
+        "RuntimeError",
+    )
 
 
 def test_requires_authentication_before_contacting_server(
