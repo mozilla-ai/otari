@@ -73,16 +73,19 @@ test.describe("standalone tenancy", () => {
     // gateway is shared with the flow below, which adds a member and leaves a
     // suspended one behind on a re-run.
     const operator = memberRow(page, OPERATOR)
-    await expect(operator.getByLabel(/^Role for /)).toHaveValue("owner")
+    const role = operator.getByRole("button", { name: /Role for / })
+    await expect(role).toHaveText(/Owner/)
     // The last active owner cannot be demoted or removed: doing so would leave
     // the organization with nobody able to manage or delete it.
-    await expect(operator.getByLabel(/^Role for /)).toBeDisabled()
+    await expect(role).toBeDisabled()
     await expect(
       operator.getByRole("button", { name: "Remove" }),
     ).toBeDisabled()
     // Status is shown, not set: suspending is what Remove does, behind a
     // confirmation, and a suspended membership leaves the roster entirely.
-    await expect(operator.getByLabel(/^Status for /)).toHaveCount(0)
+    await expect(
+      operator.getByRole("button", { name: /Status for / }),
+    ).toHaveCount(0)
     await expect(operator.getByText("Active")).toBeVisible()
   })
 

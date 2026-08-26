@@ -821,7 +821,6 @@ export function FilterSelect({
       onSelectionChange={(key) => {
         if (key != null) onChange(optionValue(String(key)))
       }}
-      className={label ? "flex flex-col gap-1" : undefined}
     >
       {label ? (
         <Label className="text-xs font-medium text-muted">{label}</Label>
