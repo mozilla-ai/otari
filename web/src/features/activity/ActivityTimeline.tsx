@@ -281,7 +281,7 @@ export function ActivityTimeline({
             <ChartLegend series={chartSeries} />
           </span>
           <div className="flex items-center gap-1.5">
-            <span className="hidden text-[11px] text-muted sm:inline">
+            <span className="hidden text-xs text-muted sm:inline">
               drag across the chart to zoom
             </span>
             <Button

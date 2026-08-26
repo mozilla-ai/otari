@@ -201,7 +201,7 @@ export function StatCard({
         ) : null}
       </span>
       {/* Two lines reserved, always. A delta like "5.8% errors · ▲ 214.1% vs
-          prev" wraps in a narrow tile while its neighbours stay on one line,
+          prev" wraps in a narrow tile while its neighbors stay on one line,
           and a row of five tiles then stops aligning. This is a layout fix and
           not a type fix on purpose: sizing the type to the longest string would
           be sizing the type by accident. min-h-9 is two 18px lines. */}
