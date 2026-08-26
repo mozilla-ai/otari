@@ -119,7 +119,7 @@
   /* ── Text — brand black + cool neutral muted ─────────────────────────── */
   --color-text: #1a1a1a; /* primary body and headings (Otari brand black) */
   --color-text-muted: #545b62; /* secondary text, labels, captions */
-  --color-text-subtle: #80868d; /* tertiary, timestamps, helper text */
+  --color-text-subtle: #62686f; /* tertiary, timestamps, helper text */
   --color-text-on-primary: #ffffff; /* text on primary-colored bg */
   --color-text-on-inverse: #ffffff; /* text on inverse/dark surface */
 
@@ -356,7 +356,7 @@
   /* ── Text ──────────────────────────────────────────────── */
   --color-text: #f0ede5; /* warm off-white (echoes brand B26 inverted) */
   --color-text-muted: #9aa4ae;
-  --color-text-subtle: #6e7882;
+  --color-text-subtle: #919ba5;
   --color-text-on-primary: #0a1419; /* deep teal-black for contrast on light teal */
   --color-text-on-inverse: #15171c;
 
@@ -555,6 +555,97 @@
   --shadow-elevation-md: var(--shadow-md);
   --shadow-elevation-lg: var(--shadow-lg);
   --shadow-modal: var(--shadow-modal);
+  /* Type scale, registration half. Two kinds of key live here and only these
+   * two, because they are the keys `@heroui/styles` does not declare:
+   *
+   *   --text-caption          a seventh step Tailwind does not ship, between
+   *                           --text-xs (12) and --text-sm (14). Registering it
+   *                           here is what makes it a real step rather than a
+   *                           number repeated in a role.
+   *   --text-*--letter-spacing  tracking per size step. Registration is what
+   *                           makes Tailwind emit the `letter-spacing` line in
+   *                           `.text-xs` and friends at all; a value declared
+   *                           only at :root is never read, because the utility
+   *                           would not reference it. So these must be here and
+   *                           the sizes must not (see the :root block below).
+   *
+   * Every value that HeroUI also declares lives in the unlayered `:root` block
+   * further down, NOT here. The comment there says why. */
+  --text-caption: 13px;
+  --text-caption--line-height: 19px;
+  --text-caption--letter-spacing: 0.0075em;
+  --text-xs--letter-spacing: 0.01em;
+  --text-sm--letter-spacing: 0.005em;
+  --text-base--letter-spacing: 0em;
+  --text-lg--letter-spacing: -0.01em;
+  --text-xl--letter-spacing: -0.015em;
+  --text-2xl--letter-spacing: -0.02em;
+}
+
+/* =============================================================
+ * Type scale, value half. READ THIS BEFORE ADDING AN @import.
+ *
+ * These are the keys `@heroui/styles` declares too, and that is the whole
+ * reason this block exists and is shaped the way it is.
+ *
+ * `@heroui/styles` is a prebuilt Tailwind stylesheet: it ships its own
+ * `@layer theme { :root, :host { … } }` carrying the full default theme,
+ * `--text-sm`, `--font-weight-medium: 500` and `--tracking-tight` included.
+ * Tailwind hoists every `@theme` block into its own theme layer at the
+ * position of `@import "tailwindcss"`, which is line 1, so HeroUI's literal
+ * theme layer lands after ours. Same layer, same `:root` specificity: source
+ * order decides, and HeroUI is second. An override of one of these keys
+ * written in `@theme` therefore compiles clean, emits, and loses. It changes
+ * nothing and reports nothing.
+ *
+ * So this block is deliberately **unlayered**. An unlayered declaration beats
+ * every `@layer`, which means it wins because of what it is and not because of
+ * where it sits. Do not move these into `@theme`, and do not rely on this
+ * block merely coming after the import: the next `@import` somebody adds would
+ * quietly outrank it if the win were only positional.
+ *
+ * Deliberately NOT in the light and dark theme blocks. Type metrics have no
+ * theme axis, and declaring twenty-odd of them twice creates a failure the
+ * single declaration cannot have: one block edited and the other missed, giving
+ * the two themes different type metrics, invisible in whichever theme you are
+ * looking at, and undetectable by the both-blocks assertion because the key
+ * sets would still match. `foundation.test.ts` pins this decision from both
+ * sides so the next reader finds a rule rather than an accident.
+ * ============================================================= */
+:root {
+  /* Size / line-height per step. Whole pixels throughout: a fractional size
+   * reflows every dense table for no legible gain, which was tested at 100%,
+   * 125% and 150% zoom before these landed. Tracking lives in the @theme
+   * registration above, positive on the small steps where tight setting goes
+   * muddy and negative on the large ones where it goes loose. */
+  --text-xs: 12px;
+  --text-xs--line-height: 18px;
+  --text-sm: 14px;
+  --text-sm--line-height: 20px;
+  --text-base: 16px;
+  --text-base--line-height: 24px;
+  --text-lg: 18px;
+  --text-lg--line-height: 26px;
+  --text-xl: 22px;
+  --text-xl--line-height: 28px;
+  --text-2xl: 26px;
+  --text-2xl--line-height: 32px;
+
+  /* Hierarchy comes from size and tracking, so the weight axis is two values
+   * doing real work instead of four crowded together. 550 is the one emphasis
+   * weight; 400 is the floor and is where nearly everything sits.
+   *
+   * `--font-weight-medium: 400` is deliberate and the name is now a lie. It is
+   * how ~140 `font-medium` call sites and HeroUI's own 93 internal uses come
+   * off 500 in two lines rather than in 140 edits, and it is the largest
+   * single visual change here: before it, no text in the shell chrome was
+   * regular, so weight could not signal anything because every row had already
+   * spent it. Deleting the now-inert utilities is follow-up, not this change. */
+  --font-weight-normal: 400;
+  --font-weight-medium: 400;
+  --font-weight-semibold: 550;
+  --font-weight-bold: 600;
+  --tracking-tight: -0.015em;
 }
 
 /* =============================================================
@@ -596,60 +687,94 @@
  * ============================================================= */
 @utility text-display {
   font-family: var(--font-display);
-  font-size: 1.5rem; /* 24px */
-  font-weight: 700;
-  line-height: 1.2;
-  letter-spacing: 0; /* neutral for the Zilla Slab slab serif */
+  font-size: var(--text-2xl);
+  line-height: var(--text-2xl--line-height);
+  /* Overrides the step's -0.02em. Zilla Slab is a slab serif with wider
+     sidebearings than the body face, so it needs less negative tracking to
+     read as set rather than as squeezed. The step keeps -0.02em for any sans
+     consumer of text-2xl. */
+  letter-spacing: -0.01em;
+  /* 500, and ZillaSlab-Medium.woff2 is the only cut this leaves in use. */
+  font-weight: 500;
   color: var(--color-text);
 }
 @utility text-heading {
-  font-family: var(--font-display);
-  font-size: 1.125rem; /* 18px */
-  font-weight: 600;
-  line-height: 1.3;
+  /* The body face, not the display face: at 18px a slab serif competes with
+     the page title above it instead of sitting under it. */
+  font-family: var(--font-sans);
+  font-size: var(--text-lg);
+  line-height: var(--text-lg--line-height);
+  letter-spacing: var(--text-lg--letter-spacing);
+  font-weight: var(--font-weight-semibold);
   color: var(--color-text);
 }
 @utility text-title {
-  font-size: 0.9375rem; /* 15px */
-  font-weight: 600;
-  line-height: 1.35;
+  font-family: var(--font-sans);
+  font-size: var(--text-base);
+  line-height: var(--text-base--line-height);
+  letter-spacing: var(--text-base--letter-spacing);
+  font-weight: var(--font-weight-semibold);
   color: var(--color-text);
 }
 @utility text-body {
-  font-size: 0.875rem; /* 14px */
-  font-weight: 400;
-  line-height: 1.55;
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  line-height: var(--text-sm--line-height);
+  letter-spacing: var(--text-sm--letter-spacing);
+  font-weight: var(--font-weight-normal);
   color: var(--color-text);
 }
 @utility text-emphasis {
-  font-size: 0.875rem;
-  font-weight: 600;
-  line-height: 1.55;
+  /* The same step as text-body, one weight apart. That is the whole emphasis
+     mechanism: 550 against a 400 floor, once, rather than a second size. */
+  font-family: var(--font-sans);
+  font-size: var(--text-sm);
+  line-height: var(--text-sm--line-height);
+  letter-spacing: var(--text-sm--letter-spacing);
+  font-weight: var(--font-weight-semibold);
   color: var(--color-text);
 }
 @utility text-caption {
-  font-size: 0.8125rem; /* 13px */
-  font-weight: 400;
-  line-height: 1.45;
+  /* 13px, the step below body, registered in @theme because Tailwind ships no
+     size between 12 and 14. Its absence is why five different meanings were
+     sharing 14px: a secondary line had nowhere lighter to go than the value it
+     was explaining. */
+  font-family: var(--font-sans);
+  font-size: var(--text-caption);
+  line-height: var(--text-caption--line-height);
+  letter-spacing: var(--text-caption--letter-spacing);
+  font-weight: var(--font-weight-normal);
   color: var(--color-text-muted);
 }
 @utility text-overline {
-  font-size: 0.6875rem; /* 11px */
-  font-weight: 600;
-  line-height: 1.2;
+  /* 12px rather than 11: of the three hand-rolled overline spellings this
+     replaces, the most common one was already 12, and an eighth theme step for
+     one role is not worth a point of size. */
+  font-family: var(--font-sans);
+  font-size: var(--text-xs);
+  line-height: var(--text-xs--line-height);
+  /* Overrides the step's +0.01em. Uppercase at a small size needs more air
+     between letters than lowercase does at the same size. */
   letter-spacing: 0.06em;
+  font-weight: var(--font-weight-semibold);
   text-transform: uppercase;
   color: var(--color-text-muted);
 }
 @utility text-chrome-row {
-  font-size: 0.84375rem; /* 13.5px, a step under the rail's own 14px rows */
-  line-height: 1.125rem;
+  font-size: var(--text-caption);
+  line-height: var(--text-caption--line-height);
+  letter-spacing: var(--text-caption--letter-spacing);
 }
 @utility text-chrome-meta {
-  font-size: 0.71875rem; /* 11.5px */
-  line-height: 0.9375rem;
+  font-size: var(--text-xs);
+  line-height: var(--text-xs--line-height);
+  letter-spacing: var(--text-xs--letter-spacing);
 }
 @utility text-chrome-initials {
+  /* Deliberately off-scale, and the one documented exception. Two letters in a
+     26px avatar are recognized, not read, so putting them on the scale would
+     either overflow the avatar or drag a real text step down to 9px to suit a
+     monogram. Leave the literal; it is not an oversight. */
   font-size: 0.5625rem; /* 9px, sized to a 26px avatar */
   line-height: 1;
 }
@@ -691,13 +816,23 @@ body {
   color: var(--color-text);
 }
 
-h1,
-h2,
-h3,
-h4,
-h5,
-h6 {
-  font-family: var(--font-display);
+/* In `@layer base` rather than unlayered, which is a cascade fix and not a
+   tidy-up: `@utility` lands in `@layer utilities`, and an unlayered rule beats
+   every layer, so while this was unlayered it silently overrode the
+   `font-family` of any role applied to a heading element. `text-heading` and
+   `text-title` are set in the body face now, and both are worn by `<h2>` and
+   `<h3>`, so unlayered here would have kept them in Zilla Slab and made the
+   role a suggestion. Layered, a bare heading still gets the display face and a
+   role still wins. */
+@layer base {
+  h1,
+  h2,
+  h3,
+  h4,
+  h5,
+  h6 {
+    font-family: var(--font-display);
+  }
 }
 
 ::selection {
@@ -904,8 +1039,21 @@ h6 {
   > [role="presentation"]:last-of-type
   > .table__column {
   background-color: transparent;
-  color: var(--color-text);
-  font-weight: 600;
+  /* The single overline spec, matching `@utility text-overline`, because a
+     column header is a label above a group and that is exactly the role. It
+     replaces a hardcoded `font-weight: 600` that no token could reach: with the
+     rest of the scale down at 400/550 that literal had become the heaviest text
+     in the product, so the header row out-weighted every cell it labeled. A
+     header is now a point smaller, 50 units lighter, muted, and letterspaced,
+     which is what stops it competing with its own rows. Kept as a rule here
+     rather than a class at the call site because these three selectors reach
+     into HeroUI's table DOM, which no call site can. */
+  color: var(--color-text-muted);
+  font-size: var(--text-xs);
+  line-height: var(--text-xs--line-height);
+  letter-spacing: 0.06em;
+  font-weight: var(--font-weight-semibold);
+  text-transform: uppercase;
   border-radius: 0;
 }
 .otari-table .table__column::after {

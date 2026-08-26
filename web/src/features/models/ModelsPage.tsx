@@ -593,9 +593,7 @@ function PanelSection({
 }) {
   return (
     <div className="flex flex-col gap-2">
-      <span className="text-xs font-semibold uppercase tracking-wide text-muted">
-        {title}
-      </span>
+      <span className="text-overline">{title}</span>
       {children}
     </div>
   )
@@ -1304,7 +1302,7 @@ function ModelTable({
         id: "input",
         header: (
           <span className="inline-flex items-center gap-1">
-            {`${comparisonLabel} in / out $ / 1M`}
+            {`${comparisonLabel} in / out / 1M`}
             <PricingInfo />
           </span>
         ),
@@ -1326,7 +1324,10 @@ function ModelTable({
       },
       {
         id: "caching",
-        header: `Caching ${comparisonContextTokens == null ? "policy" : comparisonLabel}`,
+        header:
+          comparisonContextTokens == null
+            ? "Caching"
+            : `Caching ${comparisonLabel}`,
         align: "end",
         cell: (row) => (
           <CachingCell
@@ -1338,7 +1339,7 @@ function ModelTable({
       },
       {
         id: "policy",
-        header: "Pricing policy",
+        header: "Pricing",
         align: "end",
         cell: (row) => (
           <PricingPolicyCell row={row} onEdit={() => onEditPricing(row.key)} />

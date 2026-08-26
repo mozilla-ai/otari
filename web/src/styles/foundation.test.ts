@@ -73,6 +73,103 @@ const HEROUI_VARIABLES = [
   "--overlay-shadow",
 ]
 
+const TYPE_NAMESPACES = /^--(text|font-weight|tracking)-/
+
+describe("the type scale's two halves", () => {
+  // The scale is split on purpose and the split is easy to undo by accident, so
+  // it is pinned from both sides. `@heroui/styles` is a prebuilt Tailwind
+  // stylesheet carrying its own `@layer theme` with the default `--text-*`,
+  // `--font-weight-*` and `--tracking-*` in it, and it is imported after
+  // Tailwind, so an override of one of those written in `@theme` loses on source
+  // order: it compiles, emits, and changes nothing. The values therefore live in
+  // an unlayered `:root` block, which beats every layer, and only the keys
+  // HeroUI never declares are registered in `@theme`.
+  const TYPE_VALUES = declarations(block(":root"))
+
+  it("declares every contested type key in the unlayered :root block", () => {
+    for (const key of [
+      "--text-xs",
+      "--text-xs--line-height",
+      "--text-sm",
+      "--text-sm--line-height",
+      "--text-base",
+      "--text-base--line-height",
+      "--text-lg",
+      "--text-lg--line-height",
+      "--text-xl",
+      "--text-xl--line-height",
+      "--text-2xl",
+      "--text-2xl--line-height",
+      "--font-weight-normal",
+      "--font-weight-medium",
+      "--font-weight-semibold",
+      "--font-weight-bold",
+      "--tracking-tight",
+    ]) {
+      expect(
+        TYPE_VALUES.get(key),
+        `${key} is not declared in the unlayered :root block, so @heroui/styles' own value wins`,
+      ).toBeDefined()
+    }
+  })
+
+  it("keeps type metrics out of the theme blocks", () => {
+    // Not a style preference. Type has no theme axis, and declaring these twice
+    // would allow one block to be edited and the other missed, giving the two
+    // themes different type metrics: invisible in whichever theme you are
+    // looking at, and undetectable by the both-themes assertion below, because
+    // the key sets would still match.
+    for (const [theme, tokens] of [
+      ["light", LIGHT],
+      ["dark", DARK],
+    ] as const) {
+      const offenders = [...tokens.keys()].filter((name) =>
+        TYPE_NAMESPACES.test(name),
+      )
+      expect(
+        offenders,
+        `the ${theme} theme block declares type metrics (${offenders.join(", ")}); they belong in the unlayered :root block, declared once`,
+      ).toEqual([])
+    }
+  })
+
+  it("registers in @theme only the keys HeroUI does not declare", () => {
+    // Tracking is emitted into `.text-xs` and friends only if the key is
+    // registered at build time, so these have to be in `@theme`; a value at
+    // :root alone is never read, because the utility would not reference it.
+    const theme = declarations(block("@theme"))
+    for (const key of [
+      "--text-caption",
+      "--text-caption--line-height",
+      "--text-caption--letter-spacing",
+      "--text-xs--letter-spacing",
+      "--text-sm--letter-spacing",
+      "--text-base--letter-spacing",
+      "--text-lg--letter-spacing",
+      "--text-xl--letter-spacing",
+      "--text-2xl--letter-spacing",
+    ]) {
+      expect(
+        theme.get(key),
+        `${key} is not registered in @theme, so its utility never references it`,
+      ).toBeDefined()
+    }
+    // The other direction: a size or weight registered here is the silent-no-op
+    // mistake this split exists to prevent.
+    const contested = [...theme.keys()].filter(
+      (name) =>
+        TYPE_NAMESPACES.test(name) &&
+        !name.endsWith("--letter-spacing") &&
+        name !== "--text-caption" &&
+        name !== "--text-caption--line-height",
+    )
+    expect(
+      contested,
+      `@theme registers type values @heroui/styles also declares (${contested.join(", ")}); it loses on source order, so these belong in the unlayered :root block`,
+    ).toEqual([])
+  })
+})
+
 describe("design foundation tokens", () => {
   it("declares the same token set in both themes", () => {
     // Each theme block owns the complete set of variables it needs rather than

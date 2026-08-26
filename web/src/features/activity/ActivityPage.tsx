@@ -812,9 +812,7 @@ function RoutingPlan({ entry }: { entry: UsageEntry }) {
 
   return (
     <div className="flex flex-col gap-2">
-      <span className="text-[11px] font-medium uppercase tracking-wide text-muted">
-        Routing plan · {entry.policy_name}
-      </span>
+      <span className="text-overline">Routing plan · {entry.policy_name}</span>
       <span className="text-sm text-foreground">{summary}</span>
       <div className="overflow-x-auto rounded-lg border border-border">
         <table
@@ -910,9 +908,7 @@ function DetailField({
 }) {
   return (
     <div className="flex flex-col gap-0.5">
-      <span className="text-[11px] font-medium uppercase tracking-wide text-muted">
-        {label}
-      </span>
+      <span className="text-overline">{label}</span>
       {copyValue ? (
         <CopyableValue
           value={copyValue}
@@ -967,7 +963,7 @@ function RequestDetail({
     <div className="flex flex-col gap-4 px-4 py-4">
       {entry.error_message ? (
         <div className="flex flex-col gap-1.5">
-          <span className="text-[11px] font-medium uppercase tracking-wide text-muted">
+          <span className="text-overline">
             Error{entry.status_code !== null ? ` (${entry.status_code})` : ""}
           </span>
           <pre className="max-h-48 overflow-auto rounded-lg border border-danger bg-danger-subtle p-3 text-xs whitespace-pre-wrap break-all text-danger">
@@ -1070,9 +1066,7 @@ function RequestDetail({
       ) : null}
       {entry.pricing_breakdown?.length ? (
         <div className="flex flex-col gap-2">
-          <span className="text-[11px] font-medium uppercase tracking-wide text-muted">
-            Billed meters
-          </span>
+          <span className="text-overline">Billed meters</span>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {sortedBreakdown(entry.pricing_breakdown).map((line) => {
               // A line of neither known shape was written by an older gateway.
