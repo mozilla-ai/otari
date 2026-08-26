@@ -366,10 +366,10 @@ async def _call_stream_tool(
             return outcome.content, outcome.is_error, False
         text = await pool.call_tool(name, arguments)
         return text, is_tool_error(text), False
-    except Exception:  # noqa: BLE001 - recoverable tool failure is model input
+    except Exception as exc:  # noqa: BLE001 - recoverable tool failure is model input
         # Transport exceptions may include URLs, headers, or credentials. Neither
         # logs, client events, nor the model-facing result may receive that detail.
-        logger.warning("Gateway tool %s execution failed", name)
+        logger.warning("Gateway tool %s execution failed: %s", name, type(exc).__name__)
         detail = "MCP tool execution failed" if mcp_backend is not None else "Gateway tool execution failed"
         return f"[tool error] {detail}", True, True
 

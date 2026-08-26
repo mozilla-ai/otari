@@ -233,6 +233,28 @@ def test_mcp_result_is_removed_only_with_its_gateway_use() -> None:
     assert kept == provider_pair
 
 
+def test_orphaned_gateway_mcp_result_is_stripped() -> None:
+    messages: list[dict[str, Any]] = [
+        {
+            "role": "assistant",
+            "content": [
+                {
+                    "type": "mcp_tool_result",
+                    "tool_use_id": f"{MCP_ACTIVITY_ID_PREFIX}orphaned",
+                    "content": "result",
+                    "is_error": False,
+                },
+                {"type": "text", "text": "answer"},
+            ],
+        }
+    ]
+
+    assert _has_gateway_minted_mcp_blocks(messages) is True
+    assert _strip_gateway_minted_blocks(messages)[0]["content"] == [
+        {"type": "text", "text": "answer"}
+    ]
+
+
 def test_provider_signed_blocks_survive() -> None:
     """A search Anthropic ran and signed must round-trip untouched, even with
     interception on: stripping it would break the citations chain Anthropic owns."""

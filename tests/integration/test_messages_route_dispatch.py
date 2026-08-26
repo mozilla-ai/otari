@@ -530,6 +530,60 @@ def test_mcp_servers_dispatches_through_anthropic_tool_loop(
     assert plain_amessages_called is False
 
 
+def test_mcp_servers_do_not_widen_web_search_replay_stripping(
+    client: TestClient,
+    api_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """MCP configuration must not strip web-search blocks when interception is off."""
+    monkeypatch.delenv("OTARI_WEB_SEARCH_INTERCEPT", raising=False)
+    replayed_messages = [
+        {"role": "user", "content": "search"},
+        {
+            "role": "assistant",
+            "content": [
+                {"type": "server_tool_use", "id": "srvtoolu_echoed", "name": "web_search", "input": {}},
+                {
+                    "type": "web_search_tool_result",
+                    "tool_use_id": "srvtoolu_echoed",
+                    "content": [],
+                },
+                {"type": "text", "text": "answer"},
+            ],
+        },
+        {"role": "user", "content": "continue"},
+    ]
+    captured: dict[str, Any] = {}
+
+    async def fake_loop(
+        *, completion_kwargs: Any, pool: Any, max_iterations: int, emit_native_web_search: bool = False
+    ) -> MessageResponse:
+        captured.update(completion_kwargs)
+        return _text_response("ok")
+
+    with (
+        patch("gateway.api.routes.messages.anthropic_tool_loop", new=fake_loop),
+        patch(
+            "gateway.services.mcp_client.MCPClientPool.__aenter__",
+            new=AsyncMock(return_value=AsyncMock(purpose_hints=lambda: [])),
+        ),
+        patch("gateway.services.mcp_client.MCPClientPool.__aexit__", new=AsyncMock(return_value=None)),
+    ):
+        resp = client.post(
+            "/v1/messages",
+            json={
+                "model": "anthropic:claude-3-5-sonnet-20241022",
+                "messages": replayed_messages,
+                "max_tokens": 100,
+                "mcp_servers": [{"name": "test", "url": "http://127.0.0.1:9999/mcp"}],
+            },
+            headers=api_key_header,
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert captured["messages"] == replayed_messages
+
+
 def test_code_execution_dispatches_through_sandbox_backend(
     client: TestClient,
     api_key_header: dict[str, str],

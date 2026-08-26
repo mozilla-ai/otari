@@ -873,7 +873,6 @@ async def test_stream_emits_live_mcp_activity_around_execution(
 @pytest.mark.asyncio
 async def test_stream_mcp_exception_emits_error_without_logging_detail(
     monkeypatch: pytest.MonkeyPatch,
-    caplog: pytest.LogCaptureFixture,
 ) -> None:
     iter_streams = iter(
         [
@@ -907,7 +906,13 @@ async def test_stream_mcp_exception_emits_error_without_logging_detail(
             self.calls.append((name, arguments))
             raise RuntimeError("credential-detail-do-not-log")
 
+    logged_warnings: list[tuple[Any, ...]] = []
+
+    def capture_warning(message: str, *args: Any) -> None:
+        logged_warnings.append((message, *args))
+
     monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
+    monkeypatch.setattr(messages_loop_module.logger, "warning", capture_warning)
     pool = FailingActivityPool()
     events = [
         event
@@ -930,8 +935,11 @@ async def test_stream_mcp_exception_emits_error_without_logging_detail(
     model_result = provider_calls[1]["messages"][-1]["content"][0]
     assert model_result["content"] == "[tool error] MCP tool execution failed"
     assert "credential-detail-do-not-log" not in str(provider_calls[1]["messages"])
-    assert "credential-detail-do-not-log" not in caplog.text
-    assert "do-not-log" not in caplog.text
+    assert logged_warnings == [
+        ("Gateway tool %s execution failed: %s", "fetch_url", "RuntimeError")
+    ]
+    assert "credential-detail-do-not-log" not in str(logged_warnings)
+    assert "do-not-log" not in str(logged_warnings)
 
 
 @pytest.mark.asyncio

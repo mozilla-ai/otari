@@ -153,8 +153,22 @@ def _is_gateway_minted_result(block: Any) -> bool:
     return all(isinstance(hit, dict) and not hit.get("encrypted_content") for hit in hits)
 
 
+def _is_gateway_minted_mcp_block(block: Any) -> bool:
+    """Whether ``block`` carries this gateway's reserved MCP activity prefix."""
+    if not isinstance(block, dict):
+        return False
+    block_type = block.get("type")
+    if block_type == "mcp_tool_use":
+        activity_id = block.get("id")
+    elif block_type == "mcp_tool_result":
+        activity_id = block.get("tool_use_id")
+    else:
+        return False
+    return str(activity_id or "").startswith(MCP_ACTIVITY_ID_PREFIX)
+
+
 def _has_gateway_minted_mcp_blocks(messages: Any) -> bool:
-    """Whether an inbound transcript contains an Otari-provenance MCP use block."""
+    """Whether an inbound transcript contains Otari-provenance MCP activity."""
     if not isinstance(messages, list):
         return False
     for message in messages:
@@ -163,12 +177,7 @@ def _has_gateway_minted_mcp_blocks(messages: Any) -> bool:
         content = message.get("content")
         if not isinstance(content, list):
             continue
-        if any(
-            isinstance(block, dict)
-            and block.get("type") == "mcp_tool_use"
-            and str(block.get("id") or "").startswith(MCP_ACTIVITY_ID_PREFIX)
-            for block in content
-        ):
+        if any(_is_gateway_minted_mcp_block(block) for block in content):
             return True
     return False
 
@@ -211,11 +220,9 @@ def _strip_gateway_minted_blocks(
             else set()
         )
         minted_mcp_ids = {
-            block.get("id")
+            block.get("id") if block.get("type") == "mcp_tool_use" else block.get("tool_use_id")
             for block in content
-            if isinstance(block, dict)
-            and block.get("type") == "mcp_tool_use"
-            and str(block.get("id") or "").startswith(MCP_ACTIVITY_ID_PREFIX)
+            if _is_gateway_minted_mcp_block(block)
         }
         kept_blocks = [block for block in content if not _is_minted_pair_member(block, minted_web_ids, minted_mcp_ids)]
         if len(kept_blocks) == len(content):
@@ -687,11 +694,7 @@ async def create_message(
     if request_fields.get("tools"):
         request_fields["tools"] = openai_to_anthropic_tools(request_fields["tools"])
     inbound_messages = request_fields.get("messages")
-    if inbound_messages and (
-        tool_ctx.intercepts_web_search
-        or tool_ctx.mcp_server_configs
-        or _has_gateway_minted_mcp_blocks(inbound_messages)
-    ):
+    if inbound_messages and tool_ctx.intercepts_web_search:
         request_fields["messages"] = _strip_gateway_minted_blocks(inbound_messages)
     if tool_ctx.use_sandbox:
         # ``container`` addresses Anthropic's own code-execution container, and
