@@ -555,25 +555,21 @@
   --shadow-elevation-md: var(--shadow-md);
   --shadow-elevation-lg: var(--shadow-lg);
   --shadow-modal: var(--shadow-modal);
-  /* Type scale, registration half. Two kinds of key live here and only these
-   * two, because they are the keys `@heroui/styles` does not declare:
+  /* Type scale, registration half. One kind of key lives here and nothing else:
+   * `--text-*--letter-spacing`, the per-step tracking. Registration is what makes
+   * Tailwind emit the `letter-spacing` line inside `.text-xs` and friends at all;
+   * a value declared only at :root is never read, because the utility would not
+   * reference it.
    *
-   *   --text-caption          a seventh step Tailwind does not ship, between
-   *                           --text-xs (12) and --text-sm (14). Registering it
-   *                           here is what makes it a real step rather than a
-   *                           number repeated in a role.
-   *   --text-*--letter-spacing  tracking per size step. Registration is what
-   *                           makes Tailwind emit the `letter-spacing` line in
-   *                           `.text-xs` and friends at all; a value declared
-   *                           only at :root is never read, because the utility
-   *                           would not reference it. So these must be here and
-   *                           the sizes must not (see the :root block below).
-   *
-   * Every value that HeroUI also declares lives in the unlayered `:root` block
-   * further down, NOT here. The comment there says why. */
-  --text-caption: 13px;
-  --text-caption--line-height: 19px;
-  --text-caption--letter-spacing: 0.0075em;
+   * Nothing else belongs here, and the two exclusions have different reasons.
+   * A value `@heroui/styles` also declares would lose on source order (see the
+   * unlayered `:root` block below). And a *size* registered in the `--text-*`
+   * namespace generates a `.text-<name>` utility, which collides with any
+   * `@utility` of the same name: both land in `@layer utilities`, the
+   * theme-derived declarations come second, and the role's own metrics go dead
+   * while still compiling and emitting. That is why the 13px caption step is
+   * `--text-caption-step` in the `:root` block rather than `--text-caption`
+   * here. `foundation.test.ts` pins both exclusions. */
   --text-xs--letter-spacing: 0.01em;
   --text-sm--letter-spacing: 0.005em;
   --text-base--letter-spacing: 0em;
@@ -620,6 +616,14 @@
    * muddy and negative on the large ones where it goes loose. */
   --text-xs: 12px;
   --text-xs--line-height: 18px;
+  /* The seventh step, between 12 and 14, which Tailwind does not ship. Named
+     `-step` rather than `--text-caption` on purpose: a `--text-*` key generates
+     a same-named utility that would outrank `@utility text-caption` in the same
+     layer and silently kill the role's own metrics. Nothing consumes this but
+     that role and `text-chrome-row`, so it needs no utility of its own. */
+  --text-caption-step: 13px;
+  --text-caption-step--line-height: 19px;
+  --text-caption-step--letter-spacing: 0.0075em;
   --text-sm: 14px;
   --text-sm--line-height: 20px;
   --text-base: 16px;
@@ -740,16 +744,21 @@
      sharing 14px: a secondary line had nowhere lighter to go than the value it
      was explaining. */
   font-family: var(--font-sans);
-  font-size: var(--text-caption);
-  line-height: var(--text-caption--line-height);
-  letter-spacing: var(--text-caption--letter-spacing);
+  font-size: var(--text-caption-step);
+  line-height: var(--text-caption-step--line-height);
+  letter-spacing: var(--text-caption-step--letter-spacing);
   font-weight: var(--font-weight-normal);
   color: var(--color-text-muted);
 }
 @utility text-overline {
-  /* 12px rather than 11: of the three hand-rolled overline spellings this
-     replaces, the most common one was already 12, and an eighth theme step for
-     one role is not worth a point of size. */
+  /* 12px rather than 11, and the reason is the scale rather than the call sites:
+     an eighth theme step for a single role is not worth a point of size, and
+     `--text-xs` is already exactly this size.
+     Worth being accurate about what moves. Five of the seven hand-rolled
+     spellings this replaces were `text-[11px]` and two were `text-xs`, so 11 was
+     the more common spelling, not 12. And the three call sites that already used
+     this role (`AppShell`, `nav/WorkspaceSwitcher`, `nav/rowStyles`) go up a
+     point rather than staying put. */
   font-family: var(--font-sans);
   font-size: var(--text-xs);
   line-height: var(--text-xs--line-height);
@@ -761,9 +770,9 @@
   color: var(--color-text-muted);
 }
 @utility text-chrome-row {
-  font-size: var(--text-caption);
-  line-height: var(--text-caption--line-height);
-  letter-spacing: var(--text-caption--letter-spacing);
+  font-size: var(--text-caption-step);
+  line-height: var(--text-caption-step--line-height);
+  letter-spacing: var(--text-caption-step--letter-spacing);
 }
 @utility text-chrome-meta {
   font-size: var(--text-xs);
@@ -1048,12 +1057,11 @@ body {
      which is what stops it competing with its own rows. Kept as a rule here
      rather than a class at the call site because these three selectors reach
      into HeroUI's table DOM, which no call site can. */
-  color: var(--color-text-muted);
-  font-size: var(--text-xs);
-  line-height: var(--text-xs--line-height);
-  letter-spacing: 0.06em;
-  font-weight: var(--font-weight-semibold);
-  text-transform: uppercase;
+  /* `@apply` rather than a second copy of the six declarations: the role is the
+     single definition, so retuning it moves the header row with it. What cannot
+     be a class at the call site is the selector, which reaches into HeroUI's
+     table DOM, and that is the only reason this rule exists. */
+  @apply text-overline;
   border-radius: 0;
 }
 .otari-table .table__column::after {

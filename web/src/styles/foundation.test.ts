@@ -75,6 +75,78 @@ const HEROUI_VARIABLES = [
 
 const TYPE_NAMESPACES = /^--(text|font-weight|tracking)-/
 
+/**
+ * WCAG 2.x relative luminance, sRGB. Kept here rather than pulled in as a
+ * dependency: it is eight lines and the alternative is a package in the
+ * dependency graph for one assertion.
+ */
+function luminance(hex: string): number {
+  const m = /^#([0-9a-f]{6})$/i.exec(hex.trim())
+  if (!m) throw new Error(`not a six-digit hex color: ${hex}`)
+  const channel = (v: number): number => {
+    const c = v / 255
+    return c <= 0.03928 ? c / 12.92 : ((c + 0.055) / 1.055) ** 2.4
+  }
+  const n = Number.parseInt(m[1], 16)
+  return (
+    0.2126 * channel((n >> 16) & 0xff) +
+    0.7152 * channel((n >> 8) & 0xff) +
+    0.0722 * channel(n & 0xff)
+  )
+}
+
+function contrast(a: string, b: string): number {
+  const [hi, lo] = [luminance(a), luminance(b)].sort((x, y) => y - x)
+  return (hi + 0.05) / (lo + 0.05)
+}
+
+describe("text on every ground it can land on", () => {
+  // The repair in this change was measured against all six grounds each theme
+  // declares, and the measurement is the assertion. Without it the WCAG AA fix
+  // regresses on the next palette edit with no symptom until somebody renders
+  // it, which is the same invisible-until-rendered class of failure the cascade
+  // tests above exist for.
+  //
+  // Both of these failed AA on every ground before this change (light worst case
+  // 3.01, dark 2.91), and the reason it went unnoticed for so long is that the
+  // dashboard had no regular-weight text: extra stem weight reads as more
+  // contrast than the ratio gives.
+  const GROUNDS = [
+    "--color-background",
+    "--color-background-muted",
+    "--color-background-subtle",
+    "--color-surface",
+    "--color-surface-muted",
+    "--color-surface-subtle",
+  ] as const
+  const INK = [
+    "--color-text",
+    "--color-text-muted",
+    "--color-text-subtle",
+  ] as const
+  // 4.5:1 is AA for normal-size text, which is what all three of these pair with.
+  const AA_NORMAL = 4.5
+
+  it.each([
+    ["light", LIGHT],
+    ["dark", DARK],
+  ] as const)("clears AA for normal text in the %s theme", (_theme, tokens) => {
+    for (const ink of INK) {
+      for (const ground of GROUNDS) {
+        const fg = tokens.get(ink)
+        const bg = tokens.get(ground)
+        expect(fg, `${ink} is not declared`).toBeDefined()
+        expect(bg, `${ground} is not declared`).toBeDefined()
+        const ratio = contrast(fg as string, bg as string)
+        expect(
+          Number(ratio.toFixed(2)),
+          `${ink} on ${ground} is ${ratio.toFixed(2)}:1, under the ${AA_NORMAL}:1 AA floor for normal text`,
+        ).toBeGreaterThanOrEqual(AA_NORMAL)
+      }
+    }
+  })
+})
+
 describe("the type scale's two halves", () => {
   // The scale is split on purpose and the split is easy to undo by accident, so
   // it is pinned from both sides. `@heroui/styles` is a prebuilt Tailwind
@@ -84,7 +156,19 @@ describe("the type scale's two halves", () => {
   // order: it compiles, emits, and changes nothing. The values therefore live in
   // an unlayered `:root` block, which beats every layer, and only the keys
   // HeroUI never declares are registered in `@theme`.
+  // `block()` is a first-match `indexOf`, and globals.css has two top-level
+  // `:root {` blocks: this one and the base reset further down. It resolves
+  // correctly only because this one comes first, so assert that rather than
+  // depend on it: a reordering would otherwise point every failure below at the
+  // wrong block.
   const TYPE_VALUES = declarations(block(":root"))
+
+  it("matches the type block rather than the base reset", () => {
+    expect(
+      TYPE_VALUES.get("--text-xs"),
+      "block(':root') matched a different :root block (the base reset?); anchor it on something distinguishing",
+    ).toBeDefined()
+  })
 
   it("declares every contested type key in the unlayered :root block", () => {
     for (const key of [
@@ -105,6 +189,9 @@ describe("the type scale's two halves", () => {
       "--font-weight-semibold",
       "--font-weight-bold",
       "--tracking-tight",
+      "--text-caption-step",
+      "--text-caption-step--line-height",
+      "--text-caption-step--letter-spacing",
     ]) {
       expect(
         TYPE_VALUES.get(key),
@@ -139,9 +226,6 @@ describe("the type scale's two halves", () => {
     // :root alone is never read, because the utility would not reference it.
     const theme = declarations(block("@theme"))
     for (const key of [
-      "--text-caption",
-      "--text-caption--line-height",
-      "--text-caption--letter-spacing",
       "--text-xs--letter-spacing",
       "--text-sm--letter-spacing",
       "--text-base--letter-spacing",
@@ -156,12 +240,14 @@ describe("the type scale's two halves", () => {
     }
     // The other direction: a size or weight registered here is the silent-no-op
     // mistake this split exists to prevent.
+    // No exceptions any more: the only type keys `@theme` may carry are the
+    // letter-spacing registrations. A *size* here would also generate a
+    // same-named utility that outranks the role of that name in the same layer,
+    // which is how the caption step silently killed `@utility text-caption`'s
+    // own metrics before it was renamed to `--text-caption-step`.
     const contested = [...theme.keys()].filter(
       (name) =>
-        TYPE_NAMESPACES.test(name) &&
-        !name.endsWith("--letter-spacing") &&
-        name !== "--text-caption" &&
-        name !== "--text-caption--line-height",
+        TYPE_NAMESPACES.test(name) && !name.endsWith("--letter-spacing"),
     )
     expect(
       contested,
