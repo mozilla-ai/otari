@@ -31,6 +31,50 @@ describe("StatCard", () => {
     expect(root.className).toContain("min-w-0")
     expect(root.className).toContain("p-0")
   })
+
+  it("puts the trend under the value, on one row with the hint", () => {
+    render(
+      <StatCard
+        label="Tracked cost"
+        value="$12.34"
+        trend={<span>up 4.2%</span>}
+        hint="3 unpriced"
+      />,
+    )
+    const value = screen.getByText("$12.34")
+    const trend = screen.getByText("up 4.2%")
+    const hint = screen.getByText("3 unpriced")
+    // Below the value, not sharing its row.
+    expect(value.parentElement).not.toContainElement(trend)
+    expect(
+      value.compareDocumentPosition(trend) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+    // On one row with the hint, and ahead of it, rather than stacked above it.
+    expect(trend.parentElement).toBe(hint.parentElement)
+    expect(
+      trend.compareDocumentPosition(hint) & Node.DOCUMENT_POSITION_FOLLOWING,
+    ).toBeTruthy()
+  })
+
+  it("reserves the hint's two lines for a charted tile that has no hint", () => {
+    // Otherwise a tile whose only hint was its delta loses 36px and its
+    // sparkline rides above its neighbours' in the same row.
+    const { container } = render(
+      <StatCard
+        label="Tokens"
+        value="3.3M"
+        chart={<svg aria-label="trend" />}
+      />,
+    )
+    expect(container.querySelector(".min-h-9")).not.toBeNull()
+  })
+
+  it("reserves nothing for a tile with neither hint nor chart", () => {
+    const { container } = render(
+      <StatCard label="Avg latency" value="1.33 s" />,
+    )
+    expect(container.querySelector(".min-h-9")).toBeNull()
+  })
 })
 
 describe("RefreshButton", () => {

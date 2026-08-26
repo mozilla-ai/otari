@@ -605,6 +605,22 @@ describe("UsagePage", () => {
     expect(summaryCalls.some((u) => !u.includes("end_date="))).toBe(true)
   })
 
+  it("renders period-over-period change as a trend chip, not a glyph", async () => {
+    mockApi(summary())
+    renderPage(<UsagePage />)
+    await screen.findByText("$1,240.50")
+
+    // The chip carries the caption the old plain-text hint carried, so the
+    // comparison still says what it is being compared against.
+    expect(screen.getAllByText(/vs prev/).length).toBeGreaterThan(0)
+    // And it announces a direction, which the glyph never did: "▲" is
+    // decoration a screen reader skips. TrendChip.test.tsx owns the direction
+    // and polarity mapping; this only asserts the tiles go through it.
+    expect(screen.getAllByText(/no change|up|down/).length).toBeGreaterThan(0)
+    // The hand-rolled arrow glyphs are gone from the tiles.
+    expect(screen.queryByText(/[▲▼]/)).not.toBeInTheDocument()
+  })
+
   it("lists spend by model with a reconciling 'other' fold row", async () => {
     mockApi(summary())
     renderPage(<UsagePage />)

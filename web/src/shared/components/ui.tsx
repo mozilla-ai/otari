@@ -156,6 +156,7 @@ export function StatCard({
   label,
   value,
   hint,
+  trend,
   status,
   statusLabel,
   chart,
@@ -163,7 +164,15 @@ export function StatCard({
 }: {
   label: string
   value: ReactNode
+  // Supporting context under the value: what the number is made of ("5.8%
+  // errors", "311.2k read"), not how it moved. The movement is `trend`, and the
+  // two share one row.
   hint?: ReactNode
+  // Period-over-period change, as a <TrendChip>. It leads the aside row under
+  // the value, ahead of `hint`: a pill sharing the value's baseline competes
+  // with the number for the first glance, while a second row of its own spends
+  // a line saying what belongs beside the hint anyway.
+  trend?: ReactNode
   status?: StatStatus
   // A short word (and/or icon) shown as a pill beside the value. Required to be a
   // non-color signal so status is legible without hue (colorblind operators).
@@ -200,14 +209,33 @@ export function StatCard({
           </span>
         ) : null}
       </span>
-      {/* Two lines reserved, always. A delta like "5.8% errors · ▲ 214.1% vs
-          prev" wraps in a narrow tile while its neighbors stay on one line,
-          and a row of five tiles then stops aligning. This is a layout fix and
-          not a type fix on purpose: sizing the type to the longest string would
-          be sizing the type by accident. min-h-9 is two 18px lines. */}
-      {hint ? (
-        <span className="block min-h-9 text-xs tabular-nums text-muted">
-          {hint}
+      {/* One row under the value carrying both the movement (the chip) and the
+          composition (the hint): they are two halves of the same aside, and
+          stacked they read as two, costing a line the tile does not have.
+          `flex` also makes the chip hug its text, which it does not do as a
+          direct child of this column: HeroUI's Chip is inline-flex, and a
+          stretched child would run the pill the full width of the tile.
+
+          `flex-wrap` because at five-up the pair does not always fit; the wrap
+          is the fallback, not the layout. `items-center` aligns the hint's
+          x-height to the middle of the pill rather than to its box.
+
+          Two lines reserved (min-h-9, two 18px lines) so that fallback does
+          not misalign a row of tiles: one tile wrapping while its neighbors
+          stay on one line moves its sparkline up relative to theirs. This is a
+          layout fix and not a type fix on purpose: sizing the type to the
+          longest string would be sizing the type by accident. Reserved for a
+          charted tile even with neither chip nor hint, since the chart is what
+          makes the misalignment visible; a tile with no chart and nothing to
+          say reserves nothing, so a lone tile carries no dead space. */}
+      {trend || hint || chart ? (
+        <span className="flex min-h-9 flex-wrap items-center gap-x-2 gap-y-1 text-xs tabular-nums text-muted">
+          {trend}
+          {/* Its own element, not a bare text node beside the chip: the two
+              are separate statements, and a node keeps the hint addressable
+              (by a test, and by a reader's selection) rather than merged into
+              the chip's text. */}
+          {hint ? <span>{hint}</span> : null}
         </span>
       ) : null}
       {chart ? <div className="mt-2">{chart}</div> : null}

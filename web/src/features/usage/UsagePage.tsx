@@ -31,8 +31,8 @@ import {
 } from "@/shared/components/charts"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import { type FilterChip, FilterChips } from "@/shared/components/FilterChips"
+import { TrendChip } from "@/shared/components/TrendChip"
 import {
-  DeltaHint,
   EmptyState,
   ErrorBanner,
   FilterMultiComboBox,
@@ -64,7 +64,7 @@ import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 // ---------- formatting ----------
 
 // Compact currency (formatUsd), token counts (formatTokens), percentages
-// (formatPct) and the period-over-period helpers (deltaFraction / DeltaHint) are
+// (formatPct) and the period-over-period helpers (deltaFraction / TrendChip) are
 // shared with the overview page from @/shared/helpers/format and @/shared/components/ui. Only the
 // two formatters specific to this page stay local.
 function formatBucketLabel(iso: string, bucket: UsageBucket): string {
@@ -1051,15 +1051,19 @@ export function UsagePage() {
             <StatCard
               label="Tracked cost"
               value={totals ? formatUsd(totals.cost) : "—"}
+              // Spend falling is the improvement, so a rise paints danger while
+              // the arrow keeps telling the truth about which way it went.
+              trend={
+                <TrendChip
+                  fraction={costDelta}
+                  polarity="down-is-good"
+                  caption="vs prev"
+                />
+              }
               hint={
-                totals ? (
-                  <span className="text-muted">
-                    <DeltaHint fraction={costDelta} />
-                    {totals.unpriced_requests
-                      ? `${costDelta !== null ? " · " : ""}${formatNumber(totals.unpriced_requests)} unpriced`
-                      : null}
-                  </span>
-                ) : null
+                totals?.unpriced_requests
+                  ? `${formatNumber(totals.unpriced_requests)} unpriced`
+                  : null
               }
               chart={
                 hasTrend ? (
@@ -1073,24 +1077,21 @@ export function UsagePage() {
             <StatCard
               label="Requests"
               value={totals ? formatNumber(totals.request_count) : "—"}
-              hint={
-                totals ? (
-                  <span className="text-muted">
-                    {formatPct(errorRate)} errors
-                    {prevTotals ? (
-                      <>
-                        {" · "}
-                        <DeltaHint
-                          fraction={deltaFraction(
-                            totals.request_count,
-                            prevTotals.request_count,
-                          )}
-                        />
-                      </>
-                    ) : null}
-                  </span>
+              // Volume, so `neutral`: more traffic through the gateway is
+              // neither a win nor a regression on its own, and the error rate
+              // beside it is what carries the judgment.
+              trend={
+                totals && prevTotals ? (
+                  <TrendChip
+                    fraction={deltaFraction(
+                      totals.request_count,
+                      prevTotals.request_count,
+                    )}
+                    caption="vs prev"
+                  />
                 ) : null
               }
+              hint={totals ? `${formatPct(errorRate)} errors` : null}
               chart={
                 hasTrend ? (
                   <Sparkline
@@ -1105,10 +1106,12 @@ export function UsagePage() {
               value={
                 billedTotal !== undefined ? formatTokens(billedTotal) : "—"
               }
-              hint={
+              // Volume again, for the same reason as Requests.
+              trend={
                 billedTotal !== undefined ? (
-                  <DeltaHint
+                  <TrendChip
                     fraction={deltaFraction(billedTotal, prevBilledTotal)}
+                    caption="vs prev"
                   />
                 ) : null
               }
@@ -1124,24 +1127,20 @@ export function UsagePage() {
             <StatCard
               label="Cache hit rate"
               value={cacheHitRate !== null ? formatPct(cacheHitRate) : "—"}
-              hint={
-                totals ? (
-                  <span className="text-muted">
-                    {cacheHitRate !== null && prevCacheHitRate !== undefined ? (
-                      <>
-                        <DeltaHint
-                          fraction={deltaFraction(
-                            cacheHitRate,
-                            prevCacheHitRate,
-                          )}
-                        />
-                        {" · "}
-                      </>
-                    ) : null}
-                    {formatTokens(cache.read)} read ·{" "}
-                    {formatTokens(cache.write)} written
-                  </span>
+              // A higher share of reads served from cache is the win here.
+              trend={
+                cacheHitRate !== null && prevCacheHitRate !== undefined ? (
+                  <TrendChip
+                    fraction={deltaFraction(cacheHitRate, prevCacheHitRate)}
+                    polarity="up-is-good"
+                    caption="vs prev"
+                  />
                 ) : null
+              }
+              hint={
+                totals
+                  ? `${formatTokens(cache.read)} read · ${formatTokens(cache.write)} written`
+                  : null
               }
               chart={
                 hasTrend && hasComposition ? (
