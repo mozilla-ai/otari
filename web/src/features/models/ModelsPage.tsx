@@ -824,9 +824,7 @@ function ModelDetailPanel({
         <div className="flex items-start justify-between gap-3">
           <div className="min-w-0">
             <div className="flex items-center gap-2">
-              <h2 className="text-base font-semibold break-all text-foreground">
-                {row.model}
-              </h2>
+              <h2 className="text-title break-all">{row.model}</h2>
               {metadata?.deprecated ? (
                 <Chip size="sm" color="danger">
                   deprecated

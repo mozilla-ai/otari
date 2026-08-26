@@ -817,7 +817,10 @@ function RoutingPlan({ entry }: { entry: UsageEntry }) {
           className="w-full text-xs"
           aria-label={`Routing plan for policy ${entry.policy_name}`}
         >
-          <thead className="text-muted">
+          {/* No `text-muted` here: `text-overline` on each `<th>` sets the color
+              itself, so a second declaration on the parent is one more place to
+              keep in step for no effect. */}
+          <thead>
             <tr className="border-b border-border">
               <th scope="col" className="px-3 py-2 text-left text-overline">
                 #
