@@ -2018,45 +2018,27 @@ export function ActivityPage() {
         />
         <FilterChips chips={filterChips} onClearAll={clearEntityFilters}>
           <FilterSelect
-            id="filter-status"
             label="Status"
             value={statusFilter}
             onChange={(value) => url.patch({ status: value })}
-          >
-            {STATUS_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </FilterSelect>
+            options={STATUS_OPTIONS}
+          />
           <FilterSelect
-            id="filter-priced"
             label="Priced?"
             value={pricedFilter}
             onChange={(value) => url.patch({ priced: value })}
-          >
-            {PRICED_OPTIONS.map((opt) => (
-              <option key={opt.value} value={opt.value}>
-                {opt.label}
-              </option>
-            ))}
-          </FilterSelect>
+            options={PRICED_OPTIONS}
+          />
           {/* Only offered once the window actually contains tool usage, following the
               source select below: a filter whose every option returns nothing is
               noise on the majority of gateways, which run no tools at all. */}
           {toolFilter || contextSummary.data?.by_tool?.length ? (
             <FilterSelect
-              id="filter-tool"
               label="Tool"
               value={toolFilter}
               onChange={(value) => url.patch({ tool: value })}
-            >
-              {TOOL_OPTIONS.map((opt) => (
-                <option key={opt.value} value={opt.value}>
-                  {opt.label}
-                </option>
-              ))}
-            </FilterSelect>
+              options={TOOL_OPTIONS}
+            />
           ) : null}
           {/* Provenance only earns a select once there is more than one source
               to choose between: most gateways see only their own traffic, and a
@@ -2064,18 +2046,17 @@ export function ActivityPage() {
               with a source applied keeps the select so it stays clearable. */}
           {sourceOptions.length > 1 || sourceFilter ? (
             <FilterSelect
-              id="filter-source"
               label="Source"
               value={sourceFilter}
               onChange={(value) => url.patch({ source: value })}
-            >
-              <option value="">All</option>
-              {sourceOptions.map((source) => (
-                <option key={source} value={source}>
-                  {sourceLabel(source)}
-                </option>
-              ))}
-            </FilterSelect>
+              options={[
+                { value: "", label: "All" },
+                ...sourceOptions.map((source) => ({
+                  value: source,
+                  label: sourceLabel(source),
+                })),
+              ]}
+            />
           ) : null}
           {/* allowsCustom on all three: the options are the in-window top spenders
               (a breakdown capped at 100), so an entity that exists but ranks below

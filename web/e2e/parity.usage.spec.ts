@@ -1,6 +1,14 @@
 import { expect, type Page, test } from "@playwright/test"
 
-import { filterChip, login, nav, table, tableRows, tileValue } from "./helpers"
+import {
+  filterChip,
+  login,
+  nav,
+  pickOption,
+  table,
+  tableRows,
+  tileValue,
+} from "./helpers"
 import { COUNTS, PARITY } from "./parity-data"
 
 test.describe.configure({ mode: "serial" })
@@ -60,14 +68,14 @@ test.describe("usage & analytics", () => {
     // Grouping replaces that split with one series per group, named in the
     // legend: the point of the control is that the chart says which model is
     // which, not merely that it restacked.
-    await page.getByLabel("Group by").selectOption("model")
+    await pickOption(page, "Group by", "By model")
     await expect(
       page.getByText(PARITY.models.priced.model, { exact: true }).first(),
     ).toBeVisible()
 
     // Tokens ungrouped fall back to the billed composition, the same four
     // buckets the Activity row bar uses.
-    await page.getByLabel("Group by").selectOption("")
+    await pickOption(page, "Group by", "No grouping")
     await page.getByRole("button", { name: "Tokens", exact: true }).click()
     await expect(page.getByText("Fresh input", { exact: true })).toBeVisible()
     await expect(page.getByText("Cache read", { exact: true })).toBeVisible()

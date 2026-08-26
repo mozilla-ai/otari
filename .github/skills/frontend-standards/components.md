@@ -45,9 +45,11 @@ remember on every copy of that markup. The dashboard's own nav rail is the worke
 rows are a mix of router `Link`s, plain `<button>`s and HeroUI `Button`s, and the plain ones
 answer the pointer with the default arrow, so the shared row string has to name
 `cursor-pointer` itself, where a HeroUI `Button` takes it from `--cursor-interactive` and a
-bare `<button>` takes it from no one. Reaching for a native element is sometimes right
-(`FilterSelect` is a deliberately token-styled native `<select>`, and a nav row has to be the
-router's `Link`), but it is a decision that buys styling work, not a neutral default.
+bare `<button>` takes it from no one. Reaching for a native element is sometimes right (a nav
+row has to be the router's `Link`), but it is a decision that buys styling work, not a neutral
+default, and it can buy behavior nobody asked for: `FilterSelect` was a token-styled native
+`<select>` until the platform menu it draws (over the control, covering the button that opened
+it) made it a HeroUI `Select`.
 
 Once you know what you are styling, there are four ways to change how it looks, in the order to
 try them. HeroUI v3 supports all four (its styling guide lists `className`, data attributes,
@@ -156,7 +158,7 @@ than duplicating their markup. See [design-tokens.md](./design-tokens.md).
 | Info/warning callout | `InfoBanner` (`tone="info" \| "warning"`) |
 | Page title + description + action | `PageHeader` |
 | Destructive action without a modal | `ConfirmButton` (two-click arm/confirm) |
-| Filter over a small fixed option set | `FilterSelect` (token-styled native `<select>`) |
+| Filter over a small fixed option set | `FilterSelect` (a HeroUI `Select`: the list is a popover anchored under the trigger) |
 | Filter over a large or open option set | `FilterMultiComboBox` (type-to-filter, holds a set of values; `allowsCustom` when the value space is not enumerable) |
 | Applied filters, each removable | `FilterChips` (`shared/components/FilterChips.tsx`); one chip per value, and pass `clearLabel` so several chips of one dimension stay distinguishable |
 | Form field wrapper | `Field` (`shared/components/Field.tsx`) |

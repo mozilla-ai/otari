@@ -10,6 +10,7 @@ import { UsagePage } from "@/features/usage/UsagePage"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { organizationContext, seriesPoint, usageTotals } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
+import { pickOption, selectTrigger } from "@/tests/select"
 
 function summary(overrides: Partial<UsageSummary> = {}): UsageSummary {
   return {
@@ -504,10 +505,7 @@ describe("UsagePage", () => {
     renderPage(<UsagePage />)
     await screen.findByText("$1,240.50")
 
-    await user.selectOptions(
-      screen.getByRole("combobox", { name: "Group by" }),
-      "model",
-    )
+    await pickOption(user, "Group by", "By model")
 
     // The stack's legend comes from the grouped response: the top group plus
     // the reconciling fold, which always reads "Other".
@@ -536,10 +534,7 @@ describe("UsagePage", () => {
     renderPage(<UsagePage />)
     await screen.findByText("$1,240.50")
 
-    await user.selectOptions(
-      screen.getByRole("combobox", { name: "Group by" }),
-      "model",
-    )
+    await pickOption(user, "Group by", "By model")
 
     expect(
       await screen.findByText(/predates grouped series/),
@@ -939,9 +934,9 @@ describe("UsagePage", () => {
     expect(
       screen.queryByRole("button", { name: "Source" }),
     ).not.toBeInTheDocument()
-    const groupSelect = screen.getByRole("combobox", { name: "Group by" })
+    await userEvent.setup().click(selectTrigger("Group by"))
     expect(
-      within(groupSelect).queryByRole("option", { name: "By source" }),
+      screen.queryByRole("option", { name: "By source" }),
     ).not.toBeInTheDocument()
   })
 
@@ -970,9 +965,9 @@ describe("UsagePage", () => {
     await screen.findByText("$1,240.50")
 
     expect(screen.getByRole("button", { name: "Source" })).toBeInTheDocument()
-    const groupSelect = screen.getByRole("combobox", { name: "Group by" })
+    await userEvent.setup().click(selectTrigger("Group by"))
     expect(
-      within(groupSelect).getByRole("option", { name: "By source" }),
+      await screen.findByRole("option", { name: "By source" }),
     ).toBeInTheDocument()
   })
 

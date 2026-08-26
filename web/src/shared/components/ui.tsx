@@ -6,6 +6,7 @@ import {
   Label,
   ListBox,
   ListBoxItem,
+  Select,
   Spinner,
   Tooltip,
 } from "@heroui/react"
@@ -779,12 +780,11 @@ export function Badge({
   )
 }
 
-const FILTER_SELECT_CLASS =
-  "rounded-lg border border-border bg-surface-alt px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
-
-// Token-styled native select for page filter bars. Pass `label` (+ `id`) for a
-// visible label, or `ariaLabel` alone for a compact control. Prefer `options`
-// for static lists; use `children` when options are grouped or conditional.
+// Filter dropdown for page filter bars. On HeroUI's Select rather than a native
+// <select> because a native one draws its menu *over* the control on macOS,
+// covering the button that opened it; this one is a popover anchored under the
+// trigger. Pass `label` for a visible label, or `ariaLabel` alone for a compact
+// control, and `id` when an outside <label htmlFor> points at the trigger.
 export function FilterSelect({
   id,
   label,
@@ -792,7 +792,6 @@ export function FilterSelect({
   value,
   onChange,
   options,
-  children,
   disabled,
 }: {
   id?: string
@@ -800,42 +799,38 @@ export function FilterSelect({
   ariaLabel?: string
   value: string
   onChange: (value: string) => void
-  options?: { value: string; label: string }[]
-  children?: ReactNode
+  options: { value: string; label: string }[]
   disabled?: boolean
 }) {
-  const fallbackId = useId()
-  const selectId = id ?? (label ? fallbackId : undefined)
-  const select = (
-    <select
-      id={selectId}
+  return (
+    <Select.Root
       aria-label={label ? undefined : ariaLabel}
-      value={value}
-      disabled={disabled}
-      onChange={(event) => onChange(event.target.value)}
-      className={FILTER_SELECT_CLASS}
+      isDisabled={disabled}
+      // react-aria reads an empty key as "nothing selected", and "" is a real
+      // filter value here ("All", "Any price"), so every key carries a prefix
+      // and it is stripped back off on the way out.
+      selectedKey={`v:${value}`}
+      onSelectionChange={(key) => onChange(String(key).slice(2))}
+      className={label ? "flex flex-col gap-1" : undefined}
     >
-      {options
-        ? options.map((option) => (
-            <option key={option.value} value={option.value}>
+      {label ? (
+        <Label className="text-xs font-medium text-muted">{label}</Label>
+      ) : null}
+      <Select.Trigger id={id}>
+        <Select.Value />
+        <Select.Indicator />
+      </Select.Trigger>
+      <Select.Popover>
+        <ListBox items={options} className="max-h-72 overflow-auto">
+          {(option: { value: string; label: string }) => (
+            <ListBoxItem id={`v:${option.value}`} textValue={option.label}>
               {option.label}
-            </option>
-          ))
-        : children}
-    </select>
+            </ListBoxItem>
+          )}
+        </ListBox>
+      </Select.Popover>
+    </Select.Root>
   )
-
-  if (label) {
-    return (
-      <div className="flex flex-col gap-1">
-        <label htmlFor={selectId} className="text-xs font-medium text-muted">
-          {label}
-        </label>
-        {select}
-      </div>
-    )
-  }
-  return select
 }
 
 // A type-to-filter combobox for page filter bars, accumulating a set of values.

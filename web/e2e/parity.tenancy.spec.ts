@@ -1,6 +1,6 @@
 import { expect, type Locator, type Page, test } from "@playwright/test"
 
-import { login, nav, openOrganization, tableRows } from "./helpers"
+import { login, nav, openOrganization, pickOption, tableRows } from "./helpers"
 
 // The tenancy pages against a real gateway: the organization a first boot
 // provisions, its roster, and the workspaces under it. Each flow creates what it
@@ -95,7 +95,7 @@ test.describe("standalone tenancy", () => {
 
     await page.getByRole("button", { name: "Add member" }).click()
     await page.getByLabel("Email address").fill(MEMBER_EMAIL)
-    await page.getByLabel("Role", { exact: true }).selectOption("member")
+    await pickOption(page, "Role", "Member")
     await page.getByRole("button", { name: "Add member" }).click()
 
     // Nothing is emailed and nothing has to be accepted: this edition answers
@@ -104,13 +104,13 @@ test.describe("standalone tenancy", () => {
     // than inserting beside it, which is what makes this idempotent.
     const member = memberRow(page, MEMBER_EMAIL)
     await expect(member).toBeVisible()
-    const role = member.getByLabel(/^Role for /)
-    await expect(role).toHaveValue("member")
+    const role = member.getByRole("button", { name: /Role for / })
+    await expect(role).toHaveText(/Member/)
 
-    await role.selectOption("admin")
+    await pickOption(page, /Role for /, "Admin", member)
     await expect(
-      memberRow(page, MEMBER_EMAIL).getByLabel(/^Role for /),
-    ).toHaveValue("admin")
+      memberRow(page, MEMBER_EMAIL).getByRole("button", { name: /Role for / }),
+    ).toHaveText(/Admin/)
 
     // Removal suspends rather than deletes, and a suspended membership is not
     // listable, so the row leaves the roster while the attribution behind it

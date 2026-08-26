@@ -176,6 +176,25 @@ export async function dismissComboBox(box: Locator): Promise<void> {
   await expect(box).not.toHaveAttribute("aria-expanded", "true")
 }
 
+// Pick an option from a FilterSelect. It is a HeroUI Select, so the control is a
+// button that opens a listbox popover: there is no native <select> to
+// `selectOption` on, and the option is named by its visible label. Playwright
+// names the trigger with the current value *and* the label, hence the suffix
+// match. Pass `scope` when several selects on the page share a label.
+export async function pickOption(
+  page: Page,
+  label: string | RegExp,
+  option: string,
+  scope?: Locator,
+): Promise<void> {
+  await (scope ?? page)
+    .getByRole("button", {
+      name: label instanceof RegExp ? label : new RegExp(`${label}$`),
+    })
+    .click()
+  await page.getByRole("option", { name: option, exact: true }).click()
+}
+
 // Commit a value into one of the multi-value filter comboboxes. They allow
 // custom values, so Enter is what commits a typed id.
 export async function addFilterValue(
