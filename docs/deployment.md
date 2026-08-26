@@ -40,7 +40,7 @@ This Blueprint deploys standalone mode with a local Postgres database. Render al
 
 ## Deploy on Railway
 
-For a hosted standalone deployment without local setup, use the one-click
+To run standalone in the cloud without local setup, use the one-click
 [Railway](https://railway.com) template. It stands up two services: Otari
 (`docker.io/mzdotai/otari:latest`, target port `8000`, healthcheck `/health`)
 and a managed Postgres, wired together with

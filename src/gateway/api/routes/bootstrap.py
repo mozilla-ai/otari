@@ -13,9 +13,11 @@ carries no secret. In particular it never carries the platform token, and
 credentials.
 
 The contract is shared with otari.ai, which serves the same shape for its hosted
-deployment (mozilla-ai/otari-ai#1591). That is why ``deployment_type`` and
-``session_type`` name three values each while this server only ever produces two
-of them: the enum is the contract, not this deployment's inventory.
+deployment (mozilla-ai/otari-ai#1591). ``deployment_type`` and ``session_type``
+name three values each, and this server produces all three of the first and two
+of the second: ``hosted_user`` is a session minted by somebody else's account
+system, which no build here does. The enum is the contract, not this
+deployment's inventory.
 """
 
 from typing import Annotated, Literal
@@ -92,14 +94,43 @@ STANDALONE_SURFACES: tuple[str, ...] = (
     "workspaces",
 )
 
+# The same list for a *hosted* deployment: one control plane serving many
+# organizations, rather than one operator's own gateway. Two rows differ, and
+# both differences are the same fact seen from either side, that a credential
+# here belongs to a tenant rather than to the process.
+#
+# ``providers`` drops. It is the deployment-instance surface over
+# ``provider_credentials``, whose primary key is the instance name alone, so an
+# instance added there is served to every organization and shadows that
+# organization's own BYO key for the provider (#818). On the single-tenant
+# product that page is correct, and it stays; on a multi-tenant one it is a
+# control whose blast radius nobody looking at it can see.
+#
+# ``organization_providers`` appears, and is the per-tenant surface that
+# replaces it: ``/v1/organizations/me/provider-keys``, the organization-scoped
+# BYO keys #670 shipped. It is the one name here that is not its router's path
+# prefix, because the router is nested under ``organizations``; ``organizations``
+# stays a separate surface, since the roster and the credential set are
+# different pages with different access.
+#
+# Dropping the surface is not itself a guard over the table: ``config.yml``'s
+# ``providers:`` block and ``/v1/provider-credentials`` still populate it with no
+# page in front of them, which is #818's to close.
+HOSTED_SURFACES: tuple[str, ...] = (
+    *(surface for surface in STANDALONE_SURFACES if surface != "providers"),
+    "organization_providers",
+)
+
 
 class DeploymentBootstrap(BaseModel):
     """What the dashboard shell needs before it can render anything."""
 
     deployment_type: DeploymentType = Field(
         description=(
-            "Which deployment serves this URL. 'standalone' owns its own data; "
-            "'hosted' is otari.ai; 'hybrid' is a gateway attached to otari.ai, which is "
+            "Which deployment serves this URL. 'standalone' owns its own data and serves one "
+            "tenant; 'hosted' owns its own data and serves many (otari.ai, or any deployment "
+            "run as a control plane), which is why its management surfaces are the "
+            "per-organization ones; 'hybrid' is a gateway attached to otari.ai, which is "
             "data-plane only and holds no management surface of its own."
         )
     )
@@ -220,10 +251,17 @@ async def get_bootstrap(
             mail_ready=False,
         )
     assert db is not None  # get_db_if_needed yields a session outside hybrid mode
+    # Hosted is standalone's multi-tenant sibling and differs here in exactly two
+    # fields. Everything below them is answered identically, because a hosted
+    # deployment holds its own database, mounts the same management API and mints
+    # its own sessions: ``session_type`` stays ``local_operator`` because this
+    # build's sign-in is this build's, not an account minted by somebody else's
+    # control plane, which is what ``hosted_user`` names.
+    hosted = config.is_hosted_mode
     return DeploymentBootstrap(
-        deployment_type="standalone",
+        deployment_type="hosted" if hosted else "standalone",
         session_type="local_operator",
-        surfaces=sorted(STANDALONE_SURFACES),
+        surfaces=sorted(HOSTED_SURFACES if hosted else STANDALONE_SURFACES),
         sign_in_methods=await _sign_in_methods(db, config),
         management_url=None,
         docs_url=config.docs_url,

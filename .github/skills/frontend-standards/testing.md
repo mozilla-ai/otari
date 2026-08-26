@@ -48,6 +48,12 @@ matters because several code paths branch on `undefined` rather than zero
 that the real response would fail.
 
 **Drive with `userEvent`** and assert on what the operator sees, not on component internals.
+One control needs a harness rather than `userEvent` alone: a `FilterSelect` is a HeroUI
+`Select`, so `user.selectOptions` has no native `<select>` to drive. `pickOption` and
+`selectTrigger` from `src/tests/select.ts` open its popover and click the option by its
+visible label, and `selectTrigger(label).toHaveTextContent(...)` is what replaces
+`toHaveValue` when asserting what the control currently shows. `pickOption` in
+`e2e/helpers.ts` is the Playwright half.
 
 **Wait on the event, not the clock.** `findBy*` and `waitFor` resolve the instant the DOM
 changes; their timeout is a ceiling, not a sleep. Two habits that follow:

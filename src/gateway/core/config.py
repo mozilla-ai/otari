@@ -1061,10 +1061,13 @@ class GatewayConfig(BaseSettings):
     mode: str | None = Field(
         default=None,
         description=(
-            "Otari operating mode: 'standalone' or 'hybrid'. When unset (the default), the mode is "
-            "derived from the platform token: hybrid if a token is present (OTARI_AI_TOKEN), else "
-            "standalone. Set explicitly to assert the intended mode: 'hybrid' requires a token, and "
-            "'standalone' with a token present is rejected at startup as conflicting configuration. "
+            "Otari operating mode: 'standalone', 'hosted' or 'hybrid'. When unset (the default), the "
+            "mode is derived from the platform token: hybrid if a token is present (OTARI_AI_TOKEN), "
+            "else standalone. Set explicitly to assert the intended mode: 'hybrid' requires a token, "
+            "and 'standalone' or 'hosted' with a token present is rejected at startup as conflicting "
+            "configuration. 'hosted' is standalone's multi-tenant sibling: it owns its own database "
+            "and serves the whole management API, and it reports the per-organization provider-key "
+            "surface rather than the process-global one. "
             "Legacy value 'platform' is accepted as an alias for 'hybrid'."
         ),
     )
@@ -1129,6 +1132,8 @@ class GatewayConfig(BaseSettings):
         configured = self.configured_mode
         if configured in {"hybrid", "platform"}:
             return "hybrid"
+        if configured == "hosted":
+            return "hosted"
         if configured == "standalone":
             return "standalone"
         # Mode unset: derive from the platform token.
@@ -1137,6 +1142,20 @@ class GatewayConfig(BaseSettings):
     @property
     def is_hybrid_mode(self) -> bool:
         return self.effective_mode == "hybrid"
+
+    @property
+    def is_hosted_mode(self) -> bool:
+        """Whether this deployment is the multi-tenant control plane, not a single tenant's.
+
+        A data-plane sibling of ``is_hybrid_mode`` it is not: hosted mode owns
+        its own database and mounts the whole management API, exactly as
+        standalone does, and every request path that asks ``is_hybrid_mode``
+        gets the same answer here as it would for a standalone gateway. What it
+        changes is who the deployment serves, and therefore which management
+        surfaces make sense on it: the per-organization credential set rather
+        than the process-global one (see ``bootstrap.HOSTED_SURFACES``).
+        """
+        return self.effective_mode == "hosted"
 
     @property
     def effective_mail_transport(self) -> str:
@@ -1929,10 +1948,10 @@ class GatewayConfig(BaseSettings):
             return
         # "platform" is the legacy alias for "hybrid" (the otari.ai-connected
         # runtime mode); accept it so pre-rename configs keep working.
-        if configured_mode not in {"standalone", "hybrid", "platform"}:
+        if configured_mode not in {"standalone", "hosted", "hybrid", "platform"}:
             msg = (
                 "Invalid mode (set via OTARI_MODE or the config 'mode' field). "
-                "Expected 'standalone' or 'hybrid'."
+                "Expected 'standalone', 'hosted' or 'hybrid'."
             )
             raise ValueError(msg)
 
@@ -1940,11 +1959,14 @@ class GatewayConfig(BaseSettings):
         if configured_mode in {"hybrid", "platform"} and not token_present:
             msg = "Hybrid mode (legacy value 'platform') requires OTARI_AI_TOKEN to be set."
             raise ValueError(msg)
-        if configured_mode == "standalone" and token_present:
+        # Both local-control-plane modes conflict with the token for the same
+        # reason: a deployment that holds its own management API is not also a
+        # data plane reporting to somebody else's.
+        if configured_mode in {"standalone", "hosted"} and token_present:
             msg = (
-                "Standalone mode conflicts with OTARI_AI_TOKEN being set: the token selects hybrid "
-                "mode. Unset the token to run standalone, or clear the mode setting to let the token "
-                "select hybrid mode."
+                f"{configured_mode.capitalize()} mode conflicts with OTARI_AI_TOKEN being set: the token "
+                "selects hybrid mode. Unset the token to run a control plane of your own, or clear the "
+                "mode setting to let the token select hybrid mode."
             )
             raise ValueError(msg)
 

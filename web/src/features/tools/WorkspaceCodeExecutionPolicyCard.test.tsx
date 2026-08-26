@@ -15,6 +15,7 @@ import {
   organizationContext,
   workspaceCodeExecutionPolicy,
 } from "@/tests/fixtures"
+import { pickOption, selectTrigger } from "@/tests/select"
 
 const ALPHA = "11111111-1111-1111-1111-111111111111"
 
@@ -79,8 +80,8 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
     renderCard()
 
     expect(await screen.findByText("No policy set")).toBeInTheDocument()
-    expect(await screen.findByLabelText("Code execution")).toHaveValue(
-      "default",
+    expect(selectTrigger("Code execution")).toHaveTextContent(
+      "Deployment default",
     )
   })
 
@@ -96,7 +97,7 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
     })
     await renderLoaded()
 
-    expect(screen.getByLabelText("Code execution")).toHaveValue("blocked")
+    expect(selectTrigger("Code execution")).toHaveTextContent("Blocked")
     expect(screen.getByLabelText("Max tool-loop iterations")).toHaveValue("3")
     expect(screen.getByLabelText("Execution timeout (seconds)")).toHaveValue(
       "12",
@@ -109,7 +110,7 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
     const user = userEvent.setup()
     await renderLoaded()
 
-    await user.selectOptions(screen.getByLabelText("Code execution"), "allowed")
+    await pickOption(user, "Code execution", "Allowed")
     await user.type(screen.getByLabelText("Max tool-loop iterations"), "4")
     await user.click(screen.getByRole("button", { name: "Save" }))
 
@@ -133,18 +134,19 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
     })
     await renderLoaded()
 
-    const select = screen.getByLabelText("Sandbox image") as HTMLSelectElement
-    expect([...select.options].map((option) => option.value)).toEqual([
-      "",
-      "mzdotai/otari-sandbox-container:latest",
-    ])
+    await userEvent.setup().click(selectTrigger("Sandbox image"))
+    expect(
+      screen.getAllByRole("option").map((option) => option.textContent),
+    ).toEqual(["Deployment default", "mzdotai/otari-sandbox-container:latest"])
   })
 
   it("says so rather than showing a picker when the operator approved no images", async () => {
     mockApi()
     await renderLoaded()
 
-    expect(screen.queryByLabelText("Sandbox image")).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: /Sandbox image$/ }),
+    ).not.toBeInTheDocument()
     expect(screen.getByText(/approved no sandbox images/i)).toBeInTheDocument()
   })
 
@@ -158,9 +160,10 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
     const user = userEvent.setup()
     await renderLoaded()
 
-    await user.selectOptions(screen.getByLabelText("Code execution"), "allowed")
-    await user.selectOptions(
-      screen.getByLabelText("Sandbox image"),
+    await pickOption(user, "Code execution", "Allowed")
+    await pickOption(
+      user,
+      "Sandbox image",
       "mzdotai/otari-sandbox-container:latest",
     )
     await user.click(screen.getByRole("button", { name: "Save" }))
@@ -306,12 +309,11 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
     expect(put?.body).toMatchObject({ tools: null })
   })
 
-  it("names a withdrawn pin instead of showing it as the deployment default", async () => {
+  it("names a withdrawn pin instead of showing it bare", async () => {
     // The scenario the server guards twice: the operator dropped the image from
-    // the allow-list after the workspace pinned it. Without an option matching
-    // the stored value the native select falls back to its first option, which
-    // would show "Deployment default" over a policy that is nothing of the
-    // kind, and a save would earn a 400 naming a value never on screen.
+    // the allow-list after the workspace pinned it. With no option matching it,
+    // the control would show the image bare, with nothing saying it is refused,
+    // and a save would earn a 400 over a value the screen presented as ordinary.
     mockApi({
       policy: workspaceCodeExecutionPolicy({
         workspace_id: ALPHA,
@@ -323,13 +325,9 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
     })
     await renderLoaded()
 
-    const select = screen.getByLabelText("Sandbox image") as HTMLSelectElement
-    expect(select).toHaveValue("ghcr.io/acme/withdrawn:1")
-    expect(
-      screen.getByRole("option", {
-        name: "ghcr.io/acme/withdrawn:1 (no longer approved)",
-      }),
-    ).toBeInTheDocument()
+    expect(selectTrigger("Sandbox image")).toHaveTextContent(
+      "ghcr.io/acme/withdrawn:1 (no longer approved)",
+    )
     expect(
       screen.getByText(/no longer approves, so its requests are refused/i),
     ).toBeInTheDocument()
@@ -347,8 +345,8 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
     })
     await renderLoaded()
 
-    expect(screen.getByLabelText("Sandbox image")).toHaveValue(
-      "ghcr.io/acme/withdrawn:1",
+    expect(selectTrigger("Sandbox image")).toHaveTextContent(
+      "ghcr.io/acme/withdrawn:1 (no longer approved)",
     )
   })
 
@@ -365,7 +363,7 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
     const user = userEvent.setup()
     await renderLoaded()
 
-    await user.selectOptions(screen.getByLabelText("Sandbox image"), "")
+    await pickOption(user, "Sandbox image", "Deployment default")
     await user.click(screen.getByRole("button", { name: "Save" }))
 
     const put = calls.find((call) => call.method === "PUT")
@@ -384,7 +382,7 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
     })
     await renderLoaded()
 
-    expect(screen.getByLabelText("Sandbox image")).toHaveValue(
+    expect(selectTrigger("Sandbox image")).toHaveTextContent(
       "ghcr.io/acme/sandbox:2",
     )
   })
@@ -400,7 +398,7 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
     const user = userEvent.setup()
     await renderLoaded()
 
-    await user.selectOptions(screen.getByLabelText("Code execution"), "default")
+    await pickOption(user, "Code execution", "Deployment default")
     await user.click(screen.getByRole("button", { name: "Save" }))
 
     expect(calls.some((call) => call.method === "DELETE")).toBe(true)
@@ -412,7 +410,7 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
     const user = userEvent.setup()
     await renderLoaded()
 
-    await user.selectOptions(screen.getByLabelText("Code execution"), "allowed")
+    await pickOption(user, "Code execution", "Allowed")
     await user.type(screen.getByLabelText("Execution timeout (seconds)"), "600")
     await user.click(screen.getByRole("button", { name: "Save" }))
 

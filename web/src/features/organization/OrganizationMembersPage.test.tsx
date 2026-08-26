@@ -26,6 +26,7 @@ import {
   workspace,
   workspaceMember,
 } from "@/tests/fixtures"
+import { pickOption, selectTrigger } from "@/tests/select"
 
 interface Request {
   url: string
@@ -197,7 +198,7 @@ describe("OrganizationMembersPage", () => {
 
     expect(await screen.findByText("Analyst")).toBeInTheDocument()
     expect(screen.getByText("analyst@example.com")).toBeInTheDocument()
-    expect(screen.getByLabelText("Role for Analyst")).toHaveValue("member")
+    expect(selectTrigger("Role for Analyst")).toHaveTextContent("Member")
   })
 
   it("changes a member's role through the membership endpoint", async () => {
@@ -205,8 +206,8 @@ describe("OrganizationMembersPage", () => {
     const user = userEvent.setup()
     renderPage(<OrganizationMembersPage />)
 
-    const role = await screen.findByLabelText("Role for Analyst")
-    await user.selectOptions(role, "admin")
+    await screen.findByText("Analyst")
+    await pickOption(user, "Role for Analyst", "Admin")
 
     const patch = requests.find((request) => request.method === "PATCH")
     expect(patch?.url).toContain(
@@ -282,7 +283,7 @@ describe("OrganizationMembersPage", () => {
 
     await user.click(await screen.findByRole("button", { name: "Add member" }))
     await user.type(screen.getByLabelText("Email address"), "ada@example.com")
-    await user.selectOptions(screen.getByLabelText("Role"), "admin")
+    await pickOption(user, "Role", "Admin")
     // Ticked by default, since a member in no workspace can reach nothing.
     expect(await screen.findByLabelText("Production")).toBeChecked()
     // The header action hides itself while the form is open, so the remaining
@@ -558,8 +559,7 @@ describe("OrganizationMembersPage", () => {
 
     // Already in Default Workspace on the Small budget; move to Large and join
     // Bravo. A budget is picked, never an amount: the figure is the budget's.
-    const picker = await screen.findByLabelText("Budget in Default Workspace")
-    await actor.selectOptions(picker, "bud-large")
+    await pickOption(actor, "Budget in Default Workspace", "Large")
     await actor.click(screen.getByLabelText("Bravo"))
     await actor.click(screen.getByRole("button", { name: "Save changes" }))
 

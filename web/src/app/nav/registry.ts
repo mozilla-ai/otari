@@ -205,13 +205,16 @@ const BASE_NAV_SECTIONS = [
  * provisioned for itself. The gate is written anyway because it is the thing
  * that becomes load-bearing the moment per-user sign-in lands (otari-ai#1716).
  *
- * Two of the design's rows are destinations this gateway does not serve: the
- * organization's own provider credentials, and the organization guardrail
- * ceiling. Each is **declared and gated on a surface the standalone bootstrap
- * does not report** (`STANDALONE_SURFACES` in
- * `src/gateway/api/routes/bootstrap.py` is that list), so the row is absent here
- * and present on a deployment that serves it, and a group whose every row is
- * gated drops entirely, heading included.
+ * Two of the design's rows are **declared and gated on a surface the standalone
+ * bootstrap does not report** (`STANDALONE_SURFACES` in
+ * `src/gateway/api/routes/bootstrap.py` is that list), so each row is absent
+ * here and present on a deployment that serves it, and a group whose every row
+ * is gated drops entirely, heading included. The organization guardrail ceiling
+ * is one, and this gateway serves no such surface at all. The organization's own
+ * provider credentials are the other, and that one is a *choice* rather than an
+ * absence: the API and the page both exist, and a hosted deployment reports
+ * `organization_providers` in place of the process-global `providers`, because
+ * a credential keyed on an instance name alone is served to every tenant.
  *
  * The design draws two more, Billing and Gateways, and neither is declared here
  * at all, because neither is this build's to declare: Billing is
@@ -234,11 +237,11 @@ const BASE_NAV_SECTIONS = [
  *
  * Both have a page on the *workspace* rail that looks like them and is not:
  * `/providers` is this process's credentials, and `/tools/guardrails` is
- * what this process refuses. The organization copies would be a tenant-wide
- * credential set and a ceiling over every workspace, which are different tables
- * behind different endpoints. Pointing the organization rows at the workspace
- * pages would put one destination on both rails, which `navContextForPath`
- * cannot express and `registry.test.ts` forbids.
+ * what this process refuses. The organization ones are a tenant-wide credential
+ * set and a ceiling over every workspace, which are different tables behind
+ * different endpoints. Pointing the organization rows at the workspace pages
+ * would put one destination on both rails, which `navContextForPath` cannot
+ * express and `registry.test.ts` forbids.
  */
 const ORGANIZATION_NAV_SECTIONS = [
   {
@@ -263,8 +266,9 @@ const ORGANIZATION_NAV_SECTIONS = [
       },
       // The organization's own upstream credentials, which is a different table
       // from the workspace rail's `/providers`: over there a credential belongs
-      // to the process, here it would belong to the tenant. This gateway has only
-      // the first, so the row is declared and gated off. See the note below.
+      // to the process, here it belongs to the tenant. A deployment reports one
+      // surface or the other, never both, so exactly one of the two rows renders.
+      // See the note above.
       {
         to: "/organization/provider-keys",
         label: "Providers",

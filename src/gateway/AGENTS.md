@@ -6,7 +6,7 @@ Loaded when working under `src/gateway/`. For house style (async SQLAlchemy 2.0,
 layering, the budget/reservation lifecycle, migrations, config/logging), read
 [../../.github/skills/backend-standards/SKILL.md](../../.github/skills/backend-standards/SKILL.md).
 
-The two runtime modes and the OSS/enterprise seam are in the root `AGENTS.md`;
+The runtime modes and the OSS/enterprise seam are in the root `AGENTS.md`;
 read that first if a change touches mode selection.
 
 ## Ports, container, bootstrap

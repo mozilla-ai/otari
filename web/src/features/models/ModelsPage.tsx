@@ -1672,9 +1672,10 @@ export function ModelsPage() {
   }, [modelRows])
 
   // A ?provider= value seeded from the URL may name a provider with no models,
-  // or a stale/misspelled one. The native <select> would then render blank and
-  // the table would show zero rows, a confusing dead end. Once the catalog has
-  // loaded (options beyond "all"), drop an unknown value back to "all".
+  // or a stale/misspelled one. No option would match, so the select would name
+  // the bogus provider back at you and the table would show zero rows, a
+  // confusing dead end. Once the catalog has loaded (options beyond "all"),
+  // drop an unknown value back to "all".
   useEffect(() => {
     if (providerFilter === "all" || providerOptions.length <= 1) {
       return

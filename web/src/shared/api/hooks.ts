@@ -22,6 +22,7 @@ import type {
   CreateOrganizationMemberResult,
   CreateOrganizationPricingOverride,
   CreateOrganizationRequest,
+  CreateOrgProviderKeyRequest,
   CreateScopedBudgetRequest,
   CreateSearchToolRequest,
   CreateStoredProviderRequest,
@@ -52,6 +53,7 @@ import type {
   OrganizationGuardrail,
   OrganizationMember,
   OrganizationPricingOverride,
+  OrgProviderKey,
   Passkey,
   PasskeysResponse,
   PasswordResponse,
@@ -94,6 +96,7 @@ import type {
   UpdateOrganizationMemberRequest,
   UpdateOrganizationPricingOverride,
   UpdateOrganizationRequest,
+  UpdateOrgProviderKeyRequest,
   UpdateScopedBudgetRequest,
   UpdateSearchToolRequest,
   UpdateSettingsRequest,
@@ -172,6 +175,10 @@ const DEPLOYMENT_ADMIN = "deployment-admin"
 // edit should not make all of them refetch.
 const ORGANIZATION_PRICING = "organization-pricing"
 const ORGANIZATION_GUARDRAILS = "organization-guardrails"
+// The organization's own upstream provider credentials. Its own key for the
+// reason the two above have one: this is read by one page, and a credential
+// edit has no business refetching the organization context every page reads.
+const ORGANIZATION_PROVIDER_KEYS = "organization-provider-keys"
 const WORKSPACES = "workspaces"
 // The first-request setup guide's state. Its own key rather than a child of
 // WORKSPACES: the guide polls while it is on screen, and nesting it would make
@@ -1728,11 +1735,17 @@ interface Paged<T> {
   count: number
 }
 
-async function fetchAllPaged<T>(path: string): Promise<T[]> {
+async function fetchAllPaged<T>(
+  path: string,
+  // Appended after the paging pair rather than merged with it, so every
+  // existing caller's URL is unchanged.
+  params?: Record<string, string>,
+): Promise<T[]> {
+  const extra = params ? `&${new URLSearchParams(params)}` : ""
   const all: T[] = []
   for (let page = 0; page < TENANCY_MAX_PAGES; page += 1) {
     const body = await apiFetch<Paged<T>>(
-      `${path}?skip=${page * TENANCY_PAGE_SIZE}&limit=${TENANCY_PAGE_SIZE}`,
+      `${path}?skip=${page * TENANCY_PAGE_SIZE}&limit=${TENANCY_PAGE_SIZE}${extra}`,
     )
     all.push(...body.data)
     if (body.data.length < TENANCY_PAGE_SIZE) break
@@ -2435,6 +2448,118 @@ export function useDeleteOrganizationGuardrail() {
         queryKey: [ORGANIZATION_GUARDRAILS],
       })
     },
+  })
+}
+
+function invalidateOrgProviderKeys(
+  queryClient: ReturnType<typeof useQueryClient>,
+): void {
+  void queryClient.invalidateQueries({
+    queryKey: [ORGANIZATION_PROVIDER_KEYS],
+  })
+}
+
+// The organization's own upstream provider credentials (#670), which every
+// workspace under it inherits. A different table from `/v1/provider-credentials`
+// above: that one is keyed on an instance name and belongs to the process, this
+// one belongs to the tenant. Only a hosted deployment reports the surface these
+// hooks serve (`organization_providers`).
+//
+// Archived keys are fetched too, and filtered in the page rather than by a
+// second query: archiving is reversible, the list is small, and a toggle that
+// refetched would make "show archived" a network round trip for a set the
+// browser already holds.
+export function useOrgProviderKeys(enabled = true) {
+  return useQuery({
+    queryKey: [ORGANIZATION_PROVIDER_KEYS],
+    queryFn: () =>
+      fetchAllPaged<OrgProviderKey>("/v1/organizations/me/provider-keys", {
+        include_archived: "true",
+      }),
+    staleTime: 60_000,
+    enabled,
+  })
+}
+
+export function useCreateOrgProviderKey() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (body: CreateOrgProviderKeyRequest) =>
+      apiFetch<OrgProviderKey>("/v1/organizations/me/provider-keys", {
+        method: "POST",
+        body: JSON.stringify(body),
+      }),
+    onSuccess: () => invalidateOrgProviderKeys(queryClient),
+  })
+}
+
+export function useUpdateOrgProviderKey() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: ({
+      keyId,
+      body,
+    }: {
+      keyId: string
+      body: UpdateOrgProviderKeyRequest
+    }) =>
+      apiFetch<OrgProviderKey>(
+        `/v1/organizations/me/provider-keys/${encodeURIComponent(keyId)}`,
+        { method: "PATCH", body: JSON.stringify(body) },
+      ),
+    onSuccess: () => invalidateOrgProviderKeys(queryClient),
+  })
+}
+
+// Archiving also clears the organization default, and setting one clears it on
+// whichever key held it, so every one of these four re-reads the whole list
+// rather than patching the row it acted on.
+export function useArchiveOrgProviderKey() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (keyId: string) =>
+      apiFetch<OrgProviderKey>(
+        `/v1/organizations/me/provider-keys/${encodeURIComponent(keyId)}/archive`,
+        { method: "POST" },
+      ),
+    onSuccess: () => invalidateOrgProviderKeys(queryClient),
+  })
+}
+
+export function useRestoreOrgProviderKey() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (keyId: string) =>
+      apiFetch<OrgProviderKey>(
+        `/v1/organizations/me/provider-keys/${encodeURIComponent(keyId)}/restore`,
+        { method: "POST" },
+      ),
+    onSuccess: () => invalidateOrgProviderKeys(queryClient),
+  })
+}
+
+export function useSetOrgProviderKeyDefault() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (keyId: string) =>
+      apiFetch<OrgProviderKey>(
+        `/v1/organizations/me/provider-keys/${encodeURIComponent(keyId)}/default`,
+        { method: "POST" },
+      ),
+    onSuccess: () => invalidateOrgProviderKeys(queryClient),
+  })
+}
+
+// Permanent, and the API accepts it only for a key that is already archived.
+export function useDeleteOrgProviderKey() {
+  const queryClient = useQueryClient()
+  return useMutation({
+    mutationFn: (keyId: string) =>
+      apiFetch<{ message: string }>(
+        `/v1/organizations/me/provider-keys/${encodeURIComponent(keyId)}`,
+        { method: "DELETE" },
+      ),
+    onSuccess: () => invalidateOrgProviderKeys(queryClient),
   })
 }
 

@@ -5,6 +5,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type { OrganizationGuardrail } from "@/client"
 import { OrganizationGuardrailsCard } from "@/features/tools/OrganizationGuardrailsCard"
 import { organizationContext, organizationGuardrail } from "@/tests/fixtures"
+import { selectTrigger } from "@/tests/select"
 
 const ALPHA = "11111111-1111-1111-1111-111111111111"
 const BETA = "22222222-2222-2222-2222-222222222222"
@@ -119,7 +120,7 @@ describe("OrganizationGuardrailsCard", () => {
     expect(screen.getByText("credential set")).toBeInTheDocument()
     // "Paused" is also an option in the status picker, so the badge is asserted
     // through the picker's value rather than by matching the word twice.
-    expect(screen.getByLabelText("Status")).toHaveValue("off")
+    expect(selectTrigger("Status")).toHaveTextContent("Paused")
   })
 
   it("never renders a stored credential back, only offers to replace it", async () => {

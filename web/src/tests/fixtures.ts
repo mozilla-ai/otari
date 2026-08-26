@@ -16,6 +16,7 @@ import type {
   OrganizationContext,
   OrganizationGuardrail,
   OrganizationMember,
+  OrgProviderKey,
   PricingResponse,
   ScopedBudget,
   UsageSeriesPoint,
@@ -99,6 +100,14 @@ const STANDALONE_SURFACES = [
   "usage",
   "users",
   "workspaces",
+]
+
+// The same list for a hosted (multi-tenant) deployment, kept in step with
+// HOSTED_SURFACES beside it: the process-global provider page drops and the
+// organization-scoped one takes its place.
+export const HOSTED_SURFACES = [
+  ...STANDALONE_SURFACES.filter((surface) => surface !== "providers"),
+  "organization_providers",
 ]
 
 /** The deployment bootstrap, standalone by default. See useDeployment. */
@@ -429,6 +438,27 @@ export function organizationGuardrail(
     workspace_ids: [],
     created_at: "2026-08-24T00:00:00+00:00",
     updated_at: "2026-08-24T00:00:00+00:00",
+    ...overrides,
+  }
+}
+
+export function orgProviderKey(
+  overrides: Partial<OrgProviderKey> = {},
+): OrgProviderKey {
+  return {
+    id: "66666666-6666-6666-6666-666666666666",
+    organization_id: "11111111-1111-1111-1111-111111111111",
+    provider: "openai",
+    name: "Production",
+    api_base: null,
+    client_args: null,
+    // What a stored credential looks like coming back: the ciphertext stays on
+    // the server and only the tail of the key is ever published.
+    last4: "abcd",
+    is_org_default: false,
+    archived_at: null,
+    created_at: "2026-08-24T00:00:00+00:00",
+    updated_at: null,
     ...overrides,
   }
 }

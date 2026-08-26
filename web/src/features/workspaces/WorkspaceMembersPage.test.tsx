@@ -9,6 +9,7 @@ import {
   organizationMember,
   workspaceMember,
 } from "@/tests/fixtures"
+import { pickOption } from "@/tests/select"
 
 const ALPHA = "11111111-1111-1111-1111-111111111111"
 const USER = "33333333-3333-3333-3333-333333333333"
@@ -145,9 +146,8 @@ describe("WorkspaceMembersPage", () => {
     const user = userEvent.setup()
     renderPage()
 
-    const picker = await screen.findByLabelText("Organization member")
-    await user.selectOptions(picker, "77777777-7777-7777-7777-777777777777")
-    await user.selectOptions(screen.getByLabelText("Role"), "admin")
+    await pickOption(user, "Organization member", "Analyst")
+    await pickOption(user, "Role", "Admin")
     await user.click(screen.getByRole("button", { name: "Add member" }))
 
     const post = requests.find(

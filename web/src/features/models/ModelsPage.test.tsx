@@ -17,6 +17,7 @@ import { ModelsPage } from "@/features/models/ModelsPage"
 import * as apiClient from "@/shared/api/client"
 import { pricingResponse } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
+import { pickOption, selectTrigger } from "@/tests/select"
 
 const PRICED: PricingResponse = pricingResponse({
   model_key: "openai:gpt-4o",
@@ -416,10 +417,7 @@ describe("ModelsPage", () => {
     renderWithClient(<ModelsPage />)
     await screen.findByText("openai:gpt-4o")
 
-    await user.selectOptions(
-      screen.getByLabelText("Filter by provider"),
-      "anthropic",
-    )
+    await pickOption(user, "Filter by provider", "anthropic")
 
     expect(
       within(table()).getByText("anthropic:claude-sonnet-4"),
@@ -435,7 +433,7 @@ describe("ModelsPage", () => {
 
     // The provider select is pre-set to the URL's provider, and only that
     // provider's models are shown.
-    expect(screen.getByLabelText("Filter by provider")).toHaveValue("anthropic")
+    expect(selectTrigger("Filter by provider")).toHaveTextContent("anthropic")
     expect(
       within(table()).getByText("anthropic:claude-sonnet-4"),
     ).toBeInTheDocument()
@@ -450,7 +448,9 @@ describe("ModelsPage", () => {
 
     // A stale/misspelled ?provider= resets to "all" once the catalog loads,
     // so the select is usable and every provider's models remain visible.
-    expect(screen.getByLabelText("Filter by provider")).toHaveValue("all")
+    expect(selectTrigger("Filter by provider")).toHaveTextContent(
+      "All providers",
+    )
     expect(
       within(table()).getByText("anthropic:claude-sonnet-4"),
     ).toBeInTheDocument()
@@ -464,10 +464,7 @@ describe("ModelsPage", () => {
     renderWithClient(<ModelsPage />)
     await screen.findByText("openai:gpt-4o")
 
-    await user.selectOptions(
-      screen.getByLabelText("Filter by pricing"),
-      "Custom price",
-    )
+    await pickOption(user, "Filter by pricing", "Custom price")
 
     expect(within(table()).getByText("openai:gpt-4o")).toBeInTheDocument()
     expect(
@@ -495,10 +492,7 @@ describe("ModelsPage", () => {
     renderWithClient(<ModelsPage />)
     await screen.findByText("mistral:large")
 
-    await user.selectOptions(
-      screen.getByLabelText("Filter by source"),
-      "Custom (not discovered)",
-    )
+    await pickOption(user, "Filter by source", "Custom (not discovered)")
 
     expect(within(table()).getByText("mistral:large")).toBeInTheDocument()
     expect(within(table()).queryByText("openai:gpt-4o")).not.toBeInTheDocument()
@@ -513,10 +507,7 @@ describe("ModelsPage", () => {
 
     // Reasoning is a model-level flag (models.dev), not a provider capability:
     // only claude-sonnet-4 reports it, so the two gpt-4o models drop out.
-    await user.selectOptions(
-      screen.getByLabelText("Filter by capability"),
-      "Reasoning",
-    )
+    await pickOption(user, "Filter by capability", "Reasoning")
 
     expect(
       within(table()).getByText("anthropic:claude-sonnet-4"),
@@ -543,10 +534,7 @@ describe("ModelsPage", () => {
 
     renderWithClient(<ModelsPage />)
     await screen.findByText("openai:gpt-4o")
-    await user.selectOptions(
-      screen.getByLabelText("Filter by capability"),
-      "Vision",
-    )
+    await pickOption(user, "Filter by capability", "Vision")
 
     expect(within(table()).queryByText("openai:gpt-4o")).not.toBeInTheDocument()
   })
@@ -559,10 +547,7 @@ describe("ModelsPage", () => {
     await screen.findByText("openai:gpt-4o")
 
     // No mock model reports PDF input, so the list empties for a filter reason.
-    await user.selectOptions(
-      screen.getByLabelText("Filter by capability"),
-      "PDF",
-    )
+    await pickOption(user, "Filter by capability", "PDF")
 
     expect(
       within(table()).getByText("No models match your filters."),
@@ -576,10 +561,7 @@ describe("ModelsPage", () => {
     renderWithClient(<ModelsPage />)
     await screen.findByText("openai:gpt-4o")
 
-    await user.selectOptions(
-      screen.getByLabelText("Minimum context window"),
-      "≥ 200K",
-    )
+    await pickOption(user, "Minimum context window", "≥ 200K")
 
     expect(
       within(table()).getByText("anthropic:claude-sonnet-4"),
@@ -683,7 +665,7 @@ describe("ModelsPage", () => {
     expect(within(table()).getByText("openai:m14")).toBeInTheDocument()
     expect(within(table()).queryByText("openai:m15")).not.toBeInTheDocument()
 
-    await user.selectOptions(screen.getByLabelText("Rows per page"), "25")
+    await pickOption(user, "Rows per page", "25")
 
     expect(within(table()).getByText("openai:m24")).toBeInTheDocument()
     expect(within(table()).queryByText("openai:m25")).not.toBeInTheDocument()
@@ -911,10 +893,7 @@ describe("ModelsPage", () => {
     renderWithClient(<ModelsPage />)
     await screen.findByText("openai:gpt-4o")
 
-    await user.selectOptions(
-      screen.getByLabelText("Compare prices at context"),
-      "200000",
-    )
+    await pickOption(user, "Compare prices at context", "Compare at 200K")
 
     expect(
       screen.getByRole("columnheader", { name: /at 200K in \/ out \/ 1M/ }),

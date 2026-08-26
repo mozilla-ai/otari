@@ -5,14 +5,14 @@ import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type { UsageSummary } from "@/client"
+import type { DeploymentBootstrap, UsageSummary } from "@/client"
 import {
   localDayKey,
   OverviewIndex,
   OverviewPage,
 } from "@/features/overview/OverviewPage"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
-import { bootstrap, usageTotals } from "@/tests/fixtures"
+import { bootstrap, HOSTED_SURFACES, usageTotals } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -99,7 +99,11 @@ function LocationProbe() {
   return <div data-testid="loc">{loc.pathname}</div>
 }
 
-function renderPage(ui: ReactElement, initial = "/overview") {
+function renderPage(
+  ui: ReactElement,
+  initial = "/overview",
+  deployment: DeploymentBootstrap = bootstrap(),
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -109,12 +113,15 @@ function renderPage(ui: ReactElement, initial = "/overview") {
     // are about a tile. The guide itself renders nothing here: with no
     // workspace selected there is nothing for it to be about.
     <QueryClientProvider client={client}>
-      <DeploymentProvider value={bootstrap()}>{ui}</DeploymentProvider>
+      <DeploymentProvider value={deployment}>{ui}</DeploymentProvider>
     </QueryClientProvider>,
     {
       wrapper: withRouter({
         url: initial,
-        routes: [{ path: "/providers", element: <LocationProbe /> }],
+        routes: [
+          { path: "/providers", element: <LocationProbe /> },
+          { path: "/organization/provider-keys", element: <LocationProbe /> },
+        ],
       }),
     },
   )
@@ -299,6 +306,33 @@ describe("OverviewPage", () => {
     )
   })
 
+  it("states an unreachable provider without a link on a hosted deployment", async () => {
+    // Provider health reports on `config.providers`, the process-global table a
+    // hosted deployment serves no page for, so both candidate destinations are
+    // wrong: `/providers` is answered with "not available here", and the
+    // organization page lists a different table the instance is not on.
+    mockApi({
+      health: {
+        providers: [],
+        healthy: 2,
+        total: 3,
+        checked_at: "2026-07-22T00:00:00Z",
+      },
+    })
+    renderPage(
+      <OverviewPage />,
+      "/overview",
+      bootstrap({ deployment_type: "hosted", surfaces: HOSTED_SURFACES }),
+    )
+
+    expect(
+      await screen.findByText("1 provider unreachable"),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole("link", { name: "1 provider unreachable" }),
+    ).toBeNull()
+  })
+
   it("hides the status strip when nothing needs attention", async () => {
     mockApi({
       health: {
@@ -408,6 +442,30 @@ describe("OverviewIndex routing", () => {
       screen.getByRole("button", { name: "Add your first provider" }),
     )
     expect(await screen.findByTestId("loc")).toHaveTextContent("/providers")
+  })
+
+  it("sends a hosted deployment to the organization's provider keys instead", async () => {
+    // A hosted deployment does not report the `providers` surface at all, so
+    // the shell answers that route with "not available here"; the first thing a
+    // new operator clicks must not be that panel.
+    mockApi({ providers: [] })
+    const user = userEvent.setup()
+    renderPage(
+      <OverviewIndex />,
+      "/overview",
+      bootstrap({
+        deployment_type: "hosted",
+        surfaces: HOSTED_SURFACES,
+      }),
+    )
+
+    await screen.findByText("Get started with Otari")
+    await user.click(
+      screen.getByRole("button", { name: "Add your first provider" }),
+    )
+    expect(await screen.findByTestId("loc")).toHaveTextContent(
+      "/organization/provider-keys",
+    )
   })
 
   it("reports a failed provider query instead of silently rendering a normal overview", async () => {

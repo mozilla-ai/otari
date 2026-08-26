@@ -10,6 +10,7 @@ import type {
   ToolsResponse,
 } from "@/client"
 import { ToolsGuardrailsPage } from "@/features/tools/ToolsGuardrailsPage"
+import { pickOption } from "@/tests/select"
 
 const FIELDS: ToolSettingField[] = [
   {
@@ -319,7 +320,7 @@ describe("ToolsGuardrailsPage", () => {
     renderWithClient(<ToolsGuardrailsPage />)
     await screen.findByText("Web search")
 
-    await user.selectOptions(screen.getByLabelText("web_search_extract"), "off")
+    await pickOption(user, "web_search_extract", "Off")
 
     const call = fetchMock.mock.calls.find(
       ([, init]) => (init?.method ?? "") === "PATCH",
@@ -363,7 +364,7 @@ describe("ToolsGuardrailsPage", () => {
     renderWithClient(<ToolsGuardrailsPage />)
     await screen.findByText("Web search")
 
-    await user.selectOptions(screen.getByLabelText("web_search_extract"), "off")
+    await pickOption(user, "web_search_extract", "Off")
 
     expect(await screen.findByText(/must be a boolean/)).toBeInTheDocument()
   })
@@ -499,10 +500,7 @@ describe("ToolsGuardrailsPage how-to-call card", () => {
     renderWithClient(<ToolsGuardrailsPage />)
     await screen.findByText("Web search")
 
-    await user.selectOptions(
-      screen.getByLabelText("web_search_intercept"),
-      "on",
-    )
+    await pickOption(user, "web_search_intercept", "On")
 
     const call = fetchMock.mock.calls.find(
       ([, init]) => (init?.method ?? "") === "PATCH",

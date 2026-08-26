@@ -6,6 +6,7 @@ import {
   gotoRoute,
   login,
   openFilterPickers,
+  pickOption,
   table,
   tableRows,
 } from "./helpers"
@@ -52,7 +53,7 @@ test.describe("activity log", () => {
     await expect(rows(page)).toHaveCount(ALL)
 
     await openFilterPickers(page)
-    await page.getByLabel("Status").selectOption("error")
+    await pickOption(page, "Status", "Error")
 
     // The chip is the page's own statement that the filter is applied, so it is
     // asserted alongside the rows rather than instead of them.

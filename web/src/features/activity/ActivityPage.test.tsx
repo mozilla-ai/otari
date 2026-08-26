@@ -8,6 +8,7 @@ import type { InFlightRequest, InFlightResponse, UsageEntry } from "@/client"
 import { ActivityPage } from "@/features/activity/ActivityPage"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { withRouter } from "@/tests/router"
+import { pickOption, selectTrigger } from "@/tests/select"
 
 function entry(overrides: Partial<UsageEntry> = {}): UsageEntry {
   return {
@@ -325,7 +326,7 @@ describe("ActivityPage", () => {
     )
 
     const user = userEvent.setup()
-    const chip = screen.getByRole("button", { name: /Source/ })
+    const chip = screen.getByRole("button", { name: "Remove Source filter" })
     await user.click(chip)
     await waitFor(() =>
       expect(listCalls(calls).at(-1)).not.toContain("source="),
@@ -472,11 +473,26 @@ describe("ActivityPage", () => {
     renderPage(<ActivityPage />)
 
     await screen.findByText("gpt-4o")
-    await user.selectOptions(screen.getByLabelText("Status"), "error")
+    await pickOption(user, "Status", "Error")
 
     await waitFor(() =>
       expect(listCalls(calls).at(-1)).toContain("status=error"),
     )
+  })
+
+  it("names a filter the URL invented rather than react-aria's placeholder", async () => {
+    // A hand-edited or stale link can name a status no option carries. HeroUI's
+    // Select answers an unmatched key with "Select an item", which would put
+    // library boilerplate in the filter bar over a filter that is genuinely
+    // applied; the control carries the value as its own option instead, so the
+    // bar says what is actually filtering.
+    mockApi({ rows: [entry()] })
+    renderPage(<ActivityPage />, "/activity?status=bogus")
+
+    await waitFor(() =>
+      expect(selectTrigger("Status")).toHaveTextContent("bogus"),
+    )
+    expect(selectTrigger("Status")).not.toHaveTextContent("Select an item")
   })
 
   it("sends the priced filter to the API", async () => {
@@ -485,7 +501,7 @@ describe("ActivityPage", () => {
     renderPage(<ActivityPage />)
 
     await screen.findByText("gpt-4o")
-    await user.selectOptions(screen.getByLabelText("Priced?"), "false")
+    await pickOption(user, "Priced?", "Unpriced")
 
     await waitFor(() =>
       expect(listCalls(calls).at(-1)).toContain("priced=false"),
@@ -510,17 +526,11 @@ describe("ActivityPage", () => {
 
     // Options come from the log itself (the summary's provenance breakdown), with
     // friendly labels for the sources the page knows about.
-    const select = screen.getByLabelText("Source")
-    await waitFor(() =>
-      expect(
-        within(select).getByRole("option", { name: "Claude Code" }),
-      ).toBeInTheDocument(),
-    )
-    expect(
-      within(select).getByRole("option", { name: "Gateway" }),
-    ).toBeInTheDocument()
+    await user.click(selectTrigger("Source"))
+    await screen.findByRole("option", { name: "Claude Code" })
+    expect(screen.getByRole("option", { name: "Gateway" })).toBeInTheDocument()
 
-    await user.selectOptions(select, "claude_code")
+    await user.click(screen.getByRole("option", { name: "Claude Code" }))
     await waitFor(() =>
       expect(listCalls(calls).at(-1)).toContain("source=claude_code"),
     )
@@ -533,11 +543,12 @@ describe("ActivityPage", () => {
     renderPage(<ActivityPage />, "/activity?source=codex")
     await screen.findByText("gpt-4o")
 
-    const select = screen.getByLabelText("Source")
+    const select = selectTrigger("Source")
+    expect(select).toHaveTextContent("Codex")
+    await userEvent.setup().click(select)
     expect(
-      within(select).getByRole("option", { name: "Codex" }),
+      await screen.findByRole("option", { name: "Codex" }),
     ).toBeInTheDocument()
-    expect(select).toHaveValue("codex")
   })
 
   it("surfaces a timeline summary failure instead of an empty strip", async () => {
@@ -568,7 +579,9 @@ describe("ActivityPage", () => {
     await screen.findAllByText("gpt-4o")
 
     await waitFor(() =>
-      expect(screen.queryByLabelText("Source")).not.toBeInTheDocument(),
+      expect(
+        screen.queryByRole("button", { name: /Source$/ }),
+      ).not.toBeInTheDocument(),
     )
   })
 

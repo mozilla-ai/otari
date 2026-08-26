@@ -6,6 +6,7 @@ import {
   Label,
   ListBox,
   ListBoxItem,
+  Select,
   Spinner,
   Tooltip,
 } from "@heroui/react"
@@ -832,12 +833,19 @@ export function Badge({
   )
 }
 
-const FILTER_SELECT_CLASS =
-  "rounded-lg border border-border bg-surface-alt px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
+// react-aria reads an empty key as "nothing selected", and "" is a real filter
+// value here ("All", "Any price"), so every option key carries this prefix and
+// it is stripped back off on the way out. Both directions go through these two,
+// so the prefix is written down once.
+const OPTION_KEY_PREFIX = "v:"
+const optionKey = (value: string) => `${OPTION_KEY_PREFIX}${value}`
+const optionValue = (key: string) => key.slice(OPTION_KEY_PREFIX.length)
 
-// Token-styled native select for page filter bars. Pass `label` (+ `id`) for a
-// visible label, or `ariaLabel` alone for a compact control. Prefer `options`
-// for static lists; use `children` when options are grouped or conditional.
+// Filter dropdown for page filter bars. On HeroUI's Select rather than a native
+// <select> because a native one draws its menu *over* the control on macOS,
+// covering the button that opened it; this one is a popover anchored under the
+// trigger. Pass `label` for a visible label, or `ariaLabel` alone for a compact
+// control, and `id` when an outside <label htmlFor> points at the trigger.
 export function FilterSelect({
   id,
   label,
@@ -845,7 +853,6 @@ export function FilterSelect({
   value,
   onChange,
   options,
-  children,
   disabled,
 }: {
   id?: string
@@ -853,42 +860,51 @@ export function FilterSelect({
   ariaLabel?: string
   value: string
   onChange: (value: string) => void
-  options?: { value: string; label: string }[]
-  children?: ReactNode
+  options: { value: string; label: string }[]
   disabled?: boolean
 }) {
-  const fallbackId = useId()
-  const selectId = id ?? (label ? fallbackId : undefined)
-  const select = (
-    <select
-      id={selectId}
+  // A value no option carries is a URL naming something the list does not hold
+  // (`/activity?status=bogus`) or a drill-down into a key with no rows in the
+  // window. react-aria answers an unmatched key with its own "Select an item",
+  // which would put library boilerplate where the applied filter belongs, so
+  // the value is carried as its own option instead: the filter bar says what is
+  // actually filtering, the same fallback the pages' own chips make with
+  // `?? value`. A call site whose default is missing from its own options would
+  // land here too, which is a bug at the call site rather than a shape to
+  // design around; every list today carries its own.
+  const items = options.some((option) => option.value === value)
+    ? options
+    : [{ value, label: value }, ...options]
+  return (
+    <Select.Root
       aria-label={label ? undefined : ariaLabel}
-      value={value}
-      disabled={disabled}
-      onChange={(event) => onChange(event.target.value)}
-      className={FILTER_SELECT_CLASS}
+      isDisabled={disabled}
+      selectedKey={optionKey(value)}
+      // A null key is react-aria clearing the selection, which no filter here
+      // asks for: reporting it would push the strip of a non-string ("ll") into
+      // the filter, and on a URL-backed page into the query string with it.
+      onSelectionChange={(key) => {
+        if (key != null) onChange(optionValue(String(key)))
+      }}
     >
-      {options
-        ? options.map((option) => (
-            <option key={option.value} value={option.value}>
+      {label ? (
+        <Label className="text-xs font-medium text-muted">{label}</Label>
+      ) : null}
+      <Select.Trigger id={id}>
+        <Select.Value />
+        <Select.Indicator />
+      </Select.Trigger>
+      <Select.Popover>
+        <ListBox items={items} className="max-h-72 overflow-auto">
+          {(option: { value: string; label: string }) => (
+            <ListBoxItem id={optionKey(option.value)} textValue={option.label}>
               {option.label}
-            </option>
-          ))
-        : children}
-    </select>
+            </ListBoxItem>
+          )}
+        </ListBox>
+      </Select.Popover>
+    </Select.Root>
   )
-
-  if (label) {
-    return (
-      <div className="flex flex-col gap-1">
-        <label htmlFor={selectId} className="text-xs font-medium text-muted">
-          {label}
-        </label>
-        {select}
-      </div>
-    )
-  }
-  return select
 }
 
 // A type-to-filter combobox for page filter bars, accumulating a set of values.

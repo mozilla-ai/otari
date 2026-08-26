@@ -505,6 +505,34 @@ def test_load_config_unset_mode_without_token_is_standalone(
     assert config.effective_mode == "standalone"
 
 
+def test_load_config_honors_hosted_mode_without_making_it_a_data_plane(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # Hosted is standalone's multi-tenant sibling, so it holds its own control
+    # plane: every request path that asks whether this is a hybrid gateway has to
+    # keep getting "no".
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text("mode: hosted\n", encoding="utf-8")
+    monkeypatch.delenv("OTARI_AI_TOKEN", raising=False)
+
+    config = load_config(str(config_file))
+
+    assert config.effective_mode == "hosted"
+    assert config.is_hosted_mode
+    assert not config.is_hybrid_mode
+
+
+def test_load_config_rejects_hosted_mode_when_token_is_set(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    # Same conflict as standalone, for the same reason: a deployment holding its
+    # own management API is not also reporting to somebody else's control plane.
+    config_file = tmp_path / "gateway.yml"
+    config_file.write_text("mode: hosted\n", encoding="utf-8")
+    monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
+
+    with pytest.raises(ValueError, match="conflicts with OTARI_AI_TOKEN"):
+        load_config(str(config_file))
+
+
 def test_load_config_accepts_legacy_platform_mode_alias(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     # "platform" is the pre-rename alias for the "hybrid" mode; it must keep
     # working so existing configs do not break.

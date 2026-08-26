@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 
 import type { SearchProviderInfo, SearchToolsResponse } from "@/client"
 import { SearchToolsCard } from "@/features/tools/SearchToolsCard"
+import { pickOption } from "@/tests/select"
 
 const PROVIDERS: SearchProviderInfo[] = [
   {
@@ -132,10 +133,7 @@ describe("SearchToolsCard", () => {
     await screen.findByText("local")
 
     await user.type(screen.getByLabelText("Search tool name"), "second")
-    await user.selectOptions(
-      screen.getByLabelText("Search provider"),
-      "searxng",
-    )
+    await pickOption(user, "Search provider", "searxng")
     await user.type(
       screen.getByLabelText("Search backend URL"),
       "http://other:8080",

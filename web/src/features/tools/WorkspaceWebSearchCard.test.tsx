@@ -11,6 +11,7 @@ import {
 } from "@/features/tools/WorkspaceWebSearchCard"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { organizationContext, workspaceWebSearchConfig } from "@/tests/fixtures"
+import { pickOption, selectTrigger } from "@/tests/select"
 
 const ALPHA = "11111111-1111-1111-1111-111111111111"
 
@@ -75,7 +76,7 @@ describe("WorkspaceWebSearchCard", () => {
     renderCard()
 
     expect(await screen.findByText("Nothing set")).toBeInTheDocument()
-    expect(await screen.findByLabelText("Web search")).toHaveValue("default")
+    expect(selectTrigger("Web search")).toHaveTextContent("Deployment default")
   })
 
   it("shows a stored row's stance, ceiling and domain lists", async () => {
@@ -91,7 +92,9 @@ describe("WorkspaceWebSearchCard", () => {
     })
     await renderLoaded()
 
-    expect(screen.getByLabelText("Web search")).toHaveValue("blocked")
+    expect(selectTrigger("Web search")).toHaveTextContent(
+      "Blocked (tool and /v1/search)",
+    )
     expect(screen.getByLabelText("Max results")).toHaveValue("3")
     expect(screen.getByLabelText("Allowed domains")).toHaveValue(
       "arxiv.org, wikipedia.org",
@@ -107,7 +110,7 @@ describe("WorkspaceWebSearchCard", () => {
     const user = userEvent.setup()
     await renderLoaded()
 
-    await user.selectOptions(screen.getByLabelText("Web search"), "allowed")
+    await pickOption(user, "Web search", "Allowed")
     await user.type(screen.getByLabelText("Max results"), "4")
     await user.type(
       screen.getByLabelText("Blocked domains"),
@@ -161,7 +164,7 @@ describe("WorkspaceWebSearchCard", () => {
     const user = userEvent.setup()
     await renderLoaded()
 
-    await user.selectOptions(screen.getByLabelText("Web search"), "default")
+    await pickOption(user, "Web search", "Deployment default")
     await user.click(screen.getByRole("button", { name: "Save" }))
 
     expect(calls.some((call) => call.method === "DELETE")).toBe(true)
@@ -173,7 +176,7 @@ describe("WorkspaceWebSearchCard", () => {
     const user = userEvent.setup()
     await renderLoaded()
 
-    await user.selectOptions(screen.getByLabelText("Web search"), "allowed")
+    await pickOption(user, "Web search", "Allowed")
     await user.type(screen.getByLabelText("Max results"), "500")
     await user.click(screen.getByRole("button", { name: "Save" }))
 
@@ -191,7 +194,7 @@ describe("WorkspaceWebSearchCard", () => {
     const user = userEvent.setup()
     await renderLoaded()
 
-    await user.selectOptions(screen.getByLabelText("Web search"), "allowed")
+    await pickOption(user, "Web search", "Allowed")
     await user.type(
       screen.getByLabelText("Blocked domains"),
       "https://evil.example",

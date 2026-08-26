@@ -2,6 +2,8 @@ import { render, screen } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { describe, expect, it, vi } from "vitest"
 
+import { pickOption } from "@/tests/select"
+
 import { TablePagination } from "./TablePagination"
 
 function setup(overrides: Partial<Parameters<typeof TablePagination>[0]> = {}) {
@@ -55,11 +57,11 @@ describe("TablePagination", () => {
   it("changes rows per page", async () => {
     const user = userEvent.setup()
     const { onPageSizeChange } = setup()
-    await user.selectOptions(
-      screen.getByRole("combobox", { name: "Rows per page" }),
-      "100",
-    )
-    expect(onPageSizeChange).toHaveBeenCalledWith(100)
+    // 50 rather than the 100 this fixture already shows: react-aria reports a
+    // selection that changed, so re-picking the current size is correctly
+    // silent, where the native select fired `change` either way.
+    await pickOption(user, "Rows per page", "50")
+    expect(onPageSizeChange).toHaveBeenCalledWith(50)
   })
 
   it("with an unknown total, hides last and uses the next fallback", () => {

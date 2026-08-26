@@ -13,6 +13,7 @@ import type {
 } from "@/client"
 import { AuthProvider } from "@/features/auth/AuthContext"
 import { fieldMatches, SettingsPage } from "@/features/settings/SettingsPage"
+import { pickOption } from "@/tests/select"
 
 describe("fieldMatches", () => {
   const field: ConfigField = {
@@ -415,10 +416,7 @@ describe("SettingsPage", () => {
     renderWithClient(<SettingsPage />)
     await screen.findByText(/Version 1.2.3/)
 
-    await user.selectOptions(
-      screen.getByRole("combobox", { name: "stream_missing_usage_policy" }),
-      "fail",
-    )
+    await pickOption(user, "stream_missing_usage_policy", "fail")
 
     const call = fetchMock.mock.calls.find(
       ([, init]) => (init?.method ?? "") === "PATCH",

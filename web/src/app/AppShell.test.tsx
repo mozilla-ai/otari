@@ -1075,12 +1075,10 @@ describe("AppShell entitlement gating", () => {
 
   it("leads the trail with the organization when a deployment can hold several", async () => {
     mockMatchMedia(false)
-    // The only way to exercise this: no gateway in this repository reports
-    // `hosted` (bootstrap.py answers standalone or hybrid), and a standalone
-    // deployment leaves the organization out of the trail whether or not the
-    // caller belongs to a second. So the multi-organization trail has no live
-    // deployment to be seen on, and this is what keeps it from rotting until
-    // the hosted shell arrives.
+    // A standalone deployment leaves the organization out of the trail whether
+    // or not the caller belongs to a second, so `hosted` is what exercises this:
+    // `OTARI_MODE=hosted` is the mode a multi-tenant deployment runs in, and
+    // bootstrap.py reports `deployment_type: "hosted"` for it.
     await renderShell(bootstrap({ deployment_type: "hosted" }))
 
     const crumb = await screen.findByLabelText("Breadcrumb")
