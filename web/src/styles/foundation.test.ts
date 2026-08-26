@@ -138,8 +138,11 @@ describe("text on every ground it can land on", () => {
         expect(fg, `${ink} is not declared`).toBeDefined()
         expect(bg, `${ground} is not declared`).toBeDefined()
         const ratio = contrast(fg as string, bg as string)
+        // Compare the unrounded ratio. Rounding first would let 4.496 pass as
+        // 4.50, which is a test that goes green on a value that fails AA.
+        // Rounding belongs in the message and nowhere else.
         expect(
-          Number(ratio.toFixed(2)),
+          ratio,
           `${ink} on ${ground} is ${ratio.toFixed(2)}:1, under the ${AA_NORMAL}:1 AA floor for normal text`,
         ).toBeGreaterThanOrEqual(AA_NORMAL)
       }
