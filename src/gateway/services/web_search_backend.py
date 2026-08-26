@@ -243,6 +243,11 @@ class WebSearchBackend:
         # already flattened them. Safe as single-slot state because every tool loop
         # awaits its calls one at a time.
         self._last_results: list[dict[str, Any]] = []
+        # Running result count across every call this instance has served, so
+        # numbering stays continuous ([1], [2], …) across multiple searches in
+        # one turn instead of resetting to [1] on each call — see
+        # `_format_results_for_model`.
+        self._result_count = 0
 
     async def __aenter__(self) -> WebSearchBackend:
         # The search call has its own short timeout; per-page fetches use a
@@ -338,7 +343,9 @@ class WebSearchBackend:
 
             span.set_attribute("web_search.result_count", len(filtered))
             self._last_results = filtered
-            return _format_results_for_model(query, filtered)
+            start = self._result_count + 1
+            self._result_count += len(filtered)
+            return _format_results_for_model(query, filtered, start=start)
 
     # ----- internals -----
 
@@ -517,18 +524,20 @@ class WebSearchBackend:
         return None
 
 
-def _format_results_for_model(query: str, results: list[dict[str, Any]]) -> str:
+def _format_results_for_model(query: str, results: list[dict[str, Any]], *, start: int = 1) -> str:
     """Render results as compact Markdown for tool-message consumption.
 
     Numbered so the model can refer to ``[1]``, ``[2]`` in its answer — gives
     us a clean v2 path to extract structured citations later without changing
-    the v1 wire format.
+    the v1 wire format. ``start`` lets a caller continue the numbering across
+    several searches in one turn, so ``[4]`` always names exactly one result
+    for the whole turn rather than restarting at ``[1]`` on every call.
     """
     if not results:
         return f"No results for query: {query!r}"
 
     parts: list[str] = []
-    for i, r in enumerate(results, start=1):
+    for i, r in enumerate(results, start=start):
         title = str(r.get("title") or "(untitled)").strip()
         url = str(r.get("url") or "").strip()
         snippet = str(r.get("content") or "").strip()
