@@ -28,8 +28,9 @@ operations, a separately scoped endpoint serves it to the caller's own
 organization: `/v1/organizations/me/usage` for usage, and
 `/v1/organizations/me/keys` for a member's own API keys.
 
-In hybrid mode, the completion APIs accept an otari.ai user token through
-`Authorization: Bearer <token>`. Local API keys and management APIs are not used.
+In hybrid mode, the generation APIs and `/v1/mcp/execute` accept an otari.ai
+user token through `Authorization: Bearer <token>`. Local API keys and
+management APIs are not used.
 
 ## Availability by mode
 
@@ -37,6 +38,7 @@ In hybrid mode, the completion APIs accept an otari.ai user token through
 | --- | --- | --- | --- |
 | Health and `/v1/bootstrap` | Yes | Yes | Yes |
 | Chat, Messages, and Responses | Yes | No | Yes |
+| Stateless MCP execution | Yes | No | Yes |
 | Other inference APIs | Yes | No | No |
 | `/v1/models` | Yes | Yes | No |
 | Management APIs | Yes | Yes | No |
@@ -83,6 +85,13 @@ removed.
 Gateway-side failures use fixed public messages. Diagnose them with protected
 logs and safe metadata such as request ID, provider, model, and status. Do not
 log provider keys, prompts, responses, or raw upstream bodies.
+
+## Stateless MCP execution
+
+`POST /v1/mcp/execute` executes one caller-approved tool against one inline MCP
+server and returns its native typed result. The endpoint checks the server URL,
+its configured allowlist, and live tool discovery before execution. See
+[MCP](mcp.md#stateless-tool-execution) for the request shape and error behavior.
 
 ## Keeping generated clients current
 

@@ -1,4 +1,4 @@
-"""Request-body models for inline MCP server configuration on /v1/chat/completions."""
+"""Request-body models for inline MCP server configuration."""
 
 from __future__ import annotations
 
@@ -18,7 +18,7 @@ MAX_MCP_SERVER_IDS = 50
 
 
 class McpServerConfig(BaseModel):
-    """Inline MCP server configuration accepted on the chat completions request.
+    """Inline MCP server configuration accepted by generation and execution requests.
 
     Streamable HTTP transport. The `url` must be reachable from the gateway process.
 
