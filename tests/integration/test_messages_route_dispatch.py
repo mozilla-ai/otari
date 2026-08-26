@@ -1021,7 +1021,7 @@ def test_echoed_mcp_activity_is_removed_before_prompt_estimation(
 
     async def fake_resolve_request_context(**kwargs: Any) -> Any:
         captured.update(kwargs)
-        await kwargs["normalize_messages"]("user", None, "model", None)
+        await kwargs["normalize_messages"]("user", None, "model", None, None)
         raise HTTPException(status_code=418, detail="stop after admission inputs")
 
     with (

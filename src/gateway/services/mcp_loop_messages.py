@@ -18,7 +18,7 @@ import json
 import uuid
 from collections.abc import AsyncGenerator, AsyncIterator, Callable
 from contextlib import aclosing
-from typing import TYPE_CHECKING, Any, Literal, TypedDict, cast
+from typing import TYPE_CHECKING, Any, Literal, Protocol, TypedDict, cast, runtime_checkable
 
 from anthropic.types import ServerToolUseBlock, WebSearchResultBlock, WebSearchToolResultBlock
 from anthropic.types.beta import BetaMCPToolResultBlock, BetaMCPToolUseBlock
@@ -46,6 +46,17 @@ if TYPE_CHECKING:
         MessageResponse,
         MessageStreamEvent,
     )
+
+    from gateway.services.mcp_client import MCPToolCallOutcome
+
+
+@runtime_checkable
+class MCPToolBackend(Protocol):
+    """MCP-specific capabilities used to emit streaming activity blocks."""
+
+    def server_name_for_tool(self, name: str) -> str | None: ...
+
+    async def call_tool_outcome(self, name: str, arguments: dict[str, Any]) -> MCPToolCallOutcome: ...
 
 
 # Re-export so callers in routes/messages.py have a single import surface.
@@ -328,13 +339,17 @@ def _parsed_stream_input(state: _MessagesStreamState, spec: dict[str, Any]) -> d
     return value if isinstance(value, dict) else {}
 
 
-def _mcp_server_name(pool: ToolBackend, tool_name: str) -> str | None:
+def _as_mcp_tool_backend(pool: ToolBackend) -> MCPToolBackend | None:
+    """Narrow ``pool`` when it exposes the MCP streaming activity surface."""
+    return pool if isinstance(pool, MCPToolBackend) else None
+
+
+def _mcp_server_name(pool: MCPToolBackend | None, tool_name: str) -> str | None:
     """Return MCP ownership metadata when ``pool`` is an MCP client pool."""
-    resolver = getattr(pool, "server_name_for_tool", None)
-    if not callable(resolver):
+    if pool is None:
         return None
-    value = resolver(tool_name)
-    return value if isinstance(value, str) and value else None
+    value = pool.server_name_for_tool(tool_name)
+    return value if value else None
 
 
 async def _call_stream_tool(
@@ -342,22 +357,21 @@ async def _call_stream_tool(
     name: str,
     arguments: dict[str, Any],
     *,
-    preserve_mcp_error: bool,
+    mcp_backend: MCPToolBackend | None,
 ) -> tuple[str, bool, bool]:
     """Return ``(content, is_error, raised)`` for one gateway-owned call."""
     try:
-        call_outcome = getattr(pool, "call_tool_outcome", None)
-        if preserve_mcp_error and callable(call_outcome):
-            outcome = await call_outcome(name, arguments)
-            return str(outcome.content), bool(outcome.is_error), False
+        if mcp_backend is not None:
+            outcome = await mcp_backend.call_tool_outcome(name, arguments)
+            return outcome.content, outcome.is_error, False
         text = await pool.call_tool(name, arguments)
         return text, is_tool_error(text), False
-    except Exception as exc:  # noqa: BLE001 - recoverable tool failure is model input
-        # Do not put exception details in logs: transports may include URLs or
-        # headers in them. The internal model result keeps the detail for recovery;
-        # the client-facing activity event receives a fixed error below.
+    except Exception:  # noqa: BLE001 - recoverable tool failure is model input
+        # Transport exceptions may include URLs, headers, or credentials. Neither
+        # logs, client events, nor the model-facing result may receive that detail.
         logger.warning("Gateway tool %s execution failed", name)
-        return f"[tool error] {exc}", True, True
+        detail = "MCP tool execution failed" if mcp_backend is not None else "Gateway tool execution failed"
+        return f"[tool error] {detail}", True, True
 
 
 def _content_block_events(block: Any, acc: _MessagesStreamAccumulator) -> list[Any]:
@@ -382,7 +396,8 @@ async def _execute_stream_owned_events(
     for spec in state.owned_specs:
         name = str(spec["name"])
         parsed_input = _parsed_stream_input(state, spec)
-        server_name = _mcp_server_name(pool, name)
+        mcp_backend = _as_mcp_tool_backend(pool)
+        server_name = _mcp_server_name(mcp_backend, name)
         activity_id: str | None = None
         if server_name is not None:
             activity_id = f"{MCP_ACTIVITY_ID_PREFIX}{uuid.uuid4().hex}"
@@ -400,16 +415,15 @@ async def _execute_stream_owned_events(
             pool,
             name,
             parsed_input,
-            preserve_mcp_error=server_name is not None,
+            mcp_backend=mcp_backend if server_name is not None else None,
         )
         if not raised and native_blocks is not None:
             native_blocks.extend(_native_blocks_for_call(pool, name, parsed_input))
         results.append({"type": "tool_result", "tool_use_id": spec["id"], "content": text})
 
         if activity_id is not None:
-            # A transport exception may embed URLs or headers. Keep its detail in
-            # the model-facing internal result for recovery, but expose only the
-            # truthful failure state and a fixed message to the streaming client.
+            # A transport exception may embed URLs or headers. Expose only the
+            # truthful failure state and the same fixed message sent to the model.
             activity_content = "[tool error] MCP tool execution failed" if raised else text
             completion = BetaMCPToolResultBlock(
                 type="mcp_tool_result",

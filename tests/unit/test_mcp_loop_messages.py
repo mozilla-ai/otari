@@ -896,7 +896,10 @@ async def test_stream_mcp_exception_emits_error_without_logging_detail(
         ]
     )
 
+    provider_calls: list[dict[str, Any]] = []
+
     async def fake_amessages(**kwargs: Any) -> AsyncIterator[MessageStreamEvent]:
+        provider_calls.append(kwargs)
         return next(iter_streams)
 
     class FailingActivityPool(_ActivityPool):
@@ -923,6 +926,10 @@ async def test_stream_mcp_exception_emits_error_without_logging_detail(
     )
     assert result.is_error is True
     assert result.content == "[tool error] MCP tool execution failed"
+    assert len(provider_calls) == 2
+    model_result = provider_calls[1]["messages"][-1]["content"][0]
+    assert model_result["content"] == "[tool error] MCP tool execution failed"
+    assert "credential-detail-do-not-log" not in str(provider_calls[1]["messages"])
     assert "credential-detail-do-not-log" not in caplog.text
     assert "do-not-log" not in caplog.text
 
