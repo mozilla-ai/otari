@@ -32,6 +32,7 @@ from any_llm.types.messages import (
 from gateway.services import mcp_loop_messages as messages_loop_module
 from gateway.services.mcp_client import MCPToolCallOutcome
 from gateway.services.mcp_loop_messages import (
+    MCP_CLIENT_BETA,
     MaxToolIterationsExceeded,
     anthropic_tool_loop,
     anthropic_tool_loop_stream,
@@ -826,7 +827,11 @@ async def test_stream_emits_live_mcp_activity_around_execution(
     monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
     pool = _ActivityPool(content=content, is_error=is_error)
     stream = anthropic_tool_loop_stream(
-        completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+        completion_kwargs={
+            "model": "fake",
+            "messages": [{"role": "user", "content": "go"}],
+            "betas": [MCP_CLIENT_BETA],
+        },
         pool=cast(Any, pool),
         max_iterations=5,
     )
@@ -867,6 +872,55 @@ async def test_stream_emits_live_mcp_activity_around_execution(
         "message_stop",
     ]
     assert cast(Any, remaining[1]).index == cast(Any, completion_start).index + 1
+    assert pool.calls == [("fetch_url", {"url": "https://example.test"})]
+
+
+@pytest.mark.asyncio
+async def test_stream_hides_mcp_activity_without_beta_but_still_executes(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    iter_streams = iter(
+        [
+            _async_iter(
+                _msg_start_event(),
+                _tool_use_block_start(0, "tu_internal", "fetch_url"),
+                _input_json_delta(0, '{"url": "https://example.test"}'),
+                _content_block_stop(0),
+                _msg_delta_event("tool_use"),
+                _msg_stop_event(),
+            ),
+            _async_iter(
+                _msg_start_event(),
+                _text_block_start(0),
+                _text_delta(0, "done"),
+                _content_block_stop(0),
+                _msg_delta_event("end_turn"),
+                _msg_stop_event(),
+            ),
+        ]
+    )
+
+    async def fake_amessages(**kwargs: Any) -> AsyncIterator[MessageStreamEvent]:
+        return next(iter_streams)
+
+    monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
+    pool = _ActivityPool()
+    pool.release.set()
+    events = [
+        event
+        async for event in anthropic_tool_loop_stream(
+            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+            pool=cast(Any, pool),
+            max_iterations=5,
+        )
+    ]
+
+    starts = [
+        cast(Any, event).content_block
+        for event in events
+        if event.type == "content_block_start"
+    ]
+    assert [block.type for block in starts] == ["text"]
     assert pool.calls == [("fetch_url", {"url": "https://example.test"})]
 
 
@@ -917,7 +971,11 @@ async def test_stream_mcp_exception_emits_error_without_logging_detail(
     events = [
         event
         async for event in anthropic_tool_loop_stream(
-            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}]},
+            completion_kwargs={
+                "model": "fake",
+                "messages": [{"role": "user", "content": "go"}],
+                "betas": [MCP_CLIENT_BETA],
+            },
             pool=cast(Any, pool),
             max_iterations=5,
         )
@@ -1229,7 +1287,12 @@ async def test_stream_mixed_batch_hides_and_still_runs_the_gateway_tool(
     events = [
         event
         async for event in anthropic_tool_loop_stream(
-            completion_kwargs={"model": "fake", "messages": [{"role": "user", "content": "go"}], "max_tokens": 100},
+            completion_kwargs={
+                "model": "fake",
+                "messages": [{"role": "user", "content": "go"}],
+                "max_tokens": 100,
+                "betas": [MCP_CLIENT_BETA],
+            },
             pool=cast(Any, pool),
             max_iterations=5,
         )

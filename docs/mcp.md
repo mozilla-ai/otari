@@ -26,12 +26,14 @@ The loop stops when the model returns a normal assistant response or hits
 
 ## Messages streaming activity
 
-A streaming `/v1/messages` client receives live server-owned activity around
+A streaming `/v1/messages` client that includes
+`betas: ["mcp-client-2025-04-04"]` receives live server-owned activity around
 each gateway-run MCP call. Otari emits a `content_block_start` /
 `content_block_stop` pair containing `mcp_tool_use` immediately before the call,
 then another pair containing the matching `mcp_tool_result` immediately after it.
 The blocks carry an opaque call id, tool and server names, parsed input, result
-content, and an explicit `is_error` value.
+content, and an explicit `is_error` value. Without that beta declaration, Otari
+still runs the MCP call but returns a stable stream without those activity blocks.
 
 These blocks report execution; they do not transfer it. Otari still owns the MCP
 call, feeds the result into the internal model loop, and returns one logical

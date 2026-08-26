@@ -36,7 +36,7 @@ from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from gateway.services.mcp_client import MCPToolCallOutcome
-from gateway.services.mcp_loop_messages import MCP_ACTIVITY_ID_PREFIX
+from gateway.services.mcp_loop_messages import MCP_ACTIVITY_ID_PREFIX, MCP_CLIENT_BETA
 
 _CONTEXT_MANAGEMENT = {"edits": [{"type": "compact_20260112", "trigger": {"type": "input_tokens", "value": 50_000}}]}
 _BETAS = ["compact-2026-01-12"]
@@ -1333,10 +1333,20 @@ def test_stream_mcp_servers_dispatches_through_tool_loop_stream(
     assert plain_amessages_called is False
 
 
-def test_stream_mcp_activity_reaches_the_sse_client(
+@pytest.mark.parametrize(
+    ("betas", "expected_block_types"),
+    [
+        (None, ["text"]),
+        ([MCP_CLIENT_BETA], ["mcp_tool_use", "mcp_tool_result", "text"]),
+    ],
+)
+def test_stream_mcp_activity_requires_beta(
     client: TestClient,
     api_key_header: dict[str, str],
+    betas: list[str] | None,
+    expected_block_types: list[str],
 ) -> None:
+    calls: list[tuple[str, dict[str, Any]]] = []
     streams = iter(
         [
             _stream_iter(
@@ -1415,6 +1425,7 @@ def test_stream_mcp_activity_reaches_the_sse_client(
         async def call_tool_outcome(self, name: str, arguments: dict[str, Any]) -> MCPToolCallOutcome:
             assert name == "lookup"
             assert arguments == {"issue": 755}
+            calls.append((name, arguments))
             return MCPToolCallOutcome(content="issue result", is_error=False)
 
     with (
@@ -1436,6 +1447,7 @@ def test_stream_mcp_activity_reaches_the_sse_client(
                 "max_tokens": 100,
                 "stream": True,
                 "mcp_servers": [{"name": "fixture", "url": "http://127.0.0.1:9999/mcp"}],
+                **({"betas": betas} if betas is not None else {}),
             },
             headers=api_key_header,
         )
@@ -1443,20 +1455,18 @@ def test_stream_mcp_activity_reaches_the_sse_client(
     assert resp.status_code == 200, resp.text
     payloads = [json.loads(line.removeprefix("data: ")) for line in resp.text.splitlines() if line.startswith("data: ")]
     blocks = [payload["content_block"] for payload in payloads if payload.get("type") == "content_block_start"]
-    assert [block["type"] for block in blocks] == [
-        "mcp_tool_use",
-        "mcp_tool_result",
-        "text",
-    ]
-    assert blocks[0]["name"] == "lookup"
-    assert blocks[0]["server_name"] == "fixture"
-    assert blocks[0]["input"] == {"issue": 755}
-    assert blocks[1] == {
-        "type": "mcp_tool_result",
-        "tool_use_id": blocks[0]["id"],
-        "content": "issue result",
-        "is_error": False,
-    }
+    assert [block["type"] for block in blocks] == expected_block_types
+    assert calls == [("lookup", {"issue": 755})]
+    if betas is not None:
+        assert blocks[0]["name"] == "lookup"
+        assert blocks[0]["server_name"] == "fixture"
+        assert blocks[0]["input"] == {"issue": 755}
+        assert blocks[1] == {
+            "type": "mcp_tool_result",
+            "tool_use_id": blocks[0]["id"],
+            "content": "issue result",
+            "is_error": False,
+        }
 
 
 def test_stream_code_execution_dispatches_through_sandbox(

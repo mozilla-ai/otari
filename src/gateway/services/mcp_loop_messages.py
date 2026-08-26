@@ -65,6 +65,7 @@ __all__ = [
     "MAX_TOOL_ITERATIONS_CAP",
     "MaxToolIterationsExceeded",
     "MCP_ACTIVITY_ID_PREFIX",
+    "MCP_CLIENT_BETA",
     "anthropic_tool_loop",
     "anthropic_tool_loop_stream",
 ]
@@ -81,6 +82,10 @@ _PAGE_AGE_MAX_CHARS = 128
 # route uses this prefix to remove only our synthetic pair while preserving
 # provider-native MCP blocks.
 MCP_ACTIVITY_ID_PREFIX = "otari_mcptoolu_"
+
+# Anthropic beta capability a caller must declare before the Messages stream
+# includes the beta-only MCP activity block vocabulary.
+MCP_CLIENT_BETA = "mcp-client-2025-04-04"
 
 
 def _native_web_search_blocks(query: str, results: list[dict[str, Any]]) -> list[Any]:
@@ -390,16 +395,17 @@ async def _execute_stream_owned_events(
     acc: _MessagesStreamAccumulator,
     results: list[dict[str, Any]],
     *,
+    emit_mcp_activity: bool,
     native_blocks: list[Any] | None = None,
 ) -> AsyncGenerator[MessageStreamEvent, None]:
-    """Execute owned calls and yield live MCP start/completion representations."""
+    """Execute owned calls and optionally yield MCP activity representations."""
     for spec in state.owned_specs:
         name = str(spec["name"])
         parsed_input = _parsed_stream_input(state, spec)
         mcp_backend = _as_mcp_tool_backend(pool)
         server_name = _mcp_server_name(mcp_backend, name)
         activity_id: str | None = None
-        if server_name is not None:
+        if emit_mcp_activity and server_name is not None:
             activity_id = f"{MCP_ACTIVITY_ID_PREFIX}{uuid.uuid4().hex}"
             start = BetaMCPToolUseBlock(
                 type="mcp_tool_use",
@@ -441,15 +447,21 @@ class _MessagesToolLoopStrategy:
     ``amessages`` is resolved as a module global at call time so tests can
     monkeypatch ``gateway.services.mcp_loop_messages.amessages``.
 
-    ``emit_native_web_search`` is per-request (it depends on how the caller
-    declared the tool), so a request that wants native blocks gets its own
-    strategy instance rather than sharing the module-level default one.
+    Native web-search and MCP activity emission are per-request capabilities,
+    so a request that wants either gets its own strategy instance rather than
+    sharing the module-level default one.
     """
 
     transcript_key = "messages"
 
-    def __init__(self, *, emit_native_web_search: bool = False) -> None:
+    def __init__(
+        self,
+        *,
+        emit_native_web_search: bool = False,
+        emit_native_mcp: bool = False,
+    ) -> None:
         self._emit_native_web_search = emit_native_web_search
+        self._emit_native_mcp = emit_native_mcp
 
     def _native_sink(self, sink: list[Any]) -> list[Any] | None:
         """``sink`` when native emission is on, else ``None`` (collect nothing)."""
@@ -695,6 +707,7 @@ class _MessagesToolLoopStrategy:
                 pool,
                 acc,
                 discarded,
+                emit_mcp_activity=self._emit_native_mcp,
                 native_blocks=self._native_sink(state.native_blocks),
             ):
                 yield event
@@ -779,6 +792,7 @@ class _MessagesToolLoopStrategy:
             pool,
             acc,
             tool_results,
+            emit_mcp_activity=self._emit_native_mcp,
             native_blocks=self._native_sink(state.native_blocks),
         ):
             yield event
@@ -788,13 +802,18 @@ class _MessagesToolLoopStrategy:
 _MESSAGES_STRATEGY = _MessagesToolLoopStrategy()
 
 
-def _strategy_for(emit_native_web_search: bool) -> _MessagesToolLoopStrategy:
-    """The shared strategy, or a per-request one when native emission is on.
-
-    Strategies are stateless apart from that flag, so the common case keeps reusing
-    the single module-level instance.
-    """
-    return _MessagesToolLoopStrategy(emit_native_web_search=True) if emit_native_web_search else _MESSAGES_STRATEGY
+def _strategy_for(
+    emit_native_web_search: bool,
+    *,
+    emit_native_mcp: bool = False,
+) -> _MessagesToolLoopStrategy:
+    """The shared strategy, or a per-request one when native emission is on."""
+    if not emit_native_web_search and not emit_native_mcp:
+        return _MESSAGES_STRATEGY
+    return _MessagesToolLoopStrategy(
+        emit_native_web_search=emit_native_web_search,
+        emit_native_mcp=emit_native_mcp,
+    )
 
 
 async def anthropic_tool_loop(
@@ -861,20 +880,27 @@ async def anthropic_tool_loop_stream(
          the logical message will continue.
       4. On ``message_stop``: if all buffered tool uses are gateway-owned, execute
          them, append the hidden call and result to the internal transcript, and
-         continue. MCP execution is represented live as server-owned
-         ``mcp_tool_use`` / ``mcp_tool_result`` blocks. If foreign blocks exist or
-         no owned blocks were buffered, forward the terminal events and exit.
+         continue. For a caller that declared :data:`MCP_CLIENT_BETA`, MCP
+         execution is represented live as server-owned ``mcp_tool_use`` /
+         ``mcp_tool_result`` blocks. If foreign blocks exist or no owned blocks
+         were buffered, forward the terminal events and exit.
 
     Re-emitting a synthetic ``message_start`` for the next iteration is not
     needed because ``amessages`` produces a fresh stream; the next call's
     natural ``message_start`` arrives downstream as if nothing had happened.
     """
+    betas = completion_kwargs.get("betas")
+    emit_native_mcp = isinstance(betas, list) and MCP_CLIENT_BETA in betas
+
     # aclosing makes downstream closes (client disconnect) propagate to the
     # engine generator, and through it to the upstream provider stream,
     # instead of waiting for event-loop async-generator finalization.
     async with aclosing(
         run_tool_loop_stream(
-            strategy=_strategy_for(emit_native_web_search),
+            strategy=_strategy_for(
+                emit_native_web_search,
+                emit_native_mcp=emit_native_mcp,
+            ),
             completion_kwargs=completion_kwargs,
             pool=pool,
             max_iterations=max_iterations,
