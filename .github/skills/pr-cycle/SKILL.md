@@ -1,6 +1,6 @@
 ---
 name: pr-cycle
-description: Take one or more GitHub issues to a ready PR end-to-end in mozilla-ai/otari: implement, self-review, open the PR, request Copilot and team review, wait for it, apply the fixes. Use when asked to "open a PR for issue X", "work through these issues", or run the implement/review/fix cycle (optionally fanned out across several issues in parallel).
+description: Take one or more GitHub issues to a ready PR end-to-end in mozilla-ai/otari: implement, self-review, open the PR, request review from the two bots and the team, wait for it, apply the fixes. Use when asked to "open a PR for issue X", "work through these issues", or run the implement/review/fix cycle (optionally fanned out across several issues in parallel).
 ---
 
 # PR Cycle (otari)
@@ -117,8 +117,11 @@ threads the same way (reply, then resolve). It tends to arrive first.
 
 ## Handling the review
 
-1. **Wait** for the reviewer to finish. Copilot leaves `requested_reviewers` and appears under
-   `/pulls/<n>/reviews` with state `COMMENTED` once it is done. Poll for that; it is not instant.
+1. **Wait for BOTH bots to finish**, not whichever answers first. Each appears under
+   `/pulls/<n>/reviews` with state `COMMENTED` once it is done, and Copilot also leaves
+   `requested_reviewers`. Poll for both; neither is instant, and CodeRabbit usually arrives first.
+   This is the step where a review gets called finished early: two CodeRabbit comments on a PR
+   went unread because only Copilot was polled, and one of them had caught a real regression.
 2. **Read the comments.** The summary body is in `/pulls/<n>/reviews`. **Inline comments can be
    missing from the REST `/pulls/<n>/comments` endpoint for bot reviews** even when the summary
    claims N comments, so fetch the threads over GraphQL:
@@ -199,6 +202,13 @@ tool, `isolation: "worktree"`), each executing the cycle above.
     still reports `mergeStateStatus: BLOCKED` and `reviewDecision: REVIEW_REQUIRED`.
   - **every review thread resolved** (`required_review_thread_resolution`). See the warning in
     [Handling the review](#handling-the-review) about your own self-review counting here.
+  - **an extra approval for unattributed changes**
+    (`require_extra_approval_for_unattributed_changes`). It keys on whether GitHub can attribute
+    every commit in the PR to a user account, so a commit whose author email is not linked to one
+    trips it. That matters here more than anywhere else in this file, because the subject is
+    agents pushing commits: it presents as "green CI, one approval, still `BLOCKED`", which sends
+    the reader back to the API. Avoid it by committing with an email linked to the account, rather
+    than discovering it.
   - squash or rebase only, plus `deletion` and `non_fast_forward` rules on the branch.
 
   Repository admins are bypass actors, so an admin *can* merge through all of it. That makes the
