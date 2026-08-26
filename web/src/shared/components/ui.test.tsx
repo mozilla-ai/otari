@@ -58,7 +58,7 @@ describe("StatCard", () => {
 
   it("reserves the aside row's height for a charted tile that has nothing to say", () => {
     // Otherwise a tile whose only aside was its delta loses the row, and its
-    // sparkline rides above its neighbours' in the same grid row. Asserted on
+    // sparkline rides above its neighbors' in the same grid row. Asserted on
     // the class for the same reason as the tile's own min-w-0 above: jsdom does
     // no layout, so the reservation is only observable as the utility.
     const { container } = render(

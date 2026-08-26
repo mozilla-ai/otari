@@ -616,7 +616,9 @@ describe("UsagePage", () => {
     // And it announces a direction, which the glyph never did: "▲" is
     // decoration a screen reader skips. TrendChip.test.tsx owns the direction
     // and polarity mapping; this only asserts the tiles go through it.
-    expect(screen.getAllByText(/no change|up|down/).length).toBeGreaterThan(0)
+    expect(
+      screen.getAllByText(/^(no change|up|down)(, (better|worse))?$/).length,
+    ).toBeGreaterThan(0)
     // The hand-rolled arrow glyphs are gone from the tiles.
     expect(screen.queryByText(/[▲▼]/)).not.toBeInTheDocument()
   })

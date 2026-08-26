@@ -64,9 +64,10 @@ import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
 // ---------- formatting ----------
 
 // Compact currency (formatUsd), token counts (formatTokens), percentages
-// (formatPct) and the period-over-period helpers (deltaFraction / TrendChip) are
-// shared with the overview page from @/shared/helpers/format and @/shared/components/ui. Only the
-// two formatters specific to this page stay local.
+// (formatPct) and the period-over-period delta (deltaFraction) are shared with
+// the overview page from @/shared/helpers/format, and the chip that renders one
+// comes from @/shared/components/TrendChip. Only the two formatters specific to
+// this page stay local.
 function formatBucketLabel(iso: string, bucket: UsageBucket): string {
   const d = new Date(iso)
   if (Number.isNaN(d.getTime())) return iso
@@ -743,6 +744,23 @@ export function UsagePage() {
   const prevCacheHitRate =
     prevCache.input > 0 ? prevCache.read / prevCache.input : undefined
 
+  // One delta per tile that has one. Named rather than inlined so each tile can
+  // gate its chip on `!== null`: `TrendChip` renders nothing for a null fraction
+  // (no comparable previous period), but the element itself is still truthy, and
+  // `StatCard` would reserve the aside row for a chip that draws nothing.
+  const requestDelta =
+    totals && prevTotals
+      ? deltaFraction(totals.request_count, prevTotals.request_count)
+      : null
+  const billedDelta =
+    billedTotal !== undefined
+      ? deltaFraction(billedTotal, prevBilledTotal)
+      : null
+  const cacheDelta =
+    cacheHitRate !== null && prevCacheHitRate !== undefined
+      ? deltaFraction(cacheHitRate, prevCacheHitRate)
+      : null
+
   const hasComposition = series.some((p) => (p.input_tokens ?? 0) > 0)
   const hasErrors = series.some((p) => (p.errors ?? 0) > 0)
 
@@ -1054,11 +1072,13 @@ export function UsagePage() {
               // Spend falling is the improvement, so a rise paints danger while
               // the arrow keeps telling the truth about which way it went.
               trend={
-                <TrendChip
-                  fraction={costDelta}
-                  polarity="down-is-good"
-                  caption="vs prev"
-                />
+                costDelta !== null ? (
+                  <TrendChip
+                    fraction={costDelta}
+                    polarity="down-is-good"
+                    caption="vs prev"
+                  />
+                ) : null
               }
               hint={
                 totals?.unpriced_requests
@@ -1081,14 +1101,8 @@ export function UsagePage() {
               // neither a win nor a regression on its own, and the error rate
               // beside it is what carries the judgment.
               trend={
-                totals && prevTotals ? (
-                  <TrendChip
-                    fraction={deltaFraction(
-                      totals.request_count,
-                      prevTotals.request_count,
-                    )}
-                    caption="vs prev"
-                  />
+                requestDelta !== null ? (
+                  <TrendChip fraction={requestDelta} caption="vs prev" />
                 ) : null
               }
               hint={totals ? `${formatPct(errorRate)} errors` : null}
@@ -1108,11 +1122,8 @@ export function UsagePage() {
               }
               // Volume again, for the same reason as Requests.
               trend={
-                billedTotal !== undefined ? (
-                  <TrendChip
-                    fraction={deltaFraction(billedTotal, prevBilledTotal)}
-                    caption="vs prev"
-                  />
+                billedDelta !== null ? (
+                  <TrendChip fraction={billedDelta} caption="vs prev" />
                 ) : null
               }
               chart={
@@ -1129,9 +1140,9 @@ export function UsagePage() {
               value={cacheHitRate !== null ? formatPct(cacheHitRate) : "—"}
               // A higher share of reads served from cache is the win here.
               trend={
-                cacheHitRate !== null && prevCacheHitRate !== undefined ? (
+                cacheDelta !== null ? (
                   <TrendChip
-                    fraction={deltaFraction(cacheHitRate, prevCacheHitRate)}
+                    fraction={cacheDelta}
                     polarity="up-is-good"
                     caption="vs prev"
                   />
