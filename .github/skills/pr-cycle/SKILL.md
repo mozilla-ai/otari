@@ -157,6 +157,15 @@ tool, `isolation: "worktree"`), each executing the cycle above.
   issues sharing a file are **sequenced**, with the later ones rebasing once the earlier lands.
 - **Order within a wave:** small and low-risk first, large refactors later, so the rebase surface
   stays small.
+- **A stacked PR loses two protections, so stack deliberately.** Basing a PR on a topic branch
+  instead of `main` buys a clean diff (only your own commits, not the parent's) and costs both of
+  the things that would otherwise catch a mistake. `protect-main` applies to the default branch
+  only, so the child reports `mergeStateStatus: CLEAN` and can be merged into its base with **no
+  approval and no thread resolution**, silently folding two reviews into one. And
+  `.coderabbit.yaml` sets `base_branches: ["main"]`, so **CodeRabbit skips the child entirely**
+  (it posts a "Review skipped" comment saying so); trigger it with a `@coderabbitai review`
+  comment. Neither is a reason not to stack, and both are reasons to say in the PR body that it
+  is stacked and what has to happen before the parent merges.
 - **Branch shape.** Squash and rebase merges are enabled and **merge commits are disabled**, so a
   branch collapses to one commit on `main` and its internal shape never lands. Still update with
   `git rebase origin/main` and `git push --force-with-lease` rather than merging `main` in: the
