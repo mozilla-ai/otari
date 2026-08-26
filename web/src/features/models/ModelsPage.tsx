@@ -1339,7 +1339,13 @@ function ModelTable({
       },
       {
         id: "policy",
-        header: "Pricing",
+        // Deliberately not shortened, unlike `Caching` beside it. `Pricing`
+        // alone sits two columns from `Base in / out / 1M` and reads as a
+        // second price column rather than as the policy that produced the
+        // price, so it wraps instead. See the header comment in globals.css on
+        // the overline spec: uppercase costs width, and a wrapped header costs
+        // a glance where a misleading one costs a wrong conclusion.
+        header: "Pricing policy",
         align: "end",
         cell: (row) => (
           <PricingPolicyCell row={row} onEdit={() => onEditPricing(row.key)} />
