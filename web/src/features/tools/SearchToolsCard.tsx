@@ -307,7 +307,7 @@ export function SearchToolsCard({
 
   return (
     <section className="flex flex-col gap-2">
-      <h2 className="text-sm font-semibold text-foreground">Search tools</h2>
+      <h2 className="text-title">Search tools</h2>
       <p className="text-sm text-muted">
         The tools <code className="font-mono">POST /v1/search</code> dispatches
         against. A searxng tool that declares no backend URL uses the web-search

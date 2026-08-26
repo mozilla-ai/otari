@@ -181,11 +181,16 @@ export function StatCard({
     // Card.Content's, which otherwise doubled the tile's height (most visible at
     // two-up on mobile). Content owns the padding: tighter on mobile, roomier up.
     <Card.Content className="flex flex-col gap-1 p-4 sm:p-5">
-      <span className="text-xs font-medium uppercase tracking-wide text-muted">
-        {label}
-      </span>
+      <span className="text-overline">{label}</span>
       <span className="flex flex-wrap items-center gap-2">
-        <span className="text-xl font-semibold text-foreground sm:text-2xl">
+        {/* text-xl (22px), deliberately a step *below* the page title's
+            text-display (26px). It used to be text-xl rising to text-2xl at
+            `sm`, which made a number inside a card the largest text on the
+            page, 4px bigger than the name of the page itself. Fixing that by
+            raising the title alone would have left the two agreeing by
+            coincidence; both halves move so the ladder is correct by
+            construction. `tabular-nums` so a column of these aligns. */}
+        <span className="text-xl font-semibold tabular-nums text-foreground">
           {value}
         </span>
         {status && statusLabel ? (
@@ -196,7 +201,16 @@ export function StatCard({
           </span>
         ) : null}
       </span>
-      {hint ? <span className="text-xs text-muted">{hint}</span> : null}
+      {/* Two lines reserved, always. A delta like "5.8% errors · ▲ 214.1% vs
+          prev" wraps in a narrow tile while its neighbors stay on one line,
+          and a row of five tiles then stops aligning. This is a layout fix and
+          not a type fix on purpose: sizing the type to the longest string would
+          be sizing the type by accident. min-h-9 is two 18px lines. */}
+      {hint ? (
+        <span className="block min-h-9 text-xs tabular-nums text-muted">
+          {hint}
+        </span>
+      ) : null}
       {chart ? <div className="mt-2">{chart}</div> : null}
     </Card.Content>
   )
@@ -289,9 +303,12 @@ export function PageHeader({
   return (
     <div className="flex flex-col gap-3">
       <div>
-        <h1 className="text-xl font-semibold text-foreground">{title}</h1>
+        <h1 className="text-display">{title}</h1>
         {description ? (
-          <p className="mt-1 text-sm text-muted">{description}</p>
+          // max-w-prose because this ran to the full container width: 968px at
+          // 14px is ~138 characters per line, roughly twice a comfortable
+          // measure, and it is the same paragraph on every page.
+          <p className="mt-1 max-w-prose text-sm text-muted">{description}</p>
         ) : null}
       </div>
       {/* The primary action sits on its own left-aligned row under the heading,
@@ -642,9 +659,9 @@ export function EmptyState({
     <Card>
       <Card.Content className="flex flex-col gap-4 p-6">
         <div>
-          <h2 className="text-lg font-semibold text-foreground">{title}</h2>
+          <h2 className="text-heading">{title}</h2>
           {description ? (
-            <p className="mt-1 text-sm text-muted">{description}</p>
+            <p className="mt-1 max-w-prose text-sm text-muted">{description}</p>
           ) : null}
         </div>
         {children}

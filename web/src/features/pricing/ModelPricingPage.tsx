@@ -117,9 +117,7 @@ function PricingRefreshSection() {
 
   return (
     <section className="flex flex-col gap-2">
-      <h2 className="text-sm font-semibold text-foreground">
-        Default pricing catalog
-      </h2>
+      <h2 className="text-title">Default pricing catalog</h2>
       <Card>
         <Card.Content className="flex flex-col gap-4 p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
@@ -282,7 +280,7 @@ function PriceTable() {
 
   return (
     <section className="flex flex-col gap-2">
-      <h2 className="text-sm font-semibold text-foreground">Model prices</h2>
+      <h2 className="text-title">Model prices</h2>
       <ErrorBanner error={pricing.error} />
       <Card>
         <Card.Content className="p-0">

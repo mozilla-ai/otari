@@ -564,7 +564,7 @@ function SecurityKeysSection({
 }) {
   return (
     <section className="flex flex-col gap-2">
-      <h2 className="text-sm font-semibold text-foreground">
+      <h2 className="text-heading">
         Credential security <span className="font-normal text-muted">(2)</span>
       </h2>
       <Card>
@@ -683,7 +683,7 @@ export function SettingsPage() {
 
       {groups.map((group) => (
         <section key={group.name} className="flex flex-col gap-2">
-          <h2 className="text-sm font-semibold text-foreground">
+          <h2 className="text-heading">
             {group.name}{" "}
             <span className="font-normal text-muted">
               ({group.fields.length})

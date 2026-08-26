@@ -620,7 +620,7 @@ function PolicyForm({
     <div className="flex flex-col gap-4">
       <Card>
         <Card.Content className="flex flex-col gap-5 p-5">
-          <div className="text-sm font-semibold text-foreground">
+          <div className="text-title">
             {editing ? (
               <>
                 Edit {existing.kind === "alias" ? "alias" : "policy"}{" "}

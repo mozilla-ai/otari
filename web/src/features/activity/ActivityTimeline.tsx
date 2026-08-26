@@ -275,13 +275,13 @@ export function ActivityTimeline({
       <div className="rounded-xl border border-border bg-surface p-2">
         <div className="flex items-center justify-between gap-2 px-1 pb-1">
           <span className="flex items-center gap-3">
-            <span className="text-[11px] font-medium uppercase tracking-wide text-muted">
+            <span className="text-overline">
               Requests / {bucket === "hour" ? "hour" : "day"}
             </span>
             <ChartLegend series={chartSeries} />
           </span>
           <div className="flex items-center gap-1.5">
-            <span className="hidden text-[11px] text-muted sm:inline">
+            <span className="hidden text-xs text-muted sm:inline">
               drag across the chart to zoom
             </span>
             <Button

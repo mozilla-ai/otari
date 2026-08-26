@@ -5,7 +5,7 @@
 # Schema:    https://coderabbit.ai/integrations/schema.v2.json
 #
 # Philosophy: start small. The repo's review guidance lives in AGENTS.md
-# (CLAUDE.md is a symlink to it) and the instruction files under
+# (CLAUDE.md is a one-line `@AGENTS.md` import of it, not a symlink) and the instruction files under
 # .github/instructions; CodeRabbit reads those via
 # knowledge_base.code_guidelines below, so we do not restate their rules here.
 # Pre-merge gates start at `warning` and only graduate to `error` once real PR
@@ -170,8 +170,11 @@ knowledge_base:
     enabled: true
   code_guidelines:
     enabled: true
-    # AGENTS.md is the canonical rule set; CLAUDE.md is a symlink to it but we
-    # list both since the symlink may not be resolved by the scanner. The
+    # AGENTS.md is the canonical rule set. CLAUDE.md is not a symlink to it, it
+    # is a one-line `@AGENTS.md` import (AGENTS.md says why: Git for Windows
+    # checks symlinks out as plain text). Listing both is still right, and for a
+    # better reason than the one this comment used to give: a scanner reading
+    # CLAUDE.md gets the import line rather than the rules. The
     # files under .github/instructions carry scoped review guidance.
     filePatterns:
       - "**/AGENTS.md"

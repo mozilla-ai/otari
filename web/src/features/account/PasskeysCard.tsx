@@ -230,7 +230,7 @@ export function PasskeysCard() {
 
   return (
     <section className="flex flex-col gap-2">
-      <h2 className="text-sm font-semibold text-foreground">Passkeys</h2>
+      <h2 className="text-title">Passkeys</h2>
       <Card>
         <Card.Content className="flex flex-col gap-4 px-5 py-5">
           <p className="max-w-3xl text-sm text-muted">

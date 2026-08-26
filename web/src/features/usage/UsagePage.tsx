@@ -1315,7 +1315,7 @@ export function UsagePage() {
           <div className="grid gap-6 xl:grid-cols-2">
             <div className="flex flex-col gap-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <h2 className="text-sm font-semibold text-foreground">
+                <h2 className="text-title">
                   Spend by {activePrimary.label.toLowerCase()}
                 </h2>
                 <div className="inline-flex gap-1.5">
@@ -1348,7 +1348,7 @@ export function UsagePage() {
             </div>
             <div className="flex flex-col gap-3">
               <div className="flex flex-wrap items-center justify-between gap-3">
-                <h2 className="text-sm font-semibold text-foreground">
+                <h2 className="text-title">
                   Spend by {activeSecondary.label.toLowerCase()}
                 </h2>
                 <div className="inline-flex gap-1.5">
@@ -1388,9 +1388,7 @@ export function UsagePage() {
           {toolRows.length ? (
             <div className="rounded-2xl border border-border bg-surface p-4">
               <div className="mb-3 flex flex-col gap-1">
-                <h2 className="text-sm font-semibold text-foreground">
-                  Gateway-run tools
-                </h2>
+                <h2 className="text-title">Gateway-run tools</h2>
                 <p className="text-xs text-muted">
                   Tools Otari ran itself, billed per call. MCP tools are not
                   listed here: their names come from your own server, so they

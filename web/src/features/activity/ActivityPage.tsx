@@ -224,9 +224,7 @@ function InFlightControl({
       <Popover.Content placement="bottom end">
         <Popover.Dialog>
           <div className="flex w-80 flex-col gap-2">
-            <Popover.Heading className="text-sm font-medium">
-              In flight
-            </Popover.Heading>
+            <Popover.Heading className="text-title">In flight</Popover.Heading>
             <p className="text-xs text-muted">
               Running right now, across the whole gateway; longest-running
               first. Not narrowed by the filters above.
@@ -812,36 +810,37 @@ function RoutingPlan({ entry }: { entry: UsageEntry }) {
 
   return (
     <div className="flex flex-col gap-2">
-      <span className="text-[11px] font-medium uppercase tracking-wide text-muted">
-        Routing plan · {entry.policy_name}
-      </span>
+      <span className="text-overline">Routing plan · {entry.policy_name}</span>
       <span className="text-sm text-foreground">{summary}</span>
       <div className="overflow-x-auto rounded-lg border border-border">
         <table
           className="w-full text-xs"
           aria-label={`Routing plan for policy ${entry.policy_name}`}
         >
-          <thead className="text-muted">
+          {/* No `text-muted` here: `text-overline` on each `<th>` sets the color
+              itself, so a second declaration on the parent is one more place to
+              keep in step for no effect. */}
+          <thead>
             <tr className="border-b border-border">
-              <th scope="col" className="px-3 py-2 text-left font-medium">
+              <th scope="col" className="px-3 py-2 text-left text-overline">
                 #
               </th>
-              <th scope="col" className="px-3 py-2 text-left font-medium">
+              <th scope="col" className="px-3 py-2 text-left text-overline">
                 Target
               </th>
-              <th scope="col" className="px-3 py-2 text-left font-medium">
+              <th scope="col" className="px-3 py-2 text-left text-overline">
                 Selected as
               </th>
-              <th scope="col" className="px-3 py-2 text-left font-medium">
+              <th scope="col" className="px-3 py-2 text-left text-overline">
                 Outcome
               </th>
               {/* Every attempt's `latency_ms` is measured from the start of the
                   request, not from the start of that attempt, so this is the same
                   "Total time" the row column shows, not a per-candidate duration. */}
-              <th scope="col" className="px-3 py-2 text-right font-medium">
+              <th scope="col" className="px-3 py-2 text-right text-overline">
                 Total time
               </th>
-              <th scope="col" className="px-3 py-2 text-right font-medium">
+              <th scope="col" className="px-3 py-2 text-right text-overline">
                 Cost
               </th>
             </tr>
@@ -910,9 +909,7 @@ function DetailField({
 }) {
   return (
     <div className="flex flex-col gap-0.5">
-      <span className="text-[11px] font-medium uppercase tracking-wide text-muted">
-        {label}
-      </span>
+      <span className="text-overline">{label}</span>
       {copyValue ? (
         <CopyableValue
           value={copyValue}
@@ -967,7 +964,7 @@ function RequestDetail({
     <div className="flex flex-col gap-4 px-4 py-4">
       {entry.error_message ? (
         <div className="flex flex-col gap-1.5">
-          <span className="text-[11px] font-medium uppercase tracking-wide text-muted">
+          <span className="text-overline">
             Error{entry.status_code !== null ? ` (${entry.status_code})` : ""}
           </span>
           <pre className="max-h-48 overflow-auto rounded-lg border border-danger bg-danger-subtle p-3 text-xs whitespace-pre-wrap break-all text-danger">
@@ -1070,9 +1067,7 @@ function RequestDetail({
       ) : null}
       {entry.pricing_breakdown?.length ? (
         <div className="flex flex-col gap-2">
-          <span className="text-[11px] font-medium uppercase tracking-wide text-muted">
-            Billed meters
-          </span>
+          <span className="text-overline">Billed meters</span>
           <div className="grid gap-2 sm:grid-cols-2 lg:grid-cols-3">
             {sortedBreakdown(entry.pricing_breakdown).map((line) => {
               // A line of neither known shape was written by an older gateway.

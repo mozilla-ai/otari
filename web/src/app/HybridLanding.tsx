@@ -78,9 +78,7 @@ export function HybridLanding() {
           </div>
 
           <div className="flex flex-col gap-2">
-            <h2 className="text-sm font-semibold text-foreground">
-              Point a client here
-            </h2>
+            <h2 className="text-title">Point a client here</h2>
             <CopyableValue
               value={baseUrl}
               label="gateway base URL"

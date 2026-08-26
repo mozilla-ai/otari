@@ -174,7 +174,7 @@ export function PasswordCard() {
 
   return (
     <section className="flex flex-col gap-2">
-      <h2 className="text-sm font-semibold text-foreground">
+      <h2 className="text-title">
         {isClaimed ? "Dashboard password" : "Claim this deployment"}
       </h2>
       <Card>

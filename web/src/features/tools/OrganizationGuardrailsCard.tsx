@@ -460,9 +460,7 @@ export function OrganizationGuardrailsCard({
 
   return (
     <section className="flex flex-col gap-2">
-      <h2 className="text-sm font-semibold text-foreground">
-        Organization guardrails
-      </h2>
+      <h2 className="text-title">Organization guardrails</h2>
       <p className="text-sm text-muted">
         Guardrails that run on every request from the workspaces below, whether
         the caller asked for them or not. They compose with the deployment

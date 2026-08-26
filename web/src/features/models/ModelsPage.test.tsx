@@ -577,7 +577,7 @@ describe("ModelsPage", () => {
     await screen.findByText("openai:gpt-4o")
 
     await user.click(
-      screen.getByRole("columnheader", { name: /Base in \/ out \$ \/ 1M/ }),
+      screen.getByRole("columnheader", { name: /Base in \/ out \/ 1M/ }),
     )
 
     const order = modelOrder()
@@ -854,7 +854,7 @@ describe("ModelsPage", () => {
     await screen.findByText("anthropic:claude-sonnet-4")
 
     expect(
-      screen.getByRole("columnheader", { name: "Caching policy" }),
+      screen.getByRole("columnheader", { name: "Caching" }),
     ).toBeInTheDocument()
 
     // The compact cache-policy cell keeps the table readable while opening the
@@ -896,7 +896,7 @@ describe("ModelsPage", () => {
     await pickOption(user, "Compare prices at context", "Compare at 200K")
 
     expect(
-      screen.getByRole("columnheader", { name: /at 200K in \/ out \$ \/ 1M/ }),
+      screen.getByRole("columnheader", { name: /at 200K in \/ out \/ 1M/ }),
     ).toBeInTheDocument()
     const row = tableRow("openai:gpt-4o")
     expect(

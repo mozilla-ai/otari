@@ -28,9 +28,7 @@ export function MaintenanceModeCard() {
 
   return (
     <section className="flex flex-col gap-2">
-      <h2 className="text-sm font-semibold text-foreground">
-        Maintenance mode
-      </h2>
+      <h2 className="text-title">Maintenance mode</h2>
       <Card>
         <Card.Content className="flex flex-col divide-y divide-border px-5 py-1">
           <div className="flex flex-col gap-4 py-4">

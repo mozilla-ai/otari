@@ -421,9 +421,7 @@ function CreateKeyForm({
   return (
     <Card>
       <Card.Content className="flex flex-col gap-4 p-5">
-        <div className="text-sm font-semibold text-foreground">
-          Create API key
-        </div>
+        <div className="text-title">Create API key</div>
         <ErrorBanner error={create.error} />
         <div className="grid gap-4 sm:grid-cols-2">
           <Field
@@ -551,7 +549,7 @@ function EditKeyForm({
   return (
     <Card>
       <Card.Content className="flex flex-col gap-4 p-5">
-        <div className="text-sm font-semibold text-foreground">
+        <div className="text-title">
           Edit <code>{apiKey.key_name ?? apiKey.id}</code>
         </div>
         <ErrorBanner error={update.error} />

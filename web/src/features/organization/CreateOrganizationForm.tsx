@@ -22,9 +22,7 @@ export function CreateOrganizationForm({ onClose }: { onClose: () => void }) {
   return (
     <Card>
       <Card.Content className="flex flex-col gap-4 p-5">
-        <div className="text-sm font-semibold text-foreground">
-          Create organization
-        </div>
+        <div className="text-title">Create organization</div>
         <ErrorBanner error={create.error ?? switchTo.error} />
         <Field
           label="Name"
