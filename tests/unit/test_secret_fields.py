@@ -42,10 +42,9 @@ class TestRedactSecretLikeValues:
     def test_matches_a_substring_so_a_variant_spelling_cannot_slip_through(self) -> None:
         # Substring and not an exact-name allow-list: an operator names a client
         # kwarg however the SDK expects it, and a fixed set would miss a variant.
-        masked = redact_secret_like_values(
-            {"projectAuthorizationToken": "t", "X-Api-Key": "k", "service_account_credentials": "c"}
-        )
-        assert masked == dict.fromkeys(masked, REDACTED_VALUE)
+        submitted = {"projectAuthorizationToken": "t", "X-Api-Key": "k", "service_account_credentials": "c"}
+
+        assert redact_secret_like_values(submitted) == dict.fromkeys(submitted, REDACTED_VALUE)
 
     def test_none_stays_none(self) -> None:
         assert redact_secret_like_values(None) is None

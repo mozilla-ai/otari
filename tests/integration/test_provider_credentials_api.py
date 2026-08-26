@@ -569,6 +569,14 @@ def test_saving_the_masked_client_args_back_keeps_the_stored_credential(
     assert stored.client_args == {"region_name": "eu-west-1", "aws_secret_access_key": "wJalrXUtnFEMIsecret"}
 
 
+def _stored_client_args(db_session: Session) -> dict[str, object]:
+    """Read the row back from the database, past whatever the API chose to show."""
+    db_session.expire_all()
+    stored = db_session.get(ProviderCredential, "bedrock")
+    assert stored is not None
+    return dict(stored.client_args)
+
+
 def test_a_credential_shaped_client_arg_can_still_be_replaced_and_removed(
     client: TestClient,
     master_key_header: dict[str, str],
@@ -592,11 +600,9 @@ def test_a_credential_shaped_client_arg_can_still_be_replaced_and_removed(
         headers=master_key_header,
     )
     assert rotated.status_code == 200, rotated.text
-    db_session.expire_all()
-    assert db_session.get(ProviderCredential, "bedrock").client_args == {"aws_secret_access_key": "new-secret"}
+    assert _stored_client_args(db_session) == {"aws_secret_access_key": "new-secret"}
 
     cleared = client.patch("/v1/provider-credentials/bedrock", json={"client_args": None}, headers=master_key_header)
     assert cleared.status_code == 200, cleared.text
-    db_session.expire_all()
-    assert db_session.get(ProviderCredential, "bedrock").client_args == {}
+    assert _stored_client_args(db_session) == {}
 
