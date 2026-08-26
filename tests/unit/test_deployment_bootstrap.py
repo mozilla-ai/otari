@@ -7,7 +7,7 @@ Unit rather than integration because the one database read the route makes runs
 on the SQLite file each test stands up, so there is no PostgreSQL to wait for.
 """
 
-from collections.abc import Callable
+from collections.abc import Callable, Generator
 from pathlib import Path
 
 import pytest
@@ -24,6 +24,30 @@ from gateway.main import create_app
 
 PLATFORM_TOKEN = "gw_test_token"
 MASTER_KEY = "sk-master-not-in-the-bootstrap"
+
+
+@pytest.fixture(autouse=True)
+def _reset_process_state() -> Generator[None, None, None]:
+    """Return the process-wide config and engine to their defaults after each test.
+
+    ``create_app`` installs both, and nothing in the root ``conftest`` puts them
+    back. Every test here used to end with the pair by hand, which is the same
+    guarantee right up until an assertion fails: a trailing statement is skipped
+    when the test does not reach it, and a finalizer is not.
+
+    Hardening rather than a fix for an observed failure, and worth saying so: no
+    leak in this file is currently reachable that way, because every test builds
+    its own app and ``create_app`` installs a config over whatever the last one
+    left. That is a property of these tests, not a guarantee, and it is the kind
+    that stops holding quietly.
+
+    The pairs left inline below are the ones that are not cleanup: a test
+    comparing two deployments has to put the first away before it builds the
+    second, and that has to happen mid-test.
+    """
+    yield
+    reset_config()
+    reset_db()
 
 
 def _standalone(tmp_path: Path, docs_url: str | None = None) -> GatewayConfig:
@@ -143,8 +167,6 @@ def test_passkeys_ready_turns_on_with_an_address_alone(tmp_path: Path) -> None:
         # Still no registered passkey, so it is not offered as a sign-in yet.
         assert "passkey" not in answered["sign_in_methods"]
 
-    reset_config()
-    reset_db()
 
 
 def test_mail_ready_turns_on_only_with_a_transport_and_a_public_url(tmp_path: Path) -> None:
@@ -171,9 +193,6 @@ def test_mail_ready_turns_on_only_with_a_transport_and_a_public_url(tmp_path: Pa
 
     with TestClient(create_app(ready)) as client:
         assert client.get("/v1/bootstrap").json()["mail_ready"] is True
-
-    reset_config()
-    reset_db()
 
 
 # A surface names its router's ``/v1/`` prefix, so the prefix is derived from the
@@ -209,8 +228,6 @@ def test_every_surface_names_a_route_the_gateway_mounts(
         prefix = SURFACE_ROUTE_PREFIXES.get(surface, f"/v1/{surface}")
         assert any(path.startswith(prefix) for path in mounted), f"surface {surface!r} names no mounted /v1/ route"
 
-    reset_config()
-    reset_db()
 
 
 def test_hosted_swaps_the_process_wide_provider_page_for_the_per_organization_one(tmp_path: Path) -> None:
@@ -237,8 +254,6 @@ def test_hosted_swaps_the_process_wide_provider_page_for_the_per_organization_on
     # silently withheld from a control plane.
     assert set(answered["surfaces"]) ^ set(STANDALONE_SURFACES) == {"organization_providers", "providers"}
 
-    reset_config()
-    reset_db()
 
 
 def test_hosted_answers_everything_below_the_edition_the_way_standalone_does(tmp_path: Path) -> None:
@@ -262,8 +277,6 @@ def test_hosted_answers_everything_below_the_edition_the_way_standalone_does(tmp
     differ = {key for key in standalone if standalone[key] != hosted[key]}
     assert differ == {"deployment_type", "surfaces"}
 
-    reset_config()
-    reset_db()
 
 
 def test_hosted_mode_refuses_a_platform_token(tmp_path: Path) -> None:
@@ -302,8 +315,6 @@ def test_hybrid_reports_no_session_no_surfaces_and_the_hosted_url(monkeypatch: p
         "mail_ready": False,
     }
 
-    reset_config()
-    reset_db()
 
 
 def test_hybrid_bootstrap_leaks_no_secret(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -316,8 +327,6 @@ def test_hybrid_bootstrap_leaks_no_secret(monkeypatch: pytest.MonkeyPatch) -> No
 
     assert PLATFORM_TOKEN not in body
 
-    reset_config()
-    reset_db()
 
 
 def test_management_url_is_configurable(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -330,8 +339,6 @@ def test_management_url_is_configurable(monkeypatch: pytest.MonkeyPatch) -> None
 
     assert response.json()["management_url"] == "https://staging.otari.example/"
 
-    reset_config()
-    reset_db()
 
 
 @pytest.mark.parametrize("configured", ["javascript:alert(1)", "otari.ai", ""])
@@ -353,8 +360,6 @@ def test_a_management_url_that_is_not_an_http_link_fails_at_startup(
         with TestClient(app) as client:
             assert client.get("/v1/bootstrap").json()["management_url"] == "https://otari.ai"
 
-    reset_config()
-    reset_db()
 
 
 def test_a_deployment_with_no_docs_url_points_at_the_bundled_guide(tmp_path: Path) -> None:
@@ -366,8 +371,6 @@ def test_a_deployment_with_no_docs_url_points_at_the_bundled_guide(tmp_path: Pat
 
     assert response.json()["docs_url"] is None
 
-    reset_config()
-    reset_db()
 
 
 def test_docs_url_is_published_to_a_standalone_dashboard(tmp_path: Path) -> None:
@@ -384,8 +387,6 @@ def test_docs_url_is_published_to_a_standalone_dashboard(tmp_path: Path) -> None
 
     assert response.json()["docs_url"] == "https://docs.otari.ai/en/"
 
-    reset_config()
-    reset_db()
 
 
 def test_a_hybrid_gateway_carries_the_hosted_docs_link_too(monkeypatch: pytest.MonkeyPatch) -> None:
@@ -402,8 +403,6 @@ def test_a_hybrid_gateway_carries_the_hosted_docs_link_too(monkeypatch: pytest.M
 
     assert response.json()["docs_url"] == "https://docs.otari.ai/en/"
 
-    reset_config()
-    reset_db()
 
 
 def test_docs_url_is_read_from_the_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
