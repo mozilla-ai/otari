@@ -25,6 +25,7 @@ from gateway.log_config import logger
 from gateway.services.tool_usage import ToolUsageTally
 
 if TYPE_CHECKING:
+    from mcp.types import CallToolResult
     from mcp.types import Tool as MCPTool
 
     from gateway.models.mcp import McpServerConfig
@@ -95,7 +96,7 @@ class MCPClientPool:
         await session.initialize()
 
         listed = await session.list_tools()
-        allowed = set(cfg.allowed_tools) if cfg.allowed_tools else None
+        allowed = set(cfg.allowed_tools) if cfg.allowed_tools is not None else None
         openai_tools: list[dict[str, Any]] = []
         for tool in listed.tools:
             if allowed is not None and tool.name not in allowed:
@@ -133,6 +134,18 @@ class MCPClientPool:
         """Return the configured server that owns ``name``, if connected."""
         return self._tool_owner.get(name)
 
+    async def call_tool_result(self, name: str, arguments: dict[str, Any]) -> CallToolResult:
+        """Execute an MCP call and return the server's native typed result."""
+        owner = self._tool_owner.get(name)
+        if owner is None:
+            raise KeyError(f"No MCP server owns tool {name!r}")
+        try:
+            return await self._servers[owner].session.call_tool(name, arguments)
+        except Exception:
+            if self._tally is not None:
+                self._tally.record_failure(name)
+            raise
+
     async def call_tool_outcome(self, name: str, arguments: dict[str, Any]) -> MCPToolCallOutcome:
         """Execute an MCP call and preserve its explicit ``isError`` status.
 
@@ -140,15 +153,7 @@ class MCPClientPool:
         events. Other API formats keep using :meth:`call_tool`, which returns the
         same model-facing text as before.
         """
-        owner = self._tool_owner.get(name)
-        if owner is None:
-            raise KeyError(f"No MCP server owns tool {name!r}")
-        try:
-            result = await self._servers[owner].session.call_tool(name, arguments)
-        except Exception:
-            if self._tally is not None:
-                self._tally.record_failure(name)
-            raise
+        result = await self.call_tool_result(name, arguments)
         parts = [_render_content_block(block) for block in result.content]
         flattened = "\n".join(p for p in parts if p)
         rendered = f"[tool error] {flattened}" if result.isError else flattened

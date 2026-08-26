@@ -1317,6 +1317,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/mcp/execute": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Execute Mcp Tool
+         * @description Execute one caller-approved tool against one inline MCP server.
+         *
+         *     The server is connected only for this request. Otari validates its URL,
+         *     applies its configured tool allowlist, confirms the tool through live MCP
+         *     discovery, and then executes exactly the named call. A server-returned
+         *     ``isError`` remains a typed MCP result; transport and protocol failures are
+         *     returned as a sanitized gateway error.
+         */
+        post: operations["execute_mcp_tool_v1_mcp_execute_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/messages": {
         parameters: {
             query?: never;
@@ -4369,6 +4395,37 @@ export interface components {
             /** Workspace Id */
             workspace_id?: string | null;
         };
+        /** Annotations */
+        Annotations: {
+            /** Audience */
+            audience?: ("user" | "assistant")[] | null;
+            /** Priority */
+            priority?: number | null;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * AudioContent
+         * @description Audio content for a message.
+         */
+        AudioContent: {
+            /** Meta */
+            _meta?: {
+                [key: string]: unknown;
+            } | null;
+            annotations?: components["schemas"]["Annotations"] | null;
+            /** Data */
+            data: string;
+            /** Mimetype */
+            mimeType: string;
+            /**
+             * Type
+             * @constant
+             */
+            type: "audio";
+        } & {
+            [key: string]: unknown;
+        };
         /**
          * AudioSpeechRequest
          * @description OpenAI-compatible audio speech (TTS) request.
@@ -4459,6 +4516,27 @@ export interface components {
         } & {
             [key: string]: unknown;
         };
+        /**
+         * BlobResourceContents
+         * @description Binary contents of a resource.
+         */
+        BlobResourceContents: {
+            /** Meta */
+            _meta?: {
+                [key: string]: unknown;
+            } | null;
+            /** Blob */
+            blob: string;
+            /** Mimetype */
+            mimeType?: string | null;
+            /**
+             * Uri
+             * Format: uri
+             */
+            uri: string;
+        } & {
+            [key: string]: unknown;
+        };
         /** Body_create_file_v1_files_post */
         Body_create_file_v1_files_post: {
             /** File */
@@ -4546,6 +4624,29 @@ export interface components {
              * @default 0
              */
             user_count: number;
+        };
+        /**
+         * CallToolResult
+         * @description The server's response to a tool call.
+         */
+        CallToolResult: {
+            /** Meta */
+            _meta?: {
+                [key: string]: unknown;
+            } | null;
+            /** Content */
+            content: (components["schemas"]["TextContent"] | components["schemas"]["ImageContent"] | components["schemas"]["AudioContent"] | components["schemas"]["ResourceLink"] | components["schemas"]["EmbeddedResource"])[];
+            /**
+             * Iserror
+             * @default false
+             */
+            isError: boolean;
+            /** Structuredcontent */
+            structuredContent?: {
+                [key: string]: unknown;
+            } | null;
+        } & {
+            [key: string]: unknown;
         };
         /**
          * CallerOrganizationMembershipPublic
@@ -5377,6 +5478,29 @@ export interface components {
             selector: string;
         };
         /**
+         * EmbeddedResource
+         * @description The contents of a resource, embedded into a prompt or tool call result.
+         *
+         *     It is up to the client how best to render embedded resources for the benefit
+         *     of the LLM and/or the user.
+         */
+        EmbeddedResource: {
+            /** Meta */
+            _meta?: {
+                [key: string]: unknown;
+            } | null;
+            annotations?: components["schemas"]["Annotations"] | null;
+            /** Resource */
+            resource: components["schemas"]["TextResourceContents"] | components["schemas"]["BlobResourceContents"];
+            /**
+             * Type
+             * @constant
+             */
+            type: "resource";
+        } & {
+            [key: string]: unknown;
+        };
+        /**
          * EmbeddingRequest
          * @description OpenAI-compatible embedding request.
          */
@@ -5665,6 +5789,42 @@ export interface components {
         HTTPValidationError: {
             /** Detail */
             detail?: components["schemas"]["ValidationError"][];
+        };
+        /**
+         * Icon
+         * @description An icon for display in user interfaces.
+         */
+        Icon: {
+            /** Mimetype */
+            mimeType?: string | null;
+            /** Sizes */
+            sizes?: string[] | null;
+            /** Src */
+            src: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * ImageContent
+         * @description Image content for a message.
+         */
+        ImageContent: {
+            /** Meta */
+            _meta?: {
+                [key: string]: unknown;
+            } | null;
+            annotations?: components["schemas"]["Annotations"] | null;
+            /** Data */
+            data: string;
+            /** Mimetype */
+            mimeType: string;
+            /**
+             * Type
+             * @constant
+             */
+            type: "image";
+        } & {
+            [key: string]: unknown;
         };
         /**
          * ImageGenerationRequest
@@ -6031,8 +6191,27 @@ export interface components {
             object: "tool";
         };
         /**
+         * McpExecuteRequest
+         * @description One MCP server and the exact tool call the client approved.
+         */
+        McpExecuteRequest: {
+            /**
+             * Arguments
+             * @description The JSON-object arguments to pass to the approved tool.
+             */
+            arguments?: {
+                [key: string]: unknown;
+            };
+            server: components["schemas"]["McpServerConfig"];
+            /**
+             * Tool Name
+             * @description The MCP tool the caller has approved for this one execution.
+             */
+            tool_name: string;
+        };
+        /**
          * McpServerConfig
-         * @description Inline MCP server configuration accepted on the chat completions request.
+         * @description Inline MCP server configuration accepted by generation and execution requests.
          *
          *     Streamable HTTP transport. The `url` must be reachable from the gateway process.
          *
@@ -7410,6 +7589,43 @@ export interface components {
             token: string;
         };
         /**
+         * ResourceLink
+         * @description A resource that the server is capable of reading, included in a prompt or tool call result.
+         *
+         *     Note: resource links returned by tools are not guaranteed to appear in the results of `resources/list` requests.
+         */
+        ResourceLink: {
+            /** Meta */
+            _meta?: {
+                [key: string]: unknown;
+            } | null;
+            annotations?: components["schemas"]["Annotations"] | null;
+            /** Description */
+            description?: string | null;
+            /** Icons */
+            icons?: components["schemas"]["Icon"][] | null;
+            /** Mimetype */
+            mimeType?: string | null;
+            /** Name */
+            name: string;
+            /** Size */
+            size?: number | null;
+            /** Title */
+            title?: string | null;
+            /**
+             * Type
+             * @constant
+             */
+            type: "resource_link";
+            /**
+             * Uri
+             * Format: uri
+             */
+            uri: string;
+        } & {
+            [key: string]: unknown;
+        };
+        /**
          * ResponsesRequest
          * @description OpenAI Responses API-compatible request.
          *
@@ -8064,6 +8280,47 @@ export interface components {
             ok: boolean;
             /** Reason */
             reason: string;
+        };
+        /**
+         * TextContent
+         * @description Text content for a message.
+         */
+        TextContent: {
+            /** Meta */
+            _meta?: {
+                [key: string]: unknown;
+            } | null;
+            annotations?: components["schemas"]["Annotations"] | null;
+            /** Text */
+            text: string;
+            /**
+             * Type
+             * @constant
+             */
+            type: "text";
+        } & {
+            [key: string]: unknown;
+        };
+        /**
+         * TextResourceContents
+         * @description Text contents of a resource.
+         */
+        TextResourceContents: {
+            /** Meta */
+            _meta?: {
+                [key: string]: unknown;
+            } | null;
+            /** Mimetype */
+            mimeType?: string | null;
+            /** Text */
+            text: string;
+            /**
+             * Uri
+             * Format: uri
+             */
+            uri: string;
+        } & {
+            [key: string]: unknown;
         };
         /**
          * TokenChargeLine
@@ -11458,6 +11715,39 @@ export interface operations {
                 };
                 content: {
                     "application/json": unknown;
+                };
+            };
+        };
+    };
+    execute_mcp_tool_v1_mcp_execute_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["McpExecuteRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CallToolResult"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

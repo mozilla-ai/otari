@@ -16,7 +16,7 @@ Otari calls these endpoints, all rooted at the configured platform base URL:
 |---|---|
 | `POST {base}/gateway/provider-keys/resolve` | Authorize a request and return one or more provider credentials to try |
 | `POST {base}/gateway/usage`                 | Report the outcome of an attempt back to the platform |
-| `POST {base}/gateway/mcp-servers/resolve`   | Swap workspace-scoped MCP server ids for inline server configs (called only when a request references MCP server ids) |
+| `POST {base}/gateway/mcp-servers/resolve`   | Authorize MCP access and swap workspace-scoped MCP server ids for inline server configs |
 | `POST {base}/gateway/web-search/resolve`    | Resolve the workspace's web-search policy (called only when a request uses the `otari_web_search` tool) |
 
 `{base}` means Otari platform `base_url` setting. Otari concatenates literally. The peer service is responsible for including any API-version prefix it exposes its own routes under. For the reference otari deployment that prefix is `/api/v1`, so the base URL is `http://backend:8000/api/v1` and Otari ends up POSTing to `http://backend:8000/api/v1/gateway/provider-keys/resolve`.
@@ -219,9 +219,11 @@ its own tenant.
 
 ## MCP server resolution
 
-Called only when a request references one or more workspace-scoped MCP server
-ids (a hybrid-only feature). Otari swaps those ids for the inline server
-configs it needs to open the connections.
+Called when a request references workspace-scoped MCP server ids (a
+hybrid-only feature). Otari swaps those ids for the inline server configs it
+needs to open the connections. `POST /v1/mcp/execute` also calls this endpoint
+with an empty `mcp_server_ids` list to authenticate and authorize its inline,
+stateless MCP call through the same platform boundary.
 
 ### Request
 
@@ -235,6 +237,9 @@ Content-Type: application/json
   "mcp_server_ids": ["01HX1...", "01HX2..."]
 }
 ```
+
+For stateless execution the body is `{"mcp_server_ids": []}`. A successful
+peer returns `{"servers": []}`.
 
 ### Response
 

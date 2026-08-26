@@ -25,6 +25,7 @@ from gateway.api.routes import (
     keys,
     mail,
     maintenance_mode,
+    mcp,
     messages,
     models,
     moderations,
@@ -105,6 +106,10 @@ def _register_core_routers(app: FastAPI, config: GatewayConfig) -> None:
     # fallback + usage reporting), so they're registered in both modes.
     app.include_router(messages.router)
     app.include_router(responses.router)
+    # Stateless MCP execution is a data-plane route. In hybrid mode it
+    # authenticates through the platform's MCP resolver without opening a local
+    # database; standalone uses the ordinary API/master-key path.
+    app.include_router(mcp.router)
 
     if config.is_hybrid_mode:
         # The hybrid stub router is mounted by register_routers, after the

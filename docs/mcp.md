@@ -24,6 +24,29 @@ When the model emits an MCP tool call, Otari:
 The loop stops when the model returns a normal assistant response or hits
 `max_tool_iterations`.
 
+## Stateless tool execution
+
+`POST /v1/mcp/execute` runs one caller-approved tool against one inline MCP
+server, without calling a model or retaining a session:
+
+```json
+{
+  "server": {
+    "name": "github",
+    "url": "https://mcp.example.com/github",
+    "allowed_tools": ["create_issue"]
+  },
+  "tool_name": "create_issue",
+  "arguments": {"repository": "mozilla-ai/otari", "title": "Approved issue"}
+}
+```
+
+Otari checks URL safety, `allowed_tools`, and live tool discovery before
+execution. It returns the native MCP result, including `isError`; transport and
+protocol failures become a sanitized `502`. The endpoint accepts the usual API
+key or master key in standalone mode, and an otari.ai bearer token in hybrid
+mode.
+
 ## Messages streaming activity
 
 For streaming `/v1/messages` requests with

@@ -70,6 +70,8 @@ POST /v1/audio/transcriptions
 
 [excluded]
 GET /v1/models/{model_id}      # redundant, list_models covers discovery
+# Stateless MCP execution is public, but no SDK shell wraps it yet.
+POST /v1/mcp/execute                 # not yet wrapped
 # Files API: added to the gateway spec, not yet wrapped by any SDK shell.
 POST /v1/files                       # not yet wrapped
 GET /v1/files                        # not yet wrapped

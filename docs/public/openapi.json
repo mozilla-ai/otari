@@ -1191,6 +1191,92 @@
         "title": "AliasResponse",
         "type": "object"
       },
+      "Annotations": {
+        "additionalProperties": true,
+        "properties": {
+          "audience": {
+            "anyOf": [
+              {
+                "items": {
+                  "enum": [
+                    "user",
+                    "assistant"
+                  ],
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Audience"
+          },
+          "priority": {
+            "anyOf": [
+              {
+                "maximum": 1.0,
+                "minimum": 0.0,
+                "type": "number"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Priority"
+          }
+        },
+        "title": "Annotations",
+        "type": "object"
+      },
+      "AudioContent": {
+        "additionalProperties": true,
+        "description": "Audio content for a message.",
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          },
+          "annotations": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Annotations"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "data": {
+            "title": "Data",
+            "type": "string"
+          },
+          "mimeType": {
+            "title": "Mimetype",
+            "type": "string"
+          },
+          "type": {
+            "const": "audio",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "data",
+          "mimeType"
+        ],
+        "title": "AudioContent",
+        "type": "object"
+      },
       "AudioSpeechRequest": {
         "description": "OpenAI-compatible audio speech (TTS) request.\n\nThe speech fields are derived from any-llm's ``AudioSpeechParams`` (see\n``_schema_derive``) so the schema cannot silently drop a param any-llm\nforwards. ``user`` is gateway-only (billing / auth scoping); it is not an\nany-llm param and is stripped before the request is forwarded.",
         "properties": {
@@ -1328,6 +1414,51 @@
           }
         },
         "title": "BillingMeters",
+        "type": "object"
+      },
+      "BlobResourceContents": {
+        "additionalProperties": true,
+        "description": "Binary contents of a resource.",
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          },
+          "blob": {
+            "title": "Blob",
+            "type": "string"
+          },
+          "mimeType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mimetype"
+          },
+          "uri": {
+            "format": "uri",
+            "minLength": 1,
+            "title": "Uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "uri",
+          "blob"
+        ],
+        "title": "BlobResourceContents",
         "type": "object"
       },
       "Body_create_file_v1_files_post": {
@@ -1572,6 +1703,69 @@
           "updated_at"
         ],
         "title": "BudgetResponse",
+        "type": "object"
+      },
+      "CallToolResult": {
+        "additionalProperties": true,
+        "description": "The server's response to a tool call.",
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          },
+          "content": {
+            "items": {
+              "anyOf": [
+                {
+                  "$ref": "#/components/schemas/TextContent"
+                },
+                {
+                  "$ref": "#/components/schemas/ImageContent"
+                },
+                {
+                  "$ref": "#/components/schemas/AudioContent"
+                },
+                {
+                  "$ref": "#/components/schemas/ResourceLink"
+                },
+                {
+                  "$ref": "#/components/schemas/EmbeddedResource"
+                }
+              ]
+            },
+            "title": "Content",
+            "type": "array"
+          },
+          "isError": {
+            "default": false,
+            "title": "Iserror",
+            "type": "boolean"
+          },
+          "structuredContent": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Structuredcontent"
+          }
+        },
+        "required": [
+          "content"
+        ],
+        "title": "CallToolResult",
         "type": "object"
       },
       "CallerOrganizationMembershipPublic": {
@@ -3455,6 +3649,56 @@
         "title": "DroppedResponse",
         "type": "object"
       },
+      "EmbeddedResource": {
+        "additionalProperties": true,
+        "description": "The contents of a resource, embedded into a prompt or tool call result.\n\nIt is up to the client how best to render embedded resources for the benefit\nof the LLM and/or the user.",
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          },
+          "annotations": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Annotations"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "resource": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/TextResourceContents"
+              },
+              {
+                "$ref": "#/components/schemas/BlobResourceContents"
+              }
+            ],
+            "title": "Resource"
+          },
+          "type": {
+            "const": "resource",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "resource"
+        ],
+        "title": "EmbeddedResource",
+        "type": "object"
+      },
       "EmbeddingRequest": {
         "description": "OpenAI-compatible embedding request.",
         "properties": {
@@ -4056,6 +4300,94 @@
           }
         },
         "title": "HTTPValidationError",
+        "type": "object"
+      },
+      "Icon": {
+        "additionalProperties": true,
+        "description": "An icon for display in user interfaces.",
+        "properties": {
+          "mimeType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mimetype"
+          },
+          "sizes": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Sizes"
+          },
+          "src": {
+            "title": "Src",
+            "type": "string"
+          }
+        },
+        "required": [
+          "src"
+        ],
+        "title": "Icon",
+        "type": "object"
+      },
+      "ImageContent": {
+        "additionalProperties": true,
+        "description": "Image content for a message.",
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          },
+          "annotations": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Annotations"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "data": {
+            "title": "Data",
+            "type": "string"
+          },
+          "mimeType": {
+            "title": "Mimetype",
+            "type": "string"
+          },
+          "type": {
+            "const": "image",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "data",
+          "mimeType"
+        ],
+        "title": "ImageContent",
         "type": "object"
       },
       "ImageGenerationRequest": {
@@ -4769,8 +5101,35 @@
         "title": "ManagedTool",
         "type": "object"
       },
+      "McpExecuteRequest": {
+        "description": "One MCP server and the exact tool call the client approved.",
+        "properties": {
+          "arguments": {
+            "additionalProperties": true,
+            "description": "The JSON-object arguments to pass to the approved tool.",
+            "title": "Arguments",
+            "type": "object"
+          },
+          "server": {
+            "$ref": "#/components/schemas/McpServerConfig"
+          },
+          "tool_name": {
+            "description": "The MCP tool the caller has approved for this one execution.",
+            "maxLength": 256,
+            "minLength": 1,
+            "title": "Tool Name",
+            "type": "string"
+          }
+        },
+        "required": [
+          "server",
+          "tool_name"
+        ],
+        "title": "McpExecuteRequest",
+        "type": "object"
+      },
       "McpServerConfig": {
-        "description": "Inline MCP server configuration accepted on the chat completions request.\n\nStreamable HTTP transport. The `url` must be reachable from the gateway process.\n\nURL safety (SSRF guard against private/link-local/reserved IP ranges, plus\nrejecting plain ``http://`` when ``authorization_token`` is set) is\nenforced by :func:`gateway.services.url_safety.validate_mcp_url`, called\nfrom the async request pipeline (``prepare_gateway_tools``) rather than\nhere at parse time: the safety check does a DNS lookup, which must be\nawaited so it can't block the event loop, and Pydantic validators run\nsynchronously during request-body parsing.",
+        "description": "Inline MCP server configuration accepted by generation and execution requests.\n\nStreamable HTTP transport. The `url` must be reachable from the gateway process.\n\nURL safety (SSRF guard against private/link-local/reserved IP ranges, plus\nrejecting plain ``http://`` when ``authorization_token`` is set) is\nenforced by :func:`gateway.services.url_safety.validate_mcp_url`, called\nfrom the async request pipeline (``prepare_gateway_tools``) rather than\nhere at parse time: the safety check does a DNS lookup, which must be\nawaited so it can't block the event loop, and Pydantic validators run\nsynchronously during request-body parsing.",
         "properties": {
           "allowed_tools": {
             "anyOf": [
@@ -7674,6 +8033,114 @@
         "title": "ResetPasswordRequest",
         "type": "object"
       },
+      "ResourceLink": {
+        "additionalProperties": true,
+        "description": "A resource that the server is capable of reading, included in a prompt or tool call result.\n\nNote: resource links returned by tools are not guaranteed to appear in the results of `resources/list` requests.",
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          },
+          "annotations": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Annotations"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "description": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Description"
+          },
+          "icons": {
+            "anyOf": [
+              {
+                "items": {
+                  "$ref": "#/components/schemas/Icon"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Icons"
+          },
+          "mimeType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mimetype"
+          },
+          "name": {
+            "title": "Name",
+            "type": "string"
+          },
+          "size": {
+            "anyOf": [
+              {
+                "type": "integer"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Size"
+          },
+          "title": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Title"
+          },
+          "type": {
+            "const": "resource_link",
+            "title": "Type",
+            "type": "string"
+          },
+          "uri": {
+            "format": "uri",
+            "minLength": 1,
+            "title": "Uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "name",
+          "uri",
+          "type"
+        ],
+        "title": "ResourceLink",
+        "type": "object"
+      },
       "ResponsesRequest": {
         "additionalProperties": true,
         "description": "OpenAI Responses API-compatible request.\n\nThe wire fields are derived from any-llm's ``ResponsesParams`` (see\n``_schema_derive``) so the schema cannot silently drop a param any-llm\nforwards. Gateway-internal fields (``mcp_servers``, ``mcp_server_ids``,\n``guardrails``, ``tools_header``, ``max_tool_iterations``) opt the request\ninto gateway-managed MCP / sandbox / web_search / guardrails without\nchanging the upstream wire shape. They're stripped before the request is\nforwarded.",
@@ -9231,6 +9698,94 @@
           "reason"
         ],
         "title": "TestServiceResponse",
+        "type": "object"
+      },
+      "TextContent": {
+        "additionalProperties": true,
+        "description": "Text content for a message.",
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          },
+          "annotations": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/Annotations"
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "type": {
+            "const": "text",
+            "title": "Type",
+            "type": "string"
+          }
+        },
+        "required": [
+          "type",
+          "text"
+        ],
+        "title": "TextContent",
+        "type": "object"
+      },
+      "TextResourceContents": {
+        "additionalProperties": true,
+        "description": "Text contents of a resource.",
+        "properties": {
+          "_meta": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Meta"
+          },
+          "mimeType": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Mimetype"
+          },
+          "text": {
+            "title": "Text",
+            "type": "string"
+          },
+          "uri": {
+            "format": "uri",
+            "minLength": 1,
+            "title": "Uri",
+            "type": "string"
+          }
+        },
+        "required": [
+          "uri",
+          "text"
+        ],
+        "title": "TextResourceContents",
         "type": "object"
       },
       "TokenChargeLine": {
@@ -16531,6 +17086,56 @@
         "summary": "Receive Logs",
         "tags": [
           "otel"
+        ]
+      }
+    },
+    "/v1/mcp/execute": {
+      "post": {
+        "description": "Execute one caller-approved tool against one inline MCP server.\n\nThe server is connected only for this request. Otari validates its URL,\napplies its configured tool allowlist, confirms the tool through live MCP\ndiscovery, and then executes exactly the named call. A server-returned\n``isError`` remains a typed MCP result; transport and protocol failures are\nreturned as a sanitized gateway error.",
+        "operationId": "execute_mcp_tool_v1_mcp_execute_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/McpExecuteRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CallToolResult"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Execute Mcp Tool",
+        "tags": [
+          "mcp"
         ]
       }
     },

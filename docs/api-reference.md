@@ -20,6 +20,7 @@ If the failure is the **gateway's** (its provider credentials were rejected, the
 | Chat completions (`/v1/chat/completions`) | Yes | Yes |
 | Messages (`/v1/messages`, `/v1/messages/count_tokens`) | Yes | Yes |
 | Responses (`/v1/responses`) | Yes | Yes |
+| Stateless MCP execution (`/v1/mcp/execute`) | Yes | Yes |
 | Management (keys, users, budgets, aliases, routing policies, pricing, usage, tool discovery) | Yes | No |
 | OpenAI-compatible (embeddings, models, files, batches, images, audio, moderations, rerank) | Yes | No |
 
@@ -35,7 +36,7 @@ Regular API endpoints use an API key. Management endpoints use the master key.
 
 ### Connected to otari.ai
 
-The three generation endpoints (`/v1/chat/completions`, `/v1/messages`, `/v1/responses`) expect `Authorization: Bearer <user-token>`. `Otari-Key` and local API keys are not used in this mode.
+The generation endpoints and `/v1/mcp/execute` expect `Authorization: Bearer <user-token>`. `Otari-Key` and local API keys are not used in this mode.
 
 ## Available in both deployment types
 
@@ -76,6 +77,16 @@ For a full client setup example, see [Use with Claude Code](use-with-claude-code
 | `POST` | `/v1/responses` | OpenAI Responses API-compatible endpoint. Supports streaming. | Standalone: API key or master key. Connected: `Authorization` bearer token from otari.ai. |
 
 Not every provider implements the Responses API; one that does not is rejected with `400 Provider '<name>' does not support the Responses API`. For a full client setup example, see [Use with Codex](use-with-codex.md).
+
+### Stateless MCP execution
+
+| Method | Path | Description | Auth |
+|--------|------|-------------|------|
+| `POST` | `/v1/mcp/execute` | Execute one caller-approved tool against one inline MCP server and return its native typed result. | Standalone: API key or master key. Connected: `Authorization` bearer token from otari.ai. |
+
+The endpoint checks the inline server URL, its configured allowlist, and live
+tool discovery before execution. See [MCP](mcp.md#stateless-tool-execution) for
+the request shape and error behavior.
 
 ## Standalone-only endpoints
 

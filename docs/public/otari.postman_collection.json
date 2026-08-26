@@ -2061,6 +2061,44 @@
     {
       "item": [
         {
+          "name": "Execute Mcp Tool",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"server\": {\n    \"name\": \"string\",\n    \"url\": \"string\"\n  },\n  \"tool_name\": \"string\"\n}"
+            },
+            "description": "Execute one caller-approved tool against one inline MCP server.\n\nThe server is connected only for this request. Otari validates its URL,\napplies its configured tool allowlist, confirms the tool through live MCP\ndiscovery, and then executes exactly the named call. A server-returned\n``isError`` remains a typed MCP result; transport and protocol failures are\nreturned as a sanitized gateway error.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "mcp",
+                "execute"
+              ],
+              "raw": "{{baseUrl}}/v1/mcp/execute"
+            }
+          }
+        }
+      ],
+      "name": "mcp"
+    },
+    {
+      "item": [
+        {
           "name": "Create Message",
           "request": {
             "body": {
