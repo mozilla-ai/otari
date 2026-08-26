@@ -68,14 +68,14 @@ describe("StatCard", () => {
         chart={<svg aria-label="trend" />}
       />,
     )
-    expect(container.querySelector(".min-h-10")).not.toBeNull()
+    expect(container.querySelector(".min-h-10\\.5")).not.toBeNull()
   })
 
   it("reserves nothing for a tile with neither aside nor chart", () => {
     const { container } = render(
       <StatCard label="Avg latency" value="1.33 s" />,
     )
-    expect(container.querySelector(".min-h-10")).toBeNull()
+    expect(container.querySelector(".min-h-10\\.5")).toBeNull()
   })
 })
 

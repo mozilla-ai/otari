@@ -187,6 +187,10 @@ function jsonResponse(body: unknown, status = 200): Response {
 function mockApi(
   body: UsageSummary | null,
   extra: Record<string, unknown> = {},
+  // The previous window. Without one, that query gets the current window's body
+  // back, every delta is exactly zero, and a test cannot see a direction or a
+  // polarity color.
+  previousBody?: UsageSummary,
 ) {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input)
@@ -194,6 +198,12 @@ function mockApi(
       if (url.includes(path)) return jsonResponse(answer)
     }
     if (url.includes("/v1/usage/summary")) {
+      // The previous-period query is the only one on this page passing
+      // NO_BREAKDOWNS, which goes on the wire as the server's `none` sentinel,
+      // so that is what tells the two windows apart here.
+      if (previousBody && url.includes("dimensions=none")) {
+        return jsonResponse(previousBody)
+      }
       return jsonResponse(body ?? summary())
     }
     if (url.includes("/v1/usage/series")) {
@@ -616,11 +626,41 @@ describe("UsagePage", () => {
     // And it announces a direction, which the glyph never did: "▲" is
     // decoration a screen reader skips. TrendChip.test.tsx owns the direction
     // and polarity mapping; this only asserts the tiles go through it.
+    // Anchored, and counted. Unanchored, `up` also matches the page's own
+    // description and the "No grouping" option, so the assertion would pass with
+    // the announcement deleted. The count is the four tiles that have a delta,
+    // less cache hit rate, which this fixture gives no input-token composition
+    // to divide by.
     expect(
-      screen.getAllByText(/^(no change|up|down)(, (better|worse))?$/).length,
-    ).toBeGreaterThan(0)
+      screen.getAllByText(/^(no change|up|down)(, (better|worse))?$/),
+    ).toHaveLength(3)
     // The hand-rolled arrow glyphs are gone from the tiles.
     expect(screen.queryByText(/[▲▼]/)).not.toBeInTheDocument()
+  })
+
+  it("reads a chip against the metric's own polarity, not the direction alone", async () => {
+    // Spend rose from 827.00 to 1,240.50, a 50% rise. On `down-is-good` that is
+    // the regression, so the chip is a danger chip and says so: direction plus
+    // judgment, because polarity puts good and bad in hue alone.
+    mockApi(
+      summary(),
+      {},
+      summary({
+        totals: usageTotals({
+          cost: 827,
+          request_count: 42_000,
+          billed_input_tokens: 4_000_000,
+          billed_output_tokens: 2_200_000,
+        }),
+      }),
+    )
+    renderPage(<UsagePage />)
+
+    expect(await screen.findByText("up, worse")).toBeInTheDocument()
+    expect(screen.getByText("+50.0% vs prev")).toBeInTheDocument()
+    // Requests doubled too, but volume carries no polarity, so it announces the
+    // direction and nothing more.
+    expect(screen.getAllByText("up").length).toBeGreaterThan(0)
   })
 
   it("lists spend by model with a reconciling 'other' fold row", async () => {

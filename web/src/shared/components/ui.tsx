@@ -222,18 +222,22 @@ export function StatCard({
 
           The wrap is reserved for so it does not misalign a row of tiles: one
           tile wrapping while its neighbors stay on one line would move its
-          sparkline up relative to theirs. min-h-10 is 40px, which is what the
-          wrap costs: an 18px chip line, `gap-y-1`, and one 18px hint line.
-          #807 reserved 36px here for two lines of plain text, which the chip's
-          own line height now overruns by 4px. A hint long enough to wrap on its
-          own still overruns this, so it is a floor and not a guarantee; the
-          type is deliberately not sized to the longest string, which would be
-          sizing it by accident. Reserved for a charted tile even with neither
-          chip nor hint, since the chart is what makes the misalignment visible;
-          a tile with no chart and nothing to say reserves nothing, so a lone
-          tile carries no dead space. */}
+          sparkline up relative to theirs. min-h-10.5 is 42px, which is what the
+          wrap costs: a 20px chip line, `gap-y-1`, and one 18px hint line. The
+          chip's line is 20px and not the 18px its `text-xs` implies, because
+          HeroUI's `.chip` sets `--tw-leading` to `leading-5` on the element and
+          `.chip--sm` does not reset it, so the size modifier's
+          `line-height: var(--tw-leading, var(--text-xs--line-height))` resolves
+          to the base 20px rather than to our token. #807 reserved 36px here for
+          two lines of plain text, which that overruns. A hint long enough to
+          wrap on its own still overruns this, so it is a floor and not a
+          guarantee; the type is deliberately not sized to the longest string,
+          which would be sizing it by accident. Reserved for a charted tile even
+          with neither chip nor hint, since the chart is what makes the
+          misalignment visible; a tile with no chart and nothing to say reserves
+          nothing, so a lone tile carries no dead space. */}
       {trend || hint || chart ? (
-        <span className="flex min-h-10 flex-wrap items-center gap-x-2 gap-y-1 text-xs tabular-nums text-muted">
+        <span className="flex min-h-10.5 flex-wrap items-center gap-x-2 gap-y-1 text-xs tabular-nums text-muted">
           {trend}
           {/* Its own element, not a bare text node beside the chip: the two
               are separate statements, and a node keeps the hint addressable
