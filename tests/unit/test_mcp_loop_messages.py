@@ -29,6 +29,7 @@ from any_llm.types.messages import (
     ToolUseBlock,
 )
 
+from gateway.log_config import logger
 from gateway.services import mcp_loop_messages as messages_loop_module
 from gateway.services.mcp_client import MCPToolCallOutcome
 from gateway.services.mcp_loop_messages import (
@@ -966,7 +967,7 @@ async def test_stream_mcp_exception_emits_error_without_logging_detail(
         logged_warnings.append((message, *args))
 
     monkeypatch.setattr(messages_loop_module, "amessages", fake_amessages)
-    monkeypatch.setattr(messages_loop_module.logger, "warning", capture_warning)
+    monkeypatch.setattr(logger, "warning", capture_warning)
     pool = FailingActivityPool()
     events = [
         event
