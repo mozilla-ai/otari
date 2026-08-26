@@ -51,9 +51,9 @@ artifacts.
    say why.
 9. **Request reviewers** (see [Requesting reviewers](#requesting-reviewers)).
 10. **Wait for the review, then fix** (see [Handling the review](#handling-the-review)). Leave
-    the PR ready (or draft, per step 7). **Never merge unless told to.** `main` carries no branch
-    protection, so nothing mechanical stops a merge, which is exactly why this one is a rule
-    rather than a gate.
+    the PR ready (or draft, per step 7). **Never merge unless told to**, and note that `main` is
+    protected as well (see [Merging](#merging-when-asked-to-merge)), so a merge needs a human
+    approval on top of your instruction.
 
 ## Running checks
 
@@ -97,6 +97,11 @@ a screenshot entry so the page is covered when the suite becomes a gate.
 
 ## Requesting reviewers
 
+**Two bots review this repo, not one.** Requesting Copilot and reading back its comments is half
+the surface: **CodeRabbit** reviews automatically, without being requested, and leaves inline
+comments of its own. Poll for both before calling a review loop finished, and address CodeRabbit's
+threads the same way (reply, then resolve). It tends to arrive first.
+
 - **Copilot.** `gh pr edit --add-reviewer` fails on the bot login ("Could not resolve user"), so
   use the REST endpoint:
   ```bash
@@ -137,7 +142,11 @@ a screenshot entry so the page is covered when the suite becomes a gate.
    ```
    A reply to a resolved thread does not reopen it. Keep replies terse and free of em dashes: it
    is a poor look to trip the prose rule in the same breath as answering a review.
-5. Leave the PR ready (or draft, per the original decision).
+5. **Resolve your own self-review threads too.** `required_review_thread_resolution` counts
+   every thread, including the ones you opened on your own diff in step 8. Explanatory comments
+   that need no action still block the merge until resolved, which is a non-obvious cost of doing
+   the self-review properly. Resolve them once they have been read, the same way as a reviewer's.
+6. Leave the PR ready (or draft, per the original decision).
 
 ## Multi-issue orchestration
 
@@ -152,8 +161,8 @@ tool, `isolation: "worktree"`), each executing the cycle above.
   branch collapses to one commit on `main` and its internal shape never lands. Still update with
   `git rebase origin/main` and `git push --force-with-lease` rather than merging `main` in: the
   PR diff and CI stay about your change.
-- **Poll for reviews centrally**, not inside each agent, since an agent idling on Copilot burns
-  its run for nothing. Once a wave's PRs are open, poll until each has a review, then route the
+- **Poll for reviews centrally**, not inside each agent, since an agent idling on a review burns
+  its run for nothing. Poll for both bots (see [Requesting reviewers](#requesting-reviewers)). Once a wave's PRs are open, poll until each has a review, then route the
   fixes back to the original agents with `SendMessage` (their worktree and context are intact)
   rather than starting fresh ones.
 - **Resource note.** Each agent running the integration suite boots its own Testcontainers
@@ -166,9 +175,24 @@ tool, `isolation: "worktree"`), each executing the cycle above.
 - **Squash is the button** (merge commits are disabled). The PR title becomes the commit on
   `main` and the changelog line, so it has to be the sentence you want released.
 - **Auto-merge is enabled** on the repo, so `gh pr merge --squash --auto` works while CI runs.
-- **`main` is unprotected**: no required checks, no required approvals. Nothing stops a merge, so
-  the bar is the one you hold yourself: green CI, the review addressed, and an explicit
-  instruction to merge.
+- **`main` is protected, by a ruleset rather than by legacy branch protection.** This matters
+  because of how it looks from the API: `gh api repos/mozilla-ai/otari/branches/main/protection`
+  returns **404 "Branch not protected"**, which is not evidence of no protection. It only means
+  the rules are not the legacy kind. Read `gh api repos/mozilla-ai/otari/rulesets` instead, or
+  `gh api repos/mozilla-ai/otari/branches/main -q .protected`, which reports `true`. An earlier
+  version of this file claimed `main` was unprotected on the strength of that 404.
+
+  The `protect-main` ruleset requires, on the default branch:
+  - **one approving review**, and a bot's `COMMENTED` review does not satisfy it. Copilot and
+    CodeRabbit both comment rather than approve, so a PR with both bots through and green CI
+    still reports `mergeStateStatus: BLOCKED` and `reviewDecision: REVIEW_REQUIRED`.
+  - **every review thread resolved** (`required_review_thread_resolution`). See the warning in
+    [Handling the review](#handling-the-review) about your own self-review counting here.
+  - squash or rebase only, plus `deletion` and `non_fast_forward` rules on the branch.
+
+  Repository admins are bypass actors, so an admin *can* merge through all of it. That makes the
+  bar the one you hold yourself, unchanged: green CI, the review addressed, a human approval, and
+  an explicit instruction to merge.
 - **Branches are deleted on merge**, which makes the stacked-PR trap real. Merging parent A with
   its branch deleted **closes child B permanently**: B's base is gone and GitHub refuses to
   reopen a PR whose base branch was deleted (`422 "state cannot be changed"`), even if you
