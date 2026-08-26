@@ -9,6 +9,7 @@ import { KeysPage } from "@/features/keys/KeysPage"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { bootstrap, organizationMember } from "@/tests/fixtures"
 import { renderWithRouter } from "@/tests/router"
+import { pickOption } from "@/tests/select"
 
 function user(overrides: Partial<User> = {}): User {
   return {
@@ -451,10 +452,7 @@ describe("KeysPage", () => {
     await user.type(screen.getByPlaceholderText(/Pick a user/), "alice")
     await user.keyboard("{Escape}")
     await user.click(screen.getByRole("button", { name: "Advanced" }))
-    await user.selectOptions(
-      screen.getByLabelText(/Mismatched .* field/),
-      "accept",
-    )
+    await pickOption(user, "Mismatched user field", "Always accept")
     await user.click(screen.getByRole("button", { name: "Create key" }))
 
     const post = fetchMock.mock.calls.find(
@@ -682,10 +680,7 @@ describe("KeysPage", () => {
 
     const row = (await screen.findByText("ci-bot")).closest("tr")!
     await user.click(within(row).getByRole("button", { name: "Edit" }))
-    await user.selectOptions(
-      await screen.findByLabelText(/Mismatched .* field/),
-      "accept",
-    )
+    await pickOption(user, "Mismatched user field", "Always accept")
     await user.click(screen.getByRole("button", { name: "Save changes" }))
 
     const patch = fetchMock.mock.calls.find(
@@ -713,9 +708,10 @@ describe("KeysPage", () => {
 
     const row = (await screen.findByText("ci-bot")).closest("tr")!
     await user.click(within(row).getByRole("button", { name: "Edit" }))
-    await user.selectOptions(
-      await screen.findByLabelText(/Mismatched .* field/),
-      "inherit",
+    await pickOption(
+      user,
+      "Mismatched user field",
+      "Use the deployment setting (default)",
     )
     await user.click(screen.getByRole("button", { name: "Save changes" }))
 

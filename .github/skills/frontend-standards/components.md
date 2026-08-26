@@ -49,7 +49,9 @@ bare `<button>` takes it from no one. Reaching for a native element is sometimes
 row has to be the router's `Link`), but it is a decision that buys styling work, not a neutral
 default, and it can buy behavior nobody asked for: `FilterSelect` was a token-styled native
 `<select>` until the platform menu it draws (over the control, covering the button that opened
-it) made it a HeroUI `Select`.
+it) made it a HeroUI `Select`. The phone was the argument for keeping it native, and it did not
+survive contact: at 390px the popover opens under the trigger, inside the viewport, and scrolls
+to its last option, which is what the platform picker was supposed to be needed for.
 
 Once you know what you are styling, there are four ways to change how it looks, in the order to
 try them. HeroUI v3 supports all four (its styling guide lists `className`, data attributes,

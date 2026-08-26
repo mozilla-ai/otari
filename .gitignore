@@ -22,6 +22,11 @@ otari.db
 otari-dev.db
 smoke.db
 otari-smoke.db
+# A gateway booted by hand to look at a change: its config carries a throwaway
+# master key and provider keys, and its database is a binary blob, so both are
+# named here rather than trusted to `git add -p`.
+review-otari.db
+review-otari.yml
 # SQLite WAL sidecars, which sit next to any of the *.db files above.
 *.db-shm
 *.db-wal

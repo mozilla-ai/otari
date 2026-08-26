@@ -57,6 +57,9 @@ describe("TablePagination", () => {
   it("changes rows per page", async () => {
     const user = userEvent.setup()
     const { onPageSizeChange } = setup()
+    // 50 rather than the 100 this fixture already shows: react-aria reports a
+    // selection that changed, so re-picking the current size is correctly
+    // silent, where the native select fired `change` either way.
     await pickOption(user, "Rows per page", "50")
     expect(onPageSizeChange).toHaveBeenCalledWith(50)
   })

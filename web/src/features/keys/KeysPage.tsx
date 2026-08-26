@@ -37,6 +37,7 @@ import {
   CopyField,
   EmptyState,
   ErrorBanner,
+  FilterSelect,
   InfoBanner,
   PageHeader,
 } from "@/shared/components/ui"
@@ -326,23 +327,25 @@ function UserMismatchPicker({
   const selectId = "key-reject-user-mismatch"
   return (
     <div className="flex flex-col gap-1">
+      {/* The label carries markup (`user` as code), which FilterSelect's own
+          `label` cannot, so it stays here with `htmlFor` on the trigger and
+          `ariaLabel` naming the control for assistive tech. */}
       <label htmlFor={selectId} className="text-sm font-medium text-foreground">
         Mismatched <code>user</code> field
       </label>
-      <select
+      <FilterSelect
         id={selectId}
+        ariaLabel="Mismatched user field"
         value={value === null ? "inherit" : value ? "reject" : "accept"}
-        onChange={(e) =>
-          onChange(
-            e.target.value === "inherit" ? null : e.target.value === "reject",
-          )
+        onChange={(next) =>
+          onChange(next === "inherit" ? null : next === "reject")
         }
-        className="w-full rounded-lg border border-border bg-surface-alt px-3 py-2 text-sm text-foreground"
-      >
-        <option value="inherit">Use the deployment setting (default)</option>
-        <option value="reject">Always reject (403)</option>
-        <option value="accept">Always accept</option>
-      </select>
+        options={[
+          { value: "inherit", label: "Use the deployment setting (default)" },
+          { value: "reject", label: "Always reject (403)" },
+          { value: "accept", label: "Always accept" },
+        ]}
+      />
       <span className="text-xs text-muted">
         What happens when a request on this key names a different{" "}
         <code>user</code> than its owner. Accept it for clients that send

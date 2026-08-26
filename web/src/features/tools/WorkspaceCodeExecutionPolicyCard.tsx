@@ -135,11 +135,10 @@ export function WorkspaceCodeExecutionPolicyCard({
   const allowedImages = policy?.allowed_images ?? []
   const availableTools = policy?.available_tools ?? []
   // A pin the operator has since withdrawn is still stored, and the server
-  // refuses it on the next request and on the next save. `FilterSelect` renders
-  // a controlled native `<select>`, which shows its *first* option when `value`
-  // matches none of them, so leaving it out would display "Deployment default"
-  // over a policy that is nothing of the kind, and a save would earn a 400
-  // naming a value never on screen. Carry it as an option instead, said out
+  // refuses it on the next request and on the next save. `FilterSelect` shows
+  // the option whose value matches, so with none matching the control would
+  // read as empty over a policy that is anything but, and a save would earn a
+  // 400 naming a value never on screen. Carry it as an option instead, said out
   // loud, so the withdrawal is visible and picking something else is one click.
   const withdrawnImage =
     policy?.image && !allowedImages.includes(policy.image) ? policy.image : null

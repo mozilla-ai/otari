@@ -178,20 +178,23 @@ export async function dismissComboBox(box: Locator): Promise<void> {
 
 // Pick an option from a FilterSelect. It is a HeroUI Select, so the control is a
 // button that opens a listbox popover: there is no native <select> to
-// `selectOption` on, and the option is named by its visible label. Playwright
+// `selectOption` on, and the option is named by its visible label. React-aria
 // names the trigger with the current value *and* the label, hence the suffix
-// match. Pass `scope` when several selects on the page share a label.
+// match, and the label is escaped on the way into the pattern: the dashboard
+// ships labels with regex metacharacters in them ("Priced?"), which would
+// otherwise compile to a pattern that quietly matches the wrong control rather
+// than failing. Pass `scope` when several selects on the page share a label.
 export async function pickOption(
   page: Page,
   label: string | RegExp,
   option: string,
   scope?: Locator,
 ): Promise<void> {
-  await (scope ?? page)
-    .getByRole("button", {
-      name: label instanceof RegExp ? label : new RegExp(`${label}$`),
-    })
-    .click()
+  const name =
+    label instanceof RegExp
+      ? label
+      : new RegExp(`${label.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}$`)
+  await (scope ?? page).getByRole("button", { name }).click()
   await page.getByRole("option", { name: option, exact: true }).click()
 }
 

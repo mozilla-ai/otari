@@ -311,10 +311,9 @@ describe("WorkspaceCodeExecutionPolicyCard", () => {
 
   it("names a withdrawn pin instead of showing it as the deployment default", async () => {
     // The scenario the server guards twice: the operator dropped the image from
-    // the allow-list after the workspace pinned it. Without an option matching
-    // the stored value the native select falls back to its first option, which
-    // would show "Deployment default" over a policy that is nothing of the
-    // kind, and a save would earn a 400 naming a value never on screen.
+    // the allow-list after the workspace pinned it. With no option matching the
+    // stored value the control would read as empty over a policy that is
+    // anything but, and a save would earn a 400 naming a value never on screen.
     mockApi({
       policy: workspaceCodeExecutionPolicy({
         workspace_id: ALPHA,

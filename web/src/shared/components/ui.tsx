@@ -780,6 +780,14 @@ export function Badge({
   )
 }
 
+// react-aria reads an empty key as "nothing selected", and "" is a real filter
+// value here ("All", "Any price"), so every option key carries this prefix and
+// it is stripped back off on the way out. Both directions go through these two,
+// so the prefix is written down once.
+const OPTION_KEY_PREFIX = "v:"
+const optionKey = (value: string) => `${OPTION_KEY_PREFIX}${value}`
+const optionValue = (key: string) => key.slice(OPTION_KEY_PREFIX.length)
+
 // Filter dropdown for page filter bars. On HeroUI's Select rather than a native
 // <select> because a native one draws its menu *over* the control on macOS,
 // covering the button that opened it; this one is a popover anchored under the
@@ -806,11 +814,13 @@ export function FilterSelect({
     <Select.Root
       aria-label={label ? undefined : ariaLabel}
       isDisabled={disabled}
-      // react-aria reads an empty key as "nothing selected", and "" is a real
-      // filter value here ("All", "Any price"), so every key carries a prefix
-      // and it is stripped back off on the way out.
-      selectedKey={`v:${value}`}
-      onSelectionChange={(key) => onChange(String(key).slice(2))}
+      selectedKey={optionKey(value)}
+      // A null key is react-aria clearing the selection, which no filter here
+      // asks for: reporting it would push the strip of a non-string ("ll") into
+      // the filter, and on a URL-backed page into the query string with it.
+      onSelectionChange={(key) => {
+        if (key != null) onChange(optionValue(String(key)))
+      }}
       className={label ? "flex flex-col gap-1" : undefined}
     >
       {label ? (
@@ -823,7 +833,7 @@ export function FilterSelect({
       <Select.Popover>
         <ListBox items={options} className="max-h-72 overflow-auto">
           {(option: { value: string; label: string }) => (
-            <ListBoxItem id={`v:${option.value}`} textValue={option.label}>
+            <ListBoxItem id={optionKey(option.value)} textValue={option.label}>
               {option.label}
             </ListBoxItem>
           )}
