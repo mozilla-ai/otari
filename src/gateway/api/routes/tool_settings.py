@@ -23,7 +23,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, verify_master_key
+from gateway.api.deps import get_config, get_db, require_deployment_operator
 from gateway.api.routes.settings import _redact_url_secrets
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
@@ -121,7 +121,7 @@ def _current_fields(config: GatewayConfig) -> ToolSettingsResponse:
     return ToolSettingsResponse(fields=fields)
 
 
-@router.get("", dependencies=[Depends(verify_master_key)])
+@router.get("", dependencies=[Depends(require_deployment_operator)])
 async def get_tool_settings(
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> ToolSettingsResponse:
@@ -129,7 +129,7 @@ async def get_tool_settings(
     return _current_fields(config)
 
 
-@router.patch("", dependencies=[Depends(verify_master_key)])
+@router.patch("", dependencies=[Depends(require_deployment_operator)])
 async def update_tool_settings(
     request: UpdateToolSettingsRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -169,7 +169,7 @@ async def update_tool_settings(
     return _current_fields(config)
 
 
-@router.post("/{service}/test", dependencies=[Depends(verify_master_key)])
+@router.post("/{service}/test", dependencies=[Depends(require_deployment_operator)])
 async def test_service(
     service: str,
     request: TestServiceRequest,

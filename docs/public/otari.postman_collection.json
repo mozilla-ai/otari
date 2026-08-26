@@ -1810,7 +1810,7 @@
         {
           "name": "List Keys",
           "request": {
-            "description": "List all API keys.\n\nRequires master key authentication. An unset ``workspace_id`` lists every key\non the deployment, which keeps the pre-workspace view working unchanged.",
+            "description": "List the API keys in the caller's organization.\n\nRequires master key authentication. An unset ``workspace_id`` lists every key\nin that organization; naming a workspace in another one lists nothing rather\nthan refusing, so the filter reports no more than the unfiltered read does.",
             "header": [],
             "method": "GET",
             "url": {
@@ -1857,7 +1857,7 @@
               },
               "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"exclude_from_budget\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"reject_user_mismatch\": false,\n  \"user_id\": \"string\",\n  \"workspace_id\": \"00000000-0000-0000-0000-000000000000\"\n}"
             },
-            "description": "Create a new API key.\n\nRequires master key authentication.\n\nIf user_id is provided, the key will be associated with that user (creates user if it doesn't exist).\nIf user_id is not provided, the key is associated with the shared \"default\" user, which is created\non first use. Keys without an explicit owner therefore share one identity, and so share budget,\nusage, and files.",
+            "description": "Create a new API key in the caller's organization.\n\nRequires master key authentication.\n\nIf user_id is provided, the key will be associated with that user (creates user if it doesn't exist).\nIf user_id is not provided, the key is associated with the shared \"default\" user, which is created\non first use. Keys without an explicit owner therefore share one identity, and so share budget,\nusage, and files.\n\n``workspace_id`` names a workspace in the caller's organization, and omitting\nit mints into that organization's default workspace. A key resolves that\norganization's provider credentials and bills there, so minting into another\norganization's workspace would spend its budget on its credentials.",
             "header": [
               {
                 "key": "Content-Type",
@@ -1880,7 +1880,7 @@
         {
           "name": "Get Key",
           "request": {
-            "description": "Get details of a specific API key.\n\nRequires master key authentication.",
+            "description": "Get details of a specific API key in the caller's organization.\n\nRequires master key authentication.",
             "header": [],
             "method": "GET",
             "url": {
@@ -1915,7 +1915,7 @@
               },
               "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"exclude_from_budget\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"is_active\": false,\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"reject_user_mismatch\": false\n}"
             },
-            "description": "Update an API key.\n\nRequires master key authentication.",
+            "description": "Update an API key in the caller's organization.\n\nRequires master key authentication.",
             "header": [
               {
                 "key": "Content-Type",
@@ -1946,7 +1946,7 @@
         {
           "name": "Delete Key",
           "request": {
-            "description": "Delete (revoke) an API key.\n\nRequires master key authentication.",
+            "description": "Delete (revoke) an API key in the caller's organization.\n\nRequires master key authentication.",
             "header": [],
             "method": "DELETE",
             "url": {
@@ -1972,7 +1972,7 @@
         {
           "name": "Rotate Key",
           "request": {
-            "description": "Rotate an API key's secret in place.\n\nRequires master key authentication.\n\nGenerates a new secret for the same key row (id, user, name, expiry, and\nmetadata are preserved) and returns the new raw key once, using the same\nresponse shape as key creation. The previous secret stops authenticating\nimmediately; there is no grace window.",
+            "description": "Rotate an API key's secret in place, within the caller's organization.\n\nRequires master key authentication.\n\nGenerates a new secret for the same key row (id, user, name, expiry, and\nmetadata are preserved) and returns the new raw key once, using the same\nresponse shape as key creation. The previous secret stops authenticating\nimmediately; there is no grace window.",
             "header": [],
             "method": "POST",
             "url": {

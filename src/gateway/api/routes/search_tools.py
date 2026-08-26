@@ -25,7 +25,7 @@ from pydantic import BaseModel, ConfigDict, Field
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, verify_master_key
+from gateway.api.deps import get_config, get_db, require_deployment_operator
 from gateway.core.config import (
     SEARCH_PROVIDERS,
     SEARCH_PROVIDERS_REQUIRING_API_BASE,
@@ -223,7 +223,7 @@ async def _apply_write(db: AsyncSession, config: GatewayConfig, name: str) -> No
         logger.warning("Search tool overlay refresh failed after writing '%s'; converges within TTL", name)
 
 
-@router.get("/providers", dependencies=[Depends(verify_master_key)])
+@router.get("/providers", dependencies=[Depends(require_deployment_operator)])
 async def list_search_providers(
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> list[SearchProviderSchema]:
@@ -244,7 +244,7 @@ async def list_search_providers(
     ]
 
 
-@router.get("", dependencies=[Depends(verify_master_key)])
+@router.get("", dependencies=[Depends(require_deployment_operator)])
 async def list_all_search_tools(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
@@ -280,7 +280,7 @@ async def list_all_search_tools(
     )
 
 
-@router.post("/reencrypt", dependencies=[Depends(verify_master_key)])
+@router.post("/reencrypt", dependencies=[Depends(require_deployment_operator)])
 async def reencrypt_stored_search_tool_keys(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
@@ -308,7 +308,7 @@ async def reencrypt_stored_search_tool_keys(
     return ReencryptSearchToolsResponse(reencrypted=reencrypted, unreadable=unreadable)
 
 
-@router.post("", status_code=status.HTTP_201_CREATED, dependencies=[Depends(verify_master_key)])
+@router.post("", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_deployment_operator)])
 async def create_search_tool(
     request: CreateSearchToolRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -355,7 +355,7 @@ async def create_search_tool(
     return StoredSearchToolSchema.from_model(row, shadows_config=shadows_config)
 
 
-@router.patch("/{name}", dependencies=[Depends(verify_master_key)])
+@router.patch("/{name}", dependencies=[Depends(require_deployment_operator)])
 async def update_search_tool(
     name: str,
     request: UpdateSearchToolRequest,
@@ -417,7 +417,7 @@ async def update_search_tool(
     return StoredSearchToolSchema.from_model(row, shadows_config=name in config_file_search_tools(config))
 
 
-@router.delete("/{name}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(verify_master_key)])
+@router.delete("/{name}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_deployment_operator)])
 async def delete_stored_search_tool(
     name: str,
     db: Annotated[AsyncSession, Depends(get_db)],

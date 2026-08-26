@@ -31,6 +31,7 @@ from gateway.core.config import GatewayConfig
 from gateway.core.database import create_session
 from gateway.log_config import logger
 from gateway.models.entities import SearchToolCredential
+from gateway.models.secret_fields import restore_redacted_values
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
     SecretDecryptionError,
@@ -248,7 +249,8 @@ async def save_search_tool(
     if not isinstance(timeout, _Unset):
         row.timeout_seconds = timeout
     if not isinstance(options, _Unset):
-        row.options = options or {}
+        # Same mask round-trip rule as ``provider_store_service.save_credential``.
+        row.options = restore_redacted_values(options, existing.options if existing else None) or {}
     if not isinstance(api_key, _Unset):
         if api_key:
             row.encrypted_api_key = encrypt_secret(api_key)

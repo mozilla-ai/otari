@@ -67,6 +67,7 @@ from gateway.models.provider_keys import (
     WorkspaceProviderModelRestriction,
     WorkspaceProviderModelRestrictionsPublic,
 )
+from gateway.models.secret_fields import restore_redacted_values
 from gateway.models.tenancy import MANAGEMENT_ROLES, User, Workspace
 from gateway.repositories.tenancy import (
     Candidate,
@@ -463,6 +464,11 @@ class OrgProviderKeyService:
                     raise OrgProviderKeyAlreadyExistsError(key.provider, new_name)
         if "api_base" in update_data:
             await _gate_api_base(update_data["api_base"])
+        if "client_args" in update_data:
+            # ``to_public`` masks a credential-shaped entry, so an editor
+            # resubmitting the whole object sends the mask for the entries it was
+            # never shown; those keep their stored value.
+            update_data["client_args"] = restore_redacted_values(update_data["client_args"], key.client_args)
         if "api_key" in update_data:
             encrypted_api_key, last4 = _encrypt_api_key(update_data.pop("api_key"))
             update_data["encrypted_api_key"] = encrypted_api_key

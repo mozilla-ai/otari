@@ -16,7 +16,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_db, verify_master_key
+from gateway.api.deps import get_db, require_deployment_operator
 from gateway.models.entities import APIKey, Budget, ScopedBudget
 from gateway.models.money import as_float
 from gateway.models.tenancy import Organization, OrganizationMember, Workspace, WorkspaceMember
@@ -34,7 +34,7 @@ from gateway.services.scoped_budget_service import ScopeType, period_window
 router = APIRouter(
     prefix="/v1/scoped-budgets",
     tags=["scoped-budgets"],
-    dependencies=[Depends(verify_master_key)],
+    dependencies=[Depends(require_deployment_operator)],
 )
 
 

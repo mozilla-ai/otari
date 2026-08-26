@@ -24,7 +24,7 @@ from pydantic import BaseModel
 from sqlalchemy import ColumnElement, func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import TelemetryStoragePortDep, get_db, verify_master_key
+from gateway.api.deps import TelemetryStoragePortDep, get_db, require_deployment_operator
 
 # The window, bucket-grid, and fold conventions are `usage.py`'s: a summary read
 # from both endpoints has to describe the same window the same way, so they share
@@ -368,7 +368,7 @@ def _fold_behavior(counts: BehaviorCounts) -> AgentTelemetryBehavior:
     return behavior
 
 
-@router.get("/summary", dependencies=[Depends(verify_master_key)])
+@router.get("/summary", dependencies=[Depends(require_deployment_operator)])
 async def agent_telemetry_summary(
     db: Annotated[AsyncSession, Depends(get_db)],
     storage: TelemetryStoragePortDep,
@@ -518,7 +518,7 @@ async def _summary_series(
     )
 
 
-@router.get("/count", dependencies=[Depends(verify_master_key)])
+@router.get("/count", dependencies=[Depends(require_deployment_operator)])
 async def count_agent_telemetry(
     storage: TelemetryStoragePortDep,
     start_date: datetime | None = Query(default=None, description=_START_DESC),
@@ -539,7 +539,7 @@ async def count_agent_telemetry(
     return AgentTelemetryCount(total=await storage.count(filters=scope))
 
 
-@router.get("/series", dependencies=[Depends(verify_master_key)])
+@router.get("/series", dependencies=[Depends(require_deployment_operator)])
 async def agent_telemetry_series(
     storage: TelemetryStoragePortDep,
     group_by: TelemetryGroupBy = Query(description="Dimension to split the series by"),
@@ -600,7 +600,7 @@ async def agent_telemetry_series(
     )
 
 
-@router.delete("", dependencies=[Depends(verify_master_key)])
+@router.delete("", dependencies=[Depends(require_deployment_operator)])
 async def delete_agent_telemetry_rows(
     request: AgentTelemetryDeleteRequest,
     storage: TelemetryStoragePortDep,

@@ -25,6 +25,7 @@ from sqlmodel import SQLModel
 # rather than redefined: it exists because the engines disagree about
 # ``timezone=True``, and two copies of that reasoning would drift.
 from gateway.models.money import UsdCost, UsdRate
+from gateway.models.secret_fields import redact_secret_like_values
 from gateway.models.tenancy import UtcDateTime
 
 
@@ -475,13 +476,20 @@ class ProviderCredential(Base):
     )
 
     def to_public_dict(self) -> dict[str, Any]:
-        """Serialize for the API. Never includes the secret, only ``last4``."""
+        """Serialize for the API. Never includes the secret, only ``last4``.
+
+        ``client_args`` is masked by key name the same way
+        ``OrgProviderKey.to_public`` masks its own: a standalone Bedrock instance
+        keeps its ``aws_secret_access_key`` there, so the field this table holds
+        in clear is as much a credential as ``encrypted_api_key`` is, and it must
+        not round-trip over the API either.
+        """
         return {
             "instance": self.instance,
             "provider_type": self.provider_type,
             "api_base": self.api_base,
             "last4": self.last4,
-            "client_args": self.client_args or {},
+            "client_args": redact_secret_like_values(self.client_args) or {},
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }
@@ -518,14 +526,19 @@ class SearchToolCredential(Base):
     )
 
     def to_public_dict(self) -> dict[str, Any]:
-        """Serialize for the API. Never includes the secret, only ``last4``."""
+        """Serialize for the API. Never includes the secret, only ``last4``.
+
+        ``options`` is masked by key name for the reason ``ProviderCredential``
+        gives above: it is free-form backend configuration, so a second
+        credential an operator put there is not echoed back either.
+        """
         return {
             "name": self.name,
             "provider": self.provider,
             "api_base": self.api_base,
             "last4": self.last4,
             "timeout": self.timeout_seconds,
-            "options": self.options or {},
+            "options": redact_secret_like_values(self.options) or {},
             "created_at": self.created_at.isoformat() if self.created_at else None,
             "updated_at": self.updated_at.isoformat() if self.updated_at else None,
         }

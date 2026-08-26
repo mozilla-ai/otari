@@ -25,7 +25,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_db, verify_master_key
+from gateway.api.deps import get_db, require_deployment_operator
 from gateway.log_config import logger
 from gateway.services.maintenance_mode_service import is_maintenance_mode, stage_maintenance_mode
 
@@ -51,13 +51,13 @@ class UpdateMaintenanceModeRequest(BaseModel):
     enabled: bool = Field(description="True to freeze new dashboard sign-ins, false to allow them again.")
 
 
-@router.get("", dependencies=[Depends(verify_master_key)])
+@router.get("", dependencies=[Depends(require_deployment_operator)])
 async def get_maintenance_mode(db: Annotated[AsyncSession, Depends(get_db)]) -> MaintenanceMode:
     """Report whether new dashboard sign-ins are frozen."""
     return MaintenanceMode(enabled=await is_maintenance_mode(db))
 
 
-@router.patch("", dependencies=[Depends(verify_master_key)])
+@router.patch("", dependencies=[Depends(require_deployment_operator)])
 async def update_maintenance_mode(
     request: UpdateMaintenanceModeRequest,
     db: Annotated[AsyncSession, Depends(get_db)],

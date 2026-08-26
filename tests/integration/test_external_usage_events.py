@@ -5,6 +5,7 @@ organization-scoped rates, budget isolation, and the read-surface (source filter
 by_source, CSV).
 """
 
+import uuid
 from datetime import UTC, datetime, timedelta
 from decimal import Decimal
 from typing import Any
@@ -13,8 +14,9 @@ import pytest
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from gateway.models.entities import OrganizationModelPricing, UsageLog, User
-from gateway.models.tenancy import Organization, Workspace
+from gateway.models.entities import OrganizationModelPricing, RuntimeSetting, UsageLog, User
+from gateway.models.tenancy import Organization, OrganizationMember, Workspace
+from gateway.services.tenancy.provisioning_service import BOOTSTRAP_IDENTITY_KEY
 
 _SRC = "claude_code"
 _MODEL_KEY = "anthropic:claude-sonnet-4-6"
@@ -97,6 +99,29 @@ def _post(
     if user_id is not None:
         body["user_id"] = user_id
     return client.post("/v1/usage/external-events", json=body, headers=headers)
+
+
+def _act_in(client: TestClient, master_key_header: dict[str, str], db_session: Session, organization_id: Any) -> None:
+    """Point the operator at another organization, joining it first.
+
+    A key is minted inside the organization the caller is acting in
+    (otari-ai#1880), and the master key acts as the bootstrap operator, so a test
+    that mints into an organization it wrote straight to the table has to put the
+    operator in it and switch. Through the API an operator never needs this: the
+    organization it creates makes it an owner.
+    """
+    marker = db_session.get(RuntimeSetting, BOOTSTRAP_IDENTITY_KEY)
+    assert marker is not None, "the tenancy root is provisioned by the first master-key request"
+    db_session.add(
+        OrganizationMember(organization_id=organization_id, user_id=uuid.UUID(marker.value), role="owner")
+    )
+    db_session.commit()
+    switched = client.post(
+        "/v1/organizations/me/switch",
+        json={"organization_id": str(organization_id)},
+        headers=master_key_header,
+    )
+    assert switched.status_code == 200, switched.text
 
 
 def _make_key(
@@ -656,6 +681,7 @@ def test_a_keys_import_prices_at_its_own_organizations_rate(
     db_session.commit()
     workspace_id = str(workspace.id)
 
+    _act_in(client, master_key_header, db_session, other.id)
     headers = _make_key(client, master_key_header, "dev-org-b", workspace_id=workspace_id)
     resp = _post(
         client,

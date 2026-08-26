@@ -16,7 +16,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, verify_master_key
+from gateway.api.deps import get_config, get_db, require_deployment_operator
 from gateway.core.config import PROVIDER_TYPE_ALIASES, GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import ProviderCredential
@@ -116,7 +116,7 @@ def _to_schema(info: ProviderInfo) -> ProviderInfoSchema:
     )
 
 
-@router.get("/providers", dependencies=[Depends(verify_master_key)])
+@router.get("/providers", dependencies=[Depends(require_deployment_operator)])
 async def list_providers(
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> ProvidersResponse:
@@ -166,7 +166,7 @@ def _to_known_schema(provider: KnownProvider) -> KnownProviderSchema:
     )
 
 
-@router.get("/providers/catalog", dependencies=[Depends(verify_master_key)])
+@router.get("/providers/catalog", dependencies=[Depends(require_deployment_operator)])
 async def provider_catalog() -> list[KnownProviderSummarySchema]:
     """List every known provider for the add-provider picker: id and name only.
 
@@ -179,7 +179,7 @@ async def provider_catalog() -> list[KnownProviderSummarySchema]:
     return [_to_summary_schema(summary) for summary in list_known_provider_summaries()]
 
 
-@router.get("/providers/catalog/{provider_id}", dependencies=[Depends(verify_master_key)])
+@router.get("/providers/catalog/{provider_id}", dependencies=[Depends(require_deployment_operator)])
 async def provider_catalog_detail(provider_id: str) -> KnownProviderSchema:
     """Autofill hints for one provider the add-provider form has selected.
 
@@ -253,7 +253,7 @@ def _to_health_schema(health: ProviderHealth) -> ProviderHealthSchema:
     )
 
 
-@router.get("/providers/health", dependencies=[Depends(verify_master_key)])
+@router.get("/providers/health", dependencies=[Depends(require_deployment_operator)])
 async def provider_health(
     config: Annotated[GatewayConfig, Depends(get_config)],
     refresh: bool = False,
@@ -454,7 +454,7 @@ async def _apply_write(db: AsyncSession, config: GatewayConfig, instance: str) -
         logger.warning("Provider overlay refresh failed after writing '%s'; converges within TTL", instance)
 
 
-@router.post("/provider-credentials/test", dependencies=[Depends(verify_master_key)])
+@router.post("/provider-credentials/test", dependencies=[Depends(require_deployment_operator)])
 async def test_provider_connection(
     request: TestProviderRequest,
     config: Annotated[GatewayConfig, Depends(get_config)],
@@ -491,7 +491,7 @@ async def test_provider_connection(
     )
 
 
-@router.post("/provider-credentials/reencrypt", dependencies=[Depends(verify_master_key)])
+@router.post("/provider-credentials/reencrypt", dependencies=[Depends(require_deployment_operator)])
 async def reencrypt_stored_provider_keys(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
@@ -520,7 +520,7 @@ async def reencrypt_stored_provider_keys(
     return ReencryptProviderCredentialsResponse(reencrypted=reencrypted, unreadable=unreadable)
 
 
-@router.get("/provider-credentials", dependencies=[Depends(verify_master_key)])
+@router.get("/provider-credentials", dependencies=[Depends(require_deployment_operator)])
 async def list_stored_providers(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> list[StoredProviderResponse]:
@@ -530,7 +530,11 @@ async def list_stored_providers(
     ]
 
 
-@router.post("/provider-credentials", status_code=status.HTTP_201_CREATED, dependencies=[Depends(verify_master_key)])
+@router.post(
+    "/provider-credentials",
+    status_code=status.HTTP_201_CREATED,
+    dependencies=[Depends(require_deployment_operator)],
+)
 async def create_stored_provider(
     request: CreateStoredProviderRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -570,7 +574,7 @@ async def create_stored_provider(
     return StoredProviderResponse.from_model(row)
 
 
-@router.patch("/provider-credentials/{instance}", dependencies=[Depends(verify_master_key)])
+@router.patch("/provider-credentials/{instance}", dependencies=[Depends(require_deployment_operator)])
 async def update_stored_provider(
     instance: str,
     request: UpdateStoredProviderRequest,
@@ -619,7 +623,7 @@ async def update_stored_provider(
 @router.delete(
     "/provider-credentials/{instance}",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(verify_master_key)],
+    dependencies=[Depends(require_deployment_operator)],
 )
 async def delete_stored_provider(
     instance: str,
@@ -636,7 +640,7 @@ async def delete_stored_provider(
     await _apply_write(db, config, instance)
 
 
-@router.post("/provider-credentials/{instance}/test", dependencies=[Depends(verify_master_key)])
+@router.post("/provider-credentials/{instance}/test", dependencies=[Depends(require_deployment_operator)])
 async def test_stored_provider(
     instance: str,
     db: Annotated[AsyncSession, Depends(get_db)],

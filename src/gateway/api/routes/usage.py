@@ -18,7 +18,7 @@ from pydantic import BaseModel
 from sqlalchemy import ColumnElement, and_, case, func, null, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, verify_api_key_or_master_key, verify_master_key
+from gateway.api.deps import get_config, get_db, require_deployment_operator, verify_api_key_or_master_key
 from gateway.api.routes._billing_schemas import ChargeLine, MeterMap
 from gateway.core.config import GatewayConfig
 from gateway.core.sql import (
@@ -423,7 +423,7 @@ def _usage_filters(
     return conditions
 
 
-@router.get("", dependencies=[Depends(verify_master_key)])
+@router.get("", dependencies=[Depends(require_deployment_operator)])
 async def list_usage(
     db: Annotated[AsyncSession, Depends(get_db)],
     start_date: datetime | None = Query(default=None, description=_START_DESC),
@@ -529,7 +529,7 @@ async def ingest_external_usage(
     )
 
 
-@router.get("/count", dependencies=[Depends(verify_master_key)])
+@router.get("/count", dependencies=[Depends(require_deployment_operator)])
 async def count_usage(
     db: Annotated[AsyncSession, Depends(get_db)],
     start_date: datetime | None = Query(default=None, description=_START_DESC),
@@ -586,7 +586,7 @@ async def count_usage(
     return UsageCount(total=total)
 
 
-@router.get("/in-flight", dependencies=[Depends(verify_master_key)])
+@router.get("/in-flight", dependencies=[Depends(require_deployment_operator)])
 async def list_in_flight(raw_request: Request) -> InFlightResponse:
     """Requests the gateway is currently serving, longest-running first.
 
@@ -626,7 +626,7 @@ async def list_in_flight(raw_request: Request) -> InFlightResponse:
     )
 
 
-@router.delete("", dependencies=[Depends(verify_master_key)])
+@router.delete("", dependencies=[Depends(require_deployment_operator)])
 async def delete_usage_rows(
     request: UsageDeleteRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -643,7 +643,7 @@ async def delete_usage_rows(
     return await delete_usage(db, request)
 
 
-@router.post("/set-price", dependencies=[Depends(verify_master_key)])
+@router.post("/set-price", dependencies=[Depends(require_deployment_operator)])
 async def set_usage_price_rows(
     request: UsageSetPriceRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -1333,7 +1333,7 @@ def _dense_series(
     return points
 
 
-@router.get("/summary", dependencies=[Depends(verify_master_key)])
+@router.get("/summary", dependencies=[Depends(require_deployment_operator)])
 async def usage_summary(
     db: Annotated[AsyncSession, Depends(get_db)],
     start_date: datetime | None = Query(default=None, description=_START_DESC),
@@ -1472,7 +1472,7 @@ _GROUP_COLUMNS: dict[str, tuple[Any, "_LabelJoin | None"]] = {
 }
 
 
-@router.get("/series", dependencies=[Depends(verify_master_key)])
+@router.get("/series", dependencies=[Depends(require_deployment_operator)])
 async def usage_series(
     db: Annotated[AsyncSession, Depends(get_db)],
     group_by: SeriesGroupBy = Query(description="Dimension to split the series by"),
@@ -1612,7 +1612,7 @@ def _csv_safe(value: str) -> str:
     return value
 
 
-@router.get("/summary.csv", dependencies=[Depends(verify_master_key)])
+@router.get("/summary.csv", dependencies=[Depends(require_deployment_operator)])
 async def usage_summary_csv(
     db: Annotated[AsyncSession, Depends(get_db)],
     start_date: datetime | None = Query(default=None, description=_START_DESC),

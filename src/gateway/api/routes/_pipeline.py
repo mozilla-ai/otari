@@ -85,7 +85,6 @@ from gateway.api.routes._platform import (
     _resolve_platform_mcp_servers,
     _resolve_platform_web_search,
     is_provider_billing_error,
-    redact_upstream_message,
     run_platform_attempts,
     upstream_error_message,
     upstream_exception_chain,
@@ -193,6 +192,7 @@ from gateway.services.tool_usage import (
     TOOL_METER_NAMESPACE,
     ToolUsageTally,
 )
+from gateway.services.upstream_redaction import redact_upstream_message
 from gateway.services.url_safety import UnsafeURLError, validate_mcp_url
 from gateway.services.web_search_backend import WEB_SEARCH_TOOL_NAME, WebSearchNotReachableError
 from gateway.services.workspace_scope import (

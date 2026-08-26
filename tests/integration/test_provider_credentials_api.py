@@ -478,3 +478,125 @@ def test_test_endpoint_maps_discovery_result(
     assert degraded.status_code == 200
     assert degraded.json()["ok"] is False
     assert degraded.json()["discovery_unsupported"] is True
+
+
+# =============================================================================
+# Credential-shaped client_args (otari-ai#1880)
+# =============================================================================
+
+
+def test_client_args_never_echo_a_credential_shaped_entry(
+    client: TestClient, master_key_header: dict[str, str], monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """A standalone Bedrock instance keeps a live AWS secret here, in clear.
+
+    ``client_args`` is arbitrary JSON handed to the provider SDK, and any-llm's
+    BedrockProvider never forwards ``api_key`` into the boto3 client it builds,
+    so classic IAM credentials genuinely belong in this field. They are as much a
+    credential as ``encrypted_api_key``, and were the one part of this row the API
+    returned unmasked. ``OrgProviderKey`` has masked its own since it shipped.
+    """
+    _with_key(monkeypatch)
+    created = client.post(
+        "/v1/provider-credentials",
+        json={
+            "instance": "bedrock",
+            "provider_type": "bedrock",
+            "client_args": {
+                "region_name": "us-east-1",
+                "aws_access_key_id": "AKIAIOSFODNN7EXAMPLE",
+                "aws_secret_access_key": "wJalrXUtnFEMIsecret",
+            },
+        },
+        headers=master_key_header,
+    )
+    assert created.status_code == 201, created.text
+
+    listed = client.get("/v1/provider-credentials", headers=master_key_header)
+    assert listed.status_code == 200, listed.text
+    body = listed.text
+    assert "wJalrXUtnFEMIsecret" not in body
+    assert "AKIAIOSFODNN7EXAMPLE" not in body
+    row = next(entry for entry in listed.json() if entry["instance"] == "bedrock")
+    # Masked by key name, so the settings an operator needs to see still show.
+    assert row["client_args"]["region_name"] == "us-east-1"
+    assert row["client_args"]["aws_secret_access_key"] == "***"
+
+
+def test_saving_the_masked_client_args_back_keeps_the_stored_credential(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+) -> None:
+    """The other half of masking on read, and the way it could have gone wrong.
+
+    The dashboard's provider form renders the stored ``client_args`` into its
+    textarea and sends the whole object back on save, so a naive mask would have
+    it overwrite the AWS secret with ``***`` the first time anyone edited the
+    region. An entry submitted as the mask keeps whatever is stored under that
+    name.
+    """
+    _with_key(monkeypatch)
+    assert (
+        client.post(
+            "/v1/provider-credentials",
+            json={
+                "instance": "bedrock",
+                "provider_type": "bedrock",
+                "client_args": {"region_name": "us-east-1", "aws_secret_access_key": "wJalrXUtnFEMIsecret"},
+            },
+            headers=master_key_header,
+        ).status_code
+        == 201
+    )
+    shown = next(
+        entry
+        for entry in client.get("/v1/provider-credentials", headers=master_key_header).json()
+        if entry["instance"] == "bedrock"
+    )
+
+    # Exactly what the form submits: the masked object it was given, one field edited.
+    saved = client.patch(
+        "/v1/provider-credentials/bedrock",
+        json={"client_args": {**shown["client_args"], "region_name": "eu-west-1"}},
+        headers=master_key_header,
+    )
+    assert saved.status_code == 200, saved.text
+
+    stored = db_session.get(ProviderCredential, "bedrock")
+    assert stored is not None
+    assert stored.client_args == {"region_name": "eu-west-1", "aws_secret_access_key": "wJalrXUtnFEMIsecret"}
+
+
+def test_a_credential_shaped_client_arg_can_still_be_replaced_and_removed(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    db_session: Session,
+) -> None:
+    """Keeping the stored value must not make the field write-once."""
+    _with_key(monkeypatch)
+    assert (
+        client.post(
+            "/v1/provider-credentials",
+            json={"instance": "bedrock", "client_args": {"aws_secret_access_key": "old-secret"}},
+            headers=master_key_header,
+        ).status_code
+        == 201
+    )
+
+    rotated = client.patch(
+        "/v1/provider-credentials/bedrock",
+        json={"client_args": {"aws_secret_access_key": "new-secret"}},
+        headers=master_key_header,
+    )
+    assert rotated.status_code == 200, rotated.text
+    db_session.expire_all()
+    assert db_session.get(ProviderCredential, "bedrock").client_args == {"aws_secret_access_key": "new-secret"}
+
+    cleared = client.patch("/v1/provider-credentials/bedrock", json={"client_args": None}, headers=master_key_header)
+    assert cleared.status_code == 200, cleared.text
+    db_session.expire_all()
+    assert db_session.get(ProviderCredential, "bedrock").client_args == {}
+

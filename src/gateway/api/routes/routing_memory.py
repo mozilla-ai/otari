@@ -48,7 +48,7 @@ from sqlalchemy import func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, verify_master_key
+from gateway.api.deps import get_config, get_db, require_deployment_operator
 from gateway.api.routes._helpers import resolve_managed_workspace_id
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
@@ -373,7 +373,7 @@ async def _pool_counts(
     return total, [(str(task_id), int(count)) for task_id, count in rows]
 
 
-@router.post("/preferences/rank", dependencies=[Depends(verify_master_key)])
+@router.post("/preferences/rank", dependencies=[Depends(require_deployment_operator)])
 async def rank_candidates(
     request: RankRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -489,7 +489,7 @@ async def rank_candidates(
     return RankResponse(recorded=recorded, seed_count=backend.seed_count, pools=pools)
 
 
-@router.get("/status", dependencies=[Depends(verify_master_key)])
+@router.get("/status", dependencies=[Depends(require_deployment_operator)])
 async def routing_memory_status(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],

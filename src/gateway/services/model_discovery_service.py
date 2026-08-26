@@ -37,6 +37,7 @@ from any_llm.types.model import Model
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.services.provider_kwargs import get_provider_kwargs, keyless_placeholder_api_key
+from gateway.services.upstream_redaction import redact_upstream_message
 from gateway.services.url_safety import UnsafeURLError, validate_provider_api_base
 
 # Fallback bound for ad-hoc credential tests when a caller does not pass one. The
@@ -346,9 +347,11 @@ async def _discover_for_provider(
     return provider_name, list(models)
 
 
-# A provider error is echoed to a master-key caller, who already holds more
-# authority than anything it could reveal; it is capped so a stack-trace-sized
-# message cannot fill the response.
+# A provider error is echoed into a health or test response, so it is redacted
+# before it is capped: the message comes from a call made with the deployment's
+# own credentials and can carry that key, a self-hosted ``api_base``, or an
+# upstream account id. The cap keeps a stack-trace-sized message from filling
+# the response.
 _ERROR_MAX_CHARS = 300
 
 
@@ -362,6 +365,11 @@ def _short_error(exc: BaseException, provider: str | None = None) -> str:
         # Re-apply the class-name fallback: a message that was only the tag (e.g.
         # "[anthropic]") strips to "", which would render as a blank error.
         message = message[len(provider) + 2 :].lstrip() or exc.__class__.__name__
+    # Before the cap, not after: truncating first can split a secret and leave
+    # the surviving half unmatched by the patterns. An empty result means the
+    # message was rejected whole (a request echo), so fall back to the class
+    # name rather than rendering a blank error, as the tag strip above does.
+    message = redact_upstream_message(message) or exc.__class__.__name__
     if len(message) > _ERROR_MAX_CHARS:
         return message[: _ERROR_MAX_CHARS - 1] + "…"
     return message

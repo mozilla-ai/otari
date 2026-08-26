@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, verify_api_key_or_master_key, verify_master_key
+from gateway.api.deps import get_config, get_db, require_deployment_operator, verify_api_key_or_master_key
 from gateway.api.routes.pricing import PricingTier
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
@@ -585,7 +585,7 @@ async def list_models(
 # would arrive as a model id. The corollary is that a provider model literally
 # named "discoverable" is unreachable via GET /v1/models/discoverable; that is
 # accepted, and such a model is still listed by GET /v1/models.
-@router.get("/models/discoverable", dependencies=[Depends(verify_master_key)])
+@router.get("/models/discoverable", dependencies=[Depends(require_deployment_operator)])
 async def list_discoverable_models(
     config: Annotated[GatewayConfig, Depends(get_config)],
     refresh: Annotated[
@@ -631,7 +631,7 @@ async def list_discoverable_models(
 
 # Declared before GET /models/{model_id:path} for the same route-order reason as
 # /models/discoverable above.
-@router.get("/models/metadata", dependencies=[Depends(verify_master_key)])
+@router.get("/models/metadata", dependencies=[Depends(require_deployment_operator)])
 async def list_model_metadata(
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> ModelMetadataResponse:

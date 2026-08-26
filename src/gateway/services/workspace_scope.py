@@ -101,6 +101,42 @@ async def lookup_default_workspace_id(db: AsyncSession) -> uuid.UUID | None:
     ).scalar_one_or_none()
 
 
+async def organization_default_workspace_id(db: AsyncSession, organization_id: uuid.UUID) -> uuid.UUID | None:
+    """The workspace a write lands in inside one organization, or ``None`` if it has none.
+
+    The organization-scoped counterpart of :func:`lookup_default_workspace_id`,
+    for a management write that acts in the caller's organization rather than
+    deployment-wide: ``POST /v1/keys`` with no ``workspace_id``. It resolves the
+    same two ways, by the provisioning name first and then the organization's
+    oldest workspace, because an organization whose default was renamed should
+    still mint into the one it has rather than a different organization's.
+
+    ``None`` is reachable only for an organization with no workspace at all,
+    which nothing here creates (both `provisioning_service` and
+    ``OrganizationService.create_organization_for_user`` provision one, and
+    ``WorkspaceService.delete_workspace`` refuses to remove the last), so the
+    caller reports it rather than inventing a workspace inside somebody's tenant.
+    """
+    resolved = (
+        await db.execute(
+            select(col(Workspace.id)).where(
+                col(Workspace.organization_id) == organization_id,
+                col(Workspace.name) == DEFAULT_WORKSPACE_NAME,
+            )
+        )
+    ).scalar_one_or_none()
+    if resolved is not None:
+        return resolved
+    return (
+        await db.execute(
+            select(col(Workspace.id))
+            .where(col(Workspace.organization_id) == organization_id)
+            .order_by(col(Workspace.created_at), col(Workspace.id))
+            .limit(1)
+        )
+    ).scalar_one_or_none()
+
+
 async def default_workspace_id(db: AsyncSession) -> uuid.UUID:
     """The workspace a deployment-wide write lands in.
 

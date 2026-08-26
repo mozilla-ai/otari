@@ -26,7 +26,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, verify_master_key
+from gateway.api.deps import get_config, get_db, require_deployment_operator
 from gateway.api.routes._helpers import resolve_managed_workspace_id
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
@@ -372,7 +372,7 @@ async def _refresh_quietly(db: AsyncSession, name: str) -> None:
         logger.warning("Policy cache refresh failed after writing '%s'; converges within TTL", name)
 
 
-@router.get("", dependencies=[Depends(verify_master_key)])
+@router.get("", dependencies=[Depends(require_deployment_operator)])
 async def list_policies(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
@@ -427,7 +427,7 @@ async def list_policies(
     )
 
 
-@router.post("", dependencies=[Depends(verify_master_key)])
+@router.post("", dependencies=[Depends(require_deployment_operator)])
 async def set_policy(
     request: PolicyRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -542,7 +542,11 @@ async def set_policy(
     return PolicyResponse.from_model(policy, is_dynamic=spec.is_dynamic)
 
 
-@router.delete("/{name:path}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(verify_master_key)])
+@router.delete(
+    "/{name:path}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_deployment_operator)],
+)
 async def delete_policy(
     name: str,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -590,7 +594,7 @@ async def delete_policy(
     await _refresh_quietly(db, name)
 
 
-@router.post("/explain", dependencies=[Depends(verify_master_key)])
+@router.post("/explain", dependencies=[Depends(require_deployment_operator)])
 async def explain_policy(
     request: ExplainRequest,
     db: Annotated[AsyncSession, Depends(get_db)],

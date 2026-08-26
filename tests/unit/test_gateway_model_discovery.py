@@ -72,12 +72,34 @@ class TestShortError:
         assert _short_error(ValueError("[anthropic]   "), provider="anthropic") == "ValueError"
 
     def test_caps_long_message_after_stripping_tag(self) -> None:
-        body = "x" * (_ERROR_MAX_CHARS + 50)
+        # Words rather than one long run of characters: redaction masks an
+        # unbroken alphanumeric run as key material, which would shorten the
+        # message before the cap this asserts could apply.
+        body = " ".join(["boom"] * 80)
         result = _short_error(ValueError(f"[anthropic] {body}"), provider="anthropic")
         assert len(result) == _ERROR_MAX_CHARS
-        assert result.endswith("…")
+        assert result.endswith("\u2026")
         # The tag was removed before the cap, so none of it survives.
         assert not result.startswith("[anthropic]")
+
+    def test_masks_a_credential_in_the_upstream_message(self) -> None:
+        # otari-ai#1880: this text comes from a call made with the deployment's
+        # own credential and lands in a provider health or test response, so it
+        # goes through the same redaction a client-facing provider error does.
+        exc = ValueError("[openai] Incorrect API key provided: sk-proj-abcd1234efgh5678ijkl")
+        result = _short_error(exc, provider="openai")
+        assert "sk-proj-abcd1234efgh5678ijkl" not in result
+        assert "Incorrect API key provided" in result
+
+    def test_masks_a_self_hosted_api_base(self) -> None:
+        exc = ValueError("Connection refused to https://llm.internal.example.com/v1/models")
+        assert "llm.internal.example.com" not in _short_error(exc)
+
+    def test_falls_back_to_class_name_when_redaction_rejects_the_message(self) -> None:
+        # A message that echoes the request back is rejected whole rather than
+        # masked, which would otherwise render as a blank error in the dashboard.
+        exc = ValueError('messages: [{"role": "user", "content": "my private prompt"}]')
+        assert _short_error(exc) == "ValueError"
 
 
 class TestModelCache:

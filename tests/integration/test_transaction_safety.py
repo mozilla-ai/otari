@@ -54,6 +54,10 @@ def test_create_key_rollback_on_commit_failure(
     master_key_header: dict[str, str],
 ) -> None:
     """create_key rolls back on commit failure."""
+    # Provisioned before the patch: the route resolves the caller's organization,
+    # and first-boot provisioning commits, which the patch below would otherwise
+    # fail outside the handler's own rollback.
+    assert client.get("/v1/organizations/me", headers=master_key_header).status_code == 200
     with patch(
         "gateway.api.routes.keys.AsyncSession.commit",
         side_effect=OperationalError("db", {}, Exception("connection lost")),

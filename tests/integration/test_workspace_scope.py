@@ -58,7 +58,7 @@ def test_a_key_can_be_created_in_a_named_workspace(
     assert listed["workspace_id"] == platform
 
 
-def test_the_key_list_filters_by_workspace_and_is_deployment_wide_without_one(
+def test_the_key_list_filters_by_workspace_and_covers_the_organization_without_one(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
@@ -73,8 +73,8 @@ def test_the_key_list_filters_by_workspace_and_is_deployment_wide_without_one(
     in_default = client.get(f"/v1/keys?workspace_id={default}", headers=master_key_header).json()
     assert "in-platform" not in [k["key_name"] for k in in_default]
 
-    # Unset means every key on the deployment, which is what keeps the
-    # pre-workspace view working.
+    # Unset means every key in the caller's organization, both of these
+    # workspaces being in it.
     everything = client.get("/v1/keys", headers=master_key_header).json()
     names = [k["key_name"] for k in everything]
     assert "in-default" in names
@@ -272,3 +272,125 @@ def test_a_members_workspace_ceiling_goes_with_the_workspace(
 
     orphan = client.get(f"/v1/scoped-budgets/{budget_id}", headers=master_key_header)
     assert orphan.status_code == status.HTTP_404_NOT_FOUND, orphan.text
+
+
+# =============================================================================
+# ...and to an organization
+# =============================================================================
+#
+# A workspace belongs to exactly one organization, so scoping the request plane
+# to a workspace only holds up if the management plane cannot reach across one.
+# Before otari-ai#1880 it could: `POST /v1/keys` validated `workspace_id` for
+# existence and every `/v1/keys/{id}` route loaded by id alone, so a key minted
+# into another organization's workspace resolved that organization's BYO
+# provider credential and billed it.
+
+
+def _second_organization(client: TestClient, headers: dict[str, str]) -> str:
+    """An organization the caller owns besides the default one.
+
+    Created through the API rather than written to the table, because the
+    membership is the point: creating one makes the caller its owner, which is
+    what lets the switch below succeed.
+    """
+    created = client.post("/v1/organizations", json={"name": "Other Co"}, headers=headers)
+    assert created.status_code == status.HTTP_201_CREATED, created.text
+    return str(created.json()["id"])
+
+
+def _switch_to(client: TestClient, headers: dict[str, str], organization_id: str) -> None:
+    switched = client.post(
+        "/v1/organizations/me/switch",
+        json={"organization_id": organization_id},
+        headers=headers,
+    )
+    assert switched.status_code == status.HTTP_200_OK, switched.text
+
+
+def test_a_key_created_without_a_workspace_follows_the_callers_active_organization(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """otari#817: the mint honors the switch instead of always using the deployment default.
+
+    It used to resolve the ``default``-slug organization's workspace whatever the
+    caller was acting in, and a generated slug can never be ``default``, so a key
+    minted from inside a user-created organization landed in a workspace that
+    organization does not own. It then missed that organization's BYO provider
+    key on every completion and answered 502 on a credential that was perfectly
+    fine.
+    """
+    deployment_default = _default_workspace(client, master_key_header)
+    other = _second_organization(client, master_key_header)
+    _switch_to(client, master_key_header, other)
+    other_default = _default_workspace(client, master_key_header)
+    assert other_default != deployment_default
+
+    created = _create_key(client, master_key_header, key_name="in-the-active-organization")
+
+    # Read back rather than off the 201: the create response does not carry the
+    # workspace, which is why landing in the wrong one was silent.
+    listed = client.get(f"/v1/keys/{created['id']}", headers=master_key_header).json()
+    assert listed["workspace_id"] == other_default
+
+
+def test_a_key_cannot_be_minted_into_another_organizations_workspace(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """The mint the exploit used, answering the same 404 as a workspace that does not exist.
+
+    Deliberately not a 403: a distinct status would confirm that the id names a
+    real workspace somewhere on the deployment, which is the enumeration
+    ``GET /v1/keys`` used to hand over outright.
+    """
+    home = _default_workspace(client, master_key_header)
+    other = _second_organization(client, master_key_header)
+    _switch_to(client, master_key_header, other)
+
+    response = client.post("/v1/keys", json={"key_name": "cross-org", "workspace_id": home}, headers=master_key_header)
+
+    absent_id = "00000000-0000-0000-0000-000000000000"
+    absent = client.post(
+        "/v1/keys",
+        json={"key_name": "no-such", "workspace_id": absent_id},
+        headers=master_key_header,
+    )
+
+    assert response.status_code == status.HTTP_404_NOT_FOUND, response.text
+    assert absent.status_code == response.status_code
+    # Same wording too, with only the id the caller sent differing, so the two
+    # cases are not told apart by the body either.
+    assert response.json()["detail"] == f"Workspace '{home}' not found"
+    assert absent.json()["detail"] == f"Workspace '{absent_id}' not found"
+
+
+def test_another_organizations_key_is_neither_listed_nor_reachable_by_id(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """Every `/v1/keys/{id}` route, including the rotate that returned a live secret.
+
+    Rotation is the sharpest of the four: it answered with the new plaintext key,
+    so an unscoped load by id was direct theft of any credential on the
+    deployment rather than only a read of its metadata.
+    """
+    home = str(client.get("/v1/organizations/me", headers=master_key_header).json()["organization"]["id"])
+    home_key = _create_key(client, master_key_header, key_name="at-home")["id"]
+    other = _second_organization(client, master_key_header)
+    _switch_to(client, master_key_header, other)
+
+    listed = client.get("/v1/keys", headers=master_key_header)
+    assert listed.status_code == status.HTTP_200_OK, listed.text
+    assert home_key not in [key["id"] for key in listed.json()]
+
+    assert client.get(f"/v1/keys/{home_key}", headers=master_key_header).status_code == 404
+    assert client.patch(f"/v1/keys/{home_key}", json={"is_active": False}, headers=master_key_header).status_code == 404
+    assert client.post(f"/v1/keys/{home_key}/rotate", headers=master_key_header).status_code == 404
+    assert client.delete(f"/v1/keys/{home_key}", headers=master_key_header).status_code == 404
+
+    # ...and the key is untouched: the revoke and the rotation above did nothing.
+    _switch_to(client, master_key_header, home)
+    still_there = client.get(f"/v1/keys/{home_key}", headers=master_key_header)
+    assert still_there.status_code == status.HTTP_200_OK, still_there.text
+    assert still_there.json()["is_active"] is True

@@ -49,6 +49,31 @@ value from the request body.
   cannot read or mutate another user's keys, budget, usage, or spend.
 - **Severity**: Critical
 
+### 0.1b A management route says which of two authorities it needs — CWE-285
+`verify_master_key` answers *authenticated*, not *authorized*: a dashboard session cookie
+clears it for any active identity, so it grants master-key authority to every signed-in
+member of every organization. That is only safe on a router that re-checks the caller
+afterwards. otari-ai#1880 is what happens when one does not: an ordinary member minted a
+key into another organization's workspace (billing that organization, on its BYO
+credential), listed every key on the deployment, and could rotate the deployment master
+key.
+
+- ✅ **Check**: a **deployment-wide** route (one whose handler takes no caller identity and
+  scopes to no organization or workspace) declares `require_deployment_operator`
+  (`api/deps.py`), not `verify_master_key` alone. That covers `/v1/keys`, `/v1/users`,
+  `/v1/settings`, `/v1/provider-credentials`, `/v1/search-tools`, `/v1/budgets`,
+  `/v1/usage`, `/v1/aliases`, `/v1/routing/*`, `/v1/tool-settings`, and the rest of the
+  operator plane.
+- ✅ **Check**: a **tenant-scoped** route keeps `verify_master_key` as its authentication
+  gate and resolves `CurrentIdentity`, then asks a service whether that identity may act
+  on the organization or workspace named (`services/tenancy/authorization.py`,
+  `OrganizationService.require_active_organization_management_access`). Applying the
+  operator gate to one of these is also a bug: it locks members out of their own tenant.
+- ✅ **Check**: a row reached by an id from the path is loaded **with** the tenant
+  predicate, not loaded by id and checked afterwards, and a row outside the caller's
+  tenant answers **404**, not 403, so the id is not confirmed to exist.
+- **Severity**: Critical
+
 ### 0.2 Enforce budgets atomically — no check-then-act (CWE-367 TOCTOU)
 Budget caps must hold under concurrency. The fixed-and-correct pattern is **atomic
 pre-debit reservation**, not "check the budget, call the provider, write spend later."

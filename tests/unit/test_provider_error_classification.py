@@ -30,13 +30,10 @@ from gateway.api.routes._pipeline import (
     classify_provider_error,
     failure_status_code,
 )
-from gateway.api.routes._platform import (
-    MAX_EXPOSED_DETAIL_CHARS,
-    _provider_failure_http_exc,
-    redact_upstream_message,
-)
+from gateway.api.routes._platform import _provider_failure_http_exc
 from gateway.api.routes._schema_derive import SENSITIVE_PARAM_FIELDS
 from gateway.services.mcp_loop import MaxToolIterationsExceeded
+from gateway.services.upstream_redaction import MAX_EXPOSED_DETAIL_CHARS, redact_upstream_message
 
 _RAW = "raw provider detail SECRET token=abc123"
 

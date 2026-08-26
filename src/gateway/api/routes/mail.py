@@ -23,7 +23,7 @@ from typing import Annotated
 from fastapi import APIRouter, Depends, HTTPException, status
 from pydantic import BaseModel, Field
 
-from gateway.api.deps import get_config, verify_master_key
+from gateway.api.deps import get_config, require_deployment_operator
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.services.mail import Mailer, MailNotConfiguredError, normalized_address
@@ -100,13 +100,13 @@ def _settings(config: GatewayConfig) -> MailSettings:
     )
 
 
-@router.get("", dependencies=[Depends(verify_master_key)])
+@router.get("", dependencies=[Depends(require_deployment_operator)])
 async def get_mail_settings(config: Annotated[GatewayConfig, Depends(get_config)]) -> MailSettings:
     """Report the effective outgoing-mail configuration."""
     return _settings(config)
 
 
-@router.post("/test", dependencies=[Depends(verify_master_key)])
+@router.post("/test", dependencies=[Depends(require_deployment_operator)])
 async def send_test_mail(
     request: SendTestMailRequest,
     config: Annotated[GatewayConfig, Depends(get_config)],

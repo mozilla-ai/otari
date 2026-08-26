@@ -27,7 +27,7 @@ from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, verify_master_key
+from gateway.api.deps import get_config, get_db, require_deployment_operator
 from gateway.api.routes._helpers import resolve_managed_workspace_id
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
@@ -150,7 +150,7 @@ async def _require_user(db: AsyncSession, user_id: str) -> None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User '{user_id}' not found")
 
 
-@router.get("", dependencies=[Depends(verify_master_key)])
+@router.get("", dependencies=[Depends(require_deployment_operator)])
 async def list_aliases(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
@@ -195,7 +195,7 @@ async def list_aliases(
     )
 
 
-@router.post("", dependencies=[Depends(verify_master_key)])
+@router.post("", dependencies=[Depends(require_deployment_operator)])
 async def set_alias(
     request: AliasRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -250,7 +250,11 @@ async def set_alias(
     return AliasResponse.from_model(alias)
 
 
-@router.delete("/{name:path}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(verify_master_key)])
+@router.delete(
+    "/{name:path}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_deployment_operator)],
+)
 async def delete_alias(
     name: str,
     db: Annotated[AsyncSession, Depends(get_db)],

@@ -9,7 +9,7 @@ from sqlalchemy import distinct, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, verify_api_key_or_master_key, verify_master_key
+from gateway.api.deps import get_config, get_db, require_deployment_operator, verify_api_key_or_master_key
 from gateway.core.config import GatewayConfig
 from gateway.models.entities import ModelPricing
 from gateway.models.money import as_float, to_usd, to_usd_or_none
@@ -177,7 +177,7 @@ def _candidate_model_keys(raw_key: str) -> list[str]:
 @router.post(
     "/refresh",
     response_model=PricingRefreshPreviewResponse,
-    dependencies=[Depends(verify_master_key)],
+    dependencies=[Depends(require_deployment_operator)],
 )
 async def preview_pricing_refresh(
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -212,7 +212,7 @@ async def preview_pricing_refresh(
 @router.post(
     "/refresh/confirm",
     response_model=PricingRefreshConfirmationResponse,
-    dependencies=[Depends(verify_master_key)],
+    dependencies=[Depends(require_deployment_operator)],
 )
 async def confirm_pricing_refresh(
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -234,7 +234,7 @@ async def confirm_pricing_refresh(
 @router.post(
     "/refresh/reject",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(verify_master_key)],
+    dependencies=[Depends(require_deployment_operator)],
 )
 async def reject_pricing_refresh(
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -314,7 +314,7 @@ def _policy_pricing_detail(config: GatewayConfig, request: SetPricingRequest) ->
     )
 
 
-@router.post("", dependencies=[Depends(verify_master_key)])
+@router.post("", dependencies=[Depends(require_deployment_operator)])
 async def set_pricing(
     request: SetPricingRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -493,7 +493,7 @@ async def get_pricing(
 @router.delete(
     "/{model_key:path}",
     status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(verify_master_key)],
+    dependencies=[Depends(require_deployment_operator)],
 )
 async def delete_pricing(
     model_key: str,

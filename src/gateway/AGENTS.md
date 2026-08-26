@@ -43,6 +43,35 @@ settlement path: a streaming response outlives its route handler, and the
 `finally` that wraps the whole ASGI call is the only place that runs exactly once
 per request (the same reason `gateway_active_requests` is instrumented there).
 
+## Two authorities on the management plane
+`verify_master_key` is the **authentication** gate for every management route, and it
+passes a dashboard session cookie for any active identity. Which routes may act on that
+alone is the distinction to keep, because getting it wrong in either direction is a bug
+that has already shipped (otari-ai#1880).
+
+- **Deployment-wide routes** take no caller identity and scope to nothing, so clearing the
+  credential check *is* the whole authorization. They declare
+  `require_deployment_operator` (`api/deps.py`), which admits a header master key or a
+  session whose identity clears `DeploymentUserService.has_administration_access`. Adding
+  a route to `/v1/keys`, `/v1/users`, `/v1/settings`, `/v1/provider-credentials`,
+  `/v1/search-tools`, `/v1/budgets`, `/v1/usage`, `/v1/aliases`, `/v1/routing/*`,
+  `/v1/tool-settings`, `/v1/pricing` (writes) or `/v1/agent-telemetry` means declaring it
+  there too.
+- **Tenant-scoped routes** (`organizations.py`, `workspaces.py`, `workspace_*.py`,
+  `organization_*.py`, `org_provider_keys.py`, `admin.py`) keep `verify_master_key` and
+  resolve `CurrentIdentity`, then ask a service whether that identity may act where the
+  request points (`services/tenancy/authorization.py`). The operator gate must stay off
+  them: a plain member reaching their own organization is the point of that family.
+
+`/v1/keys` sits in the first group and is *also* organization-scoped, which is the one
+route that needed both. A key resolves its workspace's organization's provider credentials
+and bills there, so the mint lands in the caller's active organization's default workspace
+(`services/workspace_scope.organization_default_workspace_id`), a named `workspace_id`
+must be one of that organization's, and every `/v1/keys/{id}` load carries the
+organization predicate and answers 404 rather than 403 outside it. `POST
+/v1/organizations/me/switch` is therefore what moves an operator between tenants here,
+which is what its own docstring already promised.
+
 ## Cost math
 `src/gateway/core/metered_pricing.py` is the only place a cost is derived from a rate: settlement, the reserve-time estimate, repricing, and imported usage all go through it. It is `Decimal` throughout, takes no database, and reads a pricing object structurally, so a stored `ModelPricing`, an organization override, and a genai-prices default are all priced by one implementation. Two rules it enforces rather than assumes: **which cached-token convention a caller speaks is an argument with no default** (`cache_tokens_included`; `GatewayUsage.cache_tokens_in_prompt` is where the request path gets it), and **rounding happens once**, half-up, to the micro-dollar, at the point an amount becomes a settled total. Settlement and the external-usage ingest also record which convention a row's counts arrived under, in `usage_logs.cache_tokens_in_prompt`; it is nullable and nothing backfills it, so a row written before the column, or by a path that does not record one, reads NULL and repricing recovers the convention from `billing_meters` instead (`usage_admin_service._row_cache_tokens_included`). The pricing *lookup* chain, which is a different concern, stays in `services/pricing_service.py`.
 

@@ -8,7 +8,7 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from gateway.api.deps import get_db, verify_master_key
+from gateway.api.deps import get_db, require_deployment_operator
 from gateway.models.entities import Budget, BudgetResetLog, ScopedBudget, User, WorkspaceBudgetDefault
 from gateway.models.money import MAX_USD_LIMIT, as_float, to_usd, to_usd_or_none
 from gateway.models.tenancy import Workspace
@@ -148,7 +148,7 @@ async def _budget_usage(db: AsyncSession, budget_id: str) -> tuple[int, float, f
     return int(row[0]), float(row[1]), float(row[2])
 
 
-@router.post("", dependencies=[Depends(verify_master_key)])
+@router.post("", dependencies=[Depends(require_deployment_operator)])
 async def create_budget(
     request: CreateBudgetRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -177,7 +177,7 @@ async def create_budget(
     return BudgetResponse.from_model(budget)
 
 
-@router.get("", dependencies=[Depends(verify_master_key)])
+@router.get("", dependencies=[Depends(require_deployment_operator)])
 async def list_budgets(
     db: Annotated[AsyncSession, Depends(get_db)],
     skip: Annotated[int, Query(ge=0)] = 0,
@@ -217,7 +217,7 @@ async def list_budgets(
     ]
 
 
-@router.get("/{budget_id}", dependencies=[Depends(verify_master_key)])
+@router.get("/{budget_id}", dependencies=[Depends(require_deployment_operator)])
 async def get_budget(
     budget_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -238,7 +238,7 @@ async def get_budget(
     )
 
 
-@router.patch("/{budget_id}", dependencies=[Depends(verify_master_key)])
+@router.patch("/{budget_id}", dependencies=[Depends(require_deployment_operator)])
 async def update_budget(
     budget_id: str,
     request: UpdateBudgetRequest,
@@ -293,7 +293,11 @@ async def update_budget(
     )
 
 
-@router.delete("/{budget_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(verify_master_key)])
+@router.delete(
+    "/{budget_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_deployment_operator)],
+)
 async def delete_budget(
     budget_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -365,7 +369,7 @@ async def delete_budget(
         ) from None
 
 
-@router.get("/{budget_id}/reset-logs", dependencies=[Depends(verify_master_key)])
+@router.get("/{budget_id}/reset-logs", dependencies=[Depends(require_deployment_operator)])
 async def list_budget_reset_logs(
     budget_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],

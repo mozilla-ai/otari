@@ -9,14 +9,15 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from gateway.api.deps import get_config, get_db, verify_master_key
+from gateway.api.deps import CurrentIdentity, get_config, get_db, require_deployment_operator
 from gateway.auth.models import generate_api_key, hash_key, key_prefix
 from gateway.core.config import GatewayConfig
 from gateway.models.entities import APIKey, User
 from gateway.models.tenancy import Workspace
 from gateway.repositories.users_repository import get_or_create_default_user
 from gateway.services.model_access import is_allowlist_subset, validate_allowed_models
-from gateway.services.workspace_scope import default_workspace_id
+from gateway.services.tenancy import OrganizationService
+from gateway.services.workspace_scope import organization_default_workspace_id
 
 # A key inherits its user's default allow-list and may narrow it, never broaden
 # it, so a key list that is not a subset of the user's is rejected on write.
@@ -26,6 +27,55 @@ _KEY_EXCEEDS_USER_DETAIL = (
 )
 
 router = APIRouter(prefix="/v1/keys", tags=["keys"])
+
+
+async def _caller_organization_id(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    identity: CurrentIdentity,
+) -> uuid.UUID:
+    """The organization this request acts in.
+
+    A key is minted, listed and revoked inside one organization, so every route
+    here resolves the caller's before it touches a row. A dashboard session names
+    the identity behind it and resolves that identity's active organization,
+    which is what ``POST /v1/organizations/me/switch`` moves; a header master key
+    names nobody, resolves the bootstrap operator, and therefore acts in the
+    default organization. That is the same rule ``services/workspace_scope``
+    already documents for a deployment-wide write, so an operator running several
+    organizations behind one gateway works in the one they are currently in
+    rather than across all of them (otari#817).
+    """
+    return (await OrganizationService(db).get_active_organization_for_user(identity)).id
+
+
+CallerOrganization = Annotated[uuid.UUID, Depends(_caller_organization_id)]
+
+
+async def _load_key_in_organization(db: AsyncSession, key_id: str, organization_id: uuid.UUID) -> APIKey:
+    """Load a key by id within one organization, or raise 404.
+
+    Joined to the workspace rather than loaded by id alone: a key belongs to
+    exactly one workspace and a workspace to exactly one organization, so this is
+    what keeps a read, a rotation or a revoke inside the caller's tenant. A key in
+    another organization answers the same 404 as one that does not exist, the
+    ``resolve_workspace_in_organization`` rule in
+    `services/tenancy/authorization.py`: a 403 would confirm the id names a real
+    key somewhere.
+    """
+    result = await db.execute(
+        select(APIKey)
+        .join(Workspace, col(Workspace.id) == col(APIKey.workspace_id))
+        .where(col(APIKey.id) == key_id, col(Workspace.organization_id) == organization_id)
+    )
+    key = result.scalar_one_or_none()
+
+    if not key:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"API key with id '{key_id}' not found",
+        )
+
+    return key
 
 
 class CreateKeyRequest(BaseModel):
@@ -61,9 +111,10 @@ class CreateKeyRequest(BaseModel):
     )
     workspace_id: uuid.UUID | None = Field(
         default=None,
-        description="Workspace this key belongs to. Omitted means the deployment's default "
-        "workspace. A key belongs to exactly one workspace: requests on it are scoped and "
-        "billed there, so the workspace is read off the key rather than off a request header.",
+        description="Workspace this key belongs to, which must be one in the caller's "
+        "organization. Omitted means that organization's default workspace. A key belongs "
+        "to exactly one workspace: requests on it are scoped and billed there, so the "
+        "workspace is read off the key rather than off a request header.",
     )
     metadata: dict[str, Any] = Field(default_factory=dict, description="Optional metadata")
 
@@ -152,13 +203,14 @@ class UpdateKeyRequest(BaseModel):
     metadata: dict[str, Any] | None = None
 
 
-@router.post("", dependencies=[Depends(verify_master_key)])
+@router.post("", dependencies=[Depends(require_deployment_operator)])
 async def create_key(
     request: CreateKeyRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    organization_id: CallerOrganization,
 ) -> CreateKeyResponse:
-    """Create a new API key.
+    """Create a new API key in the caller's organization.
 
     Requires master key authentication.
 
@@ -166,6 +218,11 @@ async def create_key(
     If user_id is not provided, the key is associated with the shared "default" user, which is created
     on first use. Keys without an explicit owner therefore share one identity, and so share budget,
     usage, and files.
+
+    ``workspace_id`` names a workspace in the caller's organization, and omitting
+    it mints into that organization's default workspace. A key resolves that
+    organization's provider credentials and bills there, so minting into another
+    organization's workspace would spend its budget on its credentials.
     """
     try:
         allowed_models = validate_allowed_models(config, request.allowed_models)
@@ -205,17 +262,33 @@ async def create_key(
 
     # Checked rather than left to the foreign key: an id naming no workspace is
     # a bad request, and letting it reach the constraint answered 500 "Database
-    # error" for a value the caller supplied and can fix.
+    # error" for a value the caller supplied and can fix. Checked for ownership
+    # and not only existence, and answering the same 404 either way, so a caller
+    # cannot use this route to discover another organization's workspace ids.
     if request.workspace_id is not None:
         named = await db.execute(
-            select(col(Workspace.id)).where(col(Workspace.id) == request.workspace_id)
+            select(col(Workspace.id)).where(
+                col(Workspace.id) == request.workspace_id,
+                col(Workspace.organization_id) == organization_id,
+            )
         )
         if named.scalar_one_or_none() is None:
             raise HTTPException(
                 status_code=status.HTTP_404_NOT_FOUND,
                 detail=f"Workspace '{request.workspace_id}' not found",
             )
-    workspace_id = request.workspace_id or await default_workspace_id(db)
+        workspace_id = request.workspace_id
+    else:
+        resolved = await organization_default_workspace_id(db, organization_id)
+        if resolved is None:
+            # Not reachable through any path that creates an organization here,
+            # each of which provisions a workspace; refused rather than
+            # provisioned so a mint never creates a workspace inside a tenant.
+            raise HTTPException(
+                status_code=status.HTTP_409_CONFLICT,
+                detail="This organization has no workspace to hold a key; create one first.",
+            )
+        workspace_id = resolved
 
     db_key = APIKey(
         id=str(key_id),
@@ -250,67 +323,61 @@ async def create_key(
     )
 
 
-@router.get("", dependencies=[Depends(verify_master_key)])
+@router.get("", dependencies=[Depends(require_deployment_operator)])
 async def list_keys(
     db: Annotated[AsyncSession, Depends(get_db)],
+    organization_id: CallerOrganization,
     skip: Annotated[int, Query(ge=0)] = 0,
     limit: Annotated[int, Query(ge=1, le=1000)] = 100,
     workspace_id: Annotated[uuid.UUID | None, Query(description="Only keys in this workspace.")] = None,
 ) -> list[KeyInfo]:
-    """List all API keys.
+    """List the API keys in the caller's organization.
 
     Requires master key authentication. An unset ``workspace_id`` lists every key
-    on the deployment, which keeps the pre-workspace view working unchanged.
+    in that organization; naming a workspace in another one lists nothing rather
+    than refusing, so the filter reports no more than the unfiltered read does.
     """
-    statement = select(APIKey)
+    statement = (
+        select(APIKey)
+        .join(Workspace, col(Workspace.id) == col(APIKey.workspace_id))
+        .where(col(Workspace.organization_id) == organization_id)
+    )
     if workspace_id is not None:
-        statement = statement.where(APIKey.workspace_id == workspace_id)
+        statement = statement.where(col(APIKey.workspace_id) == workspace_id)
     result = await db.execute(statement.offset(skip).limit(limit))
     keys = result.scalars().all()
 
     return [KeyInfo.from_model(key) for key in keys]
 
 
-@router.get("/{key_id}", dependencies=[Depends(verify_master_key)])
+@router.get("/{key_id}", dependencies=[Depends(require_deployment_operator)])
 async def get_key(
     key_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
+    organization_id: CallerOrganization,
 ) -> KeyInfo:
-    """Get details of a specific API key.
+    """Get details of a specific API key in the caller's organization.
 
     Requires master key authentication.
     """
-    result = await db.execute(select(APIKey).where(APIKey.id == key_id))
-    key = result.scalar_one_or_none()
-
-    if not key:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"API key with id '{key_id}' not found",
-        )
+    key = await _load_key_in_organization(db, key_id, organization_id)
 
     return KeyInfo.from_model(key)
 
 
-@router.patch("/{key_id}", dependencies=[Depends(verify_master_key)])
+@router.patch("/{key_id}", dependencies=[Depends(require_deployment_operator)])
 async def update_key(
     key_id: str,
     request: UpdateKeyRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    organization_id: CallerOrganization,
 ) -> KeyInfo:
-    """Update an API key.
+    """Update an API key in the caller's organization.
 
     Requires master key authentication.
     """
-    result = await db.execute(select(APIKey).where(APIKey.id == key_id))
-    key = result.scalar_one_or_none()
-
-    if not key:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"API key with id '{key_id}' not found",
-        )
+    key = await _load_key_in_organization(db, key_id, organization_id)
 
     if request.key_name is not None:
         key.key_name = request.key_name
@@ -355,12 +422,13 @@ async def update_key(
     return KeyInfo.from_model(key)
 
 
-@router.post("/{key_id}/rotate", dependencies=[Depends(verify_master_key)])
+@router.post("/{key_id}/rotate", dependencies=[Depends(require_deployment_operator)])
 async def rotate_key(
     key_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
+    organization_id: CallerOrganization,
 ) -> CreateKeyResponse:
-    """Rotate an API key's secret in place.
+    """Rotate an API key's secret in place, within the caller's organization.
 
     Requires master key authentication.
 
@@ -369,14 +437,7 @@ async def rotate_key(
     response shape as key creation. The previous secret stops authenticating
     immediately; there is no grace window.
     """
-    result = await db.execute(select(APIKey).where(APIKey.id == key_id))
-    key = result.scalar_one_or_none()
-
-    if not key:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"API key with id '{key_id}' not found",
-        )
+    key = await _load_key_in_organization(db, key_id, organization_id)
 
     new_api_key = generate_api_key()
     key.key_hash = hash_key(new_api_key)
@@ -400,23 +461,17 @@ async def rotate_key(
     )
 
 
-@router.delete("/{key_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(verify_master_key)])
+@router.delete("/{key_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_deployment_operator)])
 async def delete_key(
     key_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
+    organization_id: CallerOrganization,
 ) -> None:
-    """Delete (revoke) an API key.
+    """Delete (revoke) an API key in the caller's organization.
 
     Requires master key authentication.
     """
-    result = await db.execute(select(APIKey).where(APIKey.id == key_id))
-    key = result.scalar_one_or_none()
-
-    if not key:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"API key with id '{key_id}' not found",
-        )
+    key = await _load_key_in_organization(db, key_id, organization_id)
 
     await db.delete(key)
     try:

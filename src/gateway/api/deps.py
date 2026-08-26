@@ -27,6 +27,7 @@ from gateway.services.file_store import FileStore
 from gateway.services.log_writer import LogWriter
 from gateway.services.master_key_service import hash_master_key, is_generated_master_key, load_master_key_hash
 from gateway.services.routing import clear_router_backend_cache
+from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.provisioning_service import ensure_bootstrap_identity
 
 # Legacy module-level fallback. Config now lives on ``app.state.config`` (set in
@@ -346,6 +347,51 @@ async def verify_master_key(
         status_code=status.HTTP_401_UNAUTHORIZED,
         detail="Invalid master key",
     )
+
+
+async def require_deployment_operator(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
+    _master_key: Annotated[str | None, Depends(verify_master_key)],
+) -> None:
+    """Refuse a deployment-wide management request from a non-operator identity.
+
+    ``verify_master_key`` answers *authenticated*, not *authorized*: a dashboard
+    session clears it for any active, email-verified identity. That is right for
+    the tenant-scoped routers (`organizations.py`, `workspaces.py`,
+    `org_provider_keys.py`, `admin.py`), which declare it as their authentication
+    gate and then re-check the caller's role against the organization, workspace
+    or deployment they are acting on. It is wrong for the deployment-wide
+    routers, where clearing it *is* the whole authorization: `/v1/keys` mints a
+    key into any workspace, `/v1/provider-credentials` holds process-global
+    provider secrets, and `POST /v1/settings/master-key/rotate` replaces the
+    deployment credential. On a single-operator deployment every login is that
+    operator and the distinction is invisible; once mutually-untrusting tenants
+    sign in to one process, a member of one organization holding master-key
+    authority is a cross-organization breach (otari-ai#1880).
+
+    A **header master key** is the deployment credential itself, so it passes; it
+    names nobody, and ``get_current_identity`` resolves it to the bootstrap
+    operator. A **session** is put to
+    ``DeploymentUserService.has_administration_access``, which `/v1/admin`
+    already treats as the answer to "may this caller act deployment-wide": a
+    superuser, or the bootstrap operator whatever its flag says. Reused rather
+    than re-derived so the routers guarded here and the account administration
+    that can grant the authority cannot come to disagree about who holds it.
+
+    Declared as a dependency and not a check inside each handler so it composes
+    the way the router it guards already declares auth, and so ``Depends``
+    caching means the master-key verification underneath runs once per request
+    however many of these a route pulls in.
+    """
+    if session_identity is not None and not await DeploymentUserService(db).has_administration_access(
+        session_identity
+    ):
+        record_auth_failure("not_deployment_operator")
+        raise HTTPException(
+            status_code=status.HTTP_403_FORBIDDEN,
+            detail="This endpoint requires deployment operator access.",
+        )
 
 
 async def verify_api_key_or_master_key(

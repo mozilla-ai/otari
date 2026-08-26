@@ -8,7 +8,7 @@ from sqlalchemy import select, update
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import TelemetryStoragePortDep, get_config, get_db, verify_master_key
+from gateway.api.deps import TelemetryStoragePortDep, get_config, get_db, require_deployment_operator
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.models.entities import APIKey, Budget, UsageLog, User
@@ -118,7 +118,7 @@ class UsageLogResponse(BaseModel):
         )
 
 
-@router.post("", dependencies=[Depends(verify_master_key)])
+@router.post("", dependencies=[Depends(require_deployment_operator)])
 async def create_user(
     request: CreateUserRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -190,7 +190,7 @@ async def create_user(
     return UserResponse.from_model(user)
 
 
-@router.get("", dependencies=[Depends(verify_master_key)])
+@router.get("", dependencies=[Depends(require_deployment_operator)])
 async def list_users(
     db: Annotated[AsyncSession, Depends(get_db)],
     skip: Annotated[int, Query(ge=0)] = 0,
@@ -203,7 +203,7 @@ async def list_users(
     return [UserResponse.from_model(user) for user in users]
 
 
-@router.get("/{user_id}", dependencies=[Depends(verify_master_key)])
+@router.get("/{user_id}", dependencies=[Depends(require_deployment_operator)])
 async def get_user(
     user_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -220,7 +220,7 @@ async def get_user(
     return UserResponse.from_model(user)
 
 
-@router.patch("/{user_id}", dependencies=[Depends(verify_master_key)])
+@router.patch("/{user_id}", dependencies=[Depends(require_deployment_operator)])
 async def update_user(
     user_id: str,
     request: UpdateUserRequest,
@@ -291,7 +291,11 @@ async def update_user(
     return UserResponse.from_model(user)
 
 
-@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(verify_master_key)])
+@router.delete(
+    "/{user_id}",
+    status_code=status.HTTP_204_NO_CONTENT,
+    dependencies=[Depends(require_deployment_operator)],
+)
 async def delete_user(
     user_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -352,7 +356,7 @@ async def delete_user(
         ) from None
 
 
-@router.get("/{user_id}/usage", dependencies=[Depends(verify_master_key)])
+@router.get("/{user_id}/usage", dependencies=[Depends(require_deployment_operator)])
 async def get_user_usage(
     user_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],

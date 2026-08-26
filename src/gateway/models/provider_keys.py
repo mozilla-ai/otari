@@ -57,40 +57,20 @@ from typing import Any
 from sqlalchemy import JSON, Column, ForeignKeyConstraint, Index, UniqueConstraint, text
 from sqlmodel import Field, SQLModel
 
+from gateway.models.secret_fields import redact_secret_like_values
 from gateway.models.tenancy import CreatedAtMixin, PrimaryKeyMixin, UpdatedAtMixin, _timestamp_field
 
-# Substrings (matched case-insensitively against a client_args key) that a
-# credential-bearing field name is expected to contain. ``client_args`` is
-# arbitrary JSON, and this gateway's own Bedrock support is the reason it
-# cannot simply be rejected outright when one of these appears: standalone
-# mode's classic AWS IAM shape genuinely requires ``aws_access_key_id`` and
-# ``aws_secret_access_key`` inside ``client_args`` (any-llm-sdk's
-# ``BedrockProvider`` never forwards ``api_key`` into the boto3 client it
-# builds; see ``services/bedrock_gateway_auth.py``), so those are real
+# ``client_args`` is arbitrary JSON, and this gateway's own Bedrock support is
+# the reason a credential-shaped entry in it cannot simply be rejected outright:
+# standalone mode's classic AWS IAM shape genuinely requires
+# ``aws_access_key_id`` and ``aws_secret_access_key`` inside ``client_args``
+# (any-llm-sdk's ``BedrockProvider`` never forwards ``api_key`` into the boto3
+# client it builds; see ``services/bedrock_gateway_auth.py``), so those are real
 # credentials this field is *supposed* to carry, not smuggled duplicates of
-# ``encrypted_api_key``. They still must never round-trip over the API, the
-# same treatment ``encrypted_api_key`` already gets (only ``last4`` comes
-# back); ``_redact_client_args`` is that treatment applied by key name rather
+# ``encrypted_api_key``. They still must never round-trip over the API, the same
+# treatment ``encrypted_api_key`` already gets (only ``last4`` comes back);
+# ``redact_secret_like_values`` is that treatment applied by key name rather
 # than by field.
-_SECRET_LOOKING_CLIENT_ARG_SUBSTRINGS = ("key", "secret", "token", "password", "authorization", "credential")
-_CLIENT_ARG_REDACTED_VALUE = "***"
-
-
-def _redact_client_args(client_args: dict[str, Any] | None) -> dict[str, Any] | None:
-    """Mask values whose key name looks credential-shaped; pass the rest through.
-
-    Substring match, not an exact-name allow-list: an operator can name a
-    Bedrock/vertex/custom client kwarg however any-llm expects it, so a fixed
-    set of exact names would miss a variant spelling and silently leak it.
-    """
-    if client_args is None:
-        return None
-    return {
-        key: _CLIENT_ARG_REDACTED_VALUE
-        if any(marker in key.lower() for marker in _SECRET_LOOKING_CLIENT_ARG_SUBSTRINGS)
-        else value
-        for key, value in client_args.items()
-    }
 
 # ==============================================================================
 # Org provider keys
@@ -186,7 +166,7 @@ class OrgProviderKey(SQLModel, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, 
 
         ``client_args`` is arbitrary JSON an admin can set (Bedrock's
         ``region_name``, other client kwargs), and a credential-shaped field
-        placed there is never echoed back either: ``_redact_client_args``
+        placed there is never echoed back either: ``redact_secret_like_values``
         masks it the same way ``encrypted_api_key`` itself already stays off
         the wire (only ``last4`` comes back). That runs regardless of
         ``include_client_args``, which is a separate, coarser gate: it
@@ -201,7 +181,7 @@ class OrgProviderKey(SQLModel, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, 
             provider=self.provider,
             name=self.name,
             api_base=self.api_base,
-            client_args=_redact_client_args(self.client_args) if include_client_args else None,
+            client_args=redact_secret_like_values(self.client_args) if include_client_args else None,
             last4=self.last4,
             is_org_default=self.is_org_default,
             archived_at=self.archived_at,

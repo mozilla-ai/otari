@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, get_session_identity, verify_master_key
+from gateway.api.deps import get_config, get_db, get_session_identity, require_deployment_operator, verify_master_key
 from gateway.core.config import GatewayConfig
 from gateway.models.tenancy import User as TenancyUser
 from gateway.services.dashboard_session_service import (
@@ -346,7 +346,7 @@ def _current_settings(config: GatewayConfig) -> GatewaySettings:
     )
 
 
-@router.get("", dependencies=[Depends(verify_master_key)])
+@router.get("", dependencies=[Depends(require_deployment_operator)])
 async def get_settings(
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> GatewaySettings:
@@ -354,7 +354,7 @@ async def get_settings(
     return _current_settings(config)
 
 
-@router.patch("", dependencies=[Depends(verify_master_key)])
+@router.patch("", dependencies=[Depends(require_deployment_operator)])
 async def update_settings(
     request: UpdateSettingsRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -395,7 +395,7 @@ async def update_settings(
     return _current_settings(config)
 
 
-@router.post("/master-key/rotate", dependencies=[Depends(verify_master_key)])
+@router.post("/master-key/rotate", dependencies=[Depends(require_deployment_operator)])
 async def rotate_master_key(
     request: Request,
     response: Response,

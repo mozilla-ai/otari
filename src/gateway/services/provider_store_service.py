@@ -30,6 +30,7 @@ from gateway.core.config import GatewayConfig
 from gateway.core.database import create_session
 from gateway.log_config import logger
 from gateway.models.entities import ProviderCredential
+from gateway.models.secret_fields import restore_redacted_values
 from gateway.services.secret_box import (
     SecretBoxUnavailableError,
     SecretDecryptionError,
@@ -228,7 +229,8 @@ async def save_credential(
     encrypted before storage and requires ``OTARI_SECRET_KEY`` (raises
     ``SecretBoxUnavailableError``); passing it ``None`` clears the stored key
     (keyless local backends). ``client_args`` is normalised to ``{}`` when
-    cleared, since the column is non-null. The plaintext key is never logged.
+    cleared, since the column is non-null, and an entry resubmitted as the
+    redaction mask keeps its stored value. The plaintext key is never logged.
     """
     existing = await db.get(ProviderCredential, instance)
     if existing is None:
@@ -242,7 +244,10 @@ async def save_credential(
     if not isinstance(api_base, _Unset):
         row.api_base = api_base
     if not isinstance(client_args, _Unset):
-        row.client_args = client_args or {}
+        # A credential-shaped entry comes back masked (``to_public_dict``), so an
+        # editor resubmitting the whole object sends the mask for entries it never
+        # saw; those keep what is stored rather than overwriting it with ``***``.
+        row.client_args = restore_redacted_values(client_args, existing.client_args if existing else None) or {}
     if not isinstance(api_key, _Unset):
         if api_key:
             row.encrypted_api_key = encrypt_secret(api_key)
