@@ -514,6 +514,13 @@ describe("AppShell surface gating", () => {
     // Same reasoning as above, for the other context: the organization rail is
     // its own registry, and nothing else compares it against a full list.
     await renderShell(bootstrap(), { url: "/organization/members" })
+    // Awaited, not assumed: Accounts is the one row gated `operatorOnly:
+    // "unlisted"`, so it is absent until `GET /v1/admin/access` answers. Taking
+    // the snapshot without waiting for it is a race that passes on a fast
+    // machine and fails on CI, which is what it did.
+    await within(
+      screen.getByRole("navigation", { name: "Sidebar" }),
+    ).findByRole("link", { name: "Accounts" })
 
     expect(
       within(screen.getByRole("navigation", { name: "Sidebar" }))
