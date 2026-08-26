@@ -220,16 +220,20 @@ export function StatCard({
           is the fallback, not the layout. `items-center` aligns the hint's
           x-height to the middle of the pill rather than to its box.
 
-          Two lines reserved (min-h-9, two 18px lines) so that fallback does
-          not misalign a row of tiles: one tile wrapping while its neighbors
-          stay on one line moves its sparkline up relative to theirs. This is a
-          layout fix and not a type fix on purpose: sizing the type to the
-          longest string would be sizing the type by accident. Reserved for a
-          charted tile even with neither chip nor hint, since the chart is what
-          makes the misalignment visible; a tile with no chart and nothing to
-          say reserves nothing, so a lone tile carries no dead space. */}
+          The wrap is reserved for so it does not misalign a row of tiles: one
+          tile wrapping while its neighbors stay on one line would move its
+          sparkline up relative to theirs. min-h-10 is 40px, which is what the
+          wrap costs: an 18px chip line, `gap-y-1`, and one 18px hint line.
+          #807 reserved 36px here for two lines of plain text, which the chip's
+          own line height now overruns by 4px. A hint long enough to wrap on its
+          own still overruns this, so it is a floor and not a guarantee; the
+          type is deliberately not sized to the longest string, which would be
+          sizing it by accident. Reserved for a charted tile even with neither
+          chip nor hint, since the chart is what makes the misalignment visible;
+          a tile with no chart and nothing to say reserves nothing, so a lone
+          tile carries no dead space. */}
       {trend || hint || chart ? (
-        <span className="flex min-h-9 flex-wrap items-center gap-x-2 gap-y-1 text-xs tabular-nums text-muted">
+        <span className="flex min-h-10 flex-wrap items-center gap-x-2 gap-y-1 text-xs tabular-nums text-muted">
           {trend}
           {/* Its own element, not a bare text node beside the chip: the two
               are separate statements, and a node keeps the hint addressable

@@ -56,9 +56,11 @@ describe("StatCard", () => {
     ).toBeTruthy()
   })
 
-  it("reserves the hint's two lines for a charted tile that has no hint", () => {
-    // Otherwise a tile whose only hint was its delta loses 36px and its
-    // sparkline rides above its neighbours' in the same row.
+  it("reserves the aside row's height for a charted tile that has nothing to say", () => {
+    // Otherwise a tile whose only aside was its delta loses the row, and its
+    // sparkline rides above its neighbours' in the same grid row. Asserted on
+    // the class for the same reason as the tile's own min-w-0 above: jsdom does
+    // no layout, so the reservation is only observable as the utility.
     const { container } = render(
       <StatCard
         label="Tokens"
@@ -66,14 +68,14 @@ describe("StatCard", () => {
         chart={<svg aria-label="trend" />}
       />,
     )
-    expect(container.querySelector(".min-h-9")).not.toBeNull()
+    expect(container.querySelector(".min-h-10")).not.toBeNull()
   })
 
-  it("reserves nothing for a tile with neither hint nor chart", () => {
+  it("reserves nothing for a tile with neither aside nor chart", () => {
     const { container } = render(
       <StatCard label="Avg latency" value="1.33 s" />,
     )
-    expect(container.querySelector(".min-h-9")).toBeNull()
+    expect(container.querySelector(".min-h-10")).toBeNull()
   })
 })
 
