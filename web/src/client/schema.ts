@@ -1211,16 +1211,17 @@ export interface paths {
         };
         /**
          * List Keys
-         * @description List all API keys.
+         * @description List the API keys in the caller's organization.
          *
          *     Requires master key authentication. An unset ``workspace_id`` lists every key
-         *     on the deployment, which keeps the pre-workspace view working unchanged.
+         *     in that organization; naming a workspace in another one lists nothing rather
+         *     than refusing, so the filter reports no more than the unfiltered read does.
          */
         get: operations["list_keys_v1_keys_get"];
         put?: never;
         /**
          * Create Key
-         * @description Create a new API key.
+         * @description Create a new API key in the caller's organization.
          *
          *     Requires master key authentication.
          *
@@ -1228,6 +1229,11 @@ export interface paths {
          *     If user_id is not provided, the key is associated with the shared "default" user, which is created
          *     on first use. Keys without an explicit owner therefore share one identity, and so share budget,
          *     usage, and files.
+         *
+         *     ``workspace_id`` names a workspace in the caller's organization, and omitting
+         *     it mints into that organization's default workspace. A key resolves that
+         *     organization's provider credentials and bills there, so minting into another
+         *     organization's workspace would spend its budget on its credentials.
          */
         post: operations["create_key_v1_keys_post"];
         delete?: never;
@@ -1245,7 +1251,7 @@ export interface paths {
         };
         /**
          * Get Key
-         * @description Get details of a specific API key.
+         * @description Get details of a specific API key in the caller's organization.
          *
          *     Requires master key authentication.
          */
@@ -1254,7 +1260,7 @@ export interface paths {
         post?: never;
         /**
          * Delete Key
-         * @description Delete (revoke) an API key.
+         * @description Delete (revoke) an API key in the caller's organization.
          *
          *     Requires master key authentication.
          */
@@ -1263,7 +1269,7 @@ export interface paths {
         head?: never;
         /**
          * Update Key
-         * @description Update an API key.
+         * @description Update an API key in the caller's organization.
          *
          *     Requires master key authentication.
          */
@@ -1281,7 +1287,7 @@ export interface paths {
         put?: never;
         /**
          * Rotate Key
-         * @description Rotate an API key's secret in place.
+         * @description Rotate an API key's secret in place, within the caller's organization.
          *
          *     Requires master key authentication.
          *
@@ -4938,7 +4944,7 @@ export interface components {
             user_id?: string | null;
             /**
              * Workspace Id
-             * @description Workspace this key belongs to. Omitted means the deployment's default workspace. A key belongs to exactly one workspace: requests on it are scoped and billed there, so the workspace is read off the key rather than off a request header.
+             * @description Workspace this key belongs to, which must be one in the caller's organization. Omitted means that organization's default workspace. A key belongs to exactly one workspace: requests on it are scoped and billed there, so the workspace is read off the key rather than off a request header.
              */
             workspace_id?: string | null;
         };
