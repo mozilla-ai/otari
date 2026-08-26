@@ -33,6 +33,12 @@ If the failure is the **gateway's** (its provider credentials were rejected, the
 
 Regular API endpoints use an API key. Management endpoints use the master key.
 
+A dashboard session cookie also authenticates a management endpoint, which is how the
+browser reaches one. It does not by itself authorize a **deployment-wide** endpoint: a
+row marked `Deployment operator` below additionally requires that the session name a
+superuser or the bootstrap operator, the same standing `/v1/admin` asks for. The master
+key in a header always clears it. See [Access control](access-control.md).
+
 ### Connected to otari.ai
 
 The three generation endpoints (`/v1/chat/completions`, `/v1/messages`, `/v1/responses`) expect `Authorization: Bearer <user-token>`. `Otari-Key` and local API keys are not used in this mode.
@@ -194,12 +200,12 @@ and counted as failures rather than only in the caller's own logs.
 
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| `GET` | `/v1/search-tools` | List search tools: the stored ones plus the read-only config-file ones. | Master key |
-| `GET` | `/v1/search-tools/providers` | List the search providers this build supports, and what each one requires. | Master key |
-| `POST` | `/v1/search-tools` | Add a search tool at runtime. | Master key |
-| `PATCH` | `/v1/search-tools/{name}` | Update a stored search tool. Omitted fields are unchanged. | Master key |
-| `DELETE` | `/v1/search-tools/{name}` | Delete a stored search tool. | Master key |
-| `POST` | `/v1/search-tools/reencrypt` | Re-encrypt stored search-tool keys with the primary `OTARI_SECRET_KEY`. | Master key |
+| `GET` | `/v1/search-tools` | List search tools: the stored ones plus the read-only config-file ones. | Deployment operator |
+| `GET` | `/v1/search-tools/providers` | List the search providers this build supports, and what each one requires. | Deployment operator |
+| `POST` | `/v1/search-tools` | Add a search tool at runtime. | Deployment operator |
+| `PATCH` | `/v1/search-tools/{name}` | Update a stored search tool. Omitted fields are unchanged. | Deployment operator |
+| `DELETE` | `/v1/search-tools/{name}` | Delete a stored search tool. | Deployment operator |
+| `POST` | `/v1/search-tools/reencrypt` | Re-encrypt stored search-tool keys with the primary `OTARI_SECRET_KEY`. | Deployment operator |
 
 These are the runtime counterpart of the `search_tools` config block, and behave
 the same way [runtime provider management](configuration.md#runtime-provider-management)
@@ -263,23 +269,23 @@ into something a text-only local model can read.
 
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| `POST` | `/v1/keys` | Create an API key. Takes an optional `workspace_id`; the deployment default is used when it is omitted, and the key bills its workspace for every request. | Master key |
-| `GET` | `/v1/keys` | List all API keys. | Master key |
-| `GET` | `/v1/keys/{key_id}` | Get a specific key. | Master key |
-| `PATCH` | `/v1/keys/{key_id}` | Update a key (name, active status, expiration, allowed models, `exclude_from_budget`, `reject_user_mismatch`, `capture_agent_telemetry`, metadata). | Master key |
-| `POST` | `/v1/keys/{key_id}/rotate` | Replace a key's secret in place (id, user, name, expiry, and metadata preserved); returns the new key once. The previous secret stops working immediately. | Master key |
-| `DELETE` | `/v1/keys/{key_id}` | Revoke a key. | Master key |
+| `POST` | `/v1/keys` | Create an API key in the caller's organization. Takes an optional `workspace_id`, which must name a workspace in that organization; that organization's default workspace is used when it is omitted, and the key bills its workspace for every request. | Deployment operator |
+| `GET` | `/v1/keys` | List the API keys in the caller's organization. `POST /v1/organizations/me/switch` is what moves an operator between them. | Deployment operator |
+| `GET` | `/v1/keys/{key_id}` | Get a specific key. A key outside the caller's organization answers 404. | Deployment operator |
+| `PATCH` | `/v1/keys/{key_id}` | Update a key (name, active status, expiration, allowed models, `exclude_from_budget`, `reject_user_mismatch`, `capture_agent_telemetry`, metadata). A key outside the caller's organization answers 404. | Deployment operator |
+| `POST` | `/v1/keys/{key_id}/rotate` | Replace a key's secret in place (id, user, name, expiry, and metadata preserved); returns the new key once. The previous secret stops working immediately. A key outside the caller's organization answers 404. | Deployment operator |
+| `DELETE` | `/v1/keys/{key_id}` | Revoke a key. A key outside the caller's organization answers 404. | Deployment operator |
 
 ### User management
 
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| `POST` | `/v1/users` | Create a user. | Master key |
-| `GET` | `/v1/users` | List users. | Master key |
-| `GET` | `/v1/users/{user_id}` | Get a specific user. | Master key |
-| `PATCH` | `/v1/users/{user_id}` | Update a user. | Master key |
-| `DELETE` | `/v1/users/{user_id}` | Soft-delete a user and deactivate their keys. | Master key |
-| `GET` | `/v1/users/{user_id}/usage` | Get usage history for a user. | Master key |
+| `POST` | `/v1/users` | Create a user. | Deployment operator |
+| `GET` | `/v1/users` | List users. | Deployment operator |
+| `GET` | `/v1/users/{user_id}` | Get a specific user. | Deployment operator |
+| `PATCH` | `/v1/users/{user_id}` | Update a user. | Deployment operator |
+| `DELETE` | `/v1/users/{user_id}` | Soft-delete a user and deactivate their keys. | Deployment operator |
+| `GET` | `/v1/users/{user_id}/usage` | Get usage history for a user. | Deployment operator |
 
 ### Organizations
 
@@ -327,11 +333,11 @@ Accepting an invitation is a separate, unauthenticated pair the recipient's brow
 
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| `POST` | `/v1/budgets` | Create a budget. | Master key |
-| `GET` | `/v1/budgets` | List budgets. | Master key |
-| `GET` | `/v1/budgets/{budget_id}` | Get a specific budget. | Master key |
-| `PATCH` | `/v1/budgets/{budget_id}` | Update a budget. | Master key |
-| `DELETE` | `/v1/budgets/{budget_id}` | Delete a budget. | Master key |
+| `POST` | `/v1/budgets` | Create a budget. | Deployment operator |
+| `GET` | `/v1/budgets` | List budgets. | Deployment operator |
+| `GET` | `/v1/budgets/{budget_id}` | Get a specific budget. | Deployment operator |
+| `PATCH` | `/v1/budgets/{budget_id}` | Update a budget. | Deployment operator |
+| `DELETE` | `/v1/budgets/{budget_id}` | Delete a budget. | Deployment operator |
 
 The rows above cap one user. The family below caps a tenancy scope instead, and
 both are enforced: a request must pass every ceiling that applies to it. See
@@ -339,11 +345,11 @@ both are enforced: a request must pass every ceiling that applies to it. See
 
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| `POST` | `/v1/scoped-budgets` | Create a ceiling on an organization, workspace, membership, or API key, optionally narrowed to one provider. Its period is a rolling `budget_duration_sec` or a UTC-aligned `reset_alignment`, never both. Refused with 409 if that scope already has one. | Master key |
-| `GET` | `/v1/scoped-budgets` | List scoped budgets, optionally filtered by `scope_type` and `scope_id`. | Master key |
-| `GET` | `/v1/scoped-budgets/{budget_id}` | Get a specific scoped budget. | Master key |
-| `PATCH` | `/v1/scoped-budgets/{budget_id}` | Update a scoped budget's label, limit, or period. The scope and the provider narrowing are fixed. | Master key |
-| `DELETE` | `/v1/scoped-budgets/{budget_id}` | Delete a scoped budget. | Master key |
+| `POST` | `/v1/scoped-budgets` | Create a ceiling on an organization, workspace, membership, or API key, optionally narrowed to one provider. Its period is a rolling `budget_duration_sec` or a UTC-aligned `reset_alignment`, never both. Refused with 409 if that scope already has one. | Deployment operator |
+| `GET` | `/v1/scoped-budgets` | List scoped budgets, optionally filtered by `scope_type` and `scope_id`. | Deployment operator |
+| `GET` | `/v1/scoped-budgets/{budget_id}` | Get a specific scoped budget. | Deployment operator |
+| `PATCH` | `/v1/scoped-budgets/{budget_id}` | Update a scoped budget's label, limit, or period. The scope and the provider narrowing are fixed. | Deployment operator |
+| `DELETE` | `/v1/scoped-budgets/{budget_id}` | Delete a scoped budget. | Deployment operator |
 
 ### Aliases
 
@@ -352,9 +358,9 @@ An alias is a display name that resolves to one real model selector. See
 
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| `GET` | `/v1/aliases` | List every alias in force, from `config.yml` and from storage, in every scope. `workspace_id` narrows the stored ones to one workspace; `config.yml` aliases are deployment-wide and always listed. | Master key |
-| `POST` | `/v1/aliases` | Create or update a stored alias. Omit `user_id` for one every caller in the workspace sees, and `workspace_id` for the deployment's default workspace. | Master key |
-| `DELETE` | `/v1/aliases/{name}` | Delete a stored alias. `user_id` and `workspace_id` query params select the scope; omit them for the workspace-wide alias and the default workspace. Aliases from `config.yml` cannot be deleted here. | Master key |
+| `GET` | `/v1/aliases` | List every alias in force, from `config.yml` and from storage, in every scope. `workspace_id` narrows the stored ones to one workspace; `config.yml` aliases are deployment-wide and always listed. | Deployment operator |
+| `POST` | `/v1/aliases` | Create or update a stored alias. Omit `user_id` for one every caller in the workspace sees, and `workspace_id` for the deployment's default workspace. | Deployment operator |
+| `DELETE` | `/v1/aliases/{name}` | Delete a stored alias. `user_id` and `workspace_id` query params select the scope; omit them for the workspace-wide alias and the default workspace. Aliases from `config.yml` cannot be deleted here. | Deployment operator |
 
 ### Routing policies
 
@@ -364,10 +370,10 @@ See [Routing policies](routing.md).
 
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| `GET` | `/v1/routing/policies` | List every policy in force, from `config.yml` and from storage, in every scope. `workspace_id` narrows the stored ones to one workspace. | Master key |
-| `POST` | `/v1/routing/policies` | Create or update a stored policy. Body is `{name, spec, user_id?, workspace_id?, rename_from?}`; `spec` is the same document a `routing.policies` entry takes. Omit `user_id` for one every caller in the workspace sees, and `workspace_id` for the deployment's default workspace. `rename_from` renames an existing policy in the same scope to `name` on the same write: 404 if it does not exist, 409 if `name` is already taken. | Master key |
-| `POST` | `/v1/routing/policies/explain` | Compile a policy and return the plan without dispatching anything. Takes a saved `name`, an unsaved draft `spec`, or both (the draft wins). Optional `user_id`, `workspace_id`, `key_id`, `allowed_models`, `budget_used_pct`, `budget_remaining_usd` simulate the request. Returns the ordered candidates **and** the ones that were dropped, with reasons. For a weighted policy it also returns `router_weights`, the share each candidate takes once filtering is applied. | Master key |
-| `DELETE` | `/v1/routing/policies/{name}` | Delete a stored policy. `user_id` and `workspace_id` query params select the scope. Policies from `config.yml` cannot be deleted here. | Master key |
+| `GET` | `/v1/routing/policies` | List every policy in force, from `config.yml` and from storage, in every scope. `workspace_id` narrows the stored ones to one workspace. | Deployment operator |
+| `POST` | `/v1/routing/policies` | Create or update a stored policy. Body is `{name, spec, user_id?, workspace_id?, rename_from?}`; `spec` is the same document a `routing.policies` entry takes. Omit `user_id` for one every caller in the workspace sees, and `workspace_id` for the deployment's default workspace. `rename_from` renames an existing policy in the same scope to `name` on the same write: 404 if it does not exist, 409 if `name` is already taken. | Deployment operator |
+| `POST` | `/v1/routing/policies/explain` | Compile a policy and return the plan without dispatching anything. Takes a saved `name`, an unsaved draft `spec`, or both (the draft wins). Optional `user_id`, `workspace_id`, `key_id`, `allowed_models`, `budget_used_pct`, `budget_remaining_usd` simulate the request. Returns the ordered candidates **and** the ones that were dropped, with reasons. For a weighted policy it also returns `router_weights`, the share each candidate takes once filtering is applied. | Deployment operator |
+| `DELETE` | `/v1/routing/policies/{name}` | Delete a stored policy. `user_id` and `workspace_id` query params select the scope. Policies from `config.yml` cannot be deleted here. | Deployment operator |
 
 Master key on every verb, including `explain`: the response enumerates a policy's
 targets, which is what a policy exists to keep off the wire.
@@ -383,28 +389,28 @@ are budget-checked and logged. See
 
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| `POST` | `/v1/routing/preferences/rank` | Record a batch of scored `examples` under `user_id`, in `workspace_id` (optional, defaulting to the deployment's default workspace): each has a `prompt`, `scores` (selector to quality in `[0, 1]`), an optional `task_id` partition, and an optional `label_source`. Writes the examples the router votes over and returns each touched pool's progress toward the seed count. Up to 100 per call. A score key that no learned policy could route to is refused, because such records are unmatchable and cannot be deleted. | Master key |
-| `GET` | `/v1/routing/status` | For `user_id` in `workspace_id` (optional, defaulting to the deployment's default workspace): records and warmth per pool (the default pool plus each task partition), the router's tuning, and which policies depend on it. | Master key |
+| `POST` | `/v1/routing/preferences/rank` | Record a batch of scored `examples` under `user_id`, in `workspace_id` (optional, defaulting to the deployment's default workspace): each has a `prompt`, `scores` (selector to quality in `[0, 1]`), an optional `task_id` partition, and an optional `label_source`. Writes the examples the router votes over and returns each touched pool's progress toward the seed count. Up to 100 per call. A score key that no learned policy could route to is refused, because such records are unmatchable and cannot be deleted. | Deployment operator |
+| `GET` | `/v1/routing/status` | For `user_id` in `workspace_id` (optional, defaulting to the deployment's default workspace): records and warmth per pool (the default pool plus each task partition), the router's tuning, and which policies depend on it. | Deployment operator |
 
 ### Pricing
 
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| `POST` | `/v1/pricing` | Set or update model pricing. | Master key |
+| `POST` | `/v1/pricing` | Set or update model pricing. | Deployment operator |
 | `GET` | `/v1/pricing` | List all model pricing. | API key or master key |
 | `GET` | `/v1/pricing/{model_key}` | Get effective pricing for a model. Optional `as_of` query param. | API key or master key |
 | `GET` | `/v1/pricing/{model_key}/history` | Get full pricing history for a model. | API key or master key |
-| `DELETE` | `/v1/pricing/{model_key}` | Delete a pricing entry. | Master key |
+| `DELETE` | `/v1/pricing/{model_key}` | Delete a pricing entry. | Deployment operator |
 
 ### Usage
 
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| `GET` | `/v1/usage` | List usage logs. Filters: `start_date`, `end_date`, `user_id`, `status`, `status_code`, `model`, `endpoint`, `provider`, `source`, `source_label`, `api_key_id`, `request_group_id`. `user_id`, `model`, and `api_key_id` are repeatable (up to 50 values each) and match any of the values given. `status_code` is the HTTP status classifying a failure (e.g. 429 provider rate limit, 402 missing pricing); only error rows carry one, so filtering by it also restricts to `status=error` unless `status` is passed explicitly. `request_group_id` is repeatable and returns a routed request's whole attempt plan (see [Routing](routing.md)). | Master key |
-| `GET` | `/v1/usage/count` | Total rows matching the filters (paginator total). Same filters as `GET /v1/usage`, so a multi-value filter counts the same rows the list returns. | Master key |
-| `GET` | `/v1/usage/summary` | Aggregated spend/volume: totals, breakdowns by model/user/key/source/session/endpoint/provider, the failure taxonomy in `errors_by_status_code` (failures grouped by `status_code` with a coarse `error_class`), and a time series. `dimensions` narrows which breakdowns are computed (each one is a separate `GROUP BY`, including `status_code` for the taxonomy); `dimensions=none` returns totals and series only. `model`, `user_id`, and `api_key_id` are repeatable (up to 50 values each) and match any of the values given, so one call can compare a set of models, users, or keys. | Master key |
-| `GET` | `/v1/usage/summary.csv` | Every breakdown as a CSV download. Same filters as `/v1/usage/summary`, including the repeatable `model` / `user_id` / `api_key_id`. | Master key |
-| `GET` | `/v1/usage/series` | One time series per group, for stacked charts. `group_by` is required (`model`, `user_id`, `api_key_id`, or `source`). Same filters and window bounds as `/v1/usage/summary`, including the repeatable `model` / `user_id` / `api_key_id` (up to 50 values each, matching any of them). Returns the window's top eight groups by spend, with everything past them folded into one `other` series per bucket, so the stack reconciles with the summary totals. Points are sparse (populated cells only), and an `hour` bucket over a window of more than 1000 buckets is rejected with a 422 rather than returning an oversized payload. | Master key |
+| `GET` | `/v1/usage` | List usage logs. Filters: `start_date`, `end_date`, `user_id`, `status`, `status_code`, `model`, `endpoint`, `provider`, `source`, `source_label`, `api_key_id`, `request_group_id`. `user_id`, `model`, and `api_key_id` are repeatable (up to 50 values each) and match any of the values given. `status_code` is the HTTP status classifying a failure (e.g. 429 provider rate limit, 402 missing pricing); only error rows carry one, so filtering by it also restricts to `status=error` unless `status` is passed explicitly. `request_group_id` is repeatable and returns a routed request's whole attempt plan (see [Routing](routing.md)). | Deployment operator |
+| `GET` | `/v1/usage/count` | Total rows matching the filters (paginator total). Same filters as `GET /v1/usage`, so a multi-value filter counts the same rows the list returns. | Deployment operator |
+| `GET` | `/v1/usage/summary` | Aggregated spend/volume: totals, breakdowns by model/user/key/source/session/endpoint/provider, the failure taxonomy in `errors_by_status_code` (failures grouped by `status_code` with a coarse `error_class`), and a time series. `dimensions` narrows which breakdowns are computed (each one is a separate `GROUP BY`, including `status_code` for the taxonomy); `dimensions=none` returns totals and series only. `model`, `user_id`, and `api_key_id` are repeatable (up to 50 values each) and match any of the values given, so one call can compare a set of models, users, or keys. | Deployment operator |
+| `GET` | `/v1/usage/summary.csv` | Every breakdown as a CSV download. Same filters as `/v1/usage/summary`, including the repeatable `model` / `user_id` / `api_key_id`. | Deployment operator |
+| `GET` | `/v1/usage/series` | One time series per group, for stacked charts. `group_by` is required (`model`, `user_id`, `api_key_id`, or `source`). Same filters and window bounds as `/v1/usage/summary`, including the repeatable `model` / `user_id` / `api_key_id` (up to 50 values each, matching any of them). Returns the window's top eight groups by spend, with everything past them folded into one `other` series per bucket, so the stack reconciles with the summary totals. Points are sparse (populated cells only), and an `hour` bucket over a window of more than 1000 buckets is rejected with a 422 rather than returning an oversized payload. | Deployment operator |
 | `POST` | `/v1/usage/external-events` | Import externally-observed usage (e.g. Claude Code) as source-tagged rows, priced at API rates, never counted toward budget. An API key (must be budget-exempt) attributes to its own user; the master key may name any user. Idempotent by `(source, source_event_id)`. See [Importing external usage](external-usage.md). | API key (budget-exempt) or master key |
 | `POST` | `/v1/traces` | OTLP receiver for GenAI usage **spans** (protobuf or JSON). Maps the OpenTelemetry GenAI conventions (`gen_ai.*`, `otari.*`) onto external usage ingestion. Any instrumented app can ship here. See [Importing external usage](external-usage.md). | API key (budget-exempt); master key refused |
 | `POST` | `/v1/logs` | OTLP receiver for GenAI usage **log events** (protobuf or JSON), including Claude Code's `api_request` and Codex's `codex.sse_event` / `codex.api_request`. Same mapping as `/v1/traces`. See [Importing external usage](external-usage.md). | API key (budget-exempt); master key refused |
@@ -418,10 +424,10 @@ the `capture_agent_telemetry` setting (per key, or deployment-wide).
 
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| `GET` | `/v1/agent-telemetry/summary` | Outcomes (commits, pull requests, lines changed, active time), behavior (tool calls and their mix, accept/reject, turns, API errors), the recorded spend over the same scope, and the derived measures: cost per commit / pull request / line, spend per active hour, acceptance rate, turns per session, error rate. Each measure is `null` when its denominator is zero. Range-bounded like `/v1/usage/summary` (default last 30 days, capped at 366). Filters: `start_date`, `end_date`, `user_id`, `api_key_id` (the last two repeatable, up to 50 values each), `session_label` (scopes both the telemetry rows and the usage they are divided by), `bucket`. Cumulative counters are converted to window increments at read time, per series generation, so a re-exported total is never double counted and a counter reset never reads as negative. | Master key |
-| `GET` | `/v1/agent-telemetry/count` | Total rows matching the filters (`start_date`, `end_date`, `user_id`, `api_key_id`, `name`), mirroring `/v1/usage/count`. Same filter set as the purge below, so it sizes exactly what a "delete all N matching" would remove. | Master key |
-| `GET` | `/v1/agent-telemetry/series` | Row volume over time split by one dimension, for stacked charts. `group_by` is required (`user_id` or `api_key_id`). Top eight groups plus a reconciling `other` fold; sparse points; an `hour` bucket over more than 1000 buckets is rejected with a 422. | Master key |
-| `DELETE` | `/v1/agent-telemetry` | Purge rows by explicit `ids` or, with `by_filter: true`, by `user_id` / `api_key_id` / `name` / date range. Covers behavioral and metric rows alike. A selection matching zero rows succeeds with `deleted: 0`. | Master key |
+| `GET` | `/v1/agent-telemetry/summary` | Outcomes (commits, pull requests, lines changed, active time), behavior (tool calls and their mix, accept/reject, turns, API errors), the recorded spend over the same scope, and the derived measures: cost per commit / pull request / line, spend per active hour, acceptance rate, turns per session, error rate. Each measure is `null` when its denominator is zero. Range-bounded like `/v1/usage/summary` (default last 30 days, capped at 366). Filters: `start_date`, `end_date`, `user_id`, `api_key_id` (the last two repeatable, up to 50 values each), `session_label` (scopes both the telemetry rows and the usage they are divided by), `bucket`. Cumulative counters are converted to window increments at read time, per series generation, so a re-exported total is never double counted and a counter reset never reads as negative. | Deployment operator |
+| `GET` | `/v1/agent-telemetry/count` | Total rows matching the filters (`start_date`, `end_date`, `user_id`, `api_key_id`, `name`), mirroring `/v1/usage/count`. Same filter set as the purge below, so it sizes exactly what a "delete all N matching" would remove. | Deployment operator |
+| `GET` | `/v1/agent-telemetry/series` | Row volume over time split by one dimension, for stacked charts. `group_by` is required (`user_id` or `api_key_id`). Top eight groups plus a reconciling `other` fold; sparse points; an `hour` bucket over more than 1000 buckets is rejected with a 422. | Deployment operator |
+| `DELETE` | `/v1/agent-telemetry` | Purge rows by explicit `ids` or, with `by_filter: true`, by `user_id` / `api_key_id` / `name` / date range. Covers behavioral and metric rows alike. A selection matching zero rows succeeds with `deleted: 0`. | Deployment operator |
 
 ### Mail
 
@@ -431,5 +437,5 @@ whether this deployment has it and proves that it works. See
 
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|
-| `GET` | `/v1/settings/mail` | The transport in effect (`smtp`, `console`, or `none`), the `From` address and display name, and this deployment's public base URL. Two booleans, because they are not the same question: `enabled` is whether a transport is configured at all, and `ready` is whether a message carrying a link back to this deployment can actually be sent, which additionally needs `public_base_url`. `missing` lists the settings standing between the deployment and that, and is empty exactly when `ready` is true. Never echoes the SMTP password. | Master key |
-| `POST` | `/v1/settings/mail/test` | Send a templated test message to `to`. Returns `{ok, transport, reason}`, where `reason` carries the transport's own error text on a failed send. Refuses with `503` (naming the missing settings) when the deployment cannot send a message that links back to itself, rather than accepting a send it would drop. | Master key |
+| `GET` | `/v1/settings/mail` | The transport in effect (`smtp`, `console`, or `none`), the `From` address and display name, and this deployment's public base URL. Two booleans, because they are not the same question: `enabled` is whether a transport is configured at all, and `ready` is whether a message carrying a link back to this deployment can actually be sent, which additionally needs `public_base_url`. `missing` lists the settings standing between the deployment and that, and is empty exactly when `ready` is true. Never echoes the SMTP password. | Deployment operator |
+| `POST` | `/v1/settings/mail/test` | Send a templated test message to `to`. Returns `{ok, transport, reason}`, where `reason` carries the transport's own error text on a failed send. Refuses with `503` (naming the missing settings) when the deployment cannot send a message that links back to itself, rather than accepting a send it would drop. | Deployment operator |

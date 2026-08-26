@@ -6,8 +6,7 @@ API layer: ``services/model_discovery_service`` renders the same class of text
 (an any-llm exception from a provider call) into a provider health or test
 response. ``scripts/check_architecture.py`` forbids a service importing
 ``gateway.api``, and a second copy of these patterns would be a copy that goes
-stale, so the patterns live here and ``_platform`` re-exports them for the
-callers that already name it.
+stale, so the patterns live here and both callers import them from here.
 """
 
 import re

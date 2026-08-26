@@ -224,12 +224,15 @@ async def get_session_identity(
 ) -> TenancyUser | None:
     """The identity a valid dashboard session cookie authenticates, or None.
 
-    A session cookie grants master-key authority *and* names who is using it, so
-    this is both the credential check and the identity resolution: the callers
-    below treat a non-None result as authenticated, and ``get_current_identity``
-    reuses the same resolved identity. Declared as a dependency rather than
-    called directly so FastAPI's per-request cache means one lookup however many
-    of them a route pulls in.
+    A session cookie *authenticates* the management API and names who is using
+    it, so this is both the credential check and the identity resolution: the
+    callers below treat a non-None result as authenticated, and
+    ``get_current_identity`` reuses the same resolved identity. It is not by
+    itself an answer to *what* the caller may do: a deployment-wide route asks
+    ``require_deployment_operator`` on top, and a tenant-scoped one asks a
+    service about the organization or workspace named. Declared as a dependency
+    rather than called directly so FastAPI's per-request cache means one lookup
+    however many of them a route pulls in.
 
     ``SameSite=Strict`` on the cookie is the primary CSRF control; the
     Sec-Fetch-Site check is belt-and-braces for clients that send the header.
