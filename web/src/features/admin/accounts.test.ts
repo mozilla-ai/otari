@@ -24,15 +24,17 @@ describe("accountLockoutReason", () => {
     ).toContain("bootstrap operator")
   })
 
-  it("names the caller's own row first when it is both", () => {
+  it("names the bootstrap reason first when it is both", () => {
     // Which it is on every standalone deployment today, where the one operator
-    // identity is the marked one. The self reason is the more useful of the two
-    // there, because it names the way out: another operator.
+    // identity is the marked one. The self reason ends in a remedy ("another
+    // operator has to make this change") that nobody can carry out on this row,
+    // because the server refuses this change from every operator; the bootstrap
+    // reason is the one that stays true whoever is reading.
     expect(
       accountLockoutReason(
         deploymentUser({ is_self: true, is_bootstrap_operator: true }),
       ),
-    ).toContain("your own account")
+    ).toContain("bootstrap operator")
   })
 })
 

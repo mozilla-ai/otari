@@ -2768,13 +2768,13 @@ export function useDeploymentAdminAccess(enabled = true) {
         (body) => body.granted,
       ),
     staleTime: 60_000,
+    // Whether the deployment serves this surface at all is the *deployment*
+    // axis, and the caller passes it in from `useSurfaces()`; this hook answers
+    // only who is calling. Deliberately not inferred from a 404 here, which is
+    // the scattered mode check the surface axis replaced, and which would leave
+    // the rail and this query disagreeing about a destination they both gate.
+    // So the ordinary retry policy applies: a failure is a failure.
     enabled,
-    // Same guard the tenancy reads carry: a gateway older than this bundle does
-    // not serve the route, and a hybrid one answers 404 for the whole
-    // management plane. Neither is something a retry fixes, and the answer for
-    // both is "no such surface", which is what an errored query renders as.
-    retry: (failureCount, error) =>
-      !(error instanceof ApiError && error.status === 404) && failureCount < 3,
   })
 }
 

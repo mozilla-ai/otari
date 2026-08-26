@@ -32,7 +32,7 @@ from datetime import UTC, datetime, timedelta
 from typing import Any, cast
 
 from fastapi import Request, Response
-from sqlalchemy import delete, select, update
+from sqlalchemy import delete, or_, select, update
 from sqlalchemy.engine import CursorResult
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -85,7 +85,16 @@ async def create_dashboard_session(
     """
     now = datetime.now(UTC)
     await db.execute(delete(DashboardSession).where(DashboardSession.expires_at < now))
-    await db.execute(update(User).where(col(User.id) == user_id).values(last_sign_in_at=now))
+    # Only ever forward. Two sign-ins for one identity each compute their own
+    # ``now``, so without the second predicate the one that commits last wins
+    # rather than the one that is later, and a column presented as "last signed
+    # in" would step backwards.
+    await db.execute(
+        update(User)
+        .where(col(User.id) == user_id)
+        .where(or_(col(User.last_sign_in_at).is_(None), col(User.last_sign_in_at) < now))
+        .values(last_sign_in_at=now)
+    )
     token = f"{_SESSION_TOKEN_PREFIX}{secrets.token_urlsafe(32)}"
     expires_at = now + timedelta(hours=ttl_hours)
     db.add(

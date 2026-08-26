@@ -719,11 +719,16 @@ password. Configure mail before you expect members to sign in.
   leaves it. Each row carries the organizations the account belongs to and at
   what standing, whether it is active, whether it holds operator access, and
   when it last signed in to the dashboard ("never" if it never has). Deactivate
-  an account and its dashboard sessions end straight away, which is the control
-  for a lost laptop or a departure; its memberships, keys and usage history are
-  left alone, and reactivating gives back the sign-in and not the old sessions.
-  Operator access is what reaches this page, and it can be granted and taken
-  here.
+  an account and its dashboard sessions end straight away, so a lost laptop stops
+  reaching the dashboard now rather than when its cookie is next presented;
+  reactivating gives back the sign-in and not the old sessions.
+  It reaches the dashboard and nothing else, so it is not on its own the answer
+  to a departure: an API key authenticates on its own row and belongs to a
+  workspace rather than to the person who created it, so every key that person
+  minted goes on working, and spending, until somebody revokes it on
+  **Keys**. Memberships and usage history are left alone by design, so what
+  the account did stays attributable. Operator access is what reaches this
+  page, and it can be granted and taken here.
   Two rows keep their controls disabled, with the reason on the control: your
   own, because deactivating yourself ends the session you are doing it from and
   dropping your own access takes away the page you did it on, and the bootstrap

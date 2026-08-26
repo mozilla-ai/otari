@@ -54,10 +54,7 @@ function mockApi(opts: { granted?: boolean; accounts?: DeploymentUser[] }) {
 
 function renderPage(ui: ReactElement) {
   const client = new QueryClient({
-    // `retryDelay` as well as `retry`, because the access hook brings a retry
-    // predicate of its own that overrides the default: without a zero delay the
-    // failed-gate case below would back off for seconds before it settled.
-    defaultOptions: { queries: { retry: false, retryDelay: 0 } },
+    defaultOptions: { queries: { retry: false } },
   })
   return render(
     <DeploymentProvider value={bootstrap()}>
@@ -174,21 +171,51 @@ describe("DeploymentAccountsPage", () => {
   })
 
   it("disables the two lockout controls on the caller's own row, with the reason", async () => {
-    mockApi({ accounts: [OPERATOR, ANALYST] })
+    // A caller who is not the bootstrap identity, which is what makes the *self*
+    // reason the one on the control: a row that is both takes the bootstrap
+    // reason, because the self reason's remedy ("another operator") is one no
+    // operator can carry out on the bootstrap row. `accounts.test.ts` pins that
+    // order; this pins the plain case.
+    const SELF = deploymentUser({
+      id: "cccccccc-0000-0000-0000-000000000000",
+      full_name: "Reader",
+      is_superuser: true,
+      is_self: true,
+    })
+    mockApi({ accounts: [SELF, ANALYST] })
     renderPage(<DeploymentAccountsPage />)
 
     const own = await screen.findByLabelText(
-      /^Deactivate Operator \(This is your own account/,
+      /^Deactivate Reader \(This is your own account/,
     )
     expect(own).toBeDisabled()
     expect(
       screen.getByLabelText(
-        /^Remove operator access from Operator \(This is your own account/,
+        /^Remove operator access from Reader \(This is your own account/,
       ),
     ).toBeDisabled()
     // The other row keeps both, so the guard is about who the row is and not
     // about the page being read-only.
     expect(screen.getByLabelText("Deactivate Analyst")).toBeEnabled()
+  })
+
+  it("disables them on the caller's own row when it is also the bootstrap one", async () => {
+    // The ordinary standalone shape: one operator identity, marked, and reading
+    // its own row. Both controls are still off, and the reason is the one that
+    // stays true whoever is reading.
+    mockApi({ accounts: [OPERATOR, ANALYST] })
+    renderPage(<DeploymentAccountsPage />)
+
+    expect(
+      await screen.findByLabelText(
+        /^Deactivate Operator \(The bootstrap operator/,
+      ),
+    ).toBeDisabled()
+    expect(
+      screen.getByLabelText(
+        /^Remove operator access from Operator \(The bootstrap operator/,
+      ),
+    ).toBeDisabled()
   })
 
   it("disables them on the bootstrap operator seen by another operator", async () => {

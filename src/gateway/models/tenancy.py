@@ -355,16 +355,22 @@ class DeploymentUserPublic(SQLModel):
     without it the page could not tell which row is the reader's own.
     """
 
+    # No defaults on any of these, unlike the shapes above that share a base with
+    # a table model: ``_to_public`` sets every field on every row, so a default
+    # here would only be a default in the *schema*, which is what decides whether
+    # the field lands in the spec's ``required`` list and so whether the generated
+    # client types it as optional. Nullable and optional are not the same claim,
+    # and the four that can be null say so with ``| None`` while staying required.
     id: uuid.UUID
-    email: str | None = None
-    full_name: str | None = None
+    email: str | None
+    full_name: str | None
     is_active: bool
     is_superuser: bool
-    is_bootstrap_operator: bool = False
-    is_self: bool = False
-    last_sign_in_at: datetime | None = None
+    is_bootstrap_operator: bool
+    is_self: bool
+    last_sign_in_at: datetime | None
     created_at: datetime
-    organizations: list[DeploymentUserOrganizationPublic] = Field(default_factory=list)
+    organizations: list[DeploymentUserOrganizationPublic]
 
 
 class DeploymentUsersPublic(SQLModel):

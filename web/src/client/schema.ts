@@ -5266,9 +5266,9 @@ export interface components {
              */
             created_at: string;
             /** Email */
-            email?: string | null;
+            email: string | null;
             /** Full Name */
-            full_name?: string | null;
+            full_name: string | null;
             /**
              * Id
              * Format: uuid
@@ -5276,22 +5276,16 @@ export interface components {
             id: string;
             /** Is Active */
             is_active: boolean;
-            /**
-             * Is Bootstrap Operator
-             * @default false
-             */
+            /** Is Bootstrap Operator */
             is_bootstrap_operator: boolean;
-            /**
-             * Is Self
-             * @default false
-             */
+            /** Is Self */
             is_self: boolean;
             /** Is Superuser */
             is_superuser: boolean;
             /** Last Sign In At */
-            last_sign_in_at?: string | null;
+            last_sign_in_at: string | null;
             /** Organizations */
-            organizations?: components["schemas"]["DeploymentUserOrganizationPublic"][];
+            organizations: components["schemas"]["DeploymentUserOrganizationPublic"][];
         };
         /**
          * DeploymentUserUpdateRequest

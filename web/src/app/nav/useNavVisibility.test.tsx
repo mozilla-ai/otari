@@ -20,7 +20,9 @@ const item = (gating: Partial<NavItem>): NavItem =>
 
 // The third axis is a query rather than a provider, so it is stubbed at fetch
 // and the hook is given a client. `false` by default: the operator axis gates
-// exactly one row, and every case below is about the other two.
+// exactly one row, and every case below is about the other two. The query only
+// runs on a deployment that hosts the surface serving it, so a case about this
+// axis passes `admin` in `surfaces` as well as stubbing the answer.
 function mockOperator(granted: boolean) {
   vi.spyOn(globalThis, "fetch").mockImplementation(
     async () =>
@@ -98,18 +100,35 @@ describe("useNavVisibility", () => {
     // page behind it renders its own refusal, and a row that appears and then
     // disappears reads as a bug.
     mockOperator(false)
-    const refused = visibility([])
+    const refused = visibility(["admin"])
     expect(refused.result.current(item({ operatorOnly: true }))).toBe(false)
     await waitFor(() =>
       expect(refused.result.current(item({ operatorOnly: true }))).toBe(false),
     )
 
     mockOperator(true)
-    const allowed = visibility([])
+    const allowed = visibility(["admin"])
     await waitFor(() =>
       expect(allowed.result.current(item({ operatorOnly: true }))).toBe(true),
     )
     // And it gates only the rows that declare it.
     expect(refused.result.current(item({}))).toBe(true)
+  })
+
+  it("never asks the caller axis on a deployment without the surface", async () => {
+    // The deployment axis answers first and settles it: no surface, no operator
+    // question, and in particular no request whose 404 would be a second way to
+    // learn what `surfaces` already said.
+    mockOperator(true)
+    const fetchSpy = vi.mocked(globalThis.fetch)
+    const hidden = visibility([])
+    await waitFor(() =>
+      expect(hidden.result.current(item({ operatorOnly: true }))).toBe(false),
+    )
+    expect(
+      fetchSpy.mock.calls.some((call) =>
+        String(call[0]).includes("/v1/admin/access"),
+      ),
+    ).toBe(false)
   })
 })

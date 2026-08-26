@@ -994,15 +994,15 @@ class SandboxImageNotAllowedError(TenancyValidationError):
 
 __all__ = [
     "BootstrapOperatorProtectedError",
+    "CurrentPasswordIncorrectError",
+    "CurrentPasswordRequiredError",
     "DeploymentAdministrationUnavailableError",
     "DeploymentUserNotFoundError",
     "DeploymentUserSelfChangeError",
-    "EmptyDeploymentUserUpdateError",
-    "CurrentPasswordIncorrectError",
-    "CurrentPasswordRequiredError",
     "EmailAlreadyInUseError",
     "EmailChangeNotSupportedError",
     "EmailNotVerifiedError",
+    "EmptyDeploymentUserUpdateError",
     "ForeignTenancyError",
     "InvalidCredentialsError",
     "InvalidEmailError",

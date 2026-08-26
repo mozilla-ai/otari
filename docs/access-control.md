@@ -141,8 +141,10 @@ Everything above stops at an organization's boundary: the roster lists that orga
 # when it last signed in to the dashboard.
 curl -H "Otari-Key: $OTARI_MASTER_KEY" http://localhost:8000/v1/admin/users
 
-# Deactivate one. Its dashboard sessions end immediately; memberships, keys and
-# usage history are untouched.
+# Deactivate one. Its dashboard sessions end immediately. Memberships, keys and
+# usage history are untouched, so any API key this account minted keeps
+# authenticating until it is revoked on its own (`PATCH /v1/keys/{key_id}`):
+# deactivating closes the dashboard, not the API.
 curl -X PATCH -H "Otari-Key: $OTARI_MASTER_KEY" -H "Content-Type: application/json" \
   -d '{"is_active": false}' \
   http://localhost:8000/v1/admin/users/$USER_ID

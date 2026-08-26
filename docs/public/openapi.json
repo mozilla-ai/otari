@@ -3239,12 +3239,10 @@
             "type": "boolean"
           },
           "is_bootstrap_operator": {
-            "default": false,
             "title": "Is Bootstrap Operator",
             "type": "boolean"
           },
           "is_self": {
-            "default": false,
             "title": "Is Self",
             "type": "boolean"
           },
@@ -3274,9 +3272,15 @@
         },
         "required": [
           "id",
+          "email",
+          "full_name",
           "is_active",
           "is_superuser",
-          "created_at"
+          "is_bootstrap_operator",
+          "is_self",
+          "last_sign_in_at",
+          "created_at",
+          "organizations"
         ],
         "title": "DeploymentUserPublic",
         "type": "object"

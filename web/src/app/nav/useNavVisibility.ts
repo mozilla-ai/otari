@@ -22,6 +22,12 @@ import { useEntitlements } from "@/shared/hooks/useEntitlements"
 
 import type { NavItem } from "./types"
 
+// The surface that serves the operator gate (`GET /v1/admin/access`), which is
+// also the `surface` the one operator-only row declares. Named here rather than
+// spelled at both call sites so the deployment axis and the caller axis cannot
+// come to disagree about which surface answers the question.
+const OPERATOR_SURFACE = "admin"
+
 /**
  * A predicate over registry entries: true when this deployment hosts the
  * surface, is entitled to the capability, and (for an operator-only row) the
@@ -34,13 +40,20 @@ import type { NavItem } from "./types"
  */
 export function useNavVisibility(): (item: NavItem) => boolean {
   const isRouteVisible = useRouteVisibility()
-  // The caller axis. Asked unconditionally rather than only when a row declares
+  // The caller axis. Asked for every row rather than only the one that declares
   // it, because a hook cannot be called from inside the predicate; it is one
   // cached read that every other row ignores. Undefined while it resolves and
   // false when the surface refused, so an operator-only row is absent until the
   // answer is yes, which is the safe direction for a destination that would
   // otherwise render its own refusal.
-  const operator = useDeploymentAdminAccess()
+  //
+  // Gated on the deployment axis rather than left to fail: a gateway that does
+  // not host the surface has no operator question to answer, and reading that
+  // off a 404 from the request would be the scattered mode check `surface`
+  // exists to replace. `useSurfaces` is the same answer the predicate below
+  // gates the row on, so the two cannot disagree about this destination.
+  const hostsSurface = useSurfaces()
+  const operator = useDeploymentAdminAccess(hostsSurface(OPERATOR_SURFACE))
 
   return useMemo(
     () => (item: NavItem) =>

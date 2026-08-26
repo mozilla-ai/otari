@@ -42,6 +42,7 @@ something an operator can still do here.
 
 import uuid
 
+from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.models.tenancy import (
@@ -162,9 +163,20 @@ class DeploymentUserService:
         if request.is_superuser is not None:
             target.is_superuser = request.is_superuser
         self.db.add(target)
-        if request.is_active is False:
-            await revoke_user_dashboard_sessions(self.db, target.id)
-        await self.db.commit()
+        try:
+            if request.is_active is False:
+                await revoke_user_dashboard_sessions(self.db, target.id)
+            await self.db.commit()
+        except SQLAlchemyError:
+            # The same reason ``OrganizationService`` rolls back rather than
+            # letting the failure travel: SQLAlchemy leaves a session whose
+            # flush failed unusable, so a caller that reuses it gets
+            # ``PendingRollbackError`` from its next statement instead of the
+            # failure that actually happened. The request path is covered either
+            # way, since ``get_db`` closes the session at teardown; a
+            # service-layer caller (every service-level test here is one) is not.
+            await self.db.rollback()
+            raise
         await self.db.refresh(target)
 
         memberships = await self.members.get_by_users_with_organizations([target.id])

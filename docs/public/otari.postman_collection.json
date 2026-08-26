@@ -137,7 +137,7 @@
                   "language": "json"
                 }
               },
-              "raw": "{\n  \"is_active\": false,\n  \"is_superuser\": false\n}"
+              "raw": "{\n  \"is_active\": false\n}"
             },
             "description": "Deactivate or reactivate an account, or change whether it may administer this deployment.\n\nBoth fields are optional and omitting one leaves it alone; a body naming\nneither is refused rather than treated as a no-op. Deactivating also ends\nthat account's dashboard sessions immediately, so a lost laptop stops\nworking now rather than when its cookie is next presented.\n\nTwo changes are refused to keep a deployment reachable: an operator may not\ndeactivate their own account or drop their own operator access, and neither\nmay be taken from the deployment's bootstrap operator, which is the identity\nmaster-key sign-in resolves to. Granting either is unguarded.",
             "header": [

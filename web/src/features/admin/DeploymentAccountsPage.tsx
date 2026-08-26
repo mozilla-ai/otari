@@ -2,7 +2,6 @@ import { Button, Chip } from "@heroui/react"
 import { useMemo, useState } from "react"
 
 import type { DeploymentUser } from "@/client"
-import { ApiError } from "@/shared/api/client"
 import {
   useDeploymentAdminAccess,
   useDeploymentUsers,
@@ -83,7 +82,10 @@ export function DeploymentAccountsPage() {
             <span className="text-sm text-foreground">
               {accountLabel(account)}
             </span>
-            {account.full_name && account.email ? (
+            {/* `full_name?.trim()`, matching `accountLabel`: a name that is
+                only whitespace falls back to the email up there, so testing the
+                untrimmed value here would print the same address twice. */}
+            {account.full_name?.trim() && account.email ? (
               <span className="text-xs text-muted">{account.email}</span>
             ) : null}
           </div>
@@ -206,14 +208,12 @@ export function DeploymentAccountsPage() {
 
   // A gate that failed to answer is not a gate that said no, so a failed request
   // is reported as one rather than falling into the refusal below, which would
-  // tell an operator the page is not theirs because asking for it 500ed. A 404
-  // is the exception and keeps the refusal: it is a gateway that does not serve
-  // the surface, which is the same answer for the reader as not being an
-  // operator, and it is what `useDeploymentAdminAccess` stops retrying on.
-  if (
-    access.isError &&
-    !(access.error instanceof ApiError && access.error.status === 404)
-  ) {
+  // tell an operator the page is not theirs because asking for it 500ed. Every
+  // status reads that way, a 404 included: whether this deployment serves the
+  // surface at all is the `surface` axis, settled before the shell routed here,
+  // so inferring it from a status code would be a second answer to a question
+  // the registry already answers.
+  if (access.isError) {
     return (
       <div className="flex flex-col gap-6">
         <PageHeader title="Accounts" />
@@ -273,8 +273,10 @@ export function DeploymentAccountsPage() {
             Deactivate{" "}
             <strong>{deactivating ? accountLabel(deactivating) : ""}</strong>?
             Their dashboard sessions end straight away and they cannot sign in
-            again until the account is reactivated. Their memberships, keys and
-            usage history are left exactly as they are.
+            again until the account is reactivated. Their memberships and usage
+            history are left exactly as they are. This closes the dashboard and
+            not the API: any key they created belongs to its workspace and goes
+            on working until it is revoked on Keys.
           </>
         }
         confirmLabel="Deactivate account"

@@ -22,11 +22,17 @@ import type { DeploymentUser } from "@/client"
 export function accountLockoutReason(
   account: DeploymentUser,
 ): string | undefined {
-  if (account.is_self) {
-    return "This is your own account; another operator has to make this change"
-  }
+  // Bootstrap first, and the order matters on the row that is both: on a
+  // standalone deployment the operator reading this page usually *is* the
+  // bootstrap identity, and the self reason ends in a remedy ("another operator
+  // has to make this change") that no operator can carry out, because the server
+  // refuses this change from every one of them. The bootstrap reason is the one
+  // that is true of the row whoever is asking.
   if (account.is_bootstrap_operator) {
     return "The bootstrap operator is how master-key sign-in reaches this deployment"
+  }
+  if (account.is_self) {
+    return "This is your own account; another operator has to make this change"
   }
   return undefined
 }
@@ -44,11 +50,8 @@ export function accountLabel(account: DeploymentUser): string {
  * find, and a row saying "no organizations" for one would hide the finding.
  */
 export function organizationSummary(account: DeploymentUser): string {
-  // Optional on the generated type because the field carries a server-side
-  // default, which the generator reads as "may be omitted". It never is.
-  const organizations = account.organizations ?? []
-  if (organizations.length === 0) return "None"
-  return organizations
+  if (account.organizations.length === 0) return "None"
+  return account.organizations
     .map((organization) =>
       organization.status === "active"
         ? `${organization.name} (${organization.role})`
