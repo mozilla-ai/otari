@@ -13,6 +13,7 @@ import {
 import {
   NO_BREAKDOWNS,
   useBudgets,
+  useDeploymentAdminAccess,
   useKeys,
   useOrganizationMembers,
   useProviderHealth,
@@ -25,6 +26,7 @@ import { Sparkline } from "@/shared/components/charts"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import {
   DeltaHint,
+  EmptyState,
   ErrorBanner,
   PageHeader,
   PageLoading,
@@ -97,10 +99,56 @@ const BUDGET_WORDS = {
   alert: "Over budget",
 } as const
 
-// The authenticated index uses the provider list to make the empty gateway a
-// useful getting-started page. The providers query is master-key gated, so this
-// only runs once authenticated.
+/**
+ * The landing route, which is the one page nobody navigates to on purpose.
+ *
+ * Every panel below it reads a deployment-wide endpoint, and since otari-ai#1880
+ * those answer 403 to anyone who is not an operator of the deployment. The gate
+ * is here rather than on the queries because the hooks do not all take an
+ * `enabled` flag, and a component that is not rendered runs none of them: that
+ * is what keeps a member's first page from being nine failed requests.
+ *
+ * It fails toward the operator view on purpose. Only an explicit `false` shows
+ * the member page, so a deployment with no operator surface to ask (hybrid) and
+ * a transient failure of the question both land on the panels, which report
+ * their own errors, rather than telling a real operator this page is not theirs.
+ */
 export function OverviewIndex() {
+  const access = useDeploymentAdminAccess()
+
+  if (access.data === false) {
+    return <MemberOverview />
+  }
+  if (access.isLoading) {
+    return <PageLoading />
+  }
+  return <OperatorOverviewIndex />
+}
+
+/**
+ * What a signed-in member who does not operate the deployment sees instead.
+ *
+ * Deliberately not `UnavailableHere`: this deployment does serve the page, it is
+ * simply not this caller's, and saying the wrong one of those is how a support
+ * ticket becomes an outage report. The sidebar still carries the organization
+ * destinations they can use, so this points at it rather than repeating it.
+ */
+function MemberOverview() {
+  return (
+    <>
+      <PageHeader title="Overview" />
+      <EmptyState
+        title="This overview is for deployment operators"
+        description="It reports on the whole gateway: every key, every workspace's spend, and the provider credentials behind them. Your organization's own pages are in the sidebar."
+      />
+    </>
+  )
+}
+
+// The operator index uses the provider list to make the empty gateway a
+// useful getting-started page. The providers query is operator-gated, so this
+// only runs once the gate above has answered.
+function OperatorOverviewIndex() {
   const providers = useProviders()
   if (providers.isLoading) {
     // A visible wait beats a blank screen while the master-key-gated providers

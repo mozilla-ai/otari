@@ -10,7 +10,7 @@ from pydantic import BaseModel, Field
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, require_deployment_operator, verify_api_key_or_master_key
+from gateway.api.deps import get_config, get_db, require_deployment_operator, verify_catalog_reader
 from gateway.api.routes.pricing import PricingTier
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
@@ -422,7 +422,7 @@ async def _get_pricing_map(
 async def list_models(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
-    auth: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
+    auth: Annotated[tuple[APIKey | None, bool], Depends(verify_catalog_reader)],
     provider: Annotated[str | None, Query(description="Filter models by provider name")] = None,
 ) -> ModelListResponse:
     """List all available models.
@@ -659,7 +659,7 @@ async def get_model(
     model_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
-    auth: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
+    auth: Annotated[tuple[APIKey | None, bool], Depends(verify_catalog_reader)],
 ) -> ModelObject:
     """Get details for a specific model."""
     api_key, is_master_key = auth

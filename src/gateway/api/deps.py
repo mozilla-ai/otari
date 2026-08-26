@@ -401,18 +401,27 @@ async def verify_api_key_or_master_key(
     request: Request,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
-    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
 ) -> tuple[APIKey | None, bool]:
     """Verify either API key or master key from Otari-Key header.
 
-    A valid dashboard session cookie also grants master-key authority, but only
-    when the request carries no header credentials at all.
+    Deliberately does **not** consult the dashboard session cookie. It used to,
+    on the same "a session grants master-key authority" premise
+    ``require_deployment_operator`` exists to retire, and here that premise was
+    worse than on the management plane: ``is_master_key`` is what makes
+    ``resolve_request_context`` bill and resolve credentials through the
+    deployment's *default* workspace, so a signed-in member of any organization
+    could spend another organization's BYO provider credential on a completion,
+    or file usage rows into a tenant they do not belong to, without holding a key
+    at all (otari-ai#1880).
+
+    A browser has no reason to reach this plane: the dashboard mentions these
+    endpoints in its copy and calls none of them. The three catalog reads it does
+    call take :func:`verify_catalog_reader` instead.
 
     Args:
         request: FastAPI request object
         db: Database session
         config: Gateway configuration
-        session_identity: The identity behind a dashboard session cookie, if any
 
     Returns:
         Tuple of (APIKey object or None, is_master_key boolean)
@@ -421,9 +430,6 @@ async def verify_api_key_or_master_key(
         HTTPException: If key is invalid, inactive, or expired
 
     """
-    if session_identity is not None:
-        return None, True
-
     token = _extract_bearer_token(request, config)
 
     if await is_valid_master_key(token, config, db):
@@ -431,6 +437,30 @@ async def verify_api_key_or_master_key(
 
     api_key = await _verify_and_update_api_key(db, token)
     return api_key, False
+
+
+async def verify_catalog_reader(
+    request: Request,
+    db: Annotated[AsyncSession, Depends(get_db)],
+    config: Annotated[GatewayConfig, Depends(get_config)],
+    session_identity: Annotated[TenancyUser | None, Depends(get_session_identity)],
+) -> tuple[APIKey | None, bool]:
+    """As :func:`verify_api_key_or_master_key`, and a dashboard session also reads.
+
+    The narrow exception to the rule above, for the catalog reads that describe
+    the deployment rather than act on it: ``GET /v1/models``, ``GET /v1/pricing``
+    and ``GET /v1/tools`` (with their by-id variants). The dashboard's Models and
+    Pricing pages are built on these, so a session has to reach them; they call
+    no provider, write nothing, and bill nothing, so reaching them
+    deployment-wide costs a signed-in caller's own organization nothing.
+
+    Split out rather than left as a branch inside the other dependency so that
+    adding a route to this plane defaults to refusing the cookie, and admitting
+    one is a decision spelled at the route.
+    """
+    if session_identity is not None:
+        return None, True
+    return await verify_api_key_or_master_key(request, db, config)
 
 
 async def get_db_if_needed(
@@ -625,5 +655,6 @@ __all__ = [
     "require_capability",
     "verify_api_key",
     "verify_api_key_or_master_key",
+    "verify_catalog_reader",
     "verify_master_key",
 ]

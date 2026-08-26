@@ -9,7 +9,7 @@ from sqlalchemy import distinct, func, select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_config, get_db, require_deployment_operator, verify_api_key_or_master_key
+from gateway.api.deps import get_config, get_db, require_deployment_operator, verify_catalog_reader
 from gateway.core.config import GatewayConfig
 from gateway.models.entities import ModelPricing
 from gateway.models.money import as_float, to_usd, to_usd_or_none
@@ -433,7 +433,7 @@ async def set_pricing(
     return PricingResponse.from_model(pricing)
 
 
-@router.get("", dependencies=[Depends(verify_api_key_or_master_key)])
+@router.get("", dependencies=[Depends(verify_catalog_reader)])
 async def list_pricing(
     db: Annotated[AsyncSession, Depends(get_db)],
     skip: Annotated[int, Query(ge=0)] = 0,
@@ -452,7 +452,7 @@ async def list_pricing(
     return [PricingResponse.from_model(pricing) for pricing in pricings]
 
 
-@router.get("/{model_key:path}/history", dependencies=[Depends(verify_api_key_or_master_key)])
+@router.get("/{model_key:path}/history", dependencies=[Depends(verify_catalog_reader)])
 async def get_pricing_history(
     model_key: str,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -470,7 +470,7 @@ async def get_pricing_history(
     return [PricingResponse.from_model(pricing) for pricing in pricings]
 
 
-@router.get("/{model_key:path}", dependencies=[Depends(verify_api_key_or_master_key)])
+@router.get("/{model_key:path}", dependencies=[Depends(verify_catalog_reader)])
 async def get_pricing(
     model_key: str,
     db: Annotated[AsyncSession, Depends(get_db)],

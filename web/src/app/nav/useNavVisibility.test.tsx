@@ -95,24 +95,53 @@ describe("useNavVisibility", () => {
     expect(predicate(["routing"], { capabilities: [] })(item(all))).toBe(false)
   })
 
-  it("hides an operator-only entry until the caller is known to be one", async () => {
-    // Absent while the answer is still coming, which is the safe direction: the
-    // page behind it renders its own refusal, and a row that appears and then
-    // disappears reads as a bug.
+  it("hides an unlisted entry until the caller is known to be an operator", async () => {
+    // The server answers 404 on this one, declining to admit the page exists, so
+    // the rail may not reveal it either: absent until the answer is yes, and
+    // absent if the answer never comes.
     mockOperator(false)
     const refused = visibility(["admin"])
-    expect(refused.result.current(item({ operatorOnly: true }))).toBe(false)
+    expect(refused.result.current(item({ operatorOnly: "unlisted" }))).toBe(
+      false,
+    )
     await waitFor(() =>
-      expect(refused.result.current(item({ operatorOnly: true }))).toBe(false),
+      expect(refused.result.current(item({ operatorOnly: "unlisted" }))).toBe(
+        false,
+      ),
     )
 
     mockOperator(true)
     const allowed = visibility(["admin"])
     await waitFor(() =>
-      expect(allowed.result.current(item({ operatorOnly: true }))).toBe(true),
+      expect(allowed.result.current(item({ operatorOnly: "unlisted" }))).toBe(
+        true,
+      ),
     )
     // And it gates only the rows that declare it.
     expect(refused.result.current(item({}))).toBe(true)
+  })
+
+  it("shows a refused entry until the caller is known not to be an operator", async () => {
+    // The other direction, and the reason the flag carries a value at all. The
+    // server answers 403 here: the destination is no secret, only its use is
+    // gated. Hiding it until the answer arrives would blank nine rows of an
+    // operator's sidebar on every page load to protect nothing.
+    mockOperator(true)
+    const allowed = visibility(["admin"])
+    expect(allowed.result.current(item({ operatorOnly: "refused" }))).toBe(true)
+    await waitFor(() =>
+      expect(allowed.result.current(item({ operatorOnly: "refused" }))).toBe(
+        true,
+      ),
+    )
+
+    mockOperator(false)
+    const refused = visibility(["admin"])
+    await waitFor(() =>
+      expect(refused.result.current(item({ operatorOnly: "refused" }))).toBe(
+        false,
+      ),
+    )
   })
 
   it("never asks the caller axis on a deployment without the surface", async () => {
@@ -123,8 +152,14 @@ describe("useNavVisibility", () => {
     const fetchSpy = vi.mocked(globalThis.fetch)
     const hidden = visibility([])
     await waitFor(() =>
-      expect(hidden.result.current(item({ operatorOnly: true }))).toBe(false),
+      expect(hidden.result.current(item({ operatorOnly: "unlisted" }))).toBe(
+        false,
+      ),
     )
+    // A "refused" row is the other answer for the same reason: with no surface
+    // to ask, there is no known refusal, and the row's own `surface` gate is
+    // what decides it on a deployment like this.
+    expect(hidden.result.current(item({ operatorOnly: "refused" }))).toBe(true)
     expect(
       fetchSpy.mock.calls.some((call) =>
         String(call[0]).includes("/v1/admin/access"),

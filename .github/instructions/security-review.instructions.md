@@ -72,6 +72,12 @@ key.
 - ✅ **Check**: a row reached by an id from the path is loaded **with** the tenant
   predicate, not loaded by id and checked afterwards, and a row outside the caller's
   tenant answers **404**, not 403, so the id is not confirmed to exist.
+- ✅ **Check**: the **data plane** takes neither. A route that calls a provider or writes
+  a usage row uses `verify_api_key_or_master_key`, which does not consult the cookie at
+  all: `is_master_key` resolves credentials and billing through the deployment's *default*
+  workspace, so a session accepted there spends another tenant's credential. Not an
+  authority question, so `require_deployment_operator` is the wrong fix; a superuser
+  session is refused too. Only the catalog reads (`verify_catalog_reader`) admit a cookie.
 - **Severity**: Critical
 
 ### 0.2 Enforce budgets atomically — no check-then-act (CWE-367 TOCTOU)

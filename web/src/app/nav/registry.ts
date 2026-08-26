@@ -74,15 +74,28 @@ const BASE_NAV_SECTIONS = [
         label: "Activity",
         surface: "usage",
         icon: FiActivity,
+        operatorOnly: "refused",
       },
-      { to: "/usage", label: "Usage", surface: "usage", icon: FiBarChart2 },
+      {
+        to: "/usage",
+        label: "Usage",
+        surface: "usage",
+        icon: FiBarChart2,
+        operatorOnly: "refused",
+      },
     ],
   },
   {
     id: "gateway",
     label: "Gateway",
     items: [
-      { to: "/models", label: "Models", surface: "models", icon: FiLayers },
+      {
+        to: "/models",
+        label: "Models",
+        surface: "models",
+        icon: FiLayers,
+        operatorOnly: "refused",
+      },
       // Deliberately not tagged `capability: "routing"`, though otari.ai's
       // registry tags its own Routing item that way. ARCHITECTURE.md's
       // capability lines mark the routing split (how much is core base, how
@@ -96,6 +109,7 @@ const BASE_NAV_SECTIONS = [
         label: "Routing",
         surface: "routing",
         icon: FiRepeat,
+        operatorOnly: "refused",
         // Policies and Guardrails as the navigation prototype groups them. The
         // prototype's third entry, Aliases, is deliberately absent: this
         // dashboard lists an alias as the one-target policy it is, in the same
@@ -150,7 +164,13 @@ const BASE_NAV_SECTIONS = [
     id: "access",
     label: "Access",
     items: [
-      { to: "/keys", label: "API keys", surface: "keys", icon: FiKey },
+      {
+        to: "/keys",
+        label: "API keys",
+        surface: "keys",
+        icon: FiKey,
+        operatorOnly: "refused",
+      },
       // "Providers", not "Provider credentials": the page manages the
       // credential *and* the instance it belongs to, the rail has one line for
       // it, and a two-word label is what the rest of this group reads like.
@@ -159,6 +179,7 @@ const BASE_NAV_SECTIONS = [
         label: "Providers",
         surface: "providers",
         icon: FiBox,
+        operatorOnly: "refused",
       },
       // The selected workspace's roster, not the organization's. The
       // organization roster is "Members & roles" in the other context, and the
@@ -261,6 +282,7 @@ const ORGANIZATION_NAV_SECTIONS = [
         label: "Spend & budgets",
         surface: "budgets",
         icon: FiDollarSign,
+        operatorOnly: "refused",
       },
       // Tenant-scoped in fact as well as in the design: a rate applies to every
       // workspace and every key in the deployment. The catalog had no home
@@ -278,6 +300,7 @@ const ORGANIZATION_NAV_SECTIONS = [
         // whose data is not served.
         surface: "pricing",
         icon: FiTag,
+        operatorOnly: "refused",
       },
     ],
   },
@@ -315,6 +338,7 @@ const ORGANIZATION_NAV_SECTIONS = [
         label: "Settings",
         surface: "settings",
         icon: FiSliders,
+        operatorOnly: "refused",
       },
       // Every account on the deployment, which is not the Members & roles row
       // above: that one is this organization's roster and stops at its
@@ -326,7 +350,7 @@ const ORGANIZATION_NAV_SECTIONS = [
         to: "/admin/accounts",
         label: "Accounts",
         surface: "admin",
-        operatorOnly: true,
+        operatorOnly: "unlisted",
         icon: FiUserCheck,
       },
     ],

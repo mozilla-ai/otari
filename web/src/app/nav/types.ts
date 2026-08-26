@@ -48,20 +48,39 @@ interface NavItemBase {
    */
   capability?: string
   /**
-   * Whether this destination is only for an operator of the deployment.
+   * That this destination is only for an operator of the deployment, and how the
+   * server refuses it, which is what decides when the rail may show it.
    *
-   * The third axis, and the only one that is about *who is calling* rather than
-   * about the deployment: `surface` asks whether the process hosts the page and
+   * The third axis, and the only one about *who is calling* rather than about
+   * the deployment: `surface` asks whether the process hosts the page and
    * `capability` whether the deployment is licensed for it, and both answer the
    * same for everyone signed in. Resolved through
-   * `shared/api/hooks.useDeploymentAdminAccess`, which is the surface's own
-   * gate reported back rather than a second rule that could disagree with it.
+   * `shared/api/hooks.useDeploymentAdminAccess`, which is the surface's own gate
+   * reported back rather than a second rule that could disagree with it.
    *
-   * A missing one is ungated, which is every other row: this build has exactly
-   * one operator-only destination. Client-side only, like the other two, and the
-   * server refuses the page's requests with 404 regardless.
+   * The two values are not a preference. A rail gate is a mirror of the server's
+   * refusal and grants nothing, so it has to mirror *which* refusal:
+   *
+   * - `"unlisted"` for a destination the server answers **404** on, meaning it
+   *   declines to admit the page exists (`/v1/admin`). The rail must not reveal
+   *   it either, so the row is absent until the answer is known to be yes.
+   *   Showing it first and removing it would leak exactly what the 404 hides.
+   * - `"refused"` for a destination the server answers **403** on, which is
+   *   every router gated on `require_deployment_operator`. Its existence is no
+   *   secret; only its use is gated. So the row renders and disappears once the
+   *   answer is known to be no, and hiding it until confirmed would pay a
+   *   sidebar flicker on every operator's page load for nothing.
+   *
+   * Each also fails in the right direction when the question itself fails:
+   * `"unlisted"` needs an explicit yes, `"refused"` needs an explicit no.
+   *
+   * A missing one is ungated. Client-side only, like the other two: the server
+   * authorizes every request the page makes regardless. A page that is only
+   * *partly* deployment-wide declares nothing here on purpose, since hiding a
+   * destination a member does use costs more than a panel on it reporting its
+   * own refusal.
    */
-  operatorOnly?: true
+  operatorOnly?: "unlisted" | "refused"
 }
 
 /** One sidebar link with its deployment and entitlement gating. */

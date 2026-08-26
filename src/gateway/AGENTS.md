@@ -63,6 +63,19 @@ that has already shipped (otari-ai#1880).
   request points (`services/tenancy/authorization.py`). The operator gate must stay off
   them: a plain member reaching their own organization is the point of that family.
 
+The **data plane** is a third case and takes neither. `verify_api_key_or_master_key`
+deliberately does not consult the session cookie: a completion calls a provider with
+somebody's credentials and writes a usage row against somebody's budget, and
+`is_master_key` sends both through the deployment's *default* workspace, so honoring a
+cookie there let any signed-in member spend the default organization's BYO credential
+without holding a key. It is not an authority question, so the operator gate is the wrong
+tool for it; a superuser session is refused too. The six catalog reads the dashboard needs
+(`GET /v1/models`, `/v1/pricing`, `/v1/tools` and their by-id forms) take
+`verify_catalog_reader` instead, which is the same check plus the cookie: they call no
+provider, write nothing and bill nothing. Two callers reach the dependency directly rather
+than through `Depends` (`_pipeline.resolve_request_context` and `messages.count_tokens`),
+so a change to its signature has to visit them.
+
 `/v1/keys` sits in the first group and is *also* organization-scoped, which is the one
 route that needed both. A key resolves its workspace's organization's provider credentials
 and bills there, so the mint lands in the caller's active organization's default workspace

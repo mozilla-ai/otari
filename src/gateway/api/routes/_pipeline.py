@@ -64,7 +64,7 @@ from fastapi.responses import StreamingResponse
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
-from gateway.api.deps import get_session_identity, verify_api_key_or_master_key
+from gateway.api.deps import verify_api_key_or_master_key
 from gateway.api.routes._attempts import walk_attempts
 from gateway.api.routes._helpers import apply_input_guardrails, resolve_user_id
 from gateway.api.routes._platform import (
@@ -1543,10 +1543,14 @@ async def resolve_request_context(
     else:
         if db is None:
             raise adapter.error(500, DB_UNAVAILABLE_DETAIL, ErrorKind.API)
-        # The dashboard session cookie is resolved explicitly here: this is a
-        # direct call rather than a route dependency, so FastAPI cannot inject it.
-        session_identity = await get_session_identity(raw_request, db, config)
-        api_key, is_master_key = await verify_api_key_or_master_key(raw_request, db, config, session_identity)
+        # No session cookie is consulted, and that is the point: this plane calls
+        # a provider with somebody's credentials and writes a usage row against
+        # somebody's budget. ``is_master_key`` below sends both through the
+        # deployment's *default* workspace, so honoring a cookie here let any
+        # signed-in member of any organization spend the default organization's
+        # BYO credential and bill it (otari-ai#1880). A completion is authorized
+        # by an API key or the deployment's own master key, nothing else.
+        api_key, is_master_key = await verify_api_key_or_master_key(raw_request, db, config)
         api_key_id = api_key.id if api_key else None
         # Zero I/O for a keyed request: `api_key.workspace_id` is already an
         # in-memory attribute on the row just loaded. Only a master-key request

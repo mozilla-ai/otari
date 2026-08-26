@@ -69,6 +69,31 @@ _ESCALATION_PROBES: list[tuple[str, str]] = [
     ("POST", "/v1/settings/mail/test"),
 ]
 
+# The data plane: a provider is called with somebody's credentials and a usage
+# row is written against somebody's budget, both resolved through the
+# deployment's default workspace for a caller with no key row. A cookie must not
+# reach any of it. 401, not 403: with the cookie ignored the request simply
+# carries no credential this plane recognizes.
+_DATA_PLANE_PROBES: list[tuple[str, str]] = [
+    ("POST", "/v1/embeddings"),
+    ("POST", "/v1/moderations"),
+    ("POST", "/v1/rerank"),
+    ("POST", "/v1/search"),
+    ("POST", "/v1/images/generations"),
+    ("POST", "/v1/usage/external-events"),
+    ("GET", "/v1/files"),
+    ("GET", "/v1/batches"),
+]
+
+# The exception, and the reason the data-plane dependency was split rather than
+# just tightened: these describe the deployment instead of acting on it, and the
+# dashboard's Models and Pricing pages are built on them.
+_CATALOG_PROBES: list[tuple[str, str]] = [
+    ("GET", "/v1/models"),
+    ("GET", "/v1/pricing"),
+    ("GET", "/v1/tools"),
+]
+
 # Routers that resolve the caller and check their standing themselves. A plain
 # member reaches these by design, so a 403 from any of them means the gate was
 # applied to the wrong family. Only the routes a *member* may reach are listed:
@@ -309,3 +334,140 @@ def test_the_admin_router_keeps_its_own_404_rather_than_the_gate_403(
     assert listed.status_code == 404, listed.text
     assert access.status_code == 200, access.text
     assert access.json() == {"granted": False}
+
+
+# =============================================================================
+# The data plane, which a cookie may not reach at all
+# =============================================================================
+
+
+@pytest.mark.parametrize(("method", "path"), _DATA_PLANE_PROBES)
+def test_a_session_cookie_does_not_authenticate_the_data_plane(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    method: str,
+    path: str,
+) -> None:
+    """The second half of otari-ai#1880, and the half that needed no key at all.
+
+    ``verify_api_key_or_master_key`` used to return "this is the master key" for
+    any session, and ``is_master_key`` is what makes the request resolve its
+    workspace, its organization's provider credentials and its budget through the
+    deployment *default*. So a signed-in member of an unrelated organization
+    could spend the default organization's BYO credential on a completion, and
+    file usage rows into a tenant they belong to nothing in, without ever minting
+    a key. Gating the management plane alone would have left this open.
+    """
+    _provision(client, master_key_header)
+    organization_id = _default_organization_id(db_session_factory)
+    token = _session_for(db_session_factory, organization_id=organization_id, email="mallory@example.com")
+
+    client.cookies.set(SESSION_COOKIE_NAME, token)
+    try:
+        assert _call(client, method, path) == 401
+    finally:
+        client.cookies.clear()
+
+
+@pytest.mark.parametrize(
+    ("path", "body"),
+    [
+        (
+            "/v1/chat/completions",
+            {"model": "openai:gpt-4o", "messages": [{"role": "user", "content": "hi"}]},
+        ),
+        (
+            "/v1/messages/count_tokens",
+            {"model": "openai:gpt-4o", "messages": [{"role": "user", "content": "hi"}]},
+        ),
+    ],
+)
+def test_a_session_cookie_does_not_authenticate_a_completion(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    path: str,
+    body: dict[str, object],
+) -> None:
+    """The two routes that authenticate inside the handler rather than by dependency.
+
+    Given a body of their own, because both parse the request model before they
+    reach the credential check and would otherwise answer 422 without ever
+    getting there. This is the exact request the review reproduced: it used to
+    clear auth, resolve the default workspace, and dial the provider on that
+    organization's stored credential.
+    """
+    _provision(client, master_key_header)
+    organization_id = _default_organization_id(db_session_factory)
+    token = _session_for(db_session_factory, organization_id=organization_id, email="eve@example.com")
+
+    client.cookies.set(SESSION_COOKIE_NAME, token)
+    try:
+        response = client.post(path, json=body)
+    finally:
+        client.cookies.clear()
+
+    assert response.status_code == 401, response.text
+
+
+def test_even_a_superuser_session_does_not_authenticate_the_data_plane(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+) -> None:
+    """Not an authority check: this plane takes a key or the master key, full stop.
+
+    Worth pinning separately from the case above, because the obvious wrong fix
+    is to reuse the operator gate here. That would keep the breach open for the
+    one identity that can also read every organization's credentials.
+    """
+    _provision(client, master_key_header)
+    organization_id = _default_organization_id(db_session_factory)
+    token = _session_for(
+        db_session_factory,
+        organization_id=organization_id,
+        email="root@example.com",
+        is_superuser=True,
+    )
+
+    client.cookies.set(SESSION_COOKIE_NAME, token)
+    try:
+        assert _call(client, "POST", "/v1/embeddings") == 401
+    finally:
+        client.cookies.clear()
+
+
+@pytest.mark.parametrize(("method", "path"), _CATALOG_PROBES)
+def test_a_plain_member_session_still_reads_the_catalog(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    db_session_factory: Callable[[], Session],
+    method: str,
+    path: str,
+) -> None:
+    """These call no provider, write nothing and bill nothing, so a session reads them."""
+    _provision(client, master_key_header)
+    organization_id = _default_organization_id(db_session_factory)
+    token = _session_for(db_session_factory, organization_id=organization_id, email="ada@example.com")
+
+    client.cookies.set(SESSION_COOKIE_NAME, token)
+    try:
+        assert _call(client, method, path) == 200
+    finally:
+        client.cookies.clear()
+
+
+def test_an_api_key_still_reaches_the_data_plane(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """The control for the refusals above: nothing changed for a real credential."""
+    _provision(client, master_key_header)
+    created = client.post("/v1/keys", json={"key_name": "data-plane"}, headers=master_key_header)
+    assert created.status_code == 200, created.text
+    secret = created.json()["key"]
+
+    listed = client.get("/v1/files", headers={"Otari-Key": secret})
+
+    assert listed.status_code == 200, listed.text

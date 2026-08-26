@@ -24,7 +24,7 @@ from typing import Annotated, Any, Literal
 from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 
-from gateway.api.deps import get_config, verify_api_key_or_master_key
+from gateway.api.deps import get_config, verify_catalog_reader
 from gateway.api.routes._tools import Tool, web_search_declaration_forms
 from gateway.core.config import GatewayConfig
 from gateway.core.env import otari_env
@@ -93,7 +93,7 @@ def _managed_tools(config: GatewayConfig) -> list[ManagedTool]:
     ]
 
 
-@router.get("/tools", dependencies=[Depends(verify_api_key_or_master_key)])
+@router.get("/tools", dependencies=[Depends(verify_catalog_reader)])
 async def list_tools(config: Annotated[GatewayConfig, Depends(get_config)]) -> ToolsResponse:
     """List the tools Otari runs itself, with the declaration forms it accepts.
 

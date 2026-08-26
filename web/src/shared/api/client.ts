@@ -408,9 +408,19 @@ export async function apiFetch<T>(
     throw new ApiError(0, "Network error: could not reach the gateway.")
   }
 
-  // 401 (expired/revoked session) or 403 both mean this session can't use the
-  // management API anymore: drop it and bounce to sign-in.
-  if (response.status === 401 || response.status === 403) {
+  // Only 401. A 401 means the credential is gone: the session expired or was
+  // revoked, so dropping it and bouncing to sign-in is the right move.
+  //
+  // A 403 is the opposite: the session is live and the server is answering a
+  // question about *authority*, which signing out cannot change. Signing out on
+  // one is a loop, because the sign-in that follows lands on a page that asks
+  // again. This used to be reachable through the tenancy routes alone (a plain
+  // member opening organization guardrails is refused 403 by
+  // `require_active_organization_management_access`); since otari-ai#1880 gated
+  // the deployment-wide routers on `require_deployment_operator`, a non-operator
+  // member meets one on the landing page. Let it surface as an ordinary error
+  // the panel reports, the way every other 4xx does.
+  if (response.status === 401) {
     unauthorizedHandler?.()
     throw new ApiError(response.status, await extractErrorMessage(response))
   }

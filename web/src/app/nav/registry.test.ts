@@ -77,13 +77,29 @@ describe("nav registry", () => {
     ])
   })
 
-  it("declares the one operator-only destination and no other", () => {
-    // The third gating axis, and the only row on either rail that names it. A
-    // second one would be a design decision rather than a refactor, so this
-    // pins the count as well as the entry.
+  it("declares the operator-only destinations and no others", () => {
+    // The third gating axis. It named one row until otari-ai#1880 gated the
+    // deployment-wide routers on `require_deployment_operator`: a page built
+    // entirely on those answers 403 to a member, so the rail stops offering it.
+    // The list is pinned rather than derived because adding to it is a design
+    // decision, not a refactor. A page that is only *partly* deployment-wide
+    // stays off it on purpose (organization members, workspaces, the workspace
+    // tool pages): hiding a destination a member does use costs more than a
+    // panel on it reporting its own refusal.
     expect(
       NAV_ITEMS.filter((item) => item.operatorOnly).map((item) => item.to),
-    ).toEqual(["/admin/accounts"])
+    ).toEqual([
+      "/activity",
+      "/usage",
+      "/models",
+      "/routing",
+      "/keys",
+      "/providers",
+      "/budgets",
+      "/organization/pricing",
+      "/settings",
+      "/admin/accounts",
+    ])
   })
 
   it("puts each destination on exactly one rail", () => {

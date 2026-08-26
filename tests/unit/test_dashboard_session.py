@@ -381,27 +381,48 @@ def test_rotation_re_mints_the_session_for_the_same_identity(tmp_path: Path, mon
 _COMPLETION_BODY = {"model": "gpt-4o-mini", "messages": [{"role": "user", "content": "hi"}]}
 
 
-def test_the_cookie_authenticates_the_request_plane_too(tmp_path: Path) -> None:
-    """The two auth sites that resolve the cookie by hand rather than by injection.
+def test_the_cookie_does_not_authenticate_the_request_plane(tmp_path: Path) -> None:
+    """The two auth sites that call the dependency by hand rather than by injection.
 
-    ``resolve_request_context`` and ``/v1/messages/count_tokens`` call the auth
-    dependency directly, so FastAPI cannot inject the session identity and each
-    has to resolve it itself. The cookie check used to sit inside
-    ``verify_api_key_or_master_key``, which meant every caller got it for free; a
-    site left un-updated when it moved out would stop accepting the cookie and
-    nothing else in this file would notice.
+    Kept for the reason it was written: ``resolve_request_context`` and
+    ``/v1/messages/count_tokens`` call ``verify_api_key_or_master_key``
+    directly, so FastAPI cannot inject anything into them and a site left
+    un-updated drifts from the dependency with nothing else here to notice. Only
+    the direction it guards has flipped. It used to assert the cookie *reaches*
+    this plane, on the premise that a session carries master-key authority; that
+    premise was otari-ai#1880, because ``is_master_key`` resolves provider
+    credentials and billing through the deployment's *default* workspace, so a
+    member of any organization could spend the default organization's BYO
+    credential without holding a key.
 
-    Chat stops at the master-key user gate rather than at 401: a cookie carries
-    master-key authority, and a master key has to name the user it spends for.
+    The session here is the bootstrap operator's, minted from the master key, so
+    this pins the superuser case too: this plane is not an authority question and
+    takes a key or the master key, nothing else.
     """
     with TestClient(create_app(_config(tmp_path))) as client:
         _sign_in(client)
 
-        assert client.post("/v1/messages/count_tokens", json=_COMPLETION_BODY).status_code == 200
+        counted = client.post("/v1/messages/count_tokens", json=_COMPLETION_BODY)
+        assert counted.status_code == 401, counted.text
 
         chat = client.post("/v1/chat/completions", json=_COMPLETION_BODY)
-        assert chat.status_code == 400, chat.text
-        assert "'user' field is required" in chat.json()["detail"]
+        assert chat.status_code == 401, chat.text
+
+
+def test_the_cookie_still_reads_the_catalog(tmp_path: Path) -> None:
+    """The exception that keeps the dashboard's Models and Pricing pages working.
+
+    These describe the deployment instead of acting on it: no provider call, no
+    write, no billing, so ``verify_catalog_reader`` admits the cookie where the
+    plane around it does not. Asserted here beside the refusal above, because the
+    two are one decision and a change to either should have to look at both.
+    """
+    with TestClient(create_app(_config(tmp_path))) as client:
+        _sign_in(client)
+
+        assert client.get("/v1/models").status_code == 200
+        assert client.get("/v1/pricing").status_code == 200
+        assert client.get("/v1/tools").status_code == 200
 
 
 def test_the_request_plane_still_refuses_anonymous_and_cross_site_callers(tmp_path: Path) -> None:

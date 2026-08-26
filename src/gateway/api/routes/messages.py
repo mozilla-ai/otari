@@ -22,7 +22,6 @@ from gateway.api.deps import (
     get_config,
     get_db_if_needed,
     get_log_writer,
-    get_session_identity,
     verify_api_key_or_master_key,
 )
 from gateway.api.routes._helpers import latest_user_text, routing_signal_from_messages
@@ -737,9 +736,10 @@ async def count_message_tokens(
         else:
             if db is None:
                 raise _anthropic_error(_ERR_API, DB_UNAVAILABLE_DETAIL, status.HTTP_500_INTERNAL_SERVER_ERROR)
-            # Resolved explicitly: a direct call gets no dependency injection.
-            session_identity = await get_session_identity(raw_request, db, config)
-            await verify_api_key_or_master_key(raw_request, db, config, session_identity)
+            # No session cookie here either, for the reason the completions path
+            # gives (`_pipeline.resolve_request_context`): this counts tokens for
+            # the plane a cookie may not reach, so it must not report on one.
+            await verify_api_key_or_master_key(raw_request, db, config)
     except HTTPException as exc:
         # Keep /v1/messages/count_tokens auth errors in the Anthropic envelope too.
         raise _ensure_anthropic_error(exc) from exc

@@ -37,7 +37,15 @@ A dashboard session cookie also authenticates a management endpoint, which is ho
 browser reaches one. It does not by itself authorize a **deployment-wide** endpoint: a
 row marked `Deployment operator` below additionally requires that the session name a
 superuser or the bootstrap operator, the same standing `/v1/admin` asks for. The master
-key in a header always clears it. See [Access control](access-control.md).
+key in a header always clears it.
+
+A cookie does not authenticate the endpoints marked `API key or master key` **at all**,
+whoever holds it. Those call a provider with the deployment's credentials and bill a
+workspace, and a request with no key row resolves both through the deployment's default
+workspace, so a cookie accepted there would spend one tenant's credential for another.
+The exceptions are the catalog reads (`GET /v1/models`, `GET /v1/pricing`, `GET /v1/tools`
+and their by-id forms), which call nothing and bill nothing, and which the dashboard's
+Models and Pricing pages are built on. See [Access control](access-control.md).
 
 ### Connected to otari.ai
 

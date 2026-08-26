@@ -55,12 +55,23 @@ export function useNavVisibility(): (item: NavItem) => boolean {
   const hostsSurface = useSurfaces()
   const operator = useDeploymentAdminAccess(hostsSurface(OPERATOR_SURFACE))
 
-  return useMemo(
-    () => (item: NavItem) =>
-      isRouteVisible(item) &&
-      (item.operatorOnly === undefined || operator.data === true),
-    [isRouteVisible, operator.data],
-  )
+  return useMemo(() => {
+    // Mirrors the server's own refusal, which is what makes the two values a
+    // correctness question rather than a preference: an "unlisted" row is one
+    // the server 404s, so revealing it before the answer arrives would leak
+    // what the 404 hides, while a "refused" row is one the server 403s, whose
+    // existence is public. See `types.ts` for the full note.
+    const allowedByCaller = (item: NavItem) => {
+      if (item.operatorOnly === undefined) {
+        return true
+      }
+      return item.operatorOnly === "unlisted"
+        ? operator.data === true
+        : operator.data !== false
+    }
+
+    return (item: NavItem) => isRouteVisible(item) && allowedByCaller(item)
+  }, [isRouteVisible, operator.data])
 }
 
 /**
