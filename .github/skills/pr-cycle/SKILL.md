@@ -134,6 +134,13 @@ threads the same way (reply, then resolve). It tends to arrive first.
 3. **Triage.** Apply every valid finding; skip a nit that contradicts an established convention
    here and say so. Verify against current source before "re-fixing" anything: GitHub re-anchors
    comments to HEAD, so an addressed comment can look like it came back.
+
+   **When a finding is about a claim, grep the repo for the claim, not the file.** The habit worth
+   correcting here is fixing the place the problem was noticed rather than every place it lives.
+   One review caught the same stale statement in three files, a role whose color was checked and
+   whose metrics were not, and one of two identical hand-rolled values in a file already being
+   edited. Each fix was right and each search was one file too narrow, so after applying a finding,
+   search for the pattern rather than re-reading the diff.
 4. **Push** the fixes. On each addressed thread, **reply** with one line on how it was addressed,
    then **resolve** it:
    ```bash
