@@ -16,7 +16,7 @@ from sqlalchemy.exc import SQLAlchemyError
 
 from gateway.api.deps import reset_config
 from gateway.api.routes import bootstrap as bootstrap_route
-from gateway.api.routes.bootstrap import STANDALONE_SURFACES
+from gateway.api.routes.bootstrap import HOSTED_SURFACES, STANDALONE_SURFACES
 from gateway.core.config import GatewayConfig
 from gateway.core.database import reset_db
 from gateway.main import create_app
@@ -30,6 +30,14 @@ def _standalone(tmp_path: Path, docs_url: str | None = None) -> GatewayConfig:
         database_url=f"sqlite:///{tmp_path / 'bootstrap.db'}",
         master_key=MASTER_KEY,
         docs_url=docs_url,
+    )
+
+
+def _hosted(tmp_path: Path) -> GatewayConfig:
+    return GatewayConfig(
+        mode="hosted",
+        database_url=f"sqlite:///{tmp_path / 'bootstrap.db'}",
+        master_key=MASTER_KEY,
     )
 
 
@@ -167,15 +175,95 @@ def test_mail_ready_turns_on_only_with_a_transport_and_a_public_url(tmp_path: Pa
     reset_db()
 
 
-def test_every_surface_names_a_route_the_gateway_mounts(tmp_path: Path) -> None:
+# A surface names its router's ``/v1/`` prefix, so the prefix is derived from the
+# name. One is nested rather than top-level and cannot be: the organization's own
+# provider keys hang off ``/v1/organizations``, and naming them ``organizations``
+# would collapse them into the roster surface, which is a different page with
+# different access. Listed here rather than in the surface tuple itself so the
+# tuple stays the plain list of names the dashboard gates on.
+SURFACE_ROUTE_PREFIXES = {"organization_providers": "/v1/organizations/me/provider-keys"}
+
+
+@pytest.mark.parametrize("surfaces", [STANDALONE_SURFACES, HOSTED_SURFACES], ids=["standalone", "hosted"])
+def test_every_surface_names_a_route_the_gateway_mounts(tmp_path: Path, surfaces: tuple[str, ...]) -> None:
     """A surface that outlives its API would gate a nav item onto a 404."""
     app = create_app(_standalone(tmp_path))
     mounted = {getattr(route, "path", "") for route in app.routes}
 
-    for surface in STANDALONE_SURFACES:
-        assert any(path.startswith(f"/v1/{surface}") for path in mounted), (
-            f"surface {surface!r} names no mounted /v1/ route"
-        )
+    for surface in surfaces:
+        prefix = SURFACE_ROUTE_PREFIXES.get(surface, f"/v1/{surface}")
+        assert any(path.startswith(prefix) for path in mounted), f"surface {surface!r} names no mounted /v1/ route"
+
+    reset_config()
+    reset_db()
+
+
+def test_hosted_swaps_the_process_wide_provider_page_for_the_per_organization_one(tmp_path: Path) -> None:
+    """The whole point of the hosted surface set, in the two rows that differ.
+
+    ``provider_credentials`` is keyed on the instance name alone, so a credential
+    added through ``/providers`` is served to every organization on the
+    deployment and shadows that organization's own BYO key. The page is right for
+    the single-tenant product and wrong for a control plane, and the
+    organization-scoped one is the other way around.
+    """
+    app = create_app(_hosted(tmp_path))
+
+    with TestClient(app) as client:
+        answered = client.get("/v1/bootstrap").json()
+
+    assert answered["deployment_type"] == "hosted"
+    # Still this deployment's own sign-in: "hosted_user" is a session minted by
+    # somebody else's account system, which no build here does.
+    assert answered["session_type"] == "local_operator"
+    assert "organization_providers" in answered["surfaces"]
+    assert "providers" not in answered["surfaces"]
+    # Everything else is standalone's set, so a surface added there is not
+    # silently withheld from a control plane.
+    assert set(answered["surfaces"]) ^ set(STANDALONE_SURFACES) == {"organization_providers", "providers"}
+
+    reset_config()
+    reset_db()
+
+
+def test_hosted_answers_everything_below_the_edition_the_way_standalone_does(tmp_path: Path) -> None:
+    """Hosted mode is standalone's multi-tenant sibling, not a third data plane.
+
+    It owns its own database and mints its own sessions, so a change to hosted
+    mode that also changed how somebody signs in, or whether the deployment is
+    frozen, would be a change nobody asked for.
+    """
+    standalone_app = create_app(_standalone(tmp_path))
+    with TestClient(standalone_app) as client:
+        standalone = client.get("/v1/bootstrap").json()
+
+    reset_config()
+    reset_db()
+
+    hosted_app = create_app(_hosted(tmp_path))
+    with TestClient(hosted_app) as client:
+        hosted = client.get("/v1/bootstrap").json()
+
+    differ = {key for key in standalone if standalone[key] != hosted[key]}
+    assert differ == {"deployment_type", "surfaces"}
+
+    reset_config()
+    reset_db()
+
+
+def test_hosted_mode_refuses_a_platform_token(tmp_path: Path) -> None:
+    """The same conflict standalone already refuses, for the same reason.
+
+    A deployment that holds its own management API is not also a data plane
+    reporting to somebody else's control plane, so the two settings cannot both
+    be meant.
+    """
+    config = _hosted(tmp_path)
+    config._platform_token = PLATFORM_TOKEN
+    config._platform_token_resolved = True
+
+    with pytest.raises(ValueError, match="conflicts with OTARI_AI_TOKEN"):
+        config.validate_mode_selection()
 
 
 def test_hybrid_reports_no_session_no_surfaces_and_the_hosted_url(monkeypatch: pytest.MonkeyPatch) -> None:

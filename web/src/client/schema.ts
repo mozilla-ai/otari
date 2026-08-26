@@ -5172,7 +5172,7 @@ export interface components {
         DeploymentBootstrap: {
             /**
              * Deployment Type
-             * @description Which deployment serves this URL. 'standalone' owns its own data; 'hosted' is otari.ai; 'hybrid' is a gateway attached to otari.ai, which is data-plane only and holds no management surface of its own.
+             * @description Which deployment serves this URL. 'standalone' owns its own data and serves one tenant; 'hosted' owns its own data and serves many (otari.ai, or any deployment run as a control plane), which is why its management surfaces are the per-organization ones; 'hybrid' is a gateway attached to otari.ai, which is data-plane only and holds no management surface of its own.
              * @enum {string}
              */
             deployment_type: "standalone" | "hosted" | "hybrid";

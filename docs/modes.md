@@ -1,7 +1,9 @@
 # Modes
 
 Otari operates in two modes: **standalone** and **connected to otari.ai**
-(`hybrid mode`).
+(`hybrid mode`). Standalone has a multi-tenant variant, **hosted**, described
+below: same database, same API, a dashboard scoped to organizations rather than
+to the process.
 
 ## Standalone
 
@@ -15,15 +17,38 @@ This is the default. Otari manages everything locally:
 
 All endpoints are available. On first startup, Otari bootstraps an API key and logs it to the console.
 
+## Hosted (standalone, serving many organizations)
+
+Set `OTARI_MODE=hosted` when one Otari deployment is the control plane for
+several organizations rather than one operator's own gateway. Everything in
+standalone applies: the deployment owns its database, serves the whole
+management API, and signs operators in itself. A platform token is refused here
+for the same reason it is refused in standalone, since a deployment holding its
+own management API is not also a data plane reporting to somebody else's.
+
+What changes is the dashboard, in one place. Provider credentials in
+`config.yml` and under `/v1/provider-credentials` are keyed on the instance name
+alone, so one added there is served to every organization on the deployment. The
+`Providers` page that manages them is right for a single-tenant deployment and
+misleading on a shared one, so hosted mode hides it and shows the
+organization-scoped credentials at `Organization > Providers` instead
+(`/v1/organizations/me/provider-keys`): a key created there belongs to one
+organization, and every workspace inside it inherits it.
+
+Hiding the page does not disable the deployment-wide credentials. `config.yml`
+and the API still populate them, and they are still resolved on the request
+path; hosted mode only stops offering them a dashboard.
+
 ## Connected to otari.ai (Hybrid Mode)
 
 When connected to [otari.ai](https://otari.ai), Otari delegates provider routing, authentication, and usage tracking to the platform.
 
 This mode activates automatically when `OTARI_AI_TOKEN` is set. You can also set
 `OTARI_MODE` explicitly to assert the intended mode: `OTARI_MODE=hybrid` requires
-a token (startup fails without one), and `OTARI_MODE=standalone` with a token set
-is rejected at startup as conflicting configuration (the token would otherwise
-select hybrid). Leave `OTARI_MODE` unset to let the token decide.
+a token (startup fails without one), and `OTARI_MODE=standalone` or
+`OTARI_MODE=hosted` with a token set is rejected at startup as conflicting
+configuration (the token would otherwise select hybrid). Leave `OTARI_MODE` unset
+to let the token decide.
 
 `OTARI_AI_TOKEN` is the gateway token (`gw_...`) you create in otari.ai for
 this Otari instance. In otari.ai, go to `Organization > Gateways`, create or
@@ -103,6 +128,9 @@ If a self-hosted instance requests a managed model, otari.ai returns
 request through otari.ai's hosted gateway instead.
 
 ## Comparison
+
+Hosted is standalone with one dashboard difference (see above), so the
+standalone column describes it too.
 
 | | Standalone | Connected to otari.ai |
 |---|---|---|

@@ -39,6 +39,7 @@ import {
   formatUsd,
 } from "@/shared/helpers/format"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
+import { useSurfaces } from "@/shared/hooks/useDeployment"
 
 const DAY_MS = 86_400_000
 const PERIOD_DAYS = 30
@@ -400,8 +401,19 @@ export function OverviewPage({
   )
 }
 
+// Where "manage the credentials this gateway calls providers with" lives on
+// this deployment. A standalone one serves the process-wide page; a hosted one
+// serves the organization-scoped page in its place and does not report
+// `providers` at all, so naming `/providers` unconditionally would point an
+// operator at the shell's "not available here" panel.
+function useProvidersRoute(): "/providers" | "/organization/provider-keys" {
+  const serves = useSurfaces()
+  return serves("providers") ? "/providers" : "/organization/provider-keys"
+}
+
 function GettingStartedPanel() {
   const navigate = useNavigate()
+  const providersRoute = useProvidersRoute()
 
   return (
     <Card>
@@ -418,7 +430,7 @@ function GettingStartedPanel() {
         <div>
           <Button
             variant="primary"
-            onPress={() => navigate({ to: "/providers" })}
+            onPress={() => navigate({ to: providersRoute })}
           >
             Add your first provider
           </Button>
@@ -462,6 +474,7 @@ function SystemStatusStrip({
   ready: boolean
   failed: boolean
 }) {
+  const providersRoute = useProvidersRoute()
   // A failed source deserves a visible status message; while loading, wait for
   // actionable information instead of reserving space for a transient banner.
   if (failed) {
@@ -483,13 +496,13 @@ function SystemStatusStrip({
     if (down > 0) {
       problems.push({
         text: `${down} provider${down === 1 ? "" : "s"} unreachable`,
-        to: "/providers",
+        to: providersRoute,
       })
     }
     if (degraded > 0) {
       problems.push({
         text: `${degraded} provider${degraded === 1 ? "" : "s"} without model discovery`,
-        to: "/providers",
+        to: providersRoute,
       })
     }
   }
