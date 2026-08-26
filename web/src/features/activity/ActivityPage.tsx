@@ -224,9 +224,7 @@ function InFlightControl({
       <Popover.Content placement="bottom end">
         <Popover.Dialog>
           <div className="flex w-80 flex-col gap-2">
-            <Popover.Heading className="text-sm font-medium">
-              In flight
-            </Popover.Heading>
+            <Popover.Heading className="text-title">In flight</Popover.Heading>
             <p className="text-xs text-muted">
               Running right now, across the whole gateway; longest-running
               first. Not narrowed by the filters above.
@@ -821,25 +819,25 @@ function RoutingPlan({ entry }: { entry: UsageEntry }) {
         >
           <thead className="text-muted">
             <tr className="border-b border-border">
-              <th scope="col" className="px-3 py-2 text-left font-medium">
+              <th scope="col" className="px-3 py-2 text-left text-overline">
                 #
               </th>
-              <th scope="col" className="px-3 py-2 text-left font-medium">
+              <th scope="col" className="px-3 py-2 text-left text-overline">
                 Target
               </th>
-              <th scope="col" className="px-3 py-2 text-left font-medium">
+              <th scope="col" className="px-3 py-2 text-left text-overline">
                 Selected as
               </th>
-              <th scope="col" className="px-3 py-2 text-left font-medium">
+              <th scope="col" className="px-3 py-2 text-left text-overline">
                 Outcome
               </th>
               {/* Every attempt's `latency_ms` is measured from the start of the
                   request, not from the start of that attempt, so this is the same
                   "Total time" the row column shows, not a per-candidate duration. */}
-              <th scope="col" className="px-3 py-2 text-right font-medium">
+              <th scope="col" className="px-3 py-2 text-right text-overline">
                 Total time
               </th>
-              <th scope="col" className="px-3 py-2 text-right font-medium">
+              <th scope="col" className="px-3 py-2 text-right text-overline">
                 Cost
               </th>
             </tr>

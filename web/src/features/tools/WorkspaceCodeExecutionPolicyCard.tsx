@@ -233,9 +233,7 @@ export function WorkspaceCodeExecutionPolicyCard({
 
   return (
     <section className="flex flex-col gap-2">
-      <h2 className="text-sm font-semibold text-foreground">
-        This workspace ({selected.name})
-      </h2>
+      <h2 className="text-title">This workspace ({selected.name})</h2>
       <p className="text-sm text-muted">
         Whether requests billed to this workspace may use otari_code_execution,
         and the limits they run under. A workspace policy can only narrow what

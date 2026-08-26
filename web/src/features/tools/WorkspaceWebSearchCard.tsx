@@ -209,9 +209,7 @@ export function WorkspaceWebSearchCard({
 
   return (
     <section className="flex flex-col gap-2">
-      <h2 className="text-sm font-semibold text-foreground">
-        This workspace ({selected.name})
-      </h2>
+      <h2 className="text-title">This workspace ({selected.name})</h2>
       <p className="text-sm text-muted">
         Whether requests billed to this workspace may search the web, and how
         far a search may reach. Blocking covers both doors: the otari_web_search

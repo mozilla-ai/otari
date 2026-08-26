@@ -188,9 +188,7 @@ export function RateOverridesCard() {
   return (
     <section className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-sm font-semibold text-foreground">
-          Rate overrides
-        </h2>
+        <h2 className="text-title">Rate overrides</h2>
         <Button
           size="sm"
           variant="primary"

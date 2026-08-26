@@ -614,9 +614,7 @@ function RecentActivity({
   return (
     <div className="flex flex-col gap-3">
       <div className="flex items-center justify-between">
-        <h2 className="text-sm font-semibold text-foreground">
-          Recent activity
-        </h2>
+        <h2 className="text-title">Recent activity</h2>
         <Link
           to="/activity"
           className="text-sm text-link hover:text-link-hover hover:underline"

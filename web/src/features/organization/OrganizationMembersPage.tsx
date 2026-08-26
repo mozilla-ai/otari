@@ -197,7 +197,7 @@ function AddMemberForm({ onClose }: { onClose: () => void }) {
   return (
     <Card>
       <Card.Content className="flex flex-col gap-4 p-5">
-        <div className="text-sm font-semibold text-foreground">Add member</div>
+        <div className="text-title">Add member</div>
         <ErrorBanner error={add.error} />
         <div className="grid gap-4 sm:grid-cols-2">
           <Field
@@ -319,9 +319,7 @@ function InviteMemberForm({ onClose }: { onClose: () => void }) {
     return (
       <Card>
         <Card.Content className="flex flex-col gap-4 p-5">
-          <div className="text-sm font-semibold text-foreground">
-            Invitation sent
-          </div>
+          <div className="text-title">Invitation sent</div>
           {result.mail_sent ? (
             <InfoBanner>
               An email with an accept link was sent to{" "}
@@ -357,9 +355,7 @@ function InviteMemberForm({ onClose }: { onClose: () => void }) {
   return (
     <Card>
       <Card.Content className="flex flex-col gap-4 p-5">
-        <div className="text-sm font-semibold text-foreground">
-          Invite member
-        </div>
+        <div className="text-title">Invite member</div>
         <ErrorBanner error={invite.error} />
         <div className="grid gap-4 sm:grid-cols-2">
           <Field
@@ -606,9 +602,7 @@ function MemberEditor({
   return (
     <Card>
       <Card.Content className="flex flex-col gap-5 p-5">
-        <div className="text-sm font-semibold text-foreground">
-          Edit {memberLabel(member)}
-        </div>
+        <div className="text-title">Edit {memberLabel(member)}</div>
         <ErrorBanner error={error} />
 
         {spendRow ? (

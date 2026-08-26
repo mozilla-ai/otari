@@ -256,7 +256,7 @@ function BudgetForm({
   return (
     <Card>
       <Card.Content className="flex flex-col gap-4 p-5">
-        <div className="text-sm font-semibold text-foreground">{title}</div>
+        <div className="text-title">{title}</div>
         <ErrorBanner error={error} />
         <Field
           label="Name (optional)"

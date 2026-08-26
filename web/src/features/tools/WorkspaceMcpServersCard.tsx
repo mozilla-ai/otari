@@ -73,7 +73,7 @@ export function WorkspaceMcpServersCard({
   const [pendingDelete, setPendingDelete] = useState<WorkspaceMcpServer>()
 
   const heading = showHeading ? (
-    <h2 className="text-sm font-semibold text-foreground">MCP servers</h2>
+    <h2 className="text-title">MCP servers</h2>
   ) : null
 
   if (!selected) {

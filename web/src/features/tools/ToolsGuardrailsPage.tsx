@@ -736,11 +736,7 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
                 {/* Dropped when the page is narrowed to this one service: the
                     page title already says it, and repeating it reads as two
                     headings for the same thing. */}
-                {only ? null : (
-                  <h2 className="text-sm font-semibold text-foreground">
-                    {service.label}
-                  </h2>
-                )}
+                {only ? null : <h2 className="text-title">{service.label}</h2>}
                 <p className="text-sm text-muted">{service.blurb}</p>
                 <Card>
                   <Card.Content className="flex flex-col divide-y divide-border px-5 py-1">
