@@ -155,6 +155,70 @@ describe("OverviewPage", () => {
     expect(screen.getByText("Elevated")).toBeInTheDocument() // error-rate status word (non-hue)
   })
 
+  it("renders period-over-period change as a trend chip, not a glyph", async () => {
+    mockApi({
+      today: { cost: 5, request_count: 100, error_count: 1 },
+      period: { cost: 200, request_count: 2000, error_count: 40 },
+      prev: { cost: 100, request_count: 1600, error_count: 8 },
+    })
+    renderPage(<OverviewPage />)
+    await screen.findByText("$200.00")
+
+    // The chip carries the caption the old plain-text hint carried, so the
+    // comparison still says what it is being compared against. Distinct
+    // percentages per tile, so each assertion is about one chip: spend doubled,
+    // requests rose a quarter, and the error rate went 0.5% -> 2.0%.
+    expect(screen.getByText("+100.0% vs prev")).toBeInTheDocument()
+    expect(screen.getByText("+25.0% vs prev")).toBeInTheDocument()
+    expect(screen.getByText("+300.0% vs prev")).toBeInTheDocument()
+    // And each announces a direction, which the glyph never did: "▲" is
+    // decoration a screen reader skips. TrendChip.test.tsx owns the direction
+    // and polarity mapping; this only asserts the three tiles go through it.
+    // Anchored and counted: unanchored, `up` and `down` also match this page's
+    // own prose, so the assertion would pass with the announcement deleted.
+    expect(
+      screen.getAllByText(/^(no change|up|down)(, (better|worse))?$/),
+    ).toHaveLength(3)
+    // The hand-rolled arrow glyphs are gone from the tiles.
+    expect(screen.queryByText(/[▲▼]/)).not.toBeInTheDocument()
+  })
+
+  it("reads a chip against the metric's own polarity, not the direction alone", async () => {
+    // Spend and the error rate both rose, and both improve by falling, so both
+    // are regressions and say so: direction plus judgment, because polarity puts
+    // good and bad in hue alone. Request volume rose too, but volume carries no
+    // polarity, so it announces the direction and nothing more.
+    mockApi({
+      today: { cost: 5, request_count: 100, error_count: 1 },
+      period: { cost: 200, request_count: 2000, error_count: 40 },
+      prev: { cost: 100, request_count: 1600, error_count: 8 },
+    })
+    renderPage(<OverviewPage />)
+
+    expect(await screen.findByText("$200.00")).toBeInTheDocument()
+    expect(screen.getAllByText("up, worse")).toHaveLength(2)
+    expect(screen.getAllByText("up")).toHaveLength(1)
+  })
+
+  it("reserves no trend row for a tile with no comparable previous window", async () => {
+    // No previous window on the wire leaves every delta null, and TrendChip
+    // renders nothing for a null fraction. The chip has to be gated on the
+    // fraction rather than on the query, or StatCard reserves the aside row for
+    // an element that draws nothing.
+    mockApi({
+      today: { cost: 5 },
+      period: { cost: 200, request_count: 2000, error_count: 40 },
+      prev: { cost: 0, request_count: 0, error_count: 0 },
+    })
+    renderPage(<OverviewPage />)
+    await screen.findByText("$200.00")
+
+    expect(screen.queryByText(/vs prev/)).not.toBeInTheDocument()
+    expect(
+      screen.queryByText(/^(no change|up|down)(, (better|worse))?$/),
+    ).not.toBeInTheDocument()
+  })
+
   it("renders spend and request-volume sparklines from the 30-day series", async () => {
     const series = [
       {

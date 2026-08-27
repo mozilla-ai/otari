@@ -1,6 +1,7 @@
 import {
   Button,
   Card,
+  Chip,
   ComboBox,
   Input,
   Label,
@@ -18,7 +19,7 @@ import { Checkbox as AriaCheckbox } from "react-aria-components"
 
 import { ApiError } from "@/shared/api/client"
 import { copyToClipboard } from "@/shared/helpers/clipboard"
-import { formatPct, formatRelative } from "@/shared/helpers/format"
+import { formatRelative } from "@/shared/helpers/format"
 
 // The box visual, split out so it can hold optimistic state: react-aria only
 // reports the new `isSelected` after the whole collection re-renders (O(rows)
@@ -138,19 +139,21 @@ export type StatStatus = "ok" | "warn" | "alert"
 // and that rule is unlayered while a Tailwind utility sits in @layer utilities;
 // unlayered always wins, whatever the specificity. Without the bang the
 // shorthand `border:` resets this tile's left edge back to a hairline.
-const STAT_STATUS: Record<StatStatus, { accent: string; pill: string }> = {
-  ok: {
-    accent: "border-l-success!",
-    pill: "border-success bg-success-subtle text-success",
-  },
-  warn: {
-    accent: "border-l-warning!",
-    pill: "border-warning bg-warning-subtle text-warning",
-  },
-  alert: {
-    accent: "border-l-danger!",
-    pill: "border-danger bg-danger-subtle text-danger",
-  },
+//
+// The pill beside the value is HeroUI's own Chip, for the reason TrendChip is:
+// `globals.css` aliases the status bases the chip's CSS reads (`--success`,
+// `--warning`, `--danger`) onto our tokens, so naming a status here is all it
+// takes for both themes to follow the foundation. This used to be a hand-rolled
+// <span> carrying its own border/bg/text triple per status, which restated in
+// three class strings what the library already derives, and left the status pill
+// and the trend chip on the same tile as two different shapes.
+const STAT_STATUS: Record<
+  StatStatus,
+  { accent: string; chip: "success" | "warning" | "danger" }
+> = {
+  ok: { accent: "border-l-success!", chip: "success" },
+  warn: { accent: "border-l-warning!", chip: "warning" },
+  alert: { accent: "border-l-danger!", chip: "danger" },
 }
 
 export function StatCard({
@@ -203,11 +206,12 @@ export function StatCard({
           {value}
         </span>
         {status && statusLabel ? (
-          <span
-            className={`inline-flex items-center gap-1 rounded-full border px-2 py-0.5 text-xs font-medium ${STAT_STATUS[status].pill}`}
-          >
-            {statusLabel}
-          </span>
+          // `soft` and `sm` are TrendChip's defaults too, so a tile carrying
+          // both (the error-rate tile carries a status word and a delta) draws
+          // one shape at one weight rather than two.
+          <Chip variant="soft" color={STAT_STATUS[status].chip} size="sm">
+            <Chip.Label>{statusLabel}</Chip.Label>
+          </Chip>
         ) : null}
       </span>
       {/* One row under the value carrying both the movement (the chip) and the
@@ -271,18 +275,6 @@ export function StatCard({
     )
   }
   return <Card className={cardClass}>{body}</Card>
-}
-
-// Period-over-period change hint. Pairs an arrow glyph with the number (never hue
-// alone) so direction reads without color. null hides it (no comparable previous).
-export function DeltaHint({ fraction }: { fraction: number | null }) {
-  if (fraction === null) return null
-  const arrow = fraction > 0 ? "▲" : fraction < 0 ? "▼" : "•"
-  return (
-    <span className="text-muted">
-      {arrow} {formatPct(Math.abs(fraction))} vs prev
-    </span>
-  )
 }
 
 export function errorMessage(error: unknown): string {

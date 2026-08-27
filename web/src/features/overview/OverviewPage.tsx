@@ -24,8 +24,8 @@ import {
 } from "@/shared/api/hooks"
 import { Sparkline } from "@/shared/components/charts"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
+import { TrendChip } from "@/shared/components/TrendChip"
 import {
-  DeltaHint,
   EmptyState,
   ErrorBanner,
   PageHeader,
@@ -245,6 +245,18 @@ export function OverviewPage({
 
   const err = errorRateHealth(periodTotals)
   const errPrev = errorRateHealth(prevTotals)
+  // Each delta is its own const so the tile below can gate its chip on the
+  // fraction rather than on the query: `deltaFraction` also returns null once
+  // the current window has landed but the previous one has not, and when the
+  // previous value is 0. TrendChip renders nothing for a null fraction, but the
+  // *element* is truthy, and StatCard reserves the aside row for whatever it is
+  // handed, so an ungated chip costs a tile 42px of dead space.
+  const costDelta = periodTotals
+    ? deltaFraction(periodTotals.cost, prevTotals?.cost)
+    : null
+  const requestDelta = periodTotals
+    ? deltaFraction(periodTotals.request_count, prevTotals?.request_count)
+    : null
   const errDelta =
     err.rate !== null && errPrev.rate !== null
       ? deltaFraction(err.rate, errPrev.rate)
@@ -357,10 +369,14 @@ export function OverviewPage({
         <StatCard
           label="Spend, last 30 days"
           value={periodTotals ? formatUsd(periodTotals.cost) : "—"}
-          hint={
-            periodTotals ? (
-              <DeltaHint
-                fraction={deltaFraction(periodTotals.cost, prevTotals?.cost)}
+          // Spend falling is the improvement, so a rise paints danger while the
+          // arrow keeps telling the truth about which way it went.
+          trend={
+            costDelta !== null ? (
+              <TrendChip
+                fraction={costDelta}
+                polarity="down-is-good"
+                caption="vs prev"
               />
             ) : null
           }
@@ -376,14 +392,12 @@ export function OverviewPage({
         <StatCard
           label="Requests, last 30 days"
           value={periodTotals ? formatNumber(periodTotals.request_count) : "—"}
-          hint={
-            periodTotals ? (
-              <DeltaHint
-                fraction={deltaFraction(
-                  periodTotals.request_count,
-                  prevTotals?.request_count,
-                )}
-              />
+          // Volume, so `neutral`: more traffic through the gateway is neither a
+          // win nor a regression on its own, and the error rate tile beside it
+          // is what carries the judgment.
+          trend={
+            requestDelta !== null ? (
+              <TrendChip fraction={requestDelta} caption="vs prev" />
             ) : null
           }
           chart={
@@ -402,7 +416,16 @@ export function OverviewPage({
           statusLabel={
             err.status === "neutral" ? undefined : ERROR_WORDS[err.status]
           }
-          hint={err.rate !== null ? <DeltaHint fraction={errDelta} /> : null}
+          // Errors falling is the improvement, as with spend.
+          trend={
+            errDelta !== null ? (
+              <TrendChip
+                fraction={errDelta}
+                polarity="down-is-good"
+                caption="vs prev"
+              />
+            ) : null
+          }
         />
         <StatCard
           label="Budget health"
