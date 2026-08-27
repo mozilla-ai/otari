@@ -49,6 +49,7 @@ from gateway.api.routes._pipeline import (
     run_platform_non_stream,
     run_single_attempt_stream,
     run_standalone_non_stream,
+    stream_final_attempt_extra_seconds,
     stream_first_chunk_timeout_seconds,
 )
 from gateway.api.routes._platform import ResolvedAttempt, ResolvedRoute, SettledCost
@@ -249,6 +250,95 @@ def test_first_chunk_timeout_reads_shared_config_keys() -> None:
     )
     assert stream_first_chunk_timeout_seconds(config, tool_mode=False) == 0.5
     assert stream_first_chunk_timeout_seconds(config, tool_mode=True) == 7.0
+
+
+@pytest.mark.parametrize(
+    ("tool_mode", "has_forwarded_tools", "expected_final_timeout"),
+    [
+        pytest.param(False, False, 10.0, id="ordinary-final"),
+        pytest.param(False, True, 30.0, id="forwarded-tools-final"),
+        pytest.param(True, False, 37.0, id="managed-tool-loop-final"),
+        pytest.param(True, True, 37.0, id="managed-loop-with-forwarded-tools-final"),
+    ],
+)
+def test_final_attempt_timeout_relaxes_only_forwarded_tool_requests(
+    tool_mode: bool,
+    has_forwarded_tools: bool,
+    expected_final_timeout: float,
+) -> None:
+    config = GatewayConfig(
+        platform={
+            "streaming_first_chunk_timeout_ms": 3000,
+            "streaming_first_chunk_timeout_ms_tool_loop": 30000,
+            "streaming_final_attempt_extra_first_chunk_timeout_ms": 7000,
+        }
+    )
+
+    base_timeout = stream_first_chunk_timeout_seconds(config, tool_mode=tool_mode)
+    extra_timeout = stream_final_attempt_extra_seconds(
+        config,
+        tool_mode=tool_mode,
+        has_forwarded_tools=has_forwarded_tools,
+    )
+
+    assert base_timeout + extra_timeout == expected_final_timeout
+
+
+@pytest.mark.asyncio
+async def test_streaming_fallback_wires_forwarded_tools_into_final_timeout(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    config = GatewayConfig(
+        platform={
+            "streaming_first_chunk_timeout_ms": 3000,
+            "streaming_first_chunk_timeout_ms_tool_loop": 30000,
+            "streaming_final_attempt_extra_first_chunk_timeout_ms": 7000,
+        }
+    )
+    route = ResolvedRoute(
+        request_id="request-1",
+        fallback_enabled=False,
+        attempts=[
+            ResolvedAttempt(
+                attempt_id="attempt-1",
+                position=1,
+                provider="anthropic",
+                model="claude-test",
+                api_key="test-key",
+                managed=True,
+            )
+        ],
+    )
+    captured: dict[str, Any] = {}
+
+    async def fake_iterate_streaming_attempts(**kwargs: Any) -> tuple[Any, AsyncIterator[Any]]:
+        captured.update(kwargs)
+
+        async def stream() -> AsyncIterator[Any]:
+            yield object()
+
+        return route.attempts[0], stream()
+
+    marker = Response()
+    monkeypatch.setattr(pipeline, "iterate_streaming_attempts", fake_iterate_streaming_attempts)
+    monkeypatch.setattr(pipeline, "build_streaming_response", lambda **_kwargs: marker)
+
+    response = await pipeline.run_streaming_with_fallback(
+        adapter=chat._ADAPTER,
+        route=route,
+        base_request_fields={},
+        config=config,
+        background_tasks=BackgroundTasks(),
+        rate_limit_info=None,
+        tool_ctx=_tool_ctx(
+            config=config,
+            remaining_user_tools=[{"name": "slack_send", "input_schema": {}}],
+        ),
+    )
+
+    assert response is marker
+    assert captured["first_chunk_timeout_seconds"] == 3.0
+    assert captured["final_attempt_extra_seconds"] == 27.0
 
 
 # ---------------------------------------------------------------------------

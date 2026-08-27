@@ -3702,15 +3702,22 @@ def stream_first_chunk_timeout_seconds(config: GatewayConfig, *, tool_mode: bool
     )
 
 
-def stream_final_attempt_extra_seconds(config: GatewayConfig) -> float:
+def stream_final_attempt_extra_seconds(
+    config: GatewayConfig,
+    *,
+    tool_mode: bool = False,
+    has_forwarded_tools: bool = False,
+) -> float:
     """Extra first-chunk grace granted only to the sole/final streaming attempt.
 
     Added on top of the per-attempt failover budget for the terminal attempt,
-    which has no next entry in the routing policy to fall over to. Keeps that
-    attempt's wait bounded while not converting a slow-but-valid first token into
-    a timeout. Mode-agnostic (applies on top of the plain or tool-loop budget).
+    which has no next entry in the routing policy to fall over to. A request that
+    forwards provider-native tools but does not run a gateway-managed tool loop
+    keeps the plain failover budget for non-final attempts, while its final
+    deadline is floored to the tool-loop budget. Tool-heavy agents therefore get
+    the existing relaxed criterion only when there is nowhere left to fail over.
     """
-    return (
+    configured_extra = (
         int(
             config.platform.get(
                 _STREAM_FINAL_ATTEMPT_EXTRA_FIRST_CHUNK_TIMEOUT_MS_KEY,
@@ -3719,6 +3726,12 @@ def stream_final_attempt_extra_seconds(config: GatewayConfig) -> float:
         )
         / 1000
     )
+    if tool_mode or not has_forwarded_tools:
+        return configured_extra
+
+    plain_budget = stream_first_chunk_timeout_seconds(config, tool_mode=False)
+    tool_loop_budget = stream_first_chunk_timeout_seconds(config, tool_mode=True)
+    return max(configured_extra, tool_loop_budget - plain_budget)
 
 
 # ---------------------------------------------------------------------------
@@ -3935,7 +3948,11 @@ async def run_streaming_with_fallback(
     """
     tool_mode = tool_ctx.use_tool_loop
     first_chunk_timeout = stream_first_chunk_timeout_seconds(config, tool_mode=tool_mode)
-    final_attempt_extra = stream_final_attempt_extra_seconds(config)
+    final_attempt_extra = stream_final_attempt_extra_seconds(
+        config,
+        tool_mode=tool_mode,
+        has_forwarded_tools=bool(tool_ctx.remaining_user_tools),
+    )
 
     backend_stack = AsyncExitStack()
     pool_for_loop: Any = None
