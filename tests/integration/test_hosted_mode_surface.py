@@ -101,6 +101,14 @@ def test_hosted_mode_refuses_inference_on_every_verb(hosted_client: TestClient) 
         assert response.status_code == 404, method
         assert response.json() == {"detail": EXPECTED_DETAIL}, method
 
+    # HEAD separately, because it is the one verb with no body to compare and
+    # the one FastAPI would have derived from GET had these stubs left their
+    # methods unspecified. They do not, so it is enumerated, and a regression
+    # that dropped it would answer 405: the path is served here, only the verb
+    # was wrong, which is the opposite of what the stub is for.
+    head = hosted_client.head("/v1/chat/completions")
+    assert head.status_code == 404, "HEAD fell through to a 405"
+
     for method, path in (
         ("get", "/v1/files"),
         ("get", "/v1/files/file-abc"),

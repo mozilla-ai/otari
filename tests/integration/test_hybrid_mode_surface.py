@@ -115,8 +115,9 @@ def test_hybrid_mode_disables_dashboard_management_endpoints(monkeypatch: pytest
             assert response.status_code == 404, path
             assert response.json() == expected, path
 
-        # State-changing verbs are stubbed too (api_route covers every method), so
-        # a write cannot slip past the hybrid gate and reach a local handler.
+        # State-changing verbs are stubbed too (every method in the stubs'
+        # shared ``_METHODS``), so a write cannot slip past the hybrid gate and
+        # reach a local handler.
         patch_settings = client.patch("/v1/settings", json={"model_discovery": False})
         assert patch_settings.status_code == 404
         assert patch_settings.json() == expected
@@ -130,6 +131,11 @@ def test_hybrid_mode_disables_dashboard_management_endpoints(monkeypatch: pytest
         assert post_alias.status_code == 404
         assert post_alias.json() == expected
         assert client.delete("/v1/aliases/x").status_code == 404
+        # HEAD is in that list rather than derived from GET, which FastAPI does
+        # only for a route that leaves its methods unspecified. Dropping it
+        # would answer 405, saying the path is served here and only the verb was
+        # wrong. No body to compare on a HEAD, so the status is the assertion.
+        assert client.head("/v1/keys").status_code == 404
 
     reset_config()
     reset_db()

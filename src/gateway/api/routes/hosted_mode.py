@@ -48,7 +48,14 @@ from gateway.core.config import GatewayConfig
 
 _GENERIC_TARGET = "your Otari gateway"
 
-_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+# ``HEAD`` is enumerated rather than inherited. FastAPI derives it from ``GET``
+# only for a route that leaves its methods unspecified, and these give theirs
+# explicitly, so leaving it off answered 405 to the tooling most likely to send
+# it (health probes, link checkers, an SDK's connectivity preflight). 405 is the
+# one status these stubs exist to avoid: it reports that the path is served here
+# and only the verb was wrong, which is the opposite of the fact. The body is
+# empty by definition of the method, so the status carries the whole answer.
+_METHODS = ["GET", "HEAD", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
 
 # Every prefix a hosted deployment refuses, with why it is data plane rather
 # than management. Kept as data so a prefix added later cannot pick up a
