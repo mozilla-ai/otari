@@ -56,11 +56,11 @@ async def overlay_probe_under_a_stub_prefix() -> dict[str, str]:
     return {"source": "overlay"}
 
 
-# The same, under a prefix the *management-only* stubs claim on a hosted
-# deployment. An overlay that contributes a data-plane route to a control plane
+# The same, under a prefix the *hosted* stubs claim on a control
+# plane. An overlay that contributes a data-plane route to a control plane
 # has made a choice, and the stubs are a fallback rather than a veto.
 @granted_router.get("/v1/chat/overlay-probe")
-async def overlay_probe_under_a_management_only_prefix() -> dict[str, str]:
+async def overlay_probe_under_a_hosted_stub_prefix() -> dict[str, str]:
     return {"source": "overlay"}
 
 
@@ -206,10 +206,10 @@ def hosted_bootstrap_client(postgres_url: str, overlay_on_path: str) -> Generato
     yield from build_test_client(config)
 
 
-def test_a_contributed_route_wins_over_the_management_only_stub_catch_all(
+def test_a_contributed_route_wins_over_the_hosted_stub_catch_all(
     hosted_bootstrap_client: TestClient,
 ) -> None:
-    # The mirror of the test above, for the opposite plane. The management-only
+    # The mirror of the test above, for the opposite plane. The hosted-mode
     # stubs are ``{path:path}`` catch-alls over the inference prefixes, so an
     # overlay that deliberately contributes a data-plane route to a control
     # plane is only reachable if the stubs are mounted last.

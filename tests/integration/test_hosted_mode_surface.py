@@ -17,6 +17,7 @@ from collections.abc import Generator
 import pytest
 from fastapi.testclient import TestClient
 
+from gateway.api.routes.hosted_mode import DATA_PLANE_PREFIXES
 from gateway.core.config import GatewayConfig
 from gateway.main import create_app
 
@@ -46,10 +47,11 @@ EXPECTED_DETAIL = (
 )
 
 
-def _config(postgres_url: str, mode: str | None) -> GatewayConfig:
+def _config(postgres_url: str, mode: str | None, data_plane_url: str | None = None) -> GatewayConfig:
     return GatewayConfig(
         mode=mode,
         database_url=postgres_url,
+        data_plane_url=data_plane_url,
         master_key="test-master-key",
         auto_migrate=False,
         require_pricing=False,
@@ -63,6 +65,12 @@ def _config(postgres_url: str, mode: str | None) -> GatewayConfig:
 @pytest.fixture
 def hosted_client(postgres_url: str) -> Generator[TestClient]:
     yield from build_test_client(_config(postgres_url, "hosted"))
+
+
+@pytest.fixture
+def hosted_client_knowing_its_data_plane(postgres_url: str) -> Generator[TestClient]:
+    """The same control plane, configured with the address of its data plane."""
+    yield from build_test_client(_config(postgres_url, "hosted", "https://gateway.example.com"))
 
 
 def test_hosted_mode_refuses_every_inference_endpoint(hosted_client: TestClient) -> None:
@@ -85,7 +93,7 @@ def test_hosted_mode_refuses_inference_on_every_verb(hosted_client: TestClient) 
     The reads are refused with the writes, deliberately, so a tenant holding a
     file or a batch created before the gate went in loses the API to it rather
     than keeping a read-only window onto a plane this deployment no longer
-    serves. See ``management_only``'s module docstring.
+    serves. See ``hosted_mode``'s module docstring.
     """
     for method in ("get", "put", "patch", "delete"):
         response = getattr(hosted_client, method)("/v1/chat/completions")
@@ -158,3 +166,52 @@ def test_non_hosted_modes_keep_serving_inference(mode: str | None, postgres_url:
     # And the refusal stubs are absent entirely, rather than mounted behind the
     # real routes where a path change could one day expose them.
     assert "/v1/chat/{path:path}" not in served
+
+
+def test_every_gated_router_has_a_stub_standing_in_for_it(postgres_url: str) -> None:
+    """Nothing may be gated off hosted mode without a stub to answer for it.
+
+    The gated-router list lives in ``main._register_core_routers`` and the
+    prefix list in ``hosted_mode``, with nothing tying the two together, so a
+    router dropped from the first without a prefix added to the second would
+    ship the bare 404 this whole module exists to avoid, and would do it
+    silently. Derive the tie instead of restating either list: whatever
+    standalone serves and hosted does not must fall under a prefix the stubs
+    claim.
+
+    It cannot catch a *new* data-plane router added outside the guard, since
+    that one is mounted in both modes and so never shows up in the difference.
+    The half it does catch is the half that fails quietly.
+    """
+    def mounted(mode: str) -> set[str]:
+        app = create_app(_config(postgres_url, mode))
+        return {route.path for route in app.routes if hasattr(route, "path")}
+
+    dropped = mounted("standalone") - mounted("hosted")
+    assert dropped, "hosted mode dropped no routes at all, so the gate is not doing anything"
+
+    prefixes = [prefix for prefix, _why in DATA_PLANE_PREFIXES]
+    uncovered = {
+        path for path in dropped if not any(path == prefix or path.startswith(f"{prefix}/") for prefix in prefixes)
+    }
+    assert not uncovered, f"gated off hosted mode with no stub to answer for them: {sorted(uncovered)}"
+
+
+def test_the_refusal_names_the_data_plane_when_the_deployment_knows_it(
+    hosted_client_knowing_its_data_plane: TestClient,
+) -> None:
+    """A caller who mis-pointed an SDK needs the address, not the category.
+
+    "Send it to your Otari gateway" is what they already believed they were
+    doing. Where ``data_plane_url`` is set, which is the same value
+    ``GET /v1/bootstrap`` hands the dashboard, the refusal names the host.
+    """
+    response = hosted_client_knowing_its_data_plane.post("/v1/chat/completions", json={})
+
+    assert response.status_code == 404
+    assert response.json() == {
+        "detail": (
+            "This deployment is a control plane and does not serve inference. "
+            "Send inference requests to https://gateway.example.com instead."
+        )
+    }

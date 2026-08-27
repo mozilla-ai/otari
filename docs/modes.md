@@ -37,15 +37,23 @@ A control plane runs no customer traffic. `/v1/chat/completions`,
 `/v1/rerank`, `/v1/moderations`, `/v1/search`, `/v1/batches` and `/v1/files` are
 not served here. The routers that would run them are not mounted at all, and a
 stub stands in their place so the answer explains itself: every one of those
-paths returns `404` with a body naming the reason and pointing at the gateway
-that should have served the request, rather than the bare `404` an unmounted
-path would otherwise give.
+paths returns `404` with a body naming the reason, rather than the bare `404` an
+unmounted path would otherwise give. Set `data_plane_url` and that body names the
+address to use as well, the same one `GET /v1/bootstrap` hands the dashboard;
+leave it unset and the refusal says to use your Otari gateway without naming
+which.
 
 The reason is billing. Inference belongs on a data-plane gateway in hybrid mode,
 which resolves this control plane's credentials per request and reports the
 usage back, and that report is what debits the organization's wallet. A request
 served on the control plane itself would skip the report and so run unbilled,
 which is what the gateway used to do before otari#822.
+
+The refusal covers the reads and the deletes, not only the calls that dispatch.
+A control plane that was serving this traffic before the gate went in keeps the
+files and batches it already stored, and loses the API to them: nothing is
+deleted, but the rows outlive the refusal and a data-plane gateway is where they
+belong.
 
 Standalone is unaffected: a single-tenant deployment is its own control plane
 and its own data plane, bills nobody, and keeps serving both from one process.
@@ -198,7 +206,9 @@ request through otari.ai's hosted gateway instead.
 
 Hosted differs from standalone in the two places described above, the
 dashboard's provider page and the data plane it does not serve. Every other row
-of the standalone column describes it too.
+of the standalone column describes it too; on `Available API routes`, read that
+column as its management half. The second column is the hybrid gateway, which is
+a different deployment again and never describes hosted mode.
 
 | | Standalone | Connected to otari.ai |
 |---|---|---|

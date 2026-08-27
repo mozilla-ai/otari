@@ -19,13 +19,13 @@ from gateway.api.routes import (
     embeddings,
     files,
     health,
+    hosted_mode,
     hybrid_mode,
     images,
     invitations,
     keys,
     mail,
     maintenance_mode,
-    management_only,
     messages,
     models,
     moderations,
@@ -78,8 +78,8 @@ def register_routers(app: FastAPI, config: GatewayConfig) -> None:
         # prefixes get catch-all stubs that a contributed router still wins
         # against. An overlay that deliberately contributes a data-plane route
         # to a control plane has made a choice, and a fallback does not overrule
-        # one. See gateway.api.routes.management_only.
-        app.include_router(management_only.router)
+        # one. See gateway.api.routes.hosted_mode.
+        app.include_router(hosted_mode.router)
 
 
 def _register_contributed_routers(app: FastAPI) -> None:
