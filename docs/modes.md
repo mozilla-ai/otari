@@ -35,8 +35,11 @@ the dashboard.
 A control plane runs no customer traffic. `/v1/chat/completions`,
 `/v1/messages`, `/v1/responses`, `/v1/embeddings`, `/v1/images`, `/v1/audio`,
 `/v1/rerank`, `/v1/moderations`, `/v1/search`, `/v1/batches` and `/v1/files` are
-not mounted, and a request to any of them returns `404` saying so and pointing
-at the gateway that should have served it.
+not served here. The routers that would run them are not mounted at all, and a
+stub stands in their place so the answer explains itself: every one of those
+paths returns `404` with a body naming the reason and pointing at the gateway
+that should have served the request, rather than the bare `404` an unmounted
+path would otherwise give.
 
 The reason is billing. Inference belongs on a data-plane gateway in hybrid mode,
 which resolves this control plane's credentials per request and reports the

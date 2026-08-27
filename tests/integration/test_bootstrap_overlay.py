@@ -185,27 +185,37 @@ def test_a_contributed_route_wins_over_the_hybrid_stub_catch_all(
     assert stub_response.json()["detail"].startswith("This endpoint is not available in hybrid mode")
 
 
-def test_a_contributed_route_wins_over_the_management_only_stub_catch_all(overlay_on_path: str, tmp_path: Path) -> None:
+@pytest.fixture
+def hosted_bootstrap_client(postgres_url: str, overlay_on_path: str) -> Generator[TestClient]:
+    """A hosted control plane with the overlay attached, on the worker's database.
+
+    Unlike the hybrid client above, this one needs a real database: hosted mode
+    holds its own, so it is built the way the rest of the module's clients are
+    rather than on a SQLite file of its own.
+    """
+    config = GatewayConfig(
+        mode="hosted",
+        database_url=postgres_url,
+        master_key="test-master-key",
+        auto_migrate=False,
+        require_pricing=False,
+        model_discovery=False,
+        bootstrap_api_key=False,
+        bootstrap=f"{overlay_on_path}:register",
+    )
+    yield from build_test_client(config)
+
+
+def test_a_contributed_route_wins_over_the_management_only_stub_catch_all(
+    hosted_bootstrap_client: TestClient,
+) -> None:
     # The mirror of the test above, for the opposite plane. The management-only
     # stubs are ``{path:path}`` catch-alls over the inference prefixes, so an
     # overlay that deliberately contributes a data-plane route to a control
     # plane is only reachable if the stubs are mounted last.
-    config = GatewayConfig(
-        mode="hosted",
-        database_url=f"sqlite:///{tmp_path / 'hosted.db'}",
-        bootstrap_api_key=False,
-        bootstrap=f"{overlay_on_path}:register",
-    )
-    app = create_app(config)
-
-    try:
-        with TestClient(app) as client:
-            response = client.get("/v1/chat/overlay-probe")
-            # The stub still answers a path the overlay does not serve.
-            stub_response = client.post("/v1/chat/completions", json={})
-    finally:
-        reset_config()
-        reset_db()
+    response = hosted_bootstrap_client.get("/v1/chat/overlay-probe")
+    # The stub still answers a path the overlay does not serve.
+    stub_response = hosted_bootstrap_client.post("/v1/chat/completions", json={})
 
     assert response.status_code == 200
     assert response.json() == {"source": "overlay"}
