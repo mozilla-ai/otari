@@ -444,8 +444,10 @@ class GatewayConfig(BaseSettings):
         default=None,
         description=(
             "Where this deployment's inference traffic belongs, as an absolute http(s) URL "
-            "with no trailing slash and no '/v1' suffix (e.g. 'https://gateway.otari.ai'), "
-            "which the dashboard appends itself. Only a hosted control "
+            "with no trailing slash and no '/v1' path segment anywhere in it, not even as part "
+            "of a full endpoint like '/v1/chat/completions' (e.g. 'https://gateway.otari.ai'): "
+            "the dashboard appends that path itself. It carries no credential either, so no "
+            "query string, fragment, or user:password. Only a hosted control "
             "plane needs it: a standalone gateway and a hybrid one both serve inference at "
             "their own address, so whatever reached the dashboard reaches the API, and this "
             "stays unset. A control plane serving many organizations does not, so it has to "
@@ -1781,6 +1783,22 @@ class GatewayConfig(BaseSettings):
             raise ValueError(msg)
         if parsed.query or parsed.fragment:
             msg = f"data_plane_url must carry no query string or fragment, got '{value}'"
+            raise ValueError(msg)
+        # Userinfo is refused rather than redacted downstream, because this value
+        # is published *unauthenticated*: `GET /v1/bootstrap` hands it to any
+        # browser that asks, which no redaction in the operator-gated config
+        # viewer would cover. A credential has no business here either way, since
+        # the snippet built from this puts the whole address in a curl command
+        # somebody pastes into a terminal and a shell history.
+        if parsed.username is not None or parsed.password is not None:
+            # The message does not repeat the value, unlike the refusals above,
+            # since the offending part of it is the credential. That is tidiness
+            # and not redaction: pydantic renders the input on the error either
+            # way, and a value set here was already sitting in a config file or
+            # an environment variable. The guarantee this refusal buys is the
+            # one that matters, that the credential never reaches the
+            # unauthenticated bootstrap.
+            msg = "data_plane_url must carry no username or password"
             raise ValueError(msg)
         if any(segment.lower() == "v1" for segment in parsed.path.split("/")):
             msg = (

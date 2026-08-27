@@ -530,6 +530,37 @@ def test_a_data_plane_url_carrying_a_query_or_fragment_is_refused_at_load(config
         GatewayConfig(data_plane_url=configured)
 
 
+@pytest.mark.parametrize(
+    "configured",
+    ["https://token@gateway.otari.ai", "https://user:secret@gateway.otari.ai"],
+)
+def test_a_data_plane_url_carrying_a_credential_is_refused(configured: str) -> None:
+    """Refused at load, because this value is published to anyone who asks.
+
+    ``GET /v1/bootstrap`` is unauthenticated, so a credential here would reach
+    any browser that requested it, which no redaction in the operator-gated
+    config viewer would cover. The snippet built from it would also put the
+    whole address into a curl command somebody pastes into a shell history.
+    """
+    with pytest.raises(ValidationError, match="no username or password"):
+        GatewayConfig(data_plane_url=configured)
+
+
+def test_the_unauthenticated_bootstrap_cannot_publish_a_credential(tmp_path: Path) -> None:
+    """The end the refusal above exists to protect, asserted through the route.
+
+    A unit test on the validator says the value cannot be built; this says the
+    published payload is what a browser gets, so the two cannot drift apart if
+    somebody later relaxes one of them.
+    """
+    app = create_app(_hosted(tmp_path, data_plane_url="https://gateway.otari.ai"))
+
+    with TestClient(app) as client:
+        body = client.get("/v1/bootstrap").text
+
+    assert "@" not in body.split('"data_plane_url"')[1].split(",")[0]
+
+
 @pytest.mark.parametrize("configured", ["", "   "])
 def test_a_blank_data_plane_url_is_an_unset_one(configured: str) -> None:
     """A container templating an empty value has named no data plane."""

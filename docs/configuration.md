@@ -63,7 +63,7 @@ pricing:
 | `port` | int | `8000` | Server bind port |
 | `master_key` | string | none | Master key for management endpoints |
 | `public_base_url` | string | none | This deployment's own externally-reachable URL, no trailing slash. Needed to put an absolute link in outgoing email (see [Mail](#mail)), to derive the relying-party ID passkeys are bound to (see [Access control](access-control.md#passkeys)), and to derive the OAuth redirect URI (see [OAuth sign-in](access-control.md#oauth-sign-in-google-and-github)). |
-| `data_plane_url` | string | none | Where this deployment's inference traffic belongs, as an absolute `http(s)` URL with no trailing slash and no `/v1` segment, which the dashboard appends itself. Only a hosted control plane needs it; a standalone or hybrid gateway serves its own API and leaves it unset. See [The data-plane address](#the-data-plane-address). |
+| `data_plane_url` | string | none | Where this deployment's inference traffic belongs, as an absolute `http(s)` URL with no trailing slash, no `/v1` segment anywhere in the path, and no credential. Only a hosted control plane needs it; a standalone or hybrid gateway serves its own API and leaves it unset. See [The data-plane address](#the-data-plane-address). |
 | `docs_url` | string | none | Where this deployment's documentation lives, as an absolute `http(s)` URL. Unset, the dashboard's **Documentation** links open the operator guide bundled with the gateway at `/#/docs`. See [Documentation links](#documentation-links). |
 | `webauthn_rp_id` | string | host of `public_base_url` | The domain passkeys are bound to: bare, with no scheme, port or path. An override rather than an alternative to `public_base_url`, which is still needed as the origin a ceremony runs from. Changing it orphans every passkey already registered. |
 | `webauthn_rp_name` | string | `otari` | The name an authenticator shows while a passkey is created, and files it under. Cosmetic; nothing verifies it. |
@@ -200,7 +200,7 @@ Note the `require_pricing` interaction: it defaults to `true` (fail-closed), so 
 | `OTARI_AUTO_MIGRATE` | Auto-run migrations on startup |
 | `OTARI_BOOTSTRAP_API_KEY` | Create first-use API key |
 | `OTARI_DOCS_URL` | Documentation site the dashboard's **Documentation** links point at, as an absolute `http(s)` URL. Unset, they open the bundled operator guide. See [Documentation links](#documentation-links). |
-| `OTARI_DATA_PLANE_URL` | Where this deployment's inference traffic belongs, as an absolute `http(s)` URL with no trailing slash and no `/v1` segment, which the dashboard appends itself. Only a hosted control plane needs it; standalone and hybrid gateways serve their own API and ignore it. See [The data-plane address](#the-data-plane-address). |
+| `OTARI_DATA_PLANE_URL` | Where this deployment's inference traffic belongs, as an absolute `http(s)` URL with no trailing slash, no `/v1` segment anywhere in the path, and no credential. Only a hosted control plane needs it; standalone and hybrid gateways serve their own API and ignore it. See [The data-plane address](#the-data-plane-address). |
 | `OTARI_BOOTSTRAP` | Composition-root bootstrap for a build that layers its own adapters onto Otari, as a `module:callable` selector. Unrelated to `OTARI_BOOTSTRAP_API_KEY`; see [Extending Otari with a bootstrap module](#extending-otari-with-a-bootstrap-module). |
 
 ### Extending Otari with a bootstrap module
@@ -397,7 +397,12 @@ or a fragment is refused for that same reason: this is a prefix a client
 appends a path to, so `https://gateway.otari.ai?trace=1` would put
 `/v1/chat/completions` inside a parameter value rather than in the path.
 
-A `/v1` segment anywhere in the path is refused for the same reason, and it is
+A username or password is refused too, and for a sharper reason than the two
+above: `GET /v1/bootstrap` is unauthenticated, so a credential here would be
+served to any browser that asked for it, and the snippet built from it would put
+the whole address into a command somebody pastes into a shell history.
+
+A `/v1` segment anywhere in the path is refused as well, and it is
 the likelier mistake: everywhere else a client meets one, "base URL" means the
 `/v1` address, so `https://gateway.otari.ai/v1` here would render a snippet
 posting to `/v1/v1/chat/completions`, and pasting the whole endpoint
