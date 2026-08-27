@@ -1446,11 +1446,23 @@ function usageParams(filters: UsageFilters): URLSearchParams {
 // the prefix it asks.
 //
 // Read off the organization context rather than `useDeploymentAdminAccess`,
-// because the shell already awaits that context before it paints: there is no
-// window in which the answer is unknown and a request could go to the wrong one.
-// The hooks wait for it rather than guessing, which is why `ready` exists: an
-// operator sent briefly to the scoped route would read their own organization's
-// subset and quietly understate every total on screen.
+// because the shell reads that context on every page anyway, so on all but the
+// first paint the answer is already cached and no request goes to the wrong
+// surface. `ready` covers the paint where it is not: an operator sent briefly to
+// the scoped route would read their own organization's subset and quietly
+// understate every total on screen, so the hooks wait rather than guess.
+//
+// **An errored context is ready, not still waiting.** It is the same question
+// either way ("has the answer stopped being unknown"), and treating a failure as
+// perpetual loading disables every usage hook for the session: the pages then
+// issue no request at all and state that a gateway serving traffic has none,
+// with nothing to report because nothing was asked. A suspended membership
+// reaches this, since `_resolve_active_organization` 404s with no live
+// membership to fall back to. So a failure falls through to the *narrower*
+// surface, which is the safe direction (understating beats a cross-tenant read),
+// and its own refusal is what the page reports. `AppShell` resolves the same
+// error the same way, failing open rather than stranding the destinations behind
+// it.
 //
 // The base is part of every query key it feeds, so two callers on one browser
 // can never read each other's cached rows.
@@ -1463,7 +1475,7 @@ export function useUsageScope(): {
   const deploymentWide = context.data?.deployment_operator === true
   return {
     base: deploymentWide ? "/v1/usage" : "/v1/organizations/me/usage",
-    ready: context.isSuccess,
+    ready: context.isSuccess || context.isError,
     deploymentWide,
   }
 }

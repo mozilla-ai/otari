@@ -34,6 +34,7 @@ import pytest
 from fastapi import status
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
+from sqlmodel import col
 
 from gateway.models.entities import DashboardSession, UsageLog
 from gateway.models.tenancy import Organization, OrganizationMember, User, Workspace, WorkspaceMember
@@ -58,6 +59,7 @@ class _World:
     beta: uuid.UUID
     workspaces: dict[str, uuid.UUID] = field(default_factory=dict)
     sessions: dict[str, str] = field(default_factory=dict)
+    users: dict[str, uuid.UUID] = field(default_factory=dict)
 
 
 # Model names double as row identity: every assertion below is "these models and
@@ -76,7 +78,7 @@ def _identity(
     is_superuser: bool = False,
     workspace_ids: tuple[uuid.UUID, ...] = (),
     membership: bool = True,
-) -> str:
+) -> tuple[uuid.UUID, str]:
     """Create an identity with a live dashboard session, and return its cookie.
 
     ``membership=False`` builds the case the pointer test needs: an identity
@@ -122,7 +124,7 @@ def _identity(
         )
     )
     session.commit()
-    return token
+    return user.id, token
 
 
 def _usage_rows(session: Session, workspace_id: uuid.UUID, models: tuple[str, ...]) -> None:
@@ -173,7 +175,7 @@ def world(client: TestClient, master_key_header: dict[str, str], db_session_fact
 
         built = _World(alpha=alpha.id, beta=beta.id)
         built.workspaces = {"alpha_one": alpha_one.id, "alpha_two": alpha_two.id, "beta_one": beta_one.id}
-        built.sessions = {
+        people = {
             "alpha_owner": _identity(session, email="owner@alpha.test", organization_id=alpha.id, role="owner"),
             "alpha_admin": _identity(session, email="admin@alpha.test", organization_id=alpha.id, role="admin"),
             # Belongs to one of alpha's two workspaces, which is the case the
@@ -182,6 +184,15 @@ def world(client: TestClient, master_key_header: dict[str, str], db_session_fact
                 session,
                 email="member@alpha.test",
                 organization_id=alpha.id,
+                workspace_ids=(alpha_one.id,),
+            ),
+            # The fourth role, and outside MANAGEMENT_ROLES like ``member``, so
+            # it must take the workspace branch rather than the whole-tenant one.
+            "alpha_viewer": _identity(
+                session,
+                email="viewer@alpha.test",
+                organization_id=alpha.id,
+                role="viewer",
                 workspace_ids=(alpha_one.id,),
             ),
             # In the organization, in none of its workspaces.
@@ -202,6 +213,8 @@ def world(client: TestClient, master_key_header: dict[str, str], db_session_fact
                 is_superuser=True,
             ),
         }
+        built.users = {name: user_id for name, (user_id, _) in people.items()}
+        built.sessions = {name: token for name, (_, token) in people.items()}
         return built
     finally:
         session.close()
@@ -264,6 +277,18 @@ def test_a_member_reads_only_the_workspaces_they_belong_to(client: TestClient, w
     assert listed.isdisjoint(_BETA_MODELS)
 
 
+def test_a_viewer_is_scoped_like_a_member_and_not_like_an_admin(client: TestClient, world: _World) -> None:
+    """``viewer`` is the fourth role and is outside ``MANAGEMENT_ROLES``.
+
+    Pinned separately from ``member`` because the two reach the workspace branch
+    through different values, and a scope that tested for ``member`` by name
+    rather than for management would hand a viewer the whole organization.
+    """
+    listed = _models_listed(client, world, "alpha_viewer")
+    assert listed == set(_ALPHA_ONE_MODELS)
+    assert listed.isdisjoint(_ALPHA_TWO_MODELS)
+
+
 def test_a_member_of_no_workspace_reads_an_empty_page_rather_than_a_refusal(client: TestClient, world: _World) -> None:
     """Nothing was refused; there is simply nothing here yet."""
     code, body = _as(client, world, "alpha_newcomer", "/v1/organizations/me/usage")
@@ -273,6 +298,60 @@ def test_a_member_of_no_workspace_reads_an_empty_page_rather_than_a_refusal(clie
     code, body = _as(client, world, "alpha_newcomer", "/v1/organizations/me/usage/count")
     assert code == status.HTTP_200_OK, body
     assert body == {"total": 0}
+
+
+def test_a_member_of_no_workspace_gets_empty_aggregates_rather_than_an_error(client: TestClient, world: _World) -> None:
+    """The empty scope reaches a ``GROUP BY`` rather than a row filter here.
+
+    ``/summary`` and ``/series`` fold their breakdowns over the same conditions,
+    so a scope of "nothing" has to produce zeroed totals and empty groups rather
+    than a division by zero or a fold over an empty top-N set.
+    """
+    code, body = _as(client, world, "alpha_newcomer", "/v1/organizations/me/usage/summary")
+    assert code == status.HTTP_200_OK, body
+    assert isinstance(body, dict)
+    assert body["totals"]["request_count"] == 0
+    assert body["totals"]["cost"] == 0
+    assert body["by_model"] == []
+    assert body["series"] == []
+
+    for group_by in ("model", "user_id", "api_key_id", "source"):
+        code, body = _as(client, world, "alpha_newcomer", f"/v1/organizations/me/usage/series?group_by={group_by}")
+        assert code == status.HTTP_200_OK, (group_by, body)
+        assert isinstance(body, dict)
+        assert body["groups"] == [], group_by
+        assert body["points"] == [], group_by
+
+
+def test_a_suspended_workspace_membership_stops_granting_the_workspace(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    """The scope reads active memberships only, so suspending one takes the rows back.
+
+    Distinct from removing the organization membership, which would refuse the
+    whole surface: this caller is still a member of Alpha and still reads it,
+    with one workspace fewer in it.
+    """
+    assert _models_listed(client, world, "alpha_member") == set(_ALPHA_ONE_MODELS)
+
+    session = db_session_factory()
+    try:
+        membership = (
+            session.query(WorkspaceMember)
+            .filter(col(WorkspaceMember.workspace_id) == world.workspaces["alpha_one"])
+            .filter(col(WorkspaceMember.user_id) == world.users["alpha_member"])
+            .one()
+        )
+        membership.status = "suspended"
+        session.add(membership)
+        session.commit()
+    finally:
+        session.close()
+
+    assert _models_listed(client, world, "alpha_member") == set()
+    # Still their organization: an empty page, not a refusal.
+    code, _ = _as(client, world, "alpha_member", "/v1/organizations/me/usage")
+    assert code == status.HTTP_200_OK
 
 
 def test_a_superuser_reads_their_active_organization_and_not_every_tenant(client: TestClient, world: _World) -> None:

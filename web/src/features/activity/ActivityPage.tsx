@@ -1730,8 +1730,12 @@ export function ActivityPage() {
   const [expandedId, setExpandedId] = useState<string | null>(null)
 
   // Inline accordion panel under the clicked row (DataTable renderDetail).
-  // Stable (setter-only closure) so the row cache holds; see the DataTable
-  // docstring.
+  // Was a setter-only closure with empty dependencies, so the row cache held for
+  // the life of the page; see the DataTable docstring. It now depends on the
+  // operator flag as well, which is not a setter and cannot be read from the
+  // closure: it is false until the organization context resolves, so a stale one
+  // would leave a real operator without the price control for the session. It
+  // flips at most once, so the cache it invalidates is rebuilt once.
   const renderDetail = useCallback(
     (entry: UsageEntry) => (
       <div>
@@ -1749,12 +1753,6 @@ export function ActivityPage() {
         />
       </div>
     ),
-    // Was setter-only and therefore empty. The operator flag is the one value
-    // here that is not a setter, and it has to be a dependency rather than a
-    // closure read: it is false until the organization context resolves, so a
-    // stale closure would leave a real operator without the price control for
-    // the rest of the session. It flips at most once, so the row cache it
-    // invalidates is rebuilt once.
     [scope.deploymentWide],
   )
 

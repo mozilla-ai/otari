@@ -189,6 +189,7 @@ async def resolve_visible_workspace_scope(
     )
     return VisibleWorkspaceScope(organization=organization, role=role, workspace_ids=workspace_ids)
 
+
 __all__ = [
     "VisibleWorkspaceScope",
     "has_workspace_management_access",

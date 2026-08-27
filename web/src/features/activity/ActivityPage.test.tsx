@@ -2527,3 +2527,44 @@ describe("ActivityPage for a tenant who does not operate the deployment", () => 
     )
   })
 })
+
+describe("ActivityPage when the organization context fails", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("still asks for usage, and reports the refusal rather than painting an empty log", async () => {
+    // The usage hooks wait on `GET /v1/organizations/me` to learn which surface
+    // this caller may read. An errored context must not read as "keep waiting":
+    // that issues no request at all, and the page then states, with no banner,
+    // that a gateway serving traffic has none (otari#837).
+    const calls: string[] = []
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input)
+      calls.push(url)
+      if (url.endsWith("/v1/organizations/me")) {
+        return jsonResponse({ detail: "no active membership" }, 404)
+      }
+      if (url.includes("/usage/in-flight")) {
+        return jsonResponse({ requests: [], total: 0 })
+      }
+      if (url.includes("/usage")) {
+        return jsonResponse({ detail: "context is gone" }, 403)
+      }
+      return jsonResponse([])
+    })
+    renderPage(<ActivityPage />)
+
+    // Falls back to the narrower surface, which is the safe direction: an
+    // operator reading their own organization understates, where the reverse
+    // would be a cross-tenant read.
+    await waitFor(() =>
+      expect(
+        calls.some((url) => url.includes("/v1/organizations/me/usage")),
+      ).toBe(true),
+    )
+    expect(calls.some((url) => url.startsWith("/v1/usage"))).toBe(false)
+    // And the refusal reaches the operator instead of an empty table.
+    expect(await screen.findByText(/context is gone/)).toBeInTheDocument()
+  })
+})

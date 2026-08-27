@@ -132,6 +132,12 @@ Removing a member suspends their membership rather than deleting it, which keeps
 
 Granting the `owner` role is an owner's to give. An admin manages members, workspaces and roles, and cannot promote anyone (themselves included) to owner, nor add one.
 
+### What a role reads
+
+An organization role decides how much of that organization a member sees, and nothing beyond it. `owner` and `admin` manage the organization and read every workspace in it; `member` and `viewer` read the workspaces they belong to. That one rule covers the workspace list, every workspace-scoped read, and the organization's usage (`/v1/organizations/me/usage{,/count,/summary,/series}`, which resolves its scope from the caller's own membership and answers `404` for a workspace outside it).
+
+No organization role reaches the deployment's own surfaces. `/v1/usage` reads every tenant, and it, `/v1/keys`, `/v1/users`, `/v1/settings`, `/v1/provider-credentials` and the rest of the deployment-wide plane need operator authority, which is `is_superuser` or the bootstrap identity and is granted from Platform Admin rather than from a roster. Promoting somebody to organization admin does not confer it, and is not meant to.
+
 ### Deployment-wide account administration
 
 Everything above stops at an organization's boundary: the roster lists that organization's members, and a membership suspended everywhere leaves the roster with nowhere else to be found. `/v1/admin` is the surface that does not, and it is for whoever operates the deployment rather than for a tenant.

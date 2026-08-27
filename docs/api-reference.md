@@ -314,6 +314,10 @@ Tenancy above users and keys; see [Access control](access-control.md#organizatio
 | `POST` | `/v1/organizations/me/pricing` | Set the organization's rate for a model over a period. | Master key |
 | `PUT` | `/v1/organizations/me/pricing/{pricing_id}` | Replace an override's rates and period. | Master key |
 | `DELETE` | `/v1/organizations/me/pricing/{pricing_id}` | Remove an override, returning the model to the deployment price list. | Master key |
+| `GET` | `/v1/organizations/me/usage` | List the caller's organization's usage logs. Same filters and shape as `GET /v1/usage`, over the rows the caller may see: an owner or admin reads every workspace in the organization, a member or viewer reads the ones they belong to. `workspace_id` narrows within that and answers `404` outside it. | Master key |
+| `GET` | `/v1/organizations/me/usage/count` | Total rows matching the filters, within the same scope. | Master key |
+| `GET` | `/v1/organizations/me/usage/summary` | Aggregated spend/volume for the caller's organization. Same parameters and shape as `GET /v1/usage/summary`. | Master key |
+| `GET` | `/v1/organizations/me/usage/series` | One time series per group for the caller's organization. Same parameters and shape as `GET /v1/usage/series`. | Master key |
 | `GET` | `/v1/organizations/me/guardrails` | List the guardrails the organization mandates over its workspaces, paged. | Master key |
 | `POST` | `/v1/organizations/me/guardrails` | Mandate a guardrail, optionally with an endpoint and credential of its own. | Master key |
 | `PATCH` | `/v1/organizations/me/guardrails/{guardrail_id}` | Change an entry's profile, endpoint, credential, modes, or scope. | Master key |
@@ -411,6 +415,13 @@ are budget-checked and logged. See
 | `DELETE` | `/v1/pricing/{model_key}` | Delete a pricing entry. | Deployment operator |
 
 ### Usage
+
+These read every tenant's rows, so they need deployment-operator authority. A
+caller who administers an organization rather than the deployment reads the same
+data through the organization-scoped set above
+(`/v1/organizations/me/usage{,/count,/summary,/series}`), which resolves its
+scope from their own membership. The writes and the live in-flight view have no
+tenant-scoped form.
 
 | Method | Path | Description | Auth |
 |--------|------|-------------|------|

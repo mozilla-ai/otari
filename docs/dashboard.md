@@ -298,6 +298,14 @@ upgrade. Skip retires it, or turn the flow off with the setting above.
 
 ### Observe
 
+Both pages report the traffic you are allowed to see. If you operate the
+deployment, that is every tenant it serves. If you administer an organization
+rather than the deployment, it is your organization: an owner or admin sees every
+workspace in it, and a member or viewer sees the workspaces they belong to. The
+controls described below that act on the deployment as a whole (the in-flight
+list, and deleting or repricing imported rows) are the operator's, and are absent
+rather than refused for everyone else.
+
 - **Activity**: the per-request log of what the gateway served, with filters.
   Use it to inspect individual requests, their models, and their outcomes.
   The table is a snapshot, and it holds still: it loads when you open the page and
