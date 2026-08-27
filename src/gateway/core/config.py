@@ -1160,13 +1160,16 @@ class GatewayConfig(BaseSettings):
     def is_hosted_mode(self) -> bool:
         """Whether this deployment is the multi-tenant control plane, not a single tenant's.
 
-        A data-plane sibling of ``is_hybrid_mode`` it is not: hosted mode owns
-        its own database and mounts the whole management API, exactly as
-        standalone does, and every request path that asks ``is_hybrid_mode``
-        gets the same answer here as it would for a standalone gateway. What it
-        changes is who the deployment serves, and therefore which management
-        surfaces make sense on it: the per-organization credential set rather
-        than the process-global one (see ``bootstrap.HOSTED_SURFACES``).
+        Not a third runtime: hosted mode owns its own database and mounts the
+        whole management API the way standalone does, and every request path
+        that asks ``is_hybrid_mode`` gets the same answer here as it would for a
+        standalone gateway. What it changes is who the deployment serves, and
+        two things follow from that. Which management surfaces make sense on it:
+        the per-organization credential set rather than the process-global one
+        (see ``bootstrap.HOSTED_SURFACES``). And whether it serves a data plane
+        at all: it does not, because a control plane runs no customer traffic
+        and inference belongs on a hybrid gateway, whose usage report is what
+        debits the wallet (see ``api.main._register_core_routers``).
         """
         return self.effective_mode == "hosted"
 

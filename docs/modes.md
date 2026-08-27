@@ -94,8 +94,9 @@ ownership, so a member of one organization can put a key in another's
 workspace, billed to that organization.
 
 That is fine for the single-tenant deployment this base build is written for,
-and it is why hosted mode changes the surface set and the data plane but not the
-authority model. Do not read it as isolation between tenants. Closing the gap is tracked in
+and it is why hosted mode changes the surface set and the data plane but not
+the authority model. Do not read it as isolation between tenants. Closing the
+gap is tracked in
 [mozilla-ai/otari-ai#1880](https://github.com/mozilla-ai/otari-ai/issues/1880),
 which scopes the fix to this repository: gating the deployment-wide routers on
 the caller's real authority, and scoping every `/v1/keys` load and the mint's
@@ -192,8 +193,9 @@ request through otari.ai's hosted gateway instead.
 
 ## Comparison
 
-Hosted is standalone with one dashboard difference (see above), so the
-standalone column describes it too.
+Hosted differs from standalone in the two places described above, the
+dashboard's provider page and the data plane it does not serve. Every other row
+of the standalone column describes it too.
 
 | | Standalone | Connected to otari.ai |
 |---|---|---|
