@@ -120,9 +120,7 @@ describe("Login", () => {
 
     // Hidden rather than offered and then refused with a 503: all three flows
     // begin by sending a message.
-    expect(
-      screen.queryByRole("link", { name: /Claim your account/ }),
-    ).toBeNull()
+    expect(screen.queryByRole("link", { name: /Set your password/ })).toBeNull()
     expect(
       screen.queryByRole("link", { name: /Forgot your password/ }),
     ).toBeNull()
@@ -137,7 +135,7 @@ describe("Login", () => {
     )
 
     expect(
-      screen.getByRole("link", { name: /Claim your account/ }),
+      screen.getByRole("link", { name: /Set your password/ }),
     ).toHaveAttribute("href", "#/signup")
     expect(
       screen.getByRole("link", { name: /Forgot your password/ }),
@@ -160,7 +158,7 @@ describe("Login", () => {
     expect(screen.queryByRole("link", { name: /verification link/ })).toBeNull()
     // Signup still stands: a member an admin added by address claims it here.
     expect(
-      screen.getByRole("link", { name: /Claim your account/ }),
+      screen.getByRole("link", { name: /Set your password/ }),
     ).toBeInTheDocument()
   })
 

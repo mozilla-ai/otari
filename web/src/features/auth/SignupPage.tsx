@@ -4,6 +4,7 @@ import { useState } from "react"
 import { ApiError } from "@/shared/api/client"
 import { useSignup } from "@/shared/api/hooks"
 import { ErrorBanner } from "@/shared/components/ui"
+import { emailFromHash } from "@/shared/helpers/hashParams"
 import {
   MAX_PASSWORD_BYTES,
   MIN_PASSWORD_LENGTH,
@@ -42,11 +43,25 @@ import {
  * marketing concern; the third has nothing to link to, since a self-hosted
  * deployment publishes no terms, so the request omits `terms_accepted` rather
  * than asserting an acceptance of a document that does not exist.
+ *
+ * `?email=…` prefills the address, which is how the accept-invitation page
+ * hands an invitee straight here (otari#835). It arrives read-only, because
+ * the invitation is bound to that address and claiming a different one would
+ * answer with the same enumeration-safe sentence while doing nothing at all,
+ * which is the failure this whole handoff exists to remove. The footer offers
+ * the plain page for anyone who does need another address. Not a credential
+ * and not treated as one: the token that proved anything was spent on the
+ * accept, and `POST /v1/auth/signup` checks this address against the roster
+ * itself.
  */
-export function SignupPage() {
+export function SignupPage({ hash }: { hash: string }) {
   const signup = useSignup()
   const { recordEvent } = useTelemetry()
-  const [email, setEmail] = useState("")
+  // Read straight from the prop rather than held in state: `PublicAuthPage` is
+  // keyed on the whole hash, so a second link pasted into an open tab remounts
+  // this page instead of re-rendering it with the first link's address.
+  const invitedEmail = emailFromHash(hash)
+  const [email, setEmail] = useState(() => invitedEmail ?? "")
   const [fullName, setFullName] = useState("")
   const [password, setPassword] = useState("")
   const [confirmPassword, setConfirmPassword] = useState("")
@@ -108,12 +123,17 @@ export function SignupPage() {
   return (
     <PublicAuthLayout
       title="Claim your account"
-      description="Set a password for the address your administrator added to this gateway. You will confirm the address by email before your first sign-in."
+      description="Set a password for the address an admin invited or added. You will confirm the address by email before your first sign-in."
       footer={
         <>
           <PublicAuthLink to="#/">
             Already have a password? Sign in
           </PublicAuthLink>
+          {invitedEmail ? (
+            <PublicAuthLink to="#/signup">
+              Claim a different address
+            </PublicAuthLink>
+          ) : null}
           <PublicAuthLink to="#/resend-verification">
             Need a new verification link?
           </PublicAuthLink>
@@ -133,7 +153,12 @@ export function SignupPage() {
             setEmail(next)
             clearError()
           }}
-          description="The address your administrator added or invited. Another address has nothing to claim."
+          isReadOnly={invitedEmail !== null}
+          description={
+            invitedEmail
+              ? "The address your invitation was sent to. The invitation is bound to it, so this is the address to claim."
+              : "The address an admin added or invited. Another address has nothing to claim."
+          }
         />
         {/* Optional, and the server treats it as such: it fills the name in
             only if the identity does not already have one, so leaving it blank

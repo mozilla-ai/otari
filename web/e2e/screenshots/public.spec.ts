@@ -69,6 +69,25 @@ async function withGoogleConfigured(page: Page): Promise<void> {
   })
 }
 
+// The accept page's two routes, which the gateway would answer 404/400 for on
+// any token this suite can produce: nothing here has minted an invitation, and
+// the page's interesting state is the one after a successful accept.
+async function stubInvitation(page: Page): Promise<void> {
+  await page.route("**/v1/invitations/validate", async (route) => {
+    await route.fulfill({
+      json: {
+        email: "ada@example.com",
+        organization_name: "Acme",
+        role: "admin",
+        expires_at: "2025-01-22T12:00:00+00:00",
+      },
+    })
+  })
+  await page.route("**/v1/invitations/accept", async (route) => {
+    await route.fulfill({ json: { organization_name: "Acme", role: "admin" } })
+  })
+}
+
 test("signup", async ({ page }) => {
   await withMailReady(page)
   await page.goto("/#/signup")
@@ -86,6 +105,30 @@ test("signup on a gateway that cannot send mail", async ({ page }) => {
     page.getByRole("heading", { name: "Not available on this gateway" }),
   ).toBeVisible()
   await captureScreenshot(page, "signup-mail-unavailable")
+})
+
+test("signup prefilled from an accepted invitation", async ({ page }) => {
+  // The other half of the handoff below: the address arrives read-only, because
+  // the invitation is bound to it (otari#835).
+  await withMailReady(page)
+  await page.goto("/#/signup?email=ada%40example.com")
+  await expect(page.getByLabel("Email")).toHaveValue("ada@example.com")
+  await captureScreenshot(page, "signup-invited")
+})
+
+test("invitation accepted, ready to claim", async ({ page }) => {
+  // The accept page's own ending, and the first capture it has had. The two
+  // invitation routes are stubbed for the reason the bootstrap is above: a real
+  // pending token would have to be minted through the management API by a
+  // signed-in operator, and this project runs in front of a session.
+  await withMailReady(page)
+  await stubInvitation(page)
+  await page.goto("/#/accept-invitation?token=not-a-real-token")
+  await page.getByRole("button", { name: "Accept invitation" }).click()
+  await expect(
+    page.getByRole("button", { name: "Set your password" }),
+  ).toBeVisible()
+  await captureScreenshot(page, "accept-invitation-accepted")
 })
 
 test("check your email", async ({ page }) => {

@@ -23,13 +23,16 @@ vi.mock("@/shared/telemetry/overlayTelemetry", async () => {
   return { useTelemetry: vi.fn(() => telemetrySpy) }
 })
 
-function renderPage() {
+// `PublicAuthPage` passes the whole hash down, so the plain page is the one
+// reached from the sign-in screen and a `?email=` one is the accept page's
+// handoff (otari#835).
+function renderPage(hash = "#/signup") {
   const client = new QueryClient({
     defaultOptions: { mutations: { retry: false } },
   })
   return render(
     <QueryClientProvider client={client}>
-      <SignupPage />
+      <SignupPage hash={hash} />
     </QueryClientProvider>,
   )
 }
@@ -178,5 +181,49 @@ describe("the telemetry the signup page records", () => {
     await user.click(screen.getByRole("button", { name: "Claim account" }))
 
     expect(recordEvent).not.toHaveBeenCalled()
+  })
+
+  it("prefills the invited address, read-only, and claims that one", async () => {
+    // The address is the invitation's, not the visitor's to choose: another one
+    // has nothing to claim, and signup answers the same enumeration-safe
+    // sentence either way, so an editable field would fail silently.
+    vi.mocked(apiFetch).mockResolvedValue({ message: "…" } as never)
+    const user = userEvent.setup()
+    renderPage("#/signup?email=ada%40example.com")
+
+    const emailField = screen.getByLabelText("Email")
+    expect(emailField).toHaveValue("ada@example.com")
+    expect(emailField).toHaveAttribute("readonly")
+
+    await user.type(screen.getByLabelText("Password"), "correct-horse")
+    await user.type(screen.getByLabelText("Confirm password"), "correct-horse")
+    await user.click(screen.getByRole("button", { name: "Claim account" }))
+
+    await vi.waitFor(() => {
+      expect(window.location.hash).toBe("#/check-email?type=signup")
+    })
+    const [, init] = vi.mocked(apiFetch).mock.calls[0] ?? []
+    expect(JSON.parse(String(init?.body)).email).toBe("ada@example.com")
+  })
+
+  it("offers the plain form to anyone who needs another address", () => {
+    // The way out of the read-only field, so a prefill that is wrong for this
+    // visitor is not a dead end of its own.
+    renderPage("#/signup?email=ada%40example.com")
+
+    expect(
+      screen.getByRole("link", { name: "Claim a different address" }),
+    ).toHaveAttribute("href", "#/signup")
+  })
+
+  it("asks for the address when the link carries none", () => {
+    renderPage()
+
+    const emailField = screen.getByLabelText("Email")
+    expect(emailField).toHaveValue("")
+    expect(emailField).not.toHaveAttribute("readonly")
+    expect(
+      screen.queryByRole("link", { name: "Claim a different address" }),
+    ).toBeNull()
   })
 })

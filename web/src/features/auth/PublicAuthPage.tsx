@@ -56,7 +56,7 @@ export function PublicAuthPage({
 
   switch (path) {
     case "/signup":
-      return <SignupPage />
+      return <SignupPage hash={hash} />
     case "/check-email":
       return <CheckEmailPage hash={hash} />
     case "/resend-verification":

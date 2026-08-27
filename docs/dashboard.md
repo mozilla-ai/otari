@@ -589,8 +589,10 @@ address and a password is what turns it into a sign-in rather than a label, and
 what retires the master key as the dashboard login (step 5 of the walkthrough
 above). Members added after that hold a role and can be placed in workspaces, but
 nothing here sets a password for someone else: a member claims their own
-address from the sign-in screen instead, through **Added to this gateway?
-Claim your account**, and confirms it by following the emailed link. The
+address from the sign-in screen instead, through **Invited or added by an
+admin? Set your password**, and confirms it by following the emailed link. An
+invited member reaches the same form directly from the page their accept link
+lands on. The
 address they are added by is the handle that claims it. **Forgot your
 password?** on the same screen mails a reset link. Both need this deployment
 to be able to send mail, and with none configured the links are absent and

@@ -901,12 +901,15 @@ export function Login() {
                 themselves take no gap, because each is 44px around a 20px line
                 and so already sits 24px from its neighbor's text. */}
             {/* `text-center` because a link long enough to wrap on a phone
-                ("Claim your account" does at 390px) would otherwise rag left
-                out of the lane the single-line rows sit in. */}
+                (the signup row does at 390px) would otherwise rag left out of
+                the lane the single-line rows sit in. */}
             <div className="flex flex-col items-center text-center">
+              {/* Deployment-neutral wording (otari#835): "this gateway" read as
+                  a self-hosted process on a hosted control plane, where the same
+                  screen is the sign-in for an invited tenant. */}
               {offersSignup ? (
                 <PublicAuthLink to="#/signup">
-                  Added to this gateway? Claim your account
+                  Invited or added by an admin? Set your password
                 </PublicAuthLink>
               ) : null}
               {offersRecovery ? (

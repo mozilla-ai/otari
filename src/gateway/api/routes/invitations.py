@@ -6,12 +6,12 @@ in the link is their whole proof of anything here. Both routes therefore take
 no ``CurrentIdentity`` and are scoped to exactly the one invitation the token
 names.
 
-No session is minted on accept. Otari has no per-user sign-in yet (every
-authenticated request resolves to the one bootstrap operator identity), so
-there is nothing to sign this visitor into; accepting only resolves their
-membership to ``active``, the same place ``POST /me/members`` already lands a
-member added directly. They see the sign-in screen next, same as anyone else
-added to an organization today.
+No session is minted on accept: the token proves possession of an emailed
+link, not of a password, so accepting only resolves the membership to
+``active``, the same place ``POST /me/members`` already lands a member added
+directly. The identity it resolves to is password-less on the roster until it
+is claimed, and claiming it is ``POST /v1/auth/signup``, which the dashboard's
+accept page hands the recipient straight to (otari#835).
 """
 
 from typing import Annotated

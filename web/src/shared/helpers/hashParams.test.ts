@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest"
 
-import { tokenFromHash } from "@/shared/helpers/hashParams"
+import { emailFromHash, tokenFromHash } from "@/shared/helpers/hashParams"
 
 describe("tokenFromHash", () => {
   it("reads the token out of a hash route's own query string", () => {
@@ -20,5 +20,26 @@ describe("tokenFromHash", () => {
     // empty string satisfies neither and strands the page on its loading line.
     expect(tokenFromHash("#/verify-email?token=")).toBeNull()
     expect(tokenFromHash("#/accept-invitation?token=")).toBeNull()
+  })
+})
+
+describe("emailFromHash", () => {
+  it("reads the address the accept page prefills the signup form with", () => {
+    // Percent-encoded by URLSearchParams on the way in, decoded on the way out,
+    // which is what makes the `@` and a `+` in an address survive the round
+    // trip rather than arriving as a space.
+    expect(emailFromHash("#/signup?email=ada%40example.com")).toBe(
+      "ada@example.com",
+    )
+    expect(emailFromHash("#/signup?email=ada%2Botari%40example.com")).toBe(
+      "ada+otari@example.com",
+    )
+  })
+
+  it("answers null for a link that carries none", () => {
+    expect(emailFromHash("#/signup")).toBeNull()
+    expect(emailFromHash("#/signup?token=abc123")).toBeNull()
+    expect(emailFromHash("#/signup?email=")).toBeNull()
+    expect(emailFromHash("")).toBeNull()
   })
 })

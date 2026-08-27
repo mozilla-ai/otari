@@ -15,11 +15,20 @@ export function AuthEmailField({
   value,
   onChange,
   description,
+  isReadOnly = false,
 }: {
   label?: string
   value: string
   onChange: (next: string) => void
   description?: string
+  /**
+   * Shows the address without letting it be edited, for a form whose address
+   * was decided elsewhere: the signup page reached from an accepted invitation
+   * is bound to the address that invitation was sent to, and any other has
+   * nothing to claim. Still a field rather than a line of text, so a password
+   * manager files the credential it is being set beside against a username.
+   */
+  isReadOnly?: boolean
 }) {
   return (
     <TextField
@@ -27,6 +36,7 @@ export function AuthEmailField({
       onChange={onChange}
       type="email"
       isRequired
+      isReadOnly={isReadOnly}
       className="flex flex-col gap-1"
     >
       <Label className="text-sm font-medium text-foreground">{label}</Label>
