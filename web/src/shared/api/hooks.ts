@@ -1186,11 +1186,16 @@ async function fetchAllBudgets(): Promise<Budget[]> {
   return all
 }
 
-export function useBudgets() {
+// `enabled` is for a page that composes this deployment-wide read into a
+// tenant-scoped one: since #821 it answers 403 to anyone who does not operate
+// the deployment, so a caller who knows they are a tenant declines to ask rather
+// than surfacing the refusal (otari#838).
+export function useBudgets(enabled = true) {
   return useQuery({
     queryKey: [BUDGETS],
     queryFn: fetchAllBudgets,
     staleTime: 60_000,
+    enabled,
   })
 }
 
@@ -1270,11 +1275,13 @@ async function fetchAllScopedBudgets(): Promise<ScopedBudget[]> {
   return all
 }
 
-export function useScopedBudgets() {
+// Gated for the same reason as `useBudgets` above.
+export function useScopedBudgets(enabled = true) {
   return useQuery({
     queryKey: [SCOPED_BUDGETS],
     queryFn: fetchAllScopedBudgets,
     staleTime: 60_000,
+    enabled,
   })
 }
 
@@ -1342,11 +1349,13 @@ async function fetchAllUsers(): Promise<User[]> {
   return all
 }
 
-export function useUsers() {
+// Gated for the same reason as `useBudgets` above.
+export function useUsers(enabled = true) {
   return useQuery({
     queryKey: [USERS],
     queryFn: fetchAllUsers,
     staleTime: 60_000,
+    enabled,
   })
 }
 

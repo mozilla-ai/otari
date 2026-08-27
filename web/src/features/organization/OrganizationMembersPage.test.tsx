@@ -455,8 +455,13 @@ describe("OrganizationMembersPage", () => {
     renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
+    // Awaited rather than read synchronously: these two columns are the
+    // deployment operator's and render once the organization context says the
+    // caller is one, which can be a paint after the roster itself.
+    expect(
+      await within(rowFor("Analyst")).findByText("Selected models"),
+    ).toBeInTheDocument()
     const row = rowFor("Analyst")
-    expect(within(row).getByText("Selected models")).toBeInTheDocument()
     expect(within(row).getByText("$12.50")).toBeInTheDocument()
     expect(within(row).getByText("$2.25 in flight")).toBeInTheDocument()
   })
@@ -504,8 +509,12 @@ describe("OrganizationMembersPage", () => {
     renderPage(<OrganizationMembersPage />)
 
     await screen.findByText("Analyst")
-    const row = rowFor("Analyst")
-    await actor.click(within(row).getByRole("button", { name: "Block" }))
+    // Block lives in the Actions column but reads the spend row, so like the
+    // two operator-only columns it arrives with the organization context.
+    const block = await within(rowFor("Analyst")).findByRole("button", {
+      name: "Block",
+    })
+    await actor.click(block)
 
     const patch = requests.find(
       (r) => r.method === "PATCH" && r.url.includes("/v1/users/"),
@@ -588,5 +597,79 @@ describe("OrganizationMembersPage", () => {
     // so a workspace just joined has no id to name until the server answers.
     // Asserting the sequence is the point of testing the two together.
     expect(requests.indexOf(join!)).toBeLessThan(requests.indexOf(ceiling!))
+  })
+})
+
+describe("OrganizationMembersPage for a tenant who does not operate the deployment", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("asks for none of the deployment-wide reads", async () => {
+    // `/v1/users`, `/v1/budgets` and `/v1/scoped-budgets` have refused a tenant
+    // since #821. An organization owner is one, so the page must not ask: the
+    // refusals rendered as "this endpoint requires deployment operator access"
+    // across a page that is theirs (otari#838).
+    const requests = mockApi({
+      members: [OWNER, ANALYST],
+      context: organizationContext({ deployment_operator: false }),
+    })
+    renderPage(<OrganizationMembersPage />)
+
+    // The roster having painted is what proves the page got as far as fetching,
+    // so an empty list below is a decision not to ask rather than a page that
+    // asked for nothing at all.
+    await screen.findByText("Analyst")
+    expect(
+      requests.some((r) => r.url.includes("/v1/organizations/me/members")),
+    ).toBe(true)
+    for (const path of ["/v1/users", "/v1/budgets", "/v1/scoped-budgets"]) {
+      expect(
+        requests.filter((r) => r.method === "GET" && r.url.includes(path)),
+      ).toHaveLength(0)
+    }
+  })
+
+  it("drops the columns those reads fed, rather than emptying them", async () => {
+    // An em dash here would be indistinguishable from the em dash this table
+    // already shows for a member with no gateway identity yet, so the columns go.
+    mockApi({
+      members: [OWNER, ANALYST],
+      context: organizationContext({ deployment_operator: false }),
+    })
+    renderPage(<OrganizationMembersPage />)
+
+    await screen.findByText("Analyst")
+    expect(screen.queryByText("Model access")).not.toBeInTheDocument()
+    expect(screen.queryByText("Spend")).not.toBeInTheDocument()
+    // What is theirs stays.
+    expect(screen.getByText("Role")).toBeInTheDocument()
+    expect(screen.getByText("Workspaces")).toBeInTheDocument()
+  })
+
+  it("reports no refusal, which is the symptom this fixes", async () => {
+    mockApi({
+      members: [OWNER, ANALYST],
+      context: organizationContext({ deployment_operator: false }),
+    })
+    renderPage(<OrganizationMembersPage />)
+
+    await screen.findByText("Analyst")
+    expect(
+      screen.queryByText(/requires deployment operator access/i),
+    ).not.toBeInTheDocument()
+  })
+
+  it("still shows the columns to an operator, so the case above is not vacuous", async () => {
+    mockApi({
+      members: [OWNER, ANALYST],
+      users: [user({ user_id: ANALYST.attribution_user_id as string })],
+      context: organizationContext({ deployment_operator: true }),
+    })
+    renderPage(<OrganizationMembersPage />)
+
+    await screen.findByText("Analyst")
+    expect(await screen.findByText("Model access")).toBeInTheDocument()
+    expect(screen.getByText("Spend")).toBeInTheDocument()
   })
 })

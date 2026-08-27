@@ -98,6 +98,30 @@ export function canManage(context: OrganizationContext | undefined): boolean {
 }
 
 /**
+ * Whether this caller also operates the deployment, which no role above confers.
+ *
+ * The other authority a signed-in identity can hold, and the reason the roster's
+ * role picker looked like it did more than it does (otari#838): an organization
+ * role is authority over one tenant, and the deployment's own surfaces answer to
+ * `is_superuser` or the bootstrap identity instead.
+ *
+ * Like the predicates above, this is the client half of a gate the server
+ * enforces, and it exists so a control that would be refused is withheld rather
+ * than offered. It reads the same field `GET /v1/admin/access` publishes, which
+ * `OrganizationMembershipContextPublic` now carries so a page that already has
+ * the context needs no second request to know.
+ *
+ * Requires an explicit `true`: an absent or still-loading context is not an
+ * operator, which withholds a deployment-wide read for one paint rather than
+ * firing it and rendering its refusal.
+ */
+export function isDeploymentOperator(
+  context: OrganizationContext | undefined,
+): boolean {
+  return context?.deployment_operator === true
+}
+
+/**
  * Whether the caller may manage a specific workspace: `canManage`'s
  * organization arm, or an active owner/admin of that workspace itself.
  *
