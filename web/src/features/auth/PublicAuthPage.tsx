@@ -48,7 +48,7 @@ export function PublicAuthPage({
     })
   ) {
     return provider === null ? (
-      <MailUnavailable />
+      <MailUnavailable offersProviderSignIn={oauth_providers.length > 0} />
     ) : (
       <ProviderUnavailable provider={provider} />
     )
@@ -94,7 +94,23 @@ function ProviderUnavailable({ provider }: { provider: string }) {
   )
 }
 
-function MailUnavailable() {
+/**
+ * `offersProviderSignIn` is what stops this panel from being wrong on a
+ * deployment that configures OAuth but no mail, which is an ordinary shape: a
+ * provider client is easier to register than an SMTP host. A provider-verified
+ * address resolves a rostered identity that holds no password at all
+ * (`adapters/identity_provider_adapter.py`), so there the visitor is not stuck
+ * and should be sent to the button that works.
+ *
+ * What it never says any more is "ask an administrator to set your password":
+ * `PUT /v1/auth/password` only ever acts on the caller's own identity, so no
+ * endpoint on this deployment can do that for someone else.
+ */
+function MailUnavailable({
+  offersProviderSignIn,
+}: {
+  offersProviderSignIn: boolean
+}) {
   return (
     <PublicAuthLayout
       title="Not available on this gateway"
@@ -102,9 +118,9 @@ function MailUnavailable() {
       footer={<PublicAuthLink to="#/">Back to sign in</PublicAuthLink>}
     >
       <p className="text-center text-sm text-muted">
-        An operator can turn it on by configuring outgoing mail and a public
-        base URL for this gateway. Until then, ask whoever administers it to set
-        your password for you.
+        {offersProviderSignIn
+          ? "Sign in with one of the providers on the sign-in screen instead, which needs no mail. An operator can turn this flow on by configuring outgoing mail and a public base URL for this gateway."
+          : "An operator can turn it on by configuring outgoing mail and a public base URL for this gateway."}
       </p>
     </PublicAuthLayout>
   )

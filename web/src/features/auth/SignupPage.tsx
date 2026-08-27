@@ -129,11 +129,6 @@ export function SignupPage({ hash }: { hash: string }) {
           <PublicAuthLink to="#/">
             Already have a password? Sign in
           </PublicAuthLink>
-          {invitedEmail ? (
-            <PublicAuthLink to="#/signup">
-              Claim a different address
-            </PublicAuthLink>
-          ) : null}
           <PublicAuthLink to="#/resend-verification">
             Need a new verification link?
           </PublicAuthLink>
@@ -156,10 +151,19 @@ export function SignupPage({ hash }: { hash: string }) {
           isReadOnly={invitedEmail !== null}
           description={
             invitedEmail
-              ? "The address your invitation was sent to. The invitation is bound to it, so this is the address to claim."
+              ? "The address your invitation was sent to, which is the one it can claim."
               : "The address an admin added or invited. Another address has nothing to claim."
           }
         />
+        {/* Directly under the field rather than in the footer: this is the way
+            out of a prefill that is wrong for whoever is reading, and someone
+            who has just tried to type over a read-only field is looking here,
+            not three rows below the submit button. */}
+        {invitedEmail ? (
+          <PublicAuthLink to="#/signup">
+            Claim a different address instead
+          </PublicAuthLink>
+        ) : null}
         {/* Optional, and the server treats it as such: it fills the name in
             only if the identity does not already have one, so leaving it blank
             never clears what an admin typed. */}

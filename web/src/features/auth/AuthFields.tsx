@@ -23,10 +23,9 @@ export function AuthEmailField({
   description?: string
   /**
    * Shows the address without letting it be edited, for a form whose address
-   * was decided elsewhere: the signup page reached from an accepted invitation
-   * is bound to the address that invitation was sent to, and any other has
-   * nothing to claim. Still a field rather than a line of text, so a password
-   * manager files the credential it is being set beside against a username.
+   * was decided elsewhere; `SignupPage` is the caller and says why. Still a
+   * field rather than a line of text, so a password manager files the
+   * credential it is being set beside against a username.
    */
   isReadOnly?: boolean
 }) {
@@ -47,7 +46,18 @@ export function AuthEmailField({
           mount raises the soft keyboard over the explanation above it before
           the visitor has asked to type (frontend-standards/responsiveness.md,
           and the same call `features/account/PasswordCard` makes). */}
-      <Input placeholder="you@example.com" autoComplete="username" />
+      {/* A rule against the rendered input rather than a token or a HeroUI
+          prop, which is the order the house style asks for and neither of
+          which reaches this: HeroUI styles `isReadOnly` identically to an
+          editable field, so without it the one field on the page that ignores
+          typing looks exactly like the ones that do not. `bg-surface-alt` is
+          the registered utility for `--color-surface-muted`; `bg-surface-muted`
+          is declared nowhere and compiles to nothing (see `Login`'s CODE_CHIP). */}
+      <Input
+        placeholder="you@example.com"
+        autoComplete="username"
+        className="read-only:bg-surface-alt read-only:text-muted"
+      />
       {description ? (
         // HeroUI's Description reaches the input as aria-describedby through
         // the TextField's "description" slot, which a raw span does not.

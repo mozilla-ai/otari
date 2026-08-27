@@ -31,12 +31,9 @@ export function tokenFromHash(hash: string): string | null {
 /**
  * The `email` in `#/signup?email=…`, or null when the link carries none.
  *
- * Not a credential and not trusted as one: it only prefills the signup form's
- * address field, and the claim it stands for is checked by
- * `POST /v1/auth/signup` against the roster, which answers the same sentence
- * for an address it has nothing to do with. The accept page puts it here
- * (otari#835) so an invitee who just accepted does not have to retype the
- * address their invitation was sent to.
+ * Not a credential and not trusted as one: it prefills a form field, and
+ * `POST /v1/auth/signup` checks the address against the roster itself.
+ * `SignupPage` is the reader and carries the rest of the reasoning.
  */
 export function emailFromHash(hash: string): string | null {
   return paramFromHash(hash, "email")

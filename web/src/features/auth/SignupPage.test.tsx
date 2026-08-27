@@ -212,7 +212,7 @@ describe("the telemetry the signup page records", () => {
     renderPage("#/signup?email=ada%40example.com")
 
     expect(
-      screen.getByRole("link", { name: "Claim a different address" }),
+      screen.getByRole("link", { name: "Claim a different address instead" }),
     ).toHaveAttribute("href", "#/signup")
   })
 
@@ -223,7 +223,7 @@ describe("the telemetry the signup page records", () => {
     expect(emailField).toHaveValue("")
     expect(emailField).not.toHaveAttribute("readonly")
     expect(
-      screen.queryByRole("link", { name: "Claim a different address" }),
+      screen.queryByRole("link", { name: "Claim a different address instead" }),
     ).toBeNull()
   })
 })

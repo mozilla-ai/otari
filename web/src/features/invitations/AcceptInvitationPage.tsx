@@ -16,13 +16,17 @@
  * and left every invitee stranded on the sign-in screen.
  *
  * Which ending the visitor gets is decided from what this browser and this
- * deployment can do, never from anything the server says about the address:
- * a signed-in visitor is already past the claim, and a gateway that cannot
- * send mail cannot run signup at all (`create_user_for_signup` refuses before
- * writing). Nothing here asks whether the invited identity has a password
- * yet, and nothing may: that is the enumeration answer `POST /v1/auth/signup`
- * withholds by design, so the claim and the sign-in are both offered and the
- * visitor picks.
+ * deployment can do, never from anything the server says about the address. A
+ * gateway that cannot send mail cannot run signup at all
+ * (`create_user_for_signup` refuses before writing), and where it also
+ * configures no OAuth provider that ending is a genuine dead end, so it names
+ * the setting an operator has to fill in rather than an action nobody can
+ * take. Nothing here asks whether the invited identity has a password yet, and
+ * nothing may: that is the enumeration answer `POST /v1/auth/signup` withholds
+ * by design, so the claim and the sign-in are both offered and the visitor
+ * picks. A session is treated the same way, as this browser's state rather
+ * than proof of who is reading: accepting takes no identity, so a signed-in
+ * visitor is offered the dashboard *and* the claim.
  */
 
 import { Button, Card, Link } from "@heroui/react"
@@ -33,6 +37,7 @@ import {
   goToPublicAuthPage,
   PublicAuthLink,
 } from "@/features/auth/PublicAuthLayout"
+import { isPublicAuthPageAvailable } from "@/features/auth/publicAuthPaths"
 import { useAcceptInvitation, useValidateInvitation } from "@/shared/api/hooks"
 import { ErrorBanner } from "@/shared/components/ui"
 import { tokenFromHash } from "@/shared/helpers/hashParams"
@@ -49,17 +54,28 @@ export function AcceptInvitationPage() {
   const preview = useValidateInvitation(token ?? "")
   const accept = useAcceptInvitation()
   const { isAuthenticated } = useAuth()
-  // Signup is mail-gated for the reason `Login` gates its own link on the same
-  // field (otari#648, and `publicAuthPaths`' table): the claim mails a
+  const { mail_ready, oauth_providers } = useDeployment()
+  // Asked of `publicAuthPaths`' table rather than of `mail_ready` directly, so
+  // this page follows the destination it is sending someone to if signup's
+  // requirement ever moves. The gate exists because the claim mails a
   // verification link and refuses with a 503 where this deployment has no
-  // transport, so an invitation shared by hand on such a gateway has to say so
-  // rather than offering a button whose only outcome is that refusal.
-  const { mail_ready } = useDeployment()
+  // transport (otari#648): an invitation shared by hand on such a gateway has
+  // to say so rather than offer a button whose only outcome is that refusal.
+  const offersClaim = isPublicAuthPageAvailable("/signup", {
+    mailReady: mail_ready,
+    oauthProviders: oauth_providers,
+  })
+  // A provider sign-in is the other way in, and it needs no mail: a
+  // provider-verified address stamps `email_verified_at` and resolves a
+  // rostered identity that has no password at all
+  // (`adapters/identity_provider_adapter.py`, which calls it "the one way a
+  // deployment that cannot send mail can still let a member in"). So the
+  // no-mail ending is only a dead end where there is no provider either.
+  const offersProviderSignIn = oauth_providers.length > 0
 
-  // The address the invitation was sent to, still in the query cache behind the
-  // accept: the claim is bound to it, so prefilling it is what keeps the
-  // invitee from claiming a different address by mistyping this one. Absent
-  // only if the preview were somehow gone, and then the form asks for it.
+  // Still in the query cache behind the accept. Why the claim is bound to this
+  // address is `SignupPage`'s docstring; absent only if the preview were
+  // somehow gone, and then the form asks for it.
   const invitedEmail = preview.data?.email
   const signupHash = invitedEmail
     ? `#/signup?${new URLSearchParams({ email: invitedEmail }).toString()}`
@@ -77,13 +93,21 @@ export function AcceptInvitationPage() {
           </div>
 
           {token === null ? (
-            <ErrorBanner
-              error={
-                new Error(
-                  "This link is missing its invitation token, so there is nothing to accept.",
-                )
-              }
-            />
+            <>
+              <ErrorBanner
+                error={
+                  new Error(
+                    "This link is missing its invitation token, so there is nothing to accept.",
+                  )
+                }
+              />
+              {/* A refusal is not a handoff, and this page deliberately offers
+                  none here. It still owes a door: with forward navigation on
+                  the success branch, Back onto a spent token lands here, and a
+                  card whose only other link is the welcome guide strands
+                  whoever reads it. */}
+              <PublicAuthLink to="#/">Back to sign in</PublicAuthLink>
+            </>
           ) : accept.isSuccess ? (
             // Ahead of the preview's own branches, because the preview refuses a
             // token that has been spent: a refetch after this accept (a
@@ -110,8 +134,17 @@ export function AcceptInvitationPage() {
                   >
                     Go to the dashboard
                   </Button>
+                  {/* Offered, not assumed: `accept` takes no identity and this
+                      session may belong to someone else in a shared browser, so
+                      the claim stays reachable rather than this ending being the
+                      one with no route to it. */}
+                  {offersClaim && invitedEmail ? (
+                    <PublicAuthLink to={signupHash}>
+                      Not you? Set a password for {invitedEmail}
+                    </PublicAuthLink>
+                  ) : null}
                 </>
-              ) : mail_ready ? (
+              ) : offersClaim ? (
                 <>
                   <p className="text-center text-xs text-muted">
                     Next, set your password to sign in.
@@ -133,10 +166,14 @@ export function AcceptInvitationPage() {
                 </>
               ) : (
                 <>
+                  {/* Never "ask an administrator to set your password": there is
+                      no endpoint for that. `PUT /v1/auth/password` only ever
+                      acts on the caller's own identity, so that advice named
+                      something nobody on this deployment can do. */}
                   <p className="text-center text-xs text-muted">
-                    Setting a password works by emailing you a link, and this
-                    deployment is not configured to send mail. Ask whoever
-                    administers it to set your password for you.
+                    {offersProviderSignIn
+                      ? "Setting a password works by emailing you a link, and this deployment sends no mail. Sign in with one of the providers on the sign-in screen instead."
+                      : "Setting a password works by emailing you a link, and this deployment sends no mail. An operator can turn that on by configuring outgoing mail and a public base URL for this gateway."}
                   </p>
                   <Button
                     variant="primary"
@@ -153,7 +190,10 @@ export function AcceptInvitationPage() {
               Checking your invitation…
             </p>
           ) : preview.error ? (
-            <ErrorBanner error={preview.error} />
+            <>
+              <ErrorBanner error={preview.error} />
+              <PublicAuthLink to="#/">Back to sign in</PublicAuthLink>
+            </>
           ) : preview.data ? (
             <>
               <p className="text-center text-sm text-foreground">

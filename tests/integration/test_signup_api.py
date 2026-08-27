@@ -79,6 +79,56 @@ def test_signup_then_verify_then_sign_in(
     assert signed_in.status_code == 200, signed_in.text
 
 
+def test_invited_member_accepts_then_claims_the_invited_address(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    test_config: GatewayConfig,
+    monkeypatch: pytest.MonkeyPatch,
+    caplog: pytest.LogCaptureFixture,
+) -> None:
+    """The path an invitee actually walks, which the test above does not cover.
+
+    ``_add_member`` lands a membership ``active`` directly; an invitation lands
+    it ``invited`` and the identity stays password-less until the accept page
+    hands the recipient to signup (otari#835). Both ends existed and were
+    tested; the join between them was not, so nothing failed if the address the
+    accept page previews stopped being the address signup can claim.
+    """
+    monkeypatch.setattr(test_config, "mail_transport", "console")
+    monkeypatch.setattr(test_config, "public_base_url", "https://otari.example.com")
+
+    invited = client.post(
+        "/v1/organizations/me/member-invitations",
+        json={"email": "grace@example.com", "role": "member"},
+        headers=master_key_header,
+    )
+    assert invited.status_code == 201, invited.text
+    accept_token = _TOKEN_IN_LINK.search(invited.json()["accept_link"])
+    assert accept_token, invited.json()["accept_link"]
+
+    # The address the claim is bound to is the one the preview publishes, which
+    # is what lets the accept page prefill it without a second endpoint.
+    preview = client.post("/v1/invitations/validate", json={"token": accept_token.group(1)})
+    assert preview.status_code == 200, preview.text
+    previewed_email = preview.json()["email"]
+    assert previewed_email == "grace@example.com"
+
+    accepted = client.post("/v1/invitations/accept", json={"token": accept_token.group(1)})
+    assert accepted.status_code == 200, accepted.text
+
+    # Spending the token is what the accept page's branch order protects: the
+    # preview refuses from here on, over a membership the visitor already holds.
+    spent = client.post("/v1/invitations/validate", json={"token": accept_token.group(1)})
+    assert spent.status_code == 400, spent.text
+
+    verification_token = _signed_up_token(client, caplog, email=previewed_email)
+    verified = client.post("/v1/auth/verify-email", json={"token": verification_token})
+    assert verified.status_code == 200, verified.text
+
+    signed_in = client.post("/v1/auth/session", json={"email": previewed_email, "password": PASSWORD})
+    assert signed_in.status_code == 200, signed_in.text
+
+
 def test_signup_on_an_untouched_address_is_enumeration_safe(
     client: TestClient,
     test_config: GatewayConfig,
