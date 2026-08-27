@@ -213,10 +213,13 @@ describe("OverviewPage", () => {
     renderPage(<OverviewPage />)
     await screen.findByText("$200.00")
 
-    expect(screen.queryByText(/vs prev/)).not.toBeInTheDocument()
+    // queryAllByText, not queryByText: a regression that renders all three
+    // chips makes queryByText throw on the multiple match rather than fail on
+    // the assertion, which reads as a broken test instead of a broken tile.
+    expect(screen.queryAllByText(/vs prev/)).toHaveLength(0)
     expect(
-      screen.queryByText(/^(no change|up|down)(, (better|worse))?$/),
-    ).not.toBeInTheDocument()
+      screen.queryAllByText(/^(no change|up|down)(, (better|worse))?$/),
+    ).toHaveLength(0)
   })
 
   it("renders spend and request-volume sparklines from the 30-day series", async () => {
