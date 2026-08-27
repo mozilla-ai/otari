@@ -392,7 +392,10 @@ data_plane_url: "https://gateway.otari.ai"
 or `OTARI_DATA_PLANE_URL=https://gateway.otari.ai`. The value travels to the
 browser through `GET /v1/bootstrap` and is what the snippets then name. It is
 validated as an absolute `http(s)` URL when the config loads, and a trailing
-slash is trimmed, because the dashboard suffixes it with `/v1`.
+slash is trimmed, because the dashboard suffixes it with `/v1`. A query string
+or a fragment is refused for that same reason: this is a prefix a client
+appends a path to, so `https://gateway.otari.ai?trace=1` would put
+`/v1/chat/completions` inside a parameter value rather than in the path.
 
 **With none configured, a hosted deployment shows no snippet at all**, and says
 so where one would have been. That is deliberate: the alternative is handing

@@ -1749,6 +1749,14 @@ class GatewayConfig(BaseSettings):
         The trailing slash is normalized away here so no consumer has to: the
         dashboard suffixes this with ``/v1``, and ``https://host//v1`` is a
         different path on a strict router.
+
+        A query string or a fragment is refused for the same reason, and it is
+        the case a scheme check alone would miss: this is a base URL a client
+        appends to, so ``https://host?trace=1`` would put ``/v1/chat/completions``
+        inside the query value rather than in the path, and the snippet would
+        reach the deployment's root with a very strange parameter. Unlike
+        ``docs_url``, which is a link a person follows, nothing downstream can
+        recover from that.
         """
         normalized = (value or "").strip().rstrip("/")
         if not normalized:
@@ -1756,6 +1764,9 @@ class GatewayConfig(BaseSettings):
         parsed = urlsplit(normalized)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             msg = f"data_plane_url must be an absolute http(s) URL, got '{value}'"
+            raise ValueError(msg)
+        if parsed.query or parsed.fragment:
+            msg = f"data_plane_url must carry no query string or fragment, got '{value}'"
             raise ValueError(msg)
         return normalized
 

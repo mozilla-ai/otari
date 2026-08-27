@@ -513,6 +513,23 @@ def test_a_data_plane_url_that_is_not_an_http_link_is_refused_at_load(configured
         GatewayConfig(data_plane_url=configured)
 
 
+@pytest.mark.parametrize(
+    "configured",
+    ["https://gateway.otari.ai?trace=1", "https://gateway.otari.ai#top"],
+)
+def test_a_data_plane_url_carrying_a_query_or_fragment_is_refused_at_load(configured: str) -> None:
+    """The one bad value an http(s) check alone would let through.
+
+    This is a base URL a client appends ``/v1/chat/completions`` to, so a query
+    string would swallow that path into a parameter value and a fragment would
+    drop it after the hash. Both parse as absolute http(s) URLs and neither is
+    recoverable downstream, unlike ``docs_url``, which is a link a person
+    follows rather than a prefix anything builds on.
+    """
+    with pytest.raises(ValidationError, match="query string or fragment"):
+        GatewayConfig(data_plane_url=configured)
+
+
 @pytest.mark.parametrize("configured", ["", "   "])
 def test_a_blank_data_plane_url_is_an_unset_one(configured: str) -> None:
     """A container templating an empty value has named no data plane."""
