@@ -444,7 +444,8 @@ class GatewayConfig(BaseSettings):
         default=None,
         description=(
             "Where this deployment's inference traffic belongs, as an absolute http(s) URL "
-            "with no trailing slash (e.g. 'https://gateway.otari.ai'). Only a hosted control "
+            "with no trailing slash and no '/v1' suffix (e.g. 'https://gateway.otari.ai'), "
+            "which the dashboard appends itself. Only a hosted control "
             "plane needs it: a standalone gateway and a hybrid one both serve inference at "
             "their own address, so whatever reached the dashboard reaches the API, and this "
             "stays unset. A control plane serving many organizations does not, so it has to "
@@ -1757,6 +1758,16 @@ class GatewayConfig(BaseSettings):
         reach the deployment's root with a very strange parameter. Unlike
         ``docs_url``, which is a link a person follows, nothing downstream can
         recover from that.
+
+        A ``/v1`` suffix is refused too, and it is the likelier mistake of the
+        two: everywhere else a client meets one, "base URL" means the ``/v1``
+        address (the OpenAI SDK's own ``base_url`` includes it), so writing that
+        here is the natural error, and it renders a snippet posting to
+        ``/v1/v1/chat/completions``, which looks right and 404s on first use.
+        Refused rather than stripped, because stripping would be silent and
+        would be wrong for a gateway genuinely mounted under such a path, while
+        refusing costs one edit. Any other path prefix is left alone: a gateway
+        proxied at ``https://api.example.com/otari`` is a real deployment.
         """
         normalized = (value or "").strip().rstrip("/")
         if not normalized:
@@ -1767,6 +1778,12 @@ class GatewayConfig(BaseSettings):
             raise ValueError(msg)
         if parsed.query or parsed.fragment:
             msg = f"data_plane_url must carry no query string or fragment, got '{value}'"
+            raise ValueError(msg)
+        if parsed.path.rsplit("/", 1)[-1].lower() == "v1":
+            msg = (
+                "data_plane_url must not end in /v1: the dashboard appends that path itself, so give "
+                f"the gateway's own address (for example 'https://gateway.otari.ai'). Got '{value}'"
+            )
             raise ValueError(msg)
         return normalized
 

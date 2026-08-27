@@ -536,6 +536,39 @@ def test_a_blank_data_plane_url_is_an_unset_one(configured: str) -> None:
     assert GatewayConfig(data_plane_url=configured).data_plane_url is None
 
 
+@pytest.mark.parametrize(
+    "configured",
+    [
+        "https://gateway.otari.ai/v1",
+        "https://gateway.otari.ai/v1/",
+        "https://gateway.otari.ai/V1",
+        "https://api.example.com/otari/v1",
+    ],
+)
+def test_a_data_plane_url_that_already_names_v1_is_refused(configured: str) -> None:
+    """The likelier of the two mistakes, refused where it is cheap.
+
+    Everywhere else a client meets one, "base URL" means the ``/v1`` address, so
+    writing that here is the natural error, and it renders a snippet posting to
+    ``/v1/v1/chat/completions``: it looks right and 404s on first use. Refused
+    rather than stripped, because stripping would be silent and would be wrong
+    for a gateway genuinely mounted under such a path.
+    """
+    with pytest.raises(ValidationError, match="must not end in /v1"):
+        GatewayConfig(data_plane_url=configured)
+
+
+def test_a_path_prefix_that_is_not_v1_is_left_alone() -> None:
+    """A gateway proxied at a sub-path is a real deployment, not a typo.
+
+    Only the ``/v1`` ending is refused, so the guard cannot cost an operator a
+    deployment shape the gateway otherwise supports.
+    """
+    assert GatewayConfig(data_plane_url="https://api.example.com/otari").data_plane_url == (
+        "https://api.example.com/otari"
+    )
+
+
 def test_a_trailing_slash_is_trimmed_from_the_data_plane_url() -> None:
     """The dashboard suffixes this with ``/v1``, and ``//v1`` is a different path.
 

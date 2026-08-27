@@ -301,6 +301,17 @@ def test_config_view_shows_the_documentation_link_target() -> None:
     assert by_key["docs_url"].settable is False
 
 
+def test_config_view_shows_the_data_plane_address() -> None:
+    # A hosted control plane showing no snippet beside a new key is explained by
+    # this value, so the operator who set it (or forgot to) can read it back
+    # where they read docs_url back. A public gateway address, not a credential.
+    by_key = {field.key: field for field in _config_fields(GatewayConfig(data_plane_url="https://gateway.otari.ai"))}
+
+    assert by_key["data_plane_url"].value == "https://gateway.otari.ai"
+    # Read-only: where inference belongs is a restart-time decision.
+    assert by_key["data_plane_url"].settable is False
+
+
 def test_config_view_exposes_numeric_bounds() -> None:
     # Settable numeric fields carry their lower bound so the dashboard can gate a
     # number input the same way the backend validator does.

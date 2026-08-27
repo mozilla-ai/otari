@@ -63,7 +63,7 @@ pricing:
 | `port` | int | `8000` | Server bind port |
 | `master_key` | string | none | Master key for management endpoints |
 | `public_base_url` | string | none | This deployment's own externally-reachable URL, no trailing slash. Needed to put an absolute link in outgoing email (see [Mail](#mail)), to derive the relying-party ID passkeys are bound to (see [Access control](access-control.md#passkeys)), and to derive the OAuth redirect URI (see [OAuth sign-in](access-control.md#oauth-sign-in-google-and-github)). |
-| `data_plane_url` | string | none | Where this deployment's inference traffic belongs, as an absolute `http(s)` URL with no trailing slash. Only a hosted control plane needs it; a standalone or hybrid gateway serves its own API and leaves it unset. See [The data-plane address](#the-data-plane-address). |
+| `data_plane_url` | string | none | Where this deployment's inference traffic belongs, as an absolute `http(s)` URL with no trailing slash and no `/v1` suffix, which the dashboard appends itself. Only a hosted control plane needs it; a standalone or hybrid gateway serves its own API and leaves it unset. See [The data-plane address](#the-data-plane-address). |
 | `docs_url` | string | none | Where this deployment's documentation lives, as an absolute `http(s)` URL. Unset, the dashboard's **Documentation** links open the operator guide bundled with the gateway at `/#/docs`. See [Documentation links](#documentation-links). |
 | `webauthn_rp_id` | string | host of `public_base_url` | The domain passkeys are bound to: bare, with no scheme, port or path. An override rather than an alternative to `public_base_url`, which is still needed as the origin a ceremony runs from. Changing it orphans every passkey already registered. |
 | `webauthn_rp_name` | string | `otari` | The name an authenticator shows while a passkey is created, and files it under. Cosmetic; nothing verifies it. |
@@ -396,6 +396,13 @@ slash is trimmed, because the dashboard suffixes it with `/v1`. A query string
 or a fragment is refused for that same reason: this is a prefix a client
 appends a path to, so `https://gateway.otari.ai?trace=1` would put
 `/v1/chat/completions` inside a parameter value rather than in the path.
+
+A value that already ends in `/v1` is refused for the same reason, and it is the
+likelier mistake: everywhere else a client meets one, "base URL" means the `/v1`
+address, so `https://gateway.otari.ai/v1` here would render a snippet posting to
+`/v1/v1/chat/completions`, which looks right and 404s on first use. Give the
+gateway's own address instead. Any other path prefix is accepted, so a gateway
+proxied at `https://api.example.com/otari` works.
 
 **With none configured, a hosted deployment shows no snippet at all**, and says
 so where one would have been. That is deliberate: the alternative is handing
