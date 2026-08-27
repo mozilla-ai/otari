@@ -3,7 +3,7 @@ import { screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type { WorkspaceActivation } from "@/client"
+import type { DeploymentBootstrap, WorkspaceActivation } from "@/client"
 import { SetupGuideCard } from "@/features/onboarding/SetupGuideCard"
 import {
   SelectedWorkspaceProvider,
@@ -109,13 +109,16 @@ function Switcher() {
   )
 }
 
-function renderCard(hasProviders = true) {
+function renderCard(
+  hasProviders = true,
+  deployment: DeploymentBootstrap = bootstrap(),
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return renderWithRouter(
     <QueryClientProvider client={client}>
-      <DeploymentProvider value={bootstrap()}>
+      <DeploymentProvider value={deployment}>
         <SelectedWorkspaceProvider>
           <SetupGuideCard hasProviders={hasProviders} />
           <Switcher />
@@ -194,6 +197,54 @@ describe("SetupGuideCard", () => {
     )
     // The model comes from the catalog, so the snippet runs as pasted.
     expect(curl.value).toContain("openai:gpt-4o-mini")
+  })
+
+  it("sends the snippet at the data plane a hosted deployment published", async () => {
+    // The control plane serves this guide and is deliberately not where
+    // inference belongs (otari#822), so the origin is the one address the
+    // snippet must not name.
+    mockApi()
+    const person = userEvent.setup()
+    await renderCard(
+      true,
+      bootstrap({
+        deployment_type: "hosted",
+        data_plane_url: "https://gateway.otari.ai",
+      }),
+    )
+
+    await person.click(
+      await screen.findByRole("button", { name: "Create a setup key" }),
+    )
+
+    const curl = (await screen.findByDisplayValue(
+      new RegExp(`Otari-Key: ${KEY}`),
+    )) as HTMLTextAreaElement
+    expect(curl.value).toContain("https://gateway.otari.ai/v1/chat/completions")
+    expect(curl.value).not.toContain(window.location.origin)
+  })
+
+  it("shows the key but no snippet when a hosted deployment published no data plane", async () => {
+    // Withheld rather than aimed at this host: a placeholder would be a URL
+    // nobody reading it could replace, and the origin would be the bug itself.
+    mockApi()
+    const person = userEvent.setup()
+    await renderCard(
+      true,
+      bootstrap({ deployment_type: "hosted", data_plane_url: null }),
+    )
+
+    await person.click(
+      await screen.findByRole("button", { name: "Create a setup key" }),
+    )
+
+    expect(await screen.findByDisplayValue(KEY)).toBeInTheDocument()
+    expect(
+      screen.queryByDisplayValue(new RegExp(`Otari-Key: ${KEY}`)),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.getByText(/has not published the gateway address/),
+    ).toBeInTheDocument()
   })
 
   it("names the placeholder, and where to fix it, when no model is being served", async () => {

@@ -63,6 +63,7 @@ pricing:
 | `port` | int | `8000` | Server bind port |
 | `master_key` | string | none | Master key for management endpoints |
 | `public_base_url` | string | none | This deployment's own externally-reachable URL, no trailing slash. Needed to put an absolute link in outgoing email (see [Mail](#mail)), to derive the relying-party ID passkeys are bound to (see [Access control](access-control.md#passkeys)), and to derive the OAuth redirect URI (see [OAuth sign-in](access-control.md#oauth-sign-in-google-and-github)). |
+| `data_plane_url` | string | none | Where this deployment's inference traffic belongs, as an absolute `http(s)` URL with no trailing slash. Only a hosted control plane needs it; a standalone or hybrid gateway serves its own API and leaves it unset. See [The data-plane address](#the-data-plane-address). |
 | `docs_url` | string | none | Where this deployment's documentation lives, as an absolute `http(s)` URL. Unset, the dashboard's **Documentation** links open the operator guide bundled with the gateway at `/#/docs`. See [Documentation links](#documentation-links). |
 | `webauthn_rp_id` | string | host of `public_base_url` | The domain passkeys are bound to: bare, with no scheme, port or path. An override rather than an alternative to `public_base_url`, which is still needed as the origin a ceremony runs from. Changing it orphans every passkey already registered. |
 | `webauthn_rp_name` | string | `otari` | The name an authenticator shows while a passkey is created, and files it under. Cosmetic; nothing verifies it. |
@@ -370,6 +371,35 @@ trailing slash trimmed.
 **The bundled guide stays served at `/#/docs` either way.** Only the links move,
 so a URL somebody bookmarked keeps working and an operator on a hosted
 deployment can still read the guide for the gateway in front of them.
+
+### The data-plane address
+
+A standalone gateway serves the dashboard and the API from one process, so the
+address that reached the dashboard is the address to send a request to. The
+dashboard builds its "make your first call" snippets from exactly that, on the
+Keys page and in the setup guide, which is more reliable than anything the
+gateway could report about its own address from behind a proxy.
+
+A hosted control plane (`OTARI_MODE=hosted`) breaks that assumption: it serves
+the dashboard for several organizations, and customer inference belongs on the
+data-plane gateway rather than on it. So it has to say where that gateway is:
+
+```yaml
+data_plane_url: "https://gateway.otari.ai"
+```
+
+or `OTARI_DATA_PLANE_URL=https://gateway.otari.ai`. The value travels to the
+browser through `GET /v1/bootstrap` and is what the snippets then name. It is
+validated as an absolute `http(s)` URL when the config loads, and a trailing
+slash is trimmed, because the dashboard suffixes it with `/v1`.
+
+**With none configured, a hosted deployment shows no snippet at all**, and says
+so where one would have been. That is deliberate: the alternative is handing
+somebody a runnable command aimed at the one host their traffic should not
+reach, and a placeholder hostname would be a value nobody reading it could
+replace. The gateway logs a warning at startup so the missing panel is
+explained. Standalone and hybrid deployments ignore the setting and keep using
+the browser's own origin.
 
 ### otari.ai variables
 

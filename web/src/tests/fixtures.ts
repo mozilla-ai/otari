@@ -122,6 +122,10 @@ export function bootstrap(
     // describes by default; a test about the password login overrides it.
     sign_in_methods: ["master_key"],
     management_url: null,
+    // Null, because a standalone gateway is its own data plane: the address that
+    // served this page is the address that serves the API. The hosted-mode
+    // snippet tests set it.
+    data_plane_url: null,
     // Null, because a fixture describes a deployment whose documentation is the
     // bundled guide; the tests about an operator-configured docs site set it.
     docs_url: null,

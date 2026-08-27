@@ -3,11 +3,12 @@ import { describe, expect, it } from "vitest"
 import {
   buildCurlSnippet,
   buildPythonSnippet,
+  resolveSnippetBaseUrl,
   SNIPPET_MODEL_PLACEHOLDER,
 } from "@/shared/helpers/requestSnippets"
 
 const INPUT = {
-  origin: "https://otari.example.com",
+  baseUrl: "https://otari.example.com",
   apiKey: "gw-abc123",
   model: "openai:gpt-4o-mini",
 }
@@ -22,7 +23,7 @@ function shellPayload(snippet: string): string {
 }
 
 describe("buildCurlSnippet", () => {
-  it("posts to the completions path on the origin the dashboard was served from", () => {
+  it("posts to the completions path on the base URL it was given", () => {
     expect(buildCurlSnippet(INPUT)).toContain(
       "https://otari.example.com/v1/chat/completions",
     )
@@ -95,5 +96,75 @@ describe("buildPythonSnippet", () => {
     const snippet = buildPythonSnippet({ ...INPUT, model: 'weird"model\\name' })
 
     expect(snippet).toContain('model="weird\\"model\\\\name"')
+  })
+})
+
+describe("resolveSnippetBaseUrl", () => {
+  const ORIGIN = "https://dashboard.example.com"
+
+  it("uses the browser's own origin on a standalone gateway", () => {
+    // One process is both the dashboard and the data plane, so whatever address
+    // reached this page reaches /v1/chat/completions.
+    expect(
+      resolveSnippetBaseUrl(
+        { deployment_type: "standalone", data_plane_url: null },
+        ORIGIN,
+      ),
+    ).toBe(ORIGIN)
+  })
+
+  it("uses the browser's own origin on a hybrid gateway", () => {
+    // A gateway attached to otari.ai *is* the data plane; only its management
+    // surface lives elsewhere.
+    expect(
+      resolveSnippetBaseUrl(
+        { deployment_type: "hybrid", data_plane_url: null },
+        ORIGIN,
+      ),
+    ).toBe(ORIGIN)
+  })
+
+  it("uses the published data plane on a hosted control plane", () => {
+    expect(
+      resolveSnippetBaseUrl(
+        {
+          deployment_type: "hosted",
+          data_plane_url: "https://gateway.otari.ai",
+        },
+        ORIGIN,
+      ),
+    ).toBe("https://gateway.otari.ai")
+  })
+
+  it("answers null on a hosted control plane that published none", () => {
+    // Never the origin, which is the bug this replaces: the control plane is the
+    // one host a request must not be sent to (otari#822).
+    expect(
+      resolveSnippetBaseUrl(
+        { deployment_type: "hosted", data_plane_url: null },
+        ORIGIN,
+      ),
+    ).toBeNull()
+  })
+
+  it("trims a trailing slash, since the caller suffixes the result", () => {
+    expect(
+      resolveSnippetBaseUrl(
+        {
+          deployment_type: "hosted",
+          data_plane_url: "https://gateway.otari.ai/",
+        },
+        ORIGIN,
+      ),
+    ).toBe("https://gateway.otari.ai")
+  })
+
+  it("treats a blank published value as none at all", () => {
+    expect(
+      resolveSnippetBaseUrl(
+        { deployment_type: "hosted", data_plane_url: "   " },
+        ORIGIN,
+      ),
+    ).toBeNull()
   })
 })

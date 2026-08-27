@@ -4,7 +4,7 @@ import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type { ApiKey, User } from "@/client"
+import type { ApiKey, DeploymentBootstrap, User } from "@/client"
 import { KeysPage } from "@/features/keys/KeysPage"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
 import { bootstrap, organizationMember } from "@/tests/fixtures"
@@ -151,7 +151,10 @@ function mockApi(
     })
 }
 
-function renderPage(ui: ReactElement) {
+function renderPage(
+  ui: ReactElement,
+  deployment: DeploymentBootstrap = bootstrap(),
+) {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
@@ -160,7 +163,7 @@ function renderPage(ui: ReactElement) {
   // budget, so it needs both the deployment context and a router around it.
   return renderWithRouter(
     <QueryClientProvider client={client}>
-      <DeploymentProvider value={bootstrap()}>{ui}</DeploymentProvider>
+      <DeploymentProvider value={deployment}>{ui}</DeploymentProvider>
     </QueryClientProvider>,
   )
 }
@@ -255,6 +258,58 @@ describe("KeysPage", () => {
       await screen.findByText(`${NEW_SECRET.slice(0, 10)}…`),
     ).toBeInTheDocument()
     expect(document.body.textContent).not.toContain(NEW_SECRET)
+  })
+
+  /** Mint a key and open the one-time reveal, which is where the snippets live. */
+  async function revealANewKey(deployment?: DeploymentBootstrap) {
+    mockApi({ keys: [] })
+    const person = userEvent.setup()
+    renderPage(<KeysPage />, deployment)
+
+    await screen.findByText("No API keys yet")
+    await person.click(
+      screen.getByRole("button", { name: "Create your first key" }),
+    )
+    await person.type(screen.getByLabelText("Name"), "deploy-key")
+    await person.type(screen.getByPlaceholderText(/Pick a user/), "alice")
+    await person.keyboard("{Escape}")
+    await person.click(screen.getByRole("button", { name: "Create key" }))
+
+    return within(await screen.findByRole("dialog"))
+  }
+
+  it("sends the snippet at the data plane a hosted deployment published", async () => {
+    // The control plane serves this dashboard and is deliberately not where
+    // inference belongs (otari#822), so the origin is the one address the
+    // snippet must not name.
+    const dialog = await revealANewKey(
+      bootstrap({
+        deployment_type: "hosted",
+        data_plane_url: "https://gateway.otari.ai",
+      }),
+    )
+
+    const curl = dialog.getByDisplayValue(
+      new RegExp(`Otari-Key: ${NEW_SECRET}`),
+    ) as HTMLTextAreaElement
+    expect(curl.value).toContain("https://gateway.otari.ai/v1/chat/completions")
+    expect(curl.value).not.toContain(window.location.origin)
+  })
+
+  it("shows no snippet when a hosted deployment published no data plane", async () => {
+    // Withheld rather than aimed at this host: a placeholder would be a URL
+    // nobody reading it could replace, and the origin would be the bug itself.
+    const dialog = await revealANewKey(
+      bootstrap({ deployment_type: "hosted", data_plane_url: null }),
+    )
+
+    expect(dialog.getByDisplayValue(NEW_SECRET)).toBeInTheDocument()
+    expect(
+      dialog.queryByDisplayValue(new RegExp(`Otari-Key: ${NEW_SECRET}`)),
+    ).not.toBeInTheDocument()
+    expect(
+      dialog.getByText(/has not published the gateway address/),
+    ).toBeInTheDocument()
   })
 
   it("does not close the reveal on Escape; requires the explicit save button", async () => {

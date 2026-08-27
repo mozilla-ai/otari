@@ -197,6 +197,28 @@ def _validate_platform_config(config: GatewayConfig) -> None:
         raise ValueError(msg)
 
 
+def _warn_if_hosted_has_no_data_plane(config: GatewayConfig) -> None:
+    """Warn when a hosted control plane cannot say where its data plane is.
+
+    A hosted deployment serves the dashboard but is not where customer inference
+    belongs (otari#822), so the dashboard needs ``data_plane_url`` to build a
+    runnable snippet for a key it has just issued. Without it the snippet is
+    withheld rather than pointed at this host, which is correct but leaves an
+    operator wondering where it went, so the reason is said once at startup.
+
+    A warning and not a startup error: the alternative would take a running
+    control plane down on its next redeploy over a dashboard affordance, and the
+    management API this deployment exists to serve is unaffected either way.
+    """
+    if not config.is_hosted_mode or config.data_plane_url:
+        return
+    logger.warning(
+        "Hosted mode is active with no data_plane_url configured, so the dashboard will not "
+        "show request snippets beside a new key: it has no data-plane gateway address to put "
+        "in one, and this host is not it. Set data_plane_url (or OTARI_DATA_PLANE_URL)."
+    )
+
+
 # How long shutdown waits for refreshers to acknowledge cancellation.
 #
 # Cancelling a task is a request, not a guarantee. The CancelledError is
@@ -505,6 +527,7 @@ def create_app(config: GatewayConfig) -> FastAPI:
     """Create and configure FastAPI application."""
 
     _validate_platform_config(config)
+    _warn_if_hosted_has_no_data_plane(config)
     # A set-but-invalid OTARI_SECRET_KEY must not silently pass startup and then
     # break provider-credential storage at request time. Fail fast here instead.
     validate_secret_key()

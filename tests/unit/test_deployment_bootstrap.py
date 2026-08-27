@@ -7,7 +7,9 @@ Unit rather than integration because the one database read the route makes runs
 on the SQLite file each test stands up, so there is no PostgreSQL to wait for.
 """
 
+import logging
 from collections.abc import Callable, Generator
+from contextlib import contextmanager
 from pathlib import Path
 
 import pytest
@@ -58,11 +60,12 @@ def _standalone(tmp_path: Path, docs_url: str | None = None) -> GatewayConfig:
     )
 
 
-def _hosted(tmp_path: Path) -> GatewayConfig:
+def _hosted(tmp_path: Path, data_plane_url: str | None = None) -> GatewayConfig:
     return GatewayConfig(
         mode="hosted",
         database_url=f"sqlite:///{tmp_path / 'bootstrap.db'}",
         master_key=MASTER_KEY,
+        data_plane_url=data_plane_url,
     )
 
 
@@ -87,6 +90,7 @@ def test_standalone_reports_a_local_operator_and_the_full_surface_set(tmp_path: 
         "surfaces": sorted(STANDALONE_SURFACES),
         "sign_in_methods": ["master_key"],
         "management_url": None,
+        "data_plane_url": None,
         "docs_url": None,
         "maintenance_mode": False,
         "passkeys_ready": False,
@@ -308,6 +312,7 @@ def test_hybrid_reports_no_session_no_surfaces_and_the_hosted_url(monkeypatch: p
         "surfaces": [],
         "sign_in_methods": [],
         "management_url": "https://otari.ai",
+        "data_plane_url": None,
         "docs_url": None,
         "maintenance_mode": False,
         "passkeys_ready": False,
@@ -428,3 +433,132 @@ def test_a_docs_url_that_is_not_an_http_link_is_refused_at_load(configured: str)
 def test_a_blank_docs_url_is_an_unset_one(configured: str) -> None:
     """A container templating an empty value has not configured a docs site."""
     assert GatewayConfig(docs_url=configured).docs_url is None
+
+
+def test_a_hosted_control_plane_publishes_where_its_data_plane_is(tmp_path: Path) -> None:
+    """The field otari#823 exists for: the dashboard's snippets are built from it.
+
+    A hosted deployment serves this dashboard and is deliberately not where
+    customer inference belongs, so the address the browser reached is the one
+    address a request must not be sent to. Nothing else here can supply it.
+    """
+    app = create_app(_hosted(tmp_path, data_plane_url="https://gateway.otari.ai"))
+
+    with TestClient(app) as client:
+        response = client.get("/v1/bootstrap")
+
+    assert response.json()["data_plane_url"] == "https://gateway.otari.ai"
+
+
+def test_a_hosted_control_plane_that_names_no_data_plane_answers_null(tmp_path: Path) -> None:
+    """Null rather than this host, which is the whole bug being fixed.
+
+    Answering the control plane's own address would be the dashboard handing
+    somebody a runnable command aimed at the one host their traffic should not
+    reach. The dashboard shows no snippet on null and says why.
+    """
+    app = create_app(_hosted(tmp_path))
+
+    with TestClient(app) as client:
+        response = client.get("/v1/bootstrap")
+
+    assert response.json()["data_plane_url"] is None
+
+
+def test_standalone_never_publishes_a_data_plane_url(tmp_path: Path) -> None:
+    """A standalone gateway is its own data plane, so the browser's origin is right.
+
+    Configured or not, it answers null: the address that reached this page is an
+    address that reaches ``/v1/chat/completions``, which is more reliable than
+    anything this process could report about itself from behind a proxy.
+    """
+    config = _standalone(tmp_path)
+    config.data_plane_url = "https://elsewhere.example"
+    app = create_app(config)
+
+    with TestClient(app) as client:
+        response = client.get("/v1/bootstrap")
+
+    assert response.json()["data_plane_url"] is None
+
+
+def test_a_hybrid_gateway_never_publishes_a_data_plane_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A gateway attached to otari.ai *is* the data plane, so it names no other."""
+    monkeypatch.setenv("OTARI_AI_TOKEN", PLATFORM_TOKEN)
+    app = create_app(_hybrid())
+
+    with TestClient(app) as client:
+        response = client.get("/v1/bootstrap")
+
+    assert response.json()["data_plane_url"] is None
+
+
+def test_data_plane_url_is_read_from_the_environment(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """OTARI_DATA_PLANE_URL is the whole configuration surface a container needs."""
+    monkeypatch.setenv("OTARI_DATA_PLANE_URL", "https://gateway.otari.ai")
+
+    config = GatewayConfig(database_url=f"sqlite:///{tmp_path / 'env.db'}")
+    assert config.data_plane_url == "https://gateway.otari.ai"
+
+
+@pytest.mark.parametrize("configured", ["javascript:alert(1)", "gateway.otari.ai", "/v1"])
+def test_a_data_plane_url_that_is_not_an_http_link_is_refused_at_load(configured: str) -> None:
+    """A typo here is a curl command an operator copies and cannot explain.
+
+    Refused where the config is built, the way ``docs_url`` is: both are fields
+    of their own rather than keys inside the free-form ``platform`` dict, so
+    pydantic can validate them.
+    """
+    with pytest.raises(ValidationError, match="data_plane_url"):
+        GatewayConfig(data_plane_url=configured)
+
+
+@pytest.mark.parametrize("configured", ["", "   "])
+def test_a_blank_data_plane_url_is_an_unset_one(configured: str) -> None:
+    """A container templating an empty value has named no data plane."""
+    assert GatewayConfig(data_plane_url=configured).data_plane_url is None
+
+
+def test_a_trailing_slash_is_trimmed_from_the_data_plane_url() -> None:
+    """The dashboard suffixes this with ``/v1``, and ``//v1`` is a different path.
+
+    Normalized once here rather than at each consumer, since the value travels to
+    a browser that builds a URL from it.
+    """
+    assert GatewayConfig(data_plane_url="https://gateway.otari.ai/").data_plane_url == "https://gateway.otari.ai"
+
+
+@contextmanager
+def _gateway_warnings(caplog: pytest.LogCaptureFixture) -> Generator[None]:
+    """Capture the gateway logger, which does not propagate to root by default."""
+    gateway_logger = logging.getLogger("gateway")
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.WARNING, logger="gateway")
+    try:
+        yield
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
+
+
+def test_hosted_mode_without_a_data_plane_url_warns_at_startup(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """Said once at boot, because the missing snippet is otherwise unexplained.
+
+    A warning and not a startup error: the alternative would take a running
+    control plane down on its next redeploy over a dashboard affordance, and the
+    management API it exists to serve is unaffected either way.
+    """
+    with _gateway_warnings(caplog):
+        create_app(_hosted(tmp_path))
+
+    assert "data_plane_url" in caplog.text
+
+
+def test_a_hosted_deployment_that_names_its_data_plane_warns_about_nothing(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture
+) -> None:
+    with _gateway_warnings(caplog):
+        create_app(_hosted(tmp_path, data_plane_url="https://gateway.otari.ai"))
+
+    assert "data_plane_url" not in caplog.text

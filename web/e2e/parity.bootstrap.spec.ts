@@ -38,6 +38,10 @@ test("the deployment bootstrap is served unauthenticated", async ({
     // docs/access-control.md#dashboard-sessions-and-identity.
     sign_in_methods: ["master_key"],
     management_url: null,
+    // Null because this gateway is its own data plane, which is what makes the
+    // dashboard's request snippets correct when they name the address the
+    // browser reached. Only a hosted control plane sets it; see otari#823.
+    data_plane_url: null,
     // No docs_url in this e2e environment, so the dashboard's Documentation
     // links stay on the operator guide bundled with this gateway; see
     // docs/configuration.md#documentation-links.

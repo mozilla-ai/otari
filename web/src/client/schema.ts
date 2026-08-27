@@ -5177,6 +5177,11 @@ export interface components {
          */
         DeploymentBootstrap: {
             /**
+             * Data Plane Url
+             * @description Where this deployment's inference traffic belongs, when it is not served here. The mirror of management_url: that one says where management lives when this deployment is not the control plane, this one says where the data plane is when this deployment is not it. Set only by a hosted control plane, which serves the dashboard but not inference (otari#822); null for standalone and hybrid, both of which serve inference at the address that reached this page. Not a human link target like management_url: it is the base URL a client suffixes with /v1, which is what the dashboard builds its request snippets from. Null on a hosted deployment means unconfigured, and the dashboard then shows no snippet rather than one naming this host.
+             */
+            data_plane_url: string | null;
+            /**
              * Deployment Type
              * @description Which deployment serves this URL. 'standalone' owns its own data and serves one tenant; 'hosted' owns its own data and serves many (otari.ai, or any deployment run as a control plane), which is why its management surfaces are the per-organization ones; 'hybrid' is a gateway attached to otari.ai, which is data-plane only and holds no management surface of its own.
              * @enum {string}

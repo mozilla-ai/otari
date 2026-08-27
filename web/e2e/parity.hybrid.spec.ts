@@ -45,6 +45,10 @@ test.describe("hybrid deployment", () => {
       // renders the landing page rather than a sign-in screen.
       sign_in_methods: [],
       management_url: MANAGEMENT_URL,
+      // Null, and never anything else on a hybrid gateway: this deployment *is*
+      // the data plane, so the address that reached it is the address that
+      // reaches its API. See otari#823.
+      data_plane_url: null,
       // Deployment-wide rather than standalone-only, and unset here: a hybrid
       // gateway may carry a hosted documentation link, and this one configures
       // none, so the bundled guide stays the target.

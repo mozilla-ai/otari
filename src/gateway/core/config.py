@@ -440,6 +440,19 @@ class GatewayConfig(BaseSettings):
             "/#/docs either way."
         ),
     )
+    data_plane_url: str | None = Field(
+        default=None,
+        description=(
+            "Where this deployment's inference traffic belongs, as an absolute http(s) URL "
+            "with no trailing slash (e.g. 'https://gateway.otari.ai'). Only a hosted control "
+            "plane needs it: a standalone gateway and a hybrid one both serve inference at "
+            "their own address, so whatever reached the dashboard reaches the API, and this "
+            "stays unset. A control plane serving many organizations does not, so it has to "
+            "say where the data-plane gateway is or the dashboard has nothing runnable to "
+            "hand somebody with a new key. Unlike platform.management_url, which is a human "
+            "link target, this is the base URL a client suffixes with /v1."
+        ),
+    )
     webauthn_rp_id: str | None = Field(
         default=None,
         description=(
@@ -1720,6 +1733,29 @@ class GatewayConfig(BaseSettings):
         parsed = urlsplit(normalized)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             msg = f"docs_url must be an absolute http(s) URL, got '{value}'"
+            raise ValueError(msg)
+        return normalized
+
+    @field_validator("data_plane_url")
+    @classmethod
+    def _validate_data_plane_url(cls, value: str | None) -> str | None:
+        """Reject a data-plane address that is not an absolute http(s) URL.
+
+        Held to the same bar as ``docs_url`` and for the same reason: the
+        deployment bootstrap publishes it to the browser, which builds a runnable
+        snippet from it. A typo should be a startup error rather than a curl
+        command an operator copies and cannot explain.
+
+        The trailing slash is normalized away here so no consumer has to: the
+        dashboard suffixes this with ``/v1``, and ``https://host//v1`` is a
+        different path on a strict router.
+        """
+        normalized = (value or "").strip().rstrip("/")
+        if not normalized:
+            return None
+        parsed = urlsplit(normalized)
+        if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+            msg = f"data_plane_url must be an absolute http(s) URL, got '{value}'"
             raise ValueError(msg)
         return normalized
 

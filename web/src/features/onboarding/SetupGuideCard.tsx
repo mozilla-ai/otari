@@ -19,10 +19,11 @@ import { formatCost, formatRelative } from "@/shared/helpers/format"
 import {
   buildCurlSnippet,
   buildPythonSnippet,
+  resolveSnippetBaseUrl,
   SNIPPET_MODEL_PLACEHOLDER,
 } from "@/shared/helpers/requestSnippets"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
-import { useSurfaces } from "@/shared/hooks/useDeployment"
+import { useDeployment, useSurfaces } from "@/shared/hooks/useDeployment"
 
 /**
  * The step between "a provider is configured" and "this dashboard has something
@@ -222,8 +223,12 @@ function IssuedKey({ issued }: { issued: ActivationApiKey }) {
   // pasted. With none (a provider that answers no listing) the placeholder
   // stands and the copy below says what to do about it.
   const model = models.data?.data?.[0]?.id
-  const origin = window.location.origin
-  const snippetInput = { origin, apiKey: issued.key, model }
+  // Where a request from this deployment belongs, which is not always the
+  // address that served this page: a hosted control plane serves the dashboard
+  // and not the API. Null when it has not said where its gateway is, and the
+  // snippets are then withheld rather than aimed at this host (otari#823).
+  const baseUrl = resolveSnippetBaseUrl(useDeployment())
+  const snippetInput = baseUrl ? { baseUrl, apiKey: issued.key, model } : null
 
   return (
     <div className="flex flex-col gap-3">
@@ -232,7 +237,15 @@ function IssuedKey({ issued }: { issued: ActivationApiKey }) {
         new one in its place.
       </InfoBanner>
       <CopyField label="API key" value={issued.key} />
-      {model === undefined ? (
+      {snippetInput === null ? (
+        <p className="text-xs text-muted">
+          This deployment has not published the gateway address to send requests
+          to, so there is no example to show here. Ask whoever runs it for the
+          base URL, then call <code>/v1/chat/completions</code> with this key in
+          an <code>Otari-Key</code> header.
+        </p>
+      ) : null}
+      {snippetInput !== null && model === undefined ? (
         <p className="text-xs text-muted">
           No model is being served yet, so the snippets name{" "}
           <code>{SNIPPET_MODEL_PLACEHOLDER}</code>. Replace it with a model from
@@ -246,16 +259,20 @@ function IssuedKey({ issued }: { issued: ActivationApiKey }) {
           page.
         </p>
       ) : null}
-      <CopyField
-        label="curl"
-        value={buildCurlSnippet(snippetInput)}
-        multiline
-      />
-      <CopyField
-        label="Python (OpenAI SDK)"
-        value={buildPythonSnippet(snippetInput)}
-        multiline
-      />
+      {snippetInput !== null ? (
+        <>
+          <CopyField
+            label="curl"
+            value={buildCurlSnippet(snippetInput)}
+            multiline
+          />
+          <CopyField
+            label="Python (OpenAI SDK)"
+            value={buildPythonSnippet(snippetInput)}
+            multiline
+          />
+        </>
+      ) : null}
     </div>
   )
 }

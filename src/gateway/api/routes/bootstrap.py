@@ -9,8 +9,8 @@ which mode the gateway is in.
 Registered in both modes, and unauthenticated by necessity: this is what tells a
 browser whether a sign-in screen is even the right thing to show. It therefore
 carries no secret. In particular it never carries the platform token, and
-``management_url`` and ``docs_url`` are link targets an operator configured, not
-credentials.
+``management_url``, ``data_plane_url`` and ``docs_url`` are addresses an operator
+configured, not credentials.
 
 The contract is shared with otari.ai, which serves the same shape for its hosted
 deployment (mozilla-ai/otari-ai#1591). ``deployment_type`` and ``session_type``
@@ -156,6 +156,20 @@ class DeploymentBootstrap(BaseModel):
             "Set for a hybrid gateway so its landing page can link to otari.ai; null otherwise."
         )
     )
+    data_plane_url: str | None = Field(
+        description=(
+            "Where this deployment's inference traffic belongs, when it is not served here. "
+            "The mirror of management_url: that one says where management lives when this "
+            "deployment is not the control plane, this one says where the data plane is when "
+            "this deployment is not it. Set only by a hosted control plane, which serves the "
+            "dashboard but not inference (otari#822); null for standalone and hybrid, both of "
+            "which serve inference at the address that reached this page. Not a human link "
+            "target like management_url: it is the base URL a client suffixes with /v1, which "
+            "is what the dashboard builds its request snippets from. Null on a hosted "
+            "deployment means unconfigured, and the dashboard then shows no snippet rather "
+            "than one naming this host."
+        )
+    )
     docs_url: str | None = Field(
         description=(
             "Where this deployment's documentation lives, when it is not the operator guide "
@@ -244,6 +258,9 @@ async def get_bootstrap(
             surfaces=[],
             sign_in_methods=[],
             management_url=config.platform_management_url,
+            # This gateway *is* the data plane, so the address that reached this
+            # page is the address that reaches the API.
+            data_plane_url=None,
             docs_url=config.docs_url,
             maintenance_mode=False,
             passkeys_ready=False,
@@ -264,6 +281,9 @@ async def get_bootstrap(
         surfaces=sorted(HOSTED_SURFACES if hosted else STANDALONE_SURFACES),
         sign_in_methods=await _sign_in_methods(db, config),
         management_url=None,
+        # Standalone is its own data plane and answers null; a hosted control
+        # plane is not, and publishes wherever its operator says the gateway is.
+        data_plane_url=config.data_plane_url if hosted else None,
         docs_url=config.docs_url,
         maintenance_mode=await _maintenance_mode(db),
         passkeys_ready=config.webauthn_enabled,

@@ -39,6 +39,21 @@ Hiding the page does not disable the deployment-wide credentials. `config.yml`
 and the API still populate them, and they are still resolved on the request
 path; hosted mode only stops offering them a dashboard.
 
+### Where inference goes
+
+A hosted deployment is a control plane. Customer inference belongs on the
+data-plane gateway that resolves credentials through it and reports usage back,
+not on the host serving this dashboard. Set `data_plane_url` (or
+`OTARI_DATA_PLANE_URL`) to that gateway's base URL so the dashboard's request
+snippets, on the Keys page and in the setup guide, name it rather than the
+address the browser happens to have reached. With none set the snippets are
+withheld and the panel says why; see
+[The data-plane address](configuration.md#the-data-plane-address).
+
+Standalone and hybrid deployments need none of this: each serves its own API at
+its own address, so the browser's origin is already right and the setting is
+ignored.
+
 ### What hosted mode does not do
 
 It selects a dashboard, not a security posture, and today the gateway's own
