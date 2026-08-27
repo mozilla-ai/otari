@@ -236,6 +236,14 @@ GET /v1/organizations/me/pricing                            # dashboard-only
 POST /v1/organizations/me/pricing                           # dashboard-only
 PUT /v1/organizations/me/pricing/{pricing_id}               # dashboard-only
 DELETE /v1/organizations/me/pricing/{pricing_id}            # dashboard-only
+# The tenant's own view of the usage `/v1/usage` serves deployment-wide
+# (otari#837). Excluded for the same reason its deployment-wide siblings above
+# are: it is scoped by the caller's dashboard session, and an SDK caller holds an
+# API key, which names a workspace rather than a person with memberships.
+GET /v1/organizations/me/usage                              # dashboard-only
+GET /v1/organizations/me/usage/count                        # dashboard-only
+GET /v1/organizations/me/usage/summary                      # dashboard-only
+GET /v1/organizations/me/usage/series                       # dashboard-only
 GET /v1/organizations/me/guardrails                         # operator surface
 POST /v1/organizations/me/guardrails                        # operator surface
 PATCH /v1/organizations/me/guardrails/{guardrail_id}        # operator surface

@@ -86,11 +86,14 @@ describe("nav registry", () => {
     // stays off it on purpose (organization members, workspaces, the workspace
     // tool pages): hiding a destination a member does use costs more than a
     // panel on it reporting its own refusal.
+    //
+    // Activity and Usage left the list in otari#837, which is the other way a
+    // row leaves it: not by loosening a gate but by the page behind it gaining a
+    // tenant-scoped read, so there is no longer a caller it refuses. Removing a
+    // row from here is as much a design decision as adding one.
     expect(
       NAV_ITEMS.filter((item) => item.operatorOnly).map((item) => item.to),
     ).toEqual([
-      "/activity",
-      "/usage",
       "/models",
       "/routing",
       "/keys",

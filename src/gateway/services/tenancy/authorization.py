@@ -11,6 +11,7 @@ closing a cycle.
 """
 
 import uuid
+from dataclasses import dataclass
 
 from sqlalchemy.ext.asyncio import AsyncSession
 
@@ -126,9 +127,73 @@ async def require_workspace_management_access(
         raise NotAuthorizedError
 
 
+@dataclass(frozen=True)
+class VisibleWorkspaceScope:
+    """How much of one organization the caller may be shown.
+
+    The set form of :func:`resolve_visible_workspace`, and deliberately the same
+    rule: an owner, an admin or a superuser sees every workspace in the
+    organization, and everyone else sees the ones they actively belong to. It is
+    stated once here so a tenant-scoped read cannot invent a fifth answer to
+    "how much of this organization is yours", which is the question the workspace
+    list, the workspace resolver and now the organization's usage all ask.
+
+    ``workspace_ids`` is ``None`` for the whole organization rather than a list of
+    every workspace in it, so the caller can express that as a predicate over
+    ``organization_id`` and not an ``IN`` list that grows with the tenant. An
+    *empty* list is a real answer and not an error: a member who belongs to no
+    workspace yet may see nothing, which is an empty page rather than a refusal.
+
+    Carries no SQL. Turning this into a WHERE clause is the reading route's job,
+    because the tables a scope applies to are not this module's business.
+    """
+
+    organization: Organization
+    role: str
+    workspace_ids: list[uuid.UUID] | None
+
+    @property
+    def sees_every_workspace(self) -> bool:
+        return self.workspace_ids is None
+
+
+async def resolve_visible_workspace_scope(
+    db: AsyncSession,
+    *,
+    user: User,
+    organizations: OrganizationService,
+) -> VisibleWorkspaceScope:
+    """Resolve how much of their active organization this caller may be shown.
+
+    The organization is the caller's own ``active_organization_id``, put through
+    ``get_active_organization_for_user`` so a pointer with no live membership
+    behind it raises rather than resolving. It is never taken from the request:
+    a caller moves between organizations with ``POST /v1/organizations/me/switch``,
+    which refuses an organization they hold no active membership in, so there is
+    no parameter here for a cross-tenant read to travel on.
+    """
+    organization = await organizations.get_active_organization_for_user(user)
+    membership = await organizations.members.get_active_by_organization_and_user(organization.id, user.id)
+    # Not None: ``get_active_organization_for_user`` refuses without one. Read
+    # back rather than threaded out of it because the role is what decides the
+    # breadth below, and `workspace_service.list_workspaces` resolves it the
+    # same way.
+    role = membership.role if membership is not None else "member"
+
+    if user.is_superuser or role in MANAGEMENT_ROLES:
+        return VisibleWorkspaceScope(organization=organization, role=role, workspace_ids=None)
+
+    workspace_ids = await WorkspaceMemberRepository(db).get_workspace_ids_for_user(
+        user_id=user.id,
+        organization_id=organization.id,
+    )
+    return VisibleWorkspaceScope(organization=organization, role=role, workspace_ids=workspace_ids)
+
 __all__ = [
+    "VisibleWorkspaceScope",
     "has_workspace_management_access",
     "require_workspace_management_access",
     "resolve_visible_workspace",
+    "resolve_visible_workspace_scope",
     "resolve_workspace_in_organization",
 ]

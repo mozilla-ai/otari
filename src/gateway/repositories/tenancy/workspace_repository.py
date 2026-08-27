@@ -260,6 +260,32 @@ class WorkspaceMemberRepository:
         )
         return list(result.scalars().all()), count
 
+    async def get_workspace_ids_for_user(
+        self,
+        *,
+        user_id: uuid.UUID,
+        organization_id: uuid.UUID,
+    ) -> list[uuid.UUID]:
+        """Every workspace in one organization the user actively belongs to, as ids.
+
+        Unpaged on purpose, unlike :meth:`get_workspaces_for_user` beside it. Its
+        caller is the usage scope (``resolve_visible_workspace_scope``), where a
+        page boundary would not shorten a list but silently drop rows out of the
+        caller's own totals, and a total that quietly omits a workspace is worse
+        than a slow one. Ids only, so the unbounded result stays a set of uuids
+        rather than a set of rows.
+        """
+        result = await self.db.execute(
+            select(col(WorkspaceMember.workspace_id))
+            .join(Workspace, col(Workspace.id) == col(WorkspaceMember.workspace_id))
+            .where(
+                col(WorkspaceMember.user_id) == user_id,
+                col(Workspace.organization_id) == organization_id,
+                col(WorkspaceMember.status) == "active",
+            )
+        )
+        return list(result.scalars().all())
+
     async def create(
         self,
         *,

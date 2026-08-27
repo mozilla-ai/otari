@@ -46,6 +46,31 @@ function jsonResponse(body: unknown, status = 200): Response {
   })
 }
 
+// The context the shell reads before it paints. The usage hooks wait on it to
+// learn whether this caller reads the deployment-wide routes or the
+// organization-scoped ones (otari#837), so a hand-rolled mock that does not
+// answer it renders a page that fetches nothing. `mockApi` has its own arm; the
+// four narrower mocks in this file use this.
+function operatorContext(): Response {
+  return jsonResponse({
+    organization_member_id: "om-1",
+    role: "owner",
+    status: "active",
+    organization: {
+      id: "org-1",
+      name: "Acme",
+      slug: "acme",
+      created_by_user_id: null,
+      created_at: new Date().toISOString(),
+      updated_at: null,
+    },
+    byo_provider_keys_allowed: true,
+    deployment_operator: true,
+    provider_key_encryption_available: true,
+    workspace_memberships: [],
+  })
+}
+
 interface FetchCall {
   url: string
   method: string
@@ -65,6 +90,8 @@ function mockApi(
     inFlight?: InFlightResponse | (() => InFlightResponse)
     /** The workspace the switcher is pointed at, if a test needs one. */
     workspace?: string
+    /** False for the tenant who does not operate the deployment (otari#837). */
+    deploymentOperator?: boolean
   } = {},
 ) {
   const rows = opts.rows ?? []
@@ -95,15 +122,19 @@ function mockApi(
       if (url.includes("/v1/usage/set-price")) {
         return jsonResponse({ matched: 1, updated: 1, unchanged: 0 })
       }
-      if (url.includes("/v1/usage/count")) {
+      // The read arms match the path's tail rather than the whole prefix, so one
+      // mock answers both `/v1/usage/*` and `/v1/organizations/me/usage/*`: which
+      // of the two the page asked for is what the assertions read off `calls`.
+      // The two write arms above stay deployment-wide, because they are.
+      if (url.includes("/usage/count")) {
         return jsonResponse({ total: total() })
       }
-      // Ahead of the bare /v1/usage arm below, which would otherwise answer this
+      // Ahead of the bare usage arm below, which would otherwise answer this
       // with the row array and hand the in-flight control the wrong shape.
-      if (url.includes("/v1/usage/in-flight")) {
+      if (url.includes("/usage/in-flight")) {
         return jsonResponse(inFlight())
       }
-      if (url.includes("/v1/usage/summary")) {
+      if (url.includes("/usage/summary")) {
         const models = Array.from(new Set(rows.map((r) => r.model)))
         return jsonResponse({
           start_date: "",
@@ -150,7 +181,7 @@ function mockApi(
           series: [],
         })
       }
-      if (url.includes("/v1/usage")) {
+      if (url.includes("/usage")) {
         // The request-group lookup (repeatable request_group_id) is the same list
         // endpoint, so it is served here: rows of the asked-for groups only, out of
         // `groupRows` when a test needs siblings the page itself never listed.
@@ -185,6 +216,11 @@ function mockApi(
             updated_at: null,
           },
           byo_provider_keys_allowed: true,
+          // These suites are the operator's view of the page, which is what the
+          // deployment-wide routes below answer. The member's view reads
+          // /v1/organizations/me/usage instead and has its own cases.
+          deployment_operator: opts.deploymentOperator ?? true,
+          provider_key_encryption_available: true,
           workspace_memberships: opts.workspace
             ? [
                 {
@@ -556,6 +592,7 @@ describe("ActivityPage", () => {
     // quiet gateway; the error banner must carry the failure.
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
+      if (url.endsWith("/v1/organizations/me")) return operatorContext()
       if (url.includes("/v1/usage/summary")) {
         return jsonResponse({ detail: "summary exploded" }, 500)
       }
@@ -807,6 +844,7 @@ describe("ActivityPage", () => {
   it("keeps Next reachable when the count request fails", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
+      if (url.endsWith("/v1/organizations/me")) return operatorContext()
       if (url.includes("/v1/usage/count")) {
         return jsonResponse({ detail: "boom" }, 500)
       }
@@ -843,7 +881,10 @@ describe("ActivityPage", () => {
       "/activity?model=gpt-4o&user_id=alice&status=error",
     )
 
-    await screen.findByText("gpt-4o")
+    // Waits on the request, not on "gpt-4o": that string is the model chip's own
+    // label and paints from the URL before any row arrives, so finding it says
+    // nothing about whether the list has been asked for yet.
+    await waitFor(() => expect(listCalls(calls)).not.toHaveLength(0))
     const latest = listCalls(calls).at(-1)!
     expect(latest).toContain("model=gpt-4o")
     expect(latest).toContain("user_id=alice")
@@ -859,7 +900,8 @@ describe("ActivityPage", () => {
       "/activity?user_id=alice&user_id=bob&model=gpt-4o",
     )
 
-    await screen.findByText("gpt-4o")
+    // See the case above on why this waits on the call rather than on the label.
+    await waitFor(() => expect(listCalls(calls)).not.toHaveLength(0))
     const latest = listCalls(calls).at(-1)!
     expect(latest).toContain("user_id=alice")
     expect(latest).toContain("user_id=bob")
@@ -1938,10 +1980,16 @@ describe("ActivityPage suggestion scoping", () => {
       "/activity?model=gpt-4o&user_id=alice&range=24h",
     )
 
-    await screen.findByText("gpt-4o")
-    const summaries = calls
-      .map((c) => c.url)
-      .filter((url) => url.includes("/v1/usage/summary"))
+    // See the drill-down cases above: the label paints from the URL, so the wait
+    // has to be on the summaries this assertion actually reads.
+    const summariesSoFar = () =>
+      calls.map((c) => c.url).filter((url) => url.includes("/v1/usage/summary"))
+    await waitFor(() =>
+      expect(
+        summariesSoFar().some((url) => url.includes("dimensions=user")),
+      ).toBe(true),
+    )
+    const summaries = summariesSoFar()
 
     const modelQuery = summaries.find((url) => url.includes("dimensions=model"))
     expect(modelQuery, "model typeahead summary").toBeDefined()
@@ -2108,6 +2156,7 @@ describe("ActivityPage live traffic", () => {
 
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
+      if (url.endsWith("/v1/organizations/me")) return operatorContext()
       if (url.includes("/v1/usage/in-flight")) {
         return failing
           ? jsonResponse({ detail: "gateway restarting" }, 503)
@@ -2314,6 +2363,7 @@ describe("ActivityPage live traffic", () => {
     let countAsks = 0
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
+      if (url.endsWith("/v1/organizations/me")) return operatorContext()
       // The pinned count and the polled one share a URL, so fail every count after
       // the first: the page keeps a total and loses any way to tell if it is current.
       if (url.includes("/v1/usage/count")) {
@@ -2415,5 +2465,65 @@ describe("ActivityPage live traffic", () => {
     } finally {
       vi.useRealTimers()
     }
+  })
+})
+
+describe("ActivityPage for a tenant who does not operate the deployment", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("reads the organization-scoped routes rather than the deployment-wide ones", async () => {
+    const { calls } = mockApi({ rows: [entry()], deploymentOperator: false })
+    renderPage(<ActivityPage />)
+
+    await screen.findByText("gpt-4o")
+    const reads = calls.filter(
+      (c) => c.method === "GET" && c.url.includes("/usage"),
+    )
+    expect(reads).not.toHaveLength(0)
+    // Every one of them, not merely one: a scope applied to the list and
+    // forgotten on the count or the summary would put another tenant's totals
+    // beside this tenant's rows (otari#837).
+    for (const call of reads) {
+      expect(call.url).toContain("/v1/organizations/me/usage")
+    }
+  })
+
+  it("does not poll the in-flight strip, which stays deployment-wide", async () => {
+    // Its registry entries carry no workspace, so there is nothing in them to
+    // scope. Polling it would be a 403 every few seconds.
+    const { calls } = mockApi({ rows: [entry()], deploymentOperator: false })
+    renderPage(<ActivityPage />)
+
+    await screen.findByText("gpt-4o")
+    expect(calls.some((c) => c.url.includes("/usage/in-flight"))).toBe(false)
+  })
+
+  it("offers no row selection, because the bulk writes are not theirs", async () => {
+    // Deleting and repricing usage are deployment-wide. The bulk bar hangs off
+    // the selection, so withholding the selection withholds both.
+    const { calls } = mockApi({
+      rows: [entry({ counts_toward_budget: false, source: "claude_code" })],
+      deploymentOperator: false,
+    })
+    renderPage(<ActivityPage />)
+
+    await screen.findByText("gpt-4o")
+    expect(calls).not.toHaveLength(0)
+    expect(screen.queryByRole("checkbox")).not.toBeInTheDocument()
+  })
+
+  it("still offers the selection to an operator, so the case above is not vacuous", async () => {
+    mockApi({
+      rows: [entry({ counts_toward_budget: false, source: "claude_code" })],
+      deploymentOperator: true,
+    })
+    renderPage(<ActivityPage />)
+
+    await screen.findByText("gpt-4o")
+    await waitFor(() =>
+      expect(screen.queryAllByRole("checkbox")).not.toHaveLength(0),
+    )
   })
 })

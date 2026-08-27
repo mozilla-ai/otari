@@ -63,6 +63,30 @@ that has already shipped (otari-ai#1880).
   request points (`services/tenancy/authorization.py`). The operator gate must stay off
   them: a plain member reaching their own organization is the point of that family.
 
+**A deployment-wide read may have a tenant-scoped sibling, and that is how a tenant gets
+one.** `organization_usage.py` is the worked example (otari#837): `/v1/usage` stayed
+operator-only, and `/v1/organizations/me/usage{,/count,/summary,/series}` serves the same
+rows narrowed to the caller's own organization. Loosening the gate on the original was the
+wrong shape, because its `workspace_id` is a filter the *client* supplies and would have
+rebuilt otari-ai#1880 the moment a non-operator could reach it. Three rules if you add a
+second one:
+
+- **Derive the scope, never accept it.** `authorization.resolve_visible_workspace_scope`
+  reads the caller's own `active_organization_id` and refuses a pointer with no live
+  membership behind it. No parameter names an organization; `POST /v1/organizations/me/switch`
+  is what moves a caller, and it 404s outside their memberships.
+- **How much of the organization is one rule, stated once.** That resolver is the set form
+  of `resolve_visible_workspace`: owner, admin or superuser see every workspace, everyone
+  else sees the ones they actively belong to. Do not invent a second answer.
+- **A client filter may narrow the scope and never widen it.** A named `workspace_id` goes
+  through `resolve_workspace_in_organization`, so outside the scope it is a 404 rather than
+  a row.
+
+Two things stayed deployment-wide, both deliberately: the usage writes (delete, set-price),
+and `/v1/usage/in-flight`, whose registry entries carry no workspace to scope by.
+`tests/integration/test_organization_usage_scope.py` is where a new scoped read earns its
+cross-tenant cases.
+
 The **data plane** is a third case and takes neither. `verify_api_key_or_master_key`
 deliberately does not consult the session cookie: a completion calls a provider with
 somebody's credentials and writes a usage row against somebody's budget, and

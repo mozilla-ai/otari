@@ -12,7 +12,12 @@ import {
   OverviewPage,
 } from "@/features/overview/OverviewPage"
 import { DeploymentProvider } from "@/shared/hooks/useDeployment"
-import { bootstrap, HOSTED_SURFACES, usageTotals } from "@/tests/fixtures"
+import {
+  bootstrap,
+  HOSTED_SURFACES,
+  organizationContext,
+  usageTotals,
+} from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
 
 function jsonResponse(body: unknown, status = 200): Response {
@@ -71,6 +76,13 @@ interface Bodies {
 function mockApi(b: Bodies) {
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input)
+    // The shell reads this before it paints, and the usage hooks wait for it:
+    // it is what tells them whether this caller reads the deployment-wide
+    // routes or the organization-scoped ones (otari#837). Answered first, and
+    // on an exact match, so it cannot shadow /v1/organizations/me/usage.
+    if (url.endsWith("/v1/organizations/me")) {
+      return jsonResponse(organizationContext())
+    }
     if (url.includes("/v1/usage/summary")) {
       if (url.includes("bucket=hour"))
         return jsonResponse(summary(b.today ?? {}))
@@ -262,6 +274,13 @@ describe("OverviewPage", () => {
     ]
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
+      // The shell reads this before it paints, and the usage hooks wait for it:
+      // it is what tells them whether this caller reads the deployment-wide
+      // routes or the organization-scoped ones (otari#837). Answered first, and
+      // on an exact match, so it cannot shadow /v1/organizations/me/usage.
+      if (url.endsWith("/v1/organizations/me")) {
+        return jsonResponse(organizationContext())
+      }
       if (url.includes("/v1/usage/summary")) {
         if (url.includes("bucket=hour"))
           return jsonResponse(summary({ cost: 5 }))
@@ -466,6 +485,13 @@ describe("OverviewPage", () => {
   it("keeps the page up when one tile query fails (per-tile isolation)", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
+      // The shell reads this before it paints, and the usage hooks wait for it:
+      // it is what tells them whether this caller reads the deployment-wide
+      // routes or the organization-scoped ones (otari#837). Answered first, and
+      // on an exact match, so it cannot shadow /v1/organizations/me/usage.
+      if (url.endsWith("/v1/organizations/me")) {
+        return jsonResponse(organizationContext())
+      }
       if (url.includes("/v1/budgets"))
         return jsonResponse({ detail: "boom" }, 500)
       if (url.includes("/v1/usage/summary"))
@@ -555,6 +581,13 @@ describe("OverviewIndex routing", () => {
   it("reports a failed provider query instead of silently rendering a normal overview", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
+      // The shell reads this before it paints, and the usage hooks wait for it:
+      // it is what tells them whether this caller reads the deployment-wide
+      // routes or the organization-scoped ones (otari#837). Answered first, and
+      // on an exact match, so it cannot shadow /v1/organizations/me/usage.
+      if (url.endsWith("/v1/organizations/me")) {
+        return jsonResponse(organizationContext())
+      }
       if (url.includes("/v1/providers/health")) {
         return jsonResponse({
           providers: [],
@@ -582,6 +615,13 @@ describe("OverviewIndex routing", () => {
     let failProviders = true
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
+      // The shell reads this before it paints, and the usage hooks wait for it:
+      // it is what tells them whether this caller reads the deployment-wide
+      // routes or the organization-scoped ones (otari#837). Answered first, and
+      // on an exact match, so it cannot shadow /v1/organizations/me/usage.
+      if (url.endsWith("/v1/organizations/me")) {
+        return jsonResponse(organizationContext())
+      }
       if (url.includes("/v1/providers/health")) {
         return jsonResponse({
           providers: [],

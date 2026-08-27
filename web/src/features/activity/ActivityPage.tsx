@@ -24,6 +24,7 @@ import {
   useSetUsagePrice,
   useUsageCount,
   useUsageLogs,
+  useUsageScope,
   useUsageSummary,
 } from "@/shared/api/hooks"
 import { BulkActionBar } from "@/shared/components/BulkActionBar"
@@ -950,7 +951,13 @@ function RequestDetail({
   onPriceModel,
 }: {
   entry: UsageEntry
-  onPriceModel: (model: string) => void
+  /**
+   * Null for a caller who does not operate the deployment. Pricing a model is a
+   * deployment-wide write (`/v1/pricing`), so offering the button to a tenant
+   * would be offering a refusal; the sentence beside it is still theirs to read,
+   * because "this row cost nothing" is a fact about their own request.
+   */
+  onPriceModel: ((model: string) => void) | null
 }) {
   // A row with no cost (cost IS NULL, the same test the "Priced?" filter uses)
   // is either a model the gateway has no price for or a request refused before
@@ -1050,18 +1057,31 @@ function RequestDetail({
       </div>
       {uncosted ? (
         <div className="flex flex-wrap items-center gap-3">
-          <Button
-            size="sm"
-            variant="outline"
-            onPress={() => onPriceModel(pricingKey)}
-          >
-            Price this model
-          </Button>
+          {onPriceModel ? (
+            <Button
+              size="sm"
+              variant="outline"
+              onPress={() => onPriceModel(pricingKey)}
+            >
+              Price this model
+            </Button>
+          ) : null}
           <span className="text-xs text-muted">
-            This request carries no cost. Set a price for{" "}
-            <code className="break-all">{pricingKey}</code> so later requests
-            are metered and count against budgets. Rows already logged keep the
-            cost they were served with.
+            {onPriceModel ? (
+              <>
+                This request carries no cost. Set a price for{" "}
+                <code className="break-all">{pricingKey}</code> so later
+                requests are metered and count against budgets. Rows already
+                logged keep the cost they were served with.
+              </>
+            ) : (
+              <>
+                This request carries no cost, because no price is set for{" "}
+                <code className="break-all">{pricingKey}</code>. A deployment
+                operator sets one; rows already logged keep the cost they were
+                served with.
+              </>
+            )}
           </span>
         </div>
       ) : null}
@@ -1236,10 +1256,21 @@ export function ActivityPage() {
   const usage = useUsageLogs(filters, page, pageSize)
   const count = useUsageCount(filters)
 
+  // Which usage surface this caller reads, and with it the three things on this
+  // page that stay the deployment operator's: the in-flight strip, the bulk
+  // delete / reprice controls, and the per-row "price this model" button. The
+  // log and its aggregates are organization-scoped for everyone else
+  // (otari#837), so the page is theirs; these three are not.
+  const scope = useUsageScope()
+
   // Requests in progress, read unfiltered: the endpoint has no filters, because a
   // request that has not finished has no outcome, cost, or token count to filter
   // on. Reported gateway-wide beside the refresh control, not as rows.
-  const inFlight = useInFlightRequests()
+  //
+  // Deployment-wide and left that way: its registry entries carry no workspace,
+  // so there is nothing in them to scope to a tenant yet. A non-operator is not
+  // shown a strip reporting somebody else's traffic, and does not ask for one.
+  const inFlight = useInFlightRequests(scope.deploymentWide)
 
   // How far behind the frozen page has fallen. Polled while the count it is
   // compared against is not (see `useUsageCount`), so the difference is "rows that
@@ -1681,7 +1712,11 @@ export function ActivityPage() {
   // render disabled, which reads as a broken control rather than as "these rows
   // are not eligible". Kept while "all matching" is live so the affordance does
   // not vanish under an operator mid-bulk-op.
-  const showSelection = selectableKeys.length > 0 || selection.allMatching
+  // Deleting and repricing usage rows are deployment-wide writes, so a caller
+  // who cannot make them is not offered the selection that leads to them: the
+  // bulk bar is rendered off `hasSelection`, which this gates.
+  const showSelection =
+    scope.deploymentWide && (selectableKeys.length > 0 || selection.allMatching)
 
   const deleteUsage = useDeleteUsage()
   const setPrice = useSetUsagePrice()
@@ -1708,10 +1743,19 @@ export function ActivityPage() {
             Close
           </Button>
         </div>
-        <RequestDetail entry={entry} onPriceModel={setModelPriceKey} />
+        <RequestDetail
+          entry={entry}
+          onPriceModel={scope.deploymentWide ? setModelPriceKey : null}
+        />
       </div>
     ),
-    [],
+    // Was setter-only and therefore empty. The operator flag is the one value
+    // here that is not a setter, and it has to be a dependency rather than a
+    // closure read: it is false until the organization context resolves, so a
+    // stale closure would leave a real operator without the price control for
+    // the rest of the session. It flips at most once, so the row cache it
+    // invalidates is rebuilt once.
+    [scope.deploymentWide],
   )
 
   // A bulk op targets either the current page selection (ids) or, once the operator

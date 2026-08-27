@@ -79,6 +79,8 @@ from gateway.repositories.users_repository import (
     live_attribution_user_ids,
 )
 from gateway.services.mail import Mailer
+from gateway.services.secret_box import secret_box_configured
+from gateway.services.tenancy.deployment_user_service import DeploymentUserService
 from gateway.services.tenancy.email_address import validated_email as _validated_email
 from gateway.services.tenancy.errors import (
     InvitationAlreadyPendingError,
@@ -229,13 +231,21 @@ class OrganizationService:
         """Whether an identity is an active member of an organization."""
         return await self.members.get_active_by_organization_and_user(organization_id, user_id) is not None
 
-    @staticmethod
-    def _to_context(
+    async def _to_context(
+        self,
         *,
+        user: User,
         membership: OrganizationMember,
         organization: Organization,
         workspace_memberships: list[CallerWorkspaceMembershipPublic],
     ) -> OrganizationMembershipContextPublic:
+        """Assemble the context, including the two facts that are not the tenant's own.
+
+        Asynchronous, and an instance method rather than the static one it was,
+        because ``deployment_operator`` is resolved through the same service
+        ``/v1/admin/access`` asks rather than re-derived here; see the field's
+        note on ``OrganizationMembershipContextPublic``.
+        """
         return OrganizationMembershipContextPublic(
             organization_member_id=membership.id,
             role=membership.role,
@@ -246,6 +256,8 @@ class OrganizationService:
             # attached". A standalone deployment reading this *is* that gateway,
             # so its own provider credentials are always available to it.
             byo_provider_keys_allowed=True,
+            deployment_operator=await DeploymentUserService(self.db).has_administration_access(user),
+            provider_key_encryption_available=secret_box_configured(),
         )
 
     async def _caller_workspace_memberships(
@@ -321,7 +333,8 @@ class OrganizationService:
         """Return the caller's organization and their standing in it."""
         organization = await self._resolve_active_organization(user)
         membership = await self._require_active_membership(user, organization)
-        return self._to_context(
+        return await self._to_context(
+            user=user,
             membership=membership,
             organization=organization,
             workspace_memberships=await self._caller_workspace_memberships(user=user, organization=organization),
@@ -480,7 +493,8 @@ class OrganizationService:
         await self.users.set_active_organization(user, organization.id)
         await self.db.commit()
 
-        return self._to_context(
+        return await self._to_context(
+            user=user,
             membership=membership,
             organization=organization,
             workspace_memberships=await self._caller_workspace_memberships(user=user, organization=organization),
@@ -502,7 +516,8 @@ class OrganizationService:
         )
         await self.db.commit()
 
-        return self._to_context(
+        return await self._to_context(
+            user=user,
             membership=membership,
             organization=updated,
             workspace_memberships=await self._caller_workspace_memberships(user=user, organization=updated),

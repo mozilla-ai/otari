@@ -177,6 +177,13 @@ export function organizationContext(
     // shell treats absent and empty the same way.
     workspace_memberships: [],
     byo_provider_keys_allowed: true,
+    // True by default because the fixture models the standalone deployment whose
+    // one identity is both its operator and its organization's owner, which is
+    // what most tests here are about. A test about a tenant who is *not* an
+    // operator says so, and that is the case that reads the organization-scoped
+    // usage routes rather than the deployment-wide ones.
+    deployment_operator: true,
+    provider_key_encryption_available: true,
     ...overrides,
   }
 }

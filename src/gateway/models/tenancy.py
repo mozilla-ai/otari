@@ -499,6 +499,27 @@ class OrganizationMembershipContextPublic(SQLModel):
     # that gateway. Kept on the contract, rather than dropped as a constant, so
     # the ported page reads the same field in both editions.
     byo_provider_keys_allowed: bool = False
+    # Whether this caller also operates the deployment, which is the *other*
+    # authority a signed-in identity can hold and the one no organization role
+    # confers (mozilla-ai/otari#838). Carried here, on a read the shell already
+    # makes before it paints, so the sidebar has no in-flight window in which to
+    # show a row it is about to retract (mozilla-ai/otari#836).
+    #
+    # The same predicate ``GET /v1/admin/access`` publishes, resolved through
+    # ``DeploymentUserService.has_administration_access`` rather than re-derived,
+    # so the two answers cannot come to disagree about who operates the
+    # deployment. This does not retire that endpoint; it is a second publisher of
+    # one fact, and a client should read one of them rather than both.
+    deployment_operator: bool = False
+    # Whether the deployment can encrypt a stored credential at all, i.e. whether
+    # ``OTARI_SECRET_KEY`` is set. A deployment fact rather than a tenant one, and
+    # on the tenant's contract deliberately: it decides whether *this caller's*
+    # provider-key write can succeed, and the only endpoint that reported it
+    # (``GET /v1/settings``) is operator-gated, so a tenant page inferring it from
+    # that read cannot tell a missing key from a refused request
+    # (mozilla-ai/otari#839). Says whether a key is configured, never anything
+    # about its value.
+    provider_key_encryption_available: bool = False
 
 
 class ActiveOrganizationUpdateRequest(SQLModel):
@@ -983,6 +1004,7 @@ class Invitation(InvitationBase, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin
     workspace_assignments: list[dict[str, str]] = Field(default_factory=list, sa_column=Column(JSON, nullable=False))
     expires_at: datetime = Field(sa_type=UtcDateTime())  # type: ignore[call-overload]
 
+
 # =============================================================================
 # WebAuthn (passkeys)
 # =============================================================================
@@ -1168,6 +1190,7 @@ class WebAuthnChallenge(SQLModel, table=True):
     @classmethod
     def _known_ceremony(cls, value: str) -> str:
         return _validate_membership(value, allowed=WEBAUTHN_CEREMONIES, kind="WebAuthn ceremony")
+
 
 __all__ = [
     "DeploymentAdminAccessPublic",

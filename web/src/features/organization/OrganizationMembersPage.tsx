@@ -69,6 +69,13 @@ import {
 // hold, and whether that membership is live. Roles are fixed (owner, admin,
 // member, viewer) and the server enforces the same two rules this page disables
 // controls for, so a refusal is explained here rather than only reported.
+//
+// What the picker below does *not* do is the thing it used to look like it did
+// (otari#838). An organization role is authority over this tenant; operating the
+// deployment is a separate authority nothing on this page grants, held by a
+// superuser or the bootstrap identity and set from Platform Admin. The two were
+// indistinguishable from here, because promoting somebody to admin changed
+// nothing they could see, so the page now says which one it is setting.
 
 // What a member spends and what their keys may call live on the gateway's own
 // `users` row, not on the membership: `organization_member` has no such columns.
@@ -1049,7 +1056,7 @@ export function OrganizationMembersPage() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Members"
-        description="Who belongs to this organization and what each of them may do. Roles are fixed: owners and admins manage the organization, members use it, viewers only read. Budgets and API keys do not attach to this list; they attach to the gateway identity a member is linked to, which is what lets a key be issued to them by name. A member with no such link yet shows no access or spend, and cannot own a key until one exists."
+        description="Who belongs to this organization and what each of them may do. Roles are fixed: owners and admins manage the organization (its workspaces, provider keys, guardrails, pricing and this roster) and read its usage in full, while members and viewers read the workspaces they belong to. No role set here reaches the deployment's own pages, such as Settings and Accounts, which belong to whoever operates the gateway. Budgets and API keys do not attach to this list; they attach to the gateway identity a member is linked to, which is what lets a key be issued to them by name. A member with no such link yet shows no access or spend, and cannot own a key until one exists."
         action={
           manages && !adding && !inviting ? (
             <div className="flex gap-2">

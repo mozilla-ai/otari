@@ -1437,6 +1437,37 @@ function usageParams(filters: UsageFilters): URLSearchParams {
 }
 
 // One page of usage-log rows for the Activity viewer, newest first.
+// Which of the two usage surfaces this caller may read.
+//
+// `/v1/usage` is deployment-wide and refuses anyone who does not operate the
+// deployment; `/v1/organizations/me/usage` serves the same rows narrowed to the
+// caller's own organization, and to the workspaces they belong to within it
+// (otari#837). Both answer identical shapes, so every hook below differs only in
+// the prefix it asks.
+//
+// Read off the organization context rather than `useDeploymentAdminAccess`,
+// because the shell already awaits that context before it paints: there is no
+// window in which the answer is unknown and a request could go to the wrong one.
+// The hooks wait for it rather than guessing, which is why `ready` exists: an
+// operator sent briefly to the scoped route would read their own organization's
+// subset and quietly understate every total on screen.
+//
+// The base is part of every query key it feeds, so two callers on one browser
+// can never read each other's cached rows.
+export function useUsageScope(): {
+  base: string
+  ready: boolean
+  deploymentWide: boolean
+} {
+  const context = useOrganizationContext()
+  const deploymentWide = context.data?.deployment_operator === true
+  return {
+    base: deploymentWide ? "/v1/usage" : "/v1/organizations/me/usage",
+    ready: context.isSuccess,
+    deploymentWide,
+  }
+}
+
 // `placeholderData: keepPreviousData` keeps the current page on screen while the
 // next loads, so paging does not flash empty.
 export function useUsageLogs(
@@ -1444,14 +1475,16 @@ export function useUsageLogs(
   page: number,
   pageSize: number,
 ) {
+  const scope = useUsageScope()
   return useQuery({
-    queryKey: [USAGE, "list", filters, page, pageSize],
+    queryKey: [USAGE, "list", scope.base, filters, page, pageSize],
     queryFn: () => {
       const params = usageParams(filters)
       params.set("skip", String(page * pageSize))
       params.set("limit", String(pageSize))
-      return apiFetch<UsageEntry[]>(`/v1/usage?${params.toString()}`)
+      return apiFetch<UsageEntry[]>(`${scope.base}?${params.toString()}`)
     },
+    enabled: scope.ready,
     placeholderData: keepPreviousData,
     // The log is a snapshot an operator reads, not a feed. On a busy gateway rows
     // arrive faster than anyone can inspect them, so a page that refetched on its
@@ -1471,13 +1504,14 @@ export function useUsageLogs(
 // describes the page on screen, so a total that moved on its own would disagree
 // with the rows the operator can actually page through.
 export function useUsageCount(filters: UsageFilters, enabled = true) {
+  const scope = useUsageScope()
   return useQuery({
-    queryKey: [USAGE, "count", filters],
+    queryKey: [USAGE, "count", scope.base, filters],
     queryFn: () =>
       apiFetch<UsageCount>(
-        `/v1/usage/count?${usageParams(filters).toString()}`,
+        `${scope.base}/count?${usageParams(filters).toString()}`,
       ),
-    enabled,
+    enabled: enabled && scope.ready,
     placeholderData: keepPreviousData,
     staleTime: 10_000,
   })
@@ -1498,13 +1532,14 @@ const NEW_ROW_POLL_MS = 15_000
 // disagree about how fresh their data is. The duplicate `COUNT(*)` at mount is
 // one indexed count, which is what makes polling it affordable in the first place.
 export function useLiveUsageCount(filters: UsageFilters, enabled = true) {
+  const scope = useUsageScope()
   return useQuery({
-    queryKey: [USAGE, "count", "live", filters],
+    queryKey: [USAGE, "count", "live", scope.base, filters],
     queryFn: () =>
       apiFetch<UsageCount>(
-        `/v1/usage/count?${usageParams(filters).toString()}`,
+        `${scope.base}/count?${usageParams(filters).toString()}`,
       ),
-    enabled,
+    enabled: enabled && scope.ready,
     refetchInterval: NEW_ROW_POLL_MS,
     staleTime: 0,
     // A failed count is not worth surfacing: it sits beside a refresh button that
@@ -1530,10 +1565,15 @@ const IN_FLIGHT_POLL_MS = 2_000
 // Never cached across mounts (`staleTime: 0`) and never kept as placeholder data:
 // a stale in-flight list is worse than none, since it claims work is running that
 // finished a minute ago.
-export function useInFlightRequests() {
+// `enabled` is how the Activity page keeps a non-operator from polling a route
+// that would refuse them every few seconds: this one endpoint stays
+// deployment-wide, because its registry entries carry no workspace to scope by
+// (see `usage.list_in_flight`).
+export function useInFlightRequests(enabled = true) {
   return useQuery({
     queryKey: [USAGE, "in-flight"],
     queryFn: () => apiFetch<InFlightResponse>("/v1/usage/in-flight"),
+    enabled,
     refetchInterval: IN_FLIGHT_POLL_MS,
     staleTime: 0,
     // Retrying a 404 cannot help: a gateway that does not serve this endpoint
@@ -1557,8 +1597,9 @@ const FAILURE_COUNT_POLL_MS = 60_000
 // external-events API accepts it), and an imported session's failures are not this
 // gateway dropping traffic. Counting them would make the signal cry wolf.
 export function useFailureCount(windowSeconds: number, enabled = true) {
+  const scope = useUsageScope()
   return useQuery({
-    queryKey: [USAGE, "count", "failures", windowSeconds],
+    queryKey: [USAGE, "count", "failures", scope.base, windowSeconds],
     queryFn: () => {
       const filters: UsageFilters = {
         status: "error",
@@ -1566,10 +1607,10 @@ export function useFailureCount(windowSeconds: number, enabled = true) {
         start_date: isoAgo(windowSeconds),
       }
       return apiFetch<UsageCount>(
-        `/v1/usage/count?${usageParams(filters).toString()}`,
+        `${scope.base}/count?${usageParams(filters).toString()}`,
       )
     },
-    enabled,
+    enabled: enabled && scope.ready,
     refetchInterval: FAILURE_COUNT_POLL_MS,
     refetchOnWindowFocus: true,
     staleTime: 0,
@@ -1592,15 +1633,16 @@ const REQUEST_GROUP_PAGE_LIMIT = 1000
 // sorts its ids so two callers asking for the same set share a cache entry.
 export function useRequestGroups(groupIds: readonly string[]) {
   const ids = [...new Set(groupIds)].sort()
+  const scope = useUsageScope()
   return useQuery({
-    queryKey: [USAGE, "groups", ids],
+    queryKey: [USAGE, "groups", scope.base, ids],
     queryFn: () => {
       const params = new URLSearchParams()
       for (const id of ids) params.append("request_group_id", id)
       params.set("limit", String(REQUEST_GROUP_PAGE_LIMIT))
-      return apiFetch<UsageEntry[]>(`/v1/usage?${params.toString()}`)
+      return apiFetch<UsageEntry[]>(`${scope.base}?${params.toString()}`)
     },
-    enabled: ids.length > 0,
+    enabled: ids.length > 0 && scope.ready,
     placeholderData: keepPreviousData,
     // A group is immutable once its request finished, so the only reason to
     // refetch is a group that was still in flight when it was first read.
@@ -1671,8 +1713,16 @@ export function useUsageSummary(
   dimensions?: SummaryDimension[],
   enabled = true,
 ) {
+  const scope = useUsageScope()
   return useQuery({
-    queryKey: [USAGE, "summary", filters, bucket, dimensions ?? "all"],
+    queryKey: [
+      USAGE,
+      "summary",
+      scope.base,
+      filters,
+      bucket,
+      dimensions ?? "all",
+    ],
     queryFn: () => {
       const params = usageParams(filters)
       params.set("bucket", bucket)
@@ -1683,9 +1733,11 @@ export function useUsageSummary(
           params.append("dimensions", dimension)
         }
       }
-      return apiFetch<UsageSummary>(`/v1/usage/summary?${params.toString()}`)
+      return apiFetch<UsageSummary>(
+        `${scope.base}/summary?${params.toString()}`,
+      )
     },
-    enabled,
+    enabled: enabled && scope.ready,
     placeholderData: keepPreviousData,
     staleTime: 30_000,
   })
@@ -1700,17 +1752,18 @@ export function useUsageGroupedSeries(
   groupBy: UsageGroupBy | null,
   enabled = true,
 ) {
+  const scope = useUsageScope()
   return useQuery({
-    queryKey: [USAGE, "series", filters, bucket, groupBy],
+    queryKey: [USAGE, "series", scope.base, filters, bucket, groupBy],
     queryFn: () => {
       const params = usageParams(filters)
       params.set("bucket", bucket)
       params.set("group_by", groupBy as string)
       return apiFetch<UsageGroupedSeries>(
-        `/v1/usage/series?${params.toString()}`,
+        `${scope.base}/series?${params.toString()}`,
       )
     },
-    enabled: enabled && groupBy !== null,
+    enabled: enabled && groupBy !== null && scope.ready,
     placeholderData: keepPreviousData,
     staleTime: 30_000,
     // A 404 is version skew (a gateway older than this dashboard, e.g. not yet

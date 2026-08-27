@@ -196,9 +196,23 @@ function mockApi(
   return vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input)
     for (const [path, answer] of Object.entries(extra)) {
-      if (url.includes(path)) return jsonResponse(answer)
+      // Matched at a path boundary rather than anywhere in the URL. `/v1/usage`
+      // and `/v1/organizations/me` are both prefixes of routes this page reads
+      // (`/v1/organizations/me/usage/summary` is the tenant's own), so a bare
+      // `includes` would answer a summary request with an organization context.
+      if (url === path || url.endsWith(path) || url.includes(`${path}?`)) {
+        return jsonResponse(answer)
+      }
     }
-    if (url.includes("/v1/usage/summary")) {
+    // The shell reads this before it paints, and the usage hooks wait for it: it
+    // is what tells them whether this caller reads the deployment-wide routes or
+    // the organization-scoped ones (otari#837). After `extra`, so a test that
+    // supplies its own context still wins, and on an exact match so it cannot
+    // shadow /v1/organizations/me/usage.
+    if (url.endsWith("/v1/organizations/me")) {
+      return jsonResponse(organizationContext())
+    }
+    if (url.includes("/usage/summary")) {
       // The previous-period query is the only one on this page passing
       // NO_BREAKDOWNS, which goes on the wire as the server's `none` sentinel,
       // so that is what tells the two windows apart here.
@@ -207,7 +221,7 @@ function mockApi(
       }
       return jsonResponse(body ?? summary())
     }
-    if (url.includes("/v1/usage/series")) {
+    if (url.includes("/usage/series")) {
       return jsonResponse({
         start_date: "2026-06-21T00:00:00Z",
         end_date: "2026-07-21T00:00:00Z",
@@ -536,6 +550,13 @@ describe("UsagePage", () => {
     const user = userEvent.setup()
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
+      // The shell reads this before it paints, and the usage hooks wait for it:
+      // it is what tells them whether this caller reads the deployment-wide
+      // routes or the organization-scoped ones (otari#837). Answered first, and
+      // on an exact match, so it cannot shadow /v1/organizations/me/usage.
+      if (url.endsWith("/v1/organizations/me")) {
+        return jsonResponse(organizationContext())
+      }
       if (url.includes("/v1/usage/series"))
         return jsonResponse({ detail: "Not Found" }, 404)
       if (url.includes("/v1/usage/summary")) return jsonResponse(summary())

@@ -1993,6 +1993,104 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/organizations/me/usage": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Organization Usage
+         * @description List the caller's organization's usage logs, most recent first.
+         *
+         *     The tenant-scoped counterpart of ``GET /v1/usage``: same filters, same bare
+         *     JSON array, same separate ``/count`` for a paginator's total, confined to
+         *     what the caller's membership lets them see. Scope is never a parameter here.
+         */
+        get: operations["list_organization_usage_v1_organizations_me_usage_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/organizations/me/usage/count": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Count Organization Usage
+         * @description Total rows matching these filters, within the caller's scope.
+         *
+         *     Serves the paginator's "N of M" beside the list above, and is scoped the
+         *     same way, so the total can never describe more rows than the list will show.
+         */
+        get: operations["count_organization_usage_v1_organizations_me_usage_count_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/organizations/me/usage/series": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Organization Usage Series
+         * @description Time series split by one dimension, for the caller's organization.
+         *
+         *     The tenant-scoped counterpart of ``GET /v1/usage/series``, and kept in
+         *     lockstep with the summary above for the reason that endpoint gives: the
+         *     dashboard serializes one filter object for both, so a filter one of them
+         *     ignored would make the stacked chart disagree with the tiles beside it.
+         */
+        get: operations["organization_usage_series_v1_organizations_me_usage_series_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/organizations/me/usage/summary": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Organization Usage Summary
+         * @description Aggregate spend, tokens and request volume for the caller's organization.
+         *
+         *     The tenant-scoped counterpart of ``GET /v1/usage/summary``, running the same
+         *     aggregation over a narrower row set: the same bounded window, the same
+         *     breakdowns, the same ``dimensions`` selector for paying only for the passes a
+         *     caller reads. The breakdown by user names the people inside the caller's own
+         *     scope, which is the roster they can already read.
+         */
+        get: operations["organization_usage_summary_v1_organizations_me_usage_summary_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/pricing": {
         parameters: {
             query?: never;
@@ -6696,12 +6794,22 @@ export interface components {
              * @default false
              */
             byo_provider_keys_allowed: boolean;
+            /**
+             * Deployment Operator
+             * @default false
+             */
+            deployment_operator: boolean;
             organization: components["schemas"]["OrganizationPublic"];
             /**
              * Organization Member Id
              * Format: uuid
              */
             organization_member_id: string;
+            /**
+             * Provider Key Encryption Available
+             * @default false
+             */
+            provider_key_encryption_available: boolean;
             /** Role */
             role: string;
             /** Status */
@@ -12538,6 +12646,260 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OrganizationMembershipContextPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_organization_usage_v1_organizations_me_usage_get: {
+        parameters: {
+            query?: {
+                /** @description Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds) */
+                start_date?: string | null;
+                /** @description Return logs with timestamp < end_date (ISO 8601 or Unix epoch seconds) */
+                end_date?: string | null;
+                /** @description Filter to one or more users; repeatable (user_id=a&user_id=b). Several values match any of them. At most 50 per call. */
+                user_id?: string[] | null;
+                /** @description Filter to a single status: 'success', 'error', or 'absorbed' (an attempt a routing policy recovered from, excluded from error_count and request_count) */
+                status?: string | null;
+                /** @description Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly */
+                status_code?: number | null;
+                /** @description Filter to one or more models; repeatable (model=a&model=b). Several values match any of them. At most 50 per call. */
+                model?: string[] | null;
+                /** @description Filter to a single endpoint (e.g. '/v1/chat/completions') */
+                endpoint?: string | null;
+                /** @description Filter to a single provider (e.g. 'openai') */
+                provider?: string | null;
+                /** @description Filter to a single provenance source (e.g. 'gateway' or 'claude_code') */
+                source?: string | null;
+                /** @description Filter to a single session/project label (the source_label carried by imported usage) */
+                source_label?: string | null;
+                /** @description Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call. */
+                api_key_id?: string[] | null;
+                /** @description Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing. */
+                priced?: boolean | null;
+                /** @description Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically. */
+                tool?: ("any" | "web_search" | "code_execution") | null;
+                /** @description Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget */
+                counts_toward_budget?: boolean | null;
+                /** @description Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call. */
+                request_group_id?: string[] | null;
+                /** @description Only usage recorded in this workspace. */
+                workspace_id?: string | null;
+                skip?: number;
+                limit?: number;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageEntry"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    count_organization_usage_v1_organizations_me_usage_count_get: {
+        parameters: {
+            query?: {
+                /** @description Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds) */
+                start_date?: string | null;
+                /** @description Return logs with timestamp < end_date (ISO 8601 or Unix epoch seconds) */
+                end_date?: string | null;
+                /** @description Filter to one or more users; repeatable (user_id=a&user_id=b). Several values match any of them. At most 50 per call. */
+                user_id?: string[] | null;
+                /** @description Filter to a single status: 'success', 'error', or 'absorbed' (an attempt a routing policy recovered from, excluded from error_count and request_count) */
+                status?: string | null;
+                /** @description Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly */
+                status_code?: number | null;
+                /** @description Filter to one or more models; repeatable (model=a&model=b). Several values match any of them. At most 50 per call. */
+                model?: string[] | null;
+                /** @description Filter to a single endpoint (e.g. '/v1/chat/completions') */
+                endpoint?: string | null;
+                /** @description Filter to a single provider (e.g. 'openai') */
+                provider?: string | null;
+                /** @description Filter to a single provenance source (e.g. 'gateway' or 'claude_code') */
+                source?: string | null;
+                /** @description Filter to a single session/project label (the source_label carried by imported usage) */
+                source_label?: string | null;
+                /** @description Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call. */
+                api_key_id?: string[] | null;
+                /** @description Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing. */
+                priced?: boolean | null;
+                /** @description Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically. */
+                tool?: ("any" | "web_search" | "code_execution") | null;
+                /** @description Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget */
+                counts_toward_budget?: boolean | null;
+                /** @description Filter to the rows of one or more request groups; repeatable (request_group_id=a&request_group_id=b). A routed request writes one row per attempt, all sharing a request_group_id, so this returns a request's whole plan: its absorbed attempts and the attempt that served it. Ignore ordering by timestamp and read attempt_position to reconstruct the plan. At most 1000 ids per call. */
+                request_group_id?: string[] | null;
+                /** @description Only usage recorded in this workspace. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageCount"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    organization_usage_series_v1_organizations_me_usage_series_get: {
+        parameters: {
+            query: {
+                /** @description Dimension to split the series by */
+                group_by: "model" | "user_id" | "api_key_id" | "source";
+                /** @description Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds) */
+                start_date?: string | null;
+                /** @description Return logs with timestamp < end_date (ISO 8601 or Unix epoch seconds) */
+                end_date?: string | null;
+                /** @description Filter to one or more users; repeatable (user_id=a&user_id=b). Several values match any of them. At most 50 per call. */
+                user_id?: string[] | null;
+                /** @description Filter to a single status: 'success', 'error', or 'absorbed' (an attempt a routing policy recovered from, excluded from error_count and request_count) */
+                status?: string | null;
+                /** @description Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly */
+                status_code?: number | null;
+                /** @description Filter to one or more models; repeatable (model=a&model=b). Several values match any of them. At most 50 per call. */
+                model?: string[] | null;
+                /** @description Filter to a single endpoint (e.g. '/v1/chat/completions') */
+                endpoint?: string | null;
+                /** @description Filter to a single provider (e.g. 'openai') */
+                provider?: string | null;
+                /** @description Filter to a single provenance source (e.g. 'gateway' or 'claude_code') */
+                source?: string | null;
+                /** @description Filter to a single session/project label (the source_label carried by imported usage) */
+                source_label?: string | null;
+                /** @description Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call. */
+                api_key_id?: string[] | null;
+                /** @description Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing. */
+                priced?: boolean | null;
+                /** @description Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically. */
+                tool?: ("any" | "web_search" | "code_execution") | null;
+                /** @description Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget */
+                counts_toward_budget?: boolean | null;
+                /** @description Only usage recorded in this workspace. */
+                workspace_id?: string | null;
+                /** @description Time-series granularity: 'hour' or 'day' */
+                bucket?: "hour" | "day";
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageGroupedSeries"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    organization_usage_summary_v1_organizations_me_usage_summary_get: {
+        parameters: {
+            query?: {
+                /** @description Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds) */
+                start_date?: string | null;
+                /** @description Return logs with timestamp < end_date (ISO 8601 or Unix epoch seconds) */
+                end_date?: string | null;
+                /** @description Filter to one or more users; repeatable (user_id=a&user_id=b). Several values match any of them. At most 50 per call. */
+                user_id?: string[] | null;
+                /** @description Filter to a single status: 'success', 'error', or 'absorbed' (an attempt a routing policy recovered from, excluded from error_count and request_count) */
+                status?: string | null;
+                /** @description Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly */
+                status_code?: number | null;
+                /** @description Filter to one or more models; repeatable (model=a&model=b). Several values match any of them. At most 50 per call. */
+                model?: string[] | null;
+                /** @description Filter to a single endpoint (e.g. '/v1/chat/completions') */
+                endpoint?: string | null;
+                /** @description Filter to a single provider (e.g. 'openai') */
+                provider?: string | null;
+                /** @description Filter to a single provenance source (e.g. 'gateway' or 'claude_code') */
+                source?: string | null;
+                /** @description Filter to a single session/project label (the source_label carried by imported usage) */
+                source_label?: string | null;
+                /** @description Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call. */
+                api_key_id?: string[] | null;
+                /** @description Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing. */
+                priced?: boolean | null;
+                /** @description Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically. */
+                tool?: ("any" | "web_search" | "code_execution") | null;
+                /** @description Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget */
+                counts_toward_budget?: boolean | null;
+                /** @description Only usage recorded in this workspace. */
+                workspace_id?: string | null;
+                /** @description Time-series granularity: 'hour' or 'day' */
+                bucket?: "hour" | "day";
+                /** @description Which breakdowns to compute; repeatable (dimensions=model&dimensions=user). Each value names the 'by_<value>' response field it fills, except 'status_code', which fills the failure taxonomy in 'errors_by_status_code'. Omit for every breakdown (the default); pass 'none' for a totals-and-series-only response. Each dimension left out skips one GROUP BY scan, so a caller that reads only the tiles or the time series should say so. Fields that were not requested come back empty. */
+                dimensions?: ("model" | "user" | "api_key" | "source" | "source_label" | "endpoint" | "provider" | "status_code" | "tool" | "none")[] | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["UsageSummary"];
                 };
             };
             /** @description Validation Error */

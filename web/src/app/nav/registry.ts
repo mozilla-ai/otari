@@ -67,21 +67,26 @@ const BASE_NAV_SECTIONS = [
     id: "observe",
     label: "Observe",
     items: [
-      // Both read /v1/usage, which is why they name the surface rather than
+      // Both read usage, which is why they name the surface rather than
       // themselves: a deployment that does not host usage loses both.
+      //
+      // Neither declares `operatorOnly` any more, and that is the point of
+      // otari#837 rather than an oversight. They used to, because everything
+      // behind them was `/v1/usage` and a member was refused all of it; now the
+      // pages read `/v1/organizations/me/usage` for a caller who does not
+      // operate the deployment, so both destinations serve every signed-in
+      // identity something true. Tagging them would hide a page that works.
       {
         to: "/activity",
         label: "Activity",
         surface: "usage",
         icon: FiActivity,
-        operatorOnly: "refused",
       },
       {
         to: "/usage",
         label: "Usage",
         surface: "usage",
         icon: FiBarChart2,
-        operatorOnly: "refused",
       },
     ],
   },

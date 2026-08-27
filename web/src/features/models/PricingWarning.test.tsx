@@ -3,9 +3,9 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-
 import type { GatewaySettings } from "@/client"
 import { PricingWarning } from "@/features/models/PricingWarning"
+import { organizationContext } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
 
 const BASE: GatewaySettings = {
@@ -32,6 +32,13 @@ function mockSettings(settings: GatewaySettings, rejectedInLastHour = 0) {
     .spyOn(globalThis, "fetch")
     .mockImplementation(async (input, init) => {
       const url = String(input)
+      // The shell reads this before it paints, and the usage hooks wait for it:
+      // it is what tells them whether this caller reads the deployment-wide
+      // routes or the organization-scoped ones (otari#837). Answered first, and
+      // on an exact match, so it cannot shadow /v1/organizations/me/usage.
+      if (url.endsWith("/v1/organizations/me")) {
+        return jsonResponse(organizationContext())
+      }
       const method = (init?.method ?? "GET").toUpperCase()
       if (url.includes("/v1/settings")) {
         if (method === "PATCH")
@@ -173,7 +180,13 @@ describe("PricingWarning", () => {
     renderPage(<PricingWarning />)
 
     await screen.findByRole("button", { name: "Enable default pricing" })
-    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(2))
+    // Settings, the organization context, and the failure count. The context is
+    // the third because the count is organization-scoped for a caller who does
+    // not operate the deployment and waits to learn which they are (otari#837);
+    // in the app it is already cached by the shell. Counted rather than listed
+    // because the point is that everything has settled before the absences below
+    // are asserted.
+    await waitFor(() => expect(globalThis.fetch).toHaveBeenCalledTimes(3))
     expect(
       screen.queryByText(/failed in the last hour/),
     ).not.toBeInTheDocument()
