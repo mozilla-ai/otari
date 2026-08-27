@@ -162,7 +162,11 @@ describe("OverviewPage", () => {
       prev: { cost: 100, request_count: 1600, error_count: 8 },
     })
     renderPage(<OverviewPage />)
-    await screen.findByText("$200.00")
+    // Await a chip, not "$200.00": every assertion below is about text derived
+    // from the *previous* window, while the value comes from the period query.
+    // Awaiting the value assumes the two land in one commit, so a skew between
+    // the responses would fail the sync assertions that follow.
+    await screen.findByText("+100.0% vs prev")
 
     // The chip carries the caption the old plain-text hint carried, so the
     // comparison still says what it is being compared against. Distinct
@@ -179,8 +183,11 @@ describe("OverviewPage", () => {
     expect(
       screen.getAllByText(/^(no change|up|down)(, (better|worse))?$/),
     ).toHaveLength(3)
-    // The hand-rolled arrow glyphs are gone from the tiles.
-    expect(screen.queryByText(/[▲▼]/)).not.toBeInTheDocument()
+    // The hand-rolled arrow glyphs are gone from the tiles. queryAllByText for
+    // the same reason as below: queryByText throws on a multiple match, so a
+    // regression restoring the glyph on all three tiles would report a broken
+    // test rather than a broken tile.
+    expect(screen.queryAllByText(/[▲▼]/)).toHaveLength(0)
   })
 
   it("reads a chip against the metric's own polarity, not the direction alone", async () => {
@@ -195,7 +202,8 @@ describe("OverviewPage", () => {
     })
     renderPage(<OverviewPage />)
 
-    expect(await screen.findByText("$200.00")).toBeInTheDocument()
+    // The chip again, not the value: same previous-window dependency as above.
+    expect(await screen.findByText("+100.0% vs prev")).toBeInTheDocument()
     expect(screen.getAllByText("up, worse")).toHaveLength(2)
     expect(screen.getAllByText("up")).toHaveLength(1)
   })
@@ -220,6 +228,15 @@ describe("OverviewPage", () => {
     expect(
       screen.queryAllByText(/^(no change|up|down)(, (better|worse))?$/),
     ).toHaveLength(0)
+    // And the row itself is not reserved, which is the half the assertions
+    // above cannot see: TrendChip renders no text for a null fraction either
+    // way, so gating the chip on `periodTotals` instead of on the fraction
+    // leaves them green while the tile keeps 42px of dead space. Asserted on
+    // the utility for the reason ui.test.tsx does it: jsdom performs no layout,
+    // so the reservation is observable only as the class. Scoped to this tile,
+    // since Budget health reserves the row off its own hint.
+    const tile = screen.getByText("Spend, last 30 days").parentElement!
+    expect(tile.querySelector(".min-h-10\\.5")).toBeNull()
   })
 
   it("renders spend and request-volume sparklines from the 30-day series", async () => {
