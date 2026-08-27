@@ -161,6 +161,68 @@ _CONFIG_VIEW: tuple[tuple[str, tuple[str, ...]], ...] = (
 )
 
 
+# Every ``GatewayConfig`` field the view above does not carry, so the roster's
+# completeness is a test rather than a reviewer's memory: a field added to
+# ``GatewayConfig`` and to neither list fails
+# ``test_every_config_field_is_shown_or_deliberately_omitted``. Adding
+# ``data_plane_url`` was missed exactly that way (otari#823), silently, because
+# nothing here disagreed with it.
+#
+# Read the third group honestly. The first two are decisions: a credential must
+# never appear, and a structured block cannot, because ``ConfigField.value`` is a
+# scalar or a list of strings and a dict has nowhere to go. The third is only
+# "no page has asked for it yet", which is a different claim. Listing a name
+# there is what keeps the test meaningful; it is not a finding that the field
+# was weighed and rejected, and moving one up into ``_CONFIG_VIEW`` needs no
+# more justification than somebody wanting to read it.
+_DELIBERATELY_OMITTED: tuple[str, ...] = (
+    # Credentials. This view carries no secret, for the reason the mail group
+    # above already gives: whether a credential works is answered by using it,
+    # not by echoing it back to whoever opened the page.
+    "master_key",
+    "smtp_user",
+    "smtp_password",
+    "oauth_google_client_secret",
+    "oauth_github_client_secret",
+    # Structured blocks. ``ConfigField.value`` is bool/int/float/str/list[str],
+    # so a dict or a nested model has no representation here at all. Each of
+    # these has its own surface where it can be rendered as what it is
+    # (/v1/provider-credentials, /v1/pricing, /v1/routing, /v1/search-tools).
+    "aliases",
+    "model_capabilities",
+    "platform",
+    "pricing",
+    "providers",
+    "routing",
+    "search_tools",
+    # Not shown today, and each could be. Nothing below is a secret or an
+    # unrenderable shape; no page has needed it yet.
+    "activation_guide",
+    "bootstrap",
+    "budget_reservation_retention_sec",
+    "budget_reservation_sweep_batch",
+    "budget_reservation_sweep_interval_sec",
+    "budget_reservation_ttl_sec",
+    "capture_agent_telemetry",
+    "dashboard_session_ttl_hours",
+    "files_s3_bucket",
+    "files_s3_endpoint_url",
+    "files_s3_region",
+    "oauth_github_client_id",
+    "oauth_google_client_id",
+    "router_alpha",
+    "router_confidence_floor",
+    "router_embedding_model",
+    "router_granularity",
+    "router_k",
+    "router_max_records_per_user",
+    "router_seed_count",
+    "webauthn_allowed_origins",
+    "webauthn_rp_id",
+    "webauthn_rp_name",
+)
+
+
 class ConfigField(BaseModel):
     """One effective config value surfaced to the dashboard's config viewer."""
 

@@ -1766,8 +1766,11 @@ class GatewayConfig(BaseSettings):
         ``/v1/v1/chat/completions``, which looks right and 404s on first use.
         Refused rather than stripped, because stripping would be silent and
         would be wrong for a gateway genuinely mounted under such a path, while
-        refusing costs one edit. Any other path prefix is left alone: a gateway
-        proxied at ``https://api.example.com/otari`` is a real deployment.
+        refusing costs one edit. Any segment counts and not just the last, so
+        pasting the whole endpoint (``https://host/v1/chat/completions``, the
+        likelier copy-paste of the two) is refused as well rather than rendering
+        that path twice. Any other prefix is left alone: a gateway proxied at
+        ``https://api.example.com/otari`` is a real deployment.
         """
         normalized = (value or "").strip().rstrip("/")
         if not normalized:
@@ -1779,10 +1782,11 @@ class GatewayConfig(BaseSettings):
         if parsed.query or parsed.fragment:
             msg = f"data_plane_url must carry no query string or fragment, got '{value}'"
             raise ValueError(msg)
-        if parsed.path.rsplit("/", 1)[-1].lower() == "v1":
+        if any(segment.lower() == "v1" for segment in parsed.path.split("/")):
             msg = (
-                "data_plane_url must not end in /v1: the dashboard appends that path itself, so give "
-                f"the gateway's own address (for example 'https://gateway.otari.ai'). Got '{value}'"
+                "data_plane_url must not contain a /v1 segment: the dashboard appends that path "
+                f"itself, so give the gateway's own address (for example 'https://gateway.otari.ai'). "
+                f"Got '{value}'"
             )
             raise ValueError(msg)
         return normalized

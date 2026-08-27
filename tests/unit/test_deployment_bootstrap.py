@@ -543,10 +543,16 @@ def test_a_blank_data_plane_url_is_an_unset_one(configured: str) -> None:
         "https://gateway.otari.ai/v1/",
         "https://gateway.otari.ai/V1",
         "https://api.example.com/otari/v1",
+        # The whole endpoint, which is the likelier copy-paste of the two: it is
+        # what a curl example on this very page shows. Caught because any
+        # segment counts, not only the last one, which an earlier version of
+        # this guard got wrong and let render the path twice over.
+        "https://gateway.otari.ai/v1/chat/completions",
+        "https://gateway.otari.ai/v1/messages",
     ],
 )
 def test_a_data_plane_url_that_already_names_v1_is_refused(configured: str) -> None:
-    """The likelier of the two mistakes, refused where it is cheap.
+    """The likelier mistake, refused where it is cheap.
 
     Everywhere else a client meets one, "base URL" means the ``/v1`` address, so
     writing that here is the natural error, and it renders a snippet posting to
@@ -554,19 +560,27 @@ def test_a_data_plane_url_that_already_names_v1_is_refused(configured: str) -> N
     rather than stripped, because stripping would be silent and would be wrong
     for a gateway genuinely mounted under such a path.
     """
-    with pytest.raises(ValidationError, match="must not end in /v1"):
+    with pytest.raises(ValidationError, match="must not contain a /v1 segment"):
         GatewayConfig(data_plane_url=configured)
 
 
-def test_a_path_prefix_that_is_not_v1_is_left_alone() -> None:
+@pytest.mark.parametrize(
+    "configured",
+    [
+        "https://api.example.com/otari",
+        # Not a ``v1`` segment, so it survives: the guard matches whole segments
+        # rather than a prefix, or a real deployment would be refused for the
+        # first three characters of its path.
+        "https://api.example.com/v1beta",
+    ],
+)
+def test_a_path_that_does_not_name_v1_is_left_alone(configured: str) -> None:
     """A gateway proxied at a sub-path is a real deployment, not a typo.
 
-    Only the ``/v1`` ending is refused, so the guard cannot cost an operator a
+    The guard has to stay narrow enough that it cannot cost an operator a
     deployment shape the gateway otherwise supports.
     """
-    assert GatewayConfig(data_plane_url="https://api.example.com/otari").data_plane_url == (
-        "https://api.example.com/otari"
-    )
+    assert GatewayConfig(data_plane_url=configured).data_plane_url == configured
 
 
 def test_a_trailing_slash_is_trimmed_from_the_data_plane_url() -> None:

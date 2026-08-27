@@ -5,7 +5,7 @@ from fastapi.testclient import TestClient
 from sqlalchemy.exc import OperationalError
 
 from gateway.api.routes import settings as settings_route
-from gateway.api.routes.settings import _config_fields
+from gateway.api.routes.settings import _CONFIG_VIEW, _DELIBERATELY_OMITTED, _config_fields
 from gateway.core.config import GatewayConfig
 from gateway.main import create_app
 from gateway.services import master_key_service
@@ -299,6 +299,49 @@ def test_config_view_shows_the_documentation_link_target() -> None:
     assert by_key["docs_url"].value == "https://docs.otari.ai/en/"
     # Read-only: retargeting the links is a restart-time decision, not a runtime one.
     assert by_key["docs_url"].settable is False
+
+
+def test_every_config_field_is_shown_or_deliberately_omitted() -> None:
+    """The roster is hand-maintained, so its completeness is checked rather than remembered.
+
+    ``data_plane_url`` was added to ``GatewayConfig`` and left out of the view
+    (otari#823) with nothing to notice, which is what this closes: a new field
+    now fails here until somebody either shows it or says why not. It asserts
+    the partition and not the contents, so moving a name out of
+    ``_DELIBERATELY_OMITTED`` and into a group above needs no change here.
+    """
+    shown = {key for _, keys in _CONFIG_VIEW for key in keys}
+    omitted = set(_DELIBERATELY_OMITTED)
+    fields = set(GatewayConfig.model_fields)
+
+    assert not shown & omitted, "a field cannot be both shown and deliberately omitted"
+    unaccounted = fields - shown - omitted
+    assert not unaccounted, (
+        f"config fields in neither _CONFIG_VIEW nor _DELIBERATELY_OMITTED: {sorted(unaccounted)}. "
+        "Add each to the group it belongs in, or to _DELIBERATELY_OMITTED with a reason."
+    )
+    # The other direction catches a rename: a name left behind in either list
+    # would otherwise sit there describing a field that no longer exists.
+    stale = (shown | omitted) - fields
+    assert not stale, f"named in _CONFIG_VIEW or _DELIBERATELY_OMITTED but not a GatewayConfig field: {sorted(stale)}"
+
+
+def test_no_credential_is_shown_in_the_config_view() -> None:
+    """The one group in _DELIBERATELY_OMITTED that is a rule and not a default.
+
+    The rest of that tuple is "no page has asked for it yet" and may move; these
+    may not, so they are pinned separately from the partition above.
+    """
+    shown = {key for _, keys in _CONFIG_VIEW for key in keys}
+
+    credentials = (
+        "master_key",
+        "smtp_user",
+        "smtp_password",
+        "oauth_google_client_secret",
+        "oauth_github_client_secret",
+    )
+    assert not shown & set(credentials)
 
 
 def test_config_view_shows_the_data_plane_address() -> None:
