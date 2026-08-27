@@ -29,7 +29,10 @@ import { Button, Card, Link } from "@heroui/react"
 import { useState } from "react"
 
 import { useAuth } from "@/features/auth/AuthContext"
-import { PublicAuthLink } from "@/features/auth/PublicAuthLayout"
+import {
+  goToPublicAuthPage,
+  PublicAuthLink,
+} from "@/features/auth/PublicAuthLayout"
 import { useAcceptInvitation, useValidateInvitation } from "@/shared/api/hooks"
 import { ErrorBanner } from "@/shared/components/ui"
 import { tokenFromHash } from "@/shared/helpers/hashParams"
@@ -52,10 +55,6 @@ export function AcceptInvitationPage() {
   // transport, so an invitation shared by hand on such a gateway has to say so
   // rather than offering a button whose only outcome is that refusal.
   const { mail_ready } = useDeployment()
-
-  const goTo = (hash: string) => {
-    window.location.hash = hash
-  }
 
   // The address the invitation was sent to, still in the query cache behind the
   // accept: the claim is bound to it, so prefilling it is what keeps the
@@ -107,7 +106,7 @@ export function AcceptInvitationPage() {
                   <Button
                     variant="primary"
                     fullWidth
-                    onPress={() => goTo("#/")}
+                    onPress={() => goToPublicAuthPage("#/")}
                   >
                     Go to the dashboard
                   </Button>
@@ -120,7 +119,7 @@ export function AcceptInvitationPage() {
                   <Button
                     variant="primary"
                     fullWidth
-                    onPress={() => goTo(signupHash)}
+                    onPress={() => goToPublicAuthPage(signupHash)}
                   >
                     Set your password
                   </Button>
@@ -142,7 +141,7 @@ export function AcceptInvitationPage() {
                   <Button
                     variant="primary"
                     fullWidth
-                    onPress={() => goTo("#/")}
+                    onPress={() => goToPublicAuthPage("#/")}
                   >
                     Go to sign in
                   </Button>
