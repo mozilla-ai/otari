@@ -21,12 +21,36 @@ All endpoints are available. On first startup, Otari bootstraps an API key and l
 
 Set `OTARI_MODE=hosted` when one Otari deployment is the control plane for
 several organizations rather than one operator's own gateway. Everything in
-standalone applies: the deployment owns its database, serves the whole
-management API, and signs operators in itself. A platform token is refused here
-for the same reason it is refused in standalone, since a deployment holding its
-own management API is not also a data plane reporting to somebody else's.
+standalone applies except the data plane: the deployment owns its database,
+serves the whole management API, and signs operators in itself. A platform token
+is refused here for the same reason it is refused in standalone, since a
+deployment holding its own management API is not also a data plane reporting to
+somebody else's.
 
-What changes is the dashboard, in one place. Provider credentials in
+Two things change. The first is the data plane, described next; the second is
+the dashboard.
+
+### Hosted mode serves no inference
+
+A control plane runs no customer traffic. `/v1/chat/completions`,
+`/v1/messages`, `/v1/responses`, `/v1/embeddings`, `/v1/images`, `/v1/audio`,
+`/v1/rerank`, `/v1/moderations`, `/v1/search`, `/v1/batches` and `/v1/files` are
+not mounted, and a request to any of them returns `404` saying so and pointing
+at the gateway that should have served it.
+
+The reason is billing. Inference belongs on a data-plane gateway in hybrid mode,
+which resolves this control plane's credentials per request and reports the
+usage back, and that report is what debits the organization's wallet. A request
+served on the control plane itself would skip the report and so run unbilled,
+which is what the gateway used to do before otari#822.
+
+Standalone is unaffected: a single-tenant deployment is its own control plane
+and its own data plane, bills nobody, and keeps serving both from one process.
+Discovery is unaffected too, so `/v1/models` still answers on a control plane.
+
+### The dashboard shows per-organization credentials
+
+Provider credentials in
 `config.yml` and under `/v1/provider-credentials` are keyed on the instance name
 alone, so one added there is served to every organization on the deployment. The
 `Providers` page that manages them is right for a single-tenant deployment and
@@ -56,7 +80,7 @@ ignored.
 
 ### What hosted mode does not do
 
-It selects a dashboard, not a security posture, and today the gateway's own
+Refusing inference is not tenant isolation, and today the gateway's own
 management API is not tenant-scoped. Any valid dashboard session authenticates
 a master-key-gated route: `POST /v1/auth/session` issues the cookie, and
 `verify_master_key` accepts that cookie from whoever holds it, checking only
@@ -70,8 +94,8 @@ ownership, so a member of one organization can put a key in another's
 workspace, billed to that organization.
 
 That is fine for the single-tenant deployment this base build is written for,
-and it is why hosted mode changes the surface set and nothing else. Do not read
-it as isolation between tenants. Closing the gap is tracked in
+and it is why hosted mode changes the surface set and the data plane but not the
+authority model. Do not read it as isolation between tenants. Closing the gap is tracked in
 [mozilla-ai/otari-ai#1880](https://github.com/mozilla-ai/otari-ai/issues/1880),
 which scopes the fix to this repository: gating the deployment-wide routers on
 the caller's real authority, and scoping every `/v1/keys` load and the mint's

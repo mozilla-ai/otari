@@ -25,6 +25,7 @@ from gateway.api.routes import (
     keys,
     mail,
     maintenance_mode,
+    management_only,
     messages,
     models,
     moderations,
@@ -71,6 +72,14 @@ def register_routers(app: FastAPI, config: GatewayConfig) -> None:
         # the platform UI" instead. They are a fallback for a path nothing else
         # serves, so they are mounted like one.
         app.include_router(hybrid_mode.router)
+    elif config.is_hosted_mode:
+        # The same treatment for the opposite plane, and last for the same
+        # reason: a hosted control plane holds no data plane, so the inference
+        # prefixes get catch-all stubs that a contributed router still wins
+        # against. An overlay that deliberately contributes a data-plane route
+        # to a control plane has made a choice, and a fallback does not overrule
+        # one. See gateway.api.routes.management_only.
+        app.include_router(management_only.router)
 
 
 def _register_contributed_routers(app: FastAPI) -> None:
@@ -95,16 +104,26 @@ def _register_contributed_routers(app: FastAPI) -> None:
 
 
 def _register_core_routers(app: FastAPI, config: GatewayConfig) -> None:
-    app.include_router(chat.router)
+    # Whether this deployment serves inference at all. False only for a hosted
+    # control plane, which owns many tenants' wallets and credentials but runs
+    # none of their traffic: that belongs on a hybrid data-plane gateway, whose
+    # usage report is what debits the wallet. Serving a completion here would
+    # skip that report and run unbilled (otari#822). Standalone stays true, and
+    # legitimately serves both planes from the one process.
+    serves_data_plane = not config.is_hosted_mode
+
+    if serves_data_plane:
+        app.include_router(chat.router)
     app.include_router(health.router)
-    # Registered in both modes on purpose: the deployment bootstrap is how a
+    # Registered in every mode on purpose: the deployment bootstrap is how a
     # browser learns which mode it reached, so it is the one management-adjacent
     # route a hybrid gateway still answers.
     app.include_router(bootstrap.router)
     # /v1/messages and /v1/responses now support hybrid mode (multi-attempt
-    # fallback + usage reporting), so they're registered in both modes.
-    app.include_router(messages.router)
-    app.include_router(responses.router)
+    # fallback + usage reporting), so they're registered for hybrid too.
+    if serves_data_plane:
+        app.include_router(messages.router)
+        app.include_router(responses.router)
 
     if config.is_hybrid_mode:
         # The hybrid stub router is mounted by register_routers, after the
@@ -118,14 +137,21 @@ def _register_core_routers(app: FastAPI, config: GatewayConfig) -> None:
     app.include_router(auth_password_reset.router)
     app.include_router(auth_webauthn.router)
     app.include_router(auth_oauth.router)
-    app.include_router(embeddings.router)
-    app.include_router(images.router)
-    app.include_router(audio.router)
-    app.include_router(files.router)
-    app.include_router(rerank.router)
-    app.include_router(search.router)
-    app.include_router(batches.router)
-    app.include_router(moderations.router)
+    if serves_data_plane:
+        # The rest of the data plane. ``files`` sits here because an upload
+        # exists to be referenced from a completion or a batch, so it follows
+        # the traffic rather than the management API.
+        app.include_router(embeddings.router)
+        app.include_router(images.router)
+        app.include_router(audio.router)
+        app.include_router(files.router)
+        app.include_router(rerank.router)
+        app.include_router(search.router)
+        app.include_router(batches.router)
+        app.include_router(moderations.router)
+    # Not gated: /v1/models is discovery, not dispatch. A control plane needs it
+    # to tell a tenant which models their gateway could route to, and "models"
+    # is one of the surfaces bootstrap publishes for a hosted deployment.
     app.include_router(models.router)
     app.include_router(providers.router)
     app.include_router(keys.router)
