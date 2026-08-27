@@ -48,8 +48,10 @@ async def chat_disabled() -> None:
 
 
 # The two non-OpenAI completion shapes. Both carry their sub-paths through the
-# catch-all arm: /v1/messages/count_tokens is priced and metered like the
-# completion it estimates, so it is data plane in the same sense.
+# catch-all arm, which is what takes /v1/messages/count_tokens with them. That
+# one bills nothing itself, since it estimates locally and contacts no provider,
+# but it sizes a prompt for a completion this deployment will not serve, so it
+# belongs to the plane it answers for rather than staying behind alone.
 @router.api_route("/v1/messages/{path:path}", methods=_METHODS)
 @router.api_route("/v1/messages", methods=_METHODS)
 async def messages_disabled() -> None:

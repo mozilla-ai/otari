@@ -56,6 +56,14 @@ async def overlay_probe_under_a_stub_prefix() -> dict[str, str]:
     return {"source": "overlay"}
 
 
+# The same, under a prefix the *management-only* stubs claim on a hosted
+# deployment. An overlay that contributes a data-plane route to a control plane
+# has made a choice, and the stubs are a fallback rather than a veto.
+@granted_router.get("/v1/chat/overlay-probe")
+async def overlay_probe_under_a_management_only_prefix() -> dict[str, str]:
+    return {"source": "overlay"}
+
+
 class ProbeEntitlementAdapter:
     """Grants one capability, so the other contributed router stays refused."""
 
@@ -175,3 +183,31 @@ def test_a_contributed_route_wins_over_the_hybrid_stub_catch_all(
     assert response.json() == {"source": "overlay"}
     assert stub_response.status_code == 404
     assert stub_response.json()["detail"].startswith("This endpoint is not available in hybrid mode")
+
+
+def test_a_contributed_route_wins_over_the_management_only_stub_catch_all(overlay_on_path: str, tmp_path: Path) -> None:
+    # The mirror of the test above, for the opposite plane. The management-only
+    # stubs are ``{path:path}`` catch-alls over the inference prefixes, so an
+    # overlay that deliberately contributes a data-plane route to a control
+    # plane is only reachable if the stubs are mounted last.
+    config = GatewayConfig(
+        mode="hosted",
+        database_url=f"sqlite:///{tmp_path / 'hosted.db'}",
+        bootstrap_api_key=False,
+        bootstrap=f"{overlay_on_path}:register",
+    )
+    app = create_app(config)
+
+    try:
+        with TestClient(app) as client:
+            response = client.get("/v1/chat/overlay-probe")
+            # The stub still answers a path the overlay does not serve.
+            stub_response = client.post("/v1/chat/completions", json={})
+    finally:
+        reset_config()
+        reset_db()
+
+    assert response.status_code == 200
+    assert response.json() == {"source": "overlay"}
+    assert stub_response.status_code == 404
+    assert stub_response.json()["detail"].startswith("This deployment is a control plane")
