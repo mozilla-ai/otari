@@ -23,6 +23,14 @@ The status stays 404 to match the hybrid stubs, because it is the same fact
 being reported. It is not an authorization decision, so 403 would invite a retry
 with a different key that cannot help, and Otari does implement these endpoints,
 so 501 would misreport a deployment posture as a missing feature.
+
+The refusal covers the reads and deletes, not only the calls that dispatch. A
+control plane that was serving this traffic before the gate went in may already
+hold files and batches, and their owners lose the API to them here rather than
+keeping a read-only window onto rows the plane no longer serves. That is
+deliberate: a plane is either on a deployment or it is not, and a half-mounted
+one is the state nobody can reason about later. Nothing stored is deleted, so
+the rows outlive the refusal and a data-plane gateway is where they belong.
 """
 
 from fastapi import APIRouter, HTTPException, status
