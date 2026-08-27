@@ -65,6 +65,22 @@ describe("buildCurlSnippet", () => {
     })
   })
 
+  it("quotes the base URL, which an operator configures and we do not constrain", () => {
+    // `data_plane_url` is a server-side setting validated only for scheme and
+    // host, so a space in one would otherwise split the URL into two shell
+    // words and a quote would end the argument early (otari#823).
+    const snippet = buildCurlSnippet({
+      ...INPUT,
+      baseUrl: "https://gw.example/a b'; echo pwned; '",
+    })
+
+    // The whole URL is one shell word, so the `;` never reaches the shell as a
+    // separator: `'\''` closes the quote, emits a literal apostrophe, reopens.
+    expect(snippet.split("\n")[0]).toBe(
+      `curl 'https://gw.example/a b'\\''; echo pwned; '\\''/v1/chat/completions' \\`,
+    )
+  })
+
   it("leaves an ordinary payload unquoted beyond its own single quotes", () => {
     // The escaping is invisible for every value anyone will actually see, which
     // is what keeps the snippet readable.
@@ -96,6 +112,17 @@ describe("buildPythonSnippet", () => {
     const snippet = buildPythonSnippet({ ...INPUT, model: 'weird"model\\name' })
 
     expect(snippet).toContain('model="weird\\"model\\\\name"')
+  })
+
+  it("escapes a base URL that would otherwise break the Python literal", () => {
+    // Same reason as the curl case: the value comes from the deployment's
+    // config rather than from `window.location.origin` (otari#823).
+    const snippet = buildPythonSnippet({
+      ...INPUT,
+      baseUrl: 'https://gw.example/x"',
+    })
+
+    expect(snippet).toContain('base_url="https://gw.example/x\\"/v1"')
   })
 })
 
@@ -136,7 +163,7 @@ describe("resolveSnippetBaseUrl", () => {
     ).toBe("https://gateway.otari.ai")
   })
 
-  it("answers null on a hosted control plane that published none", () => {
+  it("answers undefined on a hosted control plane that published none", () => {
     // Never the origin, which is the bug this replaces: the control plane is the
     // one host a request must not be sent to (otari#822).
     expect(
@@ -144,7 +171,7 @@ describe("resolveSnippetBaseUrl", () => {
         { deployment_type: "hosted", data_plane_url: null },
         ORIGIN,
       ),
-    ).toBeNull()
+    ).toBeUndefined()
   })
 
   it("trims a trailing slash, since the caller suffixes the result", () => {
@@ -165,6 +192,21 @@ describe("resolveSnippetBaseUrl", () => {
         { deployment_type: "hosted", data_plane_url: "   " },
         ORIGIN,
       ),
-    ).toBeNull()
+    ).toBeUndefined()
+  })
+
+  it("answers undefined rather than an empty origin off the browser", () => {
+    // The default origin is "" where there is no `window`. Answering it would
+    // let a caller build `curl /v1/chat/completions`, which reads as a snippet
+    // and is not one; absent is the honest answer.
+    expect(
+      resolveSnippetBaseUrl(
+        {
+          deployment_type: "standalone",
+          data_plane_url: null,
+        },
+        "",
+      ),
+    ).toBeUndefined()
   })
 })

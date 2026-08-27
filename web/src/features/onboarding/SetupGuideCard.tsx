@@ -14,6 +14,7 @@ import {
   useModels,
   useWorkspaceActivation,
 } from "@/shared/api/hooks"
+import { MissingGatewayAddressNotice } from "@/shared/components/MissingGatewayAddressNotice"
 import { CopyField, ErrorBanner, InfoBanner } from "@/shared/components/ui"
 import { formatCost, formatRelative } from "@/shared/helpers/format"
 import {
@@ -225,10 +226,12 @@ function IssuedKey({ issued }: { issued: ActivationApiKey }) {
   const model = models.data?.data?.[0]?.id
   // Where a request from this deployment belongs, which is not always the
   // address that served this page: a hosted control plane serves the dashboard
-  // and not the API. Null when it has not said where its gateway is, and the
-  // snippets are then withheld rather than aimed at this host (otari#823).
+  // and not the API. Undefined when it has not said where its gateway is, and
+  // the snippets are then withheld rather than aimed at this host (otari#823).
   const baseUrl = resolveSnippetBaseUrl(useDeployment())
-  const snippetInput = baseUrl ? { baseUrl, apiKey: issued.key, model } : null
+  const snippetInput = baseUrl
+    ? { baseUrl, apiKey: issued.key, model }
+    : undefined
 
   return (
     <div className="flex flex-col gap-3">
@@ -237,15 +240,8 @@ function IssuedKey({ issued }: { issued: ActivationApiKey }) {
         new one in its place.
       </InfoBanner>
       <CopyField label="API key" value={issued.key} />
-      {snippetInput === null ? (
-        <p className="text-xs text-muted">
-          This deployment has not published the gateway address to send requests
-          to, so there is no example to show here. Ask whoever runs it for the
-          base URL, then call <code>/v1/chat/completions</code> with this key in
-          an <code>Otari-Key</code> header.
-        </p>
-      ) : null}
-      {snippetInput !== null && model === undefined ? (
+      {snippetInput === undefined ? <MissingGatewayAddressNotice /> : null}
+      {snippetInput !== undefined && model === undefined ? (
         <p className="text-xs text-muted">
           No model is being served yet, so the snippets name{" "}
           <code>{SNIPPET_MODEL_PLACEHOLDER}</code>. Replace it with a model from
@@ -259,7 +255,7 @@ function IssuedKey({ issued }: { issued: ActivationApiKey }) {
           page.
         </p>
       ) : null}
-      {snippetInput !== null ? (
+      {snippetInput !== undefined ? (
         <>
           <CopyField
             label="curl"

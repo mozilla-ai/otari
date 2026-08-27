@@ -200,6 +200,7 @@ Note the `require_pricing` interaction: it defaults to `true` (fail-closed), so 
 | `OTARI_AUTO_MIGRATE` | Auto-run migrations on startup |
 | `OTARI_BOOTSTRAP_API_KEY` | Create first-use API key |
 | `OTARI_DOCS_URL` | Documentation site the dashboard's **Documentation** links point at, as an absolute `http(s)` URL. Unset, they open the bundled operator guide. See [Documentation links](#documentation-links). |
+| `OTARI_DATA_PLANE_URL` | Where this deployment's inference traffic belongs, as an absolute `http(s)` URL. Only a hosted control plane needs it; standalone and hybrid gateways serve their own API and ignore it. See [The data-plane address](#the-data-plane-address). |
 | `OTARI_BOOTSTRAP` | Composition-root bootstrap for a build that layers its own adapters onto Otari, as a `module:callable` selector. Unrelated to `OTARI_BOOTSTRAP_API_KEY`; see [Extending Otari with a bootstrap module](#extending-otari-with-a-bootstrap-module). |
 
 ### Extending Otari with a bootstrap module

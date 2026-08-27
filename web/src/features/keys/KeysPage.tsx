@@ -33,6 +33,7 @@ import { BulkActionBar } from "@/shared/components/BulkActionBar"
 import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import { Field } from "@/shared/components/Field"
+import { MissingGatewayAddressNotice } from "@/shared/components/MissingGatewayAddressNotice"
 import {
   CopyField,
   EmptyState,
@@ -116,7 +117,7 @@ function RevealSecretModal({
   const secretRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null)
   // Where a request from this deployment belongs, which is not always the address
   // that served this page: a hosted control plane serves the dashboard and not
-  // the API. Null when it has not said where its gateway is (otari#823).
+  // the API. Undefined when it has not said where its gateway is (otari#823).
   const baseUrl = resolveSnippetBaseUrl(useDeployment())
   const secret = result.key
 
@@ -154,7 +155,7 @@ function RevealSecretModal({
         curl: buildCurlSnippet({ baseUrl, apiKey: secret }),
         python: buildPythonSnippet({ baseUrl, apiKey: secret }),
       }
-    : null
+    : undefined
 
   return (
     <div
@@ -185,24 +186,16 @@ function RevealSecretModal({
             <div className="text-sm font-medium text-foreground">
               Make your first call
             </div>
-            <p className="text-xs text-muted">
-              {snippets === null ? (
-                <>
-                  This deployment has not published the gateway address to send
-                  requests to, so there is no example to show here. Ask whoever
-                  runs it for the base URL, then call{" "}
-                  <code>/v1/chat/completions</code> with this key in an{" "}
-                  <code>Otari-Key</code> header.
-                </>
-              ) : (
-                <>
-                  Replace <code>{SNIPPET_MODEL_PLACEHOLDER}</code> with a model
-                  from the Models page.
-                </>
-              )}
-            </p>
+            {snippets === undefined ? (
+              <MissingGatewayAddressNotice />
+            ) : (
+              <p className="text-xs text-muted">
+                Replace <code>{SNIPPET_MODEL_PLACEHOLDER}</code> with a model
+                from the Models page.
+              </p>
+            )}
           </div>
-          {snippets !== null ? (
+          {snippets !== undefined ? (
             <>
               <CopyField label="curl" value={snippets.curl} multiline />
               <CopyField

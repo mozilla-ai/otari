@@ -165,6 +165,7 @@ than duplicating their markup. See [design-tokens.md](./design-tokens.md).
 | Applied filters, each removable | `FilterChips` (`shared/components/FilterChips.tsx`); one chip per value, and pass `clearLabel` so several chips of one dimension stay distinguishable |
 | Form field wrapper | `Field` (`shared/components/Field.tsx`) |
 | Tabular data | `DataTable` (`shared/components/DataTable.tsx`) |
+| What stands where a request snippet would be, when the deployment named no gateway | `MissingGatewayAddressNotice` (`shared/components/MissingGatewayAddressNotice.tsx`); pairs with `resolveSnippetBaseUrl` answering `undefined` |
 | Settings page section (header + body) | `SettingsSection` (`shared/components/ui/`, rehomed) |
 | Table row's trailing icon-button cluster | `RowActions` (`shared/components/ui/`, rehomed) |
 

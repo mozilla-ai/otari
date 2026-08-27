@@ -28,26 +28,28 @@ const DEFAULT_MESSAGE = "Hello"
  * A string as a quoted literal, escaped.
  *
  * The values here are interpolated into a JSON body and into Python source, and
- * a model id is whatever the provider's catalog says it is, so a quote or a
- * backslash in one would otherwise produce a snippet that does not run. A JSON
- * string literal is also a valid Python one (same quoting, same escapes), so one
- * helper covers both.
+ * neither is ours to constrain: a model id is whatever the provider's catalog
+ * says it is, and the base URL is whatever an operator configured. A quote or a
+ * backslash in either would otherwise produce a snippet that does not run. A
+ * JSON string literal is also a valid Python one (same quoting, same escapes),
+ * so one helper covers both.
  *
  * The shell is a second layer and is handled by ``shellSingleQuoted`` below.
  */
 const literal = (value: string): string => JSON.stringify(value)
 
 /**
- * A payload as one single-quoted shell argument.
+ * A word as one single-quoted shell argument.
  *
- * cURL's body is a shell string, so JSON escaping alone is not enough: an
+ * cURL's arguments are shell words, so JSON escaping alone is not enough: an
  * apostrophe in a model id would close the quote and leave the rest of the
- * payload as shell words. `'\''` is the portable way through that (close the
- * quote, emit an escaped one, reopen), and it leaves a payload without
- * apostrophes byte-identical, which is every payload anyone will actually see.
+ * payload as shell words, and a space in a configured base URL would split the
+ * URL into two arguments. `'\''` is the portable way through that (close the
+ * quote, emit an escaped one, reopen), and it leaves a word without apostrophes
+ * byte-identical, which is every word anyone will actually see.
  */
-const shellSingleQuoted = (payload: string): string =>
-  `'${payload.replaceAll("'", `'\\''`)}'`
+const shellSingleQuoted = (word: string): string =>
+  `'${word.replaceAll("'", `'\\''`)}'`
 
 export interface RequestSnippetInput {
   /** Where this deployment's API lives, with no trailing slash. */
@@ -73,7 +75,7 @@ export function buildCurlSnippet({
 }: RequestSnippetInput): string {
   const body = `{"model": ${literal(model)}, "messages": [{"role": "user", "content": ${literal(message)}}]}`
   return [
-    `curl ${baseUrl}/v1/chat/completions \\`,
+    `curl ${shellSingleQuoted(`${baseUrl}/v1/chat/completions`)} \\`,
     `  -H "Otari-Key: ${apiKey}" \\`,
     `  -H "Content-Type: application/json" \\`,
     `  -d ${shellSingleQuoted(body)}`,
@@ -90,7 +92,7 @@ export function buildPythonSnippet({
   return [
     "from openai import OpenAI",
     "",
-    `client = OpenAI(base_url="${baseUrl}/v1", api_key="${apiKey}")`,
+    `client = OpenAI(base_url=${literal(`${baseUrl}/v1`)}, api_key="${apiKey}")`,
     "resp = client.chat.completions.create(",
     `    model=${literal(model)},`,
     `    messages=[{"role": "user", "content": ${literal(message)}}],`,
@@ -100,7 +102,7 @@ export function buildPythonSnippet({
 }
 
 /**
- * Where a snippet should send its request, or null when nothing here knows.
+ * Where a snippet should send its request, or undefined when nothing here knows.
  *
  * Three deployments, two answers. A standalone gateway and a hybrid one both
  * serve the API at the address that served this page, so the browser's own
@@ -110,21 +112,27 @@ export function buildPythonSnippet({
  * inference belongs on the data-plane gateway rather than on it, so it has to
  * name that address itself (`data_plane_url` on `/v1/bootstrap`).
  *
- * Null when a hosted deployment names none. Falling back to the origin there is
- * the bug this replaces: it hands somebody a runnable command aimed at the one
- * host their traffic should not reach. A placeholder host would be no better,
- * since nobody reading it can know what to put in its place, so the caller shows
- * no snippet and says why.
+ * Undefined when a hosted deployment names none. Falling back to the origin
+ * there is the bug this replaces: it hands somebody a runnable command aimed at
+ * the one host their traffic should not reach. A placeholder host would be no
+ * better, since nobody reading it can know what to put in its place, so the
+ * caller shows no snippet and says why. Undefined and never `""`, so that a
+ * caller cannot build `curl /v1/chat/completions` out of an origin that is not
+ * there; this is the boundary where the bootstrap's `null` becomes the absent
+ * value the rest of the tree branches on.
  *
- * A configured value wins in every mode, so a standalone deployment fronted by a
- * separate API hostname can set one; the trailing slash is trimmed again here
- * because this is the value the gateway publishes, not the value it validated.
+ * `data_plane_url` is read whichever mode published it, but only a hosted
+ * deployment does: `bootstrap.py` answers null for standalone and hybrid even
+ * when the setting is present, because each of those serves its own API. The
+ * trailing slash is trimmed again here because this is the value the gateway
+ * published, not the value it validated.
  */
 export function resolveSnippetBaseUrl(
   deployment: Pick<DeploymentBootstrap, "deployment_type" | "data_plane_url">,
   origin: string = typeof window === "undefined" ? "" : window.location.origin,
-): string | null {
+): string | undefined {
   const configured = deployment.data_plane_url?.trim().replace(/\/+$/, "")
   if (configured) return configured
-  return deployment.deployment_type === "hosted" ? null : origin
+  if (deployment.deployment_type === "hosted") return undefined
+  return origin.trim().replace(/\/+$/, "") || undefined
 }
