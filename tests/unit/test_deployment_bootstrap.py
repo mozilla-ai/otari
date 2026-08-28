@@ -384,8 +384,8 @@ def test_docs_url_is_published_to_a_standalone_dashboard(tmp_path: Path) -> None
     """The retargeted Documentation link, published exactly as configured.
 
     No trailing slash is trimmed and no path is appended: unlike ``management_url``,
-    which the dashboard suffixes to reach ``/terms`` and ``/playground``, this is
-    the whole destination, and a docs site can need its trailing slash to resolve.
+    which the dashboard suffixes to reach ``/terms``, this is the whole
+    destination, and a docs site can need its trailing slash to resolve.
     """
     app = create_app(_standalone(tmp_path, docs_url="https://docs.otari.ai/en/"))
 

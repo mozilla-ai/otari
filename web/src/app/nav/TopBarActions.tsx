@@ -3,7 +3,6 @@ import { Link } from "@tanstack/react-router"
 // By its `@/…` specifier, never as `./overlayWalletSlot`: that specifier is the
 // seam's alias key, and the module says what a relative import would cost.
 import { WalletNavSlot } from "@/app/nav/overlayWalletSlot"
-import { EntitlementGate } from "@/shared/components/EntitlementGate"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
 // The right end of the top bar: the links that are not destinations in either
@@ -17,11 +16,6 @@ import { useDeployment } from "@/shared/hooks/useDeployment"
 // cluster is hidden below `md` and the guide would otherwise have no entry
 // point on a phone.
 //
-// Playground is a hosted surface, gated on the two things it actually needs:
-// it is a page otari.ai serves and this gateway does not, so the link needs
-// both the entitlement and a `management_url` to point at, which only a gateway
-// attached to otari.ai has.
-//
 // The design also draws a balance at the end of the cluster, and this build has
 // none to draw: this gateway meters spend but holds no wallet. `WalletNavSlot`
 // is the seam a build that does hold one replaces to contribute the chip, so
@@ -32,8 +26,7 @@ const ACTION =
   "flex min-h-[2.125rem] items-center rounded-md px-1 text-chrome-row font-medium text-muted transition-colors hover:text-foreground"
 
 export function TopBarActions() {
-  const { management_url, docs_url } = useDeployment()
-  const platform = management_url?.replace(/\/$/, "")
+  const { docs_url } = useDeployment()
 
   return (
     // Hidden below the md breakpoint, where the mobile header has room for the
@@ -55,18 +48,6 @@ export function TopBarActions() {
           Documentation
         </Link>
       )}
-      {platform ? (
-        <EntitlementGate capability="playground">
-          <a
-            href={`${platform}/playground`}
-            target="_blank"
-            rel="noopener noreferrer"
-            className={ACTION}
-          >
-            Playground
-          </a>
-        </EntitlementGate>
-      ) : null}
       <WalletNavSlot />
     </div>
   )

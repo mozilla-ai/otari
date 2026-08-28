@@ -46,14 +46,14 @@ describe("TopBarActions", () => {
     expect(container).toBeEmptyDOMElement()
   })
 
-  it("still omits the hosted playground on a gateway that has one to point at", async () => {
+  it("adds nothing to the cluster on a gateway attached to otari.ai", async () => {
     await renderActions({ management_url: "https://otari.ai/" })
 
-    // `management_url` is only half of that gate: the base build grants no
-    // capabilities, so the entitlement half withholds the link regardless.
-    expect(
-      screen.queryByRole("link", { name: "Playground" }),
-    ).not.toBeInTheDocument()
+    // The hosted Playground was the one link this cluster derived from
+    // `management_url`, and otari-ai#1909 retired it along with its backend.
+    // Asserting the whole membership rather than the absence of that one link
+    // is what would catch another hosted link reappearing here.
+    expect((await cluster())?.children).toHaveLength(1)
   })
 
   it("points Documentation at the bundled guide when no docs site is configured", async () => {
