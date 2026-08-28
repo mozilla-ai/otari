@@ -2,7 +2,7 @@
 
 Covers auth, content-free validation, idempotency, historical + cache pricing,
 organization-scoped rates, budget isolation, and the read-surface (source filter,
-by_source, CSV).
+by_source).
 """
 
 import uuid
@@ -703,7 +703,7 @@ def test_a_keys_import_prices_at_its_own_organizations_rate(
 def test_read_surface_source_filter_and_summary(
     client: TestClient, master_key_header: dict[str, str]
 ) -> None:
-    """Imported rows are exposed + labeled via list, summary, and CSV."""
+    """Imported rows are exposed + labeled via the list and the summary."""
     _seed_user(client, master_key_header)
     _seed_pricing(client, master_key_header)
     assert _post(client, master_key_header, [_event("read_1")]).json()["accepted"] == 1
@@ -720,9 +720,6 @@ def test_read_surface_source_filter_and_summary(
     sources = {r["key"]: r for r in summary["by_source"]}
     assert _SRC in sources and sources[_SRC]["requests"] == 1
 
-    csv_resp = client.get("/v1/usage/summary.csv", headers=master_key_header)
-    assert csv_resp.status_code == 200
-    assert "source" in csv_resp.text and _SRC in csv_resp.text
 
 
 def test_per_event_user_override(

@@ -1,4 +1,4 @@
-"""Integration tests for the aggregated usage summary + CSV export endpoints.
+"""Integration tests for the aggregated usage summary endpoints.
 
 Runs against the PostgreSQL the suite is configured for (``TEST_DATABASE_URL``, or
 a testcontainer). The bucketing expressions are dialect-aware (see
@@ -8,8 +8,6 @@ contract they produce.
 
 from __future__ import annotations
 
-import csv
-import io
 import uuid
 from datetime import UTC, datetime, timedelta
 from typing import Any
@@ -23,7 +21,7 @@ from gateway.core.sql import MAX_FILTER_VALUES
 from gateway.models.entities import APIKey, UsageLog, User
 
 SUMMARY_PATH = "/v1/usage/summary"
-CSV_PATH = "/v1/usage/summary.csv"
+SERIES_PATH = "/v1/usage/series"
 
 
 def _ensure_user(db: Session, user_id: str) -> None:
@@ -103,7 +101,6 @@ def _make_log(
 
 def test_summary_requires_master_key(client: TestClient) -> None:
     assert client.get(SUMMARY_PATH).status_code == 401
-    assert client.get(CSV_PATH).status_code == 401
 
 
 def test_summary_empty_range_is_all_zero(client: TestClient, master_key_header: dict[str, str]) -> None:
@@ -492,7 +489,6 @@ def test_every_read_endpoint_caps_the_number_of_filter_values(
     for path, extra in (
         (SUMMARY_PATH, {}),
         (SERIES_PATH, {"group_by": "model"}),
-        (CSV_PATH, {}),
         ("/v1/usage", {}),
         ("/v1/usage/count", {}),
     ):
@@ -532,24 +528,6 @@ def test_grouped_series_filters_by_several_models(
 
     assert {g["key"] for g in body["groups"]} == {"gpt-4", "claude"}
     assert sum(p["cost"] for p in body["points"]) == pytest.approx(0.30)
-
-
-def test_csv_export_filters_by_several_users(
-    client: TestClient, master_key_header: dict[str, str], db_session: Session
-) -> None:
-    # The export takes the same window and filters as /summary, so a multi-value
-    # comparison can be downloaded rather than re-filtered by hand.
-    now = datetime.now(UTC) - timedelta(hours=1)
-    _make_log(db_session, user_id="csv-a", timestamp=now, model="gpt-4", cost=0.10)
-    _make_log(db_session, user_id="csv-b", timestamp=now, model="claude", cost=0.20)
-    _make_log(db_session, user_id="csv-c", timestamp=now, model="gemini", cost=0.40)
-    db_session.commit()
-
-    resp = client.get(CSV_PATH, headers=master_key_header, params={"user_id": ["csv-a", "csv-b"]})
-    assert resp.status_code == 200
-    rows = list(csv.DictReader(io.StringIO(resp.text)))
-    users = {row["key"] for row in rows if row["dimension"] == "user"}
-    assert users == {"csv-a", "csv-b"}
 
 
 def test_usage_list_and_count_filter_by_session_and_provider(
@@ -748,74 +726,6 @@ def test_summary_series_zero_fills_empty_buckets(
         "2025-06-04T00:00:00Z",
     ]
     assert [p["requests"] for p in series] == [1, 0, 0, 1]
-
-
-def test_csv_export_shape_and_reconciliation(
-    client: TestClient, master_key_header: dict[str, str], db_session: Session
-) -> None:
-    now = datetime.now(UTC) - timedelta(hours=1)
-    _make_log(db_session, user_id="csv", timestamp=now, model="gpt-4", cost=0.10, total_tokens=10)
-    _make_log(db_session, user_id="csv", timestamp=now, model="claude", cost=0.20, total_tokens=20)
-    db_session.commit()
-
-    resp = client.get(CSV_PATH, headers=master_key_header, params={"user_id": "csv"})
-    assert resp.status_code == 200
-    assert resp.headers["content-type"].startswith("text/csv")
-    assert "attachment" in resp.headers["content-disposition"]
-
-    rows = list(csv.reader(io.StringIO(resp.text)))
-    assert rows[0] == ["dimension", "key", "cost", "tokens", "requests"]
-    model_rows = [r for r in rows[1:] if r[0] == "model"]
-    assert {r[1] for r in model_rows} == {"gpt-4", "claude"}
-    assert sum(float(r[2]) for r in model_rows) == pytest.approx(0.30)
-
-
-def test_csv_export_includes_session_endpoint_and_provider(
-    client: TestClient, master_key_header: dict[str, str], db_session: Session
-) -> None:
-    now = datetime.now(UTC) - timedelta(hours=1)
-    _make_log(
-        db_session,
-        user_id="csvdim",
-        timestamp=now,
-        source="claude_code",
-        source_label="session-a",
-        endpoint="external",
-        provider="anthropic",
-        cost=0.10,
-        total_tokens=10,
-    )
-    db_session.commit()
-
-    resp = client.get(CSV_PATH, headers=master_key_header, params={"user_id": "csvdim"})
-    rows = list(csv.reader(io.StringIO(resp.text)))[1:]
-    by_dimension = {r[0]: r[1] for r in rows}
-    assert by_dimension["session"] == "session-a"
-    assert by_dimension["endpoint"] == "external"
-    assert by_dimension["provider"] == "anthropic"
-    assert by_dimension["source"] == "claude_code"
-
-
-def test_csv_export_guards_formula_injection(
-    client: TestClient, master_key_header: dict[str, str], db_session: Session
-) -> None:
-    now = datetime.now(UTC) - timedelta(hours=1)
-    # A model name crafted to run as a formula if opened in a spreadsheet.
-    _make_log(db_session, user_id="inj", timestamp=now, model="=cmd|'/c calc'!A1", cost=0.01, total_tokens=1)
-    db_session.commit()
-
-    resp = client.get(CSV_PATH, headers=master_key_header, params={"user_id": "inj"})
-    rows = list(csv.reader(io.StringIO(resp.text)))
-    injected = [r for r in rows if r[0] == "model" and "cmd" in r[1]][0]
-    # The dangerous leading '=' is neutralized with a leading quote.
-    assert injected[1].startswith("'=")
-
-
-# ---------------------------------------------------------------------------
-# Billed token composition (series + totals + breakdowns) and /series grouping.
-# ---------------------------------------------------------------------------
-
-SERIES_PATH = "/v1/usage/series"
 
 
 def test_series_composition_prefers_meters_and_falls_back(
@@ -1266,10 +1176,6 @@ def test_summary_family_filters_by_workspace(
     assert {group["key"] for group in series["groups"]} == {"there"}
     assert sum(point["cost"] for point in series["points"]) == pytest.approx(0.20)
 
-    export = client.get(CSV_PATH, headers=master_key_header, params=scoped)
-    rows = list(csv.reader(io.StringIO(export.text)))
-    assert [row[1] for row in rows[1:] if row[0] == "model"] == ["there"]
-
 
 def test_summary_family_without_a_workspace_stays_deployment_wide(
     client: TestClient, master_key_header: dict[str, str], db_session: Session
@@ -1296,7 +1202,3 @@ def test_summary_family_without_a_workspace_stays_deployment_wide(
 
     series = client.get(SERIES_PATH, headers=master_key_header, params={**window, "group_by": "model"}).json()
     assert {group["key"] for group in series["groups"]} == {"here", "there"}
-
-    export = client.get(CSV_PATH, headers=master_key_header, params=window)
-    rows = list(csv.reader(io.StringIO(export.text)))
-    assert sorted(row[1] for row in rows[1:] if row[0] == "model") == ["here", "there"]

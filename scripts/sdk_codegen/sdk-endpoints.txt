@@ -153,7 +153,6 @@ POST /v1/traces                                 # otel ingest
 POST /v1/metrics                                # otel ingest
 # Usage analytics and maintenance
 GET /v1/usage/summary                           # not yet wrapped
-GET /v1/usage/summary.csv                       # not yet wrapped
 GET /v1/usage/series                            # not yet wrapped
 DELETE /v1/usage                                # not yet wrapped
 POST /v1/usage/external-events                  # not yet wrapped

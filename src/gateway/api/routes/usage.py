@@ -5,15 +5,13 @@ time range and user filters, ordered newest-first. Intended for
 external systems that need to sync usage data (billing, analytics).
 """
 
-import csv
-import io
 import uuid
 from collections.abc import Callable, Sequence
 from datetime import UTC, datetime, timedelta
 from time import monotonic
 from typing import Annotated, Any, Literal, NamedTuple, TypeVar, cast
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request
 from pydantic import BaseModel
 from sqlalchemy import ColumnElement, and_, case, func, null, or_, select
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -1089,8 +1087,11 @@ async def _breakdown(
     token count means. When ``limit`` is set, only the top rows are returned and
     the remainder is folded into a synthesized ``other`` row derived from the
     grand totals, so the breakdown always reconciles with the tiles.
-    ``limit=None`` returns every group (used by the CSV export, which must not
-    truncate).
+    ``limit=None`` returns every group. No route asks for that today: the CSV
+    export did, and it was removed with nothing having called it since the
+    dashboard dropped its download (mozilla-ai/otari#842's follow-up). The arm
+    stays because it is what makes the fold optional rather than assumed, and a
+    caller that must not truncate is the next thing to want it.
     """
     cost_sum = func.coalesce(func.sum(UsageLog.cost), 0.0)
     # The label rides along in the same pass rather than costing a second query or
@@ -1662,94 +1663,4 @@ async def usage_series(
         status=status,
         bucket=bucket,
         group_by=group_by,
-    )
-
-
-# Leading characters a spreadsheet may interpret as a formula. Any cell starting
-# with one is prefixed with a single quote so opening the CSV in Excel/Sheets can
-# never execute attacker-influenced text (model / user ids are caller-supplied).
-_CSV_FORMULA_PREFIXES = ("=", "+", "-", "@", "\t", "\r")
-
-# The export names a dimension the way an operator reads it where that differs from
-# the column name the API selector uses.
-_CSV_DIMENSION_LABELS = {"source_label": "session"}
-
-
-def _csv_safe(value: str) -> str:
-    if value and value[0] in _CSV_FORMULA_PREFIXES:
-        return "'" + value
-    return value
-
-
-@router.get("/summary.csv", dependencies=[Depends(require_deployment_operator)])
-async def usage_summary_csv(
-    db: Annotated[AsyncSession, Depends(get_db)],
-    start_date: datetime | None = Query(default=None, description=_START_DESC),
-    end_date: datetime | None = Query(default=None, description=_END_DESC),
-    user_id: Annotated[list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_USER_MULTI_DESC)] = None,
-    status: str | None = Query(default=None, description=_STATUS_DESC),
-    status_code: int | None = Query(default=None, description=_STATUS_CODE_DESC),
-    model: Annotated[list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_MODEL_MULTI_DESC)] = None,
-    endpoint: str | None = Query(default=None, description=_ENDPOINT_DESC),
-    provider: str | None = Query(default=None, description=_PROVIDER_DESC),
-    source: str | None = Query(default=None, description=_SOURCE_DESC),
-    source_label: str | None = Query(default=None, description=_SOURCE_LABEL_DESC),
-    api_key_id: Annotated[
-        list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_API_KEY_MULTI_DESC)
-    ] = None,
-    priced: bool | None = Query(default=None, description=_PRICED_DESC),
-    tool: ToolFilter | None = Query(default=None, description=_TOOL_DESC),
-    counts_toward_budget: bool | None = Query(default=None, description=_COUNTS_DESC),
-    workspace_id: Annotated[uuid.UUID | None, Query(description=_WORKSPACE_DESC)] = None,
-) -> Response:
-    """Download every breakdown the summary reports, as one CSV.
-
-    One row per (dimension, key): model, user, API key, source, session
-    (``source_label``), endpoint, and provider. A dedicated route rather than a
-    ``format=csv`` flag on ``/summary`` so that endpoint keeps a single JSON
-    response model and a clean OpenAPI schema. The export is **uncapped** (no
-    top-N fold): finance wants every row. ``tokens`` is the billed total (fresh
-    input, both cache buckets, and output), matching the dashboard's analytics.
-    Kept separate from the bare-array ``/v1/usage`` contract, which is untouched.
-    """
-    _start, _end, conditions, totals = await _summary_context(
-        db,
-        start_date=start_date,
-        end_date=end_date,
-        user_id=user_id,
-        status=status,
-        status_code=status_code,
-        model=model,
-        endpoint=endpoint,
-        provider=provider,
-        source=source,
-        source_label=source_label,
-        api_key_id=api_key_id,
-        priced=priced,
-        tool=tool,
-        counts_toward_budget=counts_toward_budget,
-        workspace_id=workspace_id,
-        scope=None,
-    )
-    # Driven off the same dimension table as ``/summary`` so a new breakdown lands
-    # in the export without a second edit here.
-    dimensions = [
-        (
-            _CSV_DIMENSION_LABELS.get(name, name),
-            await _breakdown(db, column, conditions, totals, limit=None, status_filter=status),
-        )
-        for name, (column, _cap, _label) in _SUMMARY_DIMENSIONS.items()
-    ]
-
-    buffer = io.StringIO()
-    writer = csv.writer(buffer)
-    writer.writerow(["dimension", "key", "cost", "tokens", "requests"])
-    for dimension, rows in dimensions:
-        for row in rows:
-            writer.writerow([dimension, _csv_safe(row.key or ""), f"{row.cost:.6f}", row.tokens, row.requests])
-
-    return Response(
-        content=buffer.getvalue(),
-        media_type="text/csv",
-        headers={"Content-Disposition": 'attachment; filename="usage-summary.csv"'},
     )

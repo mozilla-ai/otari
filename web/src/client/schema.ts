@@ -3350,34 +3350,6 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
-    "/v1/usage/summary.csv": {
-        parameters: {
-            query?: never;
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        /**
-         * Usage Summary Csv
-         * @description Download every breakdown the summary reports, as one CSV.
-         *
-         *     One row per (dimension, key): model, user, API key, source, session
-         *     (``source_label``), endpoint, and provider. A dedicated route rather than a
-         *     ``format=csv`` flag on ``/summary`` so that endpoint keeps a single JSON
-         *     response model and a clean OpenAPI schema. The export is **uncapped** (no
-         *     top-N fold): finance wants every row. ``tokens`` is the billed total (fresh
-         *     input, both cache buckets, and output), matching the dashboard's analytics.
-         *     Kept separate from the bare-array ``/v1/usage`` contract, which is untouched.
-         */
-        get: operations["usage_summary_csv_v1_usage_summary_csv_get"];
-        put?: never;
-        post?: never;
-        delete?: never;
-        options?: never;
-        head?: never;
-        patch?: never;
-        trace?: never;
-    };
     "/v1/users": {
         parameters: {
             query?: never;
@@ -14756,66 +14728,6 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UsageSummary"];
-                };
-            };
-            /** @description Validation Error */
-            422: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": components["schemas"]["HTTPValidationError"];
-                };
-            };
-        };
-    };
-    usage_summary_csv_v1_usage_summary_csv_get: {
-        parameters: {
-            query?: {
-                /** @description Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds) */
-                start_date?: string | null;
-                /** @description Return logs with timestamp < end_date (ISO 8601 or Unix epoch seconds) */
-                end_date?: string | null;
-                /** @description Filter to one or more users; repeatable (user_id=a&user_id=b). Several values match any of them. At most 50 per call. */
-                user_id?: string[] | null;
-                /** @description Filter to a single status: 'success', 'error', or 'absorbed' (an attempt a routing policy recovered from, excluded from error_count and request_count) */
-                status?: string | null;
-                /** @description Filter to a single failure status code (e.g. 429 for provider rate limits, 402 for missing-pricing rejections). Only error rows carry one, so this filter also restricts to status='error' unless 'status' is given explicitly */
-                status_code?: number | null;
-                /** @description Filter to one or more models; repeatable (model=a&model=b). Several values match any of them. At most 50 per call. */
-                model?: string[] | null;
-                /** @description Filter to a single endpoint (e.g. '/v1/chat/completions') */
-                endpoint?: string | null;
-                /** @description Filter to a single provider (e.g. 'openai') */
-                provider?: string | null;
-                /** @description Filter to a single provenance source (e.g. 'gateway' or 'claude_code') */
-                source?: string | null;
-                /** @description Filter to a single session/project label (the source_label carried by imported usage) */
-                source_label?: string | null;
-                /** @description Filter to one or more API key ids; repeatable (api_key_id=a&api_key_id=b). Several values match any of them. At most 50 per call. */
-                api_key_id?: string[] | null;
-                /** @description Filter by token-pricing state: true = only rows whose model tokens were priced, false = only rows that still need pricing (no cost at all, or tokens that were never metered because the model had no rate). A row charged only for gateway-run tool calls still counts as needing pricing. */
-                priced?: boolean | null;
-                /** @description Filter to requests that ran a gateway-run tool. 'any' matches any tool; a tool name (web_search, code_execution) matches that tool specifically. */
-                tool?: ("any" | "web_search" | "code_execution") | null;
-                /** @description Filter by budget participation: true = only enforced gateway rows, false = only imported rows that never touch a budget */
-                counts_toward_budget?: boolean | null;
-                /** @description Only usage recorded in this workspace. */
-                workspace_id?: string | null;
-            };
-            header?: never;
-            path?: never;
-            cookie?: never;
-        };
-        requestBody?: never;
-        responses: {
-            /** @description Successful Response */
-            200: {
-                headers: {
-                    [name: string]: unknown;
-                };
-                content: {
-                    "application/json": unknown;
                 };
             };
             /** @description Validation Error */
