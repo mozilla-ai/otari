@@ -2127,7 +2127,14 @@ export function ActivityPage() {
         </FilterChips>
       </div>
 
-      {hasSelection ? (
+      {/* Both, not just `hasSelection`: that reads the selection state, which
+          does not clear when the operator answer flips. An operator who selects
+          rows and is then found not to be one (the context refetches on its own
+          cadence) would keep Delete and Set price on screen over a hidden
+          checkbox column. The server refuses either way, so this is a confusing
+          control rather than an escalation, but it is one nobody should be
+          offered. */}
+      {showSelection && hasSelection ? (
         <BulkActionBar
           selectedCount={effectiveCount}
           allMatching={selection.allMatching}

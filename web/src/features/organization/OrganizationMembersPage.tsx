@@ -587,31 +587,43 @@ function MemberEditor({
 
       // Pass two: ceilings, against a roster that now includes the joins above
       // and the ceilings their workspaces' defaults just materialized.
-      const fresh = await scopedBudgets.refetch()
-      const ceilings = new Map(
-        (fresh.data ?? [])
-          .filter((budget) => budget.scope_type === "workspace_member")
-          .map((budget) => [budget.scope_id, budget]),
-      )
-      for (const [workspaceId, row] of rows) {
-        if (!row.member) continue
-        const membershipId = membershipIds.get(workspaceId)
-        if (!membershipId) continue
-        const existing = ceilings.get(membershipId)
-        const wanted = row.budgetId === "" ? null : row.budgetId
-        if (existing && wanted === null) {
-          await deleteCeiling.mutateAsync(existing.id)
-        } else if (existing && existing.budget_id !== wanted) {
-          await updateCeiling.mutateAsync({
-            id: existing.id,
-            body: { budget_id: wanted },
-          })
-        } else if (!existing && wanted !== null) {
-          await createCeiling.mutateAsync({
-            scope_type: "workspace_member",
-            scope_id: membershipId,
-            budget_id: wanted,
-          })
+      //
+      // Skipped whole for a caller who does not operate the deployment, and the
+      // gate has to be here rather than only on the query: `refetch()` runs the
+      // query function even when `enabled` is false, which is what makes it the
+      // way to drive a disabled query on purpose. So without this, a tenant
+      // saving nothing but a workspace placement would still ask
+      // `/v1/scoped-budgets`, be refused, and land back on the very banner
+      // otari#838 exists to remove. There is nothing to write here either: the
+      // Budget column is not rendered for them, so every `row.budgetId` is the
+      // empty string it was seeded with.
+      if (operates) {
+        const fresh = await scopedBudgets.refetch()
+        const ceilings = new Map(
+          (fresh.data ?? [])
+            .filter((budget) => budget.scope_type === "workspace_member")
+            .map((budget) => [budget.scope_id, budget]),
+        )
+        for (const [workspaceId, row] of rows) {
+          if (!row.member) continue
+          const membershipId = membershipIds.get(workspaceId)
+          if (!membershipId) continue
+          const existing = ceilings.get(membershipId)
+          const wanted = row.budgetId === "" ? null : row.budgetId
+          if (existing && wanted === null) {
+            await deleteCeiling.mutateAsync(existing.id)
+          } else if (existing && existing.budget_id !== wanted) {
+            await updateCeiling.mutateAsync({
+              id: existing.id,
+              body: { budget_id: wanted },
+            })
+          } else if (!existing && wanted !== null) {
+            await createCeiling.mutateAsync({
+              scope_type: "workspace_member",
+              scope_id: membershipId,
+              budget_id: wanted,
+            })
+          }
         }
       }
       onClose()

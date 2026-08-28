@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen, within } from "@testing-library/react"
+import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -658,6 +658,37 @@ describe("OrganizationMembersPage for a tenant who does not operate the deployme
     expect(
       screen.queryByText(/requires deployment operator access/i),
     ).not.toBeInTheDocument()
+  })
+
+  it("saves a workspace placement without asking for scoped budgets", async () => {
+    // The gate cannot live on the query alone: `refetch()` runs the query
+    // function even when `enabled` is false, so the editor's ceilings pass would
+    // still ask `/v1/scoped-budgets`, be refused, and put the operator refusal
+    // back on a page this branch just cleared of it (otari#838).
+    const requests = mockApi({
+      members: [OWNER, ANALYST],
+      workspaces: [workspace(), workspace({ id: SECOND, name: "Bravo" })],
+      context: organizationContext({ deployment_operator: false }),
+    })
+    const actor = userEvent.setup()
+    renderPage(<OrganizationMembersPage />)
+
+    await screen.findByText("Analyst")
+    await actor.click(
+      within(rowFor("Analyst")).getByRole("button", { name: "Edit" }),
+    )
+    await screen.findByText("Workspace access")
+    // No Budget column for this caller, so the only thing to save is placement.
+    expect(
+      screen.queryByLabelText("Budget in Default Workspace"),
+    ).not.toBeInTheDocument()
+    await actor.click(screen.getByRole("button", { name: "Save changes" }))
+
+    await waitFor(() =>
+      expect(requests.some((r) => r.url.includes("/v1/scoped-budgets"))).toBe(
+        false,
+      ),
+    )
   })
 
   it("still shows the columns to an operator, so the case above is not vacuous", async () => {

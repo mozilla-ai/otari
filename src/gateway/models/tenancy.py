@@ -509,7 +509,11 @@ class OrganizationMembershipContextPublic(SQLModel):
     # ``DeploymentUserService.has_administration_access`` rather than re-derived,
     # so the two answers cannot come to disagree about who operates the
     # deployment. This does not retire that endpoint; it is a second publisher of
-    # one fact, and a client should read one of them rather than both.
+    # one fact. Two publishers is a transitional state rather than a design: the
+    # server cannot give different answers, but they are separate requests
+    # resolving on their own schedules, so two surfaces reading different ones can
+    # settle out of step. Which is canonical for which layer of the dashboard,
+    # and what would retire the endpoint's use there, is in ``web/AGENTS.md``.
     deployment_operator: bool = False
     # Whether the deployment can encrypt a stored credential at all, i.e. whether
     # ``OTARI_SECRET_KEY`` is set. A deployment fact rather than a tenant one, and

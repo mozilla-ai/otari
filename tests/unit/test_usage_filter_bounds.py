@@ -43,6 +43,7 @@ def test_list_and_count_filters_pin_a_naive_bound_to_utc() -> None:
         status=None,
         model=None,
         endpoint=None,
+        scope=None,
     )
     assert _bound_values(conditions) == [
         _NAIVE_START.replace(tzinfo=UTC),
@@ -61,6 +62,7 @@ def test_list_and_count_filters_leave_an_offset_bound_alone() -> None:
         status=None,
         model=None,
         endpoint=None,
+        scope=None,
     )
     assert _bound_values(conditions) == [aware_start]
 

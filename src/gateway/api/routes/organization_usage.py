@@ -115,9 +115,17 @@ async def _scope_condition(
     the one that goes stale in the unsafe direction.
     """
     organizations = OrganizationService(db)
-    scope = await resolve_visible_workspace_scope(db, user=user, organizations=organizations)
 
     if workspace_id is not None:
+        # Only the organization is resolved on this branch. The full scope would
+        # also build the caller's workspace-id set, which is deliberately
+        # unpaged, and the branch below discards it: the Activity page issues a
+        # list, a count, a summary and a series per filter change, so resolving
+        # it here would be four unbounded reads an interaction, for nothing.
+        # ``get_active_organization_for_user`` is the same refusal the full scope
+        # opens with, so a pointer with no live membership behind it still stops
+        # here rather than reaching the resolver below.
+        organization = await organizations.get_active_organization_for_user(user)
         # Narrowing only. The resolver raises ``WorkspaceNotFoundError`` (404) for
         # a workspace in another organization *and* for one in this organization
         # the caller is not a member of, which is what keeps the parameter from
@@ -131,11 +139,12 @@ async def _scope_condition(
             db,
             user=user,
             workspace_id=workspace_id,
-            organization=scope.organization,
+            organization=organization,
             organizations=organizations,
         )
         return col(UsageLog.workspace_id) == workspace_id
 
+    scope = await resolve_visible_workspace_scope(db, user=user, organizations=organizations)
     if scope.sees_every_workspace:
         return col(UsageLog.workspace_id).in_(
             select(col(Workspace.id)).where(col(Workspace.organization_id) == scope.organization.id)

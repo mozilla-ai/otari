@@ -93,6 +93,7 @@ SeriesGroupBy = Literal["model", "user_id", "api_key_id", "source"]
 # switch on it exhaustively instead of string-matching whatever the server sent.
 ErrorClass = Literal["pricing", "rate_limit", "auth", "provider_error", "client_error", "unknown"]
 
+
 # Every breakdown ``/summary`` can compute, mapped to the column it groups by and
 # its top-N cap. A dimension name is the ``by_<name>`` response field it fills, so
 # a caller reads the selector and the payload with one vocabulary.
@@ -362,7 +363,7 @@ def _usage_filters(
     status_code: int | None = None,
     request_group_id: list[str] | None = None,
     workspace_id: uuid.UUID | None = None,
-    scope: ColumnElement[bool] | None = None,
+    scope: ColumnElement[bool] | None,
 ) -> list[ColumnElement[bool]]:
     """Build the shared WHERE conditions for the list and count endpoints.
 
@@ -370,12 +371,18 @@ def _usage_filters(
     always matches the rows ``list_usage`` returns for the same filters.
 
     ``scope`` is the one condition that is not a filter. The deployment-wide
-    routes here pass none and read every row; the organization-scoped routes in
-    ``organization_usage.py`` pass the predicate their caller's membership
+    routes here pass ``None`` and read every row; the organization-scoped routes
+    in ``organization_usage.py`` pass the predicate their caller's membership
     resolved to, so it is ANDed in alongside whatever the client asked for and a
-    client-supplied ``workspace_id`` can only ever narrow it further. It is a
-    parameter rather than something a caller appends afterwards so that a route
-    that builds filters cannot forget the half that makes them safe.
+    client-supplied ``workspace_id`` can only ever narrow it further.
+
+    Deliberately **without a default**, unlike every filter beside it. It is a
+    parameter so that a route building these conditions cannot forget the half
+    that makes them safe, and a default is exactly what would let it: the
+    forgotten case reads every tenant's rows and says nothing. Required, a new
+    scoped route that omits it is a ``TypeError`` at import rather than a
+    cross-tenant read in production, which is the difference between the
+    docstring asserting the property and the signature enforcing it.
 
     Bounds are pinned to UTC here rather than only in ``_resolve_window``, which
     the summary endpoints route through but the list and count endpoints do not:
@@ -439,9 +446,7 @@ async def list_usage(
     db: Annotated[AsyncSession, Depends(get_db)],
     start_date: datetime | None = Query(default=None, description=_START_DESC),
     end_date: datetime | None = Query(default=None, description=_END_DESC),
-    user_id: Annotated[
-        list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_USER_MULTI_DESC)
-    ] = None,
+    user_id: Annotated[list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_USER_MULTI_DESC)] = None,
     status: str | None = Query(default=None, description=_STATUS_DESC),
     status_code: int | None = Query(default=None, description=_STATUS_CODE_DESC),
     model: Annotated[list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_MODEL_MULTI_DESC)] = None,
@@ -490,6 +495,7 @@ async def list_usage(
         counts_toward_budget=counts_toward_budget,
         request_group_id=request_group_id,
         workspace_id=workspace_id,
+        scope=None,
     )
     # Outer-joined rather than looked up per row, and rather than left to the
     # client: naming a page of rows must not cost a round trip each, nor oblige a
@@ -506,8 +512,7 @@ async def list_usage(
     )
     result = await db.execute(stmt)
     return [
-        UsageEntry.from_model(log, user_alias=alias, api_key_name=key_name)
-        for log, alias, key_name in result.all()
+        UsageEntry.from_model(log, user_alias=alias, api_key_name=key_name) for log, alias, key_name in result.all()
     ]
 
 
@@ -545,9 +550,7 @@ async def count_usage(
     db: Annotated[AsyncSession, Depends(get_db)],
     start_date: datetime | None = Query(default=None, description=_START_DESC),
     end_date: datetime | None = Query(default=None, description=_END_DESC),
-    user_id: Annotated[
-        list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_USER_MULTI_DESC)
-    ] = None,
+    user_id: Annotated[list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_USER_MULTI_DESC)] = None,
     status: str | None = Query(default=None, description=_STATUS_DESC),
     status_code: int | None = Query(default=None, description=_STATUS_CODE_DESC),
     model: Annotated[list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_MODEL_MULTI_DESC)] = None,
@@ -591,6 +594,7 @@ async def count_usage(
         counts_toward_budget=counts_toward_budget,
         request_group_id=request_group_id,
         workspace_id=workspace_id,
+        scope=None,
     )
     stmt: Any = select(func.count()).select_from(UsageLog).where(*conditions)
     total = (await db.execute(stmt)).scalar_one()
@@ -1269,7 +1273,7 @@ async def _summary_context(
     counts_toward_budget: bool | None = None,
     status_code: int | None = None,
     workspace_id: uuid.UUID | None = None,
-    scope: ColumnElement[bool] | None = None,
+    scope: ColumnElement[bool] | None,
 ) -> tuple[datetime, datetime, list[ColumnElement[bool]], UsageTotals]:
     """Resolve the bounded window, the shared WHERE conditions, and the grand
     totals: the common preamble both summary endpoints run, kept in one place so a
@@ -1438,9 +1442,7 @@ async def usage_summary(
     db: Annotated[AsyncSession, Depends(get_db)],
     start_date: datetime | None = Query(default=None, description=_START_DESC),
     end_date: datetime | None = Query(default=None, description=_END_DESC),
-    user_id: Annotated[
-        list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_USER_MULTI_DESC)
-    ] = None,
+    user_id: Annotated[list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_USER_MULTI_DESC)] = None,
     status: str | None = Query(default=None, description=_STATUS_DESC),
     status_code: int | None = Query(default=None, description=_STATUS_CODE_DESC),
     model: Annotated[list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_MODEL_MULTI_DESC)] = None,
@@ -1494,6 +1496,7 @@ async def usage_summary(
         tool=tool,
         counts_toward_budget=counts_toward_budget,
         workspace_id=workspace_id,
+        scope=None,
     )
     return await _summary_response(
         db,
@@ -1602,9 +1605,7 @@ async def usage_series(
     group_by: SeriesGroupBy = Query(description="Dimension to split the series by"),
     start_date: datetime | None = Query(default=None, description=_START_DESC),
     end_date: datetime | None = Query(default=None, description=_END_DESC),
-    user_id: Annotated[
-        list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_USER_MULTI_DESC)
-    ] = None,
+    user_id: Annotated[list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_USER_MULTI_DESC)] = None,
     status: str | None = Query(default=None, description=_STATUS_DESC),
     status_code: int | None = Query(default=None, description=_STATUS_CODE_DESC),
     model: Annotated[list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_MODEL_MULTI_DESC)] = None,
@@ -1650,6 +1651,7 @@ async def usage_series(
         tool=tool,
         counts_toward_budget=counts_toward_budget,
         workspace_id=workspace_id,
+        scope=None,
     )
     return await _grouped_series_response(
         db,
@@ -1684,9 +1686,7 @@ async def usage_summary_csv(
     db: Annotated[AsyncSession, Depends(get_db)],
     start_date: datetime | None = Query(default=None, description=_START_DESC),
     end_date: datetime | None = Query(default=None, description=_END_DESC),
-    user_id: Annotated[
-        list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_USER_MULTI_DESC)
-    ] = None,
+    user_id: Annotated[list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_USER_MULTI_DESC)] = None,
     status: str | None = Query(default=None, description=_STATUS_DESC),
     status_code: int | None = Query(default=None, description=_STATUS_CODE_DESC),
     model: Annotated[list[str] | None, Query(max_length=MAX_FILTER_VALUES, description=_MODEL_MULTI_DESC)] = None,
@@ -1729,6 +1729,7 @@ async def usage_summary_csv(
         tool=tool,
         counts_toward_budget=counts_toward_budget,
         workspace_id=workspace_id,
+        scope=None,
     )
     # Driven off the same dimension table as ``/summary`` so a new breakdown lands
     # in the export without a second edit here.
