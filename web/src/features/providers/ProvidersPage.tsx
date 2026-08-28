@@ -1056,7 +1056,15 @@ export function ProvidersPage() {
           a permanent "Not authorized" alert for a read nothing here depends on.
           `context.error` takes its place, because the add control now gates on
           the membership context; a write that fails still reports itself
-          through `updateSettings.error`. */}
+          through `updateSettings.error`.
+
+          The cost is that a genuine 500 from that endpoint is silent too, and
+          `needsPricing` then reads false, so the pricing hint disappears with
+          nothing saying why. Taken deliberately: the alternative shows every
+          non-operator a permanent error for a read they were never entitled to
+          make, and the hint is an advisory nudge rather than a control. Telling
+          the two apart needs the page to distinguish a 403 from a 5xx, which is
+          worth doing when the hint earns it. */}
       <ErrorBanner
         error={
           meta.error ??

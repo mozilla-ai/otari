@@ -264,6 +264,29 @@ describe("OrganizationProviderKeysPage", () => {
     ).toBe(false)
   })
 
+  it("says nothing about the key when the context read is what failed", async () => {
+    // The shape the original bug had, from the other direction: with no context
+    // the encryption state is unknown, so the page must report the read that
+    // failed rather than claim the key is missing. It behaves correctly today
+    // only because `canManage(undefined)` is false and the banner is gated on
+    // it, which is a role check standing in for an encryption one; this pins the
+    // outcome so a later change to either gate cannot quietly restore the lie.
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
+      String(input).includes("/provider-keys")
+        ? jsonResponse({ count: 0, data: [] })
+        : jsonResponse({ detail: "Tenancy is unavailable" }, 500),
+    )
+    renderPage(<OrganizationProviderKeysPage />)
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Tenancy is unavailable",
+    )
+    expect(screen.queryByText(/OTARI_SECRET_KEY/)).toBeNull()
+    expect(
+      screen.queryByRole("button", { name: "Add provider key" }),
+    ).toBeNull()
+  })
+
   it("reports a list that could not be read instead of an empty table", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) =>
       String(input).includes("/provider-keys")
