@@ -111,9 +111,10 @@ rather than reinvented, because the two suites fail for the same reasons and onl
 should have to learn each one. Keep them recognizably the same file.
 
 **Adding a page means adding an entry**, in the registry that matches how it is reached: a
-route in `WORKSPACE_ROUTES` in `authenticated.spec.ts` for anything behind a session, or a
-test in `public.spec.ts` for anything in front of one. Either is one line and buys six
-captures. A page with no entry is a page whose mobile and dark rendering nobody checks.
+route in `WORKSPACE_ROUTES` in `authenticated.spec.ts` for anything behind a session, a
+test in `public.spec.ts` for anything in front of one, or a test in `hybrid.spec.ts` for
+the hybrid landing surface. One entry buys six captures. A page with no entry is a page
+whose mobile and dark rendering nobody checks.
 
 What the harness already handles, so you do not work around it:
 
