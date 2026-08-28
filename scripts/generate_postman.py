@@ -102,9 +102,7 @@ def example_for_schema(
         ref = schema["$ref"]
         if ref in seen:
             return None
-        return example_for_schema(
-            resolve_ref(ref, spec), spec, depth=depth, seen=seen | {ref}
-        )
+        return example_for_schema(resolve_ref(ref, spec), spec, depth=depth, seen=seen | {ref})
 
     if "example" in schema:
         return schema["example"]
@@ -120,9 +118,7 @@ def example_for_schema(
                     if isinstance(value, dict):
                         merged.update(value)
                 return merged
-            return example_for_schema(
-                schema[combiner][0], spec, depth=depth + 1, seen=seen
-            )
+            return example_for_schema(schema[combiner][0], spec, depth=depth + 1, seen=seen)
 
     if "enum" in schema and schema["enum"]:
         return schema["enum"][0]
@@ -136,9 +132,7 @@ def example_for_schema(
         required = schema.get("required", [])
         keys = required if required else list(props)
         return {
-            name: example_for_schema(props[name], spec, depth=depth + 1, seen=seen)
-            for name in keys
-            if name in props
+            name: example_for_schema(props[name], spec, depth=depth + 1, seen=seen) for name in keys if name in props
         }
 
     if schema_type == "array":
@@ -173,7 +167,26 @@ def request_body_example(operation: dict[str, Any], spec: dict[str, Any]) -> Any
     return example_for_schema(schema, spec)
 
 
-def build_url(path: str, operation: dict[str, Any]) -> dict[str, Any]:
+def _enum_choices(schema: dict[str, Any], spec: dict[str, Any]) -> list[Any]:
+    """The closed set a schema allows, following one ``$ref`` and any wrapper.
+
+    A query parameter's enum is rarely written inline: FastAPI emits a ``$ref``
+    to a named schema, and an optional one wraps it in ``anyOf`` beside a null.
+    Returns an empty list for anything that is not a closed set, which is what
+    keeps a free-form parameter's placeholder empty.
+    """
+    resolved = resolve_ref(schema["$ref"], spec) if "$ref" in schema else schema
+    if isinstance(resolved.get("enum"), list) and resolved["enum"]:
+        choices: list[Any] = resolved["enum"]
+        return choices
+    for branch in resolved.get("anyOf", []) or resolved.get("oneOf", []) or []:
+        nested = _enum_choices(branch, spec)
+        if nested:
+            return nested
+    return []
+
+
+def build_url(path: str, operation: dict[str, Any], spec: dict[str, Any]) -> dict[str, Any]:
     """Build a Postman URL object with path variables and query params."""
     # Postman represents path params as ``:name`` segments.
     raw_path = path
@@ -192,19 +205,34 @@ def build_url(path: str, operation: dict[str, Any]) -> dict[str, Any]:
     for param in operation.get("parameters", []):
         if param.get("in") != "query":
             continue
+        required = bool(param.get("required", False))
+        # A required parameter is enabled, so whatever is written here is what
+        # the saved request sends. For a free-form value an empty placeholder is
+        # right: only the person running it knows the id or the date they mean.
+        # For a *closed* set it is wrong, because empty is a value the endpoint
+        # refuses: `group_by=` on the three series requests was a guaranteed 422
+        # against the enum it violates. Those get the first member instead, which
+        # is a request that runs as saved. Optional parameters keep the empty
+        # placeholder either way, since they start disabled and never reach the
+        # wire.
+        value = ""
+        if required:
+            choices = _enum_choices(param.get("schema", {}), spec)
+            if choices:
+                value = str(choices[0])
         query.append(
             {
                 "key": param["name"],
-                "value": "",
+                "value": value,
                 "description": param.get("description", ""),
                 # Optional params start disabled so the request runs clean.
-                "disabled": not param.get("required", False),
+                "disabled": not required,
             }
         )
 
     raw = "{{baseUrl}}" + raw_path
     if query:
-        raw += "?" + "&".join(f"{q['key']}=" for q in query)
+        raw += "?" + "&".join(f"{q['key']}={q['value']}" for q in query)
 
     url: dict[str, Any] = {
         "raw": raw,
@@ -226,7 +254,7 @@ def build_item(path: str, method: str, operation: dict[str, Any], spec: dict[str
     request: dict[str, Any] = {
         "method": method.upper(),
         "header": headers,
-        "url": build_url(path, operation),
+        "url": build_url(path, operation, spec),
     }
 
     description = operation.get("description")
@@ -234,9 +262,7 @@ def build_item(path: str, method: str, operation: dict[str, Any], spec: dict[str
         request["description"] = description
 
     if method in BODY_METHODS:
-        body = EXAMPLE_BODY_OVERRIDES.get(
-            (method.upper(), path)
-        ) or request_body_example(operation, spec)
+        body = EXAMPLE_BODY_OVERRIDES.get((method.upper(), path)) or request_body_example(operation, spec)
         if body is not None:
             headers.append({"key": "Content-Type", "value": "application/json"})
             request["body"] = {
@@ -271,11 +297,7 @@ def build_collection(spec: dict[str, Any]) -> dict[str, Any]:
                     folder_order.append(tag)
             folders[tag].append(build_item(path, method, operation, spec))
 
-    items = [
-        {"name": tag, "item": folders[tag]}
-        for tag in folder_order
-        if tag in folders
-    ]
+    items = [{"name": tag, "item": folders[tag]} for tag in folder_order if tag in folders]
 
     description = (
         f"{title} management + inference collection, generated from the OpenAPI "

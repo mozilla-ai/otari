@@ -262,7 +262,7 @@
                   "description": "Dimension to split the series by",
                   "disabled": false,
                   "key": "group_by",
-                  "value": ""
+                  "value": "user_id"
                 },
                 {
                   "description": "Return rows with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
@@ -301,7 +301,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/agent-telemetry/series?group_by=&start_date=&end_date=&user_id=&api_key_id=&name=&bucket="
+              "raw": "{{baseUrl}}/v1/agent-telemetry/series?group_by=user_id&start_date=&end_date=&user_id=&api_key_id=&name=&bucket="
             }
           }
         },
@@ -3657,7 +3657,7 @@
                   "description": "Dimension to split the series by",
                   "disabled": false,
                   "key": "group_by",
-                  "value": ""
+                  "value": "model"
                 },
                 {
                   "description": "Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
@@ -3756,7 +3756,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/usage/series?group_by=&start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&workspace_id=&bucket="
+              "raw": "{{baseUrl}}/v1/organizations/me/usage/series?group_by=model&start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&workspace_id=&bucket="
             }
           }
         },
@@ -5728,7 +5728,7 @@
                   "description": "Dimension to split the series by",
                   "disabled": false,
                   "key": "group_by",
-                  "value": ""
+                  "value": "model"
                 },
                 {
                   "description": "Return logs with timestamp >= start_date (ISO 8601 or Unix epoch seconds)",
@@ -5827,7 +5827,7 @@
                   "value": ""
                 }
               ],
-              "raw": "{{baseUrl}}/v1/usage/series?group_by=&start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&workspace_id=&bucket="
+              "raw": "{{baseUrl}}/v1/usage/series?group_by=model&start_date=&end_date=&user_id=&status=&status_code=&model=&endpoint=&provider=&source=&source_label=&api_key_id=&priced=&tool=&counts_toward_budget=&workspace_id=&bucket="
             }
           }
         },
@@ -6565,10 +6565,10 @@
                   "description": "Role to assign in this workspace.",
                   "disabled": false,
                   "key": "role",
-                  "value": ""
+                  "value": "owner"
                 }
               ],
-              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/members/:user_id?role=",
+              "raw": "{{baseUrl}}/v1/workspaces/:workspace_id/members/:user_id?role=owner",
               "variable": [
                 {
                   "description": "path parameter",
