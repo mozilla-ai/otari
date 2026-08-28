@@ -109,6 +109,12 @@ Two build inputs are committed when changed:
 The bundled dashboard guide imports `docs/dashboard.md`. It remains available
 at `/#/docs` even when `docs_url` points the visible links elsewhere.
 
+The PWA manifest is generated at build time by `web/pwaManifest.ts`, which
+prefixes `id`, `start_url`, `scope`, and each icon path with Vite's resolved
+`base` and rewrites the `index.html` link (#857). Do not add a static manifest
+to `public/pwa/`; only the icons live there. The plugin is a standalone module
+so the otari-ai superset build imports it rather than copying it.
+
 ## Checks
 
 ```bash

@@ -4,6 +4,7 @@ import tailwindcss from "@tailwindcss/vite"
 import { tanstackRouter } from "@tanstack/router-plugin/vite"
 import react, { reactCompilerPreset } from "@vitejs/plugin-react"
 import { defineConfig } from "vitest/config"
+import { pwaManifest } from "./pwaManifest.ts"
 
 // The dashboard is served by the gateway at "/", so we build straight into the
 // Python package (src/gateway/static/dashboard). The output is gitignored, not
@@ -73,6 +74,10 @@ export default defineConfig({
     // configured alike. React 19 is the preset's default target.
     babel({ presets: [reactCompilerPreset()] }),
     tailwindcss(),
+    // The web app manifest, generated from the resolved `base` because a
+    // static file in public/ is copied verbatim and pointed installs back at
+    // the origin root when the bundle was built under a base path (#857).
+    pwaManifest(),
     announceApiTarget,
   ],
   resolve: {
