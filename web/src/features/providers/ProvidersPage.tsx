@@ -15,6 +15,7 @@ import {
   useOrganizationContext,
   useProviderDetail,
   useProviderHealth,
+  useProviderKeyEncryption,
   useProviders,
   useRecheckProviderHealth,
   useSettings,
@@ -837,19 +838,10 @@ export function ProvidersPage() {
   const needsPricing =
     settings.data?.require_pricing === true &&
     settings.data.default_pricing === false
-  // Gate adding providers on the server having OTARI_SECRET_KEY. Read off the
-  // membership context rather than `/v1/settings`: that endpoint is
-  // operator-only, so it 403s for any caller who is not a superuser or holding
-  // the master key, and a refusal used to read as "the key is missing" (#839).
-  // Fail closed: enabled only while the context is still loading (so the button
-  // does not flicker to disabled on first paint) or once a value has actually
-  // loaded that is not `false`. An error leaves us unable to confirm the key, so
-  // we disable rather than let the operator hit a submit-time failure. Older
-  // gateways omit the field; a present-but-missing value reads as configured
-  // (they never gated on it).
-  const secretKeyConfigured = context.data
-    ? context.data.provider_key_encryption_available !== false
-    : !context.isError
+  // Gate adding providers on the server having OTARI_SECRET_KEY, which the
+  // membership context reports and `/v1/settings` no longer answers for every
+  // caller who reaches this page (#839).
+  const secretKeyConfigured = useProviderKeyEncryption()
   const showOnboarding = !loading && rows.length === 0 && !addOpen
 
   // Which test run each row is currently showing. A row's result is only worth
@@ -1058,18 +1050,29 @@ export function ProvidersPage() {
         }
       />
 
+      {/* `settings.error` is deliberately absent. The page reads that endpoint
+          only for the pricing hint below, and it is operator-only, so a caller
+          who may manage providers but is not a deployment operator would carry
+          a permanent "Not authorized" alert for a read nothing here depends on.
+          `context.error` takes its place, because the add control now gates on
+          the membership context; a write that fails still reports itself
+          through `updateSettings.error`. */}
       <ErrorBanner
         error={
           meta.error ??
           stored.error ??
-          settings.error ??
+          context.error ??
           health.error ??
           updateSettings.error ??
           deleteProvider.error
         }
       />
 
-      {!secretKeyConfigured ? (
+      {/* Held back until the context has answered. A context that failed leaves
+          the key state unknown, which disables the control above but is not
+          grounds for telling the operator the key is missing: the banner beside
+          it already names the real error. */}
+      {context.data && !secretKeyConfigured ? (
         <InfoBanner tone="warning">
           <code>OTARI_SECRET_KEY</code> is not set, so provider keys can't be
           encrypted at rest and adding providers from the dashboard is disabled.

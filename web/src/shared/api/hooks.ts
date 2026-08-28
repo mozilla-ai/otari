@@ -1839,6 +1839,26 @@ export function useOrganizationContext() {
   })
 }
 
+// Whether the deployment can encrypt a provider credential at rest, i.e. whether
+// OTARI_SECRET_KEY is set on the server. Both provider-key pages gate their add
+// control on it, so the rule lives here rather than twice.
+//
+// Read off the membership context rather than `/v1/settings`, which reports the
+// same fact as `secret_key_configured` but is operator-only: an organization
+// owner is not one, so that query 403s for the whole tenant-facing audience and
+// a refusal used to read as "the key is missing" (#839).
+//
+// Fails closed on an error and open while the context is still loading, so the
+// control does not flicker to disabled on first paint. An older gateway omits
+// the field, and a present-but-missing value reads as configured because those
+// gateways never gated on it.
+export function useProviderKeyEncryption() {
+  const context = useOrganizationContext()
+  return context.data
+    ? context.data.provider_key_encryption_available !== false
+    : !context.isError
+}
+
 // The organizations the caller is an active member of, which is what the
 // organization half of the scope switcher renders. Its own read rather than a
 // field on the context: the context is one organization, and a switcher needs

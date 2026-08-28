@@ -611,6 +611,9 @@ describe("ProvidersPage", () => {
       ).toBeEnabled(),
     )
     expect(screen.queryByText(/OTARI_SECRET_KEY/)).toBeNull()
+    // The page reads settings only for the pricing hint, so its refusal must not
+    // leave a permanent "Not authorized" alert on a page that otherwise works.
+    expect(screen.queryByRole("alert")).toBeNull()
   })
 
   it("fails closed and disables adding providers when the context can't be loaded", async () => {
@@ -625,6 +628,10 @@ describe("ProvidersPage", () => {
         screen.getByRole("button", { name: "Add provider" }),
       ).toBeDisabled(),
     )
+    // Report the read that actually failed. Claiming the key is unset would be a
+    // guess, and the wrong one whenever the deployment has one.
+    expect(await screen.findByRole("alert")).toHaveTextContent("boom")
+    expect(screen.queryByText(/OTARI_SECRET_KEY/)).toBeNull()
   })
 
   it("retracts an open add form if the context then reports OTARI_SECRET_KEY is unset", async () => {
