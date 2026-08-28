@@ -509,6 +509,42 @@ def test_the_context_agrees_with_the_admin_access_endpoint(client: TestClient, w
         assert context["deployment_operator"] is access["granted"], who
 
 
+def test_every_response_carrying_the_context_carries_the_operator_answer(
+    client: TestClient, world: _World
+) -> None:
+    """`POST /me/switch` and `PATCH /me` return the shape too, not just `GET /me`.
+
+    The dashboard keeps whichever context it saw last, so a write answering a
+    stale `false` would strip an operator's sidebar until the next reload, and a
+    stale `true` would leave a member looking at rows the server refuses. Both
+    identities are asserted for the reason the read above gives: a field that is
+    always true is indistinguishable from one nothing computes.
+
+    Each caller switches to the organization it is already in, which the service
+    admits on purpose ("a switcher that re-sent the current row should not have
+    to be told off for it") and which keeps this test out of the membership
+    graph the rest of the file is about.
+    """
+    for who, organization, expected in (
+        ("alpha_owner", world.alpha, False),
+        ("superuser", world.beta, True),
+    ):
+        client.cookies.set(SESSION_COOKIE_NAME, world.sessions[who])
+        try:
+            switched = client.post(
+                "/v1/organizations/me/switch",
+                json={"organization_id": str(organization)},
+            )
+            renamed = client.patch("/v1/organizations/me", json={"name": f"Renamed by {who}"})
+        finally:
+            client.cookies.clear()
+
+        assert switched.status_code == status.HTTP_200_OK, switched.text
+        assert renamed.status_code == status.HTTP_200_OK, renamed.text
+        assert switched.json()["deployment_operator"] is expected, who
+        assert renamed.json()["deployment_operator"] is expected, who
+
+
 def test_the_context_reports_whether_provider_keys_can_be_encrypted(client: TestClient, world: _World) -> None:
     """A deployment fact a tenant is allowed to know, because it decides whether their own write works.
 

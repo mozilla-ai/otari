@@ -55,24 +55,34 @@ interface NavItemBase {
    * the deployment: `surface` asks whether the process hosts the page and
    * `capability` whether the deployment is licensed for it, and both answer the
    * same for everyone signed in. Resolved through
-   * `shared/api/hooks.useDeploymentAdminAccess`, which is the surface's own gate
-   * reported back rather than a second rule that could disagree with it.
+   * `shared/api/hooks.useOrganizationContext`, whose `deployment_operator` field
+   * is the server reporting the caller's own standing under the same predicate
+   * `/v1/admin` enforces, rather than a second rule that could disagree with it.
    *
-   * The two values are not a preference. A rail gate is a mirror of the server's
-   * refusal and grants nothing, so it has to mirror *which* refusal:
+   * **Neither value shows a row before the answer arrives.** A rail gate grants
+   * nothing, so the cost of hiding a row too long is a row that appears late,
+   * while the cost of showing one too early is a row that told someone a
+   * destination was theirs and then took it back. `AppShell` states the
+   * principle: a row that appears late is not a row that told anyone it was
+   * missing. The axis used to be a query of its own, which put that answer
+   * behind the first paint and made every non-operator watch most of the sidebar
+   * render and vanish (#836); riding on the context the shell already reads is
+   * what removed the window rather than picking a side in it.
+   *
+   * The two values are therefore not a preference either, and what separates
+   * them is what a *failed* read means. A rail gate mirrors the server's
+   * refusal, so it has to mirror *which* refusal:
    *
    * - `"unlisted"` for a destination the server answers **404** on, meaning it
-   *   declines to admit the page exists (`/v1/admin`). The rail must not reveal
-   *   it either, so the row is absent until the answer is known to be yes.
-   *   Showing it first and removing it would leak exactly what the 404 hides.
+   *   declines to admit the page exists (`/v1/admin`). With no answer the rail
+   *   must not reveal it either, so a failed read leaves the row absent.
    * - `"refused"` for a destination the server answers **403** on, which is
    *   every router gated on `require_deployment_operator`. Its existence is no
-   *   secret; only its use is gated. So the row renders and disappears once the
-   *   answer is known to be no, and hiding it until confirmed would pay a
-   *   sidebar flicker on every operator's page load for nothing.
-   *
-   * Each also fails in the right direction when the question itself fails:
-   * `"unlisted"` needs an explicit yes, `"refused"` needs an explicit no.
+   *   secret, only its use is gated, and the pages behind these rows are the
+   *   deployment's own. So a failed read shows the row, for the reason
+   *   `AppShell` fails `managesOrganization` open: hiding seven destinations
+   *   because one query failed strands them, and each says so itself when
+   *   opened.
    *
    * A missing one is ungated. Client-side only, like the other two: the server
    * authorizes every request the page makes regardless. A page that is only

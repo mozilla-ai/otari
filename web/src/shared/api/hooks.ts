@@ -2953,13 +2953,20 @@ export function useDeleteOrganizationPricing() {
 // Deployment administration
 //
 // The one management surface scoped to the deployment rather than to an
-// organization. `useDeploymentAdminAccess` is its gate and is read by the
-// sidebar, which is why it answers 200 with a boolean where the rest of the
-// prefix refuses a non-operator with 404: a nav gate cannot be built on a
-// failed request, and hiding a destination grants nothing either way.
+// organization. `useDeploymentAdminAccess` is its gate, which is why it answers
+// 200 with a boolean where the rest of the prefix refuses a non-operator with
+// 404: a gate cannot be built on a failed request, and hiding a destination
+// grants nothing either way.
+//
+// Read by the two pages that decide in their own words what the caller sees (the
+// deployment accounts page's refusal, the Overview's member view), and no longer
+// by the sidebar: the rail needs the same answer before its first paint, so it
+// takes `deployment_operator` off the organization context instead, which is the
+// same server-side predicate on a read the shell already makes (otari#836). Both
+// pages hold their decision until this lands, so neither pays what the rail did.
 // ---------------------------------------------------------------------------
 
-export function useDeploymentAdminAccess(enabled = true) {
+export function useDeploymentAdminAccess() {
   return useQuery({
     queryKey: [DEPLOYMENT_ADMIN, "access"],
     queryFn: () =>
@@ -2967,13 +2974,15 @@ export function useDeploymentAdminAccess(enabled = true) {
         (body) => body.granted,
       ),
     staleTime: 60_000,
-    // Whether the deployment serves this surface at all is the *deployment*
-    // axis, and the caller passes it in from `useSurfaces()`; this hook answers
-    // only who is calling. Deliberately not inferred from a 404 here, which is
-    // the scattered mode check the surface axis replaced, and which would leave
-    // the rail and this query disagreeing about a destination they both gate.
-    // So the ordinary retry policy applies: a failure is a failure.
-    enabled,
+    // No `enabled` parameter any more: it existed for the rail alone, so it could
+    // withhold the request on a gateway that does not host `/v1/admin` and keep
+    // that 404 from becoming a second reading of `surfaces`. Neither remaining
+    // caller ever passed one. The accounts page does not need to, being behind a
+    // route that declares `surface: "admin"`; the Overview index has no surface
+    // of its own, is the deployment's front page, and already asked
+    // unconditionally. Deliberately still not inferred from a 404 here, which is
+    // the scattered mode check the surface axis replaced; the ordinary retry
+    // policy applies, and a failure is a failure.
   })
 }
 

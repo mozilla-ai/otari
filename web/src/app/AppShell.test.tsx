@@ -96,11 +96,12 @@ function renderShell(
   const memberships = options.memberships ?? [callerOrganizationMembership()]
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const path = String(input)
-    // The caller axis, which unlike the other two is a request rather than a
-    // context. Granted by default, because the nine deployment-wide rows now
-    // declare it and every case below that is about the *surface* or
-    // *entitlement* axis wants a whole sidebar to reason about. The three cases
-    // that are about this axis say so explicitly.
+    // The caller axis is a field on the membership context now (see the
+    // fall-through below), so this stays only for the page behind the
+    // operator-only route, which asks the surface's own gate for its refusal
+    // panel. Answered from the same option, because a harness that could tell
+    // the rail one thing and the page another would be describing a deployment
+    // that does not exist.
     if (path.startsWith("/v1/admin/access")) {
       return Response.json({ granted: options.operator ?? true })
     }
@@ -113,7 +114,17 @@ function renderShell(
     if (path.includes("/v1/settings")) {
       return Response.json(options.settings ?? SETTINGS_WITH_PRICING)
     }
-    return Response.json(organizationContext(options.context))
+    // The membership context, which carries the caller axis. An operator by
+    // default, because eight deployment-wide rows declare that axis and every case
+    // below that is about the *surface* or *entitlement* axis wants a whole
+    // sidebar to reason about; `options.context` still wins where a case names
+    // the field itself.
+    return Response.json(
+      organizationContext({
+        deployment_operator: options.operator ?? true,
+        ...options.context,
+      }),
+    )
   })
   return renderWithRouter(<div>PAGE CONTENT</div>, {
     url,
@@ -215,7 +226,7 @@ describe("AppShell responsive layout", () => {
     await renderShell()
 
     await user.click(screen.getByRole("button", { name: "Open navigation" }))
-    await user.click(screen.getByRole("link", { name: "Providers" }))
+    await user.click(await screen.findByRole("link", { name: "Providers" }))
 
     expect(await screen.findByText("PROVIDERS PAGE")).toBeInTheDocument()
     // Navigating closes the drawer so the page it landed on is not hidden behind it.
@@ -235,7 +246,9 @@ describe("AppShell responsive layout", () => {
     await renderShell()
 
     const overview = screen.getByRole("link", { name: "Overview" })
-    const providers = screen.getByRole("link", { name: "Providers" })
+    // Awaited: Providers is one of the eight rows gated `operatorOnly`, so it
+    // arrives with the membership context rather than with the first paint.
+    const providers = await screen.findByRole("link", { name: "Providers" })
     expect(overview).toHaveAttribute("aria-current", "page")
     expect(providers).not.toHaveAttribute("aria-current")
 
@@ -481,6 +494,12 @@ describe("AppShell surface gating", () => {
   it("renders every destination the deployment serves", async () => {
     mockMatchMedia(false)
     await renderShell()
+    // Awaited for the reason the organization rail below is: four of these rows
+    // declare `operatorOnly` and arrive with the membership context, so the
+    // snapshot is a race without it.
+    await within(
+      screen.getByRole("navigation", { name: "Sidebar" }),
+    ).findByRole("link", { name: "Providers" })
 
     // Every label, not a sample: a surface misspelled on a NAV entry hides that
     // destination in every deployment, and only the full list catches it. Kept
@@ -514,10 +533,11 @@ describe("AppShell surface gating", () => {
     // Same reasoning as above, for the other context: the organization rail is
     // its own registry, and nothing else compares it against a full list.
     await renderShell(bootstrap(), { url: "/organization/members" })
-    // Awaited, not assumed: Accounts is the one row gated `operatorOnly:
-    // "unlisted"`, so it is absent until `GET /v1/admin/access` answers. Taking
-    // the snapshot without waiting for it is a race that passes on a fast
-    // machine and fails on CI, which is what it did.
+    // Awaited, not assumed: four of these rows declare `operatorOnly`, so none
+    // of them exists until `GET /v1/organizations/me` answers. Taking the
+    // snapshot without waiting is a race that passes on a fast machine and fails
+    // on CI, which is what it did. One await covers all four, because the caller
+    // axis is one read and they appear in the same paint.
     await within(
       screen.getByRole("navigation", { name: "Sidebar" }),
     ).findByRole("link", { name: "Accounts" })
@@ -535,7 +555,8 @@ describe("AppShell surface gating", () => {
       "Settings",
       // Present because this harness signs in as an operator by default. It is
       // the one row gated `operatorOnly: "unlisted"`, so a member does not see
-      // it and neither does anyone until `GET /v1/admin/access` has answered.
+      // it, and unlike the three above it stays absent when the context read
+      // fails rather than falling open.
       "Accounts",
     ])
     // The design's rail has two more rows (the organization's own Providers and
@@ -560,12 +581,17 @@ describe("AppShell surface gating", () => {
     expect(screen.queryByRole("link", { name: "API keys" })).toBeNull()
     // Ungated and still present: the index is the deployment's front page.
     expect(screen.getByRole("link", { name: "Overview" })).toBeInTheDocument()
-    expect(screen.getByRole("link", { name: "Providers" })).toBeInTheDocument()
+    expect(
+      await screen.findByRole("link", { name: "Providers" }),
+    ).toBeInTheDocument()
   })
 
   it("drops a section header once its whole group is gated away", async () => {
     mockMatchMedia(false)
     await renderShell(bootstrap({ surfaces: ["models"] }))
+    // The one row this deployment keeps is `operatorOnly`, so its heading is
+    // absent with it until the membership context lands.
+    await screen.findByRole("link", { name: "Models" })
 
     // "Access" labels keys, providers and the workspace roster; with none of
     // them served, an empty heading over nothing is worse than no heading.
@@ -598,8 +624,12 @@ describe("AppShell entitlement gating", () => {
     // would silently drop a page from the sidebar of every gateway.
     await renderShell(bootstrap(), { entitlements: { capabilities: [] } })
 
-    // Routing nests destinations, so it is the group's expander.
-    expect(screen.getByRole("button", { name: "Routing" })).toBeInTheDocument()
+    // Routing nests destinations, so it is the group's expander. Awaited
+    // because it declares `operatorOnly` as well, which the row below and the
+    // heading over both do not: the first query here has to be the waiting one.
+    expect(
+      await screen.findByRole("button", { name: "Routing" }),
+    ).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "Models" })).toBeInTheDocument()
     expect(screen.getByText("Gateway")).toBeInTheDocument()
   })
@@ -895,8 +925,10 @@ describe("AppShell entitlement gating", () => {
       await screen.findByRole("button", { name: /^Switch workspace/ }),
     )
     const menu = await screen.findByRole("dialog")
+    // Awaited, not assumed: the row is gated on `canManage(context.data)`, so it
+    // arrives with the membership context rather than with the menu.
     expect(
-      within(menu).getByRole("button", { name: "Create workspace" }),
+      await within(menu).findByRole("button", { name: "Create workspace" }),
     ).toBeInTheDocument()
   })
 
@@ -913,12 +945,15 @@ describe("AppShell entitlement gating", () => {
       await screen.findByRole("button", { name: /^Switch workspace/ }),
     )
     const menu = await screen.findByRole("dialog")
+    // The organization row first, and awaited: it is what says the membership
+    // context landed, so the absence below is a refused row rather than a row
+    // whose answer had not arrived yet. Both come from that one read.
+    expect(
+      await within(menu).findByText("Default Organization"),
+    ).toBeInTheDocument()
     expect(
       within(menu).queryByRole("button", { name: "Create workspace" }),
     ).toBeNull()
-    // The organization row is still there, so this is the create row missing
-    // rather than the menu failing to open.
-    expect(within(menu).getByText("Default Organization")).toBeInTheDocument()
   })
 
   it("leaves the organization rail by its own way back", async () => {
@@ -1082,7 +1117,9 @@ describe("AppShell entitlement gating", () => {
     await renderShell(bootstrap({ deployment_type: "hosted" }))
 
     const crumb = await screen.findByLabelText("Breadcrumb")
-    expect(crumb).toHaveTextContent("Default Organization")
+    // The organization's name comes from the membership context, so the trail
+    // renders before it can lead with one.
+    await within(crumb).findByText("Default Organization")
     expect(crumb).toHaveTextContent("Overview")
   })
 
@@ -1170,7 +1207,7 @@ describe("the telemetry the sidebar records", () => {
     const user = userEvent.setup()
     await renderShell()
 
-    await user.click(screen.getByRole("link", { name: "Providers" }))
+    await user.click(await screen.findByRole("link", { name: "Providers" }))
 
     expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.TAB_CHANGED, {
       tab_name: "providers",
@@ -1186,7 +1223,7 @@ describe("the telemetry the sidebar records", () => {
     const user = userEvent.setup()
     await renderShell(bootstrap(), { url: "/organization/members" })
 
-    await user.click(screen.getByRole("link", { name: "Model pricing" }))
+    await user.click(await screen.findByRole("link", { name: "Model pricing" }))
 
     expect(recordEvent).toHaveBeenCalledWith(TELEMETRY_EVENTS.TAB_CHANGED, {
       tab_name: "pricing",
@@ -1200,7 +1237,7 @@ describe("the telemetry the sidebar records", () => {
     const user = userEvent.setup()
     await renderShell(bootstrap(), { url: "/providers" })
 
-    await user.click(screen.getByRole("link", { name: "Providers" }))
+    await user.click(await screen.findByRole("link", { name: "Providers" }))
 
     expect(recordEvent).not.toHaveBeenCalled()
   })

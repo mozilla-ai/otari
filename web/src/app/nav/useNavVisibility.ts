@@ -11,22 +11,17 @@
  * show whatever the entitlement says. See ARCHITECTURE.md for why the first two
  * stay two mechanisms rather than one. The third, `operatorOnly`, is not about
  * the deployment at all but about who is signed in, and it is answered by the
- * surface it gates rather than by a rule of its own.
+ * server reporting the caller's own standing rather than by a rule of its own.
  */
 
 import { useMemo } from "react"
 
-import { useDeploymentAdminAccess } from "@/shared/api/hooks"
+import { isDeploymentOperator } from "@/features/organization/roles"
+import { useOrganizationContext } from "@/shared/api/hooks"
 import { useSurfaces } from "@/shared/hooks/useDeployment"
 import { useEntitlements } from "@/shared/hooks/useEntitlements"
 
 import type { NavItem } from "./types"
-
-// The surface that serves the operator gate (`GET /v1/admin/access`), which is
-// also the `surface` the one operator-only row declares. Named here rather than
-// spelled at both call sites so the deployment axis and the caller axis cannot
-// come to disagree about which surface answers the question.
-const OPERATOR_SURFACE = "admin"
 
 /**
  * A predicate over registry entries: true when this deployment hosts the
@@ -40,38 +35,48 @@ const OPERATOR_SURFACE = "admin"
  */
 export function useNavVisibility(): (item: NavItem) => boolean {
   const isRouteVisible = useRouteVisibility()
-  // The caller axis. Asked for every row rather than only the one that declares
-  // it, because a hook cannot be called from inside the predicate; it is one
-  // cached read that every other row ignores. Undefined while it resolves and
-  // false when the surface refused, so an operator-only row is absent until the
-  // answer is yes, which is the safe direction for a destination that would
-  // otherwise render its own refusal.
+  // The caller axis, and it rides on the organization context rather than on a
+  // query of its own: `GET /v1/organizations/me` carries `deployment_operator`,
+  // the same answer `/v1/admin/access` gives from the same server-side
+  // predicate, and the shell reads that context anyway to decide whether to
+  // offer the way into the organization rail. So the answer is here when the
+  // chrome is, and no row is drawn on the strength of a question still in flight
+  // (#836). Read for every row rather than only the ones that declare the axis,
+  // because a hook cannot be called from inside the predicate; it is one cached
+  // read the rest of them ignore.
   //
-  // Gated on the deployment axis rather than left to fail: a gateway that does
-  // not host the surface has no operator question to answer, and reading that
-  // off a 404 from the request would be the scattered mode check `surface`
-  // exists to replace. `useSurfaces` is the same answer the predicate below
-  // gates the row on, so the two cannot disagree about this destination.
-  const hostsSurface = useSurfaces()
-  const operator = useDeploymentAdminAccess(hostsSurface(OPERATOR_SURFACE))
+  // It also needs no deployment gate of its own any more. The request this used
+  // to make had to be withheld from a gateway that does not host `/v1/admin`, so
+  // its 404 could not become a second reading of `surfaces`; this read is not
+  // that request, and each operator-only row still declares the surface it
+  // needs, which `isRouteVisible` composes below.
+  const organization = useOrganizationContext()
+  // Through `roles.isDeploymentOperator` rather than reading the field, so the
+  // client keeps one spelling of the predicate for the same reason the server
+  // does: it already requires an explicit `true`, so an older gateway that omits
+  // the field reads as not an operator rather than as an answer.
+  const isOperator = isDeploymentOperator(organization.data)
+  const answerUnavailable = organization.isError
 
   return useMemo(() => {
-    // Mirrors the server's own refusal, which is what makes the two values a
-    // correctness question rather than a preference: an "unlisted" row is one
-    // the server 404s, so revealing it before the answer arrives would leak
-    // what the 404 hides, while a "refused" row is one the server 403s, whose
-    // existence is public. See `types.ts` for the full note.
+    // Both values wait for an explicit yes, so neither kind of row is shown and
+    // then taken away. What still separates them is what a *failed* read means,
+    // and the server's own refusal is what decides that: an "unlisted" row is
+    // one the server 404s, so with no answer the rail may not reveal it either,
+    // while a "refused" row is one the server 403s, whose existence is no secret
+    // and whose destinations stay reachable by URL regardless. See `types.ts`
+    // for the full note.
     const allowedByCaller = (item: NavItem) => {
       if (item.operatorOnly === undefined) {
         return true
       }
       return item.operatorOnly === "unlisted"
-        ? operator.data === true
-        : operator.data !== false
+        ? isOperator
+        : isOperator || answerUnavailable
     }
 
     return (item: NavItem) => isRouteVisible(item) && allowedByCaller(item)
-  }, [isRouteVisible, operator.data])
+  }, [isRouteVisible, isOperator, answerUnavailable])
 }
 
 /**
