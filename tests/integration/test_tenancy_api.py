@@ -26,6 +26,7 @@ from gateway.models.tenancy import (
     Workspace,
     WorkspaceMember,
 )
+from gateway.services.secret_box import generate_secret_key
 from gateway.services.tenancy.provisioning_service import (
     BOOTSTRAP_IDENTITY_KEY,
     DEFAULT_ORGANIZATION_NAME,
@@ -112,6 +113,29 @@ def test_first_request_provisions_the_default_organization(
     # A standalone deployment is its own gateway, so its own provider keys are
     # always available to it.
     assert context["byo_provider_keys_allowed"] is True
+
+
+@pytest.mark.parametrize("configured", [True, False])
+def test_context_reports_whether_provider_keys_can_be_encrypted(
+    client: TestClient,
+    master_key_header: dict[str, str],
+    monkeypatch: pytest.MonkeyPatch,
+    configured: bool,
+) -> None:
+    """The context carries the fact, so a tenant never has to read /v1/settings for it.
+
+    ``GET /v1/settings`` reports the same thing as ``secret_key_configured`` and
+    is operator-only, so the provider-key pages inferred it from a query that
+    403s for every organization owner (#839).
+    """
+    if configured:
+        monkeypatch.setenv("OTARI_SECRET_KEY", generate_secret_key())
+    else:
+        monkeypatch.delenv("OTARI_SECRET_KEY", raising=False)
+
+    context = _context(client, master_key_header)
+
+    assert context["provider_key_encryption_available"] is configured
 
 
 def test_first_boot_also_provisions_a_default_workspace(

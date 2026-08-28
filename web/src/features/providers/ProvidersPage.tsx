@@ -12,6 +12,7 @@ import type {
 import {
   useCreateStoredProvider,
   useDeleteStoredProvider,
+  useOrganizationContext,
   useProviderDetail,
   useProviderHealth,
   useProviders,
@@ -815,6 +816,7 @@ function OnboardingPanel({
 export function ProvidersPage() {
   const meta = useProviders()
   const stored = useStoredProviders()
+  const context = useOrganizationContext()
   const settings = useSettings()
   const health = useProviderHealth()
   const deleteProvider = useDeleteStoredProvider()
@@ -835,16 +837,19 @@ export function ProvidersPage() {
   const needsPricing =
     settings.data?.require_pricing === true &&
     settings.data.default_pricing === false
-  // Gate adding providers on the server having OTARI_SECRET_KEY. Fail closed:
-  // enabled only while settings are still loading (so the button does not
-  // flicker to disabled on first paint) or once a value has actually loaded
-  // that is not `false`. A settings *error* leaves us unable to confirm the
-  // key, so we disable rather than let the operator hit a submit-time failure.
-  // Older gateways omit the field; a present-but-missing value reads as
-  // configured (they never gated on it).
-  const secretKeyConfigured = settings.data
-    ? settings.data.secret_key_configured !== false
-    : !settings.isError
+  // Gate adding providers on the server having OTARI_SECRET_KEY. Read off the
+  // membership context rather than `/v1/settings`: that endpoint is
+  // operator-only, so it 403s for any caller who is not a superuser or holding
+  // the master key, and a refusal used to read as "the key is missing" (#839).
+  // Fail closed: enabled only while the context is still loading (so the button
+  // does not flicker to disabled on first paint) or once a value has actually
+  // loaded that is not `false`. An error leaves us unable to confirm the key, so
+  // we disable rather than let the operator hit a submit-time failure. Older
+  // gateways omit the field; a present-but-missing value reads as configured
+  // (they never gated on it).
+  const secretKeyConfigured = context.data
+    ? context.data.provider_key_encryption_available !== false
+    : !context.isError
   const showOnboarding = !loading && rows.length === 0 && !addOpen
 
   // Which test run each row is currently showing. A row's result is only worth

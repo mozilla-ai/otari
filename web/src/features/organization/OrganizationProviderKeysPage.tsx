@@ -20,7 +20,6 @@ import {
   useOrgProviderKeys,
   useRestoreOrgProviderKey,
   useSetOrgProviderKeyDefault,
-  useSettings,
   useUpdateOrgProviderKey,
 } from "@/shared/api/hooks"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
@@ -215,7 +214,6 @@ function KeyForm({
 export function OrganizationProviderKeysPage() {
   const context = useOrganizationContext()
   const keys = useOrgProviderKeys()
-  const settings = useSettings()
   const archive = useArchiveOrgProviderKey()
   const restore = useRestoreOrgProviderKey()
   const remove = useDeleteOrgProviderKey()
@@ -236,10 +234,15 @@ export function OrganizationProviderKeysPage() {
 
   // Same gate the `/providers` page applies, for the same reason: without
   // `OTARI_SECRET_KEY` the gateway cannot encrypt a credential, so the write
-  // would fail at submit time. Fail closed on an error, open while loading.
-  const secretKeyConfigured = settings.data
-    ? settings.data.secret_key_configured !== false
-    : !settings.isError
+  // would fail at submit time. Read off the membership context rather than
+  // `/v1/settings`, which is operator-only: an organization owner is not one, so
+  // that query 403s for the whole of this page's audience and a refusal used to
+  // read as "the key is missing" (#839). Fail closed on an error, open while
+  // loading; an older gateway omits the field, which reads as configured because
+  // it never gated on it.
+  const secretKeyConfigured = context.data
+    ? context.data.provider_key_encryption_available !== false
+    : !context.isError
 
   const columns: DataTableColumn<OrgProviderKey>[] = [
     {

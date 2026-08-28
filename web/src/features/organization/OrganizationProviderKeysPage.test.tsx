@@ -4,24 +4,9 @@ import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type {
-  GatewaySettings,
-  OrganizationContext,
-  OrgProviderKey,
-} from "@/client"
+import type { OrganizationContext, OrgProviderKey } from "@/client"
 import { OrganizationProviderKeysPage } from "@/features/organization/OrganizationProviderKeysPage"
 import { organizationContext, orgProviderKey } from "@/tests/fixtures"
-
-const SETTINGS: GatewaySettings = {
-  mode: "hosted",
-  version: "1.0.0",
-  model_discovery: true,
-  default_pricing: true,
-  require_pricing: false,
-  master_key_source: "configured",
-  secret_key_configured: true,
-  config: [],
-}
 
 interface Request {
   url: string
@@ -39,7 +24,6 @@ function jsonResponse(body: unknown, status = 200): Response {
 interface MockOpts {
   keys?: OrgProviderKey[]
   context?: OrganizationContext
-  settings?: GatewaySettings
 }
 
 function mockApi(opts: MockOpts = {}) {
@@ -62,8 +46,12 @@ function mockApi(opts: MockOpts = {}) {
       // through the invalidated list, so one row is enough for all of them.
       return jsonResponse(keys[0] ?? orgProviderKey())
     }
+    // What the deployment actually answers this page's audience: `/v1/settings`
+    // is operator-only and an organization owner is not one. Mocked as the
+    // refusal rather than as a body, so a page that went back to reading it
+    // would fail here rather than pass on a fixture no tenant ever receives.
     if (url.includes("/v1/settings")) {
-      return jsonResponse(opts.settings ?? SETTINGS)
+      return jsonResponse({ detail: "Not authorized" }, 403)
     }
     if (url.includes("/v1/providers/catalog")) {
       return jsonResponse([{ id: "anthropic", name: "Anthropic" }])
@@ -247,13 +235,33 @@ describe("OrganizationProviderKeysPage", () => {
   it("disables adding a key when the deployment cannot encrypt one", async () => {
     // Same gate the deployment-wide providers page applies: without
     // OTARI_SECRET_KEY the write would fail at submit time.
-    mockApi({ settings: { ...SETTINGS, secret_key_configured: false } })
+    mockApi({
+      context: organizationContext({
+        provider_key_encryption_available: false,
+      }),
+    })
     renderPage(<OrganizationProviderKeysPage />)
 
     expect(
       await screen.findByRole("button", { name: "Add provider key" }),
     ).toBeDisabled()
     expect(screen.getByText(/OTARI_SECRET_KEY/)).toBeInTheDocument()
+  })
+
+  it("keeps adding available for an owner the operator-only settings read refuses", async () => {
+    // The bug this page shipped with (#839): the flag was inferred from
+    // `/v1/settings`, which 403s for every organization owner, so the banner
+    // reported a missing key on a deployment where the write path works.
+    const requests = mockApi()
+    renderPage(<OrganizationProviderKeysPage />)
+
+    expect(
+      await screen.findByRole("button", { name: "Add provider key" }),
+    ).toBeEnabled()
+    expect(screen.queryByText(/OTARI_SECRET_KEY/)).toBeNull()
+    expect(
+      requests.some((request) => request.url.includes("/v1/settings")),
+    ).toBe(false)
   })
 
   it("reports a list that could not be read instead of an empty table", async () => {

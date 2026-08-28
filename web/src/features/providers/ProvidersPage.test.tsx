@@ -6,6 +6,7 @@ import { afterEach, describe, expect, it, vi } from "vitest"
 import type {
   GatewaySettings,
   KnownProvider,
+  OrganizationContext,
   ProviderHealth,
   ProviderHealthResponse,
   ProviderInfo,
@@ -14,6 +15,7 @@ import type {
 } from "@/client"
 import { ProvidersPage } from "@/features/providers/ProvidersPage"
 import { PROVIDER_HEALTH_REFRESH_MS } from "@/shared/api/hooks"
+import { organizationContext } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
 
 const CAPS = {
@@ -109,12 +111,19 @@ interface MockOpts {
   // is served for the forced-refresh (refresh=true) request, if given.
   health?: ProviderHealth[]
   healthRefresh?: ProviderHealth[]
-  // When set, GET /v1/settings blocks on this promise before responding, so a
-  // test can resolve it to simulate settings landing after the page has already
-  // painted (and the operator has interacted with it).
-  settingsGate?: Promise<unknown>
-  // Force GET /v1/settings to fail, so the fail-closed gate can be exercised.
-  settingsError?: boolean
+  // The caller's membership context, which is where the page reads whether the
+  // deployment can encrypt a provider credential.
+  context?: OrganizationContext
+  // When set, GET /v1/organizations/me blocks on this promise before responding,
+  // so a test can resolve it to simulate the context landing after the page has
+  // already painted (and the operator has interacted with it).
+  contextGate?: Promise<unknown>
+  // Force GET /v1/organizations/me to fail, so the fail-closed gate can be
+  // exercised.
+  contextError?: boolean
+  // Refuse GET /v1/settings the way the operator-only gate does for a caller who
+  // is neither a superuser nor holding the master key.
+  settingsRefused?: boolean
   // When set, POST .../test blocks on this promise, so a test can hold a
   // connection test in flight while the page is used.
   testGate?: Promise<unknown>
@@ -269,14 +278,18 @@ function mockApi(opts: MockOpts = {}) {
         return jsonResponse({ providers: meta })
       }
       if (url.includes("/v1/settings")) {
+        if (opts.settingsRefused) {
+          return jsonResponse({ detail: "Not authorized" }, 403)
+        }
         if (method === "PATCH") {
           settings = { ...settings, ...JSON.parse(String(init?.body)) }
         }
-        if (method === "GET") {
-          if (opts.settingsGate) await opts.settingsGate
-          if (opts.settingsError) return jsonResponse({ detail: "boom" }, 500)
-        }
         return jsonResponse(settings)
+      }
+      if (url.includes("/v1/organizations/me")) {
+        if (opts.contextGate) await opts.contextGate
+        if (opts.contextError) return jsonResponse({ detail: "boom" }, 500)
+        return jsonResponse(opts.context ?? organizationContext())
       }
       return jsonResponse([])
     })
@@ -546,12 +559,14 @@ describe("ProvidersPage", () => {
   it("disables adding providers when OTARI_SECRET_KEY is not set", async () => {
     mockApi({
       stored: [storedProvider("openai", "1234")],
-      settings: { ...SETTINGS, secret_key_configured: false },
+      context: organizationContext({
+        provider_key_encryption_available: false,
+      }),
     })
     renderPage(<ProvidersPage />)
 
     await screen.findByText("••••1234")
-    // The button starts enabled and flips once /v1/settings resolves, so wait
+    // The button starts enabled and flips once the context resolves, so wait
     // for the settled disabled state rather than asserting on first paint.
     expect(await screen.findByText(/OTARI_SECRET_KEY/)).toBeInTheDocument()
     await waitFor(() =>
@@ -565,7 +580,9 @@ describe("ProvidersPage", () => {
     mockApi({
       meta: [],
       stored: [],
-      settings: { ...SETTINGS, secret_key_configured: false },
+      context: organizationContext({
+        provider_key_encryption_available: false,
+      }),
     })
     renderPage(<ProvidersPage />)
 
@@ -577,12 +594,31 @@ describe("ProvidersPage", () => {
     )
   })
 
-  it("fails closed and disables adding providers when settings can't be loaded", async () => {
-    mockApi({ stored: [storedProvider("openai", "1234")], settingsError: true })
+  it("keeps adding providers available when the operator-only settings read is refused", async () => {
+    // #839: the gate used to be inferred from `/v1/settings`, which is
+    // operator-only, so a refusal reported a missing key on a deployment that
+    // has one.
+    mockApi({
+      stored: [storedProvider("openai", "1234")],
+      settingsRefused: true,
+    })
     renderPage(<ProvidersPage />)
 
     await screen.findByText("••••1234")
-    // A settings error leaves the key state unknown; disable rather than let the
+    await waitFor(() =>
+      expect(
+        screen.getByRole("button", { name: "Add provider" }),
+      ).toBeEnabled(),
+    )
+    expect(screen.queryByText(/OTARI_SECRET_KEY/)).toBeNull()
+  })
+
+  it("fails closed and disables adding providers when the context can't be loaded", async () => {
+    mockApi({ stored: [storedProvider("openai", "1234")], contextError: true })
+    renderPage(<ProvidersPage />)
+
+    await screen.findByText("••••1234")
+    // A context error leaves the key state unknown; disable rather than let the
     // operator fill in the form and fail on submit.
     await waitFor(() =>
       expect(
@@ -591,18 +627,20 @@ describe("ProvidersPage", () => {
     )
   })
 
-  it("retracts an open add form if settings then report OTARI_SECRET_KEY is unset", async () => {
-    let releaseSettings = () => {}
-    const settingsGate = new Promise<void>((resolve) => {
-      releaseSettings = resolve
+  it("retracts an open add form if the context then reports OTARI_SECRET_KEY is unset", async () => {
+    let releaseContext = () => {}
+    const contextGate = new Promise<void>((resolve) => {
+      releaseContext = resolve
     })
-    // The onboarding gate ignores settings loading, so the first-run card (and its
-    // enabled add button) is reachable before /v1/settings resolves.
+    // The onboarding gate ignores the context loading, so the first-run card (and
+    // its enabled add button) is reachable before /v1/organizations/me resolves.
     mockApi({
       meta: [],
       stored: [],
-      settings: { ...SETTINGS, secret_key_configured: false },
-      settingsGate,
+      context: organizationContext({
+        provider_key_encryption_available: false,
+      }),
+      contextGate,
     })
     const user = userEvent.setup()
     renderPage(<ProvidersPage />)
@@ -612,9 +650,9 @@ describe("ProvidersPage", () => {
     )
     expect(screen.getByPlaceholderText("Search providers…")).toBeInTheDocument()
 
-    // Settings land late and report the key is unavailable: the form must retract
-    // so its submit can never reach the create mutation.
-    releaseSettings()
+    // The context lands late and reports the key is unavailable: the form must
+    // retract so its submit can never reach the create mutation.
+    releaseContext()
     await waitFor(() =>
       expect(
         screen.queryByPlaceholderText("Search providers…"),
