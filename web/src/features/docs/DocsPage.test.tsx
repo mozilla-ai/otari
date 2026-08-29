@@ -14,14 +14,14 @@ describe("DocsPage", () => {
       screen.getByRole("heading", { level: 1, name: "User guide" }),
     ).toBeInTheDocument()
     expect(
-      screen.getByText(/Otari ships with a web admin dashboard for operators/),
+      screen.getByText(/Otari serves its dashboard at the gateway root/),
     ).toBeInTheDocument()
     expect(
-      screen.getByRole("heading", { name: "The two-key model" }),
+      screen.getByRole("heading", { name: "Sign-in and secrets" }),
     ).toBeInTheDocument()
   })
 
-  it("omits the circular first-run walkthrough but keeps the reference sections", () => {
+  it("omits the circular first-run walkthrough but keeps the operating sections", () => {
     render(<DocsPage />)
 
     // The reader is already past first run (running, signed-in dashboard), so
@@ -30,12 +30,12 @@ describe("DocsPage", () => {
       screen.queryByRole("heading", { name: "First-run walkthrough" }),
     ).toBeNull()
     expect(screen.queryByText(/Find your master key/)).toBeNull()
-    // Sections on both sides of the dropped one still render.
+    // The guide still covers setup and ongoing operation after the dropped section.
     expect(
-      screen.getByRole("heading", { name: "The two-key model" }),
+      screen.getByRole("heading", { name: "The setup guide" }),
     ).toBeInTheDocument()
     expect(
-      screen.getByRole("heading", { name: "Page-by-page reference" }),
+      screen.getByRole("heading", { name: "Navigation" }),
     ).toBeInTheDocument()
   })
 
@@ -85,7 +85,7 @@ describe("DocsPage", () => {
     const [configLink] = screen.getAllByRole("link", { name: /configuration/i })
     expect(configLink).toHaveAttribute(
       "href",
-      "https://github.com/mozilla-ai/otari/blob/main/docs/configuration.md",
+      "https://github.com/mozilla-ai/otari/blob/main/docs/configuration.md#mail",
     )
     expect(configLink).toHaveAttribute("target", "_blank")
     expect(configLink).toHaveAttribute("rel", "noreferrer")

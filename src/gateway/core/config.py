@@ -52,7 +52,7 @@ ROUTER_HEADER = "Otari-Router"
 # Stable per-conversation id for trace-sticky routing. When set, it is the trace
 # identity (namespaced per user); absent, the router falls back to hashing the
 # conversation's opening messages, which cannot tell apart two conversations that
-# open identically. See docs/routing-scaling.md.
+# open identically. See docs/routing.md#per-request-control.
 CONVERSATION_HEADER = "Otari-Conversation-Id"
 # Routing-memory partition (use case / category) for this request. When set, the
 # router votes only over records carrying the same task label and stays in

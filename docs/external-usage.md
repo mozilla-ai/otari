@@ -1,66 +1,43 @@
 # Importing external usage
 
-Otari tracks the requests it routes. Subscription-backed coding agents such as
-[Claude Code](use-with-claude-code.md) never hit the gateway, so their usage is
-invisible to Otari even though it represents real model consumption. The external
-usage API lets you import those events so they show up in your usage analytics
-priced at API-equivalent rates, answering "what would my subscription usage have
-cost at API prices?" and giving a team admin one dashboard across every channel.
+Otari can record usage that it did not proxy, such as subscription-backed coding
+agents or another instrumented application. Imported events appear in Activity
+and Usage with their source and an API-equivalent cost estimate.
 
-Imported usage is **real cost, attributed to a user, but never enforced**: it is
-recorded and shown in cost analytics, but it does not reserve budget, mutate a
-user's spend, or gate live traffic (a retrospective event cannot be reserved
-before the fact). See [Budget behavior](#budget-behavior) below.
+This feature is available in standalone and hosted control planes. A hybrid
+gateway has no local usage database or import API.
 
-This is a standalone-mode feature; hybrid mode has no local usage database.
+## Enforcement boundary
+
+Imported usage is retrospective. It is never reserved against a budget, never
+updates the enforcement ledger, and never blocks live traffic.
+
+An API key used for import must therefore have
+`exclude_from_budget: true`. Keep importer keys separate from inference keys:
+the same flag also exempts live traffic through that key from budget and pricing
+enforcement.
+
+If a session already routes through Otari, do not also export its telemetry to
+Otari. The proxied and imported events cannot be correlated reliably, so cost
+analytics would count the session twice.
 
 ## Authentication and attribution
 
-The endpoint accepts **either an API key or the master key**, and usage binds to
-the authenticated principal, just like a normal gateway request:
+`POST /v1/usage/external-events` accepts either:
 
-- **An API key** attributes every event to that key's own user, and stamps the
-  key's id on the rows. You can omit `user_id` entirely; if you send one, it must
-  match the key's user (a different user is rejected, unless the key's own
-  `reject_user_mismatch` is `false` or the deployment-wide setting is off, in which
-  case it binds to the key's user). This is the recommended path: hand each importer
-  a scoped API key rather than putting the master key in an adapter or collector.
-  **The key must be budget-exempt** (`exclude_from_budget: true`); a budgeted key is
-  refused with a 403. Imported usage is retrospective and can never be blocked, so
-  it must not run through a budget it could silently exceed (see
-  [Budget behavior](#budget-behavior)).
-- **The master key** is the admin path. It may name any user via the batch
-  `user_id` (or a per-event `user_id`), so one importer can attribute a mixed feed
-  to many users. Rows imported this way carry no api_key id.
+- A budget-exempt API key. Events bind to that key's user and workspace.
+- The master key. The batch or each event must name an existing user; the
+  default workspace supplies organization context.
 
-The other usage endpoints (`list`, `count`, `summary`, `csv`) remain master-key
-only, because they return every user's usage.
+Prefer a dedicated API key for each importer. It limits attribution mistakes and
+keeps the master key out of collectors.
 
-## Hello world (one curl)
-
-Create the user and an importer key (both need the master key once), then import
-with the **API key** and read it back. No collector, no infrastructure.
+## Import normalized events
 
 ```bash
-export OTARI_URL="http://localhost:8000"
-export OTARI_MASTER_KEY="your-master-key"
-
-# 1. The user must exist (imported cost is attributed to a real Otari user).
-curl -sS "$OTARI_URL/v1/users" \
-  -H "Otari-Key: Bearer $OTARI_MASTER_KEY" -H "Content-Type: application/json" \
-  -d '{"user_id": "alice"}'
-
-# 2. Mint a budget-exempt importer key bound to that user (grab the "key" from the
-#    response). Import keys MUST be budget-exempt (imported usage can't be enforced).
-curl -sS "$OTARI_URL/v1/keys" \
-  -H "Otari-Key: Bearer $OTARI_MASTER_KEY" -H "Content-Type: application/json" \
-  -d '{"key_name": "claude-code-importer", "user_id": "alice", "exclude_from_budget": true}'
-export OTARI_KEY="gw-...."   # the key from the response
-
-# 3. Import one usage event with the API key. No user_id needed: it binds to the
-#    key's user.
-curl -sS "$OTARI_URL/v1/usage/external-events" \
-  -H "Otari-Key: Bearer $OTARI_KEY" -H "Content-Type: application/json" \
+curl "$OTARI_URL/v1/usage/external-events" \
+  -H "Authorization: Bearer $OTARI_IMPORT_KEY" \
+  -H "Content-Type: application/json" \
   -d '{
     "source": "claude_code",
     "events": [{
@@ -68,233 +45,100 @@ curl -sS "$OTARI_URL/v1/usage/external-events" \
       "timestamp": "2026-07-22T12:34:56Z",
       "provider": "anthropic",
       "model": "claude-sonnet-4-6",
-      "status": "success",
       "input_tokens": 1200,
       "output_tokens": 450,
       "cache_read_tokens": 8000,
-      "cache_write_tokens": 1024,
       "session_label": "project:otari"
     }]
   }'
-# -> {"accepted":1,"duplicate":0,"rejected":0,"errors":[]}
-
-# 4. Verify it landed (reading usage needs the master key).
-curl -sS "$OTARI_URL/v1/usage?source=claude_code" \
-  -H "Otari-Key: Bearer $OTARI_MASTER_KEY"
 ```
 
-Use a recent `timestamp` if you want the row to show under the Activity page's
-"24h" filter; a backdated event only appears under wider windows.
+The batch contains a source, up to 1,000 events, and an optional default
+`user_id`. Each event supports:
 
-If the model has configured pricing at the event's timestamp, the row is priced;
-if not, it still lands with `cost: null` (imported usage is budget-exempt, so
-pricing is optional here, see [Pricing](#pricing)). Add pricing later to price
-future imports.
+| Field | Purpose |
+| --- | --- |
+| `source_event_id` | Required upstream ID and idempotency key with `source`. |
+| `timestamp` | Required event time used to select effective pricing. |
+| `provider`, `model` | Required pricing selector. |
+| `status` | `success` or `error`; defaults to success. |
+| token fields | Input, output, cache read, cache write, and one-hour cache write. |
+| `cache_tokens_in_prompt` | Marks cache tokens as a subset of input for OpenAI-shaped counts. |
+| `duration_ms` | Recorded request latency. |
+| `session_label` | Optional session or project attribution. |
+| `user_id` | Optional per-event override when the credential may name users. |
 
-## The endpoint
+The endpoint rejects prompt, completion, tool input, and tool output fields.
+Only metadata and numeric usage are accepted. Use the generated OpenAPI document
+for the exact schema and validation limits.
 
-```http
-POST /v1/usage/external-events
-Otari-Key: Bearer <api key or master key>
-Content-Type: application/json
-```
+Rows are unique on `(source, source_event_id)`. Replaying a batch reports
+duplicates without creating new usage rows.
 
-The body is a batch that shares a `source` and a default `user_id`:
+## OpenTelemetry
 
-| Field | Required | Notes |
-| --- | --- | --- |
-| `source` | yes | Provenance slug, e.g. `claude_code`. Generic: add your own sources. `gateway` and any slug starting with `otari-ai:` are reserved (otari.ai writes those tags itself) and rejected with a 422. |
-| `user_id` | with master key | Default attribution. Optional with an API key (binds to the key's user); required with the master key. Must be an existing user. |
-| `events` | yes | 1 to 1000 events. |
-
-Each event:
-
-| Field | Required | Notes |
-| --- | --- | --- |
-| `source_event_id` | yes | Upstream event id. Idempotency key together with `source`; the scope is global per source (not per user), so one collector and per-user importers can share a feed without double-counting. Use real upstream ids, which are unguessable. |
-| `timestamp` | yes | ISO-8601. Used to resolve the effective price. |
-| `provider`, `model` | yes | Priced as `provider:model` (falls back to `provider/model`). |
-| `status` | no | `success` (default) or `error`. |
-| `input_tokens`, `output_tokens` | no | Non-negative. Default 0. |
-| `cache_read_tokens`, `cache_write_tokens`, `cache_write_1h_tokens` | no | Anthropic-style additive cache counts. `cache_write_1h_tokens` is the subset of `cache_write_tokens` written with a 1-hour TTL; the remainder is billed at the 5-minute rate. |
-| `cache_tokens_in_prompt` | no | Token convention. `false` (default): `input_tokens` excludes the cache counts (Anthropic / Claude Code shape). `true`: cached tokens are a subset of `input_tokens` (OpenAI shape), and the price de-includes them instead of double-charging. |
-| `duration_ms` | no | Wall-clock, recorded as the row's latency. |
-| `session_label` | no | Optional session/project attribution. |
-| `user_id` | no | Per-event override of the batch default (one collector feed can serve many users). |
-
-The endpoint accepts only metadata and numeric usage. Any other field (a prompt,
-a completion, tool input or output) is rejected with a 422; prompt and completion
-text are never accepted or stored.
-
-The response reports what happened:
-
-```json
-{ "accepted": 3, "duplicate": 1, "rejected": 1,
-  "errors": [ { "index": 4, "source_event_id": "req_bad", "detail": "user_id 'ghost' not found. Create the user via POST /v1/users first." } ] }
-```
-
-### Idempotency
-
-Rows are unique on `(source, source_event_id)`. Re-submitting a batch (a retry, an
-overlapping poll) counts prior events as `duplicate` and never creates a second
-row, so an at-least-once pipeline is safe.
-
-### Errors
-
-Rejected events carry `problem + cause + fix`, for example:
-
-- Unknown user: `user_id 'ghost' not found. Create the user via POST /v1/users first.`
-- A content field: `Field 'prompt' is not accepted. This endpoint ingests content-free usage events only...`
-- Oversized batch: over 1000 events is rejected; split into chunks.
-
-## OpenTelemetry (any GenAI app)
-
-Any application instrumented for GenAI telemetry can ship usage to Otari over OTLP;
-it lands as imported usage, priced at Otari's rates, budget-exempt, idempotent, and
-content-free. Two signal endpoints, one mapping:
+Otari accepts OTLP over HTTP:
 
 ```text
-POST /v1/traces    spans (what most GenAI instrumentation emits)
-POST /v1/logs      log events (what Claude Code emits)
+POST /v1/traces    GenAI spans
+POST /v1/logs      GenAI log events and recognized coding-agent events
+POST /v1/metrics   content-free coding-agent outcome metrics
 ```
 
-A third receiver, `POST /v1/metrics`, takes the metrics signal. It carries no usage
-and bills nothing; it records a coding agent's content-free outcome counters. See
-[Use with Claude Code](use-with-claude-code.md).
+Protobuf and JSON are accepted, with optional gzip. gRPC is not. Authenticate
+with a budget-exempt API key in the Authorization header; the master key is
+refused because OTLP records do not carry trustworthy user attribution.
 
-Point the exporter's endpoint at the Otari root; it appends `/v1/traces` or
-`/v1/logs` itself. Both **protobuf and JSON** are accepted (optionally gzip), over an
-**http** protocol (`OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf` or `http/json`; gRPC is
-not accepted). Authenticate with a budget-exempt API key via
-`OTEL_EXPORTER_OTLP_HEADERS=Authorization=Bearer <key>`. The master key is refused
-here: OTLP events carry no user attribution, so usage always binds to the key's
-user (to import a mixed feed for many users, use `/v1/usage/external-events`).
+For a standard OTLP exporter:
 
-Otari reads only the content-free usage attributes, preferring the
-**OpenTelemetry GenAI semantic conventions**:
+```bash
+export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
+export OTEL_EXPORTER_OTLP_ENDPOINT="https://otari.example.com"
+export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer $OTARI_IMPORT_KEY"
+```
 
-| Attribute | Stored as |
-| --- | --- |
-| `gen_ai.provider.name` (or `gen_ai.system`) | provider |
-| `gen_ai.request.model` (or `gen_ai.response.model`) | model |
-| `gen_ai.response.id` (else the span id) | source_event_id (dedup key) |
-| `gen_ai.usage.input_tokens` | input |
-| `gen_ai.usage.output_tokens` | output |
-| `gen_ai.usage.cache_read_tokens` (or `cached_tokens`) | cache read |
-| `gen_ai.usage.cache_write_tokens` | cache write |
-| `otari.client_name` | `source` (provenance); a reserved slug (`gateway`, or anything starting with `otari-ai:`) falls back to `otel` |
-| `otari.user_session_label` / `otari.session_label` | session label |
+Otari reads the OpenTelemetry GenAI provider, model, response ID, input-token,
+output-token, and cache-token attributes. It ignores non-LLM spans and never
+stores prompt or response content.
 
-A record with no model/provider/tokens (a non-LLM span, a prompt log, a metric) is
-skipped, so no prompt or response content is ever stored.
-
-Anthropic-shaped emitters report cache reads/writes additively (outside
-`input_tokens`); OpenAI-shaped emitters report cached tokens as a subset of
-`input_tokens`. Otari treats the `anthropic` provider as additive and everything
-else as OpenAI-shaped, so the price de-includes cached tokens rather than charging
-them at both the input and cache-read rate.
-
-### Recognized coding agents
-
-Two coding agents ride the **logs** signal with their own attribute names rather than
-`gen_ai.*`, so Otari recognizes them directly (no per-app configuration): **Claude
-Code** (`api_request` event, `source = claude_code`, Anthropic additive cache counts)
-and **Codex** (`codex.sse_event` / `codex.api_request`, `source = codex`, OpenAI-shaped
-counts that the price de-includes). Both are re-priced at Otari's rates, deduped, and
-never counted toward budget, the same as the generic path above. For client setup,
-see the dedicated guides:
+Claude Code and Codex emit recognizable usage events on the logs signal. Their
+tool behavior and outcome counters can also populate content-free agent
+telemetry when `capture_agent_telemetry` is enabled. See the client-specific
+setup:
 
 - [Use with Claude Code](use-with-claude-code.md)
 - [Use with Codex](use-with-codex.md)
 
-No OTLP shape reports the 5-minute/1-hour split of cache creation, so every imported
-cache write is priced at the 5-minute rate. Claude Code does use both TTLs, and its
-`api_request` event reports only a combined `cache_creation_tokens`, so whichever rate
-Otari assumes is wrong for the other share: the 5-minute assumption undercharges the
-1-hour writes (the larger share on measured Claude Code workloads), and assuming
-1 hour would overcharge the 5-minute ones. A 1-hour write costs 2x base input against
-1.25x for a 5-minute one, so Otari books the cheaper bucket and an imported cost never
-reads above true cost. To bill the true split, send `cache_write_1h_tokens` yourself
-via `POST /v1/usage/external-events`.
-
-## Other sources
-
-`POST /v1/usage/external-events` (above) is the explicit path for any source that is
-not OTLP: send normalized, content-free events yourself. The OTLP endpoints map onto
-it internally, so all three share the same idempotency, pricing, and
-budget-exempt-key rules.
-
 ## Pricing
 
-Imported events are priced with Otari's effective configured pricing **at the
-event's timestamp**, so a rate change is honored historically. Anthropic
-cache-read and cache-write rates apply when configured. The result is an
-API-rate estimate, not an invoice or a subscription charge. Configure prices with
-`POST /v1/pricing` (set `effective_at` at or before the events you import).
+Each accepted event is priced at the effective rate at its timestamp:
 
-Organization rate overrides apply here too, resolved in the same order a live
-request resolves them: the importing key's organization first
-(`POST /v1/organizations/me/pricing`), then the deployment price list, then the
-default pricing dataset. The organization comes off the workspace the importing
-key belongs to, never off the request body. Because the timestamp that decides is
-the event's own, an override created today does not reprice usage from before its
-`effective_from`: backfill an old batch and it settles at whatever rate was in
-force when the usage happened.
+1. The importing key's organization override
+2. Deployment pricing
+3. The enabled default-pricing catalog
 
-**Importing with the master key prices at the default workspace's organization.**
-The master key is not bound to a workspace, so an import made with it lands in
-the default workspace the same way any other deployment-wide write does, and it
-is that workspace's organization whose overrides apply. On a deployment running
-more than one organization, import each organization's usage with a key
-belonging to it; a master-key import of another organization's usage will price
-at the default organization's rates, not that organization's own.
+An unpriced event is still stored with `cost: null`. `require_pricing` does not
+apply because imported usage is not enforceable.
 
-**A row's cost is settled by the import that created it.** Ingest is idempotent
-on `(source, source_event_id)`, so re-submitting a batch does not recost the rows
-already stored, and changing a rate afterwards does not reach back either. Rows
-imported before an override existed therefore keep the price they were imported
-at, and an organization that adds its first override can see two unit costs for
-one model in cost analytics: the old rows at the deployment rate, the new ones at
-its own. To bring the old rows into line, recost them with
-`POST /v1/usage/set-price`, which takes explicit per-1M rates and touches
-imported rows only.
+Idempotent replay does not recalculate cost, and later price changes do not
+modify existing rows. Use the usage repricing API when historical rows must be
+updated.
 
-Pricing is **optional** for imported usage. `require_pricing` is a
-budget-enforcement safety gate, and imported usage is budget-exempt, so a model
-with no configured price is not rejected: the row lands with `cost: null` and you
-can add pricing whenever you want to start seeing the cost. The same holds for
-gateway requests on an API key flagged `exclude_from_budget`, they are logged
-(cost null when unpriced) rather than blocked by the pricing gate.
+Imported cost is an estimate based on configured API rates, not an invoice or a
+subscription charge. Cache pricing is only as accurate as the token fields the
+source exports.
 
-## Budget behavior
+## Reading imported usage
 
-Imported usage is observability with real cost, **not** enforcement, and that is a
-hard invariant, not a default you can turn off:
+Use the normal usage APIs and filter on `source`, `api_key_id`, user, model,
+or session label. Activity identifies imported rows and Usage separates priced
+and unpriced totals.
 
-- **Import keys must be budget-exempt.** A budgeted API key is refused with a 403.
-  Imported usage is retrospective, it already happened somewhere Otari did not
-  route, so Otari can never *block* it. Letting it count toward an enforced budget
-  would let a user silently blow through a ceiling Otari had no way to hold. Rather
-  than ship that footgun, ingestion requires an `exclude_from_budget` key (or the
-  master key, which imports as observability).
-- It never calls reservation, reconciliation, refund, or user-spend mutation; rows
-  are written `counts_toward_budget = false`.
-- It appears in usage analytics (`/v1/usage`, `/v1/usage/summary`, the Usage and
-  Activity pages) with its `source`, so gateway and imported cost are
-  distinguishable (`/v1/usage/summary` returns a `by_source` breakdown). The Usage
-  page labels the total **Tracked cost** and discloses how many requests carry no
-  price; the Activity page shows each row's source.
-- It does **not** appear in a user's budget-consumption gauge, because that gauge
-  reads the enforcement ledger (`User.spend`), which imported usage never touches.
+Imported rows do not appear in budget-consumption gauges because those gauges
+read the enforcement ledger.
 
-The same `exclude_from_budget` flag also governs a key's **live** traffic: requests
-proxied through an exempt key are logged with cost but never reserved, billed to
-spend, or blocked (and skip the `require_pricing` gate). So the flag is one switch,
-"this key's usage is tracked, never enforced," applied to both proxied and imported
-usage.
+## Related documentation
 
-## See also
-
-- [Use with Claude Code](use-with-claude-code.md)
 - [API reference](api-reference.md)
-- [Modes](modes.md) for standalone vs hybrid behavior
+- [Configuration](configuration.md)
+- [Access control](access-control.md)

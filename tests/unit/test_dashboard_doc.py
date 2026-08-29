@@ -1,9 +1,8 @@
 """Structural checks for the admin dashboard operator guide (docs/dashboard.md).
 
 The guide is hand-written prose, so these tests guard the contract that matters:
-the file exists, is linked from the docs index, covers the pieces issue #313
-asked for (the two-key model, a first-run walkthrough, a page-by-page
-reference), keeps its internal links pointing at real files, and follows the
+the file exists, is linked from the docs index, covers sign-in and daily
+operation, keeps its internal links pointing at real files, and follows the
 project's no-em-dash-in-prose writing convention.
 """
 
@@ -36,9 +35,9 @@ def test_dashboard_doc_has_single_top_level_heading(dashboard_text: str) -> None
 
 def test_dashboard_doc_covers_required_sections(dashboard_text: str) -> None:
     for heading in (
-        "## The two-key model",
+        "## Sign-in and secrets",
         "## First-run walkthrough",
-        "## Page-by-page reference",
+        "## Navigation",
     ):
         assert heading in dashboard_text, f"missing required section: {heading!r}"
 

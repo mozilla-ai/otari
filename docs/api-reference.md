@@ -1,459 +1,93 @@
-# API Reference
+# API reference
 
-All endpoints are under `http://localhost:8000` by default.
+Otari serves an OpenAPI document at `/openapi.json` and interactive API docs at
+`/docs` by default. The repository also commits the generated
+[OpenAPI specification](public/openapi.json) and
+[Postman collection](public/otari.postman_collection.json). Those generated
+artifacts are the source of truth for paths, parameters, and schemas.
 
-For full request/response schemas, see the [OpenAPI spec](public/openapi.json) or the interactive docs at `/docs` when Otari is running.
-
-## Provider error details
-
-When an upstream provider fails, what the `detail` field contains depends on whose problem it is.
-
-If the provider returned 400, 422 or 404 because it rejected **your request**, Otari responds with 400 or 404 and a sanitized provider diagnostic that names the parameter, model or limit at fault. Credential-shaped tokens, URLs, account identifiers, and reflected request or response payloads are stripped, and the diagnostic is capped at 400 characters.
-
-If the failure is the **gateway's** (its provider credentials were rejected, the provider account is out of credit, the provider returned a 5xx, or the error could not be classified), the detail is a fixed string such as `The provider rejected the gateway's credentials`. There is no remedy you could apply, and the upstream text in those cases tends to name the operator's account rather than anything about your request. Operators should diagnose these with safe metadata (request ID, provider, model, and status) or a protected incident process, never by logging provider keys, internal URLs, prompts, responses, request bodies, or other user payloads.
-
-## Endpoint availability
-
-| Endpoint group | Standalone | Connected to otari.ai |
-|---|---|---|
-| Health (`/health*`) | Yes | Yes |
-| Chat completions (`/v1/chat/completions`) | Yes | Yes |
-| Messages (`/v1/messages`, `/v1/messages/count_tokens`) | Yes | Yes |
-| Responses (`/v1/responses`) | Yes | Yes |
-| Management (keys, users, budgets, aliases, routing policies, pricing, usage, tool discovery) | Yes | No |
-| OpenAI-compatible (embeddings, models, files, batches, images, audio, moderations, rerank) | Yes | No |
+The default server address is `http://localhost:8000`. OpenAI-compatible clients
+normally use `http://localhost:8000/v1` as their base URL.
 
 ## Authentication
 
-### Standalone
+In standalone and hosted mode, Otari accepts a local API key or the master key in
+any of these forms:
 
-- Preferred header: `Otari-Key: <token>` (a `Bearer` prefix is also accepted)
-- `Authorization: Bearer <token>` is also accepted
-- `x-api-key: <token>` is also accepted (for Anthropic-native clients)
+```text
+Authorization: Bearer <token>
+Otari-Key: <token>
+Otari-Key: Bearer <token>
+x-api-key: <token>
+```
 
-Regular API endpoints use an API key. Management endpoints use the master key.
+Use API keys for inference. The master key is a deployment-wide administrative
+credential. Dashboard sessions authenticate browser requests, but deployment-wide
+operations also require operator authority.
 
-A dashboard session cookie also authenticates a management endpoint, which is how the
-browser reaches one. It does not by itself authorize a **deployment-wide** endpoint: a
-row marked `Deployment operator` below additionally requires that the session name a
-superuser or the bootstrap operator, the same standing `/v1/admin` asks for. The master
-key in a header always clears it.
+In hybrid mode, the completion APIs accept an otari.ai user token through
+`Authorization: Bearer <token>`. Local API keys and management APIs are not used.
 
-A cookie does not authenticate the endpoints marked `API key or master key` **at all**,
-whoever holds it. Those call a provider with the deployment's credentials and bill a
-workspace, and a request with no key row resolves both through the deployment's default
-workspace, so a cookie accepted there would spend one tenant's credential for another.
-The exceptions are the catalog reads (`GET /v1/models`, `GET /v1/pricing`, `GET /v1/tools`
-and their by-id forms), which call nothing and bill nothing, and which the dashboard's
-Models and Pricing pages are built on. See [Access control](access-control.md).
+## Availability by mode
 
-### Connected to otari.ai
+| Surface | Standalone | Hosted | Hybrid |
+| --- | --- | --- | --- |
+| Health and `/v1/bootstrap` | Yes | Yes | Yes |
+| Chat, Messages, and Responses | Yes | No | Yes |
+| Other inference APIs | Yes | No | No |
+| `/v1/models` | Yes | Yes | No |
+| Management APIs | Yes | Yes | No |
 
-The three generation endpoints (`/v1/chat/completions`, `/v1/messages`, `/v1/responses`) expect `Authorization: Bearer <user-token>`. `Otari-Key` and local API keys are not used in this mode.
+Hosted mode is a control plane. Its inference paths return a descriptive `404`
+and, when configured, the data-plane URL to use instead. See [Modes](modes.md).
 
-## Available in both deployment types
+## Core inference APIs
 
-### Health
+Otari implements three completion surfaces:
 
-No authentication required.
+- `POST /v1/chat/completions`, OpenAI Chat Completions
+- `POST /v1/messages` and `/v1/messages/count_tokens`, Anthropic Messages
+- `POST /v1/responses`, OpenAI Responses
 
-| Method | Path | Description |
-|--------|------|-------------|
-| `GET` | `/health` | General health check. Includes otari.ai reachability fields when connected. |
-| `GET` | `/health/liveness` | Kubernetes liveness probe. |
-| `GET` | `/health/readiness` | Kubernetes readiness probe. Checks DB (standalone) or otari.ai reachability. Returns 503 on failure. |
-| `GET` | `/metrics` | Prometheus metrics. Disabled by default; enable with `enable_metrics: true` in config. |
+Standalone mode also serves embeddings, images, audio, files, batches,
+moderations, rerank, and search. Provider support differs by endpoint, so use
+`GET /v1/models` and the OpenAPI document for the deployment you are calling.
 
-### Chat completions
+## Search
 
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| `POST` | `/v1/chat/completions` | OpenAI-compatible chat completions. Supports streaming and tool use (`otari_code_execution`, `otari_web_search`, MCP). | Standalone: API key or master key. Connected: `Authorization` bearer token from otari.ai. |
+`POST /v1/search` and `POST /v1/search/{search_tool_name}` run a configured
+search tool directly. This is separate from `otari_web_search`, which lets a
+model request searches during a completion. Both are described in
+[Built-in tools](tools.md).
 
-For a full client setup example, see [Use with opencode](use-with-opencode.md).
+Search-tool management lives under `/v1/search-tools`. The generated OpenAPI
+document describes the supported providers, filters, and management schemas.
 
-### Messages
+## Routing policies
 
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| `POST` | `/v1/messages` | Anthropic Messages API-compatible endpoint. Supports streaming, tool use, extended thinking, and Anthropic context management (`context_management` and `betas`, including compaction). Routes to any provider in the catalog (non-Anthropic models are translated to/from the Messages format automatically). | Standalone: API key or master key. Connected: `Authorization` bearer token from otari.ai. |
-| `POST` | `/v1/messages/count_tokens` | Anthropic-compatible input-token count for a Messages request. Returns `{"input_tokens": N}`. Counts locally (no provider call, no budget debit); the count is an approximation. `context_management` and `betas` are accepted for wire compatibility, but the local estimate does not apply provider-side context edits. Used by clients such as Claude Code for context-window management. | Standalone: API key or master key. Connected: `Authorization` bearer token from otari.ai. |
+Routing-policy management lives under `/v1/routing/policies`; learned-routing
+examples and status live under `/v1/routing/preferences` and `/v1/routing/status`.
+See [Routing policies](routing.md) for configuration and behavior, and OpenAPI for
+the request schemas.
 
-> `/v1/messages` uses the Anthropic Messages request shape regardless of which upstream provider serves the model. For example, `max_tokens` is still required even when `model` is `openai:...`.
+## Provider error details
 
-For a full client setup example, see [Use with Claude Code](use-with-claude-code.md).
+Otari may return a short, sanitized provider diagnostic when the upstream
+provider rejects something the caller can fix, such as a model name or request
+parameter. Credentials, URLs, account identifiers, and reflected payloads are
+removed.
 
-### Responses
+Gateway-side failures use fixed public messages. Diagnose them with protected
+logs and safe metadata such as request ID, provider, model, and status. Do not
+log provider keys, prompts, responses, or raw upstream bodies.
 
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| `POST` | `/v1/responses` | OpenAI Responses API-compatible endpoint. Supports streaming. | Standalone: API key or master key. Connected: `Authorization` bearer token from otari.ai. |
+## Keeping generated clients current
 
-Not every provider implements the Responses API; one that does not is rejected with `400 Provider '<name>' does not support the Responses API`. For a full client setup example, see [Use with Codex](use-with-codex.md).
-
-## Standalone-only endpoints
-
-### Embeddings
-
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| `POST` | `/v1/embeddings` | Generate embeddings for text input. | API key or master key |
-
-### Models
-
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| `GET` | `/v1/models` | List available models: auto-discovered from configured providers (when `model_discovery` is on, the default), plus configured pricing entries and aliases. | API key or master key |
-| `GET` | `/v1/models/{model_id}` | Get a specific model. | API key or master key |
-
-### Tools
-
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| `GET` | `/v1/tools` | List the tools Otari runs itself, with the `tools[].type` values this deployment accepts, each tool's argument schema, and a runnable example. | API key or master key |
-
-A tool with no backend configured is listed with `"available": false` rather than omitted, so a client can distinguish an unknown tool from an unconfigured one. `accepted_types` reflects the current configuration, so it grows when [web-search interception](tools.md#web-search-interception) is enabled.
-
-Standalone-only. Connected to otari.ai the platform owns the per-workspace tool policy, so this gateway's own configuration is not the answer to "what can I call".
-
-### Moderations
-
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| `POST` | `/v1/moderations` | OpenAI-compatible content moderation. | API key or master key |
-
-### Rerank
-
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| `POST` | `/v1/rerank` | Reorder documents by relevance to a query. | API key or master key |
-
-### Search
-
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| `POST` | `/v1/search` | Run a search against a configured search tool, named in `search_tool_name`. | API key or master key |
-| `POST` | `/v1/search/{search_tool_name}` | Same, with the tool named in the path. | API key or master key |
-
-Search tools are declared under [`search_tools`](configuration.md#search-tools)
-in `config.yml`, or added at runtime through the dashboard's Tools & Guardrails
-page and the `/v1/search-tools` endpoints below, which need no config file. This
-is the direct counterpart to the `otari_web_search` tool:
-the tool answers a model's search call mid-completion, while this endpoint takes
-a query from the caller and returns results. Both forms log
-`endpoint="/v1/search"`, so one Activity filter covers every search.
-
-The request and response follow LiteLLM's `/v1/search` (itself shaped after
-Perplexity's Search API), so a client moving off the LiteLLM proxy keeps its
-request shape:
+API changes must regenerate both committed artifacts:
 
 ```bash
-curl http://localhost:8000/v1/search/exa-search \
-  -H "Otari-Key: Bearer $OTARI_API_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{
-    "query": "post-training quantization for small models",
-    "max_results": 5,
-    "search_domain_filter": ["arxiv.org"]
-  }'
+uv run python scripts/generate_openapi.py
+make postman
+make openapi-check
+make postman-check
 ```
-
-```json
-{
-  "object": "search",
-  "search_tool": "exa-search",
-  "results": [
-    {
-      "title": "…",
-      "url": "https://arxiv.org/abs/…",
-      "snippet": "…",
-      "date": "2026-01-02T00:00:00.000Z"
-    }
-  ]
-}
-```
-
-The accepted request fields are `query`, `search_tool_name`, `max_results`
-(1 to 20), `search_domain_filter` (up to 20 entries; prefix a domain with `-` to
-exclude it rather than restrict to it), `country`, `max_tokens_per_page`, and
-`user`. Two differences from Perplexity are worth knowing before you migrate:
-`query` must be a single string, so the multi-query array form is rejected with
-a 422; and the filters Otari does not model (`search_recency_filter`,
-`search_context_size`, the published-date filters) are ignored rather than
-rejected, so check that your client does not depend on one. Provider-native
-knobs with no request field, such as Exa's `type` or `category`, belong in the
-tool's `options`.
-
-The supported providers are `exa` and `searxng`, the latter being the same
-SearXNG-shaped backend the `otari_web_search` tool uses, so a deployment that
-already runs one can serve this endpoint from it without a commercial key. Which
-request fields a `searxng` tool honors differs slightly; see
-[serving the web-search backend you already run](configuration.md#serving-the-web-search-backend-you-already-run).
-
-Search bills per request rather than per token, so a usage
-row carries zero tokens and a cost taken from the provider's own reported charge
-when it reports one (Exa does); otherwise it uses the flat per-request rate
-configured for `<provider>:<tool>`, under the same convention as
-[moderations](#moderations). Like moderations, search is exempt from
-`require_pricing`. Configuring the flat rate is still
-[recommended](configuration.md#search-tools): it is what gets reserved against
-the caller's budget before the search runs.
-
-A search the gateway itself refuses, an unknown or ambiguous `search_tool_name`
-(400) or a tool the key's allowed-models list does not name (403), is written to
-the usage log too, with a null cost, so refused searches are visible in Activity
-and counted as failures rather than only in the caller's own logs.
-
-#### Search tool management
-
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| `GET` | `/v1/search-tools` | List search tools: the stored ones plus the read-only config-file ones. | Deployment operator |
-| `GET` | `/v1/search-tools/providers` | List the search providers this build supports, and what each one requires. | Deployment operator |
-| `POST` | `/v1/search-tools` | Add a search tool at runtime. | Deployment operator |
-| `PATCH` | `/v1/search-tools/{name}` | Update a stored search tool. Omitted fields are unchanged. | Deployment operator |
-| `DELETE` | `/v1/search-tools/{name}` | Delete a stored search tool. | Deployment operator |
-| `POST` | `/v1/search-tools/reencrypt` | Re-encrypt stored search-tool keys with the primary `OTARI_SECRET_KEY`. | Deployment operator |
-
-These are the runtime counterpart of the `search_tools` config block, and behave
-the same way [runtime provider management](configuration.md#runtime-provider-management)
-does: a stored tool wins over a config-file tool of the same name, API keys are
-encrypted at rest and never returned (only `last4`), and a config-file tool
-cannot be edited or deleted here. Standalone mode only.
-
-### Images
-
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| `POST` | `/v1/images/generations` | Generate images from text prompts. | API key or master key |
-
-Image generation bills per generated image, not per token, so a usage row carries
-zero tokens and an `images` meter. Unlike audio and moderations it is subject to
-`require_pricing`, so an unpriced image model is rejected with 402 under the
-default configuration. See
-[per-image pricing](configuration.md#per-image-pricing-image-generation) for how
-to set the rate.
-
-### Audio
-
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| `POST` | `/v1/audio/transcriptions` | Transcribe audio to text (multipart upload). | API key or master key |
-| `POST` | `/v1/audio/speech` | Generate speech from text (TTS). | API key or master key |
-
-Audio bills per request rather than per token, under the same convention as
-[moderations](#moderations) and search, so a usage row carries zero tokens and a
-cost taken from the flat rate configured for the model. Like moderations, audio
-is exempt from `require_pricing`: with no rate configured the request is served
-and logged at $0 with no charge line. See
-[per-request pricing](configuration.md#per-request-pricing-audio-and-moderations)
-for how to set the rate.
-
-### Files
-
-OpenAI-compatible file storage. Upload a file, then reference it from a chat
-request by `file_id`. See [files.md](files.md) for how uploaded files are turned
-into something a text-only local model can read.
-
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| `POST` | `/v1/files` | Upload a file (multipart: `file`, `purpose`). Returns a file object with an `id`. | API key or master key |
-| `GET` | `/v1/files` | List the caller's files in the workspace of the key that authenticated them. Query params: `purpose`, and `workspace_id` to narrow a master-key listing to one workspace. | API key or master key |
-| `GET` | `/v1/files/{file_id}` | Get file metadata. | API key or master key |
-| `GET` | `/v1/files/{file_id}/content` | Download the raw file bytes. | API key or master key |
-| `DELETE` | `/v1/files/{file_id}` | Delete a file. | API key or master key |
-
-### Batches
-
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| `POST` | `/v1/batches` | Create an async batch of LLM requests. | API key or master key |
-| `GET` | `/v1/batches` | List batches. Query param: `provider`. A non-master key sees only the batches it owns in its own workspace, plus legacy ones carrying no owner marker or no recorded workspace; the master key sees all of them. Ownership is filtered after the provider call, so a page can come back with fewer items than `limit`. | API key or master key |
-| `GET` | `/v1/batches/{batch_id}` | Get batch status. Query param: `provider`. | API key or master key |
-| `POST` | `/v1/batches/{batch_id}/cancel` | Cancel a batch. Query param: `provider`. | API key or master key |
-| `GET` | `/v1/batches/{batch_id}/results` | Get batch results. Returns 409 if not complete. Query param: `provider`. | API key or master key |
-
-### Key management
-
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| `POST` | `/v1/keys` | Create an API key in the caller's organization. Takes an optional `workspace_id`, which must name a workspace in that organization; that organization's default workspace is used when it is omitted, and the key bills its workspace for every request. | Deployment operator |
-| `GET` | `/v1/keys` | List the API keys in the caller's organization. `POST /v1/organizations/me/switch` is what moves an operator between them. | Deployment operator |
-| `GET` | `/v1/keys/{key_id}` | Get a specific key. A key outside the caller's organization answers 404. | Deployment operator |
-| `PATCH` | `/v1/keys/{key_id}` | Update a key (name, active status, expiration, allowed models, `exclude_from_budget`, `reject_user_mismatch`, `capture_agent_telemetry`, metadata). A key outside the caller's organization answers 404. | Deployment operator |
-| `POST` | `/v1/keys/{key_id}/rotate` | Replace a key's secret in place (id, user, name, expiry, and metadata preserved); returns the new key once. The previous secret stops working immediately. A key outside the caller's organization answers 404. | Deployment operator |
-| `DELETE` | `/v1/keys/{key_id}` | Revoke a key. A key outside the caller's organization answers 404. | Deployment operator |
-
-### User management
-
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| `POST` | `/v1/users` | Create a user. | Deployment operator |
-| `GET` | `/v1/users` | List users. | Deployment operator |
-| `GET` | `/v1/users/{user_id}` | Get a specific user. | Deployment operator |
-| `PATCH` | `/v1/users/{user_id}` | Update a user. | Deployment operator |
-| `DELETE` | `/v1/users/{user_id}` | Soft-delete a user and deactivate their keys. | Deployment operator |
-| `GET` | `/v1/users/{user_id}/usage` | Get usage history for a user. | Deployment operator |
-
-### Organizations
-
-Tenancy above users and keys; see [Access control](access-control.md#organizations-and-workspaces). One organization is provisioned on the first master-key request, and that is the shape almost every deployment keeps, so nearly every path is scoped to the caller's active organization and does not name one. A second is reachable, though (an invitation into an organization elsewhere on the deployment), so create, list-mine and switch are mounted too. `POST /v1/organizations/me/switch` is the one path that names an organization, and it answers `404` for one the caller holds no active membership in. Deleting an organization has no endpoint: every historical attribution resolves through rows that hang off one.
-
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| `POST` | `/v1/organizations` | Create an organization with the caller as its owner, and a default workspace in it. | Master key |
-| `GET` | `/v1/organizations/me` | Get the active organization and the caller's role in it. | Master key |
-| `PATCH` | `/v1/organizations/me` | Rename the active organization. | Master key |
-| `GET` | `/v1/organizations/me/memberships` | List the organizations the caller is an active member of, paged, flagging the current one. | Master key |
-| `POST` | `/v1/organizations/me/switch` | Point the caller's identity at another organization they belong to. | Master key |
-| `GET` | `/v1/organizations/me/members` | List the active organization's members. | Master key |
-| `POST` | `/v1/organizations/me/members` | Add a member by email, optionally into workspaces at the same time. | Master key |
-| `PATCH` | `/v1/organizations/me/members/{organization_member_id}` | Change a member's role or status. | Master key |
-| `DELETE` | `/v1/organizations/me/members/{organization_member_id}` | Remove a member (suspends the membership). | Master key |
-| `GET` | `/v1/organizations/me/pricing` | List the organization's model rate overrides, paged. | Master key |
-| `POST` | `/v1/organizations/me/pricing` | Set the organization's rate for a model over a period. | Master key |
-| `PUT` | `/v1/organizations/me/pricing/{pricing_id}` | Replace an override's rates and period. | Master key |
-| `DELETE` | `/v1/organizations/me/pricing/{pricing_id}` | Remove an override, returning the model to the deployment price list. | Master key |
-| `GET` | `/v1/organizations/me/usage` | List the caller's organization's usage logs. Same filters and shape as `GET /v1/usage`, over the rows the caller may see: an owner or admin reads every workspace in the organization, a member or viewer reads the ones they belong to. `workspace_id` narrows within that and answers `404` outside it. | Master key |
-| `GET` | `/v1/organizations/me/usage/count` | Total rows matching the filters, within the same scope. | Master key |
-| `GET` | `/v1/organizations/me/usage/summary` | Aggregated spend/volume for the caller's organization. Same parameters and shape as `GET /v1/usage/summary`. | Master key |
-| `GET` | `/v1/organizations/me/usage/series` | One time series per group for the caller's organization. Same parameters and shape as `GET /v1/usage/series`. | Master key |
-| `GET` | `/v1/organizations/me/guardrails` | List the guardrails the organization mandates over its workspaces, paged. | Master key |
-| `POST` | `/v1/organizations/me/guardrails` | Mandate a guardrail, optionally with an endpoint and credential of its own. | Master key |
-| `PATCH` | `/v1/organizations/me/guardrails/{guardrail_id}` | Change an entry's profile, endpoint, credential, modes, or scope. | Master key |
-| `DELETE` | `/v1/organizations/me/guardrails/{guardrail_id}` | Stop mandating a guardrail, discarding its credential and scope. | Master key |
-| `POST` | `/v1/organizations/me/member-invitations` | Invite a member by email; emails an accept link if mail is configured. | Master key |
-| `DELETE` | `/v1/organizations/me/member-invitations/{invitation_id}` | Revoke an unaccepted invitation (cancels it, suspends the membership). | Master key |
-
-Accepting an invitation is a separate, unauthenticated pair the recipient's browser calls from the link: `POST /v1/invitations/validate` to preview it and `POST /v1/invitations/accept` to commit, both with the token in the body rather than the URL (a bearer credential, which a URL path is not a safe place for). See [Access control](access-control.md#invitations).
-
-### Workspaces
-
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| `POST` | `/v1/workspaces` | Create a workspace in the active organization. | Master key |
-| `GET` | `/v1/workspaces` | List the workspaces the caller can see. | Master key |
-| `GET` | `/v1/workspaces/{workspace_id}` | Get a specific workspace. | Master key |
-| `PATCH` | `/v1/workspaces/{workspace_id}` | Rename a workspace or change its description. | Master key |
-| `DELETE` | `/v1/workspaces/{workspace_id}` | Delete a workspace and its memberships. Refused with 409 while it holds API keys, usage, aliases or routing policies, and refused for the last workspace. | Master key |
-| `GET` | `/v1/workspaces/{workspace_id}/members` | List a workspace's members. | Master key |
-| `POST` | `/v1/workspaces/{workspace_id}/members/{user_id}` | Add an organization member to a workspace. | Master key |
-| `PATCH` | `/v1/workspaces/{workspace_id}/members/{user_id}` | Change a workspace member's role. | Master key |
-| `DELETE` | `/v1/workspaces/{workspace_id}/members/{user_id}` | Remove a workspace member. | Master key |
-
-### Budget management
-
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| `POST` | `/v1/budgets` | Create a budget. | Deployment operator |
-| `GET` | `/v1/budgets` | List budgets. | Deployment operator |
-| `GET` | `/v1/budgets/{budget_id}` | Get a specific budget. | Deployment operator |
-| `PATCH` | `/v1/budgets/{budget_id}` | Update a budget. | Deployment operator |
-| `DELETE` | `/v1/budgets/{budget_id}` | Delete a budget. | Deployment operator |
-
-The rows above cap one user. The family below caps a tenancy scope instead, and
-both are enforced: a request must pass every ceiling that applies to it. See
-[Access control](access-control.md#workspace-scoped-spend).
-
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| `POST` | `/v1/scoped-budgets` | Create a ceiling on an organization, workspace, membership, or API key, optionally narrowed to one provider. Its period is a rolling `budget_duration_sec` or a UTC-aligned `reset_alignment`, never both. Refused with 409 if that scope already has one. | Deployment operator |
-| `GET` | `/v1/scoped-budgets` | List scoped budgets, optionally filtered by `scope_type` and `scope_id`. | Deployment operator |
-| `GET` | `/v1/scoped-budgets/{budget_id}` | Get a specific scoped budget. | Deployment operator |
-| `PATCH` | `/v1/scoped-budgets/{budget_id}` | Update a scoped budget's label, limit, or period. The scope and the provider narrowing are fixed. | Deployment operator |
-| `DELETE` | `/v1/scoped-budgets/{budget_id}` | Delete a scoped budget. | Deployment operator |
-
-### Aliases
-
-An alias is a display name that resolves to one real model selector. See
-[Model aliases](models.md#model-aliases).
-
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| `GET` | `/v1/aliases` | List every alias in force, from `config.yml` and from storage, in every scope. `workspace_id` narrows the stored ones to one workspace; `config.yml` aliases are deployment-wide and always listed. | Deployment operator |
-| `POST` | `/v1/aliases` | Create or update a stored alias. Omit `user_id` for one every caller in the workspace sees, and `workspace_id` for the deployment's default workspace. | Deployment operator |
-| `DELETE` | `/v1/aliases/{name}` | Delete a stored alias. `user_id` and `workspace_id` query params select the scope; omit them for the workspace-wide alias and the default workspace. Aliases from `config.yml` cannot be deleted here. | Deployment operator |
-
-### Routing policies
-
-A policy is the general form of an alias: it decides which real model serves a
-request, what is tried after a retryable failure, and which guardrails always run.
-See [Routing policies](routing.md).
-
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| `GET` | `/v1/routing/policies` | List every policy in force, from `config.yml` and from storage, in every scope. `workspace_id` narrows the stored ones to one workspace. | Deployment operator |
-| `POST` | `/v1/routing/policies` | Create or update a stored policy. Body is `{name, spec, user_id?, workspace_id?, rename_from?}`; `spec` is the same document a `routing.policies` entry takes. Omit `user_id` for one every caller in the workspace sees, and `workspace_id` for the deployment's default workspace. `rename_from` renames an existing policy in the same scope to `name` on the same write: 404 if it does not exist, 409 if `name` is already taken. | Deployment operator |
-| `POST` | `/v1/routing/policies/explain` | Compile a policy and return the plan without dispatching anything. Takes a saved `name`, an unsaved draft `spec`, or both (the draft wins). Optional `user_id`, `workspace_id`, `key_id`, `allowed_models`, `budget_used_pct`, `budget_remaining_usd` simulate the request. Returns the ordered candidates **and** the ones that were dropped, with reasons. For a weighted policy it also returns `router_weights`, the share each candidate takes once filtering is applied. | Deployment operator |
-| `DELETE` | `/v1/routing/policies/{name}` | Delete a stored policy. `user_id` and `workspace_id` query params select the scope. Policies from `config.yml` cannot be deleted here. | Deployment operator |
-
-Master key on every verb, including `explain`: the response enumerates a policy's
-targets, which is what a policy exists to keep off the wire.
-
-### Learned routing
-
-Teaching the router a policy can name with `select: [{router: knn, candidates: [...]}]`.
-Routing memory is per user, so `user_id` names whose it is. There is deliberately no
-endpoint that fans a prompt out to the candidates for you: seeing what each answers is
-what `POST /v1/chat/completions` already does, and going through it means those calls
-are budget-checked and logged. See
-[learned routing](routing.md#let-a-router-choose-learned-routing).
-
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| `POST` | `/v1/routing/preferences/rank` | Record a batch of scored `examples` under `user_id`, in `workspace_id` (optional, defaulting to the deployment's default workspace): each has a `prompt`, `scores` (selector to quality in `[0, 1]`), an optional `task_id` partition, and an optional `label_source`. Writes the examples the router votes over and returns each touched pool's progress toward the seed count. Up to 100 per call. A score key that no learned policy could route to is refused, because such records are unmatchable and cannot be deleted. | Deployment operator |
-| `GET` | `/v1/routing/status` | For `user_id` in `workspace_id` (optional, defaulting to the deployment's default workspace): records and warmth per pool (the default pool plus each task partition), the router's tuning, and which policies depend on it. | Deployment operator |
-
-### Pricing
-
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| `POST` | `/v1/pricing` | Set or update model pricing. | Deployment operator |
-| `GET` | `/v1/pricing` | List all model pricing. | API key or master key |
-| `GET` | `/v1/pricing/{model_key}` | Get effective pricing for a model. Optional `as_of` query param. | API key or master key |
-| `GET` | `/v1/pricing/{model_key}/history` | Get full pricing history for a model. | API key or master key |
-| `DELETE` | `/v1/pricing/{model_key}` | Delete a pricing entry. | Deployment operator |
-
-### Usage
-
-These read every tenant's rows, so they need deployment-operator authority. A
-caller who administers an organization rather than the deployment reads the same
-data through the organization-scoped set above
-(`/v1/organizations/me/usage{,/count,/summary,/series}`), which resolves its
-scope from their own membership. The writes and the live in-flight view have no
-tenant-scoped form.
-
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| `GET` | `/v1/usage` | List usage logs. Filters: `start_date`, `end_date`, `user_id`, `status`, `status_code`, `model`, `endpoint`, `provider`, `source`, `source_label`, `api_key_id`, `request_group_id`. `user_id`, `model`, and `api_key_id` are repeatable (up to 50 values each) and match any of the values given. `status_code` is the HTTP status classifying a failure (e.g. 429 provider rate limit, 402 missing pricing); only error rows carry one, so filtering by it also restricts to `status=error` unless `status` is passed explicitly. `request_group_id` is repeatable and returns a routed request's whole attempt plan (see [Routing](routing.md)). | Deployment operator |
-| `GET` | `/v1/usage/count` | Total rows matching the filters (paginator total). Same filters as `GET /v1/usage`, so a multi-value filter counts the same rows the list returns. | Deployment operator |
-| `GET` | `/v1/usage/summary` | Aggregated spend/volume: totals, breakdowns by model/user/key/source/session/endpoint/provider, the failure taxonomy in `errors_by_status_code` (failures grouped by `status_code` with a coarse `error_class`), and a time series. `dimensions` narrows which breakdowns are computed (each one is a separate `GROUP BY`, including `status_code` for the taxonomy); `dimensions=none` returns totals and series only. `model`, `user_id`, and `api_key_id` are repeatable (up to 50 values each) and match any of the values given, so one call can compare a set of models, users, or keys. | Deployment operator |
-| `GET` | `/v1/usage/series` | One time series per group, for stacked charts. `group_by` is required (`model`, `user_id`, `api_key_id`, or `source`). Same filters and window bounds as `/v1/usage/summary`, including the repeatable `model` / `user_id` / `api_key_id` (up to 50 values each, matching any of them). Returns the window's top eight groups by spend, with everything past them folded into one `other` series per bucket, so the stack reconciles with the summary totals. Points are sparse (populated cells only), and an `hour` bucket over a window of more than 1000 buckets is rejected with a 422 rather than returning an oversized payload. | Deployment operator |
-| `POST` | `/v1/usage/external-events` | Import externally-observed usage (e.g. Claude Code) as source-tagged rows, priced at API rates, never counted toward budget. An API key (must be budget-exempt) attributes to its own user; the master key may name any user. Idempotent by `(source, source_event_id)`. See [Importing external usage](external-usage.md). | API key (budget-exempt) or master key |
-| `POST` | `/v1/traces` | OTLP receiver for GenAI usage **spans** (protobuf or JSON). Maps the OpenTelemetry GenAI conventions (`gen_ai.*`, `otari.*`) onto external usage ingestion. Any instrumented app can ship here. See [Importing external usage](external-usage.md). | API key (budget-exempt); master key refused |
-| `POST` | `/v1/logs` | OTLP receiver for GenAI usage **log events** (protobuf or JSON), including Claude Code's `api_request` and Codex's `codex.sse_event` / `codex.api_request`. Same mapping as `/v1/traces`. See [Importing external usage](external-usage.md). | API key (budget-exempt); master key refused |
-| `POST` | `/v1/metrics` | OTLP receiver for coding-agent outcome **metrics** (protobuf or JSON). Records the content-free counters Otari has no other source for (lines of code changed, commits, pull requests, active time); token/cost metrics are skipped as already billed, and edit decisions as already captured. Never billable. See [Use with Claude Code](use-with-claude-code.md). | API key (budget-exempt); master key refused |
-
-### Agent telemetry
-
-Content-free coding-agent telemetry: behavioral events from `POST /v1/logs` and
-outcome metrics from `POST /v1/metrics`, in one table. Never billable, and gated by
-the `capture_agent_telemetry` setting (per key, or deployment-wide).
-
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| `GET` | `/v1/agent-telemetry/summary` | Outcomes (commits, pull requests, lines changed, active time), behavior (tool calls and their mix, accept/reject, turns, API errors), the recorded spend over the same scope, and the derived measures: cost per commit / pull request / line, spend per active hour, acceptance rate, turns per session, error rate. Each measure is `null` when its denominator is zero. Range-bounded like `/v1/usage/summary` (default last 30 days, capped at 366). Filters: `start_date`, `end_date`, `user_id`, `api_key_id` (the last two repeatable, up to 50 values each), `session_label` (scopes both the telemetry rows and the usage they are divided by), `bucket`. Cumulative counters are converted to window increments at read time, per series generation, so a re-exported total is never double counted and a counter reset never reads as negative. | Deployment operator |
-| `GET` | `/v1/agent-telemetry/count` | Total rows matching the filters (`start_date`, `end_date`, `user_id`, `api_key_id`, `name`), mirroring `/v1/usage/count`. Same filter set as the purge below, so it sizes exactly what a "delete all N matching" would remove. | Deployment operator |
-| `GET` | `/v1/agent-telemetry/series` | Row volume over time split by one dimension, for stacked charts. `group_by` is required (`user_id` or `api_key_id`). Top eight groups plus a reconciling `other` fold; sparse points; an `hour` bucket over more than 1000 buckets is rejected with a 422. | Deployment operator |
-| `DELETE` | `/v1/agent-telemetry` | Purge rows by explicit `ids` or, with `by_filter: true`, by `user_id` / `api_key_id` / `name` / date range. Covers behavioral and metric rows alike. A selection matching zero rows succeeds with `deleted: 0`. | Deployment operator |
-
-### Mail
-
-Outgoing mail is optional, and these two endpoints are how an operator sees
-whether this deployment has it and proves that it works. See
-[Configuration](configuration.md#mail).
-
-| Method | Path | Description | Auth |
-|--------|------|-------------|------|
-| `GET` | `/v1/settings/mail` | The transport in effect (`smtp`, `console`, or `none`), the `From` address and display name, and this deployment's public base URL. Two booleans, because they are not the same question: `enabled` is whether a transport is configured at all, and `ready` is whether a message carrying a link back to this deployment can actually be sent, which additionally needs `public_base_url`. `missing` lists the settings standing between the deployment and that, and is empty exactly when `ready` is true. Never echoes the SMTP password. | Deployment operator |
-| `POST` | `/v1/settings/mail/test` | Send a templated test message to `to`. Returns `{ok, transport, reason}`, where `reason` carries the transport's own error text on a failed send. Refuses with `503` (naming the missing settings) when the deployment cannot send a message that links back to itself, rather than accepting a send it would drop. | Deployment operator |

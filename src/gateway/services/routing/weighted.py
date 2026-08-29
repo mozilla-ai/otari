@@ -11,9 +11,8 @@ Three properties are worth stating because they are the reasons this is the
 simplest correct design and not a placeholder for a smarter one:
 
 * **Stateless.** Each request is an independent draw, so the split is exactly as
-  correct behind twenty replicas as behind one. Nothing here needs the durable
-  decision store that conversation stickiness would (see
-  ``docs/routing-scaling.md``). The cost is that the ratio converges
+  correct behind twenty replicas as behind one. Unlike learned trace stickiness,
+  it needs no cross-request decision store. The cost is that the ratio converges
   statistically: a ten-request burst is not necessarily seven and three.
 * **No pricing needed by the router.** Unlike the kNN router, nothing here scores
   cost, so an unpriced candidate is neither refused at policy-write time nor a

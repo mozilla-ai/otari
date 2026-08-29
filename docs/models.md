@@ -1,412 +1,176 @@
 # Models
 
-Otari routes requests to LLM providers through [any-llm-sdk](https://pypi.org/project/any-llm-sdk/). This page covers the model format, supported providers, and capabilities.
+Otari routes provider calls through
+[any-llm](https://github.com/mozilla-ai/any-llm). Provider support changes with
+that dependency, so the running gateway's `GET /v1/models` response is more
+reliable than a copied provider table.
 
 ## Model format
 
-Models are specified as `provider:model_name`:
+Use `provider:model`:
 
-```
-openai:gpt-4o
+```text
+openai:gpt-5
 anthropic:claude-sonnet-4-6
-mistral:mistral-large-latest
-vertexai:gemini-2.0-flash
+ollama:llama3
 ```
 
-The `provider` prefix tells Otari which backend to route to. The `model_name` is passed directly to that provider's API.
+The prefix selects a provider or named provider instance. Everything after the
+first colon is sent as the provider's model ID.
 
-## Supported providers
-
-Otari depends on `any-llm-sdk[all]`. Provider support can change as the SDK evolves.
-
-Use this list as a quick reference for common providers supported by the current Otari build.
-
-| Provider | Config key | Example model | Notes |
-|----------|-----------|---------------|-------|
-| Anthropic | `anthropic` | `anthropic:claude-sonnet-4-6` | |
-| AWS Bedrock | `bedrock` | `bedrock:anthropic.claude-v2` | AWS credentials required |
-| Azure OpenAI | `azureopenai` | `azureopenai:gpt-4o` | Requires `api_base` |
-| Azure Anthropic | `azureanthropic` | `azureanthropic:claude-sonnet-4-6` | Requires `api_base` |
-| Cerebras | `cerebras` | `cerebras:llama3.1-8b` | |
-| Cohere | `cohere` | `cohere:command-r-plus` | Also supports rerank |
-| DashScope | `dashscope` | `dashscope:qwen-turbo` | Alibaba Cloud |
-| Databricks | `databricks` | `databricks:dbrx-instruct` | Requires `api_base` |
-| DeepInfra | `deepinfra` | `deepinfra:meta-llama/Llama-3-70b` | |
-| DeepSeek | `deepseek` | `deepseek:deepseek-chat` | |
-| Fireworks | `fireworks` | `fireworks:llama-v3-70b` | |
-| Gemini | `gemini` | `gemini:gemini-2.0-flash` | |
-| Groq | `groq` | `groq:llama3-70b-8192` | |
-| HuggingFace | `huggingface` | `huggingface:meta-llama/Llama-3-70b` | Pin a backend with `:<backend>` (see [Pinning a HuggingFace inference backend](#pinning-a-huggingface-inference-backend)) |
-| Inception | `inception` | `inception:mercury-coder-small` | |
-| Llama.cpp | `llamacpp` | `llamacpp:default` | Local server |
-| Llamafile | `llamafile` | `llamafile:default` | Local server |
-| LM Studio | `lmstudio` | `lmstudio:local-model` | Local server |
-| MiniMax | `minimax` | `minimax:abab5.5-chat` | |
-| Mistral | `mistral` | `mistral:mistral-large-latest` | |
-| Moonshot | `moonshot` | `moonshot:moonshot-v1-8k` | |
-| Nebius | `nebius` | `nebius:llama-3-70b` | |
-| Ollama | `ollama` | `ollama:llama3` | Local server |
-| OpenAI | `openai` | `openai:gpt-4o` | |
-| OpenRouter | `openrouter` | `openrouter:openai/gpt-4o` | |
-| Perplexity | `perplexity` | `perplexity:llama-3-sonar-large` | |
-| SageMaker | `sagemaker` | `sagemaker:my-endpoint` | AWS credentials required |
-| SambaNova | `sambanova` | `sambanova:llama3-70b` | |
-| Together | `together` | `together:meta-llama/Llama-3-70b` | |
-| Vertex AI | `vertexai` | `vertexai:gemini-2.0-flash` | Requires service account |
-| Vertex AI Anthropic | `vertexaianthropic` | `vertexaianthropic:claude-sonnet-4-6` | Requires service account |
-| vLLM | `vllm` | `vllm:my-model` | Self-hosted |
-| Voyage | `voyage` | `voyage:voyage-large-2` | Embeddings only |
-| WatsonX | `watsonx` | `watsonx:ibm/granite-13b` | |
-| xAI | `xai` | `xai:grok-2` | |
-
-## Capabilities
-
-Not all providers support all endpoints. Here's what each endpoint type requires:
-
-| Endpoint | Capability | Example providers |
-|----------|-----------|-------------------|
-| `/v1/chat/completions` | Chat completion | Most providers |
-| `/v1/messages` | Anthropic Messages API | Anthropic, Vertex AI Anthropic |
-| `/v1/responses` | OpenAI Responses API | OpenAI |
-| `/v1/embeddings` | Text embeddings | OpenAI, Cohere, Voyage, Vertex AI |
-| `/v1/moderations` | Content moderation | OpenAI |
-| `/v1/rerank` | Document reranking | Cohere |
-| `/v1/images/generations` | Image generation | OpenAI, Vertex AI |
-| `/v1/audio/transcriptions` | Audio transcription | OpenAI |
-| `/v1/audio/speech` | Text-to-speech | OpenAI |
-| `/v1/batches` | Batch processing | OpenAI, Anthropic |
-
-In deployments connected to otari.ai, the final model/provider choices are resolved by otari.ai routing policy, not by local `providers` configuration.
+`provider/model` is also accepted on completion routes for compatibility with
+otari.ai. Prefer the colon form in standalone configuration, pricing, aliases,
+and routing policies.
 
 ## Configuring a provider
 
-In `config.yml`:
+A provider can come from `config.yml`, its native credential environment
+variable, or the standalone Providers page:
 
 ```yaml
 providers:
   openai:
-    api_key: "sk-..."
-    api_base: "https://api.openai.com/v1"  # optional for hosted OpenAI
+    api_key: ${OPENAI_API_KEY}
 ```
 
-Or via environment variable:
+A native variable such as `OPENAI_API_KEY` can be enough to dispatch a direct
+request. Add the provider to `providers` when you also want model discovery or
+explicit client settings.
 
-```bash
-export OPENAI_API_KEY="sk-..."
-```
-
-Both approaches work for routing: a provider whose native credential environment
-variable is set (for example `ANTHROPIC_API_KEY`) is callable as
-`provider:model` even without a `providers` entry. Config file values take
-precedence over environment variables.
-
-Discovery is narrower. `GET /v1/models` lists only the providers in the
-`providers` block (plus anything added at runtime through the Providers page), so
-a provider that is callable through its environment variable alone is not listed
-until you configure it. Add the entry to have its models discovered:
-
-```yaml
-providers:
-  anthropic:
-    api_key: ${ANTHROPIC_API_KEY}
-```
-
-In standalone mode, provider config only tells Otari how to reach the backend.
-Otari also requires pricing for the model you call by default, unless
-`default_pricing` covers it or `require_pricing: false` is set.
-
-For the full configuration reference, see [Configuration](configuration.md).
+Provider support is endpoint-specific. A provider that supports chat may not
+support Responses, images, audio, rerank, or batches. Unsupported combinations
+are rejected before dispatch when Otari can identify them.
 
 ## Named provider instances
 
-The `providers` map is keyed by instance name. Most of the time that name is
-also the provider, such as `openai` or `anthropic`.
-
-If you want to use multiple backends that share one provider implementation,
-give one of them a custom name and set `provider_type`. This is common for
-self-hosted OpenAI-compatible servers such as vLLM, llama.cpp, or LM Studio:
+Use a named instance when several backends share one provider implementation or
+when a self-hosted server speaks a compatible protocol:
 
 ```yaml
 providers:
-  openai:                       # key is a real provider, no provider_type needed
-    api_key: ${OPENAI_API_KEY}
-
-  home_lab:                     # custom instance name
-    provider_type: openai       # underlying any-llm implementation
-    api_base: "https://nathans-mac-studio.example.ts.net/v1"
-    api_key: ${HOME_LAB_TOKEN}
-```
-
-Route to a named instance with `instance_name:model`. For example,
-`home_lab:deepseek-v4-flash` uses the `home_lab` config, but Otari sends the
-request through the OpenAI provider implementation with that instance's
-`api_base` and `api_key`. `openai:gpt-4o` still uses the regular `openai`
-config.
-
-Pricing and usage are keyed on the instance name, so configure pricing under
-`home_lab:deepseek-v4-flash` if you want that model to be priceable. If you do
-not set `provider_type`, the key works as before and names the provider
-directly.
-
-`provider_type: openai-compatible` and `provider_type: openai_compatible` are
-both accepted as aliases for `openai`.
-
-Named instances are a standalone-mode feature. In hybrid mode, provider
-credentials come from otari.ai per request, so local named instances are not
-used.
-
-### Declaring models for backends without `/v1/models`
-
-`/v1/models` lists an instance's models by calling the backend's model-listing
-endpoint. When a backend does not expose `/v1/models`, declare the served model
-ids so they still appear in the listing:
-
-```yaml
-providers:
-  edge_box:
+  home_lab:
     provider_type: openai
-    api_base: "https://edge.example.ts.net/v1"
-    api_key: ${EDGE_TOKEN}
+    api_base: "http://gpu-box:8000/v1"
+    api_key: ${HOME_LAB_TOKEN}
     models:
-      - llama-3.3-70b
       - qwen3-32b
 ```
 
-The declared `models` are listed as `edge_box:<model>`. Direct requests work
-with or without this list; it only affects discovery.
+Call this model as `home_lab:qwen3-32b`. Pricing and usage also use the instance
+name. `provider_type: openai-compatible` and `openai_compatible` are accepted
+aliases for the OpenAI implementation.
+
+The optional `models` list supplies discovery for a backend that has no
+`/v1/models` endpoint. It does not restrict direct dispatch.
+
+Named instances are local configuration and do not apply in hybrid mode, where
+the control plane resolves each attempt.
 
 ## Local providers
 
-Ollama, llama.cpp, and llamafile need no credential at all, so there is no
-environment variable that could signal one is in use, and Otari never dials a
-localhost port on spec. Routing works regardless: with a local server running,
-`ollama:llama3` is callable straight away, with no configuration.
-
-Discovery is what needs the entry. To have a local backend's models appear in
-`GET /v1/models`, name it in the `providers` block. There is nothing to put under
-the key, so a bare entry is enough:
+Ollama, llama.cpp, and llamafile can run without an API key. Add a provider entry
+when you want Otari to discover their models:
 
 ```yaml
 providers:
   ollama:
+    api_base: "http://gpu-box:11434"
 ```
 
-Otari then calls the backend's model-listing endpoint at its default address
-(`http://127.0.0.1:11434` for Ollama, which also honors `OLLAMA_HOST`, and
-`http://127.0.0.1:8080/v1` for llama.cpp and llamafile) and lists what it finds
-under the instance name, so an `ollama` entry yields `ollama:<model>`. Point at a
-non-default address with `api_base`:
+Without the entry, a direct selector can still work if the backend is reachable
+at the provider's default address. Otari does not probe local servers merely
+because their provider exists in any-llm.
+
+## Model discovery
+
+`GET /v1/models` combines discoverable provider models, configured prices,
+aliases, and routing-policy names. Discovery is cached and bounded; an
+unreachable provider does not block the catalog indefinitely.
+
+Set `model_discovery: false` to publish a curated catalog made from aliases and
+explicitly priced models. For a backend with no listing API, use the instance's
+`models` list.
+
+Hosted mode keeps `GET /v1/models` for control-plane discovery. Hybrid mode
+does not serve the local catalog.
+
+## Capabilities
+
+`model_capabilities` can correct image and PDF support when a compatible
+provider reports capability at the protocol level rather than for each model:
 
 ```yaml
-providers:
-  ollama:
-    api_base: "http://gpu-box.example.ts.net:11434"
+model_capabilities:
+  "ollama:qwen2-vl":
+    supports_image: true
+    supports_pdf: false
 ```
 
-If the server is not running, discovery reports it as unreachable rather than
-listing anything; the failure is cached briefly, so an offline local server does
-not slow down every request. For a local backend that serves no model-listing
-endpoint, declare the ids with `models:` as shown above.
-
-A bare entry naming a provider that *does* need a key (`openai:` with nothing
-beneath it) loads too, but Otari logs a warning at startup when no credential is
-configured for it and its environment variable is unset, since that shape is
-usually a truncated edit rather than an intentionally keyless instance.
+File handling uses these values to decide whether to pass an attachment through
+or normalize it for a text-only model. See [Files](files.md).
 
 ## Model aliases
 
-An alias is a display name that maps to a real selector, so you can expose a
-friendly, stable model name and keep the underlying provider/model hidden.
-Aliases are configured in a top-level `aliases` map (display name to target):
-
-> An alias is the one-target case of a [routing policy](routing.md). Everything
-> below still applies; reach for a policy when you want failover, a
-> budget-based tier-down, or a guardrail the caller cannot skip.
+An alias gives callers a stable name for one real selector:
 
 ```yaml
 aliases:
-  myopusmodel: anthropic:claude-opus-4
-  fastmodel: openai:gpt-5
-  housemodel: home_lab:qwen3     # target may be a named instance
+  fast: openai:gpt-5-mini
+  local: home_lab:qwen3-32b
 ```
 
-A request whose `model` is an alias routes to its target. The alias is what
-callers see:
+Callers send the alias in `model`. Completion responses keep the alias while
+pricing, budgets, and usage use the resolved target. Configure the target's
+price, not a price under the alias.
 
-- `GET /v1/models` lists the alias id (and `GET /v1/models/{alias}` resolves it),
-  with pricing read from the target so the real price shows without revealing the
-  model. Aliased entries report `owned_by: otari`.
-- The response `model` field (streaming and non-streaming) is relabeled to the
-  alias, so the underlying model name never appears on the wire.
+Aliases are useful for a curated catalog. A routing policy is the broader form
+when a name needs conditions, failover, weighting, learned selection, or
+mandatory guardrails. See [Routing](routing.md).
 
-Alias routing is applied wherever a model selector is resolved, so an alias is
-accepted on every model-taking endpoint. The response `model` field is relabeled
-on `/v1/chat/completions`, `/v1/messages`, `/v1/responses`, `/v1/embeddings`,
-`/v1/moderations`, and `/v1/rerank`. Other surfaces (`/v1/images`,
-`/v1/audio/*`, `/v1/batches`) route aliases but return the provider payload as-is;
-those payloads carry no `model` field today, so nothing leaks, but a provider that
-started returning one would echo the target rather than the alias.
+Alias names cannot contain `:` or `/`, collide with provider instances, or
+point to another alias.
 
-Pricing, budgets, and usage logs key on the resolved target, not the alias:
-configure pricing once for `anthropic:claude-opus-4` and every alias pointing at
-it inherits that price. An alias with no pricing on its target fails closed under
-`require_pricing`, exactly as the real model would.
+### Runtime aliases
 
-To expose only your curated alias names, set `model_discovery: false` so the full
-provider catalog is not listed; the listing then shows just the aliases, plus any
-models you priced explicitly that no alias points at. Pricing an alias target does
-not republish it: the alias entry already carries that price, so pricing a target
-never puts the hidden name back in the listing. Whether real models are listed is
-governed by `model_discovery` alone. With discovery on, aliases appear alongside
-the discovered models, including any target you aliased.
+Standalone operators can manage aliases from Routing or `/v1/aliases` without
+restarting. A stored alias belongs to a workspace and can optionally be narrowed
+to one user. Resolution prefers the most specific applicable alias.
 
-A [routing policy](routing.md) does **not** withhold its targets, which is where it
-parts company with an alias. The policy name is listed as its own entry, and every
-selector it can reach stays in the catalog as itself. Withholding them was tried
-and reverted: a policy can name up to five selectors (its head plus an `on_failure`
-chain), so one failover policy could empty most of a catalog, and a candidate
-priced by the [genai-prices fallback](configuration.md) then disappeared from the
-dashboard together with its rate. `GET /v1/models/{key}` never withheld them
-either, so nothing was really being kept off the wire.
+The authenticating API key determines the workspace. A user-scoped alias applies
+to all of that user's keys in the workspace. Config-file aliases are
+deployment-wide and apply in every workspace.
 
-If you do want a model reachable only under a curated name, that is what an alias
-is for. Use `otari routing explain` or the dashboard's Routing page to see which
-policy sends traffic where.
+Use the generated OpenAPI specification for management request shapes and
+scoping parameters.
 
-Constraints, checked at startup: a target must be of the form `instance:model` or
-`provider:model` whose prefix is a configured instance or a known provider; an
-alias name must not contain `:` or `/` (a selector-shaped name would silently
-reroute requests for the real model) and must not collide with a provider
-instance name; and an alias target must not be another alias (no chaining).
+## Routing-policy model names
 
-Like named instances, aliases are a standalone-mode feature. In hybrid mode model
-resolution and routing are owned by the otari.ai platform, so the local `aliases`
-map does not apply.
+A static one-target policy resolves anywhere an alias does. A conditional,
+weighted, or learned policy applies only to Chat Completions, Messages, and
+Responses because other endpoints do not provide the request context needed to
+choose a candidate.
 
-### Runtime aliases, and scoping one to a user or a workspace
-
-Aliases can also be created without a restart, through `/v1/aliases` (master key
-only) or the dashboard's Routing page, which lists and manages aliases alongside
-[routing policies](routing.md). A runtime alias means the same thing to a
-request as a configured one; it is stored in the database rather than in
-`config.yml`, and the listing tells you which is which (`source: config` or
-`source: stored`).
-
-A runtime alias has two independent scopes. It belongs to one **workspace**, and
-within that workspace it applies to every caller unless you give it a `user_id`,
-which narrows it to that user alone. Omitting `workspace_id` means the
-deployment's default workspace, so a single-workspace deployment never names one:
-
-```bash
-# Workspace-wide: everyone in the default workspace resolves "fast" to gpt-5-mini.
-curl -X POST http://localhost:8000/v1/aliases \
-  -H "Authorization: Bearer <master-key>" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "fast", "target": "openai:gpt-5-mini"}'
-
-# Scoped to a user: alice alone resolves "fast" to a local model instead.
-curl -X POST http://localhost:8000/v1/aliases \
-  -H "Authorization: Bearer <master-key>" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "fast", "target": "home_lab:qwen3", "user_id": "alice"}'
-
-# Scoped to a workspace: the platform team resolves "fast" to their own target,
-# and nobody outside that workspace sees it.
-curl -X POST http://localhost:8000/v1/aliases \
-  -H "Authorization: Bearer <master-key>" \
-  -H "Content-Type: application/json" \
-  -d '{"name": "fast", "target": "openai:gpt-5", "workspace_id": "<workspace-id>"}'
-```
-
-Scoping is what lets one stable model name mean different things to different
-callers: point a team at a cheaper model, pin one user to a specific version, or
-migrate people onto a new target a few at a time, all without any caller changing
-the `model` they send.
-
-The rules that follow from it:
-
-- Which workspace a request resolves in comes off the API key that authenticated
-  it, never off a header: a caller controls its headers and not which key it
-  holds. A master-key request resolves in the default workspace, which is where
-  its own writes land.
-- A `config.yml` alias has no workspace. It comes from a file the deployment owns,
-  so it is in force in every one of them and is listed unscoped.
-- Resolution is most-specific-first: a user's own alias wins over a `config.yml`
-  alias, which wins over the workspace-wide stored one. So a user-scoped alias may
-  override a configured name (that is a working override), while a
-  *workspace-wide* stored alias may not (config would win, and the stored one
-  would silently never be used, so the API refuses it with a 400).
-- A name plus both scopes is the identity. Creating `fast` for `alice` leaves the
-  workspace-wide `fast` alone, two workspaces can each hold their own `fast`, and
-  deleting any of them leaves the others in place. Deletes take the scope as query
-  parameters: `DELETE /v1/aliases/fast?user_id=alice&workspace_id=<id>`, omitting
-  either for the workspace-wide alias and the default workspace respectively.
-- `GET /v1/models` is scoped the same way, so a caller sees their workspace's
-  aliases and the configured ones plus their own, never another user's and never
-  another workspace's. `GET /v1/aliases` is the master-key management view and
-  lists every scope at once, narrowable with `?workspace_id=<id>`.
-- Target-hiding follows the scope. A workspace-wide alias hides its target from
-  every listing in that workspace; a user-scoped one hides it from that user's
-  listing only, so another caller may still see the real model (subject to their
-  own model access). If you are using aliases to curate one catalog for everybody
-  in a workspace, keep those aliases workspace-wide.
-- That rule inverts when a user-scoped alias overrides a **`config.yml`** name.
-  The override replaces the configured entry for that user, so the configured
-  target is no longer among the names being withheld and it reappears in that
-  user's catalog. Overriding `myopusmodel` for one user therefore un-hides
-  whatever `myopusmodel` pointed at, for that user only, and still subject to
-  their model access. It takes a master key to arrange, so it is not a leak, but
-  it is the opposite of what the previous bullet leads you to expect.
-- Listing and dispatch scope on different things for a master-key caller.
-  `GET /v1/models` scopes on the API key's user, while a request scopes on the
-  billed user. For any ordinary key those are the same. For the master key they
-  are not: a chat request with `"user": "alice"` resolves alice's scoped aliases,
-  but `GET /v1/models` with the master key shows none of them, because the master
-  key has no user of its own. That is the exact sequence for checking a scoped
-  alias after creating it, so verify it with the user's own key, or by sending a
-  request, rather than by reading the master-key listing.
-- `user_id` must name a live user. An unknown id is a 404, and so is a deleted
-  one: a deleted user cannot authenticate, so the alias would never resolve.
-- Pricing still keys on the resolved target, so a scoped alias inherits its own
-  target's price. And `POST /v1/pricing` rejects any name that is an alias to
-  anyone, scoped or not: such a row could never be read.
-
-Scoping is per user, not per API key. A key inherits its user's aliases, so
-several keys belonging to one user resolve the same names.
+Policies appear as model names, but dynamic policies have no single price.
+Price their concrete candidates. Unlike aliases, policies do not hide candidate
+models from the catalog.
 
 ## Listing available models
 
-Query Otari to see which models are available:
-
 ```bash
 curl http://localhost:8000/v1/models \
-  -H "Authorization: Bearer <your-api-key>"
+  -H "Authorization: Bearer $OTARI_API_KEY"
 ```
 
-## Provider-specific notes
+## HuggingFace provider routing
 
-### Pinning a HuggingFace inference backend
-
-HuggingFace Inference Providers is a router: the same model id (for example
-`zai-org/GLM-4.6`) can be served by several backends (Together, Novita, and
-others), and in the default "auto" mode the backend, and therefore the price,
-is chosen at request time. To route (and price) deterministically, pin a
-backend with a `:<backend>` suffix on the model id, which the HuggingFace
-router honors server side:
+A HuggingFace model may be served by several inference providers. Pin the backend
+when deterministic routing and pricing matter:
 
 ```text
 huggingface:zai-org/GLM-4.6:together
 huggingface:zai-org/GLM-4.6:novita
 ```
 
-The pinned-selector grammar is `huggingface:<model>:<backend>`. Otari splits
-the provider off the first `:`, so everything after it (`<model>:<backend>`) is
-forwarded as the model id and the `:<backend>` suffix reaches the router
-unchanged. The router also accepts policy suffixes such as `:cheapest`,
-`:fastest`, `:preferred`, and `:auto`.
-
-This grammar is the contract consumers build against. The otari.ai platform's
-pricing UI, for instance, offers each priceable backend as a pinned
-`huggingface:<model>:<backend>` selector, because a pinned selector resolves to
-a single backend, which is what makes a HuggingFace model priceable (auto mode
-cannot be priced from the model id alone).
+Otari splits only the first colon, so the backend suffix reaches HuggingFace
+unchanged. Auto, cheapest, or fastest routing cannot be assigned one reliable
+backend price; configure pinned selectors when enforcing budgets.

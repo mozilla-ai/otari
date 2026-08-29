@@ -14,7 +14,7 @@ For real-time conversation, join the
 ## Documentation
 
 Most setup and configuration questions are answered in the docs. Start with the
-[Quickstart](docs/quickstart.md), then [Configuration](config.example.yml) and
+[Quickstart](docs/quickstart.md), then [Configuration](docs/configuration.md) and
 the [API reference](docs/api-reference.md).
 
 ## Bugs and feature requests

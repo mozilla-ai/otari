@@ -10,7 +10,7 @@ The gateway is an async FastAPI service: request handlers in `api/routes/`, busi
 `alembic/versions/`. This guide is the backend counterpart to the frontend skill and to the
 path-scoped review instructions in
 `.github/instructions/` (performance and security). `AGENTS.md` is the source of truth for
-build/test/lint commands and the two-mode architecture; read it first. This file captures the
+build/test/lint commands and runtime modes; read it first. This file captures the
 conventions that keep new backend code correct and consistent.
 
 ## Async SQLAlchemy 2.0: the house style
@@ -81,7 +81,7 @@ cannot attach to more than one table, so a shared mixin passes `sa_type` plus
 ## The budget / reservation lifecycle is load-bearing
 
 Billable routes hold money-adjacent state. The invariant (detailed in
-[../../instructions/security-review.instructions.md](../../instructions/security-review.instructions.md#0-budget-billing--tenant-isolation-otari-specific--read-first))
+[../../instructions/security-review.instructions.md](../../instructions/security-review.instructions.md#budget-billing-and-tenant-isolation))
 is: **reserve before the provider call, then reconcile on success or refund on every error
 path**, including provider errors, tool-iteration caps, unreachable sandbox/web-search,
 generic `except`, and `except HTTPException`, plus streaming completion and client disconnect.
@@ -91,8 +91,8 @@ A reservation that never settles leaks and permanently shrinks the user's budget
   client-supplied `user` field.
 - Enforce budgets atomically (the reservation is a single conditional `UPDATE`), not
   check-then-act. Use `is None` for "absent" vs a legitimate `0` (falsy-zero traps).
-- New billable logic must be correct in **both** standalone and hybrid mode, verify which
-  branch (`db is not None`) it belongs in.
+- New billable logic must be correct in every applicable runtime mode. Verify whether it
+  belongs in the local control-plane branch (`db is not None`), the data plane, or both.
 
 ## Migrations (Alembic)
 

@@ -943,8 +943,8 @@ class RoutingMemory(Base):
 
     Vectors are stored as a JSON list of floats for SQLite/PostgreSQL
     portability and scanned linearly in Python. That holds into the low thousands
-    of records per user (the ``router_max_records_per_user`` cap); pgvector or an
-    ANN index is the documented next step past that (`docs/routing-scaling.md`).
+    of records per user (the ``router_max_records_per_user`` cap); larger pools
+    need an indexed vector store.
     ``embedding_model`` tags each row so changing the embedding model invalidates
     stale vectors instead of mixing incomparable spaces.
 

@@ -1,16 +1,12 @@
 # Otari admin dashboard
 
-A React + [HeroUI v3](https://www.heroui.com) single-page app for the Otari
-gateway's standalone admin panel: browse the model catalog, set model pricing,
-manage aliases, and toggle runtime settings (model discovery and default
-pricing). It talks to the gateway's management API (`/v1/models`, `/v1/pricing`,
-`/v1/aliases`, `/v1/settings`) on a session. The operator signs in on the
-sign-in screen with whichever credential the deployment currently accepts, the
-master key until it is claimed and an email and password after, and the gateway
-answers with an HttpOnly cookie. The credential is never written to browser
-storage: it lives in the form's React state until the request is sent and is
-gone on reload. The cookie that replaces it does persist, and the page's own
-script cannot read it.
+A React + [HeroUI v3](https://www.heroui.com) single-page app for Otari. It
+renders the standalone or hosted management dashboard and the hybrid gateway
+landing page from the deployment contract returned by `/v1/bootstrap`.
+
+Local sign-in exchanges the deployment's current credential for an HttpOnly
+session cookie. The credential is not written to browser storage, and page
+scripts cannot read the cookie.
 
 ## Stack
 

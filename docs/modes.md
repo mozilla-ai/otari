@@ -1,272 +1,96 @@
-# Modes
+# Runtime modes
 
-Otari operates in two modes: **standalone** and **connected to otari.ai**
-(`hybrid mode`). Standalone has a multi-tenant variant, **hosted**, described
-below: same database, same API, a dashboard scoped to organizations rather than
-to the process.
-
-## Standalone
-
-This is the default. Otari manages everything locally:
-
-- **Database**: stores API keys, users, budgets, usage logs (SQLite or PostgreSQL).
-- **Provider credentials**: configured in `config.yml` or via environment variables.
-- **API key management**: create and manage keys through `/v1/keys`.
-- **User and budget controls**: manage users and spending limits through `/v1/users` and `/v1/budgets`.
-- **Usage tracking**: all requests are logged locally and queryable through `/v1/usage`.
-
-All endpoints are available. On first startup, Otari bootstraps an API key and logs it to the console.
-
-## Hosted (standalone, serving many organizations)
-
-Set `OTARI_MODE=hosted` when one Otari deployment is the control plane for
-several organizations rather than one operator's own gateway. Everything in
-standalone applies except the data plane: the deployment owns its database,
-serves the whole management API, and signs operators in itself. A platform token
-is refused here for the same reason it is refused in standalone, since a
-deployment holding its own management API is not also a data plane reporting to
-somebody else's.
-
-Two things change. The first is the data plane, described next; the second is
-the dashboard.
-
-### Hosted mode serves no inference
-
-A control plane runs no customer traffic. `/v1/chat/completions`,
-`/v1/messages`, `/v1/responses`, `/v1/embeddings`, `/v1/images`, `/v1/audio`,
-`/v1/rerank`, `/v1/moderations`, `/v1/search`, `/v1/batches` and `/v1/files` are
-not served here. The routers that would run them are not mounted at all, and a
-stub stands in their place so the answer explains itself: every one of those
-paths returns `404` with a body naming the reason, rather than the bare `404` an
-unmounted path would otherwise give. Set `data_plane_url` and that body names the
-address to use as well, the same one `GET /v1/bootstrap` hands the dashboard;
-leave it unset and the refusal says to use your Otari gateway without naming
-which.
-
-The reason is billing. Inference belongs on a data-plane gateway in hybrid mode,
-which resolves this control plane's credentials per request and reports the
-usage back, and that report is what debits the organization's wallet. A request
-served on the control plane itself would skip the report and so run unbilled,
-which is what the gateway used to do before otari#822.
-
-The refusal covers the reads and the deletes, not only the calls that dispatch.
-A control plane that was serving this traffic before the gate went in keeps the
-files and batches it already stored, and loses the API to them: nothing is
-deleted, but the rows outlive the refusal and a data-plane gateway is where they
-belong.
-
-Standalone is unaffected: a single-tenant deployment is its own control plane
-and its own data plane, bills nobody, and keeps serving both from one process.
-Discovery is unaffected too, so `/v1/models` still answers on a control plane.
-
-### The dashboard shows per-organization credentials
-
-Provider credentials in
-`config.yml` and under `/v1/provider-credentials` are keyed on the instance name
-alone, so one added there is served to every organization on the deployment. The
-`Providers` page that manages them is right for a single-tenant deployment and
-misleading on a shared one, so hosted mode hides it and shows the
-organization-scoped credentials at `Organization > Providers` instead
-(`/v1/organizations/me/provider-keys`): a key created there belongs to one
-organization, and every workspace inside it inherits it.
-
-Hiding the page does not disable the deployment-wide credentials. `config.yml`
-and the API still populate them, and they are still resolved on the request
-path; hosted mode only stops offering them a dashboard.
-
-### Where inference goes
-
-A hosted deployment is a control plane. Customer inference belongs on the
-data-plane gateway that resolves credentials through it and reports usage back,
-not on the host serving this dashboard. Set `data_plane_url` (or
-`OTARI_DATA_PLANE_URL`) to that gateway's base URL so the dashboard's request
-snippets, on the Keys page and in the setup guide, name it rather than the
-address the browser happens to have reached. With none set the snippets are
-withheld and the panel says why; see
-[The data-plane address](configuration.md#the-data-plane-address).
-
-Standalone and hybrid deployments need none of this: each serves its own API at
-its own address, so the browser's origin is already right and the setting is
-ignored.
-
-### What hosted mode does not do
-
-Refusing inference is not tenant isolation, and today the gateway's own
-management API is not tenant-scoped. Any valid dashboard session authenticates
-a master-key-gated route: `POST /v1/auth/session` issues the cookie, and
-`verify_master_key` accepts that cookie from whoever holds it, checking only
-that the session is unexpired and its identity active. So on a deployment with
-several organizations, any signed-in member can read and write `/v1/keys`,
-`/v1/provider-credentials`, `/v1/settings` (master-key rotation included),
-`/v1/pricing`, `/v1/routing` and `/v1/maintenance-mode`, whichever organization
-they belong to. Only `/v1/admin` adds a second gate. `/v1/keys` is the sharpest
-of them: the mint validates its `workspace_id` for existence and not for
-ownership, so a member of one organization can put a key in another's
-workspace, billed to that organization.
-
-That is fine for the single-tenant deployment this base build is written for,
-and it is why hosted mode changes the surface set and the data plane but not
-the authority model. Do not read it as isolation between tenants. Closing the
-gap is tracked in
-[mozilla-ai/otari-ai#1880](https://github.com/mozilla-ai/otari-ai/issues/1880),
-which scopes the fix to this repository: gating the deployment-wide routers on
-the caller's real authority, and scoping every `/v1/keys` load and the mint's
-`workspace_id` to the caller's organization. Until that lands, treat everyone
-who can sign in to a hosted deployment as an operator of the whole thing.
-
-## Connected to otari.ai (Hybrid Mode)
-
-When connected to [otari.ai](https://otari.ai), Otari delegates provider routing, authentication, and usage tracking to the platform.
-
-This mode activates automatically when `OTARI_AI_TOKEN` is set. You can also set
-`OTARI_MODE` explicitly to assert the intended mode: `OTARI_MODE=hybrid` requires
-a token (startup fails without one), and `OTARI_MODE=standalone` or
-`OTARI_MODE=hosted` with a token set is rejected at startup as conflicting
-configuration (the token would otherwise select hybrid). Leave `OTARI_MODE` unset
-to let the token decide.
-
-`OTARI_AI_TOKEN` is the gateway token (`gw_...`) you create in otari.ai for
-this Otari instance. In otari.ai, go to `Organization > Gateways`, create or
-open a gateway, then click `Create token`. It is not the per-request user token
-(`tk_...`) that clients send in `Authorization: Bearer ...`.
-
-Note the prefix: the platform gateway token uses an underscore (`gw_...`),
-whereas a locally issued Otari API key (standalone mode) uses a hyphen
-(`gw-...`). They are different credential types that differ by one character,
-so take care not to confuse them.
-
-A connected gateway publishes where its control plane lives, at
-`GET /v1/bootstrap`, so the dashboard can link an operator to it. That is
-[otari.ai](https://otari.ai) by default; set `PLATFORM_MANAGEMENT_URL` (or
-`platform.management_url` in the config file) to point at a different one, for
-example a staging platform. It must be an absolute `http(s)` URL, and the
-gateway refuses to start if it is not. This is a link target, never a credential.
-
-### What otari.ai handles
-
-- **Provider routing**: otari.ai resolves which provider and credentials to use for each request, including multi-provider fallback.
-- **Authentication**: requests are authenticated via bearer tokens issued by the platform.
-- **Usage reporting**: Otari reports token usage back to otari.ai after each request.
-- **MCP server resolution**: workspace-scoped MCP servers are resolved through the platform.
-
-### What changes on your Otari instance
-
-- No local database is used for keys, users, budgets, or usage logs.
-- The `providers` block in `config.yml` must be empty (or absent).
-- Only these routes are exposed: `/health`, `/health/liveness`, `/health/readiness`, `/v1/chat/completions`, `/v1/messages`, `/v1/messages/count_tokens`, and `/v1/responses`.
-- Chat requests use `Authorization: Bearer <otari-user-token>`.
-- The `/health` endpoint includes platform reachability status.
-
-### Setup
-
-```bash
-export OTARI_AI_TOKEN=gw_your_token_here
-```
-
-See [Deployment](deployment.md) for the full Docker setup.
-
-## Managed models vs. your own keys
-
-In hybrid mode, a request can use either your own provider key or a
-mozilla.ai-managed model. The practical differences are: whose credential is
-used, who pays, what the model string looks like, and whether the request can
-run through a self-hosted gateway.
-
-| Option | Credential source | Billing | Model string | Works on a self-hosted gateway? |
-|---|---|---|---|---|
-| Your own keys (BYO) | Your provider key stored in otari.ai | The upstream provider bills you directly | `provider/model` (or `provider:model`) | Yes |
-| Managed models | mozilla.ai-managed upstream key | Your otari.ai wallet | `mzai:...` | No |
-
-### Your own keys (BYO)
-
-Store a provider API key in otari.ai and assign it to a workspace. When a
-request arrives, otari.ai returns that workspace key to your Otari instance,
-which then calls the provider directly.
-
-- The upstream provider bills you directly.
-- This works through any Otari gateway, including one you self-host.
-- Use model strings like `openai/gpt-4o` or `anthropic/claude-sonnet-4-6`.
-- The `provider:model` form also works. See [Use with Claude Code](use-with-claude-code.md) for the model-string conventions per mode.
-
-### Managed models
-
-Managed models use mozilla.ai-managed upstream credentials. You never supply or
-see the provider key yourself.
-
-- Usage is billed to your otari.ai wallet.
-- Use the `mzai:` prefix, for example `mzai:moonshotai/Kimi-K2.6`.
-- These models are available only through the gateway that mozilla.ai operates as part of otari.ai.
-- They are not served to a gateway you self-host, because that would expose mozilla.ai-managed upstream credentials outside infrastructure mozilla.ai controls.
-
-If a self-hosted instance requests a managed model, otari.ai returns
-`403 ManagedKeyRequiresDefaultGatewayError`. To use managed models, send the
-request through otari.ai's hosted gateway instead.
+Otari has three deployment modes. Standalone serves both the control plane and
+data plane. Hosted serves only a multi-tenant control plane. Hybrid serves a data
+plane connected to an external control plane such as otari.ai.
 
 ## Comparison
 
-Hosted differs from standalone in the two places described above, the
-dashboard's provider page and the data plane it does not serve. Every other row
-of the standalone column describes it too; on `Available API routes`, read that
-column as its management half. The second column is the hybrid gateway, which is
-a different deployment again and never describes hosted mode.
+| | Standalone | Hosted | Hybrid |
+| --- | --- | --- | --- |
+| Local database | Yes | Yes | No |
+| Local management API | Yes | Yes | No |
+| Local inference | Yes | No | Yes |
+| Provider credentials | Local config or database | Organization-scoped for tenants; deployment config is operator-only | Resolved per request from the platform |
+| Usage | Stored locally | Received and stored by the control plane | Reported to the platform |
+| Dashboard | Full local dashboard | Organization-scoped control plane | Health and control-plane link |
 
-| | Standalone | Connected to otari.ai |
-|---|---|---|
-| Database | Local (SQLite/PostgreSQL) | None |
-| Provider credentials | In config or env vars | Your keys in the otari.ai vault, or mozilla.ai-managed models |
-| API key management | `/v1/keys` endpoints | Through otari.ai |
-| User/budget management | `/v1/users`, `/v1/budgets` | Through otari.ai |
-| Organizations and workspaces | `/v1/organizations`, `/v1/workspaces` | Through otari.ai |
-| Usage tracking | Local database | Reported to otari.ai |
-| Multi-provider fallback | No | Yes |
-| Available API routes | Full Otari API surface | Health, deployment bootstrap, chat completions, messages, and responses |
-| What `/` serves | The admin dashboard | A landing page: gateway health, otari.ai connection, the client base URL, and a link to otari.ai, which is where the gateway is managed |
+`GET /v1/bootstrap` publishes the effective mode, sign-in methods, available
+management surfaces, and the management or data-plane URL the dashboard needs.
 
-## How Otari talks to otari.ai
+## Standalone
 
-When connected, Otari communicates with otari.ai through four internal endpoints:
+Standalone is the default when neither `OTARI_MODE` nor `OTARI_AI_TOKEN` is
+set. It serves the full API, stores keys, budgets, and usage locally, and resolves
+providers from configuration or stored credentials.
 
-### Provider resolution
+SQLite is useful for evaluation. Use PostgreSQL for a durable deployment.
 
-Before each LLM request, Otari asks otari.ai which provider and credentials to use:
+Standalone supports local aliases and routing policies, including failover,
+weighted routing, conditional selection, and learned routing. Multi-provider
+fallback is therefore available without otari.ai when you configure a policy.
 
-```
-POST {base_url}/gateway/provider-keys/resolve
-```
+## Hosted
 
-The platform returns an ordered list of attempts (provider, model, credentials). Otari tries them in order; if one fails with a retryable error, it moves to the next.
+Set `OTARI_MODE=hosted` when one process is the control plane for multiple
+organizations.
 
-### Usage reporting
+Hosted mode serves the management API and `GET /v1/models`, but does not serve
+inference, files, batches, or other data-plane operations. Those paths return a
+descriptive `404`. Set `data_plane_url` so the error and dashboard snippets
+point clients to the correct gateway.
 
-After each attempt (success or failure), Otari reports usage:
+The dashboard hides deployment-wide provider management and exposes
+organization-scoped provider keys instead. Deployment-wide APIs still require
+operator authority; organization-scoped APIs apply membership and role checks.
 
-```
-POST {base_url}/gateway/usage
-```
+A hosted control plane and its hybrid gateways form one system: the gateway
+resolves credentials from the control plane and reports usage back so the
+control plane can debit the correct tenant.
 
-Reports include token counts, status, and error information. For priced successful
-requests, the gateway attaches the platform-settled cost to the caller response
-usage object. See the [hybrid-mode protocol](hybrid-mode-protocol.md#inline-response-fields)
-for field placement and compatibility details.
+## Hybrid, connected to otari.ai
 
-### MCP server resolution
+Hybrid mode is selected when `OTARI_AI_TOKEN` is present. Set
+`OTARI_MODE=hybrid` as well if you want startup to require that mode. Conflicting
+configurations fail at startup:
 
-When a request includes MCP server references, Otari resolves them:
+- `hybrid` without a platform token
+- `standalone` or `hosted` with a platform token
 
-```
-POST {base_url}/gateway/mcp-servers/resolve
-```
+The token is the gateway credential created in otari.ai, commonly prefixed
+`gw_`. It is not the user token sent by clients.
 
-The platform returns server configurations (URL, auth token, allowed tools).
-
-### Web search resolution
-
-When a request enables Otari's built-in web search, Otari resolves the workspace's search policy:
-
-```
-POST {base_url}/gateway/web-search/resolve
+```bash
+export OTARI_AI_TOKEN=gw_your_gateway_token
+otari serve
 ```
 
-The platform returns whether search is enabled and its configuration (provider, result limits, domain filters).
+Hybrid serves health, bootstrap, Chat Completions, Messages, and Responses. It
+does not initialize the local management database or use local provider
+configuration. Clients authenticate with an otari.ai user token in
+`Authorization: Bearer <token>`.
 
-For the full wire-level protocol specification, see [hybrid-mode-protocol.md](hybrid-mode-protocol.md).
+The gateway asks the platform to resolve an ordered set of provider attempts,
+tries retryable fallbacks before a response begins, and reports each outcome.
+Workspace MCP and web-search configuration are resolved through the same control
+plane.
+
+## Managed models and BYO credentials
+
+Hybrid mode can receive two kinds of provider credential:
+
+- A workspace's own provider key. The upstream provider bills that workspace,
+  and the key may be used through a self-hosted gateway.
+- A mozilla.ai-managed credential. Usage is billed through otari.ai and the
+  credential is returned only to the gateway operated by mozilla.ai.
+
+Managed model identifiers use the catalog values published by otari.ai. A
+self-hosted gateway that requests a managed credential is refused; this prevents
+platform-owned secrets from leaving managed infrastructure.
+
+## Internal protocol
+
+The gateway and control plane exchange provider resolution, MCP configuration,
+web-search policy, and usage reports. Integrators building a compatible control
+plane should use the normative [hybrid-mode protocol](hybrid-mode-protocol.md)
+rather than this overview.

@@ -2,246 +2,118 @@
 applyTo: "src/gateway/api/**/*.py,src/gateway/auth/**/*.py,src/gateway/services/**/*.py,src/gateway/core/config.py,src/gateway/models/**/*.py,src/gateway/streaming.py,alembic/versions/**/*.py"
 ---
 
-# Security Review Instructions
+# Security review instructions
 
-How to review otari for security regressions. otari is a self-hosted, OpenAI-compatible
-**LLM gateway**: it authenticates callers, enforces per-user budgets, meters spend, and
-proxies requests to upstream providers (via `any_llm`). Its highest-value security
-properties are **tenant isolation** and **budget/billing integrity** — most of this file
-is about those, because that is where this project's real incidents have been.
+Review the enclosing request or transaction, not only the changed lines.
+Otari's highest-risk failures are cross-tenant access, credential exposure, and
+usage that bypasses billing or leaves budget reservations stuck.
 
-**Applies to paths**:
-- `src/gateway/api/routes/**` — request handlers (the billable + admin surface)
-- `src/gateway/api/deps.py`, `src/gateway/auth/**` — authentication
-- `src/gateway/services/**` — budget, pricing, metering, log writing, tool/sandbox backends
-- `src/gateway/core/config.py` — configuration and security defaults
-- `src/gateway/models/**`, `alembic/**` — schema and migrations (`entities.py` for the gateway's
-  own tables, `tenancy.py` for the reconciled control plane's organizations, workspaces,
-  identities, and memberships, which carry the tenant boundary)
-- `src/gateway/streaming.py` — streaming/SSE billing hooks
+## Budget, billing, and tenant isolation
 
-When reviewing a PR, read the diff **and** the enclosing functions — a touched billable
-route that fails to settle a budget reservation on one error path is a real finding even
-if the changed lines look fine.
+### Bind identity to authentication
 
----
+The OpenAI `user` field is an untrusted provider tag. A non-master request is
+always billed to the API key's user and workspace. Lenient mismatch handling may
+forward a different tag, but it never changes attribution.
 
-## 0. Budget, billing & tenant isolation (otari-specific — read first)
+Every object lookup must include the tenant predicate. A row outside the
+caller's organization or workspace returns 404 so its ID is not disclosed.
 
-This gateway holds money-adjacent state (per-user `spend`, `budget`, `reserved`) and
-serves multiple tenants behind one deployment. The following are the classes of bug that
-have actually shipped here; treat any new code on a billable path against this list.
+### Choose the correct authority
 
-### 0.1 Never trust a client-supplied identifier for authz or billing — CWE-639 (IDOR)
-The OpenAI-compatible `user` field is **client-controlled** and is an end-user *tag*, not
-an identity. Spend and budget must bind to the **authenticated principal**, never to a
-value from the request body.
+Management routes use one of two authorization shapes:
 
-- ✅ **Check**: a non-master API key resolves to its own user only. `resolve_user_id`
-  (`api/routes/_helpers.py`) is the single chokepoint — a non-master key naming a
-  *different* `user` must be rejected (or bound to the key's own user when leniency
-  is in effect, either from the key's own `reject_user_mismatch` override or the
-  deployment-wide setting), **never** charged to the named user.
-- ✅ **Check**: only the **master key** may act on behalf of an arbitrary `user`.
-- ✅ **Check**: every billable route resolves identity through `resolve_user_id` — no route
-  reads `request.user` (or `metadata.user_id`) directly to attribute spend.
-- ✅ **Check**: list/read/delete endpoints scope to the caller's own resources; a user key
-  cannot read or mutate another user's keys, budget, usage, or spend.
-- **Severity**: Critical
+- Deployment-wide routes declare `require_deployment_operator`.
+- Tenant routes authenticate with `verify_master_key`, resolve the current
+  identity, and authorize it against the organization or workspace in the
+  service layer.
 
-### 0.1b A management route says which of two authorities it needs — CWE-285
-`verify_master_key` answers *authenticated*, not *authorized*: a dashboard session cookie
-clears it for any active identity, so it grants master-key authority to every signed-in
-member of every organization. That is only safe on a router that re-checks the caller
-afterwards. otari-ai#1880 is what happens when one does not: an ordinary member minted a
-key into another organization's workspace (billing that organization, on its BYO
-credential), listed every key on the deployment, and could rotate the deployment master
-key.
+Data-plane routes use `verify_api_key_or_master_key`. They never accept a
+dashboard cookie, including a superuser session, because cookie authentication
+has no API key row from which to resolve billing and provider credentials.
+Read-only catalog routes use `verify_catalog_reader`.
 
-- ✅ **Check**: a **deployment-wide** route (one whose handler takes no caller identity and
-  scopes to no organization or workspace) declares `require_deployment_operator`
-  (`api/deps.py`), not `verify_master_key` alone. That covers `/v1/keys`, `/v1/users`,
-  `/v1/settings`, `/v1/provider-credentials`, `/v1/search-tools`, `/v1/budgets`,
-  `/v1/usage`, `/v1/aliases`, `/v1/routing/*`, `/v1/tool-settings`, and the rest of the
-  operator plane.
-- ✅ **Check**: a **tenant-scoped** route keeps `verify_master_key` as its authentication
-  gate and resolves `CurrentIdentity`, then asks a service whether that identity may act
-  on the organization or workspace named (`services/tenancy/authorization.py`,
-  `OrganizationService.require_active_organization_management_access`). Applying the
-  operator gate to one of these is also a bug: it locks members out of their own tenant.
-- ✅ **Check**: a row reached by an id from the path is loaded **with** the tenant
-  predicate, not loaded by id and checked afterwards, and a row outside the caller's
-  tenant answers **404**, not 403, so the id is not confirmed to exist.
-- ✅ **Check**: the **data plane** takes neither. A route that calls a provider or writes
-  a usage row uses `verify_api_key_or_master_key`, which does not consult the cookie at
-  all: `is_master_key` resolves credentials and billing through the deployment's *default*
-  workspace, so a session accepted there spends another tenant's credential. Not an
-  authority question, so `require_deployment_operator` is the wrong fix; a superuser
-  session is refused too. Only the catalog reads (`verify_catalog_reader`) admit a cookie.
-- **Severity**: Critical
+Using the operator gate on a tenant route is also wrong; it prevents members
+from managing resources their role permits.
 
-### 0.2 Enforce budgets atomically — no check-then-act (CWE-367 TOCTOU)
-Budget caps must hold under concurrency. The fixed-and-correct pattern is **atomic
-pre-debit reservation**, not "check the budget, call the provider, write spend later."
+### Preserve the reservation lifecycle
 
-- ✅ **Check**: budget is enforced via `reserve_budget` (`services/budget_service.py`),
-  which holds an estimate in `users.reserved` with a single conditional `UPDATE`
-  (`spend + reserved + estimate <= max_budget`). A "read spend → if ok → proceed → add
-  cost afterwards" shape is a TOCTOU bug — concurrent requests all pass the stale check.
-- ✅ **Check**: a budget row lock (`FOR UPDATE`) is **not** released before the spend it
-  guards is committed. Don't `validate(...)` then `db.rollback()` then call the provider.
-- ✅ **Check**: budget resets on the request path are atomic (CAS), since the reservation
-  path holds no row lock — a read-modify-write reset races at the reset boundary.
-- **Severity**: High
+Budgeted request paths use `reserve_budget` before dispatch and then exactly
+one of:
 
-### 0.3 Reservations must always settle — reconcile or refund on every path
-A reservation that is never released leaks, permanently shrinking the user's effective
-budget (`spend + reserved` creeps toward `max_budget`).
+- `reconcile_reservation` after cost is known
+- `refund_reservation` on every failure or incomplete stream
 
-- ✅ **Check**: every billable handler calls **`reconcile_reservation`** on success and
-  **`refund_reservation`** on **every** error branch (provider error, tool-iteration cap,
-  sandbox/web-search unreachable, generic `except`, and `except HTTPException`).
-- ✅ **Check**: the streaming path settles on completion **and** on client disconnect —
-  `streaming_generator` (`streaming.py`) must call `on_incomplete` when the generator is
-  closed mid-stream, or the hold leaks.
-- ✅ **Check**: a new billable route added without the full reserve→reconcile/refund
-  lifecycle is a finding. Prefer routing settlement through the shared helpers, not
-  hand-rolled per-route.
-- **Severity**: High
+Check provider errors, tool failures, iteration limits, HTTP exceptions,
+cancellation, and client disconnect. A leaked reservation permanently reduces
+available budget.
 
-### 0.4 Fail closed on metering — unmetered usage is a budget bypass
-Any billable request that can complete **without recording cost** is a way to get free,
-uncapped usage.
+Do not replace the conditional reservation update with a read, provider call,
+and later write. Concurrent requests would pass the same stale check. Scoped
+budget rows must be acquired and compensated in their established total order.
 
-- ✅ **Check**: unpriced models are rejected by default (`require_pricing`, default
-  `true`) rather than served at $0. A code path that serves a model with no pricing and
-  silently records no cost is a bypass.
-- ✅ **Check**: streamed responses with no provider usage data are metered per
-  `stream_missing_usage_policy` (not silently billed $0).
-- ✅ **Check**: spend has a **single authority**. Reconciliation writes `users.spend`; the
-  usage-log writer (`services/log_writer.py`) must **not** also add spend (double-charge),
-  and must not be the *sole* authority (the batch writer flushes asynchronously, so the
-  next request's budget check would see stale spend).
-- ✅ **Check**: falsy-zero traps — `if cost:` / `if max_tokens:` treat a legitimate `0` as
-  "missing." Use `is None` for "absent" vs "zero."
-- **Severity**: High
+Some retrospective or asynchronously settled paths intentionally do not provide
+a hard real-time cap. Do not broaden that exception silently.
 
-### 0.5 Standalone vs hybrid mode
-Local enforcement lives in the standalone branch; hybrid mode resolves credentials and
-reports usage upstream.
+### Meter fail closed
 
-- ✅ **Check**: `config.is_hybrid_mode` is auto-detected from a platform token. New
-  billable logic that must apply locally belongs in the standalone (`db is not None`)
-  branch; logic that must not double-count belongs out of the hybrid path. Verify new
-  code is correct (or correctly gated) in **both** modes.
-- **Severity**: Medium
+`require_pricing` defaults to true for budgeted token and image traffic.
+Missing provider usage follows `stream_missing_usage_policy`. Reconciliation,
+not the usage-log writer, is the authority for spend.
 
-### 0.6 Status-code contract
-Client SDKs and the platform map gateway status codes to typed errors — keep them stable.
+Treat zero as a value and `None` as missing. Falsy checks around cost, token
+counts, or limits can create free usage.
 
-- ✅ **Check**: `402` means **insufficient funds / no pricing** (SDKs surface it as an
-  insufficient-funds error); `403` is blocked/over-budget/forbidden-user; `404` is
-  not-found. Don't repurpose a code without checking the SDK/platform mapping.
-- **Severity**: Low
+### Respect deployment mode
 
----
+Standalone serves both planes, hosted serves only the control plane, and hybrid
+serves the data plane without a local management database. Check new behavior in
+all applicable modes and avoid reporting or charging the same usage twice.
 
-## OWASP-style checklist (backend API gateway)
+Keep the status contract stable: 402 is insufficient funds or missing pricing;
+403 is forbidden, blocked, or over budget; 404 hides absent or foreign
+resources.
 
-### Injection — CWE-89 / CWE-78
-- ✅ **Check**: all DB access uses the SQLAlchemy ORM / parameterized queries — no string-built SQL.
-- ✅ **Check**: no `eval`/`exec`/`os.system`/`subprocess(..., shell=True)` with request data.
-- **Severity**: Critical
+## Secrets and public errors
 
-### Broken authentication — CWE-287
-- ✅ **Check**: API keys are stored hashed (`auth/models.py` uses SHA-256), never in plaintext; key material is not logged.
-- ✅ **Check**: key validation enforces active + non-expired; the master key is compared in constant time and never logged.
-- ✅ **Check**: `verify_api_key_or_master_key` (`api/deps.py`) is applied to every non-public route.
-- **Severity**: Critical
+Never log or return provider keys, API keys, master keys, bearer tokens, raw
+provider bodies, prompts, responses, or tool payloads.
 
-### Broken access control — CWE-862 / CWE-639
-- ✅ **Check**: admin/management endpoints (`/v1/users`, `/v1/budgets`, `/v1/keys`, `/v1/pricing`, `/v1/usage`) require the **master key** (user keys → 401/403).
-- ✅ **Check**: object-level authorization — see §0.1. No cross-user read/write/charge.
-- **Severity**: Critical
+Caller-fixable upstream 400, 404, and 422 errors may pass through only after
+`redact_upstream_message` and length limiting. Credential failures, provider
+billing failures, 5xx responses, and unknown failures use fixed public text.
+Expanding the pass-through set is a security change.
 
-### Sensitive data exposure — CWE-200 / CWE-532
-- ✅ **Check**: no provider keys, master key, or API keys in code, logs, or error messages — config via env (`.env` gitignored).
-- ✅ **Check**: **no prompt/response content or other user payloads in logs** — log opaque IDs (request id, user id), token counts, model/provider names, status. Never log `messages`, `input`, completion text, or full request bodies.
-- ✅ **Check**: upstream provider error text is returned on the statuses that are the **caller's** fault (400/422/404), redacted and length-capped by `redact_upstream_message`, and **only** there. A failure that is the gateway's own (rejected credentials, an exhausted provider account, any 5xx, an unclassifiable error) must keep a fixed detail: those are where the operator's keys and topology surface, and the caller has no remedy to apply. Adding a new status to the pass-through side is a security decision, not a UX one. (Covered by `tests/integration/test_error_detail_leakage.py` and `tests/unit/test_provider_error_classification.py`.)
-- ✅ **Check**: a new redaction shape is added to `_SECRET_SHAPES` when a provider starts emitting a credential format it does not already cover.
-- **Severity**: Critical
+Stored credentials are encrypted and responses expose only safe metadata such as
+`last4` or `has_token`. Key validation must not echo the submitted secret.
+Sentry or other telemetry must scrub request headers and bodies.
 
-### SSRF & request forwarding — CWE-918
-otari forwards to upstream providers and optional sandbox / web-search backends.
-- ✅ **Check**: sandbox / web-search backend URLs are **operator-controlled** (`OTARI_SANDBOX_URL`, `OTARI_WEB_SEARCH_URL`): a per-request URL override must **not** be honored (it would turn the gateway into an open HTTP client). See the threat-model comment in `api/routes/chat.py`.
-- ✅ **Check**: provider/base-URL selection is not driven by unvalidated request fields.
-- **Severity**: High
+## SSRF and untrusted model context
 
-### Insecure deserialization — CWE-502
-- ✅ **Check**: no `pickle`/`yaml.load` of untrusted data; all request bodies validated by Pydantic models with constraints (types, `min_length`, bounds).
-- **Severity**: Critical
+Provider, MCP, guardrail, sandbox, and search URLs follow their existing URL
+safety policy. Credentials require HTTPS where the service contract says so.
+Do not let an ordinary request turn the gateway into an unrestricted HTTP
+client.
 
-### Security misconfiguration — CWE-16
-- ✅ **Check**: debug mode off in production; docs endpoints gated as intended (`enable_docs`).
-- ✅ **Check**: CORS is not `allow_origins=["*"]` for a deployment that uses cookauth; review `main.py` CORS.
-- ✅ **Check**: new config flags that affect security **fail closed by default** and are validated at load (reject unknown values), e.g. the `stream_missing_usage_policy` validator in `core/config.py`.
-- **Severity**: High
+MCP results, web pages, sandbox output, and tool responses are untrusted data.
+Bound their size, preserve tool allow-lists, and keep loop limits. Do not insert
+external content into system instructions as trusted text.
 
-### Rate limiting & abuse — CWE-770
-- ✅ **Check**: rate limiting (`rate_limit.py`) applies to billable endpoints; per-user and/or per-key limits are enforced where configured.
-- **Severity**: Medium
+## Schema and dependency changes
 
-### Components with known vulnerabilities — CWE-1035
-- ✅ **Check**: dependencies current (Dependabot); no known CVEs. Run `uv pip ... audit` / `pip-audit` when adding deps.
-- **Severity**: Varies
+A model change needs a migration. Review defaults and backfills for populated
+tables, foreign-key deletion behavior, downgrade safety, and tenant indexes.
 
-### Insufficient logging & monitoring — CWE-778
-- ✅ **Check**: security-relevant events (auth failures, budget-exceeded, blocked users) are observable (metrics/logs) **without** user content.
-- **Severity**: Medium
+New dependencies require lockfile review and a supply-chain check. Do not load
+untrusted pickle data, unsafe YAML, or shell commands built from request input.
 
----
+## Findings
 
-## LLM & prompt-injection security
-otari relays tool outputs, MCP server responses, sandbox results, and web-search content
-back into model context. All of these are **untrusted**.
+Use Critical for authentication bypass, cross-tenant access or charging, remote
+code execution, and exposed credentials. Use High for budget bypass,
+reservation leaks, SSRF, or sensitive payload exposure. Use Medium for mode
+gaps, migration hazards, and weaker abuse controls.
 
-- ✅ **Check**: tool/MCP/web-search/sandbox outputs are treated as data, not instructions — they may contain adversarial content attempting to override the system prompt or exfiltrate other tools' results.
-- ✅ **Check**: the MCP tool loop bounds iterations (`max_tool_iterations` / cap) so a malicious tool can't drive unbounded provider calls (also a budget concern — see §0.2/§0.4 on sizing the reservation for the worst case).
-- ✅ **Check**: no raw dumps of external objects into prompts; format and bound only the fields needed.
-- **Severity**: High (CWE-74 is the closest catalog entry; there is no dedicated prompt-injection CWE.)
-
----
-
-## Schema & migration safety (Alembic)
-- ✅ **Check**: a model change anywhere in `models/` ships with a matching migration in `alembic/versions/`, chained to the current head.
-- ✅ **Check**: new non-nullable columns have a `server_default` (existing rows) — e.g. `users.reserved` defaults to `0`.
-- ✅ **Check**: every FK to `users.user_id` has an explicit `ondelete` policy and account deletion leaves no orphaned billable rows (`tests/integration/test_user_delete_preserve_logs.py` is the template — usage logs are intentionally preserved via `SET NULL`).
-- ✅ **Check**: a reversible `downgrade()`.
-- **Severity**: Medium
-
----
-
-## Severity guidelines
-- **Critical** — auth bypass, cross-user data access or charging (IDOR), injection/RCE, hardcoded secrets.
-- **High** — budget bypass / overspend (unmetered usage, TOCTOU, reservation leak), SSRF, prompt injection via unsanitized external data, sensitive-data exposure.
-- **Medium** — missing rate limit, info disclosure (non-sensitive), mode-gating gaps, migration hazards.
-- **Low** — best-practice gaps, status-code contract drift, minor misconfig.
-
-## Finding format
-```markdown
-## [Severity] — [CWE-XXX] [Title]
-**File**: `src/gateway/.../file.py:line`
-**Description**: what is wrong and why.
-**Proof of concept**: concrete request/state → wrong outcome (e.g. "ALICE key with body {"user":"bob"} → bob's spend increases").
-**Impact**: what an attacker achieves (free usage, drained budget, cross-tenant access...).
-**Recommendation**: the fix, ideally with a snippet.
-```
-
-## Validating a security fix
-1. Add a test that reproduces the issue and proves the fix (service-level and/or an HTTP/route test).
-2. `uv run ruff check` and `uv run mypy` (mypy checks `tests/` too — annotate test helpers).
-3. `uv run pytest tests/unit tests/integration` (integration spins up Postgres via testcontainers).
-4. `uv run python scripts/generate_openapi.py --check` if you changed any response/request model.
-
-## References
-- [OWASP Top 10](https://owasp.org/www-project-top-ten/) · [OWASP API Security Top 10](https://owasp.org/API-Security/) · [CWE Top 25](https://cwe.mitre.org/top25/)
+Each finding must name the file and line, show the reachable bad outcome, explain
+impact, and recommend a concrete fix. Require a regression test that fails
+before the fix.

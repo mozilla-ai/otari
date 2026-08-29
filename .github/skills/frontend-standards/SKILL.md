@@ -5,13 +5,11 @@ description: Guidelines for the otari admin dashboard (`web/`), React 19 + TypeS
 
 # Frontend Standards: otari dashboard (`web/`)
 
-`web/` is the standalone admin dashboard: a React SPA that talks to the gateway's management
-API with the master key. It is an operator tool, not a general-purpose app; keep its footprint
-small and its conventions consistent with what is already there. There is no analytics and no
-marketing surface here; do not add either to match some other repo. `src/shared/telemetry/`
-is not a counterexample: it is a no-op seam an overlay build replaces, it declares no vendor
-dependency, and the base tracker records nothing. Wiring a call site to it is fine; giving it
-an implementation here is not.
+`web/` is the dashboard shared by standalone, hosted, and hybrid deployments. It renders the
+management UI or hybrid landing page from `/v1/bootstrap` and uses an HttpOnly session for
+management calls. It is an operator tool, not a marketing surface. The base tracker under
+`src/shared/telemetry/` is a no-op seam an overlay may replace; do not give it an analytics
+implementation in this repository.
 
 Stack: React 19 (with the React Compiler), TypeScript (`strict`), HeroUI v3 (`@heroui/react`),
 Tailwind CSS v4, TanStack Query, TanStack Router (file-based, `web/src/routes/`), Vite,

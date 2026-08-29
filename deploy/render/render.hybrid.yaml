@@ -35,8 +35,8 @@ projects:
                 value: "8000"
               - key: OTARI_HOST
                 value: "0.0.0.0"
-              # The gateway token (gw-...) from otari.ai. Setting this alone
-              # switches Otari into hybrid mode -- no OTARI_MODE needed.
+              # The gateway token (gw_...) from otari.ai. Setting this alone
+              # switches Otari into hybrid mode; OTARI_MODE is not needed.
               # Create it in otari.ai under Organization > Gateways > Create token.
               - key: OTARI_AI_TOKEN
                 sync: false

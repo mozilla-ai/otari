@@ -1,152 +1,78 @@
 # Built-in tools
 
-Otari can run two tools itself so any model, including open-weight ones, gets parity with what frontier APIs expose as managed tools:
+Otari can run two tools during Chat Completions, Messages, and Responses:
 
-- **`otari_code_execution`**: a sandboxed Python REPL
-- **`otari_web_search`**: a web search backend
+- `otari_code_execution`, a sandboxed code session
+- `otari_web_search`, a search backend
 
-Both are opt-in per request via the `tools` array and require bringing up additional services via Docker Compose profiles. Operators who don't use them don't pull the extra images.
+Each tool is optional and needs a separate backend. Requests cannot currently
+combine these tools with each other or with MCP servers.
 
-Built-in tools work on `/v1/chat/completions`, `/v1/messages`, and `/v1/responses`.
-
-**Current limitations:** `otari_code_execution` and `otari_web_search` cannot be used together in the same request, and neither can be combined with `mcp_servers` in the same request. These are planned to be lifted; for now, pick one per request.
-
-To see what a given deployment exposes, ask it:
+Inspect the tools available on a running deployment:
 
 ```bash
-curl http://localhost:8000/v1/tools -H "Otari-Key: Bearer $OTARI_KEY"
+curl http://localhost:8000/v1/tools \
+  -H "Authorization: Bearer $OTARI_API_KEY"
 ```
 
-Each entry reports the `tools[].type` values that deployment accepts, the argument schema the model is given, and a ready-to-send example. A tool with no backend configured is listed with `"available": false` rather than omitted, so a client can tell "not a thing" from "not set up here".
+Unavailable but recognized tools remain in the response with
+`"available": false`.
 
-## How the keyword decides who runs it
+## Who runs a tool
 
-An `otari_*` tool type is run by Otari in its own sandbox. Any other type, including provider-native keywords like `code_interpreter` or `web_search_<date>`, is forwarded to the provider's native sandbox untouched. Either way Otari handles routing and observability.
+An `otari_*` type is executed by Otari. Other tool declarations are forwarded
+to the provider, including provider-native code interpreter and web-search
+types. Function tools remain the caller's responsibility.
 
 ### Web-search interception
 
-Some clients cannot be told to say `otari_web_search`. Claude Code, the Anthropic SDK, and Claude Desktop send Anthropic's own `{"type": "web_search_20250305", "name": "web_search"}`, so against a non-Anthropic model that declaration reaches a provider that cannot serve it. Setting `web_search_intercept` makes Otari claim the provider-named web-search keywords too, and run them against its own backend:
+Some clients can declare only provider-native search types. Set
+`web_search_intercept: true` to execute `web_search`,
+`web_search_<date>`, and `web_search_preview` through Otari's configured
+backend. A function named `web_search` is never intercepted.
 
-| Declared | Default | With `web_search_intercept` |
-|---|---|---|
-| `otari_web_search` | Otari | Otari |
-| `web_search` | The provider | Otari |
-| `web_search_<date>`, `web_search_preview` | The provider | Otari |
-| A `function` named `web_search` | You dispatch it | You dispatch it |
-
-Set it on the **Tools & Guardrails** page, or with `OTARI_WEB_SEARCH_INTERCEPT=true`. It needs `web_search_url` set; with no backend to intercept *to*, the keyword passes through as usual rather than failing the request.
-
-It is off by default because turning it on takes a search away from a provider that would have run it: a deployment already relying on Anthropic's native web search would silently switch to Otari's backend on upgrade.
-
-A `function` tool named `web_search` is never claimed, even with interception on. That is your own tool, and running it server-side would mean your handler never fires and you never get back a `tool_call` you can dispatch.
-
-If the caller forces its declaration with `tool_choice` under a non-standard name, the choice is retargeted onto the backend's tool so the forced call still resolves.
-
-`max_uses` on an Anthropic-native declaration is accepted but not enforced; `max_tool_iterations` bounds the loop instead.
-
-Billing differs by who ran the tool:
-
-| Who ran it | Billed by Otari? |
-|---|---|
-| Otari (`otari_*`) | Yes, per call, at the rate you set (see [Pricing a gateway-run tool](#pricing-a-gateway-run-tool)) |
-| A provider's native tool (`code_interpreter`, `web_search_<date>`, …) | No. The provider bills you directly, per search or per session, and Otari records only the tokens the response reported |
+Interception is off by default because enabling it changes who performs searches
+for providers that already support a native search tool. It requires
+`web_search_url`.
 
 ## Pricing a gateway-run tool
 
-A tool Otari runs itself costs you money at a search provider or a sandbox, so it
-is priced per call under the key `otari:<tool>`, for example `otari:web_search`.
+Gateway-run tools are priced per successful call:
 
-Set it on the **Tools & Guardrails** page in the dashboard, which asks for dollars
-per call, or through the API. Over the API the stored convention is USD per
-*million* calls (the same column model pricing uses), so a cent per search is
-`10000`:
-
-```bash
-curl -X POST http://localhost:8000/v1/pricing \
-  -H "Otari-Key: Bearer $OTARI_MASTER_KEY" \
-  -H 'Content-Type: application/json' \
-  -d '{"model_key": "otari:web_search", "input_price_per_million": 10000, "output_price_per_million": 0}'
+```text
+otari:code_execution
+otari:web_search
 ```
 
-The charge lands on the usage row of the request that triggered it, alongside the
-token charge, and appears in the Activity detail as a `web_search_calls` line and
-on the Usage page under "Gateway-run tools". A failed call is counted and never
-billed.
+The dashboard accepts dollars per call. The pricing API stores the value in
+`input_price_per_million`, so one cent per call is `10000`.
 
-When a request is routed through a [routing policy](routing.md), the whole
-request's tool work is billed onto the row that served it, so a chain that failed
-over does not split or double-count its searches.
+With `require_pricing: true`, an unpriced gateway-run tool is refused before the
+model call. A failed tool invocation is recorded but not charged. Charges settle
+on the final usage row alongside model tokens.
 
-**With `require_pricing` on (the default), an unpriced tool is refused with a 402**
-before the provider is called, exactly as an unpriced model is. Otari warns at
-startup when a configured tool has no price, so this surfaces before the first
-rejected request. With `require_pricing` off, the calls run and are recorded at
-zero cost.
+Direct `POST /v1/search` uses a different price key,
+`<provider>:<search-tool-name>`, because it calls a configured search provider
+without a model tool loop.
 
-Note the two search paths use different keys: the tool loop prices
-`otari:web_search`, while [`POST /v1/search`](api-reference.md#search) prices
-`<provider>:<tool>`, because that endpoint knows which commercial API it called.
+## What clients receive
 
-## What your SDK sees
+Otari consumes its own tool calls, sends results back to the model, and returns
+the final answer.
 
-Otari consumes a gateway-run tool call itself: it runs the tool, feeds the result
-back to the model, and returns the model's final answer. What the client observes
-differs by API, because only one of the three has a vocabulary for "the server ran
-a tool for you":
-
-| API | Non-streaming | Streaming |
-|---|---|---|
-| `/v1/responses` | A native `web_search_call` output item per search, before the message | The same item, as `response.output_item.added` / `.done`. It is not repeated in `response.completed`'s `output`, so a client reading only the final response sees the answer without the calls |
-| `/v1/messages` | A native `server_tool_use` + `web_search_tool_result` pair per search, before the message, for a caller that declared `web_search_<date>`. Nothing otherwise | The same pair, as `content_block_start` / `content_block_stop` events |
-| `/v1/chat/completions` | Nothing. The final message only | Nothing. The gateway's own `tool_call` deltas are not forwarded |
-
-The gateway's own tool calls are deliberately withheld from streaming clients: a
-client shown a `tool_use` block can never be sent the matching `tool_result`,
-because Otari consumed it, and an SDK accumulating that stream would be left with
-an unanswered call. When a model asks for one of your tools *and* a gateway tool in
-the same message, Otari runs its own, hides it, renumbers what is left so the
-indices stay gapless for SDK accumulators, and hands you only the call you can
-dispatch.
-
-Billing is standalone-only. In hybrid mode the platform resolves the model and
-receives the usage report, and that report carries no tool counts, so a
-gateway-run tool call there is recorded upstream as tokens only.
-
-On Messages, the native blocks are emitted only for a caller that asked in
-Anthropic's own vocabulary (a `web_search_<date>` type). That is the declaration
-which makes a client expect them and render a citations panel; `otari_web_search`
-and the bare `web_search` short form do not, so those callers keep getting the
-plain-text result they always have.
-
-`web_search_tool_result` requires `encrypted_content`, an Anthropic-signed blob
-only Anthropic can produce. Otari sends it **empty** rather than forging one, so
-the block carries the URL, title, and page age a citations panel needs and nothing
-it cannot legitimately provide.
-
-That empty field doubles as provenance. Because clients echo the previous assistant
-turn back to continue a conversation, Otari strips its own minted blocks off an
-inbound `messages` array so an echoed turn never ships an unsignable block upstream.
-Only blocks carrying gateway provenance are removed: a search a provider ran and
-signed itself round-trips untouched, and the `server_tool_use` dropped is the one our
-result answers, matched by `tool_use_id`, so a provider's pair is never split. A
-client that echoes a minted block straight to Anthropic instead of through Otari
-would be rejected there. Responses accepts a blunter version of the same trade-off
-for its minted `web_search_call` items, which have no provenance marker available and
-are stripped off an inbound `input` wholesale.
-
-When a model asks for a gateway search *and* one of your own tools in the same
-message, the search runs and its blocks are emitted alongside the call you have to
-dispatch, so you get both the citations and your own `tool_use`.
+Responses and Messages can expose native server-tool result blocks when their
+wire format expects them. Chat Completions returns only the final assistant
+message. Calls for tools the client must execute are preserved.
 
 ## Code execution
 
-Brings up a sandboxed Python REPL container Otari dispatches `otari_code_execution` calls to.
+Start the bundled sandbox:
 
 ```bash
 docker compose --profile code-exec up
 ```
 
-Use in a request:
+Request it with:
 
 ```json
 {
@@ -156,159 +82,76 @@ Use in a request:
 }
 ```
 
-A runnable walkthrough is in `demo/code-exec/`.
+The sandbox speaks the [code-execution protocol](code-execution-protocol.md).
+A runnable example lives under `demo/code-exec/`.
 
-### Per-workspace policy
+### Per-workspace code policy
 
-The sandbox above is deployment-wide: one operator points Otari at one backend.
-On top of it, each workspace can carry a policy saying whether requests billed to
-that workspace may use code execution at all, and within which limits.
+A workspace policy can disable code execution or narrow the deployment limits:
 
-```bash
-# Read (an organization owner/admin, or an owner/admin of the workspace)
-curl -H "Otari-Key: Bearer $OTARI_MASTER_KEY" \
-  http://localhost:8000/v1/workspaces/$WORKSPACE_ID/code-execution-policy
+- `enabled`
+- `max_iterations`
+- `exec_timeout_s`
+- `default_purpose_hint`
+- allowed tool kinds
+- an allowed sandbox image
 
-# Turn it off for this workspace, or narrow the limits
-curl -X PUT -H "Otari-Key: Bearer $OTARI_MASTER_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"enabled": true, "max_iterations": 3, "exec_timeout_s": 20,
-       "image": "mzdotai/otari-sandbox-container:latest",
-       "tools": ["code_execution"]}' \
-  http://localhost:8000/v1/workspaces/$WORKSPACE_ID/code-execution-policy
+Manage it under
+`/v1/workspaces/{workspace_id}/code-execution-policy` or from Tools. A policy
+cannot enable a missing deployment backend or exceed the deployment limits.
+Workspace-selected images must come from
+`sandbox_allowed_session_images` or the deployment's own session image.
 
-# Drop the policy, returning the workspace to the deployment default
-curl -X DELETE -H "Otari-Key: Bearer $OTARI_MASTER_KEY" \
-  http://localhost:8000/v1/workspaces/$WORKSPACE_ID/code-execution-policy
-```
-
-A policy can only narrow what the deployment already permits:
-
-- `enabled: false` refuses `otari_code_execution` for that workspace with a 403.
-  It cannot enable a sandbox the deployment has not configured.
-- `max_iterations` and `exec_timeout_s` lower the tool-loop and per-execution
-  ceilings. A value above the deployment's own ceiling is refused rather than
-  stored, since it could never take effect.
-- `default_purpose_hint` is used only when a request declares
-  `otari_code_execution` without a hint of its own.
-- `tools` names which code-execution tool kinds the workspace may use, from
-  `code_execution`, `bash_code_execution` and `text_editor_code_execution`. It
-  intersects with what the sandbox backend actually serves, so it only ever
-  removes one, and a list naming nothing this deployment serves is refused with
-  a 400 rather than stored: it would read as a refinement and behave as a
-  refusal on every request. Null exposes whatever the backend serves, which is
-  what a workspace has without a policy. This gateway's sandbox serves
-  `code_execution` alone today, so the field is parity with the hosted config
-  and room for a backend that serves more, rather than a narrowing you can
-  currently express; the policy reports what is actually served as
-  `available_tools`, and the dashboard offers a control only when there is more
-  than one.
-- `image` names the sandbox image the workspace's code runs in, and is the one
-  field an operator has to enable before a workspace can use it. A
-  workspace-settable image is a supply-chain surface, so a workspace may only
-  name an image the operator curated into `sandbox_allowed_session_images` (or the
-  deployment's own `sandbox_session_image`); anything else is refused with a 400, and
-  the allowed set is reported as `allowed_images` on the policy itself. It is
-  re-checked when a request arrives, so shrinking the list refuses a workspace
-  still pinning what it dropped rather than silently running the deployment's
-  image instead.
-
-A deployment that names no images at all is unaffected: with
-`sandbox_allowed_session_images` and `sandbox_session_image` both unset, no workspace can pin
-one and Otari asks the backend for nothing, exactly as before. Note
-`OTARI_SANDBOX_SESSION_IMAGE` is not docker-compose's `$OTARI_SANDBOX_IMAGE`,
-which names the sandbox container to boot rather than the image a leased session
-runs. Otari sends the
-image as an optional field on the session it leases
-([the code-execution protocol](code-execution-protocol.md)); a backend that
-leases from a fixed pre-baked pool ignores it.
-
-A workspace with no policy is not narrowed, so a deployment that configures none
-behaves exactly as it did. The workspace comes from the API key that
-authenticated the request, never from a header; a master-key request resolves to
-the deployment's default workspace. In hybrid mode the same policy is resolved
-from otari.ai instead, and this endpoint is not served.
+The authenticating API key determines the workspace. With no policy, deployment
+defaults apply. In hybrid mode, the control plane resolves the policy instead.
 
 ## Web search
 
-Brings up a SearXNG instance Otari dispatches `otari_web_search` calls to.
+Start the bundled SearXNG backend:
 
 ```bash
 docker compose --profile web-search up
 ```
 
-Use in a request:
+Request it with:
 
 ```json
 {
   "model": "anthropic:claude-sonnet-4-6",
-  "messages": [{"role": "user", "content": "What's the latest stable Python release?"}],
+  "messages": [{"role": "user", "content": "Find the latest Python release."}],
   "tools": [{"type": "otari_web_search"}]
 }
 ```
 
-To let a client that only speaks a provider's vocabulary (Claude Code, the Anthropic SDK) reach this backend, turn on [web-search interception](#web-search-interception).
+The bundled service is useful for evaluation, but public SearXNG engines may
+rate-limit automated traffic. The repository includes Brave and Tavily adapters
+under `scripts/`, or `web_search_url` can point at another compatible backend.
 
-The bundled SearXNG backend is suitable for trying things out but rate-limited for sustained use. For production, point `OTARI_WEB_SEARCH_URL` at a licensed backend. Ready-to-run Brave and Tavily adapters ship in `scripts/` and are available as separate Compose profiles (`web-search-brave`, `web-search-tavily`).
+A runnable example lives under `demo/web-search/`.
 
-A runnable walkthrough is in `demo/web-search/`.
+### Per-workspace search policy
 
-### Per-workspace configuration
+A workspace search policy can:
 
-The backend above is deployment-wide: one operator points Otari at one search
-service. On top of it, each workspace can carry a row saying whether requests
-billed to that workspace may search at all, and how far a search may reach. The
-row holds no credential; that stays with the backend the operator configured.
+- disable search
+- lower `max_results`
+- narrow allowed domains or add blocked domains
+- provide a default purpose hint
+- supply provider options
 
-```bash
-# Read (an organization owner/admin, or an owner/admin of the workspace)
-curl -H "Otari-Key: Bearer $OTARI_MASTER_KEY" \
-  http://localhost:8000/v1/workspaces/$WORKSPACE_ID/web-search
+Manage it under `/v1/workspaces/{workspace_id}/web-search` or from Tools.
+Workspace values can narrow deployment policy but cannot enable a missing
+backend or relax an operator limit.
 
-# Turn it off for this workspace, or narrow how it searches
-curl -X PUT -H "Otari-Key: Bearer $OTARI_MASTER_KEY" \
-  -H "Content-Type: application/json" \
-  -d '{"enabled": true, "max_results": 3, "blocked_domains": ["example.invalid"]}' \
-  http://localhost:8000/v1/workspaces/$WORKSPACE_ID/web-search
+The policy also applies to direct search where relevant. In hybrid mode, the
+connected control plane supplies workspace search configuration.
 
-# Drop the row, returning the workspace to the deployment default
-curl -X DELETE -H "Otari-Key: Bearer $OTARI_MASTER_KEY" \
-  http://localhost:8000/v1/workspaces/$WORKSPACE_ID/web-search
-```
+## Direct search
 
-A row can only narrow what the deployment already permits:
+`POST /v1/search` lets the caller submit a query directly instead of waiting
+for a model to request one. Configure its named providers through
+[`search_tools`](configuration.md#search-tools) or the Search tools API.
 
-- `enabled: false` refuses `otari_web_search` for that workspace with a 403, and
-  refuses [`POST /v1/search`](api-reference.md#search) for it too. It cannot
-  enable a backend the deployment has not configured.
-- `max_results` lowers how many results one search returns. A request asking for
-  fewer keeps its own number; a value above what the backend honors is refused
-  rather than stored, since it could never take effect.
-- `blocked_domains` is added to whatever a request blocks, and `allowed_domains`
-  is intersected with whatever a request allows, so no request can shed a
-  workspace's domain rules by sending rules of its own. An entry covers its
-  subdomains, so a request allowing `docs.example.com` under a workspace that
-  allows `example.com` keeps the narrower of the two. A request whose allow-list
-  names only domains the workspace does not permit is refused with a 403 rather
-  than served an empty result set.
-- `purpose_hint` is used only when a request declares `otari_web_search` without
-  a hint of its own, and `provider_options` fills in the provider knobs a request
-  did not name.
-
-A workspace with no row is not narrowed, so a deployment that configures none
-behaves exactly as it did. The workspace comes from the API key that
-authenticated the request, never from a header; a master-key request resolves to
-the deployment's default workspace. In hybrid mode the same configuration is
-resolved from otari.ai instead and this endpoint is not served, and it composes
-differently there: the platform's values are defaults a request overrides rather
-than limits it is narrowed to.
-
-To search directly rather than as part of a completion, use
-[`POST /v1/search`](api-reference.md#search). It is billed and usage-logged the
-same way, but the caller supplies the query instead of the model, it is
-configured separately under
-[`search_tools`](configuration.md#search-tools) (in the config file, or from the
-dashboard's Tools page), and it is priced under its own
-key (see [Pricing a gateway-run tool](#pricing-a-gateway-run-tool)). A tool with
-`provider: searxng` runs against this same backend, so the endpoint needs no
-commercial search key when `OTARI_WEB_SEARCH_URL` is already set.
+A SearXNG search tool can reuse `web_search_url`, so model-initiated and direct
+search can share one backend. They remain distinct surfaces with separate
+pricing keys.

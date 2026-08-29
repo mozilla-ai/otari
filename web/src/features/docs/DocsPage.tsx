@@ -70,8 +70,8 @@ function dropSection(md: string, title: string): string {
 //   2. The reader reached this page through a running, signed-in dashboard, so
 //      the first-run walkthrough (start the gateway, find the master key, sign
 //      in) is circular here. Drop it; it stays in docs/dashboard.md for readers
-//      on GitHub and the /welcome tutorial, and its post-sign-in substance is
-//      covered by the page-by-page reference below.
+//      on GitHub and the /welcome tutorial. The remaining sections cover setup,
+//      navigation, and operating the dashboard after sign-in.
 const guideBody = dropSection(
   dashboardGuide.replace(/^#{1,6}[ \t]+.*\r?\n+/, ""),
   "First-run walkthrough",

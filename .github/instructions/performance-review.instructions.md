@@ -2,202 +2,77 @@
 applyTo: "src/gateway/**/*.py,web/src/**/*.{ts,tsx}"
 ---
 
-# Performance Review Instructions
+# Performance review instructions
 
-Apply this checklist when reviewing performance-sensitive gateway code (database access on the
-request path, list endpoints, budget/usage services) and dashboard code (`web/`). The gateway
-is async SQLAlchemy 2.0 throughout; examples use its real entities (`User`, `APIKey`, `Budget`,
-`UsageLog`, `ModelPricing`, `ModelAlias`).
+Focus on request paths, list and aggregation APIs, budget and usage services,
+and dashboard work that runs on every navigation or poll.
 
-## Database performance
+## Database
 
-### N+1 queries: CWE-driven, but mostly a latency bug
+- Batch lookups and writes. An `await db.execute` inside a loop needs a clear
+  reason; prefer `IN`, eager loading, bulk statements, or a database cascade.
+- Filter, sort, count, and aggregate in SQL. Do not load a growing table to
+  process it in Python.
+- Every list endpoint has a server-enforced limit, including operator endpoints.
+  Existence checks stop after one row.
+- Foreign keys and common filter, join, and sort columns need indexes. Add the
+  matching index in the migration. Use a composite index for common combined
+  predicates, based on the query's order and selectivity.
+- Related writes share one transaction and commit once. Repositories do not
+  commit. Preserve the atomic conditional updates and ordering used by budget
+  reservations.
+- Check query count and plans for nested response shapes and new usage
+  aggregations. Watch for a query per row and unnecessary full-table sorts.
+- Avoid loading large result sets into memory. Stream or page when the caller
+  does not need the complete set.
 
-```python
-# BAD: a query per row inside a loop
-for model_key in model_keys:
-    row = (await db.execute(
-        select(ModelPricing).where(ModelPricing.model_key == model_key)
-    )).scalar_one_or_none()
+Treat an N+1 or unbounded query on inference, billing, or a frequently refreshed
+dashboard route as High severity. A missing index or avoidable full scan on a
+bounded administrative table is usually Medium.
 
-# GOOD: one batched query
-rows = (await db.execute(
-    select(ModelPricing).where(ModelPricing.model_key.in_(model_keys))
-)).scalars().all()
-```
+## Async work
 
-**Checklist:**
-- ✅ No `await db.execute(select(...))` inside a `for` loop, batch with `.in_()`, or eager-load
-  a relationship with `selectinload`/`joinedload` instead of touching it lazily per row.
-- ✅ No one-by-one deletes in a loop, use a bulk `delete().where(... .in_(...))` or a cascade.
-- ✅ Endpoints returning nested/derived data are checked (log SQL or `echo=True`) to confirm
-  they don't fan out into N+1.
-- **Severity:** High on the request/billing path.
+- Do not run blocking network, file, subprocess, or database work on the event
+  loop.
+- Run independent I/O concurrently only when doing so does not violate
+  transaction ordering, provider limits, or connection-pool bounds.
+- Bound queues, retries, fan-out, and in-memory caches. Clean up sessions, files,
+  tasks, streams, and subscriptions on every exit path.
+- Do not create one database session per helper when the request already owns
+  the transaction.
 
-### Missing indexes
+## Algorithms
 
-Foreign keys and hot filter/sort columns must be indexed. otari already does this (e.g.
-`APIKey.user_id` is `ForeignKey(..., ondelete="CASCADE"), index=True`; `User.deleted_at` is
-`index=True`), keep it up when you add columns.
+Use sets or dictionaries for repeated membership checks. Avoid repeated sorting,
+serialization, model validation, and parsing inside hot loops. A candidate set
+is currently small only when a validator enforces that limit.
 
-```python
-# BAD: FK with no index: slow joins and slow CASCADE deletes
-user_id: Mapped[str | None] = mapped_column(ForeignKey("users.user_id", ondelete="CASCADE"))
+## Dashboard
 
-# GOOD
-user_id: Mapped[str | None] = mapped_column(
-    ForeignKey("users.user_id", ondelete="CASCADE"), index=True,
-)
-```
+- TanStack Query owns server state. Do not mirror it in component state.
+- Let the server filter, sort, aggregate, and paginate growing datasets.
+- Paginated or filtered queries keep previous data while fetching when the UX
+  calls for continuity. Do not replace usable cached content with a full-page
+  skeleton.
+- Route files export only `Route`, preserving automatic code splitting.
+- Lazy-load heavy, non-critical charts, editors, and dialogs. Check the build
+  output when adding a dependency or changing imports.
+- The React Compiler handles ordinary memoization. Add `useMemo`,
+  `useCallback`, or `React.memo` only for a measured or semantic need.
+- Use query polling rather than hand-written intervals, and remove listeners,
+  observers, and subscriptions on unmount.
+- Bound any client loop that walks paginated endpoints.
 
-**Checklist:**
-- ✅ Every `ForeignKey` column has `index=True`.
-- ✅ Columns used in `WHERE`, `ORDER BY`, or join conditions are indexed; frequently
-  co-filtered columns get a composite `Index`.
-- ✅ The Alembic migration creates the index alongside the column.
-- **Severity:** Medium to High.
+The frontend standards skill owns component and data-fetching patterns. This
+file only identifies performance regressions.
 
-### Query optimization
+## Findings
 
-**Push work into SQL; don't fetch rows to process in Python.**
+A finding names the file and line, the affected route or interaction, how cost
+grows with data or traffic, and a concrete fix. Use numbers from a query plan,
+query count, bundle output, profiler, or benchmark when available.
 
-```python
-# BAD: load everything, filter/count in Python
-logs = (await db.execute(select(UsageLog))).scalars().all()
-recent = [l for l in logs if l.created_at > cutoff]
-n = len(recent)
-
-# GOOD: filter and count in SQL
-recent = (await db.execute(
-    select(UsageLog).where(UsageLog.created_at > cutoff)
-)).scalars().all()
-n = (await db.execute(
-    select(func.count()).select_from(UsageLog).where(UsageLog.created_at > cutoff)
-)).scalar_one()
-```
-
-**Every list endpoint has a hard upper bound.** Growing tables (`UsageLog`, `ModelPricing`)
-must never be selected without a `limit`. The dashboard's pricing read already pages with a
-server-side `limit` cap of 1000 and a client-side page cap, mirror that on both ends.
-
-**Checklist:**
-- ✅ `func.count()` for counts, not `len(all())`; an existence check selects one row / uses
-  `.limit(1)`, not a full count.
-- ✅ Pagination (`limit`/`skip`) with a sane default and maximum on every list endpoint,
-  including admin/master-key ones.
-- ✅ No `select(Model)` without `WHERE` or `LIMIT` on a table that grows over time.
-- ✅ Filter, sort, count, and aggregate in SQL, not in Python.
-- **Severity:** Medium.
-
-### Transaction atomicity & batch writes
-
-```python
-# BAD: a commit per iteration
-for user_id in user_ids:
-    user = (await db.execute(select(User).where(User.user_id == user_id))).scalar_one()
-    user.blocked = True
-    await db.commit()
-
-# GOOD: one bulk update, one commit
-await db.execute(update(User).where(User.user_id.in_(user_ids)).values(blocked=True))
-await db.commit()
-```
-
-**Checklist:**
-- ✅ Related writes are grouped in one transaction; commit once, not inside a loop.
-- ✅ Multi-step writes that must succeed or fail together share a transaction.
-- ✅ Budget/spend updates follow the atomic reservation pattern (a single conditional
-  `UPDATE`), never read-modify-write across a provider call, see the security instructions
-  (§0.2/§0.3).
-- **Severity:** High on hot paths.
-
-## Async efficiency
-
-```python
-# BAD: sequential awaits on independent work
-pricing = await load_pricing()
-providers = await load_providers()
-
-# GOOD: run independent awaits together
-pricing, providers = await asyncio.gather(load_pricing(), load_providers())
-```
-
-- ✅ Independent awaits use `asyncio.gather`; sequential `await` only when one result feeds the
-  next.
-- ✅ No blocking/sync I/O on the event loop in a request handler; sessions and file handles are
-  closed via context managers / FastAPI dependencies.
-- ✅ No unbounded in-memory accumulation of a growing table.
-- **Severity:** Medium to High.
-
-## Algorithm efficiency
-
-```python
-# BAD: O(n*m) membership scan          # GOOD: O(n) set lookup
-for a in list_a:                        seen = set(list_b)
-    if a in list_b:                     for a in list_a:
-        ...                                 if a in seen:
-                                                ...
-```
-
-- ✅ Watch for O(n²) nested loops / repeated linear scans; use `set`/`dict` for membership.
-- ✅ Sort once and reuse; prefer generators for large sequences.
-
-## Frontend (`web/`)
-
-The dashboard is small, but a page an operator leaves open all day compounds every mistake.
-
-- ✅ **Server does the shaping.** No client-side filtering/sorting/pagination of large server
-  datasets when the endpoint can do it. Don't assemble a view from several requests and join in
-  the browser, prefer one endpoint that returns what the page needs.
-- ✅ **TanStack Query owns server-state caching**, never duplicate it in `useState`. Pick
-  `staleTime` per how fast the data moves; invalidate only the keys a mutation actually changes
-  (see the frontend `data-fetching` guide).
-- ✅ **Loading guards are `isPending && !data`**, and a filtered or paginated query carries
-  `placeholderData: (prev) => prev`. A bare `isPending` re-renders a skeleton over data the
-  cache already has, which is a perceived-performance bug and a layout shift at once.
-- ✅ **Bounded "fetch all" loops** (`fetchAllPricing` caps pages) so a misbehaving backend can't
-  spin an unbounded request loop.
-- ✅ **Route files export `Route` and nothing else.** A second export defeats the router
-  plugin's `autoCodeSplitting`, so that page's whole component graph moves into the entry
-  chunk and ships to every visitor, including for routes their deployment never serves. Watch
-  the build log for `[tanstack-router] These exports … will not be code-split`; it is a
-  regression, not noise.
-- ✅ **Heavy, non-critical UI is lazy.** Heavy modals, charts, and syntax highlighters
-  go through `React.lazy` + `Suspense`, with `fallback={null}` for something just opened and a
-  fixed-height placeholder for anything above the fold. Mount a modal when it opens rather than
-  leaving it in the DOM behind an `isOpen` prop.
-- ✅ **Bundle watch.** `pnpm --dir web run build` prints every chunk; a new dependency landing
-  in the entry chunk, or a route chunk that jumps, is a finding. Import from subpaths, not
-  package barrels.
-- ✅ **Effect cleanup**: remove listeners/intervals/subscriptions/observers on unmount; correct
-  dependency arrays. In a long-lived dashboard these leak per navigation.
-- ✅ **Memoization needs a reason.** The React Compiler is enabled (`vite.config.ts`), so
-  hand-written `useMemo`/`useCallback`/`React.memo` should point at a profiler result or a
-  reference the compiler cannot prove stable. Flag reflexive memoization and flag hand-rolled
-  polling (`setInterval`) that should be `refetchInterval`.
-- ✅ **Long lists** past a few hundred rows paginate at the endpoint. Virtualization is a
-  deliberate decision, not a quiet addition.
-
-## Severity guidelines
-
-- **Critical**: request-path query that overloads the DB; unbounded memory growth on a hot
-  path.
-- **High**: endpoint >1s; N+1 on a frequently used route; unbounded list fetch on a growing
-  table; per-iteration commits on a billing path.
-- **Medium**: missing index on a moderately used query; suboptimal algorithm on small data;
-  avoidable re-renders.
-- **Low**: marginal caching wins; readability-only tweaks.
-
-## Finding format
-
-```markdown
-## [Severity]: Performance: [brief description]
-**File:** `src/gateway/.../file.py:line`
-**Issue:** what is slow and why.
-**Impact:** affected route(s), how it degrades as data grows.
-**Recommendation:** the fix, ideally with a snippet.
-```
-
-## References
-- [SQLAlchemy performance](https://docs.sqlalchemy.org/en/20/faq/performance.html) ·
-  [React performance](https://react.dev/learn/render-and-commit#optimizing-performance)
+Use Critical for an easily triggered path that can exhaust the service. Use High
+for request-path N+1 queries, unbounded growing-table reads, or per-item commits
+on billing paths. Use Medium for missing indexes and measurable avoidable
+client work. Do not report readability-only changes as performance findings.

@@ -1,229 +1,99 @@
-# Configuration for Otari
+# Minimal standalone Otari configuration.
+# See docs/configuration.md for sources, precedence, and advanced settings.
 
-# Database connection URL.
-# PostgreSQL is used by the full docker compose stack (postgres service is defined in docker-compose.yml).
-# For local development without Docker, switch to SQLite:
-#   database_url: "sqlite:///./otari.db"
+# Docker Compose provides this PostgreSQL service. For a local process without
+# Docker, use sqlite:///./otari.db.
 database_url: "postgresql://otari:otari@postgres:5432/otari"
 
-# Server configuration - if you want to use a different port, change it here and in the docker-compose.yml file.
 host: "0.0.0.0"
 port: 8000
 
-# Master key for protecting key management endpoints
+# Deployment-wide management credential. Applications should use API keys.
 master_key: YOUR_MASTER_KEY_HERE
 
-# Per-user rate limiting (requests per minute). Omit or set to null to disable.
+# Common models use the bundled genai-prices snapshot when no stored price
+# exists. Explicit database pricing always wins.
+default_pricing: true
+require_pricing: true
+
+providers:
+  openai:
+    api_key: YOUR_OPENAI_API_KEY_HERE
+    # api_base: "https://api.openai.com/v1"
+
+  # A named OpenAI-compatible backend. The optional model list supplies
+  # discovery when the backend has no /v1/models endpoint.
+  # home_lab:
+  #   provider_type: openai
+  #   api_base: "http://gpu-box:8000/v1"
+  #   api_key: ${HOME_LAB_TOKEN}
+  #   models: [qwen3-32b]
+
+  # Keyless local backends need an entry only for discovery.
+  # ollama:
+  #   api_base: "http://host.docker.internal:11434"
+
+# Explicit prices use USD per million tokens. They override default pricing.
+# pricing:
+#   openai:gpt-5:
+#     input_price_per_million: 1.25
+#     output_price_per_million: 10.00
+
+# Stable caller-facing model names.
+# aliases:
+#   fast: openai:gpt-5-mini
+
+# Failover and conditional routing. See docs/routing.md.
+# routing:
+#   enabled: true
+#   policies:
+#     fast:
+#       select:
+#         - default: openai:gpt-5-mini
+#       on_failure:
+#         - anthropic:claude-haiku-4-5
+
+# Optional server controls.
 # rate_limit_rpm: 60
-
-# Prometheus metrics endpoint at /metrics. Set to true to enable.
 # enable_metrics: true
+# cors_allow_origins:
+#   - "https://app.example.com"
 
-# The dashboard's first-request setup guide, offered in a workspace that has not
-# served a successful request yet. Set to false to turn the flow off for the
-# whole deployment. See docs/dashboard.md#the-setup-guide.
-# activation_guide: false
+# Provider and search credentials stored through the dashboard require
+# OTARI_SECRET_KEY in the process environment.
 
-# --- Outgoing mail (optional) ----------------------------------------------
-# Mail is optional and a deployment that never configures it works fine: an
-# organization invitation is still created and the dashboard hands you the
-# accept link to share yourself. Turning mail on takes two things, a transport
-# and this deployment's own public URL, because every message Otari sends
-# carries a link back into it. See docs/configuration.md#mail.
+# Optional email delivery. public_base_url is also used by passkeys and OAuth.
 # public_base_url: "https://otari.example.com"
-# mail_transport: smtp            # auto (default) | smtp | console | none
-#   'console' logs each message instead of sending it, token-bearing links
-#   included, so use it for local development and not where logs are shared.
+# mail_transport: smtp
 # smtp_host: "smtp.example.com"
 # smtp_port: 587
-# smtp_user: "${SMTP_USER}"
-# smtp_password: "${SMTP_PASSWORD}"
+# smtp_user: ${SMTP_USER}
+# smtp_password: ${SMTP_PASSWORD}
 # smtp_tls: true
 # mail_from_email: "otari@example.com"
 # mail_from_name: "Otari"
 
-# --- Passkeys (optional) ----------------------------------------------------
-# Sign in to the dashboard with a device or a security key instead of a
-# password. Off until this deployment knows its own address, because WebAuthn
-# binds a passkey to a domain and a gateway that has not been told one cannot
-# invent it: setting public_base_url above is enough on its own, and turns the
-# account page's passkey card on. See docs/access-control.md#passkeys.
-#
-# The two settings below are overrides and neither is required.
+# Passkeys default to the host of public_base_url. Set these only for a parent
+# relying-party domain or multiple permitted dashboard origins.
 # webauthn_rp_id: "example.com"
-#   The domain passkeys are bound to, bare: no scheme, port or path. Defaults
-#   to the host of public_base_url. Worth setting only to bind passkeys to a
-#   PARENT of the domain serving the dashboard, which works in one direction
-#   only: an 'example.com' passkey asserts on 'otari.example.com', not the
-#   reverse. It still needs public_base_url (or the origins below) to serve the
-#   ceremony from, so it does not turn passkeys on by itself.
-#   Changing it orphans every passkey already registered, because an
-#   authenticator only offers a credential under the ID it stored it under.
-# webauthn_rp_name: "otari"
-#   What an authenticator shows while a passkey is created. Cosmetic.
 # webauthn_allowed_origins:
 #   - "https://otari.example.com"
-#   - "https://admin.example.com"
-#   Only when more than one origin serves one dashboard. Each needs a scheme,
-#   and each must be the relying-party ID or a subdomain of it; startup refuses
-#   anything else rather than letting a browser fail the ceremony silently.
 
-# --- File uploads & document understanding ---------------------------------
-# The /v1/files endpoints accept uploads; the gateway then resolves file/image
-# content blocks in chat requests. For models that natively understand
-# documents/images the blocks pass through unchanged; for text-only local
-# models the gateway extracts the file to text (and captions images) so the
-# model can still "read" the attachment.
+# File and image normalization. See docs/files.md.
 # files_enabled: true
-# files_backend: "local"            # blob backend for raw bytes ('local' only today)
-# files_local_dir: "./otari-files"  # where the local backend stores bytes
-# files_max_bytes: 536870912        # 512 MB upload cap
-# files_retention_hours: 168        # stop serving files after N hours; 404 thereafter (omit = keep).
-                                    # Bytes are not auto-reclaimed yet; periodic cleanup is an operator task.
-# file_understanding_enabled: true  # master switch for content normalization
-
-# How images are handled for text-only models: 'describe' (caption via a vision
-# model, falling back to a logged drop), 'ocr' (extract text only), or 'off'.
-# vision_strategy: "describe"
-# vision_describe_model: "ollama:qwen2-vl"   # may be local (free) or frontier
-# vision_describe_max_tokens: 1024           # cap per-image caption output (billed to the user)
-
-# Per-model capability overrides. any-llm's provider-level flags over-report for
-# text-only models served behind OpenAI-compatible servers (vLLM, llama.cpp,
-# Ollama), so declare the truth here to enable native passthrough where it works.
-# Keys accept either separator: "provider:model" (matching pricing) or
-# "provider/model"; a bare "model" key also matches.
+# files_local_dir: "./otari-files"
+# files_max_bytes: 536870912
+# files_retention_hours: 168
+# vision_strategy: describe
+# vision_describe_model: "ollama:qwen2-vl"
 # model_capabilities:
 #   "ollama:qwen2-vl":
 #     supports_image: true
 #     supports_pdf: false
 
-# Pre-configured provider credentials
-providers:
-  vertexai:
-    # Vertex AI is a unique case in that it requires a service account JSON file, project ID, and location. See auth/vertex_auth.py for more details.
-    credentials: "/app/service_account.json" # Internal docker path as mapped in docker-compose.yml,
-    project: YOUR_GCP_PROJECT_ID_HERE
-    location: "us-central1"
-
-  openai:
-    api_key: YOUR_OPENAI_API_KEY_HERE
-    api_base: "https://api.openai.com/v1"  # optional
-    # client_args are passed to the provider's client initialization (e.g. custom headers, timeouts)
-    # client_args:
-    #   custom_headers:
-    #     X-Custom-Header: "custom-value"
-    #   timeout: 60
-
-  anthropic:
-    api_key: YOUR_ANTHROPIC_API_KEY_HERE
-
-  mistral:
-    api_key: YOUR_MISTRAL_API_KEY_HERE
-
-  # Named instances: run multiple backends that share an implementation by
-  # giving each a custom key and a `provider_type`. Route with
-  # `home_lab:<model>`. `provider_type: openai-compatible` and
-  # `provider_type: openai_compatible` both alias `openai`.
-  # An optional `models:` list backs /v1/models for backends without /v1/models.
-  # home_lab:
-  #   provider_type: openai
-  #   api_base: "https://my-box.example.ts.net/v1"
-  #   api_key: ${HOME_LAB_TOKEN}
-  #   models:
-  #     - deepseek-v4-flash
-
-  # Keyless local backends (ollama, llamacpp, llamafile) take no credential, so a
-  # bare key is the whole entry. Routing works without it; the entry is what puts
-  # the local server's models in /v1/models. Add `api_base` for a non-default
-  # address.
-  # ollama:
-
-  # Add more providers as needed...
-
-# Model pricing configuration (optional but necessary for price tracking)
-# Format: "provider:model" -> input/output price per million tokens
-# Database pricing takes precedence - config only sets initial values
-# Prices are in USD per million tokens
-# pricing:
-  # See https://cloud.google.com/vertex-ai/generative-ai/pricing
-  # vertexai:Qwen3-235B-A22B-Instruct-2507:
-  #   input_price_per_million: 0.25
-  #   output_price_per_million: 1.00
-  # openai:gpt-5:
-    # input_price_per_million: 0.25
-    # output_price_per_million: 1.00
-
-# Search tools (optional): what POST /v1/search can run against, keyed by the
-# name callers pass as `search_tool_name` (or in the /v1/search/{tool} path).
-# `provider` defaults to the tool name and must be one of: exa, searxng.
-# `options` holds provider-native request defaults for knobs the request body has
-# no field for; the caller's query always wins. Standalone-mode only.
-# A tool can also be added from the dashboard's Tools & Guardrails page (or
-# POST /v1/search-tools) with no config file at all; a tool stored that way wins
-# over a config-file entry of the same name.
+# Direct search tools. Model-initiated web search uses web_search_url instead.
+# See docs/tools.md.
 # search_tools:
-#   exa-search:
-#     provider: exa
-#     api_key: ${EXA_API_KEY}
-#     # api_base: "https://api.exa.ai"   # optional
-#     # timeout: 30                      # optional, seconds
-#     options:
-#       type: fast
-#   # A SearXNG-shaped backend (the bundled container, or a Brave/Tavily
-#   # adapter) needs no api_key, and inherits web_search_url and
-#   # web_search_engines when it declares neither, so the in-loop web_search
-#   # backend is served here too.
 #   local:
 #     provider: searxng
-#     # api_base: "http://searxng:8080"  # optional; defaults to web_search_url
-#     # options:
-#     #   engines: duckduckgo,mojeek     # optional; defaults to web_search_engines
-
-# Model aliases (optional): expose a friendly display name that maps to a real
-# selector, hiding the underlying provider/model. Format: name -> target
-# ("provider:model" or a named "instance:model"). The alias is what users see in
-# /v1/models and in response `model` fields; pricing, budgets, and usage key on
-# the resolved target. Set `model_discovery: false` to expose only these curated
-# names. Standalone-mode only.
-# aliases:
-#   myopusmodel: anthropic:claude-opus-4
-#   fastmodel: openai:gpt-5
-#   housemodel: home_lab:qwen3
-
-# Routing policies (optional): a model name that decides which real model serves
-# each request. An alias is the one-target case of this, so `aliases:` above stays
-# supported as the shorthand. Standalone-mode only: in hybrid mode the connected
-# platform resolves the model, so a policy name is refused with a 400.
-#
-# Two axes, kept separate on purpose:
-#   select      where the plan starts. Entries are tried in order and the first
-#               whose `when` matches wins; `default` is the fallthrough and must
-#               come last.
-#   on_failure  what is tried next when a candidate fails before any of its
-#               response has reached the caller, in order.
-#
-# `when` conditions (all must match): budget_used_pct, budget_remaining_usd,
-# user_id, key_id. Comparisons are {gte|gt|lte|lt: <number>}. A budget condition
-# never matches for a caller with no budget or an unlimited one, so the default is
-# used. A budget_used_pct threshold of `gte`/`gt` 100 or above is refused: the budget gate
-# rejects the request before selection, so the rule could never fire.
-#
-# Check what a policy compiles to, without sending anything anywhere:
-#   otari routing explain fast --budget-used-pct 85
-# routing:
-#   enabled: true                       # master off-switch
-#   policies:
-#     fast:
-#       select:
-#         - when: {budget_used_pct: {gte: 80}}
-#           target: openai:gpt-5-nano   # tier down as the budget fills up
-#         - default: openai:gpt-5-mini
-#       on_failure:
-#         - anthropic:claude-haiku-4-5  # tried if the selected model fails
-#       guardrails:
-#         # `mode` is required here (the per-request field defaults to monitor, so
-#         # an omitted mode would look like a mandate and behave as shadow mode).
-#         # on_unavailable: block fails closed, which makes the guardrails service
-#         # a hard dependency of every request through this policy.
-#         - {profile: prompt-injection, mode: block, on_unavailable: block}
+#     api_base: "http://searxng:8080"

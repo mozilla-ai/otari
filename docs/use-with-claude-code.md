@@ -1,240 +1,88 @@
 # Use with Claude Code
 
-[Claude Code](https://code.claude.com) speaks the Anthropic Messages API and lets
-you redirect it at any compatible endpoint with a couple of environment
-variables. Otari exposes that surface (`POST /v1/messages` and
-`POST /v1/messages/count_tokens`) in both standalone and hybrid modes, so you
-can route Claude Code through Otari to get budgets, usage tracking, and traces
-without changing how you use the CLI.
+Claude Code speaks the Anthropic Messages API. Otari serves
+`POST /v1/messages` and `POST /v1/messages/count_tokens` in standalone and
+hybrid modes.
 
-## Quick start
+## Route Claude Code through Otari
 
-Claude Code appends `/v1/messages` and `/v1/messages/count_tokens` to
-`ANTHROPIC_BASE_URL` itself, so the base URL must be the Otari root, not
-`/v1`. For local development, use `http://localhost:8000`.
+Claude Code appends the Messages paths itself, so `ANTHROPIC_BASE_URL` must be
+the Otari origin without `/v1`.
 
 ### Connected to otari.ai
 
 ```bash
-export ANTHROPIC_BASE_URL="https://api.otari.ai"   # your Otari base URL, no /v1
-export ANTHROPIC_AUTH_TOKEN="tk_your_otari_token"  # sent as Authorization: Bearer
+export ANTHROPIC_BASE_URL="https://api.otari.ai"
+export ANTHROPIC_AUTH_TOKEN="tk_your_otari_token"
 export ANTHROPIC_MODEL="anthropic:claude-sonnet-4-6"
 claude
 ```
 
 ### Standalone
 
-Claude Code attaches its own `metadata.user_id` to every request. It is not an
-identity: it is a JSON blob of client telemetry (`device_id`, `account_uuid`, and
-a fresh `session_id` per session), so it never equals an Otari user id and no
-user you provision can make it match. In standalone mode Otari binds spend to the
-API key's own user and, by default, rejects a request that names a different user
-(`403 permission_error`), so the key Claude Code uses needs that check relaxed.
-
-Do it on the key, not the deployment: create the key with
-`reject_user_mismatch: false` (dashboard: Keys, create a key, open **Advanced**,
-set **Mismatched `user` field** to *Always accept*; or `PATCH /v1/keys/{id}` on an
-existing one). Every other key keeps whatever the deployment setting says.
+Claude Code sends a telemetry value in the request's `user` field. It is not an
+Otari user ID, so create or update its API key with
+`reject_user_mismatch: false`. Spend still binds to the key's user.
 
 ```bash
-curl -sS "$OTARI_URL/v1/keys" \
-  -H "Otari-Key: Bearer $OTARI_MASTER_KEY" -H "Content-Type: application/json" \
-  -d '{"key_name":"claude-code","user_id":"alice","reject_user_mismatch":false}'
+curl "$OTARI_URL/v1/keys" \
+  -H "Authorization: Bearer $OTARI_MASTER_KEY" \
+  -H "Content-Type: application/json" \
+  -d '{
+    "key_name": "claude-code",
+    "user_id": "alice",
+    "reject_user_mismatch": false
+  }'
 ```
 
-The key-level field is a three-way override of the deployment-wide setting of the
-same name: `null` (the default) inherits it, `false` always accepts a mismatched
-`user`, `true` always rejects one. Spend binds to the key's own user in every
-case; the client value is forwarded to the provider as an end-user tag only.
-
-Then run Claude Code against your local Otari:
+Then point Claude Code at the standalone gateway:
 
 ```bash
 export ANTHROPIC_BASE_URL="http://localhost:8000"
-export ANTHROPIC_AUTH_TOKEN="<your-otari-api-key>"
+export ANTHROPIC_AUTH_TOKEN="gw-your-otari-key"
 export ANTHROPIC_MODEL="anthropic:claude-sonnet-4-6"
 claude
 ```
 
-Use `ANTHROPIC_AUTH_TOKEN` (not `ANTHROPIC_API_KEY`): it is sent as
-`Authorization: Bearer <token>`, which is the scheme Otari accepts for
-both standalone API keys and connected user tokens. `ANTHROPIC_API_KEY` is sent
-as an `x-api-key` header instead. In standalone mode Otari reads that header too,
-so it also authenticates; connected mode, though, expects `Authorization: Bearer`
-and does not use local API keys, so `ANTHROPIC_AUTH_TOKEN` is the portable choice
-that works in both modes.
+Use `ANTHROPIC_AUTH_TOKEN`, which sends an Authorization bearer token and works
+in both modes. `ANTHROPIC_API_KEY` uses `x-api-key`; standalone Otari accepts
+it, but hybrid authentication does not.
 
-### settings.json
-
-The same configuration works in `~/.claude/settings.json` (or a project-level
-`.claude/settings.json`). Replace the values with your deployment's URL, token,
-and model defaults:
-
-```json
-{
-  "env": {
-    "ANTHROPIC_BASE_URL": "https://api.otari.ai",
-    "ANTHROPIC_AUTH_TOKEN": "tk_your_otari_token",
-    "ANTHROPIC_DEFAULT_OPUS_MODEL": "anthropic:claude-opus-4-8",
-    "ANTHROPIC_DEFAULT_SONNET_MODEL": "anthropic:claude-sonnet-4-6",
-    "ANTHROPIC_DEFAULT_HAIKU_MODEL": "anthropic:claude-haiku-4-5"
-  }
-}
-```
+The same values can go in the `env` block of Claude Code's settings file.
 
 ## Choosing a model
 
-Claude Code speaks the Anthropic wire format, but the `model` field is just a
-string Otari forwards to [any-llm](https://github.com/mozilla-ai/any-llm).
-Examples in this page use `provider:model`; Otari also accepts
-`provider/model` in both standalone and connected mode.
+Otari can translate Messages requests to non-Anthropic providers. Set Claude
+Code's default Opus, Sonnet, and Haiku variables when its built-in aliases do not
+exist on your deployment.
 
-- **Claude models:** `anthropic:claude-sonnet-4-6`,
-  `anthropic:claude-opus-4-8`, `anthropic:claude-haiku-4-5`
-- **Standalone, any configured provider:** `openai:gpt-4o`,
-  `mistral:mistral-large-latest`, `anthropic:claude-sonnet-4-6`
-- **Connected to otari.ai, managed models:** `mzai:<catalog-id>`, for example
-  `mzai:moonshotai/Kimi-K2.6`. These run only through otari.ai's hosted gateway.
-- **Connected to otari.ai, your own provider keys:** `openai:gpt-4o`,
-  `mistral:mistral-large-latest`, `anthropic:claude-sonnet-4-6`
+Non-Claude models may lose Anthropic-specific behavior such as extended thinking,
+prompt caching, or tool semantics. Test the actual agent workflow before making
+one a default.
 
-If you use Claude Code's `opus`, `sonnet`, or `haiku` aliases, set the matching
-`ANTHROPIC_DEFAULT_*_MODEL` variables so Claude Code does not fall back to a
-model your Otari deployment does not serve.
+## Import Claude Code usage without routing
 
-### Non-Claude models
+Claude Code can send subscription usage to Otari over OpenTelemetry. This is for
+sessions that do not already route through Otari.
 
-Otari can route Claude Code to non-Claude models, but Claude Code is tuned for
-Claude. Expect weaker tool use on some models, and expect Anthropic-specific
-features such as extended thinking or prompt caching to be dropped when the
-target provider does not support them.
-
-## Import subscription usage (without routing through Otari)
-
-If you keep Claude Code on a subscription rather than routing it through Otari, you
-do not pay API rates, but Otari also can't see that usage. You can still get it into
-your usage analytics, priced at API-equivalent rates, by pointing Claude Code's
-OpenTelemetry export at Otari. Nothing about how you run Claude Code changes; it
-reports each request's usage as it goes. This is standalone-only and never affects
-budgets. Point the exporter at a standalone gateway: a hybrid (otari.ai-connected)
-gateway does not serve `/v1/logs`, so the export 404s and the telemetry is dropped.
-
-Claude Code has native OpenTelemetry support: it emits an `api_request` log event
-per model call carrying token counts, the model, and a request id, but no prompt or
-response content. Otari accepts those directly at `POST /v1/logs`, so no separate
-collector is required.
-
-The same logs export also carries behavioral events (`tool_result`,
-`tool_decision`, `user_prompt`, `api_error`), and Otari stores a content-free
-projection of each as an `agent_telemetry` row: tool name, decision
-(accept/reject), success, duration, HTTP status code, and prompt length (a
-count, not the prompt text itself); no prompt, tool input/output, or response
-content is ever persisted. This capture is on by default and can be turned off
-per key or for the whole deployment (`capture_agent_telemetry` on
-`POST /v1/keys` / `PATCH /v1/keys/{id}`, and the deployment-wide
-`capture_agent_telemetry` config setting); usage capture and billing are
-unaffected either way.
-
-The **metrics** export (a separate exporter setting, see below) carries the
-outcome counters, and Otari records four of them at `POST /v1/metrics`: lines of
-code changed, commits, pull requests, and active time. Each is stored as a value,
-its OTLP series identity, and its timestamps, and nothing else: no attribute bag,
-no file or branch names. The other metrics Claude Code emits are deliberately
-**not** recorded: `claude_code.token.usage` and `claude_code.cost.usage`, because
-the `api_request` log event already bills the same tokens (storing them again would
-double count spend); `claude_code.code_edit_tool.decision`, because the
-`tool_decision` behavioral event above already carries that accept/reject signal;
-and `claude_code.session.count`, because the summary counts sessions from the
-behavioral rows instead.
-Metric capture answers to the same `capture_agent_telemetry` toggle as behavioral
-events.
-
-Both kinds of row are read back through `GET /v1/agent-telemetry/summary`, which
-joins them against recorded spend to report cost per commit, cost per pull request,
-cost per line changed, spend per active hour, tool acceptance rate, turns per
-session, and error rate (plus `/count` and `/series`, mirroring the `/v1/usage`
-family). Previously captured rows can be removed with `DELETE /v1/agent-telemetry`
-(master-key only, by explicit `ids` or, with `by_filter: true`, a
-`user_id`/`api_key_id`/`name`/date-range filter); it covers metric and behavioral
-rows alike.
-
-> **Route or export, not both.** Telemetry import is for sessions that do NOT proxy
-> through Otari. If a session sets `ANTHROPIC_BASE_URL` to Otari and also exports
-> telemetry to it, every call lands twice: once as `source = gateway` (enforced,
-> counts toward budget) and once as `source = claude_code` (exempt observability).
-> The two rows are not correlated, so budgets and `spend` stay correct, but cost
-> analytics count the same traffic twice. Pick one path per session.
-
-### 1. Get a budget-exempt import key (admin, once)
-
-Imported usage is retrospective, so Otari can never block it, which is why an import
-key must be **budget-exempt** (a budgeted key is refused). In the dashboard: Keys ->
-create a key for the user, open **Advanced**, check **Exempt from budget**. Or over
-the API with the master key:
-
-```bash
-curl -sS "$OTARI_URL/v1/keys" \
-  -H "Otari-Key: Bearer $OTARI_MASTER_KEY" -H "Content-Type: application/json" \
-  -d '{"key_name":"claude-code-importer","user_id":"alice","exclude_from_budget":true}'
-```
-
-Treat that key as a secret: `exclude_from_budget` also exempts this key's **live**
-gateway traffic from reservations, spend, and budget enforcement, so a key that leaks
-or is reused for routing grants unmetered access. Use a key (and ideally a dedicated
-user) reserved solely for imports, and rotate it if it is exposed.
-
-### 2. Point Claude Code's telemetry at Otari
-
-Enable telemetry and send the **logs** signal (which carries `api_request`) and the
-**metrics** signal (which carries the outcome counters) to Otari's base URL,
-authenticating with the exempt key. Claude Code appends `/v1/logs` and `/v1/metrics`
-itself, so the endpoint is the Otari root, not `/v1`.
+Create a dedicated API key with `exclude_from_budget: true`, then configure the
+logs exporter. The optional metrics exporter adds content-free outcome counters.
 
 ```bash
 export CLAUDE_CODE_ENABLE_TELEMETRY=1
 export OTEL_LOGS_EXPORTER=otlp
-export OTEL_METRICS_EXPORTER=otlp                     # outcome counters
-export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf      # http/json also works
+export OTEL_METRICS_EXPORTER=otlp
+export OTEL_EXPORTER_OTLP_PROTOCOL=http/protobuf
 export OTEL_EXPORTER_OTLP_ENDPOINT="https://otari.example.com"
-export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer gw-your-exempt-key"
+export OTEL_EXPORTER_OTLP_HEADERS="Authorization=Bearer gw-your-import-key"
 claude
 ```
 
-The two exporters are independent settings: `OTEL_LOGS_EXPORTER` is the load-bearing
-one for spend (all per-request usage rides the logs signal), and
-`OTEL_METRICS_EXPORTER` adds the outcome counters that give that spend a
-denominator. Enabling only the metrics exporter records no usage at all. Set an
-**http** protocol (`http/protobuf` or `http/json`); the default is gRPC, which
-Otari's HTTP receiver does not accept. The same settings work in the `env` block of
-`~/.claude/settings.json` so every session reports automatically:
+The endpoint is the Otari origin; the exporter appends `/v1/logs` and
+`/v1/metrics`. Use an HTTP protocol because Otari does not accept OTLP over
+gRPC.
 
-```json
-{
-  "env": {
-    "CLAUDE_CODE_ENABLE_TELEMETRY": "1",
-    "OTEL_LOGS_EXPORTER": "otlp",
-    "OTEL_METRICS_EXPORTER": "otlp",
-    "OTEL_EXPORTER_OTLP_PROTOCOL": "http/protobuf",
-    "OTEL_EXPORTER_OTLP_ENDPOINT": "https://otari.example.com",
-    "OTEL_EXPORTER_OTLP_HEADERS": "Authorization=Bearer gw-your-exempt-key"
-  }
-}
-```
-
-Otari re-prices each event at its own configured rate for the event's timestamp
-(Claude Code's own cost estimate is ignored), records it as `source = claude_code`,
-and dedups by request id, so replays never double-count. A model with no configured
-price still lands with `cost: null`; add pricing to see the cost.
-
-### 3. See it
-
-In the dashboard, the Activity page shows each imported request with its **API key**
-column, and (expanded) its Source and session; the Usage page's **Tracked cost**
-total separates priced from unpriced usage, with an "unpriced" hint when a model has
-no price. Filter the Activity log by API key to scope it to your importer key.
-
-## See also
-
-- [Importing external usage](external-usage.md) for tracking subscription-backed usage
-- [Modes](modes.md) for standalone vs connected behavior
-- [API reference](api-reference.md) for the Messages endpoints and auth rules
+Imported events are priced for analytics and never count toward budgets. Do not
+both route and export one session, or its cost will appear twice. See
+[Importing external usage](external-usage.md) for attribution, privacy,
+idempotency, and pricing behavior.

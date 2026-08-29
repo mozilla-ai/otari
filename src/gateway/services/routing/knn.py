@@ -19,8 +19,8 @@ requesting workspace, held in the gateway DB
 (:class:`gateway.models.entities.RoutingMemory`). That holds into the low
 thousands of records per partition (the ``router_max_records_per_user`` cap,
 which bounds one user's records in one workspace, since that is what a decision
-loads); pgvector or an ANN index is the next step past that, and the reasoning is
-in `docs/routing-scaling.md`. Records carry an ``embedding_model`` tag so changing
+loads); larger pools need an indexed vector store. Records carry an
+``embedding_model`` tag so changing
 the embedding model invalidates stale vectors rather than mixing incomparable
 spaces.
 
