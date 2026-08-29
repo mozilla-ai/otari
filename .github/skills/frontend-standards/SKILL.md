@@ -7,9 +7,11 @@ description: Guidelines for the otari admin dashboard (`web/`), React 19 + TypeS
 
 `web/` is the dashboard shared by standalone, hosted, and hybrid deployments. It renders the
 management UI or hybrid landing page from `/v1/bootstrap` and uses an HttpOnly session for
-management calls. It is an operator tool, not a marketing surface. The base tracker under
-`src/shared/telemetry/` is a no-op seam an overlay may replace; do not give it an analytics
-implementation in this repository.
+management calls. It is an operator tool, not a marketing surface. Telemetry
+under `src/shared/telemetry/` is gated by `VITE_MIXPANEL_TOKEN`: with no key the Mixpanel SDK
+is never loaded and nothing is tracked, which is the OSS default. Do not invent events beyond
+`TELEMETRY_EVENTS`, do not fire `CHECKOUT_CANCELLED` (no wallet), and do not add a second
+analytics vendor.
 
 Stack: React 19 (with the React Compiler), TypeScript (`strict`), HeroUI v3 (`@heroui/react`),
 Tailwind CSS v4, TanStack Query, TanStack Router (file-based, `web/src/routes/`), Vite,

@@ -1,0 +1,20 @@
+import { describe, expect, it } from "vitest"
+
+import { isLocalDashboard } from "./mixpanelToken"
+
+describe("isLocalDashboard", () => {
+  it("is true for Vite DEV even on a public hostname", () => {
+    expect(isLocalDashboard("example.com", true)).toBe(true)
+  })
+
+  it("is true for make-dev loopback hosts on a production bundle", () => {
+    expect(isLocalDashboard("localhost", false)).toBe(true)
+    expect(isLocalDashboard("127.0.0.1", false)).toBe(true)
+    expect(isLocalDashboard("[::1]", false)).toBe(true)
+  })
+
+  it("is false for a deployed host on a production bundle", () => {
+    expect(isLocalDashboard("example.com", false)).toBe(false)
+    expect(isLocalDashboard("otari.example", false)).toBe(false)
+  })
+})
