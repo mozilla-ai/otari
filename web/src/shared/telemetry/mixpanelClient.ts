@@ -56,6 +56,15 @@ function peopleProperties(identity: TelemetryIdentity): Record<string, string> {
 
 export function createMixpanelTelemetry(token: string): Telemetry {
   mixpanel.init(token, MIXPANEL_INIT)
+  // `actorId` is the active organization's membership id, so a switch
+  // changes it. mixpanel-browser 2.82.1 `identify` always tracks `$identify`
+  // with `$anon_distinct_id` set to the previous `distinct_id`, and the
+  // server merges those two. That is the anonymous-to-first-user link we
+  // want on the first identify (and after `reset`). It is not what we want
+  // when the previous id is another membership: that would cluster two
+  // actors. Remember the last identified membership and `reset` before a
+  // different one so the previous id is a fresh `$device:` id, not a peer.
+  let identifiedActor: string | undefined
 
   return {
     // A Mixpanel key is the deployment opt-in. This build has no consent UI,
@@ -66,9 +75,17 @@ export function createMixpanelTelemetry(token: string): Telemetry {
     },
     identify: (identity) => {
       if (identity === null) {
+        identifiedActor = undefined
         mixpanel.reset()
         return
       }
+      if (
+        identifiedActor !== undefined &&
+        identifiedActor !== identity.actorId
+      ) {
+        mixpanel.reset()
+      }
+      identifiedActor = identity.actorId
       mixpanel.identify(identity.actorId)
       mixpanel.people.set(peopleProperties(identity))
     },

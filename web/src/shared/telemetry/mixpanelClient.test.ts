@@ -1,6 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from "vitest"
 
 import { TELEMETRY_EVENTS } from "./events"
+import type { TelemetryIdentity } from "./types"
 
 const init = vi.fn()
 const track = vi.fn()
@@ -17,6 +18,16 @@ vi.mock("mixpanel-browser", () => ({
     people: { set: peopleSet },
   },
 }))
+
+function member(actorId: string): TelemetryIdentity {
+  return {
+    actorId,
+    sessionType: "local_operator",
+    organizationId: "org-1",
+    organizationName: "Default Organization",
+    role: "owner",
+  }
+}
 
 describe("createMixpanelTelemetry", () => {
   beforeEach(() => {
@@ -58,13 +69,7 @@ describe("createMixpanelTelemetry", () => {
     const { createMixpanelTelemetry } = await import("./mixpanelClient")
     const telemetry = createMixpanelTelemetry("mp-test-token")
 
-    telemetry.identify({
-      actorId: "member-1",
-      sessionType: "local_operator",
-      organizationId: "org-1",
-      organizationName: "Default Organization",
-      role: "owner",
-    })
+    telemetry.identify(member("member-1"))
 
     expect(identify).toHaveBeenCalledWith("member-1")
     expect(peopleSet).toHaveBeenCalledWith({
@@ -73,6 +78,62 @@ describe("createMixpanelTelemetry", () => {
       organization_name: "Default Organization",
       role: "owner",
     })
+  })
+
+  it("does not reset before the first identify", async () => {
+    const { createMixpanelTelemetry } = await import("./mixpanelClient")
+    const telemetry = createMixpanelTelemetry("mp-test-token")
+
+    telemetry.identify(member("member-1"))
+
+    expect(reset).not.toHaveBeenCalled()
+    expect(identify).toHaveBeenCalledWith("member-1")
+  })
+
+  it("does not reset when identifying the same actor again", async () => {
+    const { createMixpanelTelemetry } = await import("./mixpanelClient")
+    const telemetry = createMixpanelTelemetry("mp-test-token")
+
+    telemetry.identify(member("member-1"))
+    reset.mockClear()
+    identify.mockClear()
+
+    telemetry.identify(member("member-1"))
+
+    expect(reset).not.toHaveBeenCalled()
+    expect(identify).toHaveBeenCalledWith("member-1")
+  })
+
+  it("resets before identifying a different already-identified actor", async () => {
+    const { createMixpanelTelemetry } = await import("./mixpanelClient")
+    const telemetry = createMixpanelTelemetry("mp-test-token")
+
+    telemetry.identify(member("member-1"))
+    reset.mockClear()
+    identify.mockClear()
+
+    telemetry.identify(member("member-2"))
+
+    expect(reset).toHaveBeenCalledOnce()
+    expect(identify).toHaveBeenCalledWith("member-2")
+    expect(reset.mock.invocationCallOrder[0]).toBeLessThan(
+      identify.mock.invocationCallOrder[0],
+    )
+  })
+
+  it("does not reset on the first identify after a logout reset", async () => {
+    const { createMixpanelTelemetry } = await import("./mixpanelClient")
+    const telemetry = createMixpanelTelemetry("mp-test-token")
+
+    telemetry.identify(member("member-1"))
+    telemetry.identify(null)
+    reset.mockClear()
+    identify.mockClear()
+
+    telemetry.identify(member("member-2"))
+
+    expect(reset).not.toHaveBeenCalled()
+    expect(identify).toHaveBeenCalledWith("member-2")
   })
 
   it("resets Mixpanel when identify is handed null", async () => {

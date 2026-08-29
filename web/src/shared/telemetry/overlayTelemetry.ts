@@ -44,10 +44,14 @@ function createQueuedTelemetry(
   loadClient: (token: string) => Promise<Telemetry>,
 ): Telemetry {
   let client: Telemetry | undefined
+  let failed = false
   const pending: Array<(loaded: Telemetry) => void> = []
 
   void loadClient(token)
     .then((loaded) => {
+      if (failed) {
+        return
+      }
       client = loaded
       for (const apply of pending) {
         apply(loaded)
@@ -55,10 +59,15 @@ function createQueuedTelemetry(
       pending.length = 0
     })
     .catch(() => {
+      failed = true
       pending.length = 0
+      client = NO_TELEMETRY
     })
 
   const enqueue = (apply: (loaded: Telemetry) => void): void => {
+    if (failed) {
+      return
+    }
     if (client) {
       apply(client)
       return

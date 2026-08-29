@@ -1,6 +1,27 @@
 import { describe, expect, it } from "vitest"
 
-import { isLocalDashboard } from "./mixpanelToken"
+import { isLocalDashboard, readMixpanelToken } from "./mixpanelToken"
+
+describe("readMixpanelToken", () => {
+  it("maps a missing or non-string value to undefined", () => {
+    expect(readMixpanelToken(undefined)).toBeUndefined()
+    expect(readMixpanelToken(null)).toBeUndefined()
+    expect(readMixpanelToken(1)).toBeUndefined()
+  })
+
+  it("maps an empty string to undefined", () => {
+    expect(readMixpanelToken("")).toBeUndefined()
+  })
+
+  it("maps whitespace-only to undefined", () => {
+    expect(readMixpanelToken("   ")).toBeUndefined()
+    expect(readMixpanelToken("\n\t")).toBeUndefined()
+  })
+
+  it("trims a valid token", () => {
+    expect(readMixpanelToken("  tok  ")).toBe("tok")
+  })
+})
 
 describe("isLocalDashboard", () => {
   it("is true for Vite DEV even on a public hostname", () => {

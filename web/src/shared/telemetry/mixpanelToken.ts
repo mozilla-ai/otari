@@ -6,8 +6,9 @@
  * whitespace-only value is treated as absent: that is the OSS default, and it
  * is what keeps the SDK from loading.
  */
-export function readMixpanelToken(): string | undefined {
-  const raw = import.meta.env.VITE_MIXPANEL_TOKEN
+export function readMixpanelToken(
+  raw: unknown = import.meta.env.VITE_MIXPANEL_TOKEN,
+): string | undefined {
   if (typeof raw !== "string") {
     return undefined
   }

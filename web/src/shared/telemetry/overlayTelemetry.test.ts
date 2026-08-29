@@ -148,6 +148,37 @@ describe("createTelemetry with a key", () => {
     createTelemetry(undefined, { isLocal: false, loadClient, log: vi.fn() })
     expect(loadClient).not.toHaveBeenCalled()
   })
+
+  it("discards the in-flight queue and later calls after load failure", async () => {
+    let rejectLoad!: (reason: unknown) => void
+    const loadClient = vi.fn(
+      () =>
+        new Promise<Telemetry>((_, reject) => {
+          rejectLoad = reject
+        }),
+    )
+
+    const telemetry = createTelemetry("mp-test-token", {
+      isLocal: false,
+      loadClient,
+      log: vi.fn(),
+    })
+
+    telemetry.recordEvent(TELEMETRY_EVENTS.LOGIN_SUCCESS, {
+      authentication_method: "password",
+    })
+    telemetry.identify(identity())
+
+    const load = loadClient.mock.results[0]?.value as Promise<Telemetry>
+    rejectLoad(new Error("chunk failed"))
+    await expect(load).rejects.toThrow("chunk failed")
+
+    expect(() => {
+      telemetry.recordEvent(TELEMETRY_EVENTS.LOGOUT)
+      telemetry.identify(null)
+    }).not.toThrow()
+    expect(loadClient).toHaveBeenCalledTimes(1)
+  })
 })
 
 describe("the base telemetry seam", () => {
