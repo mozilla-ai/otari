@@ -4,7 +4,9 @@ import { isLocalDashboard, readMixpanelToken } from "./mixpanelToken"
 
 describe("readMixpanelToken", () => {
   it("maps a missing or non-string value to undefined", () => {
-    expect(readMixpanelToken(undefined)).toBeUndefined()
+    // Do not pass `undefined`: that triggers the default parameter and reads
+    // `import.meta.env.VITE_MIXPANEL_TOKEN`, so a Vitest process with a token
+    // would fail this assertion. `null` and `1` cover the non-string arm.
     expect(readMixpanelToken(null)).toBeUndefined()
     expect(readMixpanelToken(1)).toBeUndefined()
   })
