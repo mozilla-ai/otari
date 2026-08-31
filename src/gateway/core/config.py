@@ -1776,7 +1776,7 @@ class GatewayConfig(BaseSettings):
         ``data_plane_url`` keeps its own, stricter validator: a client builds a
         request from it rather than following it.
 
-        Userinfo is the one refusal the three share with ``data_plane_url``, and
+        Userinfo is the one refusal these three fields share with ``data_plane_url``, and
         they share it for its reason rather than theirs: ``GET /v1/bootstrap``
         is unauthenticated, so a credential written into any of these would
         reach every browser that asked, which no redaction in the operator-gated

@@ -41,10 +41,9 @@ import {
 // the credential it was minted from (otari#653): a session is per-identity
 // since otari#647, and the identity holds a password of its own since otari#649,
 // so the row this menu carried disabled from the start now has a destination.
-// The legal rows link `terms_url` and `privacy_url` where the deployment set
-// them. Data & Privacy stays a disabled row when unset rather than vanishing:
-// the settings surface it will become is coming, and a menu that silently
-// lacks it reads as a menu that never will.
+// Data & Privacy stays a disabled row when unset rather than vanishing: the
+// settings surface it will become is coming, and a menu that silently lacks it
+// reads as a menu that never will.
 
 const THEME_LABELS: Record<ThemePreference, string> = {
   system: "System",

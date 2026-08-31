@@ -100,7 +100,6 @@ describe("AccountMenu", () => {
     await openMenu()
 
     expect(screen.queryByRole("link", { name: "Terms of service" })).toBeNull()
-    // Present but inert rather than absent.
     const privacy = await screen.findByRole("button", {
       name: /^Data & Privacy \(/,
     })
