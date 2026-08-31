@@ -1370,6 +1370,78 @@ body {
   background-color: var(--color-primary-subtle);
 }
 
+/* =============================================================
+ * Wide tables: what happens when the lanes do not fit.
+ *
+ * Four rules, and the first is the one the others serve: a column is never
+ * dropped. There is no responsive hiding machinery here and none is wanted,
+ * because a hidden column is a number somebody came to read and cannot.
+ *
+ * The scroller is the row area only. HeroUI puts `overflow-x-auto` on
+ * `.table__scroll-container`, *inside* `.table-root`, and the bounding rules
+ * were on `.table__header`, also inside it, so they were as wide as the table
+ * rather than as wide as the section and they moved when it scrolled. The rules
+ * move to the root, outside the scroller, where they span the section and stay
+ * put.
+ *
+ * The identity lane freezes. A row is unreadable the moment the thing it names
+ * has scrolled away, so the first column pins to the left with the control edge
+ * as the boundary between what is held and what is moving. It needs an opaque
+ * fill of its own: a sticky cell with a transparent background lets the columns
+ * it is supposed to occlude slide underneath it.
+ *
+ * And the clip is left where it falls, mid-column. No fade, no edge shadow, no
+ * rule at the cut: a half-visible number is the most honest cue that there is
+ * more to the right, and the treatments that dress it up all imply the table
+ * ends there.
+ *
+ * Scoped to the tables whose screens have been torn down. A later teardown opts
+ * in by adding its own hook to these selectors rather than by this reaching
+ * pages whose design does not exist yet.
+ * ============================================================= */
+.otari-breakdown .otari-table.table-root,
+.otari-overview-activity .otari-table.table-root {
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+}
+.otari-breakdown .otari-table .table__header,
+.otari-overview-activity .otari-table .table__header {
+  border-top: 0;
+}
+/* Only the breakdown tables freeze a lane today. The Overview preview's
+   identity column is Model, which is its *second* lane behind Time, so pinning
+   `:first-child` there would hold the timestamp and let the model name scroll
+   away, which is the exact failure this rule exists to prevent. Pinning the
+   second lane needs a left offset equal to the first one's width and a ruling
+   on whether Time or Model leads that table; both are being brought to design
+   rather than guessed at here. */
+.otari-breakdown .table__column:first-child,
+.otari-breakdown .table__row .table__cell:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background-color: var(--color-background);
+  border-right: 1px solid var(--color-control-border);
+}
+/* A fixed lane holds its width instead of being squeezed, and the flexible one
+   stops giving ground before its content becomes unreadable. Past that the
+   table scrolls, which is the point. */
+.otari-breakdown .table__column[data-key="requests"],
+.otari-breakdown .table__column[data-key="tokens"] {
+  min-width: 110px;
+}
+.otari-breakdown .table__column[data-key="spend"],
+.otari-breakdown .table__column[data-key="calls"],
+.otari-breakdown .table__column[data-key="failed"] {
+  min-width: 100px;
+}
+.otari-breakdown .table__column:first-child {
+  min-width: 180px;
+}
+.otari-overview-activity .table__column[data-key="model"] {
+  min-width: 180px;
+}
+
 /* Usage's two breakdown tables, on the same terms as the Overview preview: on
    the page ground rather than on a surface, a rule-bounded overline header
    instead of a tinted band, separators on the faint tier, and fixed numeric

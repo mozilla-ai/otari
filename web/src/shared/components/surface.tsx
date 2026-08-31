@@ -190,7 +190,10 @@ export function Tab({
       type="button"
       aria-pressed={isActive}
       onClick={onPress}
-      className={`px-2.5 py-[5px] text-sm transition-colors motion-reduce:transition-none ${
+      // A segment never shrinks and never wraps its label: a tab row that
+      // squeezed would put the same control at two widths on one page, and a
+      // wrapped label would break the row's height. The row scrolls instead.
+      className={`shrink-0 px-2.5 py-[5px] text-sm whitespace-nowrap transition-colors motion-reduce:transition-none ${
         isActive
           ? "bg-surface-subtle text-foreground"
           : "text-muted hover:text-foreground"
@@ -211,5 +214,9 @@ export function Tab({
  * what a screen reader needs; the row is only spacing.
  */
 export function TabRow({ children }: { children: ReactNode }) {
-  return <div className="inline-flex items-center gap-1">{children}</div>
+  return (
+    <div className="inline-flex max-w-full items-center gap-1 overflow-x-auto">
+      {children}
+    </div>
+  )
 }
