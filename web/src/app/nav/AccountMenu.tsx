@@ -29,8 +29,8 @@ import {
 } from "./rowStyles"
 
 // The control that ends the sidebar, and the menu it opens: account settings,
-// appearance, the legal pages, and the way out. The design's
-// "Menu member · Linear order" artboard is the order and the geometry. Who you
+// appearance, the legal pages, and the way out. The design's account-menu
+// artboard is the order and the geometry. Who you
 // are signed in as is the trigger's own line, not a row inside the menu: the
 // menu repeated it under an avatar the trigger already draws, so that block is
 // gone and /account is where an identity is actually read.

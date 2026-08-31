@@ -26,27 +26,37 @@
  * | ---------------- | -------------------- | -------------------- |
  * | resting          | no fill              | no fill              |
  * | hover / focused  | `surface-subtle`     | `surface-subtle`     |
- * | pressed          | `border`             | `border`             |
- * | selected         | `surface-alt`        | `surface`            |
- * | selected + hover | `surface`            | `background`         |
+ * | pressed          | `background`         | `background`         |
+ * | selected         | `surface-alt`        | `surface-alt`        |
+ * | selected + hover | `surface-alt` (none) | `surface-alt` (none) |
  *
- * The first three rows need no `dark:` override because the ramp is a mirror
- * image per theme: `surface-subtle` and then `border` sit one step and then two
- * steps *below* the rail in light, one and two *above* it in dark, and either
- * direction is away from the chrome. Selection is the pair that does need one.
- * `surface-alt` (that is `--color-surface-muted`) is lighter than the rail in
- * light mode, but in dark the two are within a couple of units of lightness, so
- * the chip would be invisible; `dark:bg-surface` is the same lift read the other
- * way, cards sitting below chrome in the dark stack (fields, chrome, cards,
- * body, deepest last). Selected + hover then takes the one further step each
- * theme has left in that direction: pure white in light, the body ground in
- * dark. This is the navigation design's ramp, not an invention, and the selected
- * row is a lifted chip rather than a tinted one, which is why it is no longer
- * `bg-primary-subtle`.
+ * Hover and selection move in opposite directions off the rail, and press moves
+ * in a third. The rail itself is `--color-background-muted`. A hover lifts one
+ * step away from the chrome to `surface-subtle`; a persistent selection lifts a
+ * smaller step to `surface-muted`; a press goes the other way entirely, onto
+ * `--color-background`, the page canvas showing through. Four distinct fills, in
+ * both themes, at matched perceptual steps - no `dark:` override is needed for
+ * any of them, because the surface family is staggered one rung above the
+ * background family in both themes. An earlier ladder put `surface` *below*
+ * chrome in dark and needed `dark:bg-surface` to produce a lift; under the
+ * current mapping that override resolves to the rail's own value and erases the
+ * selection, which is why it is gone.
  *
- * A selected row deliberately has no pressed state. It is the current page, so
- * the press has nowhere to go; it keeps answering the pointer with the hover
- * fill and stops there.
+ * Measured on the running page in dark, as L* from the rail: pressed -2.20,
+ * selected +4.56, hover +7.63. Light mirrors it, and the four fills are
+ * distinct in both themes.
+ *
+ * The selected row is a lifted chip rather than a tinted one, which is why it
+ * is no longer `bg-primary-subtle`.
+ *
+ * A selected row answers the pointer with neither hover nor press. It is the
+ * current page, so clicking it is a no-op and there is nothing for an
+ * affordance to promise. This is a CHANGE from the earlier rule, which kept the
+ * hover fill: `ROW_RESTING` gives a hovered row `hover:text-foreground` as well
+ * as a fill, so a selected row that also took the hover fill became
+ * indistinguishable from a hovered resting one - and losing "is the row under
+ * my pointer the page I am on" costs more than losing a hover response on a row
+ * that does nothing when clicked.
  *
  * **A nested child is indented with padding, not a narrower box.** `3.125rem`
  * clears the parent's icon lane (0.75rem padding + 1rem icon + 0.75rem gap) and
@@ -128,12 +138,11 @@ const ROW_BASE = `flex min-h-11 w-full items-center gap-3 rounded-lg px-3 font-s
  * press can arrive without a hover, from touch or from Space on a focused row.
  */
 const ROW_PRESSED =
-  "active:bg-border active:text-foreground data-[pressed]:bg-border data-[pressed]:text-foreground"
+  "active:bg-background active:text-foreground data-[pressed]:bg-background data-[pressed]:text-foreground"
 
 const ROW_RESTING = `text-muted hover:bg-surface-subtle hover:text-foreground focus-visible:bg-surface-subtle focus-visible:text-foreground ${ROW_PRESSED}`
 
-const ROW_SELECTED =
-  "bg-surface-alt text-foreground hover:bg-surface dark:bg-surface dark:hover:bg-background"
+const ROW_SELECTED = "bg-surface-alt text-foreground"
 
 /** The class list for one sidebar row. */
 export function navRowClass({

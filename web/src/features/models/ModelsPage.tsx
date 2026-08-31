@@ -532,7 +532,7 @@ function InfoTooltip({
         className={`inline-flex h-4 w-4 items-center justify-center rounded-full border text-[10px] leading-none ${
           tone === "warning"
             ? "border-warning text-warning"
-            : "border-border text-muted hover:border-accent hover:text-accent"
+            : "border-border text-muted hover:border-accent hover:text-link"
         }`}
       >
         i
@@ -540,7 +540,7 @@ function InfoTooltip({
       <span
         id={tipId}
         role="tooltip"
-        className="pointer-events-none absolute top-full right-0 z-20 mt-1.5 w-72 rounded-lg border border-border bg-surface px-3 py-2 text-left text-xs font-normal whitespace-normal break-words text-foreground opacity-0 shadow-lg transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+        className="pointer-events-none absolute top-full right-0 z-20 mt-1.5 w-72 rounded-lg border border-border bg-surface px-3 py-2 text-left text-xs font-normal whitespace-normal break-words text-foreground opacity-0 shadow-elevation-lg transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
       >
         {children}
       </span>

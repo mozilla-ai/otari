@@ -108,7 +108,7 @@ function SaveToast({ message }: { message: string | null }) {
     <div
       role="status"
       aria-live="polite"
-      className="fixed right-4 bottom-4 z-50 flex items-center gap-2 rounded-lg border border-success bg-success-subtle px-4 py-3 text-sm font-medium text-success shadow-lg"
+      className="fixed right-4 bottom-4 z-50 flex items-center gap-2 rounded-lg border border-success bg-success-subtle px-4 py-3 text-sm font-medium text-success shadow-elevation-lg"
     >
       <svg
         viewBox="0 0 24 24"

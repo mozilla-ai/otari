@@ -186,7 +186,7 @@ export function RouterReadiness({
             prompts from 0 (bad) to 1 (great) per candidate; two good answers is
             the case that lets the cheaper model win. See{" "}
             <a
-              className="text-accent hover:underline"
+              className="text-link hover:underline"
               href="https://mozilla-ai.github.io/otari/routing/#teach-it"
               target="_blank"
               rel="noreferrer"

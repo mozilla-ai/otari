@@ -652,7 +652,7 @@ function AppShellChrome() {
         type="button"
         inert={backgroundInert}
         onClick={skipToMain}
-        className="sr-only focus:not-sr-only focus:absolute focus:top-3 focus:left-3 focus:z-50 focus:rounded-lg focus:border focus:border-accent focus:bg-surface focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-link focus:shadow-md focus:outline-none"
+        className="sr-only focus:not-sr-only focus:absolute focus:top-3 focus:left-3 focus:z-50 focus:rounded-lg focus:border focus:border-accent focus:bg-surface focus:px-4 focus:py-2 focus:text-sm focus:font-medium focus:text-link focus:shadow-elevation-md focus:outline-none"
       >
         Skip to main content
       </button>

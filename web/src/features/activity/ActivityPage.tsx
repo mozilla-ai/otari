@@ -599,7 +599,7 @@ function TokenBar({ entry }: { entry: UsageEntry }) {
   })
 
   return (
-    <span className="inline-flex flex-col items-end gap-1" title={summary}>
+    <span className="inline-flex flex-col items-end gap-1.5" title={summary}>
       <span className="tabular-nums">{composition.total.toLocaleString()}</span>
       <svg
         viewBox="0 0 100 4"

@@ -172,7 +172,7 @@ function RevealSecretModal({
         aria-modal="true"
         aria-labelledby="reveal-title"
         onKeyDown={onKeyDown}
-        className="flex max-h-[90vh] w-full max-w-2xl flex-col gap-4 overflow-y-auto rounded-xl bg-surface p-6 shadow-xl"
+        className="flex max-h-[90vh] w-full max-w-2xl flex-col gap-4 overflow-y-auto rounded-xl bg-surface p-6 shadow-modal"
       >
         <h2 id="reveal-title" className="text-title">
           {title}
@@ -712,7 +712,7 @@ function AccessChip({ allowed }: { allowed: string[] | null }) {
       ? "text-danger font-medium"
       : tone === "muted"
         ? "text-muted"
-        : "text-accent font-medium"
+        : "text-link font-medium"
   // Surface the exact entries on hover; the count would mislead (a wildcard is many).
   const title = allowed && allowed.length > 0 ? allowed.join(", ") : undefined
   return (

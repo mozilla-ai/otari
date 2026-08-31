@@ -93,84 +93,103 @@
 :root,
 .light,
 [data-theme="light"] {
-  /* ── Surfaces — white cards on a silver-tinted chrome ─────────────────
-     Cool silver neutrals so the teal primary reads cleanly against the
-     chrome (a warm body muddied the teal). Warm tones are reserved for
-     selective attention accents, not the base canvas. Top-down
-     (lightest → darkest):
-       body / fields / cards `#FFFFFF`
-         ↑ contrast step
-       nested cards, hovered rows `#F1F4F6`
-         ↑ small step
-       chrome         `#E8ECEF`   (silver — nav, sidebar, default-bg)
-     Chrome stays a notch deeper than body so HeroUI's default-variant
-     controls (chips, Switch tracks, Checkbox boxes — all bound to
-     `--color-default` → `--color-background-muted`) remain visible
-     against the body / card surfaces rather than vanishing. Saturation
-     kept low so the surfaces recede and the teal primary holds the
-     accent role.                                                      */
-  --color-background: #ffffff; /* page canvas */
-  --color-background-muted: #e8ecef; /* nav/sidebar chrome — light silver */
-  --color-background-subtle: #eef1f4; /* hover/pressed on muted */
-  --color-surface: #ffffff; /* cards, modals — pure white (top layer) */
-  --color-surface-muted: #f1f4f6; /* nested cards, hovered rows */
-  --color-surface-subtle: #e4e9ed; /* dividers, subtle fills */
+  /* ── Surfaces — four levels, two families, staggered ──────────────────
+     Four neutral levels, with the surface family sitting one rung ABOVE
+     the background family rather than sharing rungs with it. Two pairs
+     therefore hold the same value, which is the stagger working and not a
+     duplicate to collapse:
+       #ffffff   background-muted (chrome)  ·  surface        (cards)
+       #f7f8f8   background       (canvas)
+       #f0f1f2   background-subtle          ·  surface-muted
+       #e8e9eb                                 surface-subtle
+     The consequence to expect rather than fix: the nav rail is pure white
+     and the page canvas is DARKER than it. That is the deliberate mirror of
+     dark, where the rail (#0f1011) sits above the canvas (#08090a), and it
+     is what keeps chrome reading distinctly from cards in both themes.
+     HeroUI's default-variant controls (chips, Switch tracks, Checkbox boxes,
+     bound to `--color-default` → `--color-background-muted`) stay visible
+     against the canvas for the same reason.                            */
+  --color-background: #f7f8f8; /* page canvas */
+  --color-background-muted: #ffffff; /* nav/sidebar chrome, one rung above the canvas */
+  --color-background-subtle: #f0f1f2; /* hover/pressed on muted */
+  --color-surface: #ffffff; /* cards, modals (top layer) */
+  --color-surface-muted: #f0f1f2; /* nested cards, hovered rows */
+  --color-surface-subtle: #e8e9eb; /* dividers, subtle fills */
 
-  /* ── Text — brand black + cool neutral muted ─────────────────────────── */
-  --color-text: #1a1a1a; /* primary body and headings (Otari brand black) */
-  --color-text-muted: #545b62; /* secondary text, labels, captions */
-  --color-text-subtle: #62686f; /* tertiary, timestamps, helper text */
+  /* ── Text — three tiers on a neutral ramp ────────────────────────────── */
+  --color-text: #08090a; /* primary body and headings */
+  --color-text-muted: #2c2e33; /* secondary text, labels, captions */
+  --color-text-subtle: #5a5f6b; /* tertiary, timestamps, helper text */
   --color-text-on-primary: #ffffff; /* text on primary-colored bg */
   --color-text-on-inverse: #ffffff; /* text on inverse/dark surface */
 
-  /* ── Borders — light silver to match the chrome ──────────────────────── */
-  --color-border: #d6dce1; /* default 1px dividers, card outlines */
-  --color-border-strong: #aab2b9; /* form-field outlines, prominent borders */
-  --color-border-subtle: #e4e9ed; /* faint internal dividers */
+  /* ── Borders — translucent overlays, three tiers ─────────────────────
+     Alpha rather than opaque hexes, so a border composites correctly on
+     whichever of the four levels it lands on instead of being tuned to one
+     of them. Measured: 0.06 black on white is dL* 2.77.                */
+  --color-border: rgb(0 0 0 / 0.06); /* default 1px dividers, card outlines */
+  --color-border-strong: rgb(
+    0 0 0 / 0.1
+  ); /* form-field outlines, prominent borders */
+  --color-border-subtle: rgb(0 0 0 / 0.03); /* faint internal dividers */
 
-  /* ── Primary (Otari brand teal) ────────────────────────────────────────
-     The brand swatch `#4E8295` lands at only 4.24:1 against white —
-     just under WCAG AA's 4.5:1 for normal text, which leaves button
-     labels under-contrast. Use `#4A7D8F` instead: visually
-     indistinguishable from the brand swatch (<2 ΔE) but lands at
-     4.51:1 against white so white-on-primary button text clears AA.
-     Hover steps toward the Deep Teal, active lands on it.
+  /* ── Primary ───────────────────────────────────────────────────────────
+     `#0098a4`. Its ink is near-black, not white: white on it measures 3.48:1
+     and fails, `#08090a` measures 5.72:1. `--color-primary-foreground` is
+     therefore the same near-black in both themes, which is the reverse of the
+     previous accent and the line most easily missed when the accent moves.
+
+     Three values here do not follow from `--color-primary` and are deliberate:
+     `--color-link` diverges because the accent itself reads 2.87:1 as text on
+     these surfaces, `--color-focus` steps down to clear the 3:1 a ring needs,
+     and in the dark block `--color-primary-subtle-foreground` is the accent
+     itself.
 
      Two copies of this value live outside CSS, because neither can read a
      custom property: the `theme-color` meta tag in web/index.html and
      `theme_color` in web/public/pwa/manifest.webmanifest, which tint the
      browser and installed-app chrome. `foundation.test.ts` reads all three
      and fails when they disagree, so change them together.           */
-  --color-primary: #4a7d8f; /* primary CTAs, links, focus rings (brand Teal, AA-tuned) */
-  --color-primary-hover: #3f6d7e;
-  --color-primary-active: #0d475a; /* brand Deep Teal */
-  --color-primary-subtle: #e3edf1; /* selected/soft backgrounds */
-  --color-primary-foreground: #ffffff; /* text/icons on primary bg */
+  --color-primary: #0098a4; /* primary CTAs, links, focus rings */
+  --color-primary-hover: #00848f;
+  --color-primary-active: #00717a;
+  /* Translucent on purpose, not a hex. An opaque tint tuned to one ground
+     lands -4.97 / -2.48 / -0.07 / +2.71 L* across the four surface rungs:
+     invisible on one and inverted on another, lighter than a card but darker
+     than a well. An overlay holds to a 1.03 L* spread across all four here,
+     and 1.22 in dark. Same reason the border tiers are overlays. */
+  --color-primary-subtle: rgb(0 152 164 / 0.14); /* selected/soft backgrounds */
+  --color-primary-foreground: #08090a; /* text/icons on primary bg */
   /* Text on the subtle fill, which is a different question from text on the
      solid one and does not have the same answer. `--color-primary` itself
-     lands at 3.8:1 on `--color-primary-subtle`, so the obvious reading —
-     "the brand color, on the brand tint" — is under AA for the small text
-     these chips and active nav items are set in. This is the Deep Teal, at
-     8.4:1 on that fill. */
-  --color-primary-subtle-foreground: #0d475a;
+     is under AA on `--color-primary-subtle`, so the obvious reading, "the
+     accent on the accent tint", does not work for the small text these chips
+     and active nav items are set in. This is the darker step instead. */
+  --color-primary-subtle-foreground: #005b63;
 
   /* ── Link & focus ───────────────────────────────────────────────────────
-   * Link is a muted teal — clearly distinct from the brand teal accent
+   * Link is the accent's darker step, clearly distinct from the accent itself
    * (reserved for active routes and primary CTAs) but quiet enough that
    * sidebar/footer links don't fight body content for attention. The
    * underline does the heavy lifting; the color is just a nudge. */
-  --color-link: #475866;
-  --color-link-hover: #0d475a;
-  --color-focus: var(--color-primary);
+  --color-link: #00747e;
+  --color-link-hover: #00626a;
+  --color-focus: #00848f;
 
   /* ── Status (semantic intent colors) ───────────────────────────────────
-     Success leans teal-green so it harmonizes with the brand primary;
-     the subtle fill consumes the brand "Green" #D2E7D4 directly. The
-     foreground sits at `#1F6648` so text on the subtle fill clears
-     WCAG AA — the lighter `#2E7D5C` on `#D2E7D4` was only 3.8:1, the
-     darker `#1F6648` lands at ~5.2:1. Info shifts to a clearly bluer
-     hue so it stays visually distinct from primary teal in adjacent
-     surfaces (badges, alerts, banners).
+     Five hues, each held at roughly 90% of what sRGB allows at the
+     lightness AA forces on it. Lightness is bounded by AA on
+     `--color-surface-subtle`, the deepest ground any of these words is set
+     on; the worst pairing anywhere in either theme is 4.48:1. Info is a
+     cyan-teal 65 degrees off success and 60 off the accent, so a status
+     badge never reads as a second success or a second accent.
+
+     Light `--color-warning` is a bronze rather than an amber, and that is
+     forced rather than chosen: `text-warning` is real text in 23 places, so
+     it has to clear 4.5:1, and at this hue the sRGB ceiling collapses as
+     lightness rises. A brighter amber is available only as a fill with dark
+     ink on it, which is not how this token is used. If the bronze reads
+     badly the fix is those call sites, not the token.
 
      Warning and danger are one step darker than the swatches they were
      rehomed at, for the reason success is already where it is: a status
@@ -181,17 +200,17 @@
      same hue, and both improve their solid-fill pairing too (white on
      either clears 5.4:1), which is why warning's foreground moves to white
      alongside: near-black on the darker amber would not have.          */
-  --color-success: #1f6648;
-  --color-success-subtle: #d2e7d4;
+  --color-success: #21783d;
+  --color-success-subtle: #e7f7e9;
   --color-success-foreground: #ffffff;
-  --color-warning: #8a6200;
-  --color-warning-subtle: #faf1da;
+  --color-warning: #87631a;
+  --color-warning-subtle: #faf0e0;
   --color-warning-foreground: #ffffff;
-  --color-danger: #c22836; /* clear cherry-red */
-  --color-danger-subtle: #fbe9eb;
+  --color-danger: #cb2526; /* clear cherry-red */
+  --color-danger-subtle: #ffece9;
   --color-danger-foreground: #ffffff;
-  --color-info: #2a6bbe;
-  --color-info-subtle: #e6eef9;
+  --color-info: #2166c7;
+  --color-info-subtle: #e8f3ff;
   --color-info-foreground: #ffffff;
 
   /* ── Attention (warm accent) — see the @theme block for intent. Warm
@@ -199,25 +218,22 @@
    *    action-required banners + new/unread indicators. ─────────────── */
   /* One step darker than the rehomed swatch, for the same reason as warning
      and danger above: `#C2680F` on `#FBEEDE` was 3.5:1, this is 4.7:1. */
-  --color-attention: #a4560a;
-  --color-attention-subtle: #fbeede;
+  --color-attention: #a5531b;
+  --color-attention-subtle: #ffeee4;
   /* White, for the same reason warning's moved: near-black on the darkened
      attention fill is 3.4:1, white is 5.4:1. */
   --color-attention-foreground: #ffffff;
-  --color-attention-border: #ecc187;
+  --color-attention-border: #d76e26;
 
   /* ── Backdrop — modal/popover dimming. Dark in both themes so a fixed
    *   bg-backdrop/50 darkens the page rather than inverting in dark mode. */
   --color-backdrop: #000000;
 
   /* ── Elevation (light-mode shadow rhythm) ──────────────── */
-  --shadow-sm:
-    0 1px 2px rgba(21, 23, 28, 0.04), 0 1px 3px rgba(21, 23, 28, 0.06);
-  --shadow-md:
-    0 2px 4px rgba(21, 23, 28, 0.06), 0 4px 8px rgba(21, 23, 28, 0.08);
-  --shadow-lg:
-    0 8px 16px rgba(21, 23, 28, 0.08), 0 16px 32px rgba(21, 23, 28, 0.1);
-  --shadow-modal: 0 24px 60px rgba(21, 23, 28, 0.22);
+  --shadow-sm: 0 1px 2px rgb(8 9 10 / 0.04), 0 1px 3px rgb(8 9 10 / 0.06);
+  --shadow-md: 0 2px 4px rgb(8 9 10 / 0.06), 0 4px 8px rgb(8 9 10 / 0.08);
+  --shadow-lg: 0 8px 16px rgb(8 9 10 / 0.08), 0 16px 32px rgb(8 9 10 / 0.1);
+  --shadow-modal: 0 24px 60px rgb(8 9 10 / 0.22);
 
   /* ── Inverse code surface — dark in both themes, because a code block
    *    reads as a terminal rather than as another card. The bundled user
@@ -331,88 +347,114 @@
      in dark because the contrast direction inverts, and keeps the same
      1px border for consistency. */
   --field-background: #ffffff;
-  --field-border: #bcc3c9;
+  --field-border: rgb(0 0 0 / 0.48);
   --field-border-width: 1px;
+  /* Four HeroUI variables the mapping above never claimed. Without them a token
+     change reaches most of the screen but not these: HeroUI's own values are
+     literals, so a Select's value text, a field's shadow and every table and
+     accordion separator keep whatever @heroui/styles ships and stop tracking
+     the palette. Measured before adding them, a full token swap moved 98.2% of
+     the painted properties on eleven routes; these are the rest. */
+  --field-foreground: var(--color-text);
+  --separator: var(--color-border);
+  --separator-secondary: var(--color-border-subtle);
+  --separator-tertiary: var(--color-border-subtle);
 }
 
 .dark,
 [data-theme="dark"] {
-  /* ── Surfaces ───────────────────────────────────────────────────────────
-     Soft gray-teal IDE-style rather than near-black navy. The whole
-     palette has a faint cool/teal undertone so the brand primary doesn't
-     read as alien against the chrome. `--color-background-muted` is
-     intentionally above `--color-surface` so chrome (navbar / sidebar /
-     `--default`-backed controls — Switch track, Checkbox box, default
-     Chip, secondary Button) reads distinctly against the card surface
-     it sits on. Layering top-down: fields `#2D323D` ← chrome `#222731`
-     ← cards `#1B1F27` ← body `#15191F`.                                */
-  --color-background: #15191f;
-  --color-background-muted: #222731;
-  --color-background-subtle: #292e38;
-  --color-surface: #1b1f27;
-  --color-surface-muted: #232831;
-  --color-surface-subtle: #2b313b;
+  /* ── Surfaces — the light block's stagger, mirrored ─────────────────────
+     The same four levels and the same one-rung offset between the two
+     families, read the other way up:
+       #08090a   background       (canvas, the deepest ground)
+       #0f1011   background-muted (chrome)  ·  surface        (cards)
+       #191a1b   background-subtle          ·  surface-muted
+       #1f2023                                 surface-subtle
+     Chrome therefore sits one rung ABOVE the canvas here exactly as it sits
+     one rung above it in light, which is what keeps `--default`-backed
+     controls (Switch track, Checkbox box, default Chip, secondary Button)
+     visible against the cards they sit on.                             */
+  --color-background: #08090a;
+  --color-background-muted: #0f1011;
+  --color-background-subtle: #191a1b;
+  --color-surface: #0f1011;
+  --color-surface-muted: #191a1b;
+  --color-surface-subtle: #1f2023;
 
   /* ── Text ──────────────────────────────────────────────── */
-  --color-text: #f0ede5; /* warm off-white (echoes brand B26 inverted) */
-  --color-text-muted: #9aa4ae;
-  --color-text-subtle: #919ba5;
-  --color-text-on-primary: #0a1419; /* deep teal-black for contrast on light teal */
-  --color-text-on-inverse: #15171c;
+  --color-text: #f7f8f8;
+  --color-text-muted: #d0d6e0;
+  --color-text-subtle: #8a8f98;
+  /* White, not the near-black this held before. That value was correct while
+     the dark accent was a lifted light teal; this palette uses the same
+     the same accent in both themes. `--color-primary-foreground` beside it
+     answers the same question, so the two agreeing matters more than either
+     value on its own. */
+  --color-text-on-primary: #ffffff;
+  --color-text-on-inverse: #15171c; /* ink on a light surface; 15.85:1 at worst */
 
   /* ── Borders ───────────────────────────────────────────── */
-  --color-border: #343a46;
-  --color-border-strong: #454d5b;
-  --color-border-subtle: #242a35;
+  --color-border: rgb(255 255 255 / 0.08);
+  --color-border-strong: rgb(255 255 255 / 0.14);
+  --color-border-subtle: rgb(255 255 255 / 0.05);
 
-  /* ── Primary (brightened brand teal for dark backgrounds) ───────────────
-     Lifted from #4E8295 to #6fa8bc to clear AA against the dark surfaces
-     (#6fa8bc on #15191f ≈ 7.7:1). Hover is lighter, active drops back to
-     the brand Teal so the chain stays anchored to the Otari palette. */
-  --color-primary: #6fa8bc;
-  --color-primary-hover: #8bbccc;
-  --color-primary-active: #4e8295;
-  --color-primary-subtle: #142b34; /* dark teal selection / soft fill */
-  --color-primary-foreground: #0a1419;
-  /* Same role as the light block's, and the reason it is not simply the
-     brand-on-tint pairing is the same: the contrast direction inverts here,
-     so this is a lifted teal rather than the Deep Teal (8.2:1 on the fill). */
-  --color-primary-subtle-foreground: #9bc9d9;
+  /* ── Primary ───────────────────────────────────────────────────────────
+     The same accent as light, unchanged: it clears AA on these grounds
+     without lifting. Hover brightens, active drops back one step.       */
+  --color-primary: #0098a4;
+  /* Both steps go UP here, mirroring light's two down. Before this, active sat
+     below primary while its own hover sat above it: the only role in either
+     theme travelling against itself. Light steps -7.13 then -6.99; dark now
+     +6.99 then +7.15. */
+  --color-primary-hover: #00acba;
+  --color-primary-active: #00c1d0;
+  --color-primary-subtle: rgb(0 152 164 / 0.18); /* selection / soft fill */
+  --color-primary-foreground: #08090a;
+  /* Same role as the light block's, and not simply the accent-on-tint
+     pairing for the same reason. The contrast direction inverts here, so
+     this is a lifted step rather than a darker one. */
+  /* Lifted from the accent itself, because a translucent fill composites
+     lighter as the rung rises and the ink loses contrast with it: the accent
+     drops to 3.97 and 3.70 on the two lighter rungs, under AA, where the
+     opaque fill had held a flat 4.55. This clears 5.04 on the worst rung.
+     Same hue, same ceiling fraction. */
+  --color-primary-subtle-foreground: #00b3c1;
 
-  /* ── Link & focus — light teal-slate, mirrors the light-mode restraint ──── */
-  --color-link: #9bb3bf;
-  --color-link-hover: #cfdce2;
-  --color-focus: var(--color-primary);
+  /* ── Link & focus — mirrors the light block's restraint ──────────────── */
+  --color-link: #00a5b2;
+  --color-link-hover: #00bac9;
+  --color-focus: #00a5b2;
 
   /* ── Status ────────────────────────────────────────────── */
-  --color-success: #4fbf95;
-  --color-success-subtle: #13261e;
-  --color-success-foreground: #0a1419;
-  --color-warning: #e5b341;
-  --color-warning-subtle: #2a2113;
-  --color-warning-foreground: #15171c;
-  --color-danger: #f0556a; /* cleaner cherry-red, less orange than a coral */
-  --color-danger-subtle: #2a1418;
-  --color-danger-foreground: #15171c;
-  --color-info: #6aa3e5;
-  --color-info-subtle: #131d2d;
-  --color-info-foreground: #0a1419;
+  --color-success: #2c9a50;
+  --color-success-subtle: #122115;
+  --color-success-foreground: #08090a;
+  --color-warning: #ad7f24;
+  --color-warning-subtle: #241b0c;
+  --color-warning-foreground: #08090a;
+  --color-danger: #f6453f; /* cleaner cherry-red, less orange than a coral */
+  --color-danger-subtle: #2a1715;
+  --color-danger-foreground: #08090a;
+  --color-info: #3e86ee;
+  --color-info-subtle: #151e2d;
+  --color-info-foreground: #08090a;
 
   /* ── Attention (warm accent) — brighter honey for dark surfaces.
    *    See the @theme block for what this token is for. ────────────── */
-  --color-attention: #e8a85a;
-  --color-attention-subtle: #2b1e10;
-  --color-attention-foreground: #15171c;
-  --color-attention-border: #62492a;
+  --color-attention: #d16a25;
+  --color-attention-subtle: #281910;
+  --color-attention-foreground: #08090a;
+  --color-attention-border: #a2511a;
 
   /* ── Backdrop — dark in both themes (see light block comment) ────── */
   --color-backdrop: #000000;
 
   /* ── Elevation (deeper shadows on dark) ────────────────── */
-  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.3), 0 1px 3px rgba(0, 0, 0, 0.4);
-  --shadow-md: 0 2px 4px rgba(0, 0, 0, 0.35), 0 4px 8px rgba(0, 0, 0, 0.45);
-  --shadow-lg: 0 8px 16px rgba(0, 0, 0, 0.4), 0 16px 32px rgba(0, 0, 0, 0.55);
-  --shadow-modal: 0 24px 60px rgba(0, 0, 0, 0.55);
+  --shadow-sm: 0 0 0 1px rgb(255 255 255 / 0.05);
+  --shadow-md: 0 0 0 1px rgb(255 255 255 / 0.08);
+  --shadow-lg: 0 0 0 1px rgb(255 255 255 / 0.14);
+  --shadow-modal:
+    0 0 0 1px rgb(255 255 255 / 0.14), 0 24px 60px rgb(0 0 0 / 0.6);
 
   /* Code surface stays inverse on dark too, one step below the card. */
   --color-code-surface: #10161a;
@@ -482,8 +524,8 @@
      body/surface, not from the border weight. A 1px border (matching
      the light block; HeroUI defaults `--field-border-width` to 0)
      firms up the field edge for consistency across themes. */
-  --field-background: #2d323d;
-  --field-border: #404a55;
+  --field-background: rgb(255 255 255 / 0.05);
+  --field-border: rgb(255 255 255 / 0.345);
   --field-border-width: 1px;
 
   /* Mirror of the light block: own the `@theme` alias values directly
@@ -491,6 +533,16 @@
    * block. See the matching comment in the light block above.       */
   --color-background-alt: var(--color-background-muted);
   --color-surface-alt: var(--color-surface-muted);
+  /* Four HeroUI variables the mapping above never claimed. Without them a token
+     change reaches most of the screen but not these: HeroUI's own values are
+     literals, so a Select's value text, a field's shadow and every table and
+     accordion separator keep whatever @heroui/styles ships and stop tracking
+     the palette. Measured before adding them, a full token swap moved 98.2% of
+     the painted properties on eleven routes; these are the rest. */
+  --field-foreground: var(--color-text);
+  --separator: var(--color-border);
+  --separator-secondary: var(--color-border-subtle);
+  --separator-tertiary: var(--color-border-subtle);
 }
 
 /* =============================================================
@@ -854,7 +906,7 @@ body {
  * doubles up with that. But the browser's default `outline: auto` still
  * fires on focusable elements that HeroUI doesn't style (raw anchors,
  * tabindex divs, etc.), producing a system-blue ring that clashes with
- * our brand teal accent. Re-tint only the color of that default outline so
+ * our accent. Re-tint only the color of that default outline so
  * keyboard focus stays consistent across all elements without competing
  * with HeroUI's own indicator. */
 :focus-visible {
@@ -946,6 +998,14 @@ body {
 /* Tooltip content padding: v3's default is cramped at text-xs density.
  * Apply a comfortable padding to every tooltip so individual call sites
  * don't need to override classNames. */
+/* The overlay arrow's outline is `color-mix(in oklab, var(--border) 40%, transparent)`
+   inside @heroui/styles. With a translucent border token that multiplies to
+   near-nothing and the arrow loses its edge, so the tooltip reads the strong
+   tier instead. Scoped to the component, not the theme. */
+.tooltip {
+  --border: var(--color-border-strong);
+}
+
 .tooltip__content {
   padding: 0.5rem 0.75rem;
   font-size: 0.8125rem;
@@ -1070,6 +1130,16 @@ body {
 .otari-table .table__row .table__cell {
   border-color: var(--color-border);
 }
+/* Aliasing `--separator` is not enough for the row. HeroUI draws a bottom
+   border on the row as well as on its cells, and halves it on the way through:
+   `color-mix(in oklab, var(--separator) 50%, transparent)`. Measured on the
+   built stylesheet, that renders the row edge at alpha 0.029 against the cell's
+   0.06, so the same line is drawn at two strengths. Setting the color here
+   restores one. */
+.otari-table .table__row {
+  border-color: var(--color-border);
+}
+
 .otari-table .table__row:hover .table__cell {
   background-color: var(--color-surface-muted);
 }
@@ -1235,8 +1305,8 @@ body {
 .otari-markdown code {
   font-family: var(--font-mono);
   font-size: 0.85em;
-  /* Tinted chip, text ink. Coloring the text with the brand instead would put
-     a mid-tone teal on a pale teal, which clears AA in neither theme. */
+  /* Tinted chip, text ink. Coloring the text with the accent instead would put
+     the accent on its own tint, which clears AA in neither theme. */
   background-color: var(--color-primary-subtle);
   color: var(--color-text);
   padding: 0.1rem 0.35rem;

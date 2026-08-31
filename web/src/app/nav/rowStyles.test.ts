@@ -26,26 +26,36 @@ describe("navRowClass", () => {
     }
   })
 
-  it("presses a resting row one step further, for either kind of press", () => {
+  it("presses a resting row the other way off the rail", () => {
     // `active` covers the Links and the plain expand buttons; `data-pressed` is
     // what react-aria reports on the rows that are HeroUI Buttons.
+    //
+    // The fill is the page canvas, not a border token used as a fill. Hover
+    // lifts away from the chrome and a press sinks onto the ground behind it,
+    // so the two are told apart by direction rather than by degree.
     for (const variant of ["active", "data-[pressed]"]) {
-      expect(resting).toContain(`${variant}:bg-border`)
+      expect(resting).toContain(`${variant}:bg-background`)
       expect(resting).toContain(`${variant}:text-foreground`)
     }
   })
 
-  it("lifts a selected row off the rail, in both themes", () => {
+  it("lifts a selected row off the rail with one class in both themes", () => {
     expect(selected).toContain("bg-surface-alt")
-    expect(selected).toContain("dark:bg-surface")
     expect(selected).toContain("text-foreground")
+    // No `dark:` override. The surface family sits one rung above the
+    // background family in both themes, so `surface-alt` is a step off the
+    // rail either way. An override here would resolve to the rail's own value
+    // and erase the selection.
+    expect(selected).not.toContain("dark:bg-")
   })
 
-  it("still answers the pointer on a selected row, and only with a hover", () => {
-    expect(selected).toContain("hover:bg-surface")
-    expect(selected).toContain("dark:hover:bg-background")
-    // The current page has nowhere to press to, so the pressed step stops at
-    // the rows that navigate somewhere.
+  it("does not answer the pointer on a selected row at all", () => {
+    // Neither hover nor press. It is the current page, so clicking it is a
+    // no-op and there is nothing for an affordance to promise. A hover fill
+    // here would also collide with a hovered resting row, which already gets
+    // `hover:text-foreground` as well as a fill, and losing "is the row under
+    // my pointer the page I am on" costs more than losing the response.
+    expect(selected).not.toContain("hover:bg-")
     expect(selected).not.toContain("active:")
     expect(selected).not.toContain("data-[pressed]:")
   })

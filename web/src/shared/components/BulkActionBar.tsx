@@ -44,9 +44,9 @@ export function BulkActionBar({
     <div
       role="toolbar"
       aria-label="Bulk actions"
-      className="otari-bulk-bar fixed bottom-4 left-1/2 z-40 flex w-[calc(100%-2rem)] max-w-3xl -translate-x-1/2 flex-wrap items-center gap-3 rounded-xl border border-accent bg-surface px-4 py-2.5 shadow-lg"
+      className="otari-bulk-bar fixed bottom-4 left-1/2 z-40 flex w-[calc(100%-2rem)] max-w-3xl -translate-x-1/2 flex-wrap items-center gap-3 rounded-xl border border-accent bg-surface px-4 py-2.5 shadow-elevation-lg"
     >
-      <span className="text-sm font-medium text-accent">{label}</span>
+      <span className="text-sm font-medium text-link">{label}</span>
       {!allMatching && canSelectAllMatching && matchingTotal != null ? (
         <Button size="sm" variant="ghost" onPress={onSelectAllMatching}>
           Select all {matchingTotal.toLocaleString()} matching this filter
