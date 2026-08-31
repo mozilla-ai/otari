@@ -1,4 +1,4 @@
-import { Button, Card } from "@heroui/react"
+import { Button } from "@heroui/react"
 import { Fragment, useEffect, useRef, useState } from "react"
 import type {
   ManagedTool,
@@ -19,12 +19,12 @@ import {
   useTools,
   useUpdateToolSettings,
 } from "@/shared/api/hooks"
+import { Dot } from "@/shared/components/surface"
 import {
   ErrorBanner,
   errorMessage,
   FilterSelect,
   INPUT_CLASS,
-  PageHeader,
   PageLoading,
 } from "@/shared/components/ui"
 
@@ -537,8 +537,11 @@ function HowToCallCard({ tool }: { tool: ManagedTool }) {
       <div className="flex flex-wrap items-center gap-2">
         <code className="text-sm font-medium text-foreground">{tool.id}</code>
         {tool.available ? null : (
-          <span className="rounded-full border border-warning bg-warning-subtle px-2 py-0.5 text-xs font-medium text-warning">
-            No backend configured
+          // The reason, stated: a subtle dot and a mono fact, because a tool
+          // with no backend is unavailable rather than broken.
+          <span className="flex items-center gap-2 font-mono text-[11px] tracking-[0.1em] text-subtle uppercase">
+            <Dot className="bg-surface-subtle" />
+            Unavailable — no backend
           </span>
         )}
       </div>
@@ -696,15 +699,20 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader
-        title={
-          only
+      <header className="pb-1">
+        <h1 className="font-display text-[28px] leading-[34px] font-semibold tracking-[-0.01em] text-foreground">
+          {only
             ? (SERVICES.find((service) => service.key === only)?.label ??
               "Tools & Guardrails")
-            : "Tools & Guardrails"
-        }
-        description="Configure the built-in tool and guardrail service endpoints without a restart. Changes apply immediately and persist. URLs are validated for shape (http/https) and can be tested for reachability before saving; the network-safety gates for these services live on the Settings page."
-      />
+            : "Tools & Guardrails"}
+        </h1>
+        <p className="mt-1 max-w-[620px] text-sm text-muted">
+          Configure the built-in tool and guardrail service endpoints without a
+          restart. Changes apply immediately and persist. URLs are validated for
+          shape (http/https) and can be tested for reachability before saving;
+          the network-safety gates for these services live on the Settings page.
+        </p>
+      </header>
 
       <ErrorBanner error={query.error} />
 
@@ -738,42 +746,40 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
                     headings for the same thing. */}
                 {only ? null : <h2 className="text-title">{service.label}</h2>}
                 <p className="text-sm text-muted">{service.blurb}</p>
-                <Card>
-                  <Card.Content className="flex flex-col divide-y divide-border px-5 py-1">
-                    {service.pricingKey ? (
-                      <ToolPriceRow
-                        pricingKey={service.pricingKey}
-                        configured={
-                          currentRates.get(service.pricingKey) ?? null
-                        }
-                        onSave={(perCall) =>
-                          savePrice(service.pricingKey as string, perCall)
-                        }
-                        saving={pricedTool === service.pricingKey}
-                        saveError={
-                          priceErrors[service.pricingKey] ||
-                          (pricing.error
-                            ? "Could not load the current price. Reload before editing."
-                            : undefined)
-                        }
-                        // Also disabled when the load failed: an errored query leaves
-                        // `configured` null, which renders as "Not priced" and would
-                        // invite an operator to overwrite a rate they cannot see.
-                        disabled={pricing.isLoading || Boolean(pricing.error)}
-                      />
-                    ) : null}
-                    {fields.map((field) => (
-                      <ServiceRow
-                        key={field.key}
-                        field={field}
-                        onSave={(value) => save(field, value)}
-                        saveError={errors[field.key]}
-                        disabled={disabled}
-                      />
-                    ))}
-                    {managed ? <HowToCallCard tool={managed} /> : null}
-                  </Card.Content>
-                </Card>
+                {/* A settings list: rows divided by rules, on the page ground,
+                    with no box around them. */}
+                <div className="flex flex-col divide-y divide-border border-y border-border">
+                  {service.pricingKey ? (
+                    <ToolPriceRow
+                      pricingKey={service.pricingKey}
+                      configured={currentRates.get(service.pricingKey) ?? null}
+                      onSave={(perCall) =>
+                        savePrice(service.pricingKey as string, perCall)
+                      }
+                      saving={pricedTool === service.pricingKey}
+                      saveError={
+                        priceErrors[service.pricingKey] ||
+                        (pricing.error
+                          ? "Could not load the current price. Reload before editing."
+                          : undefined)
+                      }
+                      // Also disabled when the load failed: an errored query leaves
+                      // `configured` null, which renders as "Not priced" and would
+                      // invite an operator to overwrite a rate they cannot see.
+                      disabled={pricing.isLoading || Boolean(pricing.error)}
+                    />
+                  ) : null}
+                  {fields.map((field) => (
+                    <ServiceRow
+                      key={field.key}
+                      field={field}
+                      onSave={(value) => save(field, value)}
+                      saveError={errors[field.key]}
+                      disabled={disabled}
+                    />
+                  ))}
+                  {managed ? <HowToCallCard tool={managed} /> : null}
+                </div>
               </section>
               {/* Directly below the in-loop web-search settings, because a searxng
                 search tool that declares no backend URL of its own inherits the

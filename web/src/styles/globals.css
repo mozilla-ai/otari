@@ -1472,20 +1472,24 @@ body {
    content on the same pixel, so the lane is given explicit room on its left
    rather than relying on the cell padding both sides already spend. */
 .otari-models-table .otari-table.table-root,
-.otari-providers-table .otari-table.table-root {
+.otari-providers-table .otari-table.table-root,
+.otari-routing-table .otari-table.table-root {
   background-color: transparent;
   border-top: 1px solid var(--color-border);
   border-bottom: 1px solid var(--color-border);
 }
 .otari-models-table .otari-table .table__header,
-.otari-providers-table .otari-table .table__header {
+.otari-providers-table .otari-table .table__header,
+.otari-routing-table .otari-table .table__header {
   background-color: transparent;
   border-bottom: 1px solid var(--color-border);
 }
 .otari-models-table .otari-table .table__row,
 .otari-models-table .table__row .table__cell,
 .otari-providers-table .otari-table .table__row,
-.otari-providers-table .table__row .table__cell {
+.otari-providers-table .table__row .table__cell,
+.otari-routing-table .otari-table .table__row,
+.otari-routing-table .table__row .table__cell {
   border-color: var(--color-border-subtle);
 }
 .otari-models-table .table__column[data-key="policy"],
@@ -1502,7 +1506,9 @@ body {
 .otari-models-table .table__column:first-child,
 .otari-models-table .table__row .table__cell:first-child,
 .otari-providers-table .table__column:first-child,
-.otari-providers-table .table__row .table__cell:first-child {
+.otari-providers-table .table__row .table__cell:first-child,
+.otari-routing-table .table__column:first-child,
+.otari-routing-table .table__row .table__cell:first-child {
   position: sticky;
   left: 0;
   z-index: 1;
@@ -1512,6 +1518,10 @@ body {
 .otari-models-table[data-scrolled="true"] .table__row .table__cell:first-child,
 .otari-providers-table[data-scrolled="true"] .table__column:first-child,
 .otari-providers-table[data-scrolled="true"]
+  .table__row
+  .table__cell:first-child,
+.otari-routing-table[data-scrolled="true"] .table__column:first-child,
+.otari-routing-table[data-scrolled="true"]
   .table__row
   .table__cell:first-child {
   border-right: 1px solid var(--color-control-border);

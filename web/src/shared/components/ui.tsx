@@ -16,8 +16,8 @@ import { Link } from "@tanstack/react-router"
 import type { KeyboardEvent as ReactKeyboardEvent, ReactNode } from "react"
 import { useEffect, useId, useRef, useState } from "react"
 import { Checkbox as AriaCheckbox } from "react-aria-components"
-
 import { ApiError } from "@/shared/api/client"
+import { Dot } from "@/shared/components/surface"
 import { copyToClipboard } from "@/shared/helpers/clipboard"
 import { formatRelative } from "@/shared/helpers/format"
 
@@ -310,13 +310,18 @@ export function InfoBanner({
   tone?: "info" | "warning"
   children: ReactNode
 }) {
-  const styles =
-    tone === "warning"
-      ? "border-warning bg-warning-subtle text-warning"
-      : "border-accent bg-primary-subtle text-primary-subtle-foreground"
+  // A fact stated between rules, not a tinted box. An informational banner here
+  // is almost always a ceiling ("this deployment has no sandbox", "an admin sets
+  // this"), which is a fact about the deployment rather than a problem with it,
+  // so it reads on the muted rung behind a subtle dot. A caution keeps the
+  // danger dot and the same muted prose: the dot says "worth noticing" and the
+  // words say what.
   return (
-    <div className={`rounded-lg border px-4 py-3 text-sm ${styles}`}>
-      {children}
+    <div className="flex items-start gap-3 border-y border-border py-3 text-sm text-muted">
+      <Dot
+        className={`mt-2 ${tone === "warning" ? "bg-danger" : "bg-surface-subtle"}`}
+      />
+      <div className="min-w-0">{children}</div>
     </div>
   )
 }

@@ -26,7 +26,7 @@ import {
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import { Field } from "@/shared/components/Field"
 import { SecretField } from "@/shared/components/SecretField"
-import { Dot, TableScrollFrame } from "@/shared/components/surface"
+import { Dot, Tab, TableScrollFrame, TabRow } from "@/shared/components/surface"
 import {
   ConfirmButton,
   ErrorBanner,
@@ -375,28 +375,18 @@ function AddProviderForm({ onClose }: { onClose: () => void }) {
   return (
     <section className="flex flex-col gap-4 border-y border-border py-5">
       <div className="flex items-center justify-between">
-        <div className="flex items-center gap-1 rounded-lg bg-surface-alt p-1">
+        <TabRow>
           {(
             [
               ["known", "Known provider"],
               ["custom", "Custom endpoint"],
             ] as const
           ).map(([id, label]) => (
-            <button
-              key={id}
-              type="button"
-              aria-pressed={tab === id}
-              onClick={() => setTab(id)}
-              className={
-                tab === id
-                  ? "rounded-md bg-surface px-3 py-1.5 text-sm font-medium text-foreground shadow-elevation-sm"
-                  : "rounded-md px-3 py-1.5 text-sm text-muted hover:text-foreground"
-              }
-            >
+            <Tab key={id} isActive={tab === id} onPress={() => setTab(id)}>
               {label}
-            </button>
+            </Tab>
           ))}
-        </div>
+        </TabRow>
       </div>
       {tab === "known" ? (
         <KnownProviderForm onClose={onClose} />
