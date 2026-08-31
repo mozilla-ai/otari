@@ -187,7 +187,8 @@ search_tools:
 
 `GET /v1/search-tools/providers` publishes the supported providers and whether
 each requires an `api_key` or `api_base`. Provider options and request filters
-are covered in [Built-in tools](tools.md).
+are covered in [Built-in tools](tools.md). A tool carrying an `api_key` must use
+an HTTPS `api_base`; a keyless local SearXNG endpoint may use HTTP.
 
 ## Mail
 

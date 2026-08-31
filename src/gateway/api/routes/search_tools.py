@@ -32,6 +32,7 @@ from gateway.core.config import (
     SEARCH_PROVIDERS_REQUIRING_API_KEY,
     GatewayConfig,
     validate_search_tool_entry,
+    validate_search_tool_transport,
 )
 from gateway.log_config import logger
 from gateway.models.entities import SearchToolCredential
@@ -178,7 +179,7 @@ def _is_decryptable(row: SearchToolCredential) -> bool:
     return True
 
 
-def _validate_entry(name: str, entry: dict[str, Any]) -> None:
+def _validate_entry(name: str, entry: dict[str, Any], *, inherited_api_base: str | None = None) -> None:
     """Hold a dashboard-written tool to the rules the config file is held to, as a 422.
 
     The same :func:`validate_search_tool_entry` startup validation runs on, so a
@@ -188,10 +189,14 @@ def _validate_entry(name: str, entry: dict[str, Any]) -> None:
         validate_search_tool_entry(name, entry)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from None
+    provider = str(entry.get("provider") or name)
     api_base = entry.get("api_base")
+    if not api_base and provider in SEARCH_PROVIDERS_REQUIRING_API_BASE:
+        api_base = inherited_api_base
     if api_base:
         try:
             validate_url(str(api_base))
+            validate_search_tool_transport(name, api_base, entry.get("api_key"))
         except ValueError as exc:
             raise HTTPException(status_code=status.HTTP_422_UNPROCESSABLE_CONTENT, detail=str(exc)) from None
 
@@ -325,6 +330,7 @@ async def create_search_tool(
             "timeout": request.timeout,
             "options": request.options,
         },
+        inherited_api_base=config.web_search_url,
     )
     conflict = f"A stored search tool '{name}' already exists; use PATCH to update it."
     if await get_search_tool(db, name) is not None:
@@ -394,7 +400,7 @@ async def update_search_tool(
         # decrypted here just to re-validate it.
         "api_key": request.api_key if "api_key" in sent else existing.encrypted_api_key,
     }
-    _validate_entry(name, merged)
+    _validate_entry(name, merged, inherited_api_base=config.web_search_url)
 
     try:
         row = await save_search_tool(

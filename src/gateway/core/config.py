@@ -129,6 +129,19 @@ SEARCH_PROVIDERS_REQUIRING_API_KEY = ("exa",)
 SEARCH_PROVIDERS_REQUIRING_API_BASE = ("searxng",)
 
 
+def validate_search_tool_transport(name: str, api_base: Any, api_key: Any) -> None:
+    """Require encrypted transport when a search tool carries a credential."""
+    if not api_key or not api_base:
+        return
+    try:
+        scheme = urlsplit(str(api_base).strip()).scheme.lower()
+    except ValueError:
+        scheme = ""
+    if scheme != "https":
+        msg = f"search_tools.{name}.api_base must use https when api_key is set."
+        raise ValueError(msg)
+
+
 def validate_search_tool_entry(name: str, entry: Any) -> None:
     """Validate one ``search_tools`` entry, raising ``ValueError`` on any problem.
 
@@ -164,6 +177,7 @@ def validate_search_tool_entry(name: str, entry: Any) -> None:
     if provider in SEARCH_PROVIDERS_REQUIRING_API_KEY and not entry.get("api_key"):
         msg = f"search_tools.{name}.api_key is required for provider '{provider}'."
         raise ValueError(msg)
+    validate_search_tool_transport(name, entry.get("api_base"), entry.get("api_key"))
     timeout = entry.get("timeout")
     if timeout is not None:
         if isinstance(timeout, bool) or not isinstance(timeout, (int, float)):
@@ -1712,6 +1726,11 @@ class GatewayConfig(BaseSettings):
         """
         for name, entry in self.search_tools.items():
             validate_search_tool_entry(name, entry)
+            if not isinstance(entry, dict):
+                continue
+            provider = str(entry.get("provider") or name)
+            if provider in SEARCH_PROVIDERS_REQUIRING_API_BASE and not entry.get("api_base"):
+                validate_search_tool_transport(name, self.web_search_url, entry.get("api_key"))
 
     @field_validator("stream_missing_usage_policy")
     @classmethod

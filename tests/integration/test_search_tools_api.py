@@ -123,6 +123,12 @@ def test_private_api_base_is_allowed(client: TestClient, master_key_header: dict
     assert _create(client, master_key_header, api_base="http://searxng:8080").status_code == 201
 
 
+def test_credentialed_http_api_base_is_refused(client: TestClient, master_key_header: dict[str, str]) -> None:
+    resp = _create(client, master_key_header, api_key="adapter-secret")
+    assert resp.status_code == 422
+    assert "api_base must use https when api_key is set" in resp.json()["detail"]
+
+
 def test_duplicate_name_conflicts(client: TestClient, master_key_header: dict[str, str]) -> None:
     assert _create(client, master_key_header).status_code == 201
     dup = _create(client, master_key_header)

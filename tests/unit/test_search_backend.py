@@ -98,6 +98,18 @@ def test_api_base_override_is_normalized() -> None:
     assert tool.api_base == "https://proxy.internal"
 
 
+@pytest.mark.parametrize(
+    "entry",
+    [
+        {"provider": "exa", "api_key": "secret", "api_base": "http://exa.internal"},
+        {"provider": "searxng", "api_key": "secret", "api_base": "http://searxng:8080"},
+    ],
+)
+def test_credentialed_tool_refuses_an_http_api_base(entry: dict[str, Any]) -> None:
+    with pytest.raises(SearchToolError, match="api_base must use https when api_key is set"):
+        resolve_search_tool(_config(search=entry), "search")
+
+
 def test_no_configured_tools_is_a_tool_error() -> None:
     with pytest.raises(SearchToolError, match="No search tools are configured"):
         resolve_search_tool(_config(), None)
@@ -482,8 +494,25 @@ async def test_searxng_search_forwards_a_configured_key_as_the_gateway_token(
         return httpx.Response(200, json={"results": []})
 
     _patch_transport(monkeypatch, handler)
-    await run_search(replace(_SEARXNG_TOOL, api_key="adapter-secret"), SearchQuery(query="otari"))
+    tool = replace(_SEARXNG_TOOL, api_base="https://searxng.example.com", api_key="adapter-secret")
+    await run_search(tool, SearchQuery(query="otari"))
     assert seen["token"] == "adapter-secret"
+
+
+@pytest.mark.asyncio
+async def test_run_search_never_sends_a_credential_over_http(monkeypatch: pytest.MonkeyPatch) -> None:
+    called = False
+
+    def handler(_request: httpx.Request) -> httpx.Response:
+        nonlocal called
+        called = True
+        return httpx.Response(200, json={"results": []})
+
+    _patch_transport(monkeypatch, handler)
+    tool = replace(_SEARXNG_TOOL, api_key="adapter-secret")
+    with pytest.raises(SearchProviderError, match="api_base must use https when api_key is set"):
+        await run_search(tool, SearchQuery(query="otari"))
+    assert called is False
 
 
 @pytest.mark.asyncio
@@ -598,6 +627,15 @@ async def test_closing_the_pooled_client_lets_the_next_search_rebuild_it(monkeyp
     [
         ({"exa": {"api_key": "k"}}, None),
         ({"web": {"provider": "exa", "api_key": "k"}}, None),
+        ({"exa": {"api_key": "k", "api_base": "https://exa.internal"}}, None),
+        (
+            {"exa": {"api_key": "k", "api_base": "http://exa.internal"}},
+            "api_base must use https when api_key is set",
+        ),
+        (
+            {"local": {"provider": "searxng", "api_key": "k", "api_base": "http://searxng:8080"}},
+            "api_base must use https when api_key is set",
+        ),
         ({"web": {"api_key": "k"}}, "is not a supported search provider"),
         ({"exa": {}}, "api_key is required for provider 'exa'"),
         ({"searxng": {"api_base": "http://searxng:8080"}}, None),
@@ -630,6 +668,15 @@ def test_validate_accepts_a_searxng_tool_that_inherits_the_web_search_url() -> N
     )
     config.validate_search_tools()
     assert config.search_tools_without_backend_url() == []
+
+
+def test_validate_refuses_a_credentialed_searxng_tool_inheriting_http() -> None:
+    config = GatewayConfig(
+        search_tools={"local": {"provider": "searxng", "api_key": "k"}},
+        web_search_url="http://searxng:8080",
+    )
+    with pytest.raises(ValueError, match="api_base must use https when api_key is set"):
+        config.validate_search_tools()
 
 
 def test_a_searxng_tool_with_no_backend_url_anywhere_is_reported() -> None:

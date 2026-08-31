@@ -59,7 +59,12 @@ from urllib.parse import urlparse
 
 import httpx
 
-from gateway.core.config import SEARCH_PROVIDERS, SEARCH_PROVIDERS_REQUIRING_API_KEY, GatewayConfig
+from gateway.core.config import (
+    SEARCH_PROVIDERS,
+    SEARCH_PROVIDERS_REQUIRING_API_KEY,
+    GatewayConfig,
+    validate_search_tool_transport,
+)
 
 EXA_PROVIDER = "exa"
 SEARXNG_PROVIDER = "searxng"
@@ -216,6 +221,10 @@ def resolve_search_tool(config: GatewayConfig, name: str | None) -> SearchTool:
     if provider not in SEARCH_PROVIDERS or missing_key or not api_base:
         msg = f"Search tool '{name}' is not configured correctly."
         raise SearchToolError(msg)
+    try:
+        validate_search_tool_transport(name, api_base, api_key)
+    except ValueError as exc:
+        raise SearchToolError(str(exc)) from None
 
     raw_options = entry.get("options")
     options = dict(raw_options) if isinstance(raw_options, dict) else {}
@@ -253,6 +262,12 @@ def default_api_base(config: GatewayConfig, provider: str) -> str | None:
 
 async def run_search(tool: SearchTool, query: SearchQuery) -> SearchOutcome:
     """Dispatch one search against the tool's provider."""
+    try:
+        validate_search_tool_transport(tool.name, tool.api_base, tool.api_key)
+    except ValueError as exc:
+        # Defense in depth for a caller that constructs SearchTool directly
+        # instead of using resolve_search_tool. No credential reaches the client.
+        raise SearchProviderError(str(exc)) from None
     if tool.provider == EXA_PROVIDER:
         return await _search_exa(tool, query)
     if tool.provider == SEARXNG_PROVIDER:
