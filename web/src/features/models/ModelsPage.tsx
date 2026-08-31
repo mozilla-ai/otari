@@ -177,6 +177,9 @@ interface ModelRow {
   cacheWrite1hPrice: number | null
   pricingTiers: PricingTier[]
   source: PriceSource
+  /** What the model accepts and emits, for the Modalities lane. */
+  inputModalities?: string[]
+  outputModalities?: string[]
 }
 
 type EffectiveRates = Pick<
@@ -394,7 +397,7 @@ function PricingTierEditor({
   }
 
   return (
-    <div className="flex flex-col gap-2 rounded-lg border border-border p-3">
+    <div className="flex flex-col gap-2 border border-control-border p-3">
       <div className="flex items-center justify-between gap-3">
         <div>
           <div className="text-xs font-medium text-foreground">
@@ -561,7 +564,7 @@ function InfoTooltip({
       <span
         id={tipId}
         role="tooltip"
-        className="pointer-events-none absolute top-full right-0 z-20 mt-1.5 w-72 rounded-lg border border-border bg-surface px-3 py-2 text-left text-xs font-normal whitespace-normal break-words text-foreground opacity-0 shadow-elevation-lg transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
+        className="pointer-events-none absolute top-full right-0 z-20 mt-1.5 w-72 border border-control-border bg-surface px-3 py-2 text-left text-xs font-normal whitespace-normal break-words text-foreground opacity-0 transition-opacity group-hover:opacity-100 group-focus-within:opacity-100"
       >
         {children}
       </span>
@@ -1304,6 +1307,27 @@ function ModelTable({
         cell: (row) => <span className="text-muted">{row.provider}</span>,
       },
       {
+        id: "modalities",
+        header: "Modalities",
+        // The category set's one instance in a table, which is why the artboard
+        // puts it here rather than only in the detail panel: this is the form's
+        // rendered specimen. An em dash where the metadata service reported
+        // nothing, because unknown is an absence rather than "none".
+        cell: (row) => {
+          const input = row.inputModalities ?? []
+          const output = row.outputModalities ?? []
+          if (input.length === 0 && output.length === 0) {
+            return <span className="text-muted">—</span>
+          }
+          return (
+            <div className="flex flex-col gap-1">
+              <ModalitySet label="In" values={input} />
+              <ModalitySet label="Out" values={output} />
+            </div>
+          )
+        },
+      },
+      {
         id: "input",
         header: (
           <span className="inline-flex items-center gap-1">
@@ -1638,6 +1662,8 @@ export function ModelsPage() {
       contextWindow:
         row.contextWindow ?? metadataByKey[row.key]?.context_window ?? null,
       releaseDate: metadataByKey[row.key]?.release_date ?? null,
+      inputModalities: metadataByKey[row.key]?.input_modalities ?? undefined,
+      outputModalities: metadataByKey[row.key]?.output_modalities ?? undefined,
     }))
     const seen = new Set(out.map((row) => row.key))
     // These rows exist because discovery reaches a model the catalog did not list:
@@ -1664,6 +1690,10 @@ export function ModelsPage() {
           isDiscovered: true,
           contextWindow: metadataByKey[model.key]?.context_window ?? null,
           releaseDate: metadataByKey[model.key]?.release_date ?? null,
+          inputModalities:
+            metadataByKey[model.key]?.input_modalities ?? undefined,
+          outputModalities:
+            metadataByKey[model.key]?.output_modalities ?? undefined,
           inputPrice: null,
           outputPrice: null,
           cacheReadPrice: null,

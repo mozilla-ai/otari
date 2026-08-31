@@ -142,7 +142,7 @@ export function TablePagination({
                 }
               }}
               onBlur={commitPage}
-              className="w-12 rounded-lg border border-border bg-surface-alt px-2 py-1 text-center text-sm text-foreground tabular-nums focus:border-accent focus:outline-none"
+              className="w-12 border border-control-border bg-surface-alt px-2 py-1 text-center text-sm text-foreground tabular-nums focus:border-accent focus:outline-none"
             />
             {pageCount != null ? (
               <span className="tabular-nums">

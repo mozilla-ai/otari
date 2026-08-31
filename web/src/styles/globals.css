@@ -1497,7 +1497,10 @@ body {
   padding-left: 20px;
 }
 .otari-models-table .table__column[data-key="provider"] {
-  width: 140px;
+  width: 150px;
+}
+.otari-models-table .table__column[data-key="modalities"] {
+  width: 210px;
 }
 .otari-models-table .table__column[data-key="model"] {
   min-width: 220px;

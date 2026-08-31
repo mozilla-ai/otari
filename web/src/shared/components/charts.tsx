@@ -93,7 +93,7 @@ export function ChartTooltip({
     rows.length > 1 ? rows.filter((entry) => (entry.value as number) > 0) : rows
   const total = rows.reduce((sum, entry) => sum + (entry.value as number), 0)
   return (
-    <div className="rounded-md border border-border bg-surface px-2.5 py-1.5 text-xs shadow-elevation-sm">
+    <div className="border border-control-border bg-surface px-2.5 py-1.5 text-xs">
       <div className="text-muted">{heading}</div>
       <div className="mt-0.5 flex flex-col gap-0.5">
         {visible.map((entry, index) => (

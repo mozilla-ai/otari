@@ -554,14 +554,14 @@ function HowToCallCard({ tool }: { tool: ManagedTool }) {
           {tool.accepted_types.map((type) => (
             <code
               key={type}
-              className="border border-border bg-surface px-1.5 py-0.5 text-xs"
+              className="border border-control-border bg-surface px-1.5 py-0.5 text-xs"
             >
               {type}
             </code>
           ))}
         </div>
       </div>
-      <pre className="overflow-x-auto rounded-md border border-border bg-surface p-3 text-xs">
+      <pre className="overflow-x-auto border border-control-border bg-surface p-3 text-xs">
         <code>{`POST /v1/chat/completions\n${JSON.stringify(request, null, 2)}`}</code>
       </pre>
     </div>

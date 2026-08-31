@@ -663,8 +663,11 @@ function HealthSummary({
       : "bg-danger"
   const recheck = useRecheckProviderHealth()
   return (
-    <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-surface px-4 py-2.5 text-sm">
-      <span aria-hidden className={`h-2 w-2 ${dot}`} />
+    // A band of the page rather than a card, which is what the rest of this page
+    // became: the summary is a region between rules, so the rules are what bound
+    // it and the fill goes.
+    <div className="flex flex-wrap items-center gap-3 border-y border-border py-3 text-sm">
+      <Dot className={dot} />
       <span className="font-medium text-foreground">
         {healthy} of {total} provider{total === 1 ? "" : "s"} reachable
       </span>

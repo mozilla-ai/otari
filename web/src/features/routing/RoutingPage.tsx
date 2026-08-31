@@ -710,7 +710,7 @@ function PolicyForm({
 
         {/* Conditional tier-down */}
         {conditions.length > 0 ? (
-          <div className="flex flex-col gap-3 rounded-lg border border-border p-3">
+          <div className="flex flex-col gap-3 border border-control-border p-3">
             <div>
               <span className="text-sm font-medium text-foreground">
                 Instead, when the budget fills up
@@ -772,7 +772,7 @@ function PolicyForm({
               models, one of them per request". What differs is who decides, and
               whether a share sits next to each entry. */}
         {candidates.length > 0 ? (
-          <div className="flex flex-col gap-3 rounded-lg border border-border p-3">
+          <div className="flex flex-col gap-3 border border-control-border p-3">
             <div>
               <span className="text-sm font-medium text-foreground">
                 {weighted
@@ -925,7 +925,7 @@ function PolicyForm({
 
         {/* Failure chain */}
         {chain.length > 0 ? (
-          <div className="flex flex-col gap-3 rounded-lg border border-border p-3">
+          <div className="flex flex-col gap-3 border border-control-border p-3">
             <div>
               <span className="text-sm font-medium text-foreground">
                 If that fails, try
@@ -984,7 +984,7 @@ function PolicyForm({
 
         {/* Guardrails */}
         {guardrails.length > 0 ? (
-          <div className="flex flex-col gap-3 rounded-lg border border-border p-3">
+          <div className="flex flex-col gap-3 border border-control-border p-3">
             <div>
               <span className="text-sm font-medium text-foreground">
                 Always check

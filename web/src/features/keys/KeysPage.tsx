@@ -337,7 +337,7 @@ function BudgetExemptToggle({
   onChange: (value: boolean) => void
 }) {
   return (
-    <label className="flex items-start gap-2 rounded-lg border border-border p-3 text-sm">
+    <label className="flex items-start gap-2 border border-control-border p-3 text-sm">
       <input
         type="checkbox"
         checked={checked}
@@ -505,7 +505,7 @@ function CreateKeyForm({
         {showAdvanced ? "Hide advanced" : "Advanced"}
       </button>
       {showAdvanced ? (
-        <div className="flex flex-col gap-4 rounded-lg border border-border p-4">
+        <div className="flex flex-col gap-4 border border-control-border p-4">
           <OwnerAccessNote userId={userId} users={users.data ?? []} />
           <ModelScopeControl
             title="Restrict this key's models"

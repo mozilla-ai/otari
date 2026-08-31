@@ -808,7 +808,7 @@ function RoutingPlan({ entry }: { entry: UsageEntry }) {
     <div className="flex flex-col gap-2">
       <span className="text-overline">Routing plan · {entry.policy_name}</span>
       <span className="text-sm text-foreground">{summary}</span>
-      <div className="overflow-x-auto rounded-lg border border-border">
+      <div className="overflow-x-auto border border-control-border">
         <table
           className="w-full text-xs"
           aria-label={`Routing plan for policy ${entry.policy_name}`}

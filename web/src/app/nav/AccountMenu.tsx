@@ -244,7 +244,7 @@ export function AccountMenu({ collapsed }: { collapsed: boolean }) {
         aria-label="Account"
         className={`${navRowClass({ collapsed })} w-auto! justify-start`}
       >
-        <span className="flex h-[1.625rem] w-[1.625rem] shrink-0 items-center justify-center border border-border bg-surface-alt text-chrome-initials font-semibold text-muted">
+        <span className="flex h-[1.625rem] w-[1.625rem] shrink-0 items-center justify-center border border-control-border bg-surface-alt text-chrome-initials font-semibold text-muted">
           {identity.initials}
         </span>
         {collapsed ? null : (
