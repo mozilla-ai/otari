@@ -168,10 +168,10 @@ class OrgProviderKey(SQLModel, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, 
         ``region_name``, other client kwargs), and a credential-shaped field
         placed there is never echoed back either: ``redact_secret_like_values``
         masks it the same way ``encrypted_api_key`` itself already stays off
-        the wire (only ``last4`` comes back). No coarser per-audience gate sits
-        over it any more: every path that serializes a key, the list read
-        included, is organization owner/admin-gated (otari-ai#1944), so there is
-        no wider audience to withhold the field from.
+        the wire (only ``last4`` comes back). That masking is the whole
+        protection the field gets, and it is enough because it holds for every
+        reader: this surface has one audience, the organization owners and
+        admins each of its routes is gated on.
         """
         return OrgProviderKeyPublic(
             id=self.id,

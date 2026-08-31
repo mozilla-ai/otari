@@ -377,12 +377,11 @@ class OrgProviderKeyService:
     ) -> OrgProviderKeysPublic:
         """List the caller's organization's keys. Organization owners and admins only.
 
-        Gated like the writes rather than open to every active member: a row
-        names the provider, the endpoint and the credential's last four, and the
-        roles matrix puts the whole provider-key surface out of a member's sight
-        (otari-ai#1944). That is also what retired the per-audience
-        ``client_args`` redaction `OrgProviderKey.to_public` used to carry: with
-        no member reader left, there is no wider audience to withhold it from.
+        Gated like every write on this surface, not open to the wider
+        membership: a row names the provider, the endpoint and the credential's
+        last four, which the roles matrix keeps out of a plain member's sight
+        (otari-ai#1944). One audience for the whole surface is also what lets
+        `OrgProviderKey.to_public` serialize ``client_args`` for every caller.
         ``count`` is the total matching rows, not the page size, so a caller
         can page correctly (mirrors ``WorkspaceService.list_workspaces``).
         """
