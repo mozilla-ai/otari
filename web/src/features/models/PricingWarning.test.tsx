@@ -66,13 +66,23 @@ function countWindows(fetchMock: FetchMock): string[] {
     .map((u) => String(new URLSearchParams(u.split("?")[1]).get("start_date")))
 }
 
-function renderPage(ui: ReactElement) {
-  const client = new QueryClient({
-    defaultOptions: { queries: { retry: false } },
+function renderPage(
+  ui: ReactElement,
+  client = new QueryClient({ defaultOptions: { queries: { retry: false } } }),
+) {
+  render(<QueryClientProvider client={client}>{ui}</QueryClientProvider>, {
+    wrapper: withRouter(),
   })
-  return render(
-    <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
-    { wrapper: withRouter() },
+  return client
+}
+
+// Resolves once the organization context has landed in the cache, which is when
+// the operator gate has an answer. `fetch` having been called only says the
+// request started, so an absence asserted on that alone would also hold while
+// the gate was still undecided.
+async function settleContext(client: QueryClient) {
+  await waitFor(() =>
+    expect(client.getQueryData(["organizations", "context"])).toBeDefined(),
   )
 }
 
@@ -230,19 +240,40 @@ describe("PricingWarning", () => {
       12,
       organizationContext({ deployment_operator: false }),
     )
-    renderPage(<PricingWarning />)
+    const client = renderPage(<PricingWarning />)
 
-    await waitFor(() =>
-      expect(
-        fetchMock.mock.calls.some(([u]) =>
-          String(u).endsWith("/v1/organizations/me"),
-        ),
-      ).toBe(true),
-    )
+    await settleContext(client)
     expect(
       fetchMock.mock.calls.some(([u]) => String(u).includes("/v1/settings")),
     ).toBe(false)
     expect(screen.queryByText(/Requests are rejected/)).not.toBeInTheDocument()
+  })
+
+  it("keeps an operator's cached settings out of a tenant's shell", async () => {
+    // A disabled query still serves whatever sits under its key, and the query
+    // client outlives a sign-out, so the session that follows an operator's in
+    // the same tab would otherwise be shown their banner and a button that
+    // would be refused.
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    client.setQueryData(["settings"], {
+      ...BASE,
+      require_pricing: true,
+      default_pricing: false,
+    } satisfies GatewaySettings)
+    mockSettings(
+      { ...BASE, require_pricing: true, default_pricing: false },
+      12,
+      organizationContext({ deployment_operator: false }),
+    )
+    renderPage(<PricingWarning />, client)
+
+    await settleContext(client)
+    expect(screen.queryByText(/Requests are rejected/)).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Enable default pricing" }),
+    ).not.toBeInTheDocument()
   })
 
   it("can be dismissed", async () => {

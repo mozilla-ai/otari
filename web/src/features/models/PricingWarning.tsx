@@ -33,11 +33,17 @@ export function PricingWarning() {
   // `useProviderKeyEncryption` does: a second request to ask the same question
   // is the cost this removes.
   const organization = useOrganizationContext()
-  const settings = useSettings(isDeploymentOperator(organization.data))
+  const isOperator = isDeploymentOperator(organization.data)
+  const settings = useSettings(isOperator)
   const updateSettings = useUpdateSettings()
   const [dismissed, setDismissed] = useState(false)
 
+  // The render is gated on the same answer the request is, because a disabled
+  // query still serves whatever sits under its key and the query client outlives
+  // a sign-out: without this, a session that follows an operator's in the same
+  // tab renders their settings and a button that would be refused.
   const needsPricing =
+    isOperator &&
     settings.data?.require_pricing === true &&
     settings.data.default_pricing === false
   const showing = needsPricing && !dismissed
