@@ -1448,6 +1448,60 @@ body {
   min-width: 180px;
 }
 
+/* The API keys table. Same terms as the others (page ground, rule-bounded
+   overline header, faint separators), plus the lanes from the frozen artboard
+   and a two-line name cell that sets the 58px row.
+
+   The armed confirmation is a strip under its own row, and the pair has to read
+   as one thing: the armed row's bottom rule is suppressed so the strip is not
+   fenced off from the row it is about, and the strip carries the rules instead.
+   `.otari-detail-row` is what `DataTable` names that inserted row. */
+.otari-keys-table .otari-table.table-root {
+  background-color: transparent;
+}
+.otari-keys-table .otari-table .table__header {
+  background-color: transparent;
+  border-bottom: 1px solid var(--color-border);
+}
+.otari-keys-table .otari-table .table__row,
+.otari-keys-table .table__row .table__cell {
+  border-color: var(--color-border-subtle);
+}
+.otari-keys-table .table__row .table__cell {
+  height: 58px;
+  padding-block: 0;
+}
+.otari-keys-table .table__column[data-key="status"] {
+  width: 120px;
+}
+.otari-keys-table .table__column[data-key="owner"] {
+  width: 170px;
+}
+.otari-keys-table .table__column[data-key="key"] {
+  width: 150px;
+}
+.otari-keys-table .table__column[data-key="created"],
+.otari-keys-table .table__column[data-key="expires"] {
+  width: 110px;
+}
+.otari-keys-table .table__column[data-key="last_used"] {
+  width: 120px;
+}
+.otari-keys-table .table__column[data-key="actions"] {
+  width: 250px;
+}
+.otari-keys-table .otari-table .otari-detail-row > td {
+  background-color: transparent;
+  border-top: 1px solid var(--color-border-subtle);
+  border-bottom: 1px solid var(--color-border-subtle);
+}
+/* The row above an armed strip gives up its own rule, so the two are one unit
+   rather than two stacked bands. */
+.otari-keys-table .otari-table .table__row:has(+ .otari-detail-row),
+.otari-keys-table .table__row:has(+ .otari-detail-row) .table__cell {
+  border-bottom-color: transparent;
+}
+
 /* Usage's two breakdown tables, on the same terms as the Overview preview: on
    the page ground rather than on a surface, a rule-bounded overline header
    instead of a tinted band, separators on the faint tier, and fixed numeric

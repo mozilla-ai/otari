@@ -1,7 +1,6 @@
-import { Button, Card, Chip } from "@heroui/react"
+import { Button } from "@heroui/react"
 import { Link } from "@tanstack/react-router"
 import {
-  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
   useCallback,
   useEffect,
@@ -35,12 +34,16 @@ import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import { Field } from "@/shared/components/Field"
 import { MissingGatewayAddressNotice } from "@/shared/components/MissingGatewayAddressNotice"
 import {
+  BLEED_INSET,
+  Dot,
+  FULL_BLEED,
+  TableScrollFrame,
+} from "@/shared/components/surface"
+import {
   CopyField,
   EmptyState,
   ErrorBanner,
   FilterSelect,
-  InfoBanner,
-  PageHeader,
 } from "@/shared/components/ui"
 import { formatDate } from "@/shared/helpers/format"
 import {
@@ -101,10 +104,18 @@ const getKeyRowKey = (k: ApiKey): string => k.id
 
 // ---------- one-time reveal ----------
 
-// The highest-stakes moment: the plaintext key is shown once. A focus-trapped
-// dialog that cannot be dismissed by backdrop or Esc, only by an explicit "I've
-// saved this key". Doubles as an activation moment: a copy-paste first call.
-function RevealSecretModal({
+/**
+ * The highest-stakes moment: the plaintext key, shown once.
+ *
+ * A strip between the page header and the table rather than a modal. The modal
+ * existed to make the acknowledgement unavoidable, and it bought that with a
+ * focus trap, a swallowed Esc and a backdrop that ignored clicks, all of which
+ * are a dialog fighting its own conventions. A strip that stays until it is
+ * acknowledged does the same job without pretending to be dismissible: there is
+ * one control and it is the acknowledgement. The page scrolls to it on reveal,
+ * so it is never announced somewhere the operator is not looking.
+ */
+function RevealSecretStrip({
   title,
   result,
   onClose,
@@ -113,7 +124,6 @@ function RevealSecretModal({
   result: CreateKeyResponse
   onClose: () => void
 }) {
-  const dialogRef = useRef<HTMLDivElement>(null)
   const secretRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null)
   // Where a request from this deployment belongs, which is not always the address
   // that served this page: a hosted control plane serves the dashboard and not
@@ -122,29 +132,13 @@ function RevealSecretModal({
   const secret = result.key
 
   useEffect(() => {
-    // Focus the secret so Ctrl/Cmd-C works at once and a stray Enter doesn't land
-    // on the close button.
+    // The strip is above the fold only if the page is at the top, and a reveal
+    // can arrive after a scroll. Move there first, then take focus, so the
+    // secret is selected somewhere the operator can see it.
+    window.scrollTo({ top: 0 })
     secretRef.current?.focus()
     secretRef.current?.select()
   }, [])
-
-  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    // Esc is intentionally ignored; closing is an explicit acknowledgement.
-    if (event.key !== "Tab") return
-    const focusables = dialogRef.current?.querySelectorAll<HTMLElement>(
-      'button, input, textarea, a[href], [tabindex]:not([tabindex="-1"])',
-    )
-    if (!focusables || focusables.length === 0) return
-    const first = focusables[0]
-    const last = focusables[focusables.length - 1]
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault()
-      last.focus()
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault()
-      first.focus()
-    }
-  }
 
   // The same two calls the setup guide hands out with its own key; the builders
   // are shared so an operator cannot be shown two dialects of one request.
@@ -158,93 +152,125 @@ function RevealSecretModal({
     : undefined
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-backdrop/40 p-4"
-      role="presentation"
+    <section
+      // `alert` rather than `status`: this is the one message on the page that
+      // is gone forever if it is missed.
+      role="alert"
+      aria-labelledby="reveal-title"
+      className={`${FULL_BLEED} ${BLEED_INSET} flex flex-col gap-4 border-y border-border py-5`}
     >
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="reveal-title"
-        onKeyDown={onKeyDown}
-        className="flex max-h-[90vh] w-full max-w-2xl flex-col gap-4 overflow-y-auto rounded-xl bg-surface p-6 shadow-modal"
-      >
-        <h2 id="reveal-title" className="text-lg font-semibold text-foreground">
-          {title}
-        </h2>
-        <InfoBanner tone="warning">
-          Copy this key now. For security it is shown only once and cannot be
-          retrieved later. If you lose it, use Regenerate to issue a new secret.
-        </InfoBanner>
-        <p className="text-xs text-muted">
-          Model access: {accessLabel(result.allowed_models).text}.
-        </p>
-        <CopyField label="Secret key" value={secret} fieldRef={secretRef} />
-        <div className="flex flex-col gap-2">
-          <div>
-            <div className="text-sm font-medium text-foreground">
-              Make your first call
-            </div>
-            {snippets === undefined ? (
-              <MissingGatewayAddressNotice />
-            ) : (
-              <p className="text-xs text-muted">
-                Replace <code>{SNIPPET_MODEL_PLACEHOLDER}</code> with a model
-                from the Models page.
-              </p>
-            )}
-          </div>
-          {snippets !== undefined ? (
-            <>
-              <CopyField label="curl" value={snippets.curl} multiline />
-              <CopyField
-                label="Python (OpenAI SDK)"
-                value={snippets.python}
-                multiline
-              />
-            </>
-          ) : null}
-        </div>
-        <div className="flex justify-end">
-          <Button variant="primary" onPress={onClose}>
-            I&rsquo;ve saved this key
-          </Button>
+      <div className="flex items-start gap-3">
+        <Dot className="mt-2 bg-danger" />
+        <div className="min-w-0">
+          <h2 id="reveal-title" className="text-title">
+            {title}
+          </h2>
+          <p className="mt-1 text-sm text-muted">
+            Copy this key now. For security it is shown only once and cannot be
+            retrieved later. If you lose it, use Regenerate to issue a new
+            secret. Model access: {accessLabel(result.allowed_models).text}.
+          </p>
         </div>
       </div>
-    </div>
+      <CopyField label="Secret key" value={secret} fieldRef={secretRef} />
+      <div className="flex flex-col gap-2">
+        <div>
+          <div className="text-sm font-medium text-foreground">
+            Make your first call
+          </div>
+          {snippets === undefined ? (
+            <MissingGatewayAddressNotice />
+          ) : (
+            <p className="text-xs text-muted">
+              Replace <code>{SNIPPET_MODEL_PLACEHOLDER}</code> with a model from
+              the Models page.
+            </p>
+          )}
+        </div>
+        {snippets !== undefined ? (
+          <>
+            <CopyField label="curl" value={snippets.curl} multiline />
+            <CopyField
+              label="Python (OpenAI SDK)"
+              value={snippets.python}
+              multiline
+            />
+          </>
+        ) : null}
+      </div>
+      <div className="flex justify-end border-t border-border pt-4">
+        <Button variant="primary" onPress={onClose}>
+          I&rsquo;ve saved this key
+        </Button>
+      </div>
+    </section>
   )
 }
 
-// ---------- inline confirm (names the target, no modal) ----------
+// ---------- row actions and the armed strip ----------
 
-function InlineConfirm({
-  trigger,
+/**
+ * A row action: 13px of muted text, no button, no border, no fill. A row has
+ * four of these and boxing each one turned the last lane into a control panel;
+ * the actions are the only interactive things in a row of static values, so
+ * they need no shape to be found. Danger ink is reserved for the armed state,
+ * which is the only moment one of them is about to do something irreversible.
+ */
+function RowAction({
+  onPress,
+  isDanger,
+  isDisabled,
+  children,
+}: {
+  onPress: () => void
+  isDanger?: boolean
+  isDisabled?: boolean
+  children: ReactNode
+}) {
+  return (
+    <button
+      type="button"
+      disabled={isDisabled}
+      onClick={onPress}
+      className={`text-[13px] transition-colors motion-reduce:transition-none disabled:opacity-50 ${
+        isDanger ? "text-danger" : "text-muted hover:text-foreground"
+      }`}
+    >
+      {children}
+    </button>
+  )
+}
+
+/**
+ * The confirmation, as a strip spanning the whole table directly under the row
+ * it is about, rather than as a panel inside one cell.
+ *
+ * It reads as part of that row: the row's own bottom rule is suppressed in CSS
+ * so the two are one unit, and the strip carries its own rules top and bottom.
+ * The message keeps its `<strong>` on the key's name, which is the one thing
+ * that must not be misread when the next click is irreversible.
+ */
+function ArmedStrip({
   message,
   confirmLabel,
   isPending,
   onConfirm,
+  onCancel,
 }: {
-  trigger: string
   message: ReactNode
   confirmLabel: string
   isPending?: boolean
   onConfirm: () => void
+  onCancel: () => void
 }) {
-  const [armed, setArmed] = useState(false)
-
-  if (!armed) {
-    return (
-      <Button size="sm" variant="danger-soft" onPress={() => setArmed(true)}>
-        {trigger}
-      </Button>
-    )
-  }
-
   return (
-    <div className="flex flex-col items-end gap-1.5 rounded-lg border border-warning bg-warning-subtle p-2 text-right">
-      <span className="max-w-xs text-xs text-warning">{message}</span>
-      <span className="inline-flex gap-1">
+    <div className="flex flex-wrap items-center gap-4 bg-background px-8 py-3.5">
+      <Dot className="bg-danger" />
+      <span className="min-w-0 flex-1 text-sm text-foreground">{message}</span>
+      <div className="flex shrink-0 items-center gap-4">
+        <RowAction onPress={onCancel} isDisabled={isPending}>
+          Cancel
+        </RowAction>
         <Button
           size="sm"
           variant="danger"
@@ -253,15 +279,7 @@ function InlineConfirm({
         >
           {confirmLabel}
         </Button>
-        <Button
-          size="sm"
-          variant="ghost"
-          isDisabled={isPending}
-          onPress={() => setArmed(false)}
-        >
-          Cancel
-        </Button>
-      </span>
+      </div>
     </div>
   )
 }
@@ -443,91 +461,92 @@ function CreateKeyForm({
   }
 
   return (
-    <Card>
-      <Card.Content className="flex flex-col gap-4 p-5">
-        <div className="text-title">Create API key</div>
-        <ErrorBanner error={create.error} />
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field
-            label="Name"
-            value={keyName}
-            onChange={setKeyName}
-            placeholder="ci-bot"
-            autoFocus
-            description="A label to recognize this key later."
-          />
-          <Field
-            label="Expires (optional)"
-            value={expiresAt}
-            onChange={setExpiresAt}
-            type="datetime-local"
-            description={
-              expiresInPast ? (
-                <span className="text-danger">
-                  That time is in the past; the key would be rejected
-                  immediately.
-                </span>
-              ) : (
-                "Leave blank for a key that never expires."
-              )
-            }
-          />
-        </div>
-        <UserComboBox
-          value={userId}
-          onChange={setUserId}
-          users={users.data ?? []}
-          memberLabels={memberLabels}
+    <section
+      className={`${FULL_BLEED} ${BLEED_INSET} flex flex-col gap-4 border-y border-border py-5`}
+    >
+      <h2 className="text-title">Create API key</h2>
+      <ErrorBanner error={create.error} />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field
+          label="Name"
+          value={keyName}
+          onChange={setKeyName}
+          placeholder="ci-bot"
+          autoFocus
+          description="A label to recognize this key later."
         />
-        <button
-          type="button"
-          className="self-start text-xs font-medium text-link hover:text-link-hover"
-          onClick={() => setShowAdvanced((v) => !v)}
-        >
-          {showAdvanced ? "Hide advanced" : "Advanced"}
-        </button>
-        {showAdvanced ? (
-          <div className="flex flex-col gap-4 rounded-lg border border-border p-4">
-            <OwnerAccessNote userId={userId} users={users.data ?? []} />
-            <ModelScopeControl
-              title="Restrict this key's models"
-              description="By default this key inherits its owner's access. Optionally narrow it to a subset; a key can never exceed its owner's allowed models."
-              anyLabel="Inherit owner access"
-              initial={null}
-              onChange={(value, valid) => {
-                setAllowedModels(value)
-                setScopeValid(valid)
-              }}
-            />
-            <BudgetExemptToggle
-              checked={excludeFromBudget}
-              onChange={setExcludeFromBudget}
-            />
-            <UserMismatchPicker
-              value={rejectUserMismatch}
-              onChange={setRejectUserMismatch}
-            />
-          </div>
-        ) : null}
-        <div className="flex gap-2">
-          <Button
-            variant="primary"
-            isDisabled={
-              create.isPending ||
-              !scopeValid ||
-              ownerMissing ||
-              workspaceUnresolved
-            }
-            onPress={submit}
-          >
-            {create.isPending ? "Creating…" : "Create key"}
-          </Button>
-          <Button variant="ghost" onPress={onClose}>
-            Cancel
-          </Button>
+        <Field
+          label="Expires (optional)"
+          value={expiresAt}
+          onChange={setExpiresAt}
+          type="datetime-local"
+          description={
+            expiresInPast ? (
+              <span className="text-danger">
+                That time is in the past; the key would be rejected immediately.
+              </span>
+            ) : (
+              "Leave blank for a key that never expires."
+            )
+          }
+        />
+      </div>
+      <UserComboBox
+        value={userId}
+        onChange={setUserId}
+        users={users.data ?? []}
+        memberLabels={memberLabels}
+      />
+      <button
+        type="button"
+        className="self-start text-xs font-medium text-link hover:text-link-hover"
+        onClick={() => setShowAdvanced((v) => !v)}
+      >
+        {showAdvanced ? "Hide advanced" : "Advanced"}
+      </button>
+      {showAdvanced ? (
+        <div className="flex flex-col gap-4 rounded-lg border border-border p-4">
+          <OwnerAccessNote userId={userId} users={users.data ?? []} />
+          <ModelScopeControl
+            title="Restrict this key's models"
+            description="By default this key inherits its owner's access. Optionally narrow it to a subset; a key can never exceed its owner's allowed models."
+            anyLabel="Inherit owner access"
+            initial={null}
+            onChange={(value, valid) => {
+              setAllowedModels(value)
+              setScopeValid(valid)
+            }}
+          />
+          <BudgetExemptToggle
+            checked={excludeFromBudget}
+            onChange={setExcludeFromBudget}
+          />
+          <UserMismatchPicker
+            value={rejectUserMismatch}
+            onChange={setRejectUserMismatch}
+          />
         </div>
-      </Card.Content>
-    </Card>
+      ) : null}
+      {/* The actions sit under a rule of their own, so the row that commits the
+          form is divided from the fields rather than floating after them. */}
+      <div className="flex items-center justify-end gap-3 border-t border-border pt-4">
+        <Button variant="ghost" onPress={onClose}>
+          Cancel
+        </Button>
+        <Button
+          variant="primary"
+          isDisabled={
+            create.isPending ||
+            !scopeValid ||
+            ownerMissing ||
+            workspaceUnresolved
+          }
+          onPress={submit}
+        >
+          {create.isPending ? "Creating…" : "Create key"}
+        </Button>
+      </div>
+    </section>
   )
 }
 
@@ -571,102 +590,146 @@ function EditKeyForm({
   }
 
   return (
-    <Card>
-      <Card.Content className="flex flex-col gap-4 p-5">
-        <div className="text-title">
-          Edit <code>{apiKey.key_name ?? apiKey.id}</code>
-        </div>
-        <ErrorBanner error={update.error} />
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field
-            label="Name"
-            value={keyName}
-            onChange={setKeyName}
-            placeholder="ci-bot"
-          />
-          <Field
-            label="Expires"
-            value={expiresAt}
-            onChange={setExpiresAt}
-            type="datetime-local"
-            description="Blank clears the expiry."
-          />
-        </div>
-        {apiKey.user_id ? (
-          <OwnerAccessNote userId={apiKey.user_id} users={users.data ?? []} />
-        ) : null}
-        <ModelScopeControl
-          title="Restrict this key's models"
-          description="This key inherits its owner's access by default. Narrow it to a subset here; it can never exceed the owner's allowed models."
-          anyLabel="Inherit owner access"
-          initial={apiKey.allowed_models}
-          onChange={(value, valid) => {
-            setAllowedModels(value)
-            setScopeValid(valid)
-          }}
+    <section
+      className={`${FULL_BLEED} ${BLEED_INSET} flex flex-col gap-4 border-y border-border py-5`}
+    >
+      <h2 className="text-title">
+        Edit{" "}
+        <span className="font-mono text-[15px]">
+          {apiKey.key_name ?? apiKey.id}
+        </span>
+      </h2>
+      <ErrorBanner error={update.error} />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field
+          label="Name"
+          value={keyName}
+          onChange={setKeyName}
+          placeholder="ci-bot"
         />
-        <BudgetExemptToggle
-          checked={excludeFromBudget}
-          onChange={setExcludeFromBudget}
+        <Field
+          label="Expires"
+          value={expiresAt}
+          onChange={setExpiresAt}
+          type="datetime-local"
+          description="Blank clears the expiry."
         />
-        <UserMismatchPicker
-          value={rejectUserMismatch}
-          onChange={setRejectUserMismatch}
-        />
-        <div className="flex gap-2">
-          <Button
-            variant="primary"
-            isDisabled={update.isPending || !scopeValid}
-            onPress={submit}
-          >
-            {update.isPending ? "Saving…" : "Save changes"}
-          </Button>
-          <Button variant="ghost" onPress={onClose}>
-            Cancel
-          </Button>
-        </div>
-      </Card.Content>
-    </Card>
+      </div>
+      {apiKey.user_id ? (
+        <OwnerAccessNote userId={apiKey.user_id} users={users.data ?? []} />
+      ) : null}
+      <ModelScopeControl
+        title="Restrict this key's models"
+        description="This key inherits its owner's access by default. Narrow it to a subset here; it can never exceed the owner's allowed models."
+        anyLabel="Inherit owner access"
+        initial={apiKey.allowed_models}
+        onChange={(value, valid) => {
+          setAllowedModels(value)
+          setScopeValid(valid)
+        }}
+      />
+      <BudgetExemptToggle
+        checked={excludeFromBudget}
+        onChange={setExcludeFromBudget}
+      />
+      <UserMismatchPicker
+        value={rejectUserMismatch}
+        onChange={setRejectUserMismatch}
+      />
+      <div className="flex items-center justify-end gap-3 border-t border-border pt-4">
+        <Button variant="ghost" onPress={onClose}>
+          Cancel
+        </Button>
+        <Button
+          variant="primary"
+          isDisabled={update.isPending || !scopeValid}
+          onPress={submit}
+        >
+          {update.isPending ? "Saving…" : "Save changes"}
+        </Button>
+      </div>
+    </section>
   )
 }
 
 // ---------- status + rows ----------
 
-function StatusChip({ apiKey }: { apiKey: ApiKey }) {
-  if (!apiKey.is_active) {
-    return (
-      <Chip size="sm" color="default">
-        Disabled
-      </Chip>
-    )
-  }
-  if (isExpired(apiKey)) {
-    return (
-      <Chip size="sm" color="warning">
-        Expired
-      </Chip>
-    )
-  }
+/**
+ * A key's state: a square dot for the family and the word for the severity,
+ * never a pill.
+ *
+ * The three are graded rather than coloured by rank. `Disabled` takes the
+ * subtle rung in both channels because somebody chose it, and a deliberate
+ * operator action is not a fault to be flagged. `Expired` takes the danger dot
+ * and muted ink: the key stopped working, which needs noticing, but nothing was
+ * breached. `Active` is a success dot with muted ink, because the normal case
+ * should be legible without being loud.
+ */
+function StatusMark({ apiKey }: { apiKey: ApiKey }) {
+  const { word, dot, ink } = !apiKey.is_active
+    ? { word: "Disabled", dot: "bg-surface-subtle", ink: "text-subtle" }
+    : isExpired(apiKey)
+      ? { word: "Expired", dot: "bg-danger", ink: "text-muted" }
+      : { word: "Active", dot: "bg-success", ink: "text-muted" }
   return (
-    <Chip size="sm" color="accent">
-      Active
-    </Chip>
+    <span className={`flex items-center gap-2 font-mono text-[13px] ${ink}`}>
+      <Dot className={dot} />
+      {word}
+    </span>
   )
 }
 
-function AccessChip({ allowed }: { allowed: string[] | null }) {
-  const { text, tone } = accessLabel(allowed)
-  const cls =
-    tone === "danger"
-      ? "text-danger font-medium"
-      : tone === "muted"
-        ? "text-muted"
-        : "text-link font-medium"
+/**
+ * The metadata line under a key's name: what it can reach, and the two
+ * behaviors that depart from the deployment default.
+ *
+ * Facts about the key rather than states of it, so they are set as metadata and
+ * not as chips: 11px mono, uppercase, letterspaced, muted. `No models` is the
+ * one that takes danger ink, because a key that can reach nothing is broken
+ * rather than merely narrow. `Selected models` is muted like its siblings and
+ * deliberately not link ink: it is a label, and nothing here is clickable.
+ */
+function KeyMetaLine({ apiKey }: { apiKey: ApiKey }) {
+  const { text, tone } = accessLabel(apiKey.allowed_models)
   // Surface the exact entries on hover; the count would mislead (a wildcard is many).
-  const title = allowed && allowed.length > 0 ? allowed.join(", ") : undefined
+  const title =
+    apiKey.allowed_models && apiKey.allowed_models.length > 0
+      ? apiKey.allowed_models.join(", ")
+      : undefined
+  const facts: { key: string; text: string; ink: string; title?: string }[] = [
+    {
+      key: "access",
+      text,
+      ink: tone === "danger" ? "text-danger" : "text-muted",
+      title,
+    },
+  ]
+  if (apiKey.exclude_from_budget) {
+    facts.push({
+      key: "budget",
+      text: "Budget-exempt",
+      ink: "text-muted",
+      title:
+        "Requests on this key are logged with cost but never counted toward budget",
+    })
+  }
+  if (apiKey.reject_user_mismatch !== null) {
+    facts.push({
+      key: "user",
+      text: apiKey.reject_user_mismatch ? "Strict user" : "Lenient user",
+      ink: "text-muted",
+      title: apiKey.reject_user_mismatch
+        ? "This key always rejects a request naming a different user, whatever the deployment setting says"
+        : "This key always accepts a request naming a different user; spend still binds to its owner",
+    })
+  }
   return (
-    <span className={`text-xs ${cls}`} title={title}>
-      {text}
+    <span className="flex flex-wrap items-center gap-x-3 gap-y-1 font-mono text-[11px] tracking-[0.1em] uppercase">
+      {facts.map((fact) => (
+        <span key={fact.key} className={fact.ink} title={fact.title}>
+          {fact.text}
+        </span>
+      ))}
     </span>
   )
 }
@@ -739,6 +802,14 @@ export function KeysPage() {
   }
 
   // Memoized on the values the cells actually read (mutation pending flags and
+  // Which row is armed, and for what. Page state rather than per-button state,
+  // because the confirmation is a strip under the row now and only one may be
+  // open at a time.
+  const [armed, setArmed] = useState<{
+    id: string
+    kind: "regenerate" | "delete"
+  } | null>(null)
+
   // the stable handlers) so DataTable's per-row cache holds across selection
   // clicks; see the DataTable docstring.
   const columns = useMemo<DataTableColumn<ApiKey>[]>(
@@ -747,41 +818,20 @@ export function KeysPage() {
         id: "name",
         header: "Name",
         isRowHeader: true,
+        // Two lines: the name at 16px, then the metadata line 5px under it.
         cell: (k) => (
-          <div className="flex flex-col gap-0.5">
-            <span className="font-medium text-foreground">
+          <div className="flex flex-col gap-[5px]">
+            <span className="text-base text-foreground">
               {k.key_name ?? <span className="text-muted">(unnamed)</span>}
             </span>
-            <div className="flex flex-wrap items-center gap-1">
-              <AccessChip allowed={k.allowed_models} />
-              {k.exclude_from_budget ? (
-                <span
-                  className="inline-flex items-center rounded-full border border-border bg-primary-subtle px-2 py-0.5 text-xs font-medium text-primary-subtle-foreground"
-                  title="Requests on this key are logged with cost but never counted toward budget"
-                >
-                  Budget-exempt
-                </span>
-              ) : null}
-              {k.reject_user_mismatch === null ? null : (
-                <span
-                  className="inline-flex items-center rounded-full border border-border bg-primary-subtle px-2 py-0.5 text-xs font-medium text-primary-subtle-foreground"
-                  title={
-                    k.reject_user_mismatch
-                      ? "This key always rejects a request naming a different user, whatever the deployment setting says"
-                      : "This key always accepts a request naming a different user; spend still binds to its owner"
-                  }
-                >
-                  {k.reject_user_mismatch ? "Strict user" : "Lenient user"}
-                </span>
-              )}
-            </div>
+            <KeyMetaLine apiKey={k} />
           </div>
         ),
       },
       {
         id: "status",
         header: "Status",
-        cell: (k) => <StatusChip apiKey={k} />,
+        cell: (k) => <StatusMark apiKey={k} />,
       },
       {
         id: "owner",
@@ -791,11 +841,13 @@ export function KeysPage() {
         // stays in the title so the value actually sent on a request is still
         // recoverable from this column.
         cell: (k) => {
+          // One column, two faces, deliberately: a member is a person and takes
+          // the body face, while a raw id like `ci-bot` is an identifier and
+          // takes the mono one. The face is what tells the two apart, so
+          // neither needs a chip to say which it is.
           if (isVirtualUser(k.user_id)) {
             return (
-              <Chip size="sm" color="default">
-                virtual
-              </Chip>
+              <span className="font-mono text-[13px] text-subtle">virtual</span>
             )
           }
           const member = k.user_id ? memberLabels.get(k.user_id) : undefined
@@ -806,30 +858,36 @@ export function KeysPage() {
               </span>
             )
           }
-          return <code className="text-xs text-muted">{k.user_id ?? "—"}</code>
+          return (
+            <span className="font-mono text-[13px] text-muted">
+              {k.user_id ?? "—"}
+            </span>
+          )
         },
       },
       {
         id: "key",
         header: "Key",
         cell: (k) => (
-          <code className="text-xs text-muted">
+          <span className="font-mono text-[13px] text-muted">
             {k.key_prefix ? `${k.key_prefix}…` : "—"}
-          </code>
+          </span>
         ),
       },
       {
         id: "created",
         header: "Created",
         cell: (k) => (
-          <span className="text-muted">{formatDate(k.created_at)}</span>
+          <span className="font-mono text-[13px] text-muted">
+            {formatDate(k.created_at)}
+          </span>
         ),
       },
       {
         id: "last_used",
         header: "Last used",
         cell: (k) => (
-          <span className="text-muted">
+          <span className="font-mono text-[13px] text-muted">
             {relative(k.last_used_at) ?? "never"}
           </span>
         ),
@@ -853,66 +911,92 @@ export function KeysPage() {
         header: "Actions",
         align: "end",
         cell: (k) => (
-          <div className="flex items-center justify-end gap-1.5">
-            <Button
-              size="sm"
-              variant="outline"
+          <div className="flex items-center justify-end gap-4">
+            <RowAction
               isDisabled={updateKey.isPending}
               onPress={() => setActive(k, !k.is_active)}
             >
               {k.is_active ? "Disable" : "Enable"}
-            </Button>
-            <Button
-              size="sm"
-              variant="ghost"
+            </RowAction>
+            <RowAction
               onPress={() => {
                 setAddOpen(false)
                 setEditing(k.id)
               }}
             >
               Edit
-            </Button>
-            <InlineConfirm
-              trigger="Regenerate"
-              confirmLabel="Regenerate"
-              isPending={rotateKey.isPending}
-              message={
-                <>
-                  Regenerate the secret for <strong>{label(k)}</strong>? The
-                  current secret stops working immediately, with no grace
-                  period.
-                </>
-              }
-              onConfirm={() => regenerate(k)}
-            />
+            </RowAction>
+            <RowAction
+              isDanger={armed?.id === k.id && armed.kind === "regenerate"}
+              onPress={() => setArmed({ id: k.id, kind: "regenerate" })}
+            >
+              Regenerate
+            </RowAction>
             {/* Permanent delete is only offered once a key is disabled, so a live
               caller can't be broken (and its audit trail erased) in one click. */}
             {k.is_active ? null : (
-              <InlineConfirm
-                trigger="Delete"
-                confirmLabel="Delete permanently"
-                isPending={deleteKey.isPending}
-                message={
-                  <>
-                    Permanently delete <strong>{label(k)}</strong>? This removes
-                    the key and unlinks its usage history. Cannot be undone.
-                  </>
-                }
-                onConfirm={() => deleteKey.mutate(k.id)}
-              />
+              <RowAction
+                isDanger={armed?.id === k.id && armed.kind === "delete"}
+                onPress={() => setArmed({ id: k.id, kind: "delete" })}
+              >
+                Delete
+              </RowAction>
             )}
           </div>
         ),
       },
     ],
+    [updateKey.isPending, setActive, memberLabels, armed],
+  )
+
+  // The armed confirmation, rendered as a strip under its own row rather than
+  // inside the actions cell. Referentially stable per the DataTable docstring.
+  const renderArmed = useCallback(
+    (k: ApiKey) => {
+      if (!armed || armed.id !== k.id) return null
+      if (armed.kind === "regenerate") {
+        return (
+          <ArmedStrip
+            confirmLabel="Regenerate"
+            isPending={rotateKey.isPending}
+            message={
+              <>
+                Regenerate the secret for <strong>{label(k)}</strong>? The
+                current secret stops working immediately, with no grace period.
+              </>
+            }
+            onConfirm={() => {
+              setArmed(null)
+              regenerate(k)
+            }}
+            onCancel={() => setArmed(null)}
+          />
+        )
+      }
+      return (
+        <ArmedStrip
+          confirmLabel="Delete permanently"
+          isPending={deleteKey.isPending}
+          message={
+            <>
+              Permanently delete <strong>{label(k)}</strong>? This removes the
+              key and unlinks its usage history. Cannot be undone.
+            </>
+          }
+          onConfirm={() => {
+            setArmed(null)
+            deleteKey.mutate(k.id)
+          }}
+          onCancel={() => setArmed(null)}
+        />
+      )
+    },
     [
-      updateKey.isPending,
+      armed,
       rotateKey.isPending,
       deleteKey.isPending,
       deleteKey.mutate,
-      setActive,
       regenerate,
-      memberLabels,
     ],
   )
 
@@ -921,24 +1005,30 @@ export function KeysPage() {
   const deletableSelected = selectedKeys.filter((k) => !k.is_active)
 
   return (
-    <div className="flex flex-col gap-6">
-      <PageHeader
-        title="API keys"
-        description="Issue and revoke the keys that authenticate callers to this gateway. Secrets are shown once at creation."
-        action={
-          addOpen ? null : (
-            <Button
-              variant="primary"
-              onPress={() => {
-                setEditing(null)
-                setAddOpen(true)
-              }}
-            >
-              Create key
-            </Button>
-          )
-        }
-      />
+    <div className="flex flex-col">
+      <header className="flex flex-col gap-4 pb-5 sm:flex-row sm:items-start sm:justify-between">
+        <div className="max-w-[620px]">
+          <h1 className="font-display text-[28px] leading-[34px] font-semibold tracking-[-0.01em] text-foreground">
+            API keys
+          </h1>
+          <p className="mt-1 text-sm text-muted">
+            Issue and revoke the keys that authenticate callers to this gateway.
+            Secrets are shown once at creation.
+          </p>
+        </div>
+        {addOpen ? null : (
+          <Button
+            variant="primary"
+            className="shrink-0"
+            onPress={() => {
+              setEditing(null)
+              setAddOpen(true)
+            }}
+          >
+            Create key
+          </Button>
+        )}
+      </header>
 
       <ErrorBanner
         error={
@@ -949,8 +1039,9 @@ export function KeysPage() {
       {/* A key's owner and its spending limit are both set elsewhere now, on the
           organization rail. This page is where an operator arrives looking for
           them, so it says where they went rather than leaving the sidebar to be
-          re-learned. */}
-      <p className="text-sm text-muted">
+          re-learned. The two links here stay in link ink: they are real links
+          inside a sentence, which is what that ink is for. */}
+      <p className="max-w-[620px] pb-5 text-sm text-muted">
         A key spends against its owner's budget. Owners live under{" "}
         <Link
           to="/organization/members"
@@ -967,6 +1058,19 @@ export function KeysPage() {
         </Link>
         .
       </p>
+
+      {revealed ? (
+        <RevealSecretStrip
+          title={revealed.title}
+          result={revealed.result}
+          onClose={() => {
+            setRevealed(null)
+            // Drop the one-time secret from mutation state so reopening
+            // Create/Regenerate never flashes the previous key.
+            rotateKey.reset()
+          }}
+        />
+      ) : null}
 
       {showOnboarding ? (
         <EmptyState
@@ -1050,17 +1154,21 @@ export function KeysPage() {
           panel owns the empty state, so a fresh gateway shows one call to action,
           not a panel stacked over a redundant "no rows" table. */}
       {showOnboarding ? null : (
-        <DataTable
-          ariaLabel="API keys"
-          columns={columns}
-          rows={rows}
-          getRowKey={getKeyRowKey}
-          isLoading={loading}
-          emptyContent="No API keys yet. Create one to authenticate a caller."
-          selectionMode="multiple"
-          selectedKeys={selection.selectedKeys}
-          onSelectionChange={selection.onSelectionChange}
-        />
+        <TableScrollFrame className="otari-keys-table">
+          <DataTable
+            ariaLabel="API keys"
+            columns={columns}
+            rows={rows}
+            getRowKey={getKeyRowKey}
+            isLoading={loading}
+            emptyContent="No API keys yet. Create one to authenticate a caller."
+            selectionMode="multiple"
+            selectedKeys={selection.selectedKeys}
+            onSelectionChange={selection.onSelectionChange}
+            detailKey={armed?.id ?? null}
+            renderDetail={renderArmed}
+          />
+        </TableScrollFrame>
       )}
 
       <ConfirmDialog
@@ -1081,19 +1189,6 @@ export function KeysPage() {
           )
         }
       />
-
-      {revealed ? (
-        <RevealSecretModal
-          title={revealed.title}
-          result={revealed.result}
-          onClose={() => {
-            setRevealed(null)
-            // Drop the one-time secret from mutation state so reopening Create/Regenerate
-            // never flashes the previous key.
-            rotateKey.reset()
-          }}
-        />
-      ) : null}
     </div>
   )
 }
