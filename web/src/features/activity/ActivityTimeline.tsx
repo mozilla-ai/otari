@@ -370,7 +370,7 @@ export function ActivityTimeline({
                   aria-valuenow={Math.min(sel.startIndex, panMax)}
                   aria-valuetext={`Window starting at ${formatTick(starts[sel.startIndex] ?? starts[0], bucket)}`}
                   tabIndex={0}
-                  className="absolute inset-y-0 cursor-grab touch-none rounded-full bg-accent/40 outline-none hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-accent active:cursor-grabbing"
+                  className="absolute inset-y-0 cursor-grab touch-none rounded-full bg-accent/40 hover:bg-accent/60 active:cursor-grabbing"
                   style={{
                     left: `${loPct}%`,
                     width: `${Math.max(2, hiPct - loPct)}%`,

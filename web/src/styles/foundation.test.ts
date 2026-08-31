@@ -21,6 +21,11 @@ function block(selector: string): string {
   return CSS.slice(start, end)
 }
 
+/** Source with `//` and block comments removed, for rules about written code. */
+function stripComments(source: string): string {
+  return source.replace(/\/\*[\s\S]*?\*\//g, "").replace(/^\s*\/\/.*$/gm, "")
+}
+
 /** Every custom property *declared* in a block, as name → value. */
 function declarations(text: string): Map<string, string> {
   const found = new Map<string, string>()
@@ -564,6 +569,24 @@ describe("semantic tokens only", () => {
       "a numbered Tailwind palette class is not a token",
     ).not.toMatch(
       /\b(?:bg|text|border|ring|fill|stroke|from|via|to|outline|decoration|shadow|accent|caret|divide|placeholder)(?:-[tblrsexy])?-(?:slate|gray|zinc|neutral|stone|red|orange|amber|yellow|lime|green|emerald|teal|cyan|sky|blue|indigo|violet|purple|fuchsia|pink|rose)-\d{2,3}\b/,
+    )
+    // A focus ring is an accessibility floor, and until this rule it was spelled
+    // at nine call sites that did not agree: four drew it from `accent`, two
+    // from `focus`, and the rest left the width and offset to the browser. None
+    // of that fails anything, which is why it drifted. The ring is defined once
+    // now, in `@layer base` for plain elements and as `@utility otari-focus-ring`
+    // the two that have to outrank a HeroUI component rule, so a call site has
+    // nothing left to spell. `ring-0` and `ring-offset-0` are deliberately not
+    // matched: those suppress HeroUI's own inner ring rather than drawing ours.
+    //
+    // Matched against the code with comments removed. `rowStyles.ts` explains
+    // why its rows cannot use the base rule, and that explanation has to be
+    // able to name the thing it is explaining.
+    expect(
+      stripComments(source),
+      "a focus ring is defined once in globals.css; use `otari-focus-ring`, do not spell one here",
+    ).not.toMatch(
+      /\b(?:ring|outline)-(?:accent|primary|focus)\b|\boutline-offset-\d|\b(?:ring|outline)-[1-9]\b/,
     )
     // `bg-white` / `text-black` are the same problem without a number: a
     // literal that never follows the theme.

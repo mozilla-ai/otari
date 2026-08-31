@@ -35,7 +35,7 @@ export function Toggle({
       // requires past it (responsiveness.md). Absolutely positioned on a
       // `relative` button, so it grows the hit area without moving a row. Same
       // device the master-key reveal toggle uses on the sign-in screen.
-      className="relative inline-flex h-6 w-11 shrink-0 items-center border border-control-border bg-background outline-none before:absolute before:inset-x-0 before:-inset-y-2.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50"
+      className="relative inline-flex h-6 w-11 shrink-0 items-center border border-control-border bg-background before:absolute before:inset-x-0 before:-inset-y-2.5 disabled:opacity-50"
     >
       <span
         // 20x20 inset 1px from the track's inner edge, which `items-center`

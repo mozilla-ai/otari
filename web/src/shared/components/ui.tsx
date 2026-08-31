@@ -62,7 +62,7 @@ export function CheckboxVisual({
         showChecked
           ? "bg-accent text-accent-foreground"
           : "border border-control-border bg-background"
-      } group-data-[focus-visible]:outline-2 group-data-[focus-visible]:outline-accent`}
+      } group-data-[focus-visible]:otari-focus-ring`}
     >
       {isIndeterminate && flash === null ? (
         <svg
@@ -270,10 +270,7 @@ export function StatCard({
         // unlayered, so the hover tint needs the bang to be seen at all.
         className={`${cardClass} transition-colors hover:border-accent!`}
       >
-        <Link
-          to={to}
-          className="block rounded-[inherit] focus:outline-none focus-visible:ring-2 focus-visible:ring-accent"
-        >
+        <Link to={to} className="block rounded-[inherit]">
           {body}
         </Link>
       </Card>

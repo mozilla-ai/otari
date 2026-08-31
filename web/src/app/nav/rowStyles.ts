@@ -82,28 +82,31 @@ export const NAV_TRANSITION =
   "transition-[color,background-color,border-color,box-shadow,transform] duration-150 ease-smooth motion-reduce:transition-none"
 
 /**
- * The keyboard ring: 2px of `--color-focus` at 2px of offset, on every row
- * whatever else it is wearing, which is why it lives in the base and not in one
- * of the state constants below.
+ * The keyboard ring, on every row whatever else it is wearing, which is why it
+ * lives in the base and not in one of the state constants below.
  *
- * An `outline` rather than the `ring-2 ring-focus` HeroUI draws on its own
- * focusable components, for one reason: a ring is box-shadow, so its offset is
- * an opaque band that has to be told the color of the ground behind it, and
- * these rows sit on two grounds (the rail, and `--color-surface` inside a
- * collapsed group's flyout). Any single `ring-offset-*` color is wrong on one of
- * them, while an outline's offset is transparent and shows whatever is actually
- * there. `ring-offset-transparent` is not the way out of that: box-shadow layers
- * composite, so a transparent offset band over the ring paints the ring's color
- * rather than the ground.
+ * The ring itself is `focus-ring`, defined once in globals.css. Its values are
+ * not spelled here and must not be: nine call sites used to spell their own and
+ * they disagreed about which token a ring comes from. What is still spelled
+ * here is why this row cannot use the base rule instead.
  *
- * The last three utilities are for the rows that are HeroUI `Button`s. `.button`
- * carries `outline-none`, which leaves `--tw-outline-style: none` for
- * `outline-2` to read, so the style has to be named back; and it draws its own
- * `focus-ring` off `data-focus-visible`, which would otherwise sit inside this
- * outline as a second mark. Both are in the components layer, so a utility wins.
+ * It is an outline and not the box-shadow ring HeroUI draws on its own
+ * focusable components, for one reason: a shadow ring's offset is an opaque
+ * band that has to be told the color of the ground behind it, and these rows
+ * sit on two grounds (the rail, and `--color-surface` inside a collapsed
+ * group's flyout). Any single offset color is wrong on one of them, while an
+ * outline's offset is transparent and shows whatever is actually there. A
+ * transparent offset band is not the way out of that: box-shadow layers
+ * composite, so it would paint the ring's color rather than the ground.
+ *
+ * The two suppressions are for the rows that are HeroUI `Button`s, which draw
+ * their own inner ring off `data-focus-visible`; without them it sits inside
+ * this outline as a second mark. Both are in the components layer, so a utility
+ * wins. `.button` also carries `outline-none` there, which is why the ring has
+ * to arrive as a utility at all rather than from the base rule.
  */
 const ROW_FOCUS =
-  "focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-focus focus-visible:outline-solid focus-visible:ring-0 focus-visible:ring-offset-0"
+  "focus-visible:otari-focus-ring focus-visible:ring-0 focus-visible:ring-offset-0"
 
 /**
  * `font-sans` is load-bearing, not decoration. A group's row is a

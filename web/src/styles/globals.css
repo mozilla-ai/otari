@@ -967,16 +967,52 @@ body {
   color: var(--color-primary);
 }
 
-/* HeroUI handles focus styling per-component (inputs, buttons, links, etc.)
- * with its own focus indicator. We don't add a global outline because it
- * doubles up with that. But the browser's default `outline: auto` still
- * fires on focusable elements that HeroUI doesn't style (raw anchors,
- * tabindex divs, etc.), producing a system-blue ring that clashes with
- * our accent. Re-tint only the color of that default outline so
- * keyboard focus stays consistent across all elements without competing
- * with HeroUI's own indicator. */
-:focus-visible {
-  outline-color: var(--color-focus);
+/* The focus ring, defined once. A call site never spells one.
+ *
+ * This used to set `outline-color` alone, unlayered, because a full outline
+ * written unlayered beats every layer and would have doubled up with the ring
+ * HeroUI's own components draw: 52 of its focus rules set `outline-style: none`
+ * and paint a `box-shadow` instead, and an unlayered rule outranks all of them.
+ * Colour alone was safe because it cannot create an outline where the style is
+ * `none`, but it also left the width, offset and style to the browser, so the
+ * ring was only half specified and every element that wanted a real one spelled
+ * its own. Four of those spelled `accent` and two spelled `focus`, which is a
+ * disagreement about an accessibility floor that nothing could fail on.
+ *
+ * `@layer base` is what makes the full ring safe. It loses to HeroUI's
+ * components layer, so a HeroUI component keeps its own indicator, and it wins
+ * over the browser default, so everything else gets this one. `--color-focus`
+ * and not `--color-primary`: the accent reads under 3:1 against these grounds
+ * and the focus step exists to clear it (see the Primary block above).
+ *
+ * It loses to `@layer utilities`, so `outline-none` at a call site still
+ * suppresses it. That is deliberate for the two places that need it and is the
+ * reason `@utility otari-focus-ring` exists below; anywhere else, `outline-none`
+ * silently removes the ring and should not be written. */
+@layer base {
+  :focus-visible {
+    outline: 2px solid var(--color-focus);
+    outline-offset: 2px;
+  }
+}
+
+/* The same ring, at utility strength, for the two places that draw a ring on an
+ * element HeroUI has already styled. Both reach into vendor DOM, which is the
+ * whole reason they cannot use the base rule: `.button` carries `outline-none`
+ * in the components layer, and a checkbox's visual box is a sibling of the
+ * element that actually takes focus. Applied as
+ * `focus-visible:otari-focus-ring` or through a `group-data-` variant, so the
+ * values still live in one place.
+ *
+ * The `otari-` namespace is load-bearing here rather than decorative.
+ * `@heroui/styles` already defines `@utility focus-ring`, and an identically
+ * named one lands in the same layer: ours would win on `outline` by coming
+ * second while HeroUI's `--tw-ring-shadow` kept applying, so every consumer
+ * would draw an outline and a box-shadow ring at once. Compiled and read before
+ * this was renamed; the collision emits cleanly and reports nothing. */
+@utility otari-focus-ring {
+  outline: 2px solid var(--color-focus);
+  outline-offset: 2px;
 }
 
 @media (prefers-reduced-motion: reduce) {

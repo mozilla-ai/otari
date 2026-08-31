@@ -72,12 +72,13 @@ describe("navRowClass", () => {
 
   it("rings every row on keyboard focus, whatever else it is wearing", () => {
     for (const row of [resting, selected]) {
-      expect(row).toContain("focus-visible:outline-2")
-      expect(row).toContain("focus-visible:outline-offset-2")
-      expect(row).toContain("focus-visible:outline-focus")
-      // Names the style back and folds HeroUI's own ring away, both of which
-      // only matter on the rows that are HeroUI Buttons.
-      expect(row).toContain("focus-visible:outline-solid")
+      // The ring's values are globals.css's, not this module's, so what is
+      // asserted here is that a row asks for one at utility strength. Spelling
+      // the width, offset and color back would recreate the disagreement that
+      // moving them into one place resolved.
+      expect(row).toContain("focus-visible:otari-focus-ring")
+      // Folds HeroUI's own inner ring away, which only matters on the rows that
+      // are HeroUI Buttons.
       expect(row).toContain("focus-visible:ring-0")
       expect(row).toContain("focus-visible:ring-offset-0")
     }

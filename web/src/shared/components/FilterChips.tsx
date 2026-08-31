@@ -66,7 +66,7 @@ export function FilterChips({
               type="button"
               onClick={chip.onClear}
               aria-label={chip.clearLabel ?? `Remove ${chip.label} filter`}
-              className="inline-flex h-4 w-4 items-center justify-center rounded-full text-muted outline-none hover:bg-surface-subtle hover:text-foreground focus-visible:ring-2 focus-visible:ring-accent"
+              className="inline-flex h-4 w-4 items-center justify-center rounded-full text-muted hover:bg-surface-subtle hover:text-foreground"
             >
               <svg
                 viewBox="0 0 24 24"
