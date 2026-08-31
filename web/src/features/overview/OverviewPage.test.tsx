@@ -649,3 +649,143 @@ describe("OverviewIndex routing", () => {
     )
   })
 })
+
+// The wire for a caller who does not operate the deployment: `/v1/admin/access`
+// answers an explicit no, the organization context agrees, and the usage hooks
+// therefore read `/v1/organizations/me/usage` (otari#837). Everything else is
+// an endpoint this caller must never be asked to read, so it refuses the way
+// the server would; a leak fails the assertions loudly instead of rendering a
+// plausible tile. Every URL is recorded so the tests can say so.
+function mockScopedApi(b: Bodies): string[] {
+  const requested: string[] = []
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+    const url = String(input)
+    requested.push(url)
+    if (url.endsWith("/v1/admin/access")) {
+      return jsonResponse({ granted: false })
+    }
+    if (url.endsWith("/v1/organizations/me")) {
+      return jsonResponse(organizationContext({ deployment_operator: false }))
+    }
+    if (url.includes("/v1/organizations/me/usage/summary")) {
+      if (url.includes("bucket=hour"))
+        return jsonResponse(summary(b.today ?? {}))
+      if (url.includes("end_date=")) return jsonResponse(summary(b.prev ?? {}))
+      return jsonResponse(summary(b.period ?? {}))
+    }
+    if (url.includes("/v1/organizations/me/usage")) {
+      return jsonResponse(b.logs ?? [])
+    }
+    return jsonResponse({ detail: "forbidden" }, 403)
+  })
+  return requested
+}
+
+describe("OverviewIndex for a caller who does not operate the deployment", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("lands on their own usage, not an apology card", async () => {
+    mockScopedApi({
+      today: { cost: 5, request_count: 100, error_count: 1 },
+      period: { cost: 200, request_count: 2000, error_count: 40 },
+      prev: { cost: 100, request_count: 1000, error_count: 5 },
+    })
+    renderPage(<OverviewIndex />)
+
+    // The scoped summaries land as real tiles: today vs 30-day spend, volume,
+    // and the window's error rate, exactly as the operator page renders them.
+    expect(await screen.findByText("$5.00")).toBeInTheDocument()
+    expect(screen.getByText("$200.00")).toBeInTheDocument()
+    expect(screen.getByText("2,000")).toBeInTheDocument()
+    expect(screen.getByText("2.0%")).toBeInTheDocument()
+    // The dead-end card this page replaced (otari-ai#1929) stays gone.
+    expect(
+      screen.queryByText(/This overview is for deployment operators/),
+    ).not.toBeInTheDocument()
+  })
+
+  it("reads only the organization-scoped surface and shows no operator tile", async () => {
+    const requested = mockScopedApi({
+      period: { cost: 200, request_count: 2000 },
+    })
+    renderPage(<OverviewIndex />)
+    await screen.findByText("$200.00")
+
+    // The deployment-wide panels stay on the operator page: no tile here reads
+    // budgets, keys, or the deployment roster.
+    expect(screen.queryByText("Budget health")).not.toBeInTheDocument()
+    expect(screen.queryByText("Active keys")).not.toBeInTheDocument()
+    expect(screen.queryByText("Active members")).not.toBeInTheDocument()
+    // And nothing left the scoped surface: beyond the gate and the context,
+    // every request this page made names /v1/organizations/me/usage. A bare
+    // /v1/usage read here would be a cross-tenant read the server refuses, so
+    // the page must not even attempt it.
+    const scoped = requested.filter(
+      (url) =>
+        !url.endsWith("/v1/admin/access") &&
+        !url.endsWith("/v1/organizations/me"),
+    )
+    expect(scoped.length).toBeGreaterThan(0)
+    for (const url of scoped) {
+      expect(url).toContain("/v1/organizations/me/usage")
+    }
+  })
+
+  it("previews the caller's recent requests with a link to the full log", async () => {
+    mockScopedApi({
+      logs: [
+        {
+          id: "1",
+          user_id: null,
+          api_key_id: null,
+          timestamp: "2026-07-22T00:00:00Z",
+          model: "gpt-5.6",
+          provider: "openai",
+          endpoint: "/v1/chat/completions",
+          prompt_tokens: 10,
+          completion_tokens: 5,
+          total_tokens: 15,
+          cache_read_tokens: 0,
+          cache_write_tokens: 0,
+          cost: 0.5,
+          status: "success",
+          error_message: null,
+          latency_ms: 120,
+        },
+      ],
+    })
+    renderPage(<OverviewIndex />)
+
+    expect(await screen.findByText("gpt-5.6")).toBeInTheDocument()
+    // Activity serves this caller from the same scoped surface, so the preview
+    // may hand them off to it.
+    expect(screen.getByRole("link", { name: /view all/i })).toHaveAttribute(
+      "href",
+      "/activity",
+    )
+  })
+
+  it("reports a failed scoped summary instead of a silent wall of dashes", async () => {
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input)
+      if (url.endsWith("/v1/admin/access")) {
+        return jsonResponse({ granted: false })
+      }
+      if (url.endsWith("/v1/organizations/me")) {
+        return jsonResponse(organizationContext({ deployment_operator: false }))
+      }
+      if (url.includes("/v1/organizations/me/usage/summary")) {
+        return jsonResponse({ detail: "usage exploded" }, 500)
+      }
+      if (url.includes("/v1/organizations/me/usage")) {
+        return jsonResponse([])
+      }
+      return jsonResponse({ detail: "forbidden" }, 403)
+    })
+    renderPage(<OverviewIndex />)
+
+    expect(await screen.findByText(/usage exploded/)).toBeInTheDocument()
+  })
+})

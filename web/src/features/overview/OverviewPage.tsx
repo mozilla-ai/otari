@@ -26,7 +26,6 @@ import { Sparkline } from "@/shared/components/charts"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import { TrendChip } from "@/shared/components/TrendChip"
 import {
-  EmptyState,
   ErrorBanner,
   PageHeader,
   PageLoading,
@@ -91,6 +90,48 @@ function useWindows() {
   }, [dayKey])
 }
 
+// The queries every overview variant is built on: the three summary windows
+// behind the usage tiles, and the newest few requests. Every filter carries the
+// shell's selected workspace, so the tiles, the sparklines and the
+// recent-requests strip narrow together with whatever sits beside them. The
+// usage hooks pick the surface for the caller (deployment-wide for an operator,
+// organization-scoped otherwise; see useUsageScope), which is what lets the
+// operator page and the organization page share this derivation.
+function useUsageOverview() {
+  const w = useWindows()
+  const { selected: workspace } = useSelectedWorkspace()
+  const scope = workspace?.workspace_id
+
+  const todayFilters = useMemo(
+    () => ({ workspace_id: scope, start_date: w.today }),
+    [scope, w],
+  )
+  const periodFilters = useMemo(
+    () => ({ workspace_id: scope, start_date: w.periodStart }),
+    [scope, w],
+  )
+  // Bounded previous window ([-60d, -30d)) so it does not overlap the current one.
+  const prevFilters = useMemo(
+    () => ({
+      workspace_id: scope,
+      start_date: w.prevStart,
+      end_date: w.periodStart,
+    }),
+    [scope, w],
+  )
+  const recentFilters = useMemo(() => ({ workspace_id: scope }), [scope])
+
+  // Tiles and the sparkline read only `totals` and `series`, so all three windows
+  // opt out of every breakdown rather than making the server run a GROUP BY per
+  // dimension three times over for numbers this page never shows.
+  const today = useUsageSummary(todayFilters, "hour", NO_BREAKDOWNS)
+  const period = useUsageSummary(periodFilters, "day", NO_BREAKDOWNS)
+  const previous = useUsageSummary(prevFilters, "day", NO_BREAKDOWNS)
+  const recent = useUsageLogs(recentFilters, 0, 5)
+
+  return { scope, today, period, previous, recent }
+}
+
 // A status tile's short word (paired with the color so status never rides on hue
 // alone), keyed off the derived Health.
 const ERROR_WORDS = { ok: "Healthy", warn: "Elevated", alert: "High" } as const
@@ -100,25 +141,138 @@ const BUDGET_WORDS = {
   alert: "Over budget",
 } as const
 
+// The four usage tiles both overviews open with: spend today, spend and request
+// volume over the window, and the window's error rate. A fragment rather than
+// its own grid, so each page seats them beside its own tiles.
+function UsageStatTiles({
+  today,
+  period,
+  previous,
+}: {
+  today: ReturnType<typeof useUsageSummary>
+  period: ReturnType<typeof useUsageSummary>
+  previous: ReturnType<typeof useUsageSummary>
+}) {
+  const todayTotals = today.data?.totals
+  const periodTotals = period.data?.totals
+  const prevTotals = previous.data?.totals
+
+  // The 30-day daily series is already on the wire (used for tile sparklines).
+  // A single point has no trend to draw, so sparklines only appear with 2+ days.
+  const periodSeries = period.data?.series ?? []
+  const hasTrend = periodSeries.length > 1
+
+  const err = errorRateHealth(periodTotals)
+  const errPrev = errorRateHealth(prevTotals)
+  // Each delta is its own const so the tile below can gate its chip on the
+  // fraction rather than on the query: `deltaFraction` also returns null once
+  // the current window has landed but the previous one has not, and when the
+  // previous value is 0. TrendChip renders nothing for a null fraction, but the
+  // *element* is truthy, and StatCard reserves the aside row for whatever it is
+  // handed, so an ungated chip costs a tile 42px of dead space.
+  const costDelta = periodTotals
+    ? deltaFraction(periodTotals.cost, prevTotals?.cost)
+    : null
+  const requestDelta = periodTotals
+    ? deltaFraction(periodTotals.request_count, prevTotals?.request_count)
+    : null
+  const errDelta =
+    err.rate !== null && errPrev.rate !== null
+      ? deltaFraction(err.rate, errPrev.rate)
+      : null
+
+  return (
+    <>
+      <StatCard
+        label="Spend today"
+        value={todayTotals ? formatUsd(todayTotals.cost) : "—"}
+      />
+      <StatCard
+        label="Spend, last 30 days"
+        value={periodTotals ? formatUsd(periodTotals.cost) : "—"}
+        // Spend falling is the improvement, so a rise paints danger while the
+        // arrow keeps telling the truth about which way it went.
+        trend={
+          costDelta !== null ? (
+            <TrendChip
+              fraction={costDelta}
+              polarity="down-is-good"
+              caption="vs prev"
+            />
+          ) : null
+        }
+        chart={
+          hasTrend ? (
+            <Sparkline
+              values={periodSeries.map((p) => p.cost)}
+              ariaLabel="Spend trend over the last 30 days"
+            />
+          ) : undefined
+        }
+      />
+      <StatCard
+        label="Requests, last 30 days"
+        value={periodTotals ? formatNumber(periodTotals.request_count) : "—"}
+        // Volume, so `neutral`: more traffic through the gateway is neither a
+        // win nor a regression on its own, and the error rate tile beside it
+        // is what carries the judgment.
+        trend={
+          requestDelta !== null ? (
+            <TrendChip fraction={requestDelta} caption="vs prev" />
+          ) : null
+        }
+        chart={
+          hasTrend ? (
+            <Sparkline
+              values={periodSeries.map((p) => p.requests)}
+              ariaLabel="Request volume trend over the last 30 days"
+            />
+          ) : undefined
+        }
+      />
+      <StatCard
+        label="Error rate, last 30 days"
+        value={err.rate === null ? "—" : formatPct(err.rate)}
+        status={toStatStatus(err.status)}
+        statusLabel={
+          err.status === "neutral" ? undefined : ERROR_WORDS[err.status]
+        }
+        // Errors falling is the improvement, as with spend.
+        trend={
+          errDelta !== null ? (
+            <TrendChip
+              fraction={errDelta}
+              polarity="down-is-good"
+              caption="vs prev"
+            />
+          ) : null
+        }
+      />
+    </>
+  )
+}
+
 /**
  * The landing route, which is the one page nobody navigates to on purpose.
  *
- * Every panel below it reads a deployment-wide endpoint, and since otari-ai#1880
- * those answer 403 to anyone who is not an operator of the deployment. The gate
- * is here rather than on the queries because the hooks do not all take an
- * `enabled` flag, and a component that is not rendered runs none of them: that
- * is what keeps a member's first page from being nine failed requests.
+ * The operator page's status panels read deployment-wide endpoints (provider
+ * health, budgets, keys, accounts), and since otari-ai#1880 those answer 403
+ * to anyone who is not an operator of the deployment. The gate is here rather
+ * than on the queries because the hooks do not all take an `enabled` flag, and
+ * a component that is not rendered runs none of them: that is what keeps a
+ * tenant's first page from being a row of failed requests.
  *
  * It fails toward the operator view on purpose. Only an explicit `false` shows
- * the member page, so a deployment with no operator surface to ask (hybrid) and
- * a transient failure of the question both land on the panels, which report
- * their own errors, rather than telling a real operator this page is not theirs.
+ * the organization-scoped page, so a deployment with no operator surface to ask
+ * (hybrid) and a transient failure of the question both land on the panels,
+ * which report their own errors, rather than telling a real operator this page
+ * is not theirs.
  */
 export function OverviewIndex() {
   const access = useDeploymentAdminAccess()
 
   if (access.data === false) {
-    return <MemberOverview />
+    return <OrganizationOverview />
   }
   if (access.isLoading) {
     return <PageLoading />
@@ -127,22 +281,63 @@ export function OverviewIndex() {
 }
 
 /**
- * What a signed-in member who does not operate the deployment sees instead.
+ * The landing page for a signed-in caller who does not operate the deployment.
  *
- * Deliberately not `UnavailableHere`: this deployment does serve the page, it is
- * simply not this caller's, and saying the wrong one of those is how a support
- * ticket becomes an outage report. The sidebar still carries the organization
- * destinations they can use, so this points at it rather than repeating it.
+ * The 11 Aug roles matrix has Overview as "my usage" for every role
+ * (otari-ai#1946), so this is a real page rather than a card apologizing for
+ * the operator one (otari-ai#1929): the same usage tiles and recent-request
+ * preview the operator page opens with, served by the scope-aware usage hooks,
+ * which read `/v1/organizations/me/usage` for this caller. The server narrows
+ * those rows to what the caller may read (their organization for an admin, the
+ * workspaces they belong to for a member; otari#837), so nothing here
+ * re-derives roles. The deployment-wide panels (provider health, budgets, keys,
+ * accounts) stay on the operator page, whose endpoints refuse this caller.
  */
-function MemberOverview() {
+function OrganizationOverview() {
+  const { today, period, previous, recent } = useUsageOverview()
+
+  // Recent activity is excluded for the operator page's reason: it renders its
+  // own inline banner, so including it here would double-report.
+  const loadError = today.error ?? period.error
+
+  const refresh = () => {
+    void today.refetch()
+    void period.refetch()
+    void previous.refetch()
+    void recent.refetch()
+  }
+  const isRefreshing =
+    today.isFetching ||
+    period.isFetching ||
+    previous.isFetching ||
+    recent.isFetching
+
   return (
-    <>
-      <PageHeader title="Overview" />
-      <EmptyState
-        title="This overview is for deployment operators"
-        description="It reports on the whole gateway: every key, every workspace's spend, and the provider credentials behind them. Your organization's own pages are in the sidebar."
+    <div className="flex flex-col gap-6">
+      <PageHeader
+        title="Overview"
+        description="At-a-glance spend, traffic, and recent activity in your organization."
+        action={
+          <RefreshButton
+            onRefresh={refresh}
+            isFetching={isRefreshing}
+            updatedAt={period.dataUpdatedAt}
+          />
+        }
       />
-    </>
+
+      <ErrorBanner error={loadError} />
+
+      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">
+        <UsageStatTiles today={today} period={period} previous={previous} />
+      </div>
+
+      <RecentActivity
+        entries={recent.data ?? []}
+        loading={recent.isLoading}
+        error={recent.error}
+      />
+    </div>
   )
 }
 
@@ -192,75 +387,19 @@ export function OverviewPage({
   refreshSetup?: () => void
   setupFetching?: boolean
 }) {
-  const w = useWindows()
-  const { selected: workspace } = useSelectedWorkspace()
-  // Every window carries the selected workspace, so the tiles, the sparkline and
-  // the recent-requests strip narrow with the keys tile beside them. Scoping one
-  // and not the others would put a workspace's key count next to the whole
-  // deployment's spend on the page an operator opens first.
-  const scope = workspace?.workspace_id
-
-  const todayFilters = useMemo(
-    () => ({ workspace_id: scope, start_date: w.today }),
-    [scope, w],
-  )
-  const periodFilters = useMemo(
-    () => ({ workspace_id: scope, start_date: w.periodStart }),
-    [scope, w],
-  )
-  // Bounded previous window ([-60d, -30d)) so it does not overlap the current one.
-  const prevFilters = useMemo(
-    () => ({
-      workspace_id: scope,
-      start_date: w.prevStart,
-      end_date: w.periodStart,
-    }),
-    [scope, w],
-  )
-  const recentFilters = useMemo(() => ({ workspace_id: scope }), [scope])
-
-  // Tiles and the sparkline read only `totals` and `series`, so all three windows
-  // opt out of every breakdown rather than making the server run a GROUP BY per
-  // dimension three times over for numbers this page never shows.
-  const today = useUsageSummary(todayFilters, "hour", NO_BREAKDOWNS)
-  const period = useUsageSummary(periodFilters, "day", NO_BREAKDOWNS)
-  const previous = useUsageSummary(prevFilters, "day", NO_BREAKDOWNS)
+  const usage = useUsageOverview()
+  const { today, period, previous, recent } = usage
   const health = useProviderHealth()
   const budgets = useBudgets()
   // Same scope as the API keys page this tile links to, so the count and the
   // table behind it cannot disagree.
-  const keys = useKeys(scope)
+  const keys = useKeys(usage.scope)
   const users = useUsers()
   const members = useOrganizationMembers()
-  const recent = useUsageLogs(recentFilters, 0, 5)
 
-  const todayTotals = today.data?.totals
-  const periodTotals = period.data?.totals
-  const prevTotals = previous.data?.totals
-
-  // The 30-day daily series is already on the wire (used for tile sparklines).
-  // A single point has no trend to draw, so sparklines only appear with 2+ days.
-  const periodSeries = period.data?.series ?? []
-  const hasTrend = periodSeries.length > 1
-
-  const err = errorRateHealth(periodTotals)
-  const errPrev = errorRateHealth(prevTotals)
-  // Each delta is its own const so the tile below can gate its chip on the
-  // fraction rather than on the query: `deltaFraction` also returns null once
-  // the current window has landed but the previous one has not, and when the
-  // previous value is 0. TrendChip renders nothing for a null fraction, but the
-  // *element* is truthy, and StatCard reserves the aside row for whatever it is
-  // handed, so an ungated chip costs a tile 42px of dead space.
-  const costDelta = periodTotals
-    ? deltaFraction(periodTotals.cost, prevTotals?.cost)
-    : null
-  const requestDelta = periodTotals
-    ? deltaFraction(periodTotals.request_count, prevTotals?.request_count)
-    : null
-  const errDelta =
-    err.rate !== null && errPrev.rate !== null
-      ? deltaFraction(err.rate, errPrev.rate)
-      : null
+  // The status strip reads the window's error rate too; errorRateHealth is
+  // pure, so it is derived here again rather than threaded out of the tiles.
+  const err = errorRateHealth(period.data?.totals)
 
   const budget = budgetHealth(budgets.data ?? [])
   const providerHealth = providerHealthStatus(health.data)
@@ -274,7 +413,7 @@ export function OverviewPage({
   // gateway has no providers AND no recorded usage. Imported OTLP usage lands in
   // the usage tables (with counts_toward_budget=false) through a budget-exempt key
   // and no provider config, so "no providers" alone no longer means "nothing has
-  // happened". `recent` is the unfiltered, all-time log query already loaded below;
+  // happened". `recent` is the all-time log query useUsageOverview already loads;
   // gate on it having resolved so the banner never flashes in then hides.
   const hasAnyUsage = (recent.data?.length ?? 0) > 0
   const showGettingStarted = needsSetup && recent.isSuccess && !hasAnyUsage
@@ -362,71 +501,7 @@ export function OverviewPage({
       <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">
         {/* Tiles gate on data presence, not isLoading, so a failed query reads as
             "—" (unknown) rather than a misleading real zero. */}
-        <StatCard
-          label="Spend today"
-          value={todayTotals ? formatUsd(todayTotals.cost) : "—"}
-        />
-        <StatCard
-          label="Spend, last 30 days"
-          value={periodTotals ? formatUsd(periodTotals.cost) : "—"}
-          // Spend falling is the improvement, so a rise paints danger while the
-          // arrow keeps telling the truth about which way it went.
-          trend={
-            costDelta !== null ? (
-              <TrendChip
-                fraction={costDelta}
-                polarity="down-is-good"
-                caption="vs prev"
-              />
-            ) : null
-          }
-          chart={
-            hasTrend ? (
-              <Sparkline
-                values={periodSeries.map((p) => p.cost)}
-                ariaLabel="Spend trend over the last 30 days"
-              />
-            ) : undefined
-          }
-        />
-        <StatCard
-          label="Requests, last 30 days"
-          value={periodTotals ? formatNumber(periodTotals.request_count) : "—"}
-          // Volume, so `neutral`: more traffic through the gateway is neither a
-          // win nor a regression on its own, and the error rate tile beside it
-          // is what carries the judgment.
-          trend={
-            requestDelta !== null ? (
-              <TrendChip fraction={requestDelta} caption="vs prev" />
-            ) : null
-          }
-          chart={
-            hasTrend ? (
-              <Sparkline
-                values={periodSeries.map((p) => p.requests)}
-                ariaLabel="Request volume trend over the last 30 days"
-              />
-            ) : undefined
-          }
-        />
-        <StatCard
-          label="Error rate, last 30 days"
-          value={err.rate === null ? "—" : formatPct(err.rate)}
-          status={toStatStatus(err.status)}
-          statusLabel={
-            err.status === "neutral" ? undefined : ERROR_WORDS[err.status]
-          }
-          // Errors falling is the improvement, as with spend.
-          trend={
-            errDelta !== null ? (
-              <TrendChip
-                fraction={errDelta}
-                polarity="down-is-good"
-                caption="vs prev"
-              />
-            ) : null
-          }
-        />
+        <UsageStatTiles today={today} period={period} previous={previous} />
         <StatCard
           label="Budget health"
           value={
