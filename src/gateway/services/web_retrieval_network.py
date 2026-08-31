@@ -1,0 +1,493 @@
+"""Pinned networking primitives for gateway-managed web retrieval.
+
+The transport in this module never resolves a request hostname itself. Callers
+first create a :class:`ValidatedTarget`, then attach it to an HTTPX request. The
+connection pool retains the canonical URL origin for TLS SNI, certificate
+verification, and HTTP Host while its network backend dials only an admitted IP.
+"""
+
+from __future__ import annotations
+
+import asyncio
+import ipaddress
+import socket
+import ssl
+from collections.abc import AsyncIterable, Awaitable, Callable, Sequence
+from dataclasses import dataclass, field
+from time import monotonic
+from typing import Any, Protocol, TypeAlias, TypeVar
+
+import httpcore
+import httpx
+from httpcore._backends.auto import AutoBackend
+from httpcore._backends.base import AsyncNetworkBackend, AsyncNetworkStream
+from httpx._transports.default import AsyncResponseStream, map_httpcore_exceptions
+
+from gateway.services.web_retrieval_policy import (
+    CanonicalOrigin,
+    CanonicalWebURL,
+    DomainPolicy,
+    IPAddress,
+    WebURLValidationError,
+    canonicalize_web_url,
+    resolve_redirect_url,
+)
+
+PINNED_TARGET_EXTENSION = "otari.validated_target"
+MAX_WEB_REDIRECTS = 5
+MAX_DECODED_BODY_BYTES = 5 * 1024 * 1024
+NETWORK_DEADLINE_SECONDS = 5.0
+_REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
+
+T = TypeVar("T")
+PoolKey: TypeAlias = tuple[str, str, int, str]
+
+
+class RetrievalTargetError(ValueError):
+    """Raised when a URL cannot become an admitted pinned target."""
+
+
+class RetrievalDomainPolicyError(RetrievalTargetError):
+    """Raised when workspace policy denies a retrieval destination."""
+
+
+class RetrievalAddressError(RetrievalTargetError):
+    """Raised when DNS or address safety checks deny a target."""
+
+
+class PinnedTransportError(httpx.TransportError):
+    """Raised when a pinned request violates its validated-target contract."""
+
+
+class RedirectValidationError(ValueError):
+    """Raised when a manual redirect walk cannot safely continue."""
+
+
+class NetworkDeadlineExceeded(TimeoutError):
+    """Raised when the one wall-clock retrieval deadline expires."""
+
+
+class AddressResolver(Protocol):
+    """Resolve a canonical authority without blocking the event loop."""
+
+    async def resolve(self, host: str, port: int) -> Sequence[IPAddress]: ...
+
+
+class SystemAddressResolver:
+    """The default async system resolver used before any connection is opened."""
+
+    async def resolve(self, host: str, port: int) -> Sequence[IPAddress]:
+        loop = asyncio.get_running_loop()
+        try:
+            records = await loop.getaddrinfo(
+                host,
+                port,
+                family=socket.AF_UNSPEC,
+                type=socket.SOCK_STREAM,
+                proto=socket.IPPROTO_TCP,
+            )
+        except socket.gaierror:
+            return ()
+
+        result: list[IPAddress] = []
+        seen: set[IPAddress] = set()
+        for _family, _type, _proto, _canonname, sockaddr in records:
+            try:
+                address = ipaddress.ip_address(sockaddr[0])
+            except ValueError:
+                continue
+            if address not in seen:
+                result.append(address)
+                seen.add(address)
+        return tuple(result)
+
+
+@dataclass(frozen=True, slots=True)
+class ValidatedTarget:
+    """Canonical request URL plus every address admitted for this DNS result."""
+
+    canonical_url: CanonicalWebURL
+    addresses: tuple[IPAddress, ...]
+
+    @property
+    def url(self) -> httpx.URL:
+        return self.canonical_url.url
+
+    @property
+    def origin(self) -> CanonicalOrigin:
+        return self.canonical_url.origin
+
+    @property
+    def display_url(self) -> str:
+        return self.canonical_url.display_url
+
+
+def _blocked_address_reason(address: IPAddress) -> str | None:
+    if address.is_unspecified:
+        return "unspecified"
+    if address.is_loopback:
+        return "loopback"
+    if address.is_link_local:
+        return "link-local"
+    if address.is_multicast:
+        return "multicast"
+    if address.is_private:
+        return "private"
+    if address.is_reserved:
+        return "reserved"
+    if not address.is_global:
+        return "non-global"
+    return None
+
+
+class NetworkDeadline:
+    """One absolute wall-clock deadline shared by every network operation."""
+
+    def __init__(self, seconds: float = NETWORK_DEADLINE_SECONDS, *, now: Callable[[], float] = monotonic) -> None:
+        if seconds <= 0:
+            raise ValueError("network deadline must be positive")
+        self._now = now
+        self._expires_at = now() + seconds
+
+    @property
+    def remaining(self) -> float:
+        remaining = self._expires_at - self._now()
+        if remaining <= 0:
+            raise NetworkDeadlineExceeded("web retrieval network deadline exceeded")
+        return remaining
+
+    async def run(self, operation: Awaitable[T]) -> T:
+        """Run one operation within the remaining shared deadline."""
+        try:
+            async with asyncio.timeout(self.remaining):
+                return await operation
+        except TimeoutError as exc:
+            raise NetworkDeadlineExceeded("web retrieval network deadline exceeded") from exc
+
+
+async def validate_retrieval_target(
+    value: str | CanonicalWebURL,
+    *,
+    policy: DomainPolicy | None = None,
+    allow_private_addresses: bool = False,
+    resolver: AddressResolver | None = None,
+    deadline: NetworkDeadline | None = None,
+) -> ValidatedTarget:
+    """Canonicalize, resolve, and admit a destination before connection setup.
+
+    If any DNS answer is unsafe, the whole target is rejected. This prevents a
+    hostname with mixed public and internal answers from selecting the internal
+    address through retry or address ordering. Search enrichment can explicitly
+    admit private answers, but it still resolves and pins them.
+    """
+    try:
+        canonical_url = value if isinstance(value, CanonicalWebURL) else canonicalize_web_url(value)
+    except WebURLValidationError as exc:
+        raise RetrievalTargetError(str(exc)) from exc
+
+    if policy is not None and not policy.permits(canonical_url.origin.host):
+        raise RetrievalDomainPolicyError("destination is disallowed by domain policy")
+
+    literal = canonical_url.origin.host.ip
+    if literal is not None:
+        resolved: Sequence[IPAddress] = (literal,)
+    else:
+        active_resolver = resolver or SystemAddressResolver()
+        operation = active_resolver.resolve(canonical_url.origin.host.value, canonical_url.origin.port)
+        resolved = await deadline.run(operation) if deadline is not None else await operation
+    if not resolved:
+        raise RetrievalAddressError("destination hostname could not be resolved")
+
+    admitted: list[IPAddress] = []
+    seen: set[IPAddress] = set()
+    for address in resolved:
+        canonical_address = ipaddress.ip_address(str(address))
+        if not allow_private_addresses:
+            reason = _blocked_address_reason(canonical_address)
+            if reason is not None:
+                raise RetrievalAddressError(f"destination resolves to a disallowed {reason} address")
+        if canonical_address not in seen:
+            admitted.append(canonical_address)
+            seen.add(canonical_address)
+    if not admitted:
+        raise RetrievalAddressError("destination hostname had no usable addresses")
+    return ValidatedTarget(canonical_url=canonical_url, addresses=tuple(admitted))
+
+
+class RedirectTracker:
+    """State for a bounded, equivalence-aware manual redirect walk."""
+
+    def __init__(self, initial: CanonicalWebURL, *, max_redirects: int = MAX_WEB_REDIRECTS) -> None:
+        if max_redirects < 0:
+            raise ValueError("max_redirects cannot be negative")
+        self._current = initial
+        self._max_redirects = max_redirects
+        self._redirects_followed = 0
+        self._visited = {initial.redirect_loop_key}
+
+    @property
+    def current(self) -> CanonicalWebURL:
+        return self._current
+
+    @property
+    def redirects_followed(self) -> int:
+        return self._redirects_followed
+
+    def advance(self, location: str | None) -> CanonicalWebURL:
+        """Validate and record one redirect target without resolving or dialing it."""
+        if location is None:
+            raise RedirectValidationError("redirect response is missing Location")
+        if self._redirects_followed >= self._max_redirects:
+            raise RedirectValidationError("redirect hop limit exceeded")
+        try:
+            next_url = resolve_redirect_url(self._current, location)
+        except WebURLValidationError as exc:
+            raise RedirectValidationError("redirect target is malformed") from exc
+        if self._current.origin.scheme == "https" and next_url.origin.scheme == "http":
+            raise RedirectValidationError("HTTPS-to-HTTP redirect is not allowed")
+        if next_url.redirect_loop_key in self._visited:
+            raise RedirectValidationError("redirect loop detected")
+
+        self._redirects_followed += 1
+        self._visited.add(next_url.redirect_loop_key)
+        self._current = next_url
+        return next_url
+
+
+def is_redirect_status(status_code: int) -> bool:
+    return status_code in _REDIRECT_STATUSES
+
+
+class _PinnedNetworkBackend(AsyncNetworkBackend):
+    """Ignore origin DNS and dial one already-admitted address."""
+
+    def __init__(
+        self,
+        *,
+        origin: CanonicalOrigin,
+        address: IPAddress,
+        backend: AsyncNetworkBackend,
+    ) -> None:
+        self._origin = origin
+        self._address = address
+        self._backend = backend
+
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Any = None,
+    ) -> AsyncNetworkStream:
+        if host.lower().rstrip(".") != self._origin.host.value or port != self._origin.port:
+            raise PinnedTransportError("connection origin does not match validated target")
+        return await self._backend.connect_tcp(
+            str(self._address),
+            port,
+            timeout=timeout,
+            local_address=local_address,
+            socket_options=socket_options,
+        )
+
+    async def connect_unix_socket(
+        self,
+        path: str,
+        timeout: float | None = None,
+        socket_options: Any = None,
+    ) -> AsyncNetworkStream:
+        raise PinnedTransportError("Unix sockets are not supported by the web retrieval transport")
+
+    async def sleep(self, seconds: float) -> None:
+        await self._backend.sleep(seconds)
+
+
+class PinnedAsyncHTTPTransport(httpx.AsyncBaseTransport):
+    """HTTPX transport with pools isolated by canonical origin and pinned IP.
+
+    Each address has its own HTTP Core pool. A later validation may reuse a
+    connection only when that exact address remains in the target's admitted
+    address set. Connect failures retry only the remaining validated addresses;
+    no retry performs fresh DNS resolution.
+    """
+
+    def __init__(
+        self,
+        *,
+        ssl_context: ssl.SSLContext | None = None,
+        backend_factory: Callable[[], AsyncNetworkBackend] = AutoBackend,
+        max_connections: int = 10,
+        max_keepalive_connections: int = 10,
+        keepalive_expiry: float = 5.0,
+    ) -> None:
+        self._ssl_context = ssl_context or httpx.create_ssl_context(verify=True, trust_env=False)
+        self._backend_factory = backend_factory
+        self._max_connections = max_connections
+        self._max_keepalive_connections = max_keepalive_connections
+        self._keepalive_expiry = keepalive_expiry
+        self._pools: dict[PoolKey, httpcore.AsyncConnectionPool] = {}
+        self._pool_lock = asyncio.Lock()
+        self._closed = False
+
+    @staticmethod
+    def _pool_key(target: ValidatedTarget, address: IPAddress) -> PoolKey:
+        return (
+            target.origin.scheme,
+            target.origin.host.value,
+            target.origin.port,
+            str(address),
+        )
+
+    async def _get_pool(self, target: ValidatedTarget, address: IPAddress) -> httpcore.AsyncConnectionPool:
+        key = self._pool_key(target, address)
+        async with self._pool_lock:
+            if self._closed:
+                raise PinnedTransportError("web retrieval transport is closed")
+            pool = self._pools.get(key)
+            if pool is None:
+                network_backend = _PinnedNetworkBackend(
+                    origin=target.origin,
+                    address=address,
+                    backend=self._backend_factory(),
+                )
+                pool = httpcore.AsyncConnectionPool(
+                    ssl_context=self._ssl_context,
+                    max_connections=self._max_connections,
+                    max_keepalive_connections=self._max_keepalive_connections,
+                    keepalive_expiry=self._keepalive_expiry,
+                    http1=True,
+                    http2=False,
+                    retries=0,
+                    network_backend=network_backend,
+                )
+                self._pools[key] = pool
+            return pool
+
+    @staticmethod
+    def _target_from_request(request: httpx.Request) -> ValidatedTarget:
+        target = request.extensions.get(PINNED_TARGET_EXTENSION)
+        if not isinstance(target, ValidatedTarget):
+            raise PinnedTransportError("request is missing its validated retrieval target")
+        if request.url != target.url:
+            raise PinnedTransportError("request URL does not match its validated retrieval target")
+        if request.method != "GET":
+            raise PinnedTransportError("web retrieval transport permits GET requests only")
+        if request.headers.get("host") != target.origin.authority:
+            raise PinnedTransportError("request Host does not match its validated retrieval target")
+        return target
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        if not isinstance(request.stream, httpx.AsyncByteStream):
+            raise PinnedTransportError("web retrieval request stream must be asynchronous")
+        target = self._target_from_request(request)
+
+        last_connect_error: httpx.ConnectError | httpx.ConnectTimeout | None = None
+        for address in target.addresses:
+            pool = await self._get_pool(target, address)
+            core_request = httpcore.Request(
+                method=request.method,
+                url=httpcore.URL(
+                    scheme=request.url.raw_scheme,
+                    host=request.url.raw_host,
+                    port=request.url.port,
+                    target=request.url.raw_path,
+                ),
+                headers=request.headers.raw,
+                content=request.stream,
+                extensions=request.extensions,
+            )
+            try:
+                with map_httpcore_exceptions():
+                    response = await pool.handle_async_request(core_request)
+            except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
+                last_connect_error = exc
+                continue
+
+            assert isinstance(response.stream, AsyncIterable)
+            return httpx.Response(
+                status_code=response.status,
+                headers=response.headers,
+                stream=AsyncResponseStream(response.stream),
+                extensions=response.extensions,
+            )
+
+        if last_connect_error is not None:
+            raise last_connect_error
+        raise PinnedTransportError("validated retrieval target has no addresses")
+
+    async def aclose(self) -> None:
+        async with self._pool_lock:
+            if self._closed:
+                return
+            self._closed = True
+            pools = tuple(self._pools.values())
+            self._pools.clear()
+        await asyncio.gather(*(pool.aclose() for pool in pools))
+
+
+@dataclass(frozen=True, slots=True)
+class CappedBody:
+    content: bytes
+    truncated: bool
+
+
+async def read_capped_decoded_body(
+    response: httpx.Response,
+    *,
+    deadline: NetworkDeadline,
+    max_bytes: int = MAX_DECODED_BODY_BYTES,
+    chunk_size: int = 65536,
+) -> CappedBody:
+    """Read at most ``max_bytes`` decoded response bytes under the deadline.
+
+    One byte beyond the cap is observed, but never retained, so a body exactly at
+    the ceiling is distinguishable from a truncated body. ``aiter_bytes`` applies
+    HTTPX content decoding before this bound, limiting compressed expansion as the
+    application receives it.
+    """
+    if max_bytes < 0:
+        raise ValueError("max_bytes cannot be negative")
+    if chunk_size <= 0:
+        raise ValueError("chunk_size must be positive")
+
+    async def read() -> CappedBody:
+        buffer = bytearray()
+        async for chunk in response.aiter_bytes(chunk_size=chunk_size):
+            remaining = max_bytes - len(buffer)
+            if len(chunk) > remaining:
+                if remaining > 0:
+                    buffer.extend(chunk[:remaining])
+                return CappedBody(content=bytes(buffer), truncated=True)
+            buffer.extend(chunk)
+        return CappedBody(content=bytes(buffer), truncated=False)
+
+    return await deadline.run(read())
+
+
+@dataclass(frozen=True, slots=True)
+class UTF8Truncation:
+    text: str
+    truncated: bool
+    byte_length: int = field(init=False)
+
+    def __post_init__(self) -> None:
+        object.__setattr__(self, "byte_length", len(self.text.encode("utf-8")))
+
+
+def truncate_utf8(value: str, max_bytes: int, *, suffix: str = "") -> UTF8Truncation:
+    """Return a valid UTF-8 head within ``max_bytes``, optionally ending in a suffix."""
+    if max_bytes < 0:
+        raise ValueError("max_bytes cannot be negative")
+    encoded = value.encode("utf-8")
+    if len(encoded) <= max_bytes:
+        return UTF8Truncation(text=value, truncated=False)
+
+    suffix_bytes = suffix.encode("utf-8")
+    if len(suffix_bytes) > max_bytes:
+        suffix_bytes = suffix_bytes[:max_bytes]
+        suffix = suffix_bytes.decode("utf-8", errors="ignore")
+        suffix_bytes = suffix.encode("utf-8")
+    head_limit = max_bytes - len(suffix_bytes)
+    head = encoded[:head_limit].decode("utf-8", errors="ignore")
+    result = f"{head}{suffix}"
+    return UTF8Truncation(text=result, truncated=True)
