@@ -174,6 +174,10 @@ export function TrendChart({
   height = 200,
   showYAxis = false,
   showTotal,
+  // Recharts' `interval`: 0 draws every tick, 1 every other, and the default
+  // `"preserveStartEnd"` thins by pixel gap instead, which makes the label
+  // density a function of the window width rather than of the data.
+  xTickInterval,
   onSelectRange,
   window: windowRange,
 }: {
@@ -185,6 +189,7 @@ export function TrendChart({
   height?: number
   showYAxis?: boolean
   showTotal?: boolean
+  xTickInterval?: number
   onSelectRange?: (startIndex: number, endIndex: number) => void
   window?: { startIndex: number; endIndex: number } | null
 }) {
@@ -272,7 +277,7 @@ export function TrendChart({
             dataKey="x"
             tickLine={false}
             axisLine={false}
-            interval="preserveStartEnd"
+            interval={xTickInterval ?? "preserveStartEnd"}
             minTickGap={40}
             tickFormatter={formatXTick}
             tick={{ fontSize: 10, fill: "var(--color-text-muted)" }}

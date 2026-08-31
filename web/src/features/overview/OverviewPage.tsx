@@ -24,6 +24,14 @@ import {
 } from "@/shared/api/hooks"
 import { Sparkline } from "@/shared/components/charts"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
+import {
+  BLEED_INSET,
+  Dot,
+  FULL_BLEED,
+  KpiCell,
+  KpiStrip,
+  Meter,
+} from "@/shared/components/surface"
 import { TrendChip } from "@/shared/components/TrendChip"
 import {
   EmptyState,
@@ -541,15 +549,6 @@ export function OverviewPage({
   )
 }
 
-/**
- * Every section on this page breaks out of `<main>`'s column padding so its
- * rules reach the page edge. Kept as one constant rather than repeated, because
- * a section that forgets it does not look broken, it looks like a card.
- */
-const FULL_BLEED = "-mx-4 md:-mx-6"
-/** The padding a full-bleed section puts back inside its own rules. */
-const BLEED_INSET = "px-4 md:px-6"
-
 function OverviewHeader({
   refresh,
   isRefreshing,
@@ -581,11 +580,6 @@ function OverviewHeader({
       </div>
     </header>
   )
-}
-
-/** A 6px square. The page's one status mark, in every place it appears. */
-function Dot({ className }: { className: string }) {
-  return <span aria-hidden className={`h-1.5 w-1.5 shrink-0 ${className}`} />
 }
 
 // Where "add a provider credential" lives on this deployment. A standalone one
@@ -766,141 +760,6 @@ function AttentionStrip({
         </span>
       ))}
     </section>
-  )
-}
-
-/**
- * Five equal cells divided by vertical rules, between horizontal ones. Equal
- * rather than content-sized so the divisions land on a rhythm rather than
- * wherever the longest label happens to end.
- */
-function KpiStrip({
-  children,
-  empty,
-}: {
-  children: ReactNode
-  empty: boolean
-}) {
-  return (
-    <section
-      // Auto rows in groups of four, one group per row of cells, so the cells
-      // below can subgrid onto them and line their four parts up with each
-      // other. Without it a label that wraps makes its own cell taller and
-      // drops its value below the others'.
-      className={`${FULL_BLEED} ${BLEED_INSET} grid grid-cols-2 border-y border-border sm:grid-cols-3 xl:grid-cols-5`}
-      // The graphic row is dropped uniformly in the empty state, so the strip
-      // gets shorter without any cell changing shape relative to its neighbors.
-      data-empty={empty ? "true" : undefined}
-    >
-      {children}
-    </section>
-  )
-}
-
-function KpiCell({
-  label,
-  value,
-  severity,
-  subline,
-  delta,
-  graphic,
-}: {
-  label: string
-  value: string
-  severity?: Severity
-  /**
-   * Why the value is what it is. Carried in every page state and not only in
-   * the empty one: an em dash with nothing under it makes the reader guess
-   * whether the number is missing or zero, and the empty state is simply the
-   * case where every cell has something to say.
-   */
-  subline?: string
-  delta?: ReactNode
-  graphic?: ReactNode
-}) {
-  return (
-    // `grid-rows-subgrid` over `row-span-4` is what keeps the five values on one
-    // baseline. The cells are equal-height grid items, so a wrapped label used
-    // to make its own cell taller and push its value down while the other four
-    // stayed put (measured with a 1180px column: value tops 241 against 223).
-    // Subgridding the cell's four parts onto the strip's own rows lines the
-    // labels, values, deltas and graphics up with their neighbors instead, and
-    // reserves nothing when no label wraps, so it costs no dead space wide.
-    // `items-end` on the label is what makes a one-line label sit on the same
-    // baseline as the last line of a two-line one.
-    <div className="grid row-span-4 grid-rows-subgrid gap-1.5 border-border px-7 py-[18px] not-last:border-r">
-      <span className="flex items-end text-overline">{label}</span>
-      {/* 400, deliberately, where the rest of the page's emphasis is 550: at
-          30px the size is already the hierarchy, and a heavier numeral here
-          would out-weigh the page title above it. */}
-      <span className="font-mono text-[30px] leading-[36px] font-normal text-foreground tabular-nums">
-        {value}
-      </span>
-      {/* One line, always present, so no cell is shorter than its neighbors.
-          Severity and delta share it where a cell has both: dropping the delta
-          to make room would lose the comparison the strip is otherwise built
-          around. */}
-      <span className="flex min-h-[18px] items-center gap-2 text-xs text-muted">
-        {severity ? <SeverityMark severity={severity} /> : null}
-        {severity && delta ? (
-          <span aria-hidden className="text-subtle">
-            ·
-          </span>
-        ) : null}
-        {subline ?? delta ?? null}
-      </span>
-      {/* Reserved rather than conditional: an absent sparkline must not make one
-          cell shorter than the four beside it. Dropped in the empty state by
-          the caller passing none to any cell, which shortens the whole strip. */}
-      {graphic ? (
-        <span className="flex h-10 items-center">{graphic}</span>
-      ) : null}
-    </div>
-  )
-}
-
-type Severity = { status: "ok" | "warn" | "alert"; word: string }
-
-/**
- * A severity as a square dot plus its word, never as a color alone. `warn` and
- * `alert` share the danger dot and differ in their ink, because the dot answers
- * "is anything wrong here" and the word answers "how much".
- */
-function SeverityMark({ severity }: { severity: Severity }) {
-  const { status, word } = severity
-  return (
-    <span
-      className={`flex items-center gap-2 font-mono ${
-        status === "alert"
-          ? "text-danger"
-          : status === "warn"
-            ? "text-muted"
-            : "text-subtle"
-      }`}
-    >
-      <Dot className={status === "ok" ? "bg-success" : "bg-danger"} />
-      {word.toUpperCase()}
-    </span>
-  )
-}
-
-/** The budget meter: a 140x3 track with an accent fill. */
-function Meter({
-  fraction,
-  ariaLabel,
-}: {
-  fraction: number
-  ariaLabel: string
-}) {
-  const pct = Math.max(0, Math.min(1, fraction)) * 100
-  return (
-    <span
-      role="img"
-      aria-label={ariaLabel}
-      className="block h-[3px] w-[140px] bg-surface-subtle"
-    >
-      <span className="block h-full bg-accent" style={{ width: `${pct}%` }} />
-    </span>
   )
 }
 

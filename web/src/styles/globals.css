@@ -1370,6 +1370,34 @@ body {
   background-color: var(--color-primary-subtle);
 }
 
+/* Usage's two breakdown tables, on the same terms as the Overview preview: on
+   the page ground rather than on a surface, a rule-bounded overline header
+   instead of a tinted band, separators on the faint tier, and fixed numeric
+   lanes so the same share reads at the same width in both tables sitting side
+   by side. The name column takes what is left, because a model id is the one
+   value here with no bound. */
+.otari-breakdown .otari-table.table-root {
+  background-color: transparent;
+}
+.otari-breakdown .otari-table .table__header {
+  background-color: transparent;
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+}
+.otari-breakdown .table__column[data-key="requests"],
+.otari-breakdown .table__column[data-key="tokens"] {
+  width: 110px;
+}
+.otari-breakdown .table__column[data-key="spend"],
+.otari-breakdown .table__column[data-key="calls"],
+.otari-breakdown .table__column[data-key="failed"] {
+  width: 100px;
+}
+.otari-breakdown .otari-table .table__row,
+.otari-breakdown .table__row .table__cell {
+  border-color: var(--color-border-subtle);
+}
+
 /* The Overview's activity preview, whose lanes are fixed rather than content
    sized: five of its six columns hold a bounded value (a relative time, a key
    name, two numerics, a status word), so letting the widest cell in a five-row
