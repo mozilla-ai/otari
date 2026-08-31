@@ -3,7 +3,11 @@ import { join } from "node:path"
 
 import { describe, expect, it } from "vitest"
 
-import { buildManifest, MANIFEST_PATH } from "../pwaManifest"
+import {
+  buildManifest,
+  MANIFEST_PATH,
+  rewriteManifestLink,
+} from "../pwaManifest"
 
 // Resolved from the Vitest root (web/) rather than import.meta.url, which the
 // jsdom environment reports as an http URL. Same reason as src/routes.test.ts.
@@ -50,6 +54,18 @@ describe("the generated web app manifest", () => {
   it("is emitted at the path index.html links", () => {
     const html = readFileSync(join(WEB, "index.html"), "utf8")
     expect(html).toContain(`<link rel="manifest" href="/${MANIFEST_PATH}" />`)
+  })
+
+  it("rewrites the real index.html link under a base path", () => {
+    // Vite stopped rewriting this href when the file left public/ (it no
+    // longer resolves to an asset it knows), so the plugin owns the rewrite.
+    // Held to the actual index.html rather than a fixture, so a drifted link
+    // fails here instead of only in a manual base-path build.
+    const html = readFileSync(join(WEB, "index.html"), "utf8")
+    expect(rewriteManifestLink(html, "/dashboard/")).toContain(
+      `<link rel="manifest" href="/dashboard/${MANIFEST_PATH}" />`,
+    )
+    expect(rewriteManifestLink(html, "/")).toBe(html)
   })
 
   it("keeps the static manifest retired", () => {

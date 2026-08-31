@@ -58,6 +58,21 @@ export function buildManifest(base: string) {
 const serialize = (base: string) =>
   `${JSON.stringify(buildManifest(base), null, 2)}\n`
 
+/**
+ * The href rewrite transformIndexHtml applies. Vite rewrites an absolute URL
+ * in index.html under `base` only when it resolves to a file it knows
+ * (public/ or the graph); the manifest no longer does, so the link the
+ * emitted file answers is rewritten here. A pure function so the test can
+ * hold it to the real index.html without driving a build.
+ */
+export function rewriteManifestLink(html: string, base: string): string {
+  const prefix = base.endsWith("/") ? base : `${base}/`
+  return html.replace(
+    `href="/${MANIFEST_PATH}"`,
+    `href="${prefix}${MANIFEST_PATH}"`,
+  )
+}
+
 export function pwaManifest(): Plugin {
   let base = "/"
   return {
@@ -72,15 +87,8 @@ export function pwaManifest(): Plugin {
         source: serialize(base),
       })
     },
-    // Vite rewrites an absolute URL in index.html under `base` only when it
-    // resolves to a file it knows (public/ or the graph). This one no longer
-    // does, so the link the emitted manifest answers is rewritten here.
     transformIndexHtml(html) {
-      const prefix = base.endsWith("/") ? base : `${base}/`
-      return html.replace(
-        `href="/${MANIFEST_PATH}"`,
-        `href="${prefix}${MANIFEST_PATH}"`,
-      )
+      return rewriteManifestLink(html, base)
     },
     // The dev server serves `public/` directly and the file is not there, so
     // answer the URL index.html links (which carries `base`; this middleware
