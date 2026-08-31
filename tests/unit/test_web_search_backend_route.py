@@ -6,6 +6,7 @@ it, and that no upstream detail reaches the caller.
 """
 
 import json
+import logging
 from collections.abc import Iterator
 from pathlib import Path
 from typing import Any
@@ -19,6 +20,7 @@ from gateway.api.deps import reset_config
 from gateway.api.routes.web_search_backend import _authorize
 from gateway.core.config import GatewayConfig
 from gateway.core.database import reset_db
+from gateway.log_config import logger as gateway_logger
 from gateway.main import create_app
 
 BACKEND_TOKEN = "gw-default-token"
@@ -177,28 +179,55 @@ def test_a_non_ascii_token_is_a_refusal_not_a_crash(tmp_path: Path) -> None:
     assert raised.value.status_code == 401
 
 
-def test_a_half_configured_provider_is_refused_at_startup(tmp_path: Path) -> None:
-    """Either half alone runs no search, and without this the deployment that set
-    the provider precisely so it would need no URL answers 400 to every search."""
-    with pytest.raises(ValueError, match="web_search_provider_api_key"):
-        GatewayConfig(
-            database_url=f"sqlite:///{tmp_path / 'x.db'}",
-            master_key="sk-test-master",
-            web_search_provider="tavily",
-        ).validate_web_search_provider()
-
-    with pytest.raises(ValueError, match="names no provider"):
-        GatewayConfig(
-            database_url=f"sqlite:///{tmp_path / 'x.db'}",
-            master_key="sk-test-master",
-            web_search_provider_api_key="tvly-x",
-        ).validate_web_search_provider()
+def _warnings_from(config: GatewayConfig, caplog: pytest.LogCaptureFixture) -> str:
+    """What the (non-propagating) gateway logger said, per ``test_chat_output_cap``."""
+    gateway_logger.addHandler(caplog.handler)
+    caplog.set_level(logging.WARNING, logger="gateway")
+    try:
+        config.warn_about_half_configured_web_search()
+        return caplog.text
+    finally:
+        gateway_logger.removeHandler(caplog.handler)
 
 
-def test_both_halves_together_pass_startup(tmp_path: Path) -> None:
-    GatewayConfig(
+@pytest.mark.parametrize(
+    ("overrides", "expected"),
+    [
+        ({"web_search_provider": "tavily"}, "web_search_provider_api_key is not set"),
+        ({"web_search_provider_api_key": "tvly-x"}, "web_search_provider is not set"),
+    ],
+)
+def test_a_half_configured_provider_is_warned_about(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, overrides: dict[str, str], expected: str
+) -> None:
+    """Warned rather than refused, like half-configured OAuth: web search is one
+    optional tool, and a compose file can default the provider name without being
+    able to default the secret, so refusing to boot would take the process down
+    over a setting nobody typed.
+
+    Silent is the alternative: neither half is read without the other, so a
+    deployment that named a provider precisely so it would need no URL answers
+    400 to every search and says nowhere why.
+    """
+    config = GatewayConfig(
         database_url=f"sqlite:///{tmp_path / 'x.db'}",
         master_key="sk-test-master",
-        web_search_provider="tavily",
-        web_search_provider_api_key="tvly-x",
-    ).validate_web_search_provider()
+        **overrides,
+    )
+    assert expected in _warnings_from(config, caplog)
+
+
+@pytest.mark.parametrize(
+    "overrides",
+    [{}, {"web_search_provider": "tavily", "web_search_provider_api_key": "tvly-x"}],
+)
+def test_neither_half_and_both_halves_are_both_quiet(
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, overrides: dict[str, str]
+) -> None:
+    """Configuring nothing is the ordinary state, not a mistake."""
+    config = GatewayConfig(
+        database_url=f"sqlite:///{tmp_path / 'x.db'}",
+        master_key="sk-test-master",
+        **overrides,
+    )
+    assert _warnings_from(config, caplog) == ""

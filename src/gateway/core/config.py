@@ -1793,25 +1793,35 @@ class GatewayConfig(BaseSettings):
                 images.append(image)
         return tuple(images)
 
-    def validate_web_search_provider(self) -> None:
-        """Refuse a half-configured licensed search provider at startup.
+    def warn_about_half_configured_web_search(self) -> None:
+        """Say so when a search provider was named but cannot be used.
 
-        Either half alone runs no search, and the failure is otherwise silent:
-        ``web_search_configured`` falls through to ``web_search_url``, and a
-        deployment that set the provider precisely so it would not need a URL
-        then answers every ``otari_web_search`` request with the
-        not-configured 400. The same call ``SEARCH_PROVIDERS_REQUIRING_API_KEY``
-        makes for a search tool.
+        A warning rather than a refusal, for the reason
+        :meth:`warn_about_half_configured_oauth` gives: web search is one
+        optional tool, and refusing to boot would take a gateway offline over
+        it. A deployment naming a provider it has no key for is also the
+        ordinary state of one that has not filled the key in yet, and a compose
+        file can default the name without being able to default the secret.
+
+        But the failure is otherwise completely silent. Neither half is read
+        without the other, so ``web_search_configured`` falls through to
+        ``web_search_url``, and a deployment that named a provider precisely so
+        it would need no URL answers every ``otari_web_search`` request with the
+        not-configured 400 and says nowhere why.
         """
-        if self.web_search_provider and not self.web_search_provider_api_key:
-            msg = (
-                f"web_search_provider is '{self.web_search_provider}' but web_search_provider_api_key is not set; "
-                "both are needed to run a search, and neither is read without the other"
-            )
-            raise ValueError(msg)
-        if self.web_search_provider_api_key and not self.web_search_provider:
-            msg = "web_search_provider_api_key is set but web_search_provider names no provider to send it to"
-            raise ValueError(msg)
+        if bool(self.web_search_provider) == bool(self.web_search_provider_api_key):
+            return
+        missing, present = (
+            ("web_search_provider_api_key", f"web_search_provider is {self.web_search_provider!r}")
+            if self.web_search_provider
+            else ("web_search_provider", "web_search_provider_api_key is set")
+        )
+        logger.warning(
+            "Web search through a licensed provider is configured but will not run: %s, and %s is not set. "
+            "Set both, or neither and point web_search_url at a SearXNG-shaped backend instead.",
+            present,
+            missing,
+        )
 
     def validate_search_tools(self) -> None:
         """Validate the ``search_tools`` map at startup so misconfig fails fast.
@@ -2287,10 +2297,10 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     config.validate_aliases()
     config.validate_routing_policies()
     config.validate_search_tools()
-    config.validate_web_search_provider()
     config.validate_mail_transport()
     config.validate_webauthn_relying_party()
     config.warn_about_half_configured_oauth()
+    config.warn_about_half_configured_web_search()
     _bridge_yaml_fields_to_env(config, yaml_bridged_fields)
     return config
 
