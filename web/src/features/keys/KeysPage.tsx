@@ -170,7 +170,7 @@ function RevealSecretModal({
         onKeyDown={onKeyDown}
         className="flex max-h-[90vh] w-full max-w-2xl flex-col gap-4 overflow-y-auto rounded-xl bg-surface p-6 shadow-xl"
       >
-        <h2 id="reveal-title" className="text-lg font-semibold text-foreground">
+        <h2 id="reveal-title" className="text-title">
           {title}
         </h2>
         <InfoBanner tone="warning">

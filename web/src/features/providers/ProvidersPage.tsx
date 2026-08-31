@@ -747,9 +747,7 @@ function OnboardingPanel({
     <Card>
       <Card.Content className="flex flex-col gap-4 p-6">
         <div>
-          <h2 className="text-lg font-semibold text-foreground">
-            Welcome to Otari
-          </h2>
+          <h2 className="text-heading">Welcome to Otari</h2>
           <p className="mt-1 text-sm text-muted">
             You are signed in. Add a provider to start serving models: three
             quick steps.

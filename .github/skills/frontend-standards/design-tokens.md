@@ -189,8 +189,12 @@ card title nested two sections deep may be an `<h3>` or an `<h4>` and still wear
 `text-title`. Pick the level that keeps the outline unbroken, then the role that matches the
 meaning.
 
-Headings and the display/heading roles are set in Zilla Slab; body and UI text in Mozilla
-Text; keys, IDs, and code in Fira Code. The faces are self-hosted in `web/public/fonts/` under
+Zilla Slab is spent on `text-display` alone; every other role, `text-heading` included, is set
+in Mozilla Text, because at 18px a slab serif competes with the page title instead of sitting
+under it (otari#807). Keys, IDs, and code are Fira Code. A bare `h1`-`h6` still defaults to the
+display face through the `@layer base` rule in the same file, which is why a heading always
+wears a role: left bare it renders serif, and at any size but the display's that reads as an
+accident. The faces are self-hosted in `web/public/fonts/` under
 SIL OFL 1.1, with each family's license shipped beside it (see the README there), so the
 dashboard's typography needs no third-party request and an air-gapped gateway looks like a
 connected one. Adding a family means adding its license in the same commit;

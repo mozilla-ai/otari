@@ -62,9 +62,7 @@ export function HybridLanding() {
             {/* Decorative: the heading beside it already names the product. */}
             <img src="/favicon.svg" alt="" className="h-12 w-12" />
             <div>
-              <h1 className="text-lg font-semibold text-foreground">
-                Otari gateway
-              </h1>
+              <h1 className="text-display">Otari gateway</h1>
               <p className="mt-1 text-sm text-muted">
                 This gateway serves requests. Its providers, routing, budgets
                 and usage are managed on otari.ai.

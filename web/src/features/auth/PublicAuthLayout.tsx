@@ -33,7 +33,7 @@ export function PublicAuthLayout({
           <div className="flex flex-col items-center gap-3 text-center">
             <img src="/favicon.svg" alt="Otari" className="h-12 w-12" />
             <div>
-              <h1 className="text-lg font-semibold text-foreground">{title}</h1>
+              <h1 className="text-display">{title}</h1>
               {description ? (
                 <p className="mt-1 text-sm text-muted">{description}</p>
               ) : null}

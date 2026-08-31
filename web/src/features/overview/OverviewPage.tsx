@@ -574,9 +574,7 @@ function GettingStartedPanel() {
     <Card>
       <Card.Content className="flex flex-col gap-3 p-6">
         <div>
-          <h2 className="text-lg font-semibold text-foreground">
-            Get started with Otari
-          </h2>
+          <h2 className="text-heading">Get started with Otari</h2>
           <p className="mt-1 text-sm text-muted">
             Add a provider to begin serving models. Once it is configured, this
             page will show your gateway&rsquo;s traffic, spend, and health.
