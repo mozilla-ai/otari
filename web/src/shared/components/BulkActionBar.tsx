@@ -44,9 +44,17 @@ export function BulkActionBar({
     <div
       role="toolbar"
       aria-label="Bulk actions"
-      className="otari-bulk-bar fixed bottom-4 left-1/2 z-40 flex w-[calc(100%-2rem)] max-w-3xl -translate-x-1/2 flex-wrap items-center gap-3 rounded-xl border border-accent bg-surface px-4 py-2.5 shadow-elevation-lg"
+      // A floating surface, so it takes the floating rule: `bg-surface` and a
+      // 1px control edge, square, no shadow. It was an accent-bordered rounded
+      // card with an elevation that is now `none`, which left the accent doing
+      // the work of an edge; the accent is data ink and fills, not a way to say
+      // "this is on top".
+      className="otari-bulk-bar fixed bottom-4 left-1/2 z-40 flex w-[calc(100%-2rem)] max-w-3xl -translate-x-1/2 flex-wrap items-center gap-3 border border-control-border bg-surface px-4 py-2.5"
     >
-      <span className="text-sm font-medium text-link">{label}</span>
+      {/* Foreground, not link ink. This is a count, not a destination, and link
+          ink on something unclickable promises an interaction that is not
+          there. */}
+      <span className="text-sm font-medium text-foreground">{label}</span>
       {!allMatching && canSelectAllMatching && matchingTotal != null ? (
         <Button size="sm" variant="ghost" onPress={onSelectAllMatching}>
           Select all {matchingTotal.toLocaleString()} matching this filter

@@ -1408,19 +1408,25 @@ body {
 .otari-overview-activity .otari-table .table__header {
   border-top: 0;
 }
-/* Only the breakdown tables freeze a lane today. The Overview preview's
-   identity column is Model, which is its *second* lane behind Time, so pinning
-   `:first-child` there would hold the timestamp and let the model name scroll
-   away, which is the exact failure this rule exists to prevent. Pinning the
-   second lane needs a left offset equal to the first one's width and a ruling
-   on whether Time or Model leads that table; both are being brought to design
-   rather than guessed at here. */
+/* Only the breakdown tables freeze a lane, and the Overview preview is ruled
+   *out* rather than pending: it is five rows of six narrow lanes and never
+   scrolls, and Time leading is right for a chronology preview even though the
+   identity is Model. Where a table does scroll and its identity is not the
+   first lane, the frozen region runs from the first lane through the row header
+   inclusive; if that exceeds about a third of the table's width, the column
+   order is wrong and the order is the fix, so the pin doubles as a detector. */
 .otari-breakdown .table__column:first-child,
 .otari-breakdown .table__row .table__cell:first-child {
   position: sticky;
   left: 0;
   z-index: 1;
   background-color: var(--color-background);
+}
+/* The boundary appears only while there is something behind it. At rest a table
+   has no internal verticals: its columns are not regions, which is what makes it
+   a table rather than the KPI strip. `TableScrollFrame` is what sets the flag. */
+.otari-breakdown[data-scrolled="true"] .table__column:first-child,
+.otari-breakdown[data-scrolled="true"] .table__row .table__cell:first-child {
   border-right: 1px solid var(--color-control-border);
 }
 /* A fixed lane holds its width instead of being squeezed, and the flexible one

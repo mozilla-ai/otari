@@ -1,4 +1,4 @@
-import type { ReactNode } from "react"
+import { type ReactNode, useEffect, useRef } from "react"
 
 /**
  * The shared vocabulary of the divided surface: the full-bleed rule, the square
@@ -95,12 +95,22 @@ export function KpiCell({
           than one: dropping any of them to make room would lose information the
           strip is there to carry, and a cell with a spare line would break the
           shared baseline the subgrid buys. */}
-      <span className="flex min-h-[18px] flex-wrap items-center gap-2 text-xs text-muted">
+      {/* Most-judged to least, left to right: a severity, then the comparison,
+          then the raw fact. It never wraps: a second line here made one cell
+          taller than its siblings and silently undid the shared baseline the
+          subgrid buys. The severity and the delta hold their width; the subline
+          is the only thing that gives, and it truncates, because its facts also
+          live in the breakdown tables while a delta lives nowhere else. */}
+      <span className="flex min-h-[18px] items-center gap-2 text-xs text-nowrap text-muted">
         {severity ? <SeverityMark severity={severity} /> : null}
-        {severity && (subline || delta) ? <Separator /> : null}
-        {subline ? <span>{subline}</span> : null}
-        {subline && delta ? <Separator /> : null}
+        {severity && delta ? <Separator /> : null}
         {delta}
+        {(severity || delta) && subline ? <Separator /> : null}
+        {subline ? (
+          <span className="min-w-0 truncate" title={subline}>
+            {subline}
+          </span>
+        ) : null}
       </span>
       {/* Reserved rather than conditional: an absent sparkline must not make one
           cell shorter than the four beside it. Dropped in the empty state by
@@ -115,7 +125,7 @@ export function KpiCell({
 /** The middot between two things sharing the line under a value. */
 function Separator() {
   return (
-    <span aria-hidden className="text-subtle">
+    <span aria-hidden className="shrink-0 text-subtle">
       ·
     </span>
   )
@@ -132,7 +142,7 @@ export function SeverityMark({ severity }: { severity: Severity }) {
   const { status, word } = severity
   return (
     <span
-      className={`flex items-center gap-2 font-mono ${
+      className={`flex shrink-0 items-center gap-2 font-mono ${
         status === "alert"
           ? "text-danger"
           : status === "warn"
@@ -216,6 +226,46 @@ export function Tab({
 export function TabRow({ children }: { children: ReactNode }) {
   return (
     <div className="inline-flex max-w-full items-center gap-1 overflow-x-auto">
+      {children}
+    </div>
+  )
+}
+
+/**
+ * Marks its subtree `data-scrolled` while the table inside it is scrolled off
+ * its left edge, so the pinned lane can draw its boundary only then.
+ *
+ * A cue for a state disappears with the state: at rest a table has no internal
+ * verticals, because its columns are not regions, which is exactly what
+ * separates it from the KPI strip. The same principle the mid-column clip
+ * follows.
+ *
+ * It reaches for `.table__scroll-container` because that element is HeroUI's
+ * and no call site can put a listener on it any other way.
+ */
+export function TableScrollFrame({
+  className,
+  children,
+}: {
+  className: string
+  children: ReactNode
+}) {
+  const ref = useRef<HTMLDivElement>(null)
+  useEffect(() => {
+    const root = ref.current
+    const scroller = root?.querySelector<HTMLElement>(
+      ".table__scroll-container",
+    )
+    if (!root || !scroller) return
+    const sync = () => {
+      root.dataset.scrolled = scroller.scrollLeft > 0 ? "true" : "false"
+    }
+    sync()
+    scroller.addEventListener("scroll", sync, { passive: true })
+    return () => scroller.removeEventListener("scroll", sync)
+  })
+  return (
+    <div ref={ref} className={className}>
       {children}
     </div>
   )

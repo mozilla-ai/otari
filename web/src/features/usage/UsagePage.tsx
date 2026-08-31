@@ -37,6 +37,7 @@ import {
   KpiCell,
   KpiStrip,
   Tab,
+  TableScrollFrame,
   TabRow,
 } from "@/shared/components/surface"
 import { TrendChip } from "@/shared/components/TrendChip"
@@ -299,7 +300,8 @@ function BreakdownTable({
   return (
     // `otari-breakdown` is the hook globals.css needs to reach `.table__column`
     // and `.table__header`, which are HeroUI's DOM and not addressable here.
-    <div className="otari-breakdown flex flex-col gap-2">
+    // The frame is what tells that CSS whether the table is scrolled.
+    <TableScrollFrame className="otari-breakdown flex flex-col gap-2">
       <DataTable
         ariaLabel={`Spend by ${dimensionLabel.toLowerCase()}`}
         columns={columns}
@@ -324,7 +326,7 @@ function BreakdownTable({
           Show top {TABLE_TOP_N}
         </Button>
       ) : null}
-    </div>
+    </TableScrollFrame>
   )
 }
 
@@ -409,7 +411,7 @@ function ToolBreakdownTable({
     },
   ]
   return (
-    <div className="otari-breakdown">
+    <TableScrollFrame className="otari-breakdown">
       <DataTable
         ariaLabel="Spend by gateway-run tool"
         columns={columns}
@@ -419,7 +421,7 @@ function ToolBreakdownTable({
         emptyContent="No gateway-run tool calls in this range."
         onRowAction={(key) => onDrill(String(key))}
       />
-    </div>
+    </TableScrollFrame>
   )
 }
 

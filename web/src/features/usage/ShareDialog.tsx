@@ -396,7 +396,10 @@ export function ShareDialog(props: ShareDialogProps) {
             </AlertDialog.Body>
             <AlertDialog.Footer className="flex flex-wrap items-center gap-2">
               {notice !== undefined ? (
-                <span className="mr-auto text-xs text-link">{notice}</span>
+                // Muted, not link ink: a notice is a result, not a destination, and
+                // link ink on something unclickable promises an interaction
+                // that is not there.
+                <span className="mr-auto text-xs text-muted">{notice}</span>
               ) : null}
               <Button variant="ghost" onPress={onClose}>
                 Close
