@@ -878,6 +878,25 @@
   font-weight: var(--font-weight-normal);
   color: var(--color-text-muted);
 }
+/* The tertiary text rung, reachable at last. `--color-text-subtle` has been
+   declared in both theme blocks since the rehome and registered nowhere, so
+   `text-subtle` produced no CSS and the one step between `text-muted` and
+   nothing was unreachable from a call site.
+
+   A `@utility` and not a `@theme` entry, which is not the obvious choice and is
+   the only one that gives this name: Tailwind derives `text-<name>` from
+   `--color-<name>`, so registering `--color-text-subtle` generates
+   `text-text-subtle`, and registering `--color-subtle` to fix the name would
+   also mint `bg-subtle` and `border-subtle`, which name a rung without saying
+   which one. One declaration, one class, no strays. Safe from the utility/theme
+   collision documented above because no theme block declares `--color-subtle`.
+
+   Color only, unlike the type roles below it: this is a rung on the text ramp,
+   not a role with metrics of its own. */
+@utility text-subtle {
+  color: var(--color-text-subtle);
+}
+
 @utility text-overline {
   /* 12px rather than 11, and the reason is the scale rather than the call sites:
      an eighth theme step for a single role is not worth a point of size, and
@@ -1259,6 +1278,7 @@ body {
 .otari-table .table__row .table__cell {
   border-color: var(--color-border);
 }
+
 /* Aliasing `--separator` is not enough for the row. HeroUI draws a bottom
    border on the row as well as on its cells, and halves it on the way through:
    `color-mix(in oklab, var(--separator) 50%, transparent)`. Measured on the
@@ -1310,6 +1330,52 @@ body {
    render (linear in page size) catches up and the panel slides in. */
 .otari-table .otari-detail-opening .table__cell {
   background-color: var(--color-primary-subtle);
+}
+
+/* The Overview's activity preview, whose lanes are fixed rather than content
+   sized: five of its six columns hold a bounded value (a relative time, a key
+   name, two numerics, a status word), so letting the widest cell in a five-row
+   sample set the column is how the same table lands at a different shape on
+   every load. Keyed on the column ids the page declares, because these reach
+   `.table__column`, which is HeroUI's DOM and not addressable from a call site.
+
+   The pitch is set on the cell rather than the row: HeroUI's row is a `<tr>`
+   whose height is whatever its cells make it. */
+/* The preview sits on the page ground rather than on a surface, and its header
+   is a rule-bounded overline rather than a tinted band. Scoped to this table
+   and not to `.otari-table`: the other screens still draw their tables as
+   panels until their own teardowns land, and changing them from here would be
+   a change nobody reviewing this page could see. */
+.otari-overview-activity .otari-table.table-root {
+  background-color: transparent;
+}
+.otari-overview-activity .otari-table .table__header {
+  background-color: transparent;
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+}
+.otari-overview-activity .table__column[data-key="time"] {
+  width: 120px;
+}
+/* A relative time is short but wraps at this lane width ("4 minutes ago" is
+   three words), and a wrapped cell is the one thing that can break the row
+   pitch below. */
+.otari-overview-activity .table__cell[data-key="time"],
+.otari-overview-activity .table__row .table__cell:first-child {
+  white-space: nowrap;
+}
+.otari-overview-activity .table__column[data-key="key"] {
+  width: 200px;
+}
+.otari-overview-activity .table__column[data-key="tokens"],
+.otari-overview-activity .table__column[data-key="cost"],
+.otari-overview-activity .table__column[data-key="status"] {
+  width: 110px;
+}
+.otari-overview-activity .table__row .table__cell {
+  height: 45px;
+  padding-block: 0;
+  border-color: var(--color-border-subtle);
 }
 .otari-detail-reveal {
   display: grid;

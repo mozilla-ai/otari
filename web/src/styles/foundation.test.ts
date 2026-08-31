@@ -610,6 +610,17 @@ describe("the shell chrome's type roles", () => {
     "text-chrome-initials",
   ]
 
+  it("declares text-subtle as a utility, not a color token", () => {
+    // `--color-text-subtle` would generate `text-text-subtle`, and
+    // `--color-subtle` would also mint `bg-subtle` and `border-subtle`. The
+    // utility form is the only one that yields this name and nothing else.
+    expect(CSS).toContain("@utility text-subtle {")
+    expect(
+      declarations(block("@theme")).get("--color-subtle"),
+      "`--color-subtle` in @theme would collide with `@utility text-subtle` in the same layer",
+    ).toBeUndefined()
+  })
+
   it.each(CHROME_ROLES)("declares %s in globals.css", (role) => {
     // The same failure the documented-utilities list guards against: a role
     // named in the scale's comment but never declared is a className that

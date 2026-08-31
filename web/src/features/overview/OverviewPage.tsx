@@ -1,6 +1,7 @@
-import { Button, Card } from "@heroui/react"
+import { Button } from "@heroui/react"
 import type { LinkProps } from "@tanstack/react-router"
 import { Link, useNavigate } from "@tanstack/react-router"
+import type { ReactNode } from "react"
 import { useEffect, useMemo, useState } from "react"
 import type { UsageEntry } from "@/client"
 import { SetupGuideCard } from "@/features/onboarding/SetupGuideCard"
@@ -8,7 +9,6 @@ import {
   budgetHealth,
   errorRateHealth,
   providerHealthStatus,
-  toStatStatus,
 } from "@/features/overview/overview"
 import {
   NO_BREAKDOWNS,
@@ -31,7 +31,6 @@ import {
   PageHeader,
   PageLoading,
   RefreshButton,
-  StatCard,
 } from "@/shared/components/ui"
 import {
   deltaFraction,
@@ -90,15 +89,6 @@ function useWindows() {
     }
   }, [dayKey])
 }
-
-// A status tile's short word (paired with the color so status never rides on hue
-// alone), keyed off the derived Health.
-const ERROR_WORDS = { ok: "Healthy", warn: "Elevated", alert: "High" } as const
-const BUDGET_WORDS = {
-  ok: "On track",
-  warn: "Near limit",
-  alert: "Over budget",
-} as const
 
 /**
  * The landing route, which is the one page nobody navigates to on purpose.
@@ -172,6 +162,18 @@ function OperatorOverviewIndex() {
   )
 }
 
+/**
+ * The one page nobody navigates to on purpose, rebuilt as a divided surface.
+ *
+ * There are no cards here any more. The page is one ground partitioned by
+ * hairlines: a header, an optional attention strip, a KPI strip of five cells
+ * divided by vertical rules, a subordinate spend chart, and a lower split of
+ * the activity table against a workspace rail. Each section is full-bleed
+ * between `border-border` rules, which is what `-mx-4 md:-mx-6` is doing at
+ * every one of them: `<main>` pads its column, and a rule that stops short of
+ * the column edge reads as a card's top border rather than as a division of
+ * the page.
+ */
 export function OverviewPage({
   needsSetup = false,
   hasProviders = false,
@@ -238,19 +240,20 @@ export function OverviewPage({
   const periodTotals = period.data?.totals
   const prevTotals = previous.data?.totals
 
-  // The 30-day daily series is already on the wire (used for tile sparklines).
-  // A single point has no trend to draw, so sparklines only appear with 2+ days.
+  // The 30-day daily series is already on the wire, and so is today's hourly
+  // one: the today window is requested at `"hour"` granularity for exactly this.
+  // A single point has no trend to draw, so a sparkline needs two.
   const periodSeries = period.data?.series ?? []
+  const todaySeries = today.data?.series ?? []
   const hasTrend = periodSeries.length > 1
+  const hasHourlyTrend = todaySeries.length > 1
 
   const err = errorRateHealth(periodTotals)
   const errPrev = errorRateHealth(prevTotals)
-  // Each delta is its own const so the tile below can gate its chip on the
+  // Each delta is its own const so the cell below can gate its chip on the
   // fraction rather than on the query: `deltaFraction` also returns null once
   // the current window has landed but the previous one has not, and when the
-  // previous value is 0. TrendChip renders nothing for a null fraction, but the
-  // *element* is truthy, and StatCard reserves the aside row for whatever it is
-  // handed, so an ungated chip costs a tile 42px of dead space.
+  // previous value is 0.
   const costDelta = periodTotals
     ? deltaFraction(periodTotals.cost, prevTotals?.cost)
     : null
@@ -270,16 +273,16 @@ export function OverviewPage({
     (member) => member.status === "active",
   ).length
 
-  // The getting-started banner is an onboarding empty state: show it only when the
-  // gateway has no providers AND no recorded usage. Imported OTLP usage lands in
-  // the usage tables (with counts_toward_budget=false) through a budget-exempt key
-  // and no provider config, so "no providers" alone no longer means "nothing has
-  // happened". `recent` is the unfiltered, all-time log query already loaded below;
-  // gate on it having resolved so the banner never flashes in then hides.
+  // The getting-started state is an onboarding empty state: the gateway has no
+  // providers AND no recorded usage. Imported OTLP usage lands in the usage
+  // tables (with counts_toward_budget=false) through a budget-exempt key and no
+  // provider config, so "no providers" alone no longer means "nothing has
+  // happened". `recent` is the unfiltered, all-time log query already loaded
+  // below; gate on it having resolved so the strip never flashes in then hides.
   const hasAnyUsage = (recent.data?.length ?? 0) > 0
-  const showGettingStarted = needsSetup && recent.isSuccess && !hasAnyUsage
+  const isEmpty = needsSetup && recent.isSuccess && !hasAnyUsage
 
-  // Surface the first load error across the tile queries so a broken master key
+  // Surface the first load error across the cell queries so a broken master key
   // or backend does not just leave a wall of "—". Recent activity is excluded: it
   // renders its own inline banner, so including it here would double-report. The
   // provider-list error from the index comes first: it is the query that decides
@@ -323,29 +326,24 @@ export function OverviewPage({
     recent.isFetching
 
   return (
-    <div className="flex flex-col gap-6">
-      <PageHeader
-        title="Overview"
-        description="At-a-glance spend, traffic, and health across the gateway."
-        action={
-          <RefreshButton
-            onRefresh={refresh}
-            isFetching={isRefreshing}
-            updatedAt={period.dataUpdatedAt}
-          />
-        }
+    <div className="flex flex-col">
+      <OverviewHeader
+        refresh={refresh}
+        isRefreshing={isRefreshing}
+        updatedAt={period.dataUpdatedAt}
       />
 
-      {showGettingStarted ? <GettingStartedPanel /> : null}
+      {isEmpty ? <GetStartedStrip /> : null}
+
       {/* The step after that one: a provider exists, so the guide can hand out a
           key and watch for the first request. It decides for itself whether to
           render, including holding back while there is no provider, which is
-          when the panel above is the right guide instead. */}
+          when the strip above is the right guide instead. */}
       <SetupGuideCard hasProviders={hasProviders} />
 
       <ErrorBanner error={loadError} />
 
-      <SystemStatusStrip
+      <AttentionStrip
         providerHealth={providerHealth}
         healthy={health.data?.healthy ?? 0}
         degraded={health.data?.degraded ?? 0}
@@ -359,117 +357,180 @@ export function OverviewPage({
         failed={health.isError || budgets.isError || period.isError}
       />
 
-      <div className="grid grid-cols-2 gap-4 sm:grid-cols-3 xl:grid-cols-4">
-        {/* Tiles gate on data presence, not isLoading, so a failed query reads as
-            "—" (unknown) rather than a misleading real zero. */}
-        <StatCard
+      <KpiStrip empty={isEmpty}>
+        <KpiCell
           label="Spend today"
+          // A real zero where zero is a fact, an em dash where the value is
+          // unknown: a failed query must not read as "you spent nothing".
           value={todayTotals ? formatUsd(todayTotals.cost) : "—"}
+          subline={isEmpty ? "no prior spend" : undefined}
+          graphic={
+            !isEmpty && hasHourlyTrend ? (
+              <Sparkline
+                values={todaySeries.map((p) => p.cost)}
+                ariaLabel="Spend by hour today"
+                height={40}
+              />
+            ) : undefined
+          }
         />
-        <StatCard
+        <KpiCell
           label="Spend, last 30 days"
           value={periodTotals ? formatUsd(periodTotals.cost) : "—"}
+          subline={isEmpty ? "no prior spend" : undefined}
           // Spend falling is the improvement, so a rise paints danger while the
           // arrow keeps telling the truth about which way it went.
-          trend={
+          delta={
             costDelta !== null ? (
               <TrendChip
                 fraction={costDelta}
                 polarity="down-is-good"
                 caption="vs prev"
               />
-            ) : null
+            ) : undefined
           }
-          chart={
-            hasTrend ? (
+          graphic={
+            !isEmpty && hasTrend ? (
               <Sparkline
                 values={periodSeries.map((p) => p.cost)}
                 ariaLabel="Spend trend over the last 30 days"
+                height={40}
               />
             ) : undefined
           }
         />
-        <StatCard
+        <KpiCell
           label="Requests, last 30 days"
           value={periodTotals ? formatNumber(periodTotals.request_count) : "—"}
-          // Volume, so `neutral`: more traffic through the gateway is neither a
-          // win nor a regression on its own, and the error rate tile beside it
-          // is what carries the judgment.
-          trend={
+          subline={isEmpty ? "no prior traffic" : undefined}
+          // Volume, so no polarity: more traffic through the gateway is neither
+          // a win nor a regression on its own, and the error rate beside it is
+          // what carries the judgment.
+          delta={
             requestDelta !== null ? (
               <TrendChip fraction={requestDelta} caption="vs prev" />
-            ) : null
+            ) : undefined
           }
-          chart={
-            hasTrend ? (
+          graphic={
+            !isEmpty && hasTrend ? (
               <Sparkline
                 values={periodSeries.map((p) => p.requests)}
                 ariaLabel="Request volume trend over the last 30 days"
+                height={40}
               />
             ) : undefined
           }
         />
-        <StatCard
+        <KpiCell
           label="Error rate, last 30 days"
           value={err.rate === null ? "—" : formatPct(err.rate)}
-          status={toStatStatus(err.status)}
-          statusLabel={
-            err.status === "neutral" ? undefined : ERROR_WORDS[err.status]
-          }
+          subline={isEmpty ? "NO REQUESTS YET" : undefined}
           // Errors falling is the improvement, as with spend.
-          trend={
+          delta={
             errDelta !== null ? (
               <TrendChip
                 fraction={errDelta}
                 polarity="down-is-good"
                 caption="vs prev"
               />
-            ) : null
+            ) : undefined
+          }
+          graphic={
+            !isEmpty && periodTotals ? (
+              <span className="text-xs text-muted">
+                {`${formatNumber(periodTotals.error_count)} of ${formatNumber(periodTotals.request_count)} requests`}
+              </span>
+            ) : undefined
           }
         />
-        <StatCard
+        <KpiCell
           label="Budget health"
           value={
-            budgets.data
-              ? budget.worst
-                ? formatPct(budget.worst.pct)
-                : "—"
-              : "—"
+            budgets.data && budget.worst ? formatPct(budget.worst.pct) : "—"
           }
-          status={budgets.data ? toStatStatus(budget.status) : undefined}
-          statusLabel={
-            budgets.data && budget.status !== "neutral"
-              ? BUDGET_WORDS[budget.status]
-              : undefined
+          subline={isEmpty ? "NO BUDGETS SET" : undefined}
+          graphic={
+            !isEmpty && budgets.data && budget.worst ? (
+              <Meter
+                fraction={budget.worst.pct}
+                ariaLabel={`Worst budget usage: ${budget.worst.name}`}
+              />
+            ) : undefined
           }
-          hint={
-            budgets.data
-              ? budget.worst
-                ? `${budget.label} · worst: ${budget.worst.name}`
-                : budget.label
-              : undefined
-          }
-          to="/budgets"
         />
-        <StatCard
-          label="Active keys"
-          value={keys.data ? formatNumber(activeKeys) : "—"}
-          to="/keys"
-        />
-        <StatCard
-          label="Active members"
-          value={members.data ? formatNumber(activeMembers) : "—"}
-          to="/organization/members"
-        />
-      </div>
+      </KpiStrip>
 
-      <RecentActivity
-        entries={recent.data ?? []}
-        loading={recent.isLoading}
-        error={recent.error}
-      />
+      {/* Subordinate to the strip above it, which is the point: the numbers are
+          the answer and the shape of the month is the context. Absent entirely
+          in the empty state, where there is no shape to show. */}
+      {isEmpty ? null : (
+        <SpendChart series={periodSeries} ready={period.isSuccess} />
+      )}
+
+      <div className="flex flex-col lg:flex-row lg:items-stretch">
+        <div className="min-w-0 flex-1">
+          <RecentActivity
+            entries={recent.data ?? []}
+            loading={recent.isLoading}
+            error={recent.error}
+          />
+        </div>
+        <div className="border-border lg:w-[300px] lg:shrink-0 lg:border-l">
+          <WorkspaceRail
+            activeKeys={keys.data ? activeKeys : null}
+            activeMembers={members.data ? activeMembers : null}
+          />
+        </div>
+      </div>
     </div>
   )
+}
+
+/**
+ * Every section on this page breaks out of `<main>`'s column padding so its
+ * rules reach the page edge. Kept as one constant rather than repeated, because
+ * a section that forgets it does not look broken, it looks like a card.
+ */
+const FULL_BLEED = "-mx-4 md:-mx-6"
+/** The padding a full-bleed section puts back inside its own rules. */
+const BLEED_INSET = "px-4 md:px-6"
+
+function OverviewHeader({
+  refresh,
+  isRefreshing,
+  updatedAt,
+}: {
+  refresh: () => void
+  isRefreshing: boolean
+  updatedAt: number
+}) {
+  return (
+    <header className="flex flex-col gap-4 pb-6 sm:flex-row sm:items-start sm:justify-between">
+      <div>
+        <h1 className="font-display text-[28px] leading-[34px] font-semibold tracking-[-0.01em] text-foreground">
+          Overview
+        </h1>
+        {/* ~620px rather than `max-w-prose`: this paragraph sits beside the meta
+            block, so its measure is set by the room the two share. */}
+        <p className="mt-1 max-w-[620px] text-sm text-muted">
+          At-a-glance spend, traffic, and health across the gateway.
+        </p>
+      </div>
+      <div className="flex shrink-0 items-center gap-3">
+        <span className="text-overline">Last 30 days</span>
+        <RefreshButton
+          onRefresh={refresh}
+          isFetching={isRefreshing}
+          updatedAt={updatedAt}
+        />
+      </div>
+    </header>
+  )
+}
+
+/** A 6px square. The page's one status mark, in every place it appears. */
+function Dot({ className }: { className: string }) {
+  return <span aria-hidden className={`h-1.5 w-1.5 shrink-0 ${className}`} />
 }
 
 // Where "add a provider credential" lives on this deployment. A standalone one
@@ -481,22 +542,25 @@ export function OverviewPage({
 // Only correct for *adding* one, which is why provider health does not use it:
 // `/v1/providers/health` reports on `config.providers`, the process-global
 // table, so on a hosted deployment an unreachable instance is not a row the
-// organization page could show. `SystemStatusStrip` drops the link there rather
+// organization page could show. `AttentionStrip` drops the link there rather
 // than sending somebody to a page the instance is not on.
 function useAddProviderRoute(): "/providers" | "/organization/provider-keys" {
   const serves = useSurfaces()
   return serves("providers") ? "/providers" : "/organization/provider-keys"
 }
 
-function GettingStartedPanel() {
+function GetStartedStrip() {
   const navigate = useNavigate()
   const addProviderRoute = useAddProviderRoute()
 
   return (
-    <Card>
-      <Card.Content className="flex flex-col gap-3 p-6">
+    <section
+      className={`${FULL_BLEED} ${BLEED_INSET} flex flex-col gap-4 border-y border-border py-5 sm:flex-row sm:items-center sm:justify-between`}
+    >
+      <div className="flex items-start gap-3">
+        <Dot className="mt-2.5 bg-accent" />
         <div>
-          <h2 className="text-lg font-semibold text-foreground">
+          <h2 className="font-display text-xl font-semibold text-foreground">
             Get started with Otari
           </h2>
           <p className="mt-1 text-sm text-muted">
@@ -504,33 +568,32 @@ function GettingStartedPanel() {
             page will show your gateway&rsquo;s traffic, spend, and health.
           </p>
         </div>
-        <div>
-          <Button
-            variant="primary"
-            onPress={() => navigate({ to: addProviderRoute })}
-          >
-            Add your first provider
-          </Button>
-        </div>
-      </Card.Content>
-    </Card>
+      </div>
+      <Button
+        variant="primary"
+        className="shrink-0"
+        onPress={() => navigate({ to: addProviderRoute })}
+      >
+        Add your first provider
+      </Button>
+    </section>
   )
 }
 
-// A neutral, hue-free strip for a failed status source. Its details are also
+// A neutral, hue-free line for a failed status source. Its details are also
 // surfaced in the ErrorBanner, but this preserves context at the status area.
 function NeutralStrip({ text }: { text: string }) {
   return (
-    <div
+    <section
       role="status"
-      className="flex items-center gap-2 rounded-xl border border-border bg-surface-alt px-4 py-3 text-sm text-muted"
+      className={`${FULL_BLEED} ${BLEED_INSET} border-t border-border py-3 text-sm text-muted`}
     >
       {text}
-    </div>
+    </section>
   )
 }
 
-function SystemStatusStrip({
+function AttentionStrip({
   providerHealth,
   healthy,
   degraded,
@@ -613,19 +676,22 @@ function SystemStatusStrip({
     return null
   }
 
-  // The attention family rather than warning: every entry here names something
-  // to go and do, and "look here" is what separates attention from caution in
-  // the foundation's two warm roles.
+  // No fill and no radius any more: the strip is a band of the page between two
+  // rules, and the square danger dot is what carries the urgency the tinted
+  // attention fill used to.
   return (
-    <div
+    <section
       role="alert"
-      className="flex flex-col gap-2 rounded-xl border border-attention-border bg-attention-subtle px-4 py-3 text-sm text-attention sm:flex-row sm:flex-wrap sm:items-center"
+      className={`${FULL_BLEED} ${BLEED_INSET} flex flex-col gap-2 border-y border-border py-3 text-sm sm:flex-row sm:flex-wrap sm:items-center`}
     >
-      <span className="font-medium">Needs attention:</span>
+      <span className="flex items-center gap-2 font-medium text-foreground">
+        <Dot className="bg-danger" />
+        Needs attention
+      </span>
       {problems.map((p, i) => (
-        <span key={p.text} className="flex items-center gap-2">
+        <span key={p.text} className="flex items-center gap-2 text-muted">
           {i > 0 ? (
-            <span aria-hidden className="opacity-60">
+            <span aria-hidden className="text-subtle">
               ·
             </span>
           ) : null}
@@ -634,7 +700,7 @@ function SystemStatusStrip({
               to={p.to}
               search={p.search}
               // Thicken the underline on hover rather than lightening the text:
-              // the color here is already the one tuned to clear AA on this fill.
+              // the color here is already the one tuned to clear AA.
               className="underline underline-offset-2 hover:decoration-2"
             >
               {p.text}
@@ -644,8 +710,148 @@ function SystemStatusStrip({
           )}
         </span>
       ))}
+    </section>
+  )
+}
+
+/**
+ * Five equal cells divided by vertical rules, between horizontal ones. Equal
+ * rather than content-sized so the divisions land on a rhythm rather than
+ * wherever the longest label happens to end.
+ */
+function KpiStrip({
+  children,
+  empty,
+}: {
+  children: ReactNode
+  empty: boolean
+}) {
+  return (
+    <section
+      className={`${FULL_BLEED} ${BLEED_INSET} grid grid-cols-2 border-y border-border sm:grid-cols-3 xl:grid-cols-5`}
+      // The graphic row is dropped uniformly in the empty state, so the strip
+      // gets shorter without any cell changing shape relative to its neighbors.
+      data-empty={empty ? "true" : undefined}
+    >
+      {children}
+    </section>
+  )
+}
+
+function KpiCell({
+  label,
+  value,
+  subline,
+  delta,
+  graphic,
+}: {
+  label: string
+  value: string
+  subline?: string
+  delta?: ReactNode
+  graphic?: ReactNode
+}) {
+  return (
+    <div className="flex flex-col gap-1.5 border-border px-7 py-[18px] not-last:border-r">
+      <span className="text-overline">{label}</span>
+      <span className="font-mono text-[30px] leading-[36px] font-medium text-foreground tabular-nums">
+        {value}
+      </span>
+      <span className="min-h-[18px] text-xs text-muted">
+        {subline ?? delta ?? null}
+      </span>
+      {/* Reserved rather than conditional: an absent sparkline must not make one
+          cell shorter than the four beside it. Dropped in the empty state by
+          the caller passing none to any cell, which shortens the whole strip. */}
+      {graphic ? (
+        <span className="flex h-10 items-center">{graphic}</span>
+      ) : null}
     </div>
   )
+}
+
+/** The budget meter: a 140x3 track with an accent fill. */
+function Meter({
+  fraction,
+  ariaLabel,
+}: {
+  fraction: number
+  ariaLabel: string
+}) {
+  const pct = Math.max(0, Math.min(1, fraction)) * 100
+  return (
+    <span
+      role="img"
+      aria-label={ariaLabel}
+      className="block h-[3px] w-[140px] bg-surface-subtle"
+    >
+      <span className="block h-full bg-accent" style={{ width: `${pct}%` }} />
+    </span>
+  )
+}
+
+/**
+ * The month's shape, under the numbers that answer the question. Bars rather
+ * than an area, square-topped, on a single baseline rule.
+ */
+function SpendChart({
+  series,
+  ready,
+}: {
+  series: { bucket_start: string; cost: number }[]
+  ready: boolean
+}) {
+  if (!ready || series.length < 2) {
+    return null
+  }
+  const max = Math.max(...series.map((p) => p.cost), 0)
+  return (
+    <section
+      className={`${FULL_BLEED} ${BLEED_INSET} border-b border-border py-5`}
+    >
+      <div className="flex items-baseline justify-between">
+        <h2 className="text-overline">Spend, last 30 days</h2>
+        <Link
+          to="/usage"
+          className="text-sm text-muted underline underline-offset-2 hover:text-foreground"
+        >
+          View usage →
+        </Link>
+      </div>
+      <div
+        role="img"
+        aria-label="Daily spend over the last 30 days"
+        className="mt-4 flex h-[180px] items-end gap-[3px] border-b border-border"
+      >
+        {series.map((point) => (
+          <span
+            key={point.bucket_start}
+            className="min-w-px flex-1 bg-accent"
+            style={{
+              height:
+                max > 0 ? `${Math.max(1, (point.cost / max) * 100)}%` : "1px",
+            }}
+          />
+        ))}
+      </div>
+      <div className="mt-1.5 flex justify-between font-mono text-[11px] text-muted">
+        <span>{shortDate(series[0]?.bucket_start)}</span>
+        <span>{shortDate(series[series.length - 1]?.bucket_start)}</span>
+      </div>
+      <p className="mt-2 text-xs text-muted">
+        Daily totals for the selected workspace. Unpriced requests are recorded
+        at zero.
+      </p>
+    </section>
+  )
+}
+
+function shortDate(bucket: string | undefined): string {
+  if (!bucket) return ""
+  const d = new Date(bucket)
+  return Number.isNaN(d.getTime())
+    ? ""
+    : d.toLocaleDateString(undefined, { month: "short", day: "numeric" })
 }
 
 // "absorbed" is kept verbatim rather than folded into "ok": it is an attempt a
@@ -657,8 +863,32 @@ function statusWord(status: string): string {
   return status === "absorbed" ? "absorbed" : "ok"
 }
 
+/**
+ * Status as a family on a square dot plus a severity in text, never as a fill.
+ * The dot says which family (served, failed, recovered) and the word says what
+ * happened, so neither hue alone nor shape alone has to carry it.
+ */
+function StatusMark({ status }: { status: string }) {
+  const word = statusWord(status)
+  const dot =
+    word === "error"
+      ? "bg-danger"
+      : word === "absorbed"
+        ? "bg-surface-subtle"
+        : "bg-success"
+  const text = word === "error" ? "text-danger" : "text-muted"
+  return (
+    <span className={`flex items-center gap-2 ${text}`}>
+      <Dot className={dot} />
+      {word.toUpperCase()}
+    </span>
+  )
+}
+
 // Newest few requests, as an at-a-glance preview. Rows are read-only; a single
-// "View all" link opens the full Activity log. Cost is nullable per row.
+// "View all" link opens the full Activity log. Cost and tokens are nullable per
+// row, and a failed request has neither, which reads as an em dash rather than
+// as a zero it did not spend.
 function RecentActivity({
   entries,
   loading,
@@ -688,50 +918,135 @@ function RecentActivity({
       cell: (entry) => <span className="text-foreground">{entry.model}</span>,
     },
     {
+      id: "key",
+      header: "Key",
+      cell: (entry) => (
+        <span className="text-muted">{entry.api_key_name ?? "—"}</span>
+      ),
+    },
+    {
+      id: "tokens",
+      header: "Tokens",
+      align: "end",
+      cell: (entry) => (
+        <span className="font-mono text-[13px] tabular-nums">
+          {entry.total_tokens === null ? "—" : formatNumber(entry.total_tokens)}
+        </span>
+      ),
+    },
+    {
       id: "cost",
       header: "Cost",
       align: "end",
-      cell: (entry) => (entry.cost === null ? "—" : formatUsd(entry.cost)),
+      cell: (entry) => (
+        <span className="font-mono text-[13px] tabular-nums">
+          {entry.cost === null ? "—" : formatUsd(entry.cost)}
+        </span>
+      ),
     },
     {
       id: "status",
       header: "Status",
-      cell: (entry) => (
-        <span
-          className={`inline-flex items-center rounded-full border px-2 py-0.5 text-xs font-medium ${
-            entry.status === "error"
-              ? "border-danger bg-danger-subtle text-danger"
-              : entry.status === "absorbed"
-                ? "border-warning bg-warning-subtle text-warning"
-                : "border-border bg-primary-subtle text-primary-subtle-foreground"
-          }`}
-        >
-          {statusWord(entry.status)}
-        </span>
-      ),
+      cell: (entry) => <StatusMark status={entry.status} />,
     },
   ]
 
   return (
-    <div className="flex flex-col gap-3">
-      <div className="flex items-center justify-between">
-        <h2 className="text-title">Recent activity</h2>
+    <section className="flex flex-col pt-6 lg:pr-6">
+      <div className="flex items-baseline justify-between pb-3">
+        <h2 className="text-overline">Recent activity</h2>
         <Link
           to="/activity"
-          className="text-sm text-link hover:text-link-hover hover:underline"
+          className="text-sm text-muted underline underline-offset-2 hover:text-foreground"
         >
           View all →
         </Link>
       </div>
       <ErrorBanner error={error} />
-      <DataTable
-        ariaLabel="Recent activity"
-        columns={columns}
-        rows={entries}
-        getRowKey={(entry) => entry.id}
-        isLoading={loading}
-        emptyContent="No requests yet. Once the gateway serves traffic, it appears here."
-      />
+      {/* The lane widths and the row pitch are in globals.css, keyed on the
+          column ids below: they have to reach `.table__column`, which is
+          HeroUI's DOM and not addressable from here. */}
+      <div className="otari-overview-activity">
+        <DataTable
+          ariaLabel="Recent activity"
+          columns={columns}
+          rows={entries}
+          getRowKey={(entry) => entry.id}
+          isLoading={loading}
+          emptyContent="No requests yet. Once the gateway serves traffic, it appears here."
+        />
+      </div>
+    </section>
+  )
+}
+
+/**
+ * The workspace's own numbers, beside the deployment-wide table rather than in
+ * it. A rail and not two more KPI cells: these count things that belong to one
+ * workspace, and the strip above counts what the gateway did.
+ */
+function WorkspaceRail({
+  activeKeys,
+  activeMembers,
+}: {
+  activeKeys: number | null
+  activeMembers: number | null
+}) {
+  return (
+    <section className="flex flex-col gap-6 pt-6 lg:pl-6">
+      <div>
+        <h2 className="text-overline">This workspace</h2>
+        <dl className="mt-3 flex gap-8 lg:flex-col lg:gap-4">
+          <RailStat
+            label="Active keys"
+            value={activeKeys === null ? "—" : formatNumber(activeKeys)}
+          />
+          <RailStat
+            label="Active members"
+            value={activeMembers === null ? "—" : formatNumber(activeMembers)}
+          />
+        </dl>
+      </div>
+      <div>
+        <h2 className="text-overline">Go to</h2>
+        <ul className="mt-1 flex flex-col">
+          <RailLink to="/keys">API keys</RailLink>
+          <RailLink to="/organization/members">Members</RailLink>
+          <RailLink to="/budgets">Budgets</RailLink>
+          <RailLink to="/activity">Activity</RailLink>
+        </ul>
+      </div>
+    </section>
+  )
+}
+
+function RailStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <dt className="text-xs text-muted">{label}</dt>
+      <dd className="font-mono text-[30px] leading-[36px] font-medium text-foreground tabular-nums">
+        {value}
+      </dd>
     </div>
+  )
+}
+
+function RailLink({
+  to,
+  children,
+}: {
+  to: LinkProps["to"]
+  children: ReactNode
+}) {
+  return (
+    <li className="border-b border-separator-secondary last:border-b-0">
+      <Link
+        to={to}
+        className="flex items-center justify-between py-2.5 text-sm text-muted hover:text-foreground"
+      >
+        {children}
+        <span aria-hidden>→</span>
+      </Link>
+    </li>
   )
 }
