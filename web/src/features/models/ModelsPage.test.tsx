@@ -1270,6 +1270,50 @@ describe("ModelsPage", () => {
     ).toBeInTheDocument()
   })
 
+  it("keeps cached operator data out of a member's page", async () => {
+    // A disabled query still serves whatever sits under its key, so a caller
+    // demoted mid-session would otherwise keep the discovered models and the
+    // metering tooltip they fetched as an operator.
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    // A model only discovery knows about, so the assertion is about the
+    // operator-only read rather than about the catalog every session reads.
+    client.setQueryData(["discoverable"], {
+      providers: [
+        {
+          provider: "openai",
+          ok: true,
+          error: null,
+          discovery_unsupported: false,
+          models: [{ id: "gpt-secret", key: "openai:gpt-secret" }],
+        },
+      ],
+    } satisfies DiscoverableModelsResponse)
+    client.setQueryData(["settings"], SETTINGS)
+    mockApi({
+      context: organizationContext({
+        deployment_operator: false,
+        role: "member",
+      }),
+    })
+    render(
+      <QueryClientProvider client={client}>
+        <ModelsPage />
+      </QueryClientProvider>,
+      { wrapper: withRouter({ url: "/" }) },
+    )
+    await screen.findByText("openai:gpt-4o")
+
+    expect(
+      screen.queryByRole("button", {
+        name: /How unpriced models are metered/,
+      }),
+    ).not.toBeInTheDocument()
+    // The discovery-only rows are the operator's read; the catalog stands.
+    expect(screen.queryByText("openai:gpt-secret")).not.toBeInTheDocument()
+  })
+
   it("shows a non-operator the catalog read-only and never fires the operator reads", async () => {
     // The member half of otari-ai#1942: the catalog and the price list serve
     // any session, and everything that writes or is operator-only is absent

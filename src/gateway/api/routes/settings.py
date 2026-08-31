@@ -15,7 +15,6 @@ and, where safe, control runtime behavior. Two layers:
 import types
 import typing
 from typing import Annotated, Any, Literal
-from urllib.parse import parse_qsl, quote, urlencode, urlsplit, urlunsplit
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response, status
 from pydantic import BaseModel, Field
@@ -47,6 +46,7 @@ from gateway.services.runtime_settings_service import (
     stage_override,
 )
 from gateway.services.secret_box import secret_box_configured
+from gateway.services.url_safety import redact_url_secrets
 from gateway.version import __version__
 
 router = APIRouter(prefix="/v1/settings", tags=["settings"])
@@ -324,46 +324,6 @@ def _scalar_type_name(annotation: Any) -> Literal["bool", "int", "float", "str",
 _REDACTED_URL_FIELDS = frozenset({"database_url", "sandbox_url", "guardrails_url"})
 
 
-def _redact_url_secrets(value: str) -> str:
-    """Mask credentials in a URL while keeping its shape recognizable.
-
-    A ``user:pass@`` password is masked while the username stays visible. A
-    single-component userinfo (``token@host``) is masked whole, since a lone
-    userinfo component is more likely a bearer token than a benign username and
-    the two cannot be told apart. Every query-parameter *value* is masked too
-    (a denylist of "credential-looking" keys cannot be complete, and a config
-    viewer cannot know which value is a secret), while the keys stay visible so
-    the operator can still see what is set. Scheme, host, and path are preserved.
-    """
-    try:
-        parts = urlsplit(value)
-    except ValueError:
-        return value
-
-    netloc = parts.netloc
-    if parts.username is not None or parts.password is not None:
-        host = parts.hostname or ""
-        # An IPv6 literal must keep its brackets or the rebuilt URL is malformed.
-        if ":" in host:
-            host = f"[{host}]"
-        if parts.port is not None:
-            host = f"{host}:{parts.port}"
-        if parts.password is not None:
-            netloc = f"{parts.username or ''}:***@{host}"
-        else:
-            netloc = f"***@{host}"
-
-    query = parts.query
-    if query:
-        pairs = parse_qsl(query, keep_blank_values=True)
-        # quote_via with '*' left safe keeps the mask readable ('***', not '%2A%2A%2A').
-        query = urlencode([(key, "***") for key, _ in pairs], quote_via=quote, safe="*")
-
-    if netloc == parts.netloc and query == parts.query:
-        return value
-    return urlunsplit((parts.scheme, netloc, parts.path, query, parts.fragment))
-
-
 def _field_value(config: GatewayConfig, name: str) -> bool | int | float | str | list[str] | None:
     # ``mode`` is often unset (None) with the real mode derived from the platform
     # token; show the effective mode so the viewer is not misleading.
@@ -371,7 +331,7 @@ def _field_value(config: GatewayConfig, name: str) -> bool | int | float | str |
         return config.effective_mode
     value: bool | int | float | str | list[str] | None = getattr(config, name)
     if name in _REDACTED_URL_FIELDS and isinstance(value, str):
-        return _redact_url_secrets(value)
+        return redact_url_secrets(value)
     return value
 
 

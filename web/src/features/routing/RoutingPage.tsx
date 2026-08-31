@@ -1282,6 +1282,12 @@ export function RoutingPage() {
 
   // Aliases and policies are listed together: an alias is the one-target case,
   // and this page is the only place either is managed.
+  //
+  // Both operator lists are read through `isOperator` rather than relied on to
+  // be empty because their hooks are disabled: a disabled query still hands
+  // back whatever sits in the cache under its key, so a caller who was an
+  // operator earlier in the session would keep seeing the deployment-wide rows
+  // after being demoted. The gate belongs where the data is rendered.
   const rows: RoutingRow[] = [
     ...((isOperator ? policies.data : memberPolicies.data) ?? []).map(
       (policy) => ({
@@ -1289,7 +1295,7 @@ export function RoutingPage() {
         kind: "policy" as const,
       }),
     ),
-    ...(aliases.data ?? []).map(aliasAsRow),
+    ...(isOperator ? (aliases.data ?? []) : []).map(aliasAsRow),
   ].sort(
     (a, b) =>
       a.name.localeCompare(b.name) ||
@@ -1487,7 +1493,7 @@ export function RoutingPage() {
             : "Named models your callers send as `model`. A policy decides which real model serves each request, what is tried if that fails, and which guardrails always run. These are the policies in force in your workspaces; a deployment operator manages them."
         }
         action={
-          !isOperator || adding || editing !== null ? undefined : (
+          !isOperator || isAdding || editing !== null ? undefined : (
             <Button
               variant="primary"
               onPress={() => {

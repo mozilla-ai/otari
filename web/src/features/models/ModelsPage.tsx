@@ -555,11 +555,15 @@ function PricingInfo() {
   // deployment-operator-only, and the tooltip explains a policy only an
   // operator can change, so for anyone else the header simply has no note.
   const organization = useOrganizationContext()
-  const settings = useSettings(isDeploymentOperator(organization.data))
-  if (!settings.data) {
+  const isOperator = isDeploymentOperator(organization.data)
+  const settings = useSettings(isOperator)
+  // Read through `isOperator` for the reason `ModelsPage` does: a disabled
+  // query still serves whatever its key already holds in the cache.
+  const data = isOperator ? settings.data : undefined
+  if (!data) {
     return null
   }
-  if (settings.data.default_pricing) {
+  if (data.default_pricing) {
     return (
       <InfoTooltip label="How unpriced models are metered" tone="info">
         Default pricing is on: models without a configured price are metered
@@ -571,7 +575,7 @@ function PricingInfo() {
   return (
     <InfoTooltip label="How unpriced models are metered" tone="warning">
       Default pricing is off: only models with a configured price are metered.
-      {settings.data.require_pricing
+      {data.require_pricing
         ? " Requests for any other model are rejected (HTTP 402) because require_pricing is on."
         : " Other models are served without cost tracking."}
     </InfoTooltip>
@@ -1516,6 +1520,14 @@ export function ModelsPage() {
   const discoverable = useDiscoverableModels(isOperator)
   const metadata = useModelMetadata(isOperator)
   const settings = useSettings(isOperator)
+  // Read through `isOperator` rather than relied on to be undefined because
+  // the hooks above are disabled: a disabled query still hands back whatever
+  // sits in the cache under its key, so a caller demoted mid-session would
+  // keep seeing what they fetched as an operator. The gate belongs where the
+  // data is rendered, not only where it is fetched.
+  const discoverableData = isOperator ? discoverable.data : undefined
+  const metadataData = isOperator ? metadata.data : undefined
+  const settingsData = isOperator ? settings.data : undefined
 
   const setPricing = useSetPricing()
   const [search, setSearch] = useState("")
@@ -1556,17 +1568,17 @@ export function ModelsPage() {
   const [releaseFilter, setReleaseFilter] = useState("all")
   const [comparisonContext, setComparisonContext] = useState("")
 
-  const metadataByKey = metadata.data?.models ?? {}
-  const metadataAvailable = metadata.data?.available ?? false
+  const metadataByKey = metadataData?.models ?? {}
+  const metadataAvailable = metadataData?.available ?? false
 
   const discoverableKeys = useMemo(
     () =>
       new Set(
-        (discoverable.data?.providers ?? []).flatMap((provider) =>
+        (discoverableData?.providers ?? []).flatMap((provider) =>
           provider.models.map((model) => model.key),
         ),
       ),
-    [discoverable.data],
+    [discoverableData],
   )
 
   const changeSearch = (value: string) => {
@@ -1697,8 +1709,8 @@ export function ModelsPage() {
     // answer: while settings are still loading the flag is undefined, and "not priced"
     // is the one of the two labels that would be asserting something.
     const unpricedSource: PriceSource =
-      settings.data?.default_pricing === false ? "none" : "unknown"
-    for (const provider of discoverable.data?.providers ?? []) {
+      settingsData?.default_pricing === false ? "none" : "unknown"
+    for (const provider of discoverableData?.providers ?? []) {
       for (const model of provider.models) {
         if (seen.has(model.key)) {
           continue
@@ -1722,9 +1734,9 @@ export function ModelsPage() {
       }
     }
     return out
-  }, [rows, discoverable.data, metadataByKey, settings.data?.default_pricing])
+  }, [rows, discoverableData, metadataByKey, settingsData?.default_pricing])
 
-  const discoveredErrors = (discoverable.data?.providers ?? []).filter(
+  const discoveredErrors = (discoverableData?.providers ?? []).filter(
     (provider) => !provider.ok,
   )
 

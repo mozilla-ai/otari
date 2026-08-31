@@ -455,6 +455,36 @@ async def test_a_plain_member_may_read_but_not_write(async_db: AsyncSession) -> 
         await service.delete_server(user=member, workspace_id=workspace.id, server_id=created.id)
 
 
+async def test_a_credential_in_the_url_is_masked_for_a_reader_who_cannot_manage(async_db: AsyncSession) -> None:
+    """The member read must not be a wider disclosure than the management one.
+
+    Nothing rejects a URL whose userinfo or query string carries a credential,
+    so opening the list to members would otherwise hand them one. A manager
+    still reads the URL as stored, because the edit form restates it.
+    """
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, owner=owner)
+    member = await _member(async_db, organization, role="member", full_name="Member")
+    await WorkspaceMemberRepository(async_db).create(workspace_id=workspace.id, user_id=member.id, role="member")
+    service = WorkspaceMcpServerService(async_db)
+    await service.create_server(
+        user=owner,
+        workspace_id=workspace.id,
+        request=_create(url="https://svc:hunter2@93.184.216.34/mcp?api_key=secret"),
+    )
+
+    for_member = await service.list_servers(user=member, workspace_id=workspace.id)
+    assert "hunter2" not in for_member.data[0].url
+    assert "secret" not in for_member.data[0].url
+    # Masked, not dropped: the host and path still identify the endpoint.
+    assert "93.184.216.34" in for_member.data[0].url
+    assert "api_key" in for_member.data[0].url
+
+    for_owner = await service.list_servers(user=owner, workspace_id=workspace.id)
+    assert for_owner.data[0].url == "https://svc:hunter2@93.184.216.34/mcp?api_key=secret"
+
+
 async def test_an_organization_member_outside_the_workspace_cannot_read(async_db: AsyncSession) -> None:
     """Member visibility is workspace membership, not organization membership."""
     organization = await _organization(async_db)

@@ -24,7 +24,6 @@ from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db, require_deployment_operator
-from gateway.api.routes.settings import _redact_url_secrets
 from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.services.runtime_settings_service import SettingValue
@@ -38,6 +37,7 @@ from gateway.services.tool_settings_service import (
     stage_override,
     validate_url,
 )
+from gateway.services.url_safety import redact_url_secrets
 
 router = APIRouter(prefix="/v1/tool-settings", tags=["tool-settings"])
 
@@ -102,7 +102,7 @@ class TestServiceResponse(BaseModel):
 def _display_value(config: GatewayConfig, key: str) -> bool | int | str | None:
     value = effective_values(config)[key]
     if key in _URL_FIELDS and isinstance(value, str):
-        return _redact_url_secrets(value)
+        return redact_url_secrets(value)
     # No tool field is float-typed, so the SettingValue here is bool/int/str/None.
     return cast("bool | int | str | None", value)
 

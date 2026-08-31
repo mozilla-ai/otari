@@ -1245,6 +1245,45 @@ describe("RoutingPage", () => {
     ).not.toBeInTheDocument()
   })
 
+  it("keeps cached operator rows out of a member's table", async () => {
+    // A disabled query still serves whatever sits under its key, so a caller
+    // demoted mid-session would otherwise keep seeing the deployment-wide
+    // policies and aliases they fetched as an operator. The pre-seeded client
+    // stands in for that cache.
+    const client = new QueryClient({
+      defaultOptions: { queries: { retry: false } },
+    })
+    client.setQueryData(["routing-policies"], [policy("operator-only", CHAIN)])
+    client.setQueryData(
+      ["aliases"],
+      [
+        {
+          name: "operator-alias",
+          target: "openai:gpt-5",
+          source: "stored",
+          user_id: null,
+        },
+      ],
+    )
+    mockApi([], null, [], {
+      context: organizationContext({
+        deployment_operator: false,
+        role: "member",
+      }),
+      memberPolicies: [policy("mine", CHAIN)],
+    })
+    render(
+      <QueryClientProvider client={client}>
+        <RoutingPage />
+      </QueryClientProvider>,
+      { wrapper: withRouter({ url: "/" }) },
+    )
+
+    expect(await screen.findByText("mine")).toBeInTheDocument()
+    expect(screen.queryByText("operator-only")).not.toBeInTheDocument()
+    expect(screen.queryByText("operator-alias")).not.toBeInTheDocument()
+  })
+
   it("never fires the operator reads for a non-operator", async () => {
     const { calls } = mockApi([], null, [], {
       context: organizationContext({

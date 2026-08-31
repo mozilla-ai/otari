@@ -343,6 +343,9 @@ describe("WorkspaceMcpServersCard", () => {
     const user = userEvent.setup()
     await renderLoaded(servers)
 
+    // The URL as the server chose to render it for this caller: the service
+    // masks any credential in it for a reader who cannot manage the workspace,
+    // so the card renders what it is given and adds no masking of its own.
     expect(screen.getByText("https://mcp.example.com/github")).toBeVisible()
     // The token stays write-only whoever is reading.
     expect(screen.getByText("Stored")).toBeVisible()
