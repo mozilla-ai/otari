@@ -136,6 +136,19 @@ describe("AccountMenu", () => {
     expect(screen.queryByRole("link", { name: "Terms of service" })).toBeNull()
   })
 
+  it("leaves Data & Privacy disabled for a deployment that published terms alone", async () => {
+    await openMenu({ terms_url: "https://otari.ai/terms" })
+
+    expect(
+      await screen.findByRole("link", { name: "Terms of service" }),
+    ).toHaveAttribute("href", "https://otari.ai/terms")
+    // The other direction of the same independence: one address published does
+    // not invent the other, so this row stays the disabled one.
+    expect(
+      screen.getByRole("button", { name: /^Data & Privacy \(/ }),
+    ).toBeDisabled()
+  })
+
   it("retargets the phone's Documentation row at the deployment's own docs site", async () => {
     mockCaller(OPERATOR)
     await openMenu({ docs_url: "https://docs.otari.ai/en/" })

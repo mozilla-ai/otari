@@ -40,9 +40,13 @@ import {
  *
  * The platform's Google and GitHub buttons, its newsletter opt-in, and its
  * terms checkbox are all left behind. The first two are #651 and a hosted
- * marketing concern; the third has nothing to link to, since a self-hosted
- * deployment publishes no terms, so the request omits `terms_accepted` rather
- * than asserting an acceptance of a document that does not exist.
+ * marketing concern; the third has nothing to link to on a deployment that
+ * published no terms, so the request omits `terms_accepted` rather than
+ * asserting an acceptance of a document that does not exist. `terms_url` makes
+ * that conditional rather than always true, and the server has carried
+ * `terms_accepted` and its `terms_accepted_at` column throughout, so offering
+ * the checkbox where there is a document to accept is unwired rather than
+ * impossible.
  *
  * `?email=…` prefills the address, which is how the accept-invitation page
  * hands an invitee straight here (otari#835). It arrives read-only, because
