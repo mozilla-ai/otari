@@ -69,6 +69,12 @@ Rotation preserves the key record and invalidates the previous secret.
 A budget-exempt key is also exempt from `require_pricing`. Reserve such keys for
 usage import or other intentional observability-only traffic.
 
+`/v1/keys` manages every key in the caller's organization and requires the
+deployment operator's standing. A signed-in member without it manages their own
+keys at `/v1/organizations/me/keys`, which derives the owner rather than
+accepting one, mints only into a workspace the caller may see, and never issues
+a budget-exempt key.
+
 ## Budgets
 
 Otari enforces budgets before dispatch and reconciles actual cost afterwards.

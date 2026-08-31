@@ -89,6 +89,11 @@ settings response.
 Exact page names and availability can change with deployment mode and installed
 extensions. The running dashboard is the source of truth.
 
+What a page shows can also depend on who is signed in. On API keys, an operator
+manages every key in the organization and chooses each key's owner, while a
+member sees the same page scoped to their own keys, always billed to themselves
+and never budget-exempt.
+
 ## Observability
 
 Activity is the per-request log. Usage provides aggregates and time series.

@@ -23,7 +23,10 @@ x-api-key: <token>
 
 Use API keys for inference. The master key is a deployment-wide administrative
 credential. Dashboard sessions authenticate browser requests, but deployment-wide
-operations also require operator authority.
+operations also require operator authority. Where a tenant needs one of those
+operations, a separately scoped endpoint serves it to the caller's own
+organization: `/v1/organizations/me/usage` for usage, and
+`/v1/organizations/me/keys` for a member's own API keys.
 
 In hybrid mode, the completion APIs accept an otari.ai user token through
 `Authorization: Bearer <token>`. Local API keys and management APIs are not used.
