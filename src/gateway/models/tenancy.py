@@ -481,6 +481,33 @@ class CallerWorkspaceMembershipPublic(SQLModel):
     role: str
 
 
+class CallerIdentityPublic(SQLModel):
+    """Who the caller is, as against what they may do.
+
+    The account control at the foot of the dashboard's sidebar draws a person,
+    and no authenticated route reported the caller's own name or address, so it
+    drew a role for everybody who could reach it: "Operator", which is not a
+    name and on a multi-tenant deployment was not even true
+    (mozilla-ai/otari#832).
+
+    Carried on the membership context for the reason ``deployment_operator`` is:
+    the shell reads that context before it paints, so an identity taken from it
+    needs no request of its own and cannot arrive a beat after the chrome it
+    names. Publishing it costs nothing either, since it is the caller's own
+    identity and they are holding the credential that resolved to it.
+
+    Both fields are nullable, and for opposite reasons. A local operator
+    identity has no address, because first boot provisions it with a name and
+    nothing to sign in with but the master key; a member added to the roster by
+    address has no name until they claim the identity and supply one. So a shell
+    has to be ready to draw either one alone.
+    """
+
+    user_id: uuid.UUID
+    email: str | None = None
+    full_name: str | None = None
+
+
 class OrganizationMembershipContextPublic(SQLModel):
     """An organization plus the caller's standing in it.
 
@@ -493,6 +520,12 @@ class OrganizationMembershipContextPublic(SQLModel):
     status: str
     organization: OrganizationPublic
     workspace_memberships: list[CallerWorkspaceMembershipPublic] = Field(default_factory=list)
+    # Who is signed in, which every other field here describes the authority of
+    # rather than the person holding it. Optional like the fields below it, and
+    # for the same reason: a shell reading a deployment that predates this (or a
+    # platform serving this contract without it) falls back to naming nobody,
+    # rather than failing to parse the context the rest of the chrome needs.
+    caller: CallerIdentityPublic | None = None
     # Whether the dashboard may offer the BYO provider-keys surface. The
     # platform answers "does this org have a self-hosted gateway attached", which
     # in a standalone deployment is always yes: the deployment reading this *is*

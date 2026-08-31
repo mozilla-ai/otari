@@ -24,11 +24,10 @@
  * password claims the deployment (otari#702), so a member changing theirs on an
  * unclaimed one gets `false` and nothing here moves. Every consumer of that
  * fact has to move together, or the tab that claimed keeps a sign-in screen
- * offering the credential the gateway now refuses, an account menu naming a
- * session kind that ended, and a password page that asks to claim a deployment
- * already claimed. So the claim
- * reports itself through `useRetireMasterKeySignIn` and this provider serves
- * the corrected bootstrap from then on.
+ * offering the credential the gateway now refuses and a password page that asks
+ * to claim a deployment already claimed. So the claim reports itself through
+ * `useRetireMasterKeySignIn` and this provider serves the corrected bootstrap
+ * from then on.
  *
  * Registering the first passkey, or deleting the last one, is the second
  * (otari#652): the gateway publishes `passkey` exactly while some credential

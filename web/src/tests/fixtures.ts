@@ -168,6 +168,14 @@ export function organizationContext(
 ): OrganizationContext {
   return {
     organization_member_id: "22222222-2222-2222-2222-222222222222",
+    // The identity a standalone first boot provisions: a name (OPERATOR_FULL_NAME
+    // in provisioning_service.py) and no address, since the master key is what
+    // signs it in. A test about a rostered member overrides it.
+    caller: {
+      user_id: "33333333-3333-3333-3333-333333333333",
+      email: null,
+      full_name: "Operator",
+    },
     role: "owner",
     status: "active",
     organization: organization(),

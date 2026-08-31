@@ -1574,6 +1574,43 @@
         "title": "BudgetResponse",
         "type": "object"
       },
+      "CallerIdentityPublic": {
+        "description": "Who the caller is, as against what they may do.\n\nThe account control at the foot of the dashboard's sidebar draws a person,\nand no authenticated route reported the caller's own name or address, so it\ndrew a role for everybody who could reach it: \"Operator\", which is not a\nname and on a multi-tenant deployment was not even true\n(mozilla-ai/otari#832).\n\nCarried on the membership context for the reason ``deployment_operator`` is:\nthe shell reads that context before it paints, so an identity taken from it\nneeds no request of its own and cannot arrive a beat after the chrome it\nnames. Publishing it costs nothing either, since it is the caller's own\nidentity and they are holding the credential that resolved to it.\n\nBoth fields are nullable, and for opposite reasons. A local operator\nidentity has no address, because first boot provisions it with a name and\nnothing to sign in with but the master key; a member added to the roster by\naddress has no name until they claim the identity and supply one. So a shell\nhas to be ready to draw either one alone.",
+        "properties": {
+          "email": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Email"
+          },
+          "full_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Full Name"
+          },
+          "user_id": {
+            "format": "uuid",
+            "title": "User Id",
+            "type": "string"
+          }
+        },
+        "required": [
+          "user_id"
+        ],
+        "title": "CallerIdentityPublic",
+        "type": "object"
+      },
       "CallerOrganizationMembershipPublic": {
         "description": "One organization the caller belongs to, and their standing in it.\n\nWhat an organization switcher renders. Deliberately not\n``OrganizationMembershipContextPublic``: that one answers \"the organization\nthis request is acting in\" and carries the caller's workspaces in it, which\nfor an organization they are not currently in would be a second read per\nrow.",
         "properties": {
@@ -6242,6 +6279,16 @@
             "default": false,
             "title": "Byo Provider Keys Allowed",
             "type": "boolean"
+          },
+          "caller": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/CallerIdentityPublic"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "deployment_operator": {
             "default": false,

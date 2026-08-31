@@ -50,6 +50,7 @@ from gateway.models.tenancy import (
     ActiveOrganizationMemberPublic,
     ActiveOrganizationMembersPublic,
     ActiveOrganizationMemberUpdateRequest,
+    CallerIdentityPublic,
     CallerOrganizationMembershipPublic,
     CallerOrganizationMembershipsPublic,
     CallerWorkspaceMembershipPublic,
@@ -252,6 +253,11 @@ class OrganizationService:
             status=membership.status,
             organization=OrganizationPublic.model_validate(organization),
             workspace_memberships=workspace_memberships,
+            caller=CallerIdentityPublic(
+                user_id=user.id,
+                email=user.email,
+                full_name=user.full_name,
+            ),
             # The platform answers "does this org have a self-hosted gateway
             # attached". A standalone deployment reading this *is* that gateway,
             # so its own provider credentials are always available to it.

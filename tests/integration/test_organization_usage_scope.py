@@ -545,6 +545,45 @@ def test_every_response_carrying_the_context_carries_the_operator_answer(
         assert renamed.json()["deployment_operator"] is expected, who
 
 
+def test_the_context_names_the_caller_it_describes(client: TestClient, world: _World) -> None:
+    """The identity behind the standing, which is what a shell draws a person from.
+
+    Nothing else on this contract says *who* is signed in, so the dashboard's
+    account control had no name to show and showed a role instead (otari#832).
+    Asserted per identity rather than for shape alone: a field filled from the
+    wrong identity is the failure that matters here, and one filled from a
+    constant would satisfy a shape check.
+    """
+    for who, email in (
+        ("alpha_owner", "owner@alpha.test"),
+        ("alpha_member", "member@alpha.test"),
+        ("superuser", "root@beta.test"),
+    ):
+        code, body = _as(client, world, who, "/v1/organizations/me")
+        assert code == status.HTTP_200_OK, body
+        assert isinstance(body, dict)
+        caller = body["caller"]
+        assert caller["user_id"] == str(world.users[who]), who
+        assert caller["email"] == email, who
+        # What `_identity` gives every one of them: the address's local part.
+        assert caller["full_name"] == email.split("@")[0].title(), who
+
+
+def test_the_context_names_an_identity_that_holds_no_address(
+    client: TestClient, world: _World, master_key_header: dict[str, str]
+) -> None:
+    """The local operator, which is the identity a standalone first boot leaves behind.
+
+    It has a name and no email, so a shell that assumed an address would have
+    nothing to draw for the one caller every standalone deployment has.
+    """
+    response = client.get("/v1/organizations/me", headers=master_key_header)
+    assert response.status_code == status.HTTP_200_OK, response.text
+    caller = response.json()["caller"]
+    assert caller["email"] is None
+    assert caller["full_name"]
+
+
 def test_the_context_reports_whether_provider_keys_can_be_encrypted(client: TestClient, world: _World) -> None:
     """A deployment fact a tenant is allowed to know, because it decides whether their own write works.
 
