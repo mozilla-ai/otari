@@ -1,4 +1,4 @@
-import { Button, Chip, Spinner } from "@heroui/react"
+import { Button, Spinner } from "@heroui/react"
 import { Link } from "@tanstack/react-router"
 import { type ReactNode, useEffect, useRef, useState } from "react"
 import type {
@@ -619,12 +619,12 @@ function HealthPill({ health }: { health: ProviderHealth | undefined }) {
     return <span className="text-xs text-muted">—</span>
   }
   const degraded = !health.ok && health.discovery_unsupported
-  const styles = health.ok
-    ? "border-success bg-success-subtle text-success"
-    : degraded
-      ? "border-warning bg-warning-subtle text-warning"
-      : "border-danger bg-danger-subtle text-danger"
-  const dot = health.ok ? "bg-success" : degraded ? "bg-warning" : "bg-danger"
+  // Only a real failure colors its text. Degraded is a provider that answers
+  // requests but lists no models, which is a fact about discovery rather than an
+  // outage, so it reads on the muted rung with the danger dot that says "worth
+  // noticing" without the ink that says "broken".
+  const styles = health.ok || degraded ? "text-muted" : "text-danger"
+  const dot = health.ok ? "bg-success" : "bg-danger"
   // The last-checked time lives in the top summary banner; the row just shows the
   // status. The error (and time) stay available on hover as the pill's tooltip.
   const checked = health.checked_at
@@ -637,14 +637,14 @@ function HealthPill({ health }: { health: ProviderHealth | undefined }) {
   return (
     <span
       title={title}
-      className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium ${styles}`}
+      className={`flex items-center gap-2 font-mono text-[13px] ${styles}`}
     >
-      <span aria-hidden className={`h-1.5 w-1.5 ${dot}`} />
+      <Dot className={dot} />
       {health.ok
-        ? "Reachable"
+        ? "REACHABLE"
         : degraded
-          ? "No model discovery"
-          : "Unreachable"}
+          ? "NO MODEL DISCOVERY"
+          : "UNREACHABLE"}
     </span>
   )
 }
@@ -938,9 +938,14 @@ export function ProvidersPage() {
       id: "source",
       header: "Source",
       cell: (row) => (
-        <Chip size="sm" color={row.source === "stored" ? "accent" : "default"}>
-          {row.source === "stored" ? "stored" : "config"}
-        </Chip>
+        <span className="flex items-center gap-2 font-mono text-[13px] text-muted">
+          <Dot
+            className={
+              row.source === "stored" ? "bg-accent" : "bg-surface-subtle"
+            }
+          />
+          {row.source === "stored" ? "STORED" : "CONFIG"}
+        </span>
       ),
     },
     {
