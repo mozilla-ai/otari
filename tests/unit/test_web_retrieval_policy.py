@@ -55,6 +55,25 @@ def test_unicode_and_punycode_hosts_have_one_identity() -> None:
     assert unicode_url.origin.host.value == "xn--bcher-kva.example"
 
 
+@pytest.mark.parametrize("separator", ["。", "．", "｡"])
+def test_uts46_terminal_separators_have_one_policy_identity(separator: str) -> None:
+    blocked = canonicalize_domain_rule(f"example.com{separator}")
+    plain_destination = canonicalize_web_url("https://example.com/path").origin.host
+    mapped_destination = canonicalize_web_url(f"https://example.com{separator}/path").origin.host
+
+    assert blocked.value == "example.com"
+    assert plain_destination == mapped_destination
+    assert domain_rule_matches(blocked, plain_destination)
+
+
+@pytest.mark.parametrize("separator", ["。", "．", "｡"])
+def test_uts46_mapped_ip_literal_is_reclassified(separator: str) -> None:
+    rule = canonicalize_domain_rule(f"192.0.2.1{separator}")
+
+    assert rule.value == "192.0.2.1"
+    assert rule.is_ip
+
+
 def test_signed_path_and_query_serialization_is_preserved() -> None:
     result = canonicalize_web_url("https://EXAMPLE.com./a%2Fb//c?b=2&a=%2F&a=3#client-only")
 
@@ -93,6 +112,7 @@ def test_relative_redirect_preserves_signed_path_and_query() -> None:
         "https://%65xample.com/path",
         "https://[fe80::1%25en0]/path",
         "https://example.com/line\nbreak",
+        "https://example.com:0/path",
         "https://example.com:70000/path",
     ],
 )
