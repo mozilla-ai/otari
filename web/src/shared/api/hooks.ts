@@ -2663,6 +2663,10 @@ function invalidateOrgProviderKeys(
 // second query: archiving is reversible, the list is small, and a toggle that
 // refetched would make "show archived" a network round trip for a set the
 // browser already holds.
+//
+// The list itself is organization owner/admin-gated, not member-readable
+// (otari-ai#1944), so a caller reachable by a plain member passes `enabled`
+// false for them rather than rendering the refusal.
 export function useOrgProviderKeys(enabled = true) {
   return useQuery({
     queryKey: [ORGANIZATION_PROVIDER_KEYS],

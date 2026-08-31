@@ -18463,7 +18463,7 @@
     },
     "/v1/organizations/me/provider-keys": {
       "get": {
-        "description": "List the caller's organization's provider keys. Any active member may read it.",
+        "description": "List the caller's organization's provider keys. Organization owners and admins only.",
         "operationId": "list_org_provider_keys_v1_organizations_me_provider_keys_get",
         "parameters": [
           {

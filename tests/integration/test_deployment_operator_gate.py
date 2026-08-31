@@ -98,11 +98,11 @@ _CATALOG_PROBES: list[tuple[str, str]] = [
 # member reaches these by design, so a 403 from any of them means the gate was
 # applied to the wrong family. Only the routes a *member* may reach are listed:
 # several of these routers hold owner/admin routes as well (organization
-# guardrails and pricing are entirely owner/admin), and their own 403 is
-# indistinguishable here from the one this file is about.
+# guardrails and pricing are entirely owner/admin, and the provider-keys list
+# joined them in otari-ai#1944), and their own 403 is indistinguishable here
+# from the one this file is about.
 _TENANT_SCOPED_PROBES: list[tuple[str, str]] = [
     ("GET", "/v1/organizations/me"),
-    ("GET", "/v1/organizations/me/provider-keys"),
     ("GET", "/v1/workspaces"),
     ("GET", "/v1/admin/access"),
 ]

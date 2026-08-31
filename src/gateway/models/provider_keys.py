@@ -161,19 +161,17 @@ class OrgProviderKey(SQLModel, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, 
     archived_at: datetime | None = _timestamp_field(default=None, column_kwargs={})
     is_org_default: bool = Field(default=False, nullable=False)
 
-    def to_public(self, *, include_client_args: bool = True) -> OrgProviderKeyPublic:
+    def to_public(self) -> OrgProviderKeyPublic:
         """Serialize for the API. Never includes the key, only ``last4``.
 
         ``client_args`` is arbitrary JSON an admin can set (Bedrock's
         ``region_name``, other client kwargs), and a credential-shaped field
         placed there is never echoed back either: ``redact_secret_like_values``
         masks it the same way ``encrypted_api_key`` itself already stays off
-        the wire (only ``last4`` comes back). That runs regardless of
-        ``include_client_args``, which is a separate, coarser gate: it
-        defaults to included, since every write path (create/update/archive/
-        restore/set-default) is already organization owner/admin-gated, and
-        ``include_client_args=False`` is for the plain-member list read,
-        which is open to every active member, not only admins.
+        the wire (only ``last4`` comes back). No coarser per-audience gate sits
+        over it any more: every path that serializes a key, the list read
+        included, is organization owner/admin-gated (otari-ai#1944), so there is
+        no wider audience to withhold the field from.
         """
         return OrgProviderKeyPublic(
             id=self.id,
@@ -181,7 +179,7 @@ class OrgProviderKey(SQLModel, PrimaryKeyMixin, CreatedAtMixin, UpdatedAtMixin, 
             provider=self.provider,
             name=self.name,
             api_base=self.api_base,
-            client_args=redact_secret_like_values(self.client_args) if include_client_args else None,
+            client_args=redact_secret_like_values(self.client_args),
             last4=self.last4,
             is_org_default=self.is_org_default,
             archived_at=self.archived_at,

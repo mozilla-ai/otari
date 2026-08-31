@@ -69,7 +69,7 @@ async def list_org_provider_keys(
     skip: Annotated[int, Query(ge=0, description="Number of records to skip")] = 0,
     limit: Annotated[int, Query(ge=1, le=1000, description="Maximum number of records to return")] = 100,
 ) -> OrgProviderKeysPublic:
-    """List the caller's organization's provider keys. Any active member may read it."""
+    """List the caller's organization's provider keys. Organization owners and admins only."""
     return await service.list_keys_for_user(
         user=current_identity, include_archived=include_archived, skip=skip, limit=limit
     )

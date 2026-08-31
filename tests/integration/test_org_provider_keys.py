@@ -180,10 +180,11 @@ async def test_plain_member_cannot_create_a_key(async_db: AsyncSession) -> None:
         await service.create_key_for_user(user=member, request=_create_request())
 
 
-async def test_plain_member_does_not_see_client_args_but_admin_does(async_db: AsyncSession) -> None:
-    """`client_args` is arbitrary JSON an admin can set, so the list read
-    (open to every active member) redacts it wholesale for a non-admin reader
-    while the admin who set it still sees the non-credential fields back."""
+async def test_plain_member_cannot_list_keys(async_db: AsyncSession) -> None:
+    """The list read is management-gated too (otari-ai#1944): a row names the
+    provider, the endpoint and the credential's last four, and the roles matrix
+    puts that out of a member's sight. The admin who set the key still reads it
+    back, `client_args` included."""
     organization = await _organization(async_db)
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
     member = await _member(async_db, organization, role="member", full_name="Member")
@@ -198,8 +199,24 @@ async def test_plain_member_does_not_see_client_args_but_admin_does(async_db: As
     as_owner = await service.list_keys_for_user(user=owner)
     assert as_owner.data[0].client_args == {"region_name": "us-east-1"}
 
-    as_member = await service.list_keys_for_user(user=member)
-    assert as_member.data[0].client_args is None
+    with pytest.raises(NotAuthorizedError):
+        await service.list_keys_for_user(user=member)
+
+
+async def test_superuser_member_may_still_list_keys(async_db: AsyncSession) -> None:
+    """The gate is `require_active_organization_management_access`, which admits
+    a superuser whatever their role, so the operator identity that reads this
+    surface on a standalone deployment is not locked out by the narrowing above."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    operator = await _member(async_db, organization, role="member", full_name="Operator")
+    operator.is_superuser = True
+    async_db.add(operator)
+    await async_db.commit()
+    service = OrgProviderKeyService(async_db)
+    await service.create_key_for_user(user=owner, request=_create_request())
+
+    assert len((await service.list_keys_for_user(user=operator)).data) == 1
 
 
 async def test_credential_shaped_client_args_are_redacted_even_for_the_admin_who_set_them(
@@ -209,9 +226,9 @@ async def test_credential_shaped_client_args_are_redacted_even_for_the_admin_who
     Bedrock support genuinely needs `aws_access_key_id`/`aws_secret_access_key`
     there, so the field cannot simply be rejected outright) never round-trips,
     the same treatment `encrypted_api_key` itself already gets: only `last4`
-    comes back, never the plaintext. This holds even for the admin who set it,
-    not only for a lower-privileged reader -- that is a separate, coarser gate
-    `include_client_args` already covers."""
+    comes back, never the plaintext. The admin who set it is the only reader
+    this surface has left, so the masking has to hold for them: there is no
+    lower-privileged audience a coarser gate could withhold the field from."""
     organization = await _organization(async_db)
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
     service = OrgProviderKeyService(async_db)

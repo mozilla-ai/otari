@@ -68,7 +68,7 @@ from gateway.models.provider_keys import (
     WorkspaceProviderModelRestrictionsPublic,
 )
 from gateway.models.secret_fields import restore_redacted_values
-from gateway.models.tenancy import MANAGEMENT_ROLES, User, Workspace
+from gateway.models.tenancy import User, Workspace
 from gateway.repositories.tenancy import (
     Candidate,
     OrgProviderKeyRepository,
@@ -375,22 +375,23 @@ class OrgProviderKeyService:
         skip: int = 0,
         limit: int = 100,
     ) -> OrgProviderKeysPublic:
-        """List the caller's organization's keys. Any active member may read it.
+        """List the caller's organization's keys. Organization owners and admins only.
 
-        ``client_args`` is redacted for a plain member: this read is open to
-        every active member, not only owners/admins, and `OrgProviderKey.to_public`
-        explains why that field cannot be assumed safe for that wider audience.
+        Gated like the writes rather than open to every active member: a row
+        names the provider, the endpoint and the credential's last four, and the
+        roles matrix puts the whole provider-key surface out of a member's sight
+        (otari-ai#1944). That is also what retired the per-audience
+        ``client_args`` redaction `OrgProviderKey.to_public` used to carry: with
+        no member reader left, there is no wider audience to withhold it from.
         ``count`` is the total matching rows, not the page size, so a caller
         can page correctly (mirrors ``WorkspaceService.list_workspaces``).
         """
         organization = await self.organizations.get_active_organization_for_user(user)
+        await self.organizations.require_active_organization_management_access(user=user, organization=organization)
         rows, count = await self.keys.list_for_organization(
             organization.id, include_archived=include_archived, skip=skip, limit=limit
         )
-        membership = await self.organizations.members.get_active_by_organization_and_user(organization.id, user.id)
-        is_admin = user.is_superuser or (membership is not None and membership.role in MANAGEMENT_ROLES)
-        data = [row.to_public(include_client_args=is_admin) for row in rows]
-        return OrgProviderKeysPublic(data=data, count=count)
+        return OrgProviderKeysPublic(data=[row.to_public() for row in rows], count=count)
 
     async def create_key_for_user(
         self,

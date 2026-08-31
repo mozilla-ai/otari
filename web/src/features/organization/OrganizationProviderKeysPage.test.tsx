@@ -215,21 +215,35 @@ describe("OrganizationProviderKeysPage", () => {
     expect(screen.getByRole("button", { name: "Delete" })).toBeInTheDocument()
   })
 
-  it("offers no writes to a member who cannot manage the organization", async () => {
-    mockApi({
+  it("withholds the keys and their read from a member who cannot manage the organization", async () => {
+    // The list read is organization owner/admin-gated on the server
+    // (otari-ai#1944), so a member reaching this URL is answered 403. The read
+    // is not made, and the table goes with it: an empty one would say the
+    // organization has no keys rather than that they cannot see them.
+    const requests = mockApi({
       keys: [orgProviderKey()],
       context: organizationContext({ role: "member" }),
     })
     renderPage(<OrganizationProviderKeysPage />)
 
-    await screen.findByText("Production")
+    expect(
+      await screen.findByText(/Only organization owners and admins/),
+    ).toBeInTheDocument()
+    expect(screen.queryByText("Production")).toBeNull()
+    // HeroUI's table is a `grid`, so this is the table itself being absent and
+    // not merely empty of the row above.
+    expect(
+      screen.queryByRole("grid", { name: "Organization provider keys" }),
+    ).toBeNull()
     expect(
       screen.queryByRole("button", { name: "Add provider key" }),
     ).toBeNull()
     expect(screen.queryByRole("button", { name: "Edit" })).toBeNull()
     expect(
-      screen.getByText(/Only organization owners and admins/),
-    ).toBeInTheDocument()
+      requests.some((request) =>
+        request.url.includes("/v1/organizations/me/provider-keys"),
+      ),
+    ).toBe(false)
   })
 
   it("disables adding a key when the deployment cannot encrypt one", async () => {
@@ -284,6 +298,13 @@ describe("OrganizationProviderKeysPage", () => {
     expect(screen.queryByText(/OTARI_SECRET_KEY/)).toBeNull()
     expect(
       screen.queryByRole("button", { name: "Add provider key" }),
+    ).toBeNull()
+    // Nor is the role claimed either way: with the context unread the page
+    // cannot say the caller is a member, so the refusal banner stays off and the
+    // table, whose read is gated on that same role, is not drawn empty.
+    expect(screen.queryByText(/Only organization owners and admins/)).toBeNull()
+    expect(
+      screen.queryByRole("grid", { name: "Organization provider keys" }),
     ).toBeNull()
   })
 

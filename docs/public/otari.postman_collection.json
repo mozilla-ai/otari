@@ -3102,7 +3102,7 @@
         {
           "name": "List Org Provider Keys",
           "request": {
-            "description": "List the caller's organization's provider keys. Any active member may read it.",
+            "description": "List the caller's organization's provider keys. Organization owners and admins only.",
             "header": [],
             "method": "GET",
             "url": {

@@ -203,9 +203,3 @@ def test_to_public_client_args_none_stays_none() -> None:
     key = _key(name="plain")
     assert key.client_args is None
     assert key.to_public().client_args is None
-
-
-def test_to_public_include_client_args_false_still_redacts_nothing_since_it_is_already_none() -> None:
-    key = _key(name="plain")
-    key.client_args = {"aws_secret_access_key": "supersecretvalue"}
-    assert key.to_public(include_client_args=False).client_args is None

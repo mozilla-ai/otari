@@ -1950,7 +1950,7 @@ export interface paths {
         };
         /**
          * List Org Provider Keys
-         * @description List the caller's organization's provider keys. Any active member may read it.
+         * @description List the caller's organization's provider keys. Organization owners and admins only.
          */
         get: operations["list_org_provider_keys_v1_organizations_me_provider_keys_get"];
         put?: never;
