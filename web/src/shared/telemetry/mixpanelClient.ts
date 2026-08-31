@@ -11,6 +11,7 @@ import mixpanel from "mixpanel-browser"
 
 import type {
   Telemetry,
+  TelemetryConsent,
   TelemetryIdentity,
   TelemetryProperties,
 } from "@/shared/telemetry/types"
@@ -54,7 +55,20 @@ function peopleProperties(identity: TelemetryIdentity): Record<string, string> {
   }
 }
 
-export function createMixpanelTelemetry(token: string): Telemetry {
+/**
+ * Build the Mixpanel-backed tracker.
+ *
+ * `consent` defaults to `"granted"` because a Mixpanel key is this
+ * deployment's opt-in and there is no consent UI to answer otherwise. It is a
+ * parameter rather than a constant because `types.ts` puts the `recordEvent`
+ * gate on whichever module implements the seam: `TelemetryIdentity` withholds
+ * only the identity, so without the check below a stored refusal would keep
+ * every event firing. A build that grows a real consent source passes it here.
+ */
+export function createMixpanelTelemetry(
+  token: string,
+  consent: TelemetryConsent = "granted",
+): Telemetry {
   mixpanel.init(token, MIXPANEL_INIT)
   // `actorId` is the active organization's membership id, so a switch
   // changes it. mixpanel-browser 2.82.1 `identify` always tracks `$identify`
@@ -67,10 +81,11 @@ export function createMixpanelTelemetry(token: string): Telemetry {
   let identifiedActor: string | undefined
 
   return {
-    // A Mixpanel key is the deployment opt-in. This build has no consent UI,
-    // so the key is the gate: present means granted, absent never reaches here.
-    consent: "granted",
+    consent,
     recordEvent: (event, properties) => {
+      if (consent !== "granted") {
+        return
+      }
       mixpanel.track(event, toDict(properties))
     },
     identify: (identity) => {

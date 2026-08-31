@@ -136,6 +136,27 @@ describe("createMixpanelTelemetry", () => {
     expect(identify).toHaveBeenCalledWith("member-2")
   })
 
+  it("records nothing when consent is not granted", async () => {
+    const { createMixpanelTelemetry } = await import("./mixpanelClient")
+    const telemetry = createMixpanelTelemetry("mp-test-token", "denied")
+
+    telemetry.recordEvent(TELEMETRY_EVENTS.LOGIN_SUCCESS, {
+      authentication_method: "password",
+    })
+
+    expect(telemetry.consent).toBe("denied")
+    expect(track).not.toHaveBeenCalled()
+  })
+
+  it("records nothing while no consent decision is stored", async () => {
+    const { createMixpanelTelemetry } = await import("./mixpanelClient")
+    const telemetry = createMixpanelTelemetry("mp-test-token", "unknown")
+
+    telemetry.recordEvent(TELEMETRY_EVENTS.LOGOUT)
+
+    expect(track).not.toHaveBeenCalled()
+  })
+
   it("resets Mixpanel when identify is handed null", async () => {
     const { createMixpanelTelemetry } = await import("./mixpanelClient")
     const telemetry = createMixpanelTelemetry("mp-test-token")
