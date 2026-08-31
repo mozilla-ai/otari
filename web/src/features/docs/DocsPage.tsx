@@ -133,7 +133,13 @@ export function DocsPage() {
       />
       <Card>
         <Card.Content className="p-5 sm:p-6">
-          <div className="otari-markdown">
+          {/* INTERIM, pending the prose-pattern design. Measured at 1334px and
+              171 characters per line before this, which is roughly two and a
+              half times a comfortable measure. Capped at the same ~620px the
+              page description above already uses, so the two paragraphs on this
+              screen at least agree with each other; the real answer is a prose
+              pattern the whole product shares, not a number chosen here. */}
+          <div className="otari-markdown max-w-[620px]">
             <ReactMarkdown
               remarkPlugins={[remarkGfm]}
               components={markdownComponents}

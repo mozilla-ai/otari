@@ -113,6 +113,22 @@ const HEADING = "text-display"
  * `bg-surface-alt` is the registered utility for `--color-surface-muted`:
  * `bg-surface-muted` is declared nowhere and would compile to nothing at all.
  */
+/**
+ * INTERIM, pending the centered-card design.
+ *
+ * This card used to be told from the page by `--surface-shadow`, and on light
+ * that was a real drop shadow. With elevation zeroed the only thing left was
+ * tone, and `--color-surface` against `--color-background` measures 1.04:1, so
+ * the one element on an otherwise empty screen had no boundary at all. A
+ * hairline in the control edge, the same rule floating surfaces take, holds it
+ * until the centered-card pattern is drawn.
+ *
+ * `--color-control-border` and not `--color-border`: the divider tier is an
+ * alpha meant to separate two surfaces of nearly the same value, which is
+ * exactly what it fails at here.
+ */
+const SIGN_IN_CARD = "w-full max-w-md border border-control-border"
+
 const CODE_CHIP =
   "bg-surface-alt px-1 py-px font-mono text-xs whitespace-nowrap text-foreground"
 
@@ -582,7 +598,7 @@ export function Login() {
   if (signInUnavailable) {
     return (
       <div className={PAGE_FLAT}>
-        <Card className="w-full max-w-md">
+        <Card className={SIGN_IN_CARD}>
           <Card.Content className={CARD_FLAT}>
             {/* Grouped so the mark sits 16px from the heading it belongs to,
                 the way it does on the form. alt="" because the <h1> under it
@@ -621,7 +637,7 @@ export function Login() {
   if (maintenance_mode) {
     return (
       <div className={PAGE_FLAT}>
-        <Card className="w-full max-w-md">
+        <Card className={SIGN_IN_CARD}>
           <Card.Content className={CARD_FLAT}>
             <div className="flex flex-col items-center gap-4">
               <img src="/favicon.svg" alt="" className="h-10 w-11" />
@@ -644,7 +660,7 @@ export function Login() {
 
   return (
     <div className={PAGE}>
-      <Card className="w-full max-w-md">
+      <Card className={SIGN_IN_CARD}>
         <Card.Content className={CARD}>
           <div className="flex flex-col items-center gap-4 text-center">
             {/* Decorative: the <h1> beside it says "Otari Dashboard". */}

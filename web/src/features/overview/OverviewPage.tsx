@@ -893,7 +893,13 @@ function Meter({
 
 /**
  * The month's shape, under the numbers that answer the question. Bars rather
- * than an area, square-topped, on a single baseline rule.
+ * than an area, square-topped, on a baseline rule.
+ *
+ * Subordinate to the strip above it, and subordinate means a shorter plot and
+ * fewer x labels. It does **not** mean fewer axes: a bar chart with no y-axis
+ * cannot be read quantitatively, and a chart that cannot be read is decoration
+ * rather than a supporting detail. The y-axis was missing here and this is the
+ * fix; five steps in a 44px lane, nine x labels at every fourth day.
  */
 function SpendChart({
   series,
@@ -905,13 +911,18 @@ function SpendChart({
   if (!ready || series.length < 2) {
     return null
   }
-  const max = Math.max(...series.map((p) => p.cost), 0)
+  const peak = Math.max(...series.map((p) => p.cost), 0)
+  // A rounded ceiling rather than the peak itself, so the top label is a number
+  // somebody would say out loud and the steps between are even.
+  const top = niceCeiling(peak)
+  // Top-down, which is the order they are drawn in.
+  const steps = [1, 0.75, 0.5, 0.25, 0].map((f) => top * f)
   return (
     <section
       className={`${FULL_BLEED} ${BLEED_INSET} border-b border-border py-5`}
     >
       <div className="flex items-baseline justify-between">
-        <h2 className="text-overline">Spend, last 30 days</h2>
+        <h2 className="text-title">Spend, last 30 days</h2>
         <Link
           to="/usage"
           className="text-sm text-muted underline underline-offset-2 hover:text-foreground"
@@ -919,25 +930,52 @@ function SpendChart({
           View usage →
         </Link>
       </div>
-      <div
-        role="img"
-        aria-label="Daily spend over the last 30 days"
-        className="mt-4 flex h-[180px] items-end gap-[3px] border-b border-border"
-      >
-        {series.map((point) => (
-          <span
-            key={point.bucket_start}
-            className="min-w-px flex-1 bg-accent"
-            style={{
-              height:
-                max > 0 ? `${Math.max(1, (point.cost / max) * 100)}%` : "1px",
-            }}
-          />
-        ))}
-      </div>
-      <div className="mt-1.5 flex justify-between font-mono text-[11px] text-muted">
-        <span>{shortDate(series[0]?.bucket_start)}</span>
-        <span>{shortDate(series[series.length - 1]?.bucket_start)}</span>
+      <div className="mt-4 flex">
+        {/* The lane is fixed so the plot's left edge does not move as the
+            numbers change width. */}
+        <div
+          aria-hidden
+          className="flex h-[180px] w-11 shrink-0 flex-col justify-between pr-2 text-right font-mono text-[11px] text-subtle"
+        >
+          {steps.map((value) => (
+            <span key={value} className="leading-none">
+              {formatAxisUsd(value)}
+            </span>
+          ))}
+        </div>
+        <div className="min-w-0 flex-1">
+          <div
+            role="img"
+            aria-label={`Daily spend over the last 30 days, peaking at ${formatUsd(peak)}`}
+            className="flex h-[180px] items-end gap-[3px] border-b border-border"
+          >
+            {series.map((point) => (
+              <span
+                key={point.bucket_start}
+                className="min-w-px flex-1 bg-accent"
+                style={{
+                  height:
+                    top > 0
+                      ? `${Math.max(1, (point.cost / top) * 100)}%`
+                      : "1px",
+                }}
+              />
+            ))}
+          </div>
+          {/* Every fourth day, which lands nine labels across a thirty-day
+              window: enough to date a bar, few enough not to become a second
+              row of text under a chart that is not the headline. */}
+          <div className="mt-1.5 flex font-mono text-[11px] text-subtle">
+            {series.map((point, i) => (
+              <span
+                key={point.bucket_start}
+                className="min-w-px flex-1 text-center whitespace-nowrap"
+              >
+                {i % 4 === 0 ? shortDate(point.bucket_start) : "\u00a0"}
+              </span>
+            ))}
+          </div>
+        </div>
       </div>
       <p className="mt-2 text-xs text-muted">
         Daily totals for the selected workspace. Unpriced requests are recorded
@@ -945,6 +983,26 @@ function SpendChart({
       </p>
     </section>
   )
+}
+
+/**
+ * The next 1, 2 or 5 times a power of ten at or above a value, so an axis tops
+ * out at a number a reader would say rather than at the tallest bar.
+ */
+function niceCeiling(value: number): number {
+  if (!(value > 0)) return 1
+  const magnitude = 10 ** Math.floor(Math.log10(value))
+  for (const step of [1, 2, 5, 10]) {
+    if (value <= step * magnitude) return step * magnitude
+  }
+  return 10 * magnitude
+}
+
+/** Axis money: whole dollars once the scale is past them, cents below. */
+function formatAxisUsd(value: number): string {
+  return value >= 10 || value === 0
+    ? `$${Math.round(value)}`
+    : `$${value.toFixed(2)}`
 }
 
 function shortDate(bucket: string | undefined): string {
@@ -1005,7 +1063,7 @@ function RecentActivity({
       header: "Time",
       cell: (entry) => (
         <span
-          className="text-muted"
+          className="font-mono text-[13px] text-muted"
           title={new Date(entry.timestamp).toLocaleString()}
         >
           {formatRelative(entry.timestamp)}
@@ -1016,13 +1074,19 @@ function RecentActivity({
       id: "model",
       header: "Model",
       isRowHeader: true,
-      cell: (entry) => <span className="text-foreground">{entry.model}</span>,
+      cell: (entry) => (
+        <span className="font-mono text-[13px] text-foreground">
+          {entry.model}
+        </span>
+      ),
     },
     {
       id: "key",
       header: "Key",
       cell: (entry) => (
-        <span className="text-muted">{entry.api_key_name ?? "—"}</span>
+        <span className="font-mono text-[13px] text-muted">
+          {entry.api_key_name ?? "—"}
+        </span>
       ),
     },
     {
@@ -1055,7 +1119,7 @@ function RecentActivity({
   return (
     <section className="flex flex-col pt-6 lg:pr-6">
       <div className="flex items-baseline justify-between pb-3">
-        <h2 className="text-overline">Recent activity</h2>
+        <h2 className="text-title">Recent activity</h2>
         <Link
           to="/activity"
           className="text-sm text-muted underline underline-offset-2 hover:text-foreground"
@@ -1096,7 +1160,7 @@ function WorkspaceRail({
   return (
     <section className="flex flex-col gap-6 pt-6 lg:pl-6">
       <div>
-        <h2 className="text-overline">This workspace</h2>
+        <h2 className="text-title">This workspace</h2>
         <dl className="mt-3 flex gap-8 lg:flex-col lg:gap-4">
           <RailStat
             label="Active keys"
@@ -1124,7 +1188,7 @@ function WorkspaceRail({
 function RailStat({ label, value }: { label: string; value: string }) {
   return (
     <div>
-      <dt className="text-xs text-muted">{label}</dt>
+      <dt className="text-overline">{label}</dt>
       <dd className="font-mono text-[30px] leading-[36px] font-normal text-foreground tabular-nums">
         {value}
       </dd>

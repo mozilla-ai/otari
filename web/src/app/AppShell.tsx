@@ -348,7 +348,13 @@ function NavGroup({
           every edge. The clip is only needed while the panel is moving, and it
           cannot be moving while something inside it holds focus: closing the
           group puts focus on the trigger, which is outside the panel. */}
-      <Disclosure.Content className="flex flex-col focus-within:overflow-visible">
+      {/* The spine is drawn *inside* the panel rather than as a border on it,
+          because a `border-l` here would narrow every child by a pixel and inset
+          its fill from the rail's edge, which `rowStyles.ts` explains is
+          deliberately not how a nested row is indented. Absolutely positioned at
+          20px, the center of the parent's icon lane, so the rule reads as
+          descending from the group's own mark. */}
+      <Disclosure.Content className="relative flex flex-col before:absolute before:top-0 before:bottom-0 before:left-5 before:w-px before:bg-border before:content-[''] focus-within:overflow-visible">
         {children.map((child) => (
           <NavRowLink
             key={child.to}

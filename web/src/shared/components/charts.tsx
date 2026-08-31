@@ -362,10 +362,15 @@ export function Sparkline({
 }) {
   const data = values.map((value, index) => ({ index, value }))
   return (
+    // The wrapper carries the accessible name, so the SVG inside must not be a
+    // second stop: recharts gives its `<svg>` `tabIndex={0}` by default, which
+    // put three empty focus stops on the Overview page, each landing a ring on a
+    // decorative line with nothing to do there. A sparkline has no interaction.
     <div role="img" aria-label={ariaLabel} className="w-full">
       <ResponsiveContainer width="100%" height={height}>
         <LineChart
           data={data}
+          tabIndex={-1}
           margin={{ top: 2, right: 2, left: 2, bottom: 2 }}
         >
           <Line

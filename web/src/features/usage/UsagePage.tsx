@@ -130,6 +130,16 @@ const GROUP_OPTIONS: { value: "" | UsageGroupBy; label: string }[] = [
   { value: "source", label: "Source" },
 ]
 
+/**
+ * An option's label as it reads after "By". Lowercased only when it is an
+ * ordinary capitalized word, so "Model" becomes "model" while "API key" is left
+ * alone: a blanket `toLowerCase()` printed "By api key", which is the initialism
+ * spelled as a word.
+ */
+function groupedLabel(label: string): string {
+  return /^[A-Z][a-z]/.test(label) ? label.toLowerCase() : label
+}
+
 // Billed token composition, bottom-up: input side first (fresh, then the two
 // cache buckets), then output. One hue at four lightnesses — the same encoding,
 // same order, and same tokens as the Activity page's per-row bar, so the two
@@ -1214,7 +1224,7 @@ export function UsagePage() {
                   ).map((o) => ({
                     value: o.value,
                     label: o.value
-                      ? `By ${o.label.toLowerCase()}`
+                      ? `By ${groupedLabel(o.label)}`
                       : "No grouping",
                   }))}
                 />

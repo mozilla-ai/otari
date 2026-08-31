@@ -914,7 +914,11 @@
   letter-spacing: 0.06em;
   font-weight: var(--font-weight-semibold);
   text-transform: uppercase;
-  color: var(--color-text-muted);
+  /* The tertiary rung, not the secondary one. An overline names the thing under
+     it and must not compete with it, and at 550 uppercase the weight and the
+     tracking already give it more presence than its size suggests. `text-muted`
+     here made a label as strong as the value it labeled. */
+  color: var(--color-text-subtle);
 }
 @utility text-chrome-row {
   font-size: var(--text-caption-step);
@@ -1053,6 +1057,40 @@ body {
     transition-duration: 0.01ms;
     scroll-behavior: auto;
   }
+}
+
+/* =============================================================
+ * Floating surfaces: the edge that replaced the shadow.
+ *
+ * Everything that leaves the page plane reads `--overlay`, which is
+ * `--color-surface`, and that is one rung off the ground: 1.04:1 on light and
+ * 1.05:1 on dark, measured. It used to be told apart by `--shadow-overlay`,
+ * which on dark was a 1px white ring rather than a drop shadow. Zeroing the
+ * elevation tokens took that away and left a popover as unbounded text over
+ * whatever it covered.
+ *
+ * So elevation is border weight now: one opaque hairline in the control edge,
+ * square, no shadow. It is deliberately `--color-control-border` and not
+ * `--color-border`; the divider tier is a 0.06 alpha meant to separate two
+ * surfaces of nearly the same value, which is exactly the job it fails at here.
+ *
+ * At the shared layer on purpose. Every one of these is HeroUI's own DOM, so a
+ * page cannot reach them, and a floating surface that is invisible is invisible
+ * on every screen at once rather than on the one being reviewed.
+ * ============================================================= */
+.popover,
+.select__popover,
+.combo-box__popover,
+.dropdown__popover,
+.autocomplete__popover,
+.date-picker__popover,
+.date-range-picker__popover,
+.color-picker__popover,
+.tooltip,
+.toast,
+.modal__dialog,
+.alert-dialog__dialog {
+  border: 1px solid var(--color-control-border);
 }
 
 /* =============================================================
@@ -1374,10 +1412,17 @@ body {
 .otari-overview-activity .table__column[data-key="status"] {
   width: 110px;
 }
+/* Both, and the row is the one that was showing. HeroUI draws a bottom border
+   on the row as well as on its cells, so overriding only the cell left the
+   section tier (0.06/0.08) painting the separators between rows, where the
+   design asks for the faint internal tier. */
+.otari-overview-activity .otari-table .table__row,
+.otari-overview-activity .table__row .table__cell {
+  border-color: var(--color-border-subtle);
+}
 .otari-overview-activity .table__row .table__cell {
   height: 45px;
   padding-block: 0;
-  border-color: var(--color-border-subtle);
 }
 .otari-detail-reveal {
   display: grid;
