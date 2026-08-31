@@ -1,5 +1,5 @@
 // biome-ignore-all lint/a11y/noLabelWithoutControl: every label here wraps MoneyInput, which renders the input and takes its own ariaLabel. The rule cannot see through a component, and it still works on this file's native inputs.
-import { Button, Card, Chip } from "@heroui/react"
+import { Button } from "@heroui/react"
 import {
   type ReactNode,
   useCallback,
@@ -28,6 +28,7 @@ import {
 } from "@/shared/api/hooks"
 import { BulkActionBar } from "@/shared/components/BulkActionBar"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
+import { Dot, TableScrollFrame } from "@/shared/components/surface"
 import { TablePagination } from "@/shared/components/TablePagination"
 import {
   ConfirmButton,
@@ -36,7 +37,6 @@ import {
   errorMessage,
   FilterSelect,
   InfoBanner,
-  PageHeader,
 } from "@/shared/components/ui"
 import {
   formatContext,
@@ -485,25 +485,49 @@ function PricingTierEditor({
   )
 }
 
-function SourceChip({ source }: { source: PriceSource }) {
-  if (source === "configured") {
-    return (
-      <Chip size="sm" color="default">
-        configured
-      </Chip>
-    )
-  }
-  if (source === "default" || source === "alias") {
-    return (
-      <Chip size="sm" color="accent">
-        {source}
-      </Chip>
-    )
-  }
-  if (source === "unknown") {
-    return <span className="text-xs text-muted">rate unknown</span>
-  }
-  return <span className="text-xs text-muted">not priced</span>
+/**
+ * Where a model's price came from, as a dot and a word.
+ *
+ * `configured` is the only affirmative one, and it takes the accent dot with
+ * foreground ink because it is the one that means somebody set this
+ * deliberately. A catalog default or an alias is a fact rather than a decision
+ * and reads muted; an unpriced model is the absence of one and reads subtle.
+ * The accent is the data ink here, not a way to say "look at this".
+ */
+/** One row of a category set: a subtle group label, then its members. */
+function ModalitySet({ label, values }: { label: string; values: string[] }) {
+  if (values.length === 0) return null
+  return (
+    <div className="flex flex-wrap items-baseline gap-x-4 gap-y-1 font-mono text-[11px] tracking-[0.1em] uppercase">
+      <span className="text-subtle">{label}</span>
+      {values.map((m) => (
+        <span key={m} className="text-muted">
+          {MODALITY_LABELS[m] ?? m}
+        </span>
+      ))}
+    </div>
+  )
+}
+
+function SourceMark({ source }: { source: PriceSource }) {
+  const { word, dot, ink } =
+    source === "configured"
+      ? { word: "Custom", dot: "bg-accent", ink: "text-foreground" }
+      : source === "default" || source === "alias"
+        ? { word: source, dot: "bg-surface-subtle", ink: "text-muted" }
+        : source === "unknown"
+          ? {
+              word: "rate unknown",
+              dot: "bg-surface-subtle",
+              ink: "text-subtle",
+            }
+          : { word: "not priced", dot: "bg-surface-subtle", ink: "text-subtle" }
+  return (
+    <span className={`flex items-center gap-2 font-mono text-[13px] ${ink}`}>
+      <Dot className={dot} />
+      {word.toUpperCase()}
+    </span>
+  )
 }
 
 // A small info affordance: an "i" bubble that reveals a tooltip on hover or
@@ -819,119 +843,103 @@ function ModelDetailPanel({
   )
 
   return (
-    <Card>
-      <Card.Content className="flex flex-col gap-5 p-5">
-        <div className="flex items-start justify-between gap-3">
-          <div className="min-w-0">
-            <div className="flex items-center gap-2">
-              <h2 className="text-title break-all">{row.model}</h2>
-              {metadata?.deprecated ? (
-                <Chip size="sm" color="danger">
-                  deprecated
-                </Chip>
-              ) : null}
-            </div>
-            <p className="mt-1 text-xs break-all text-muted">
-              Selector:{" "}
-              <CopyableValue value={row.key} label="model id">
-                <code>{row.key}</code>
-              </CopyableValue>
-            </p>
-            {metadata?.family ? (
-              <p className="text-xs text-muted">{metadata.family}</p>
+    <section className="flex flex-col gap-5 border-y border-border py-5">
+      <div className="flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <div className="flex items-center gap-2">
+            <h2 className="text-title break-all">{row.model}</h2>
+            {metadata?.deprecated ? (
+              <span className="flex items-center gap-2 font-mono text-[13px] text-danger">
+                <Dot className="bg-danger" />
+                DEPRECATED
+              </span>
             ) : null}
           </div>
-          <button
-            type="button"
-            aria-label="Close model details"
-            onClick={onClose}
-            className="-mt-1 -mr-1 shrink-0 rounded-md px-1.5 py-0.5 text-lg leading-none text-muted hover:bg-surface-alt hover:text-foreground"
-          >
-            ✕
-          </button>
+          <p className="mt-1 text-xs break-all text-muted">
+            Selector:{" "}
+            <CopyableValue value={row.key} label="model id">
+              <code>{row.key}</code>
+            </CopyableValue>
+          </p>
+          {metadata?.family ? (
+            <p className="text-xs text-muted">{metadata.family}</p>
+          ) : null}
         </div>
+        <button
+          type="button"
+          aria-label="Close model details"
+          onClick={onClose}
+          className="-mt-1 -mr-1 shrink-0 rounded-md px-1.5 py-0.5 text-lg leading-none text-muted hover:bg-surface-alt hover:text-foreground"
+        >
+          ✕
+        </button>
+      </div>
 
-        {metadata?.description ? (
-          <p className="text-sm text-foreground">{metadata.description}</p>
-        ) : null}
+      {metadata?.description ? (
+        <p className="text-sm text-foreground">{metadata.description}</p>
+      ) : null}
 
-        <PanelSection title="Pricing">
-          <div className="flex items-center gap-2">
-            <SourceChip source={row.source} />
-            {row.isDiscovered ? null : (
-              <span className="text-xs text-muted">not discovered</span>
-            )}
+      <PanelSection title="Pricing">
+        <div className="flex items-center gap-2">
+          <SourceMark source={row.source} />
+          {row.isDiscovered ? null : (
+            <span className="text-xs text-muted">not discovered</span>
+          )}
+        </div>
+        <PanelPriceEditor key={row.key} row={row} />
+      </PanelSection>
+
+      <PanelSection title="Specs">
+        <Spec label="Context window" value={formatContext(row.contextWindow)} />
+        <Spec
+          label="Max output"
+          value={formatContext(metadata?.max_output_tokens ?? null)}
+        />
+        <Spec
+          label="Knowledge cutoff"
+          value={metadata?.knowledge_cutoff ?? "—"}
+        />
+        <Spec
+          label="Released"
+          value={formatReleaseDate(metadata?.release_date)}
+        />
+        <Spec
+          label="Open weights"
+          value={metadata ? (metadata.open_weights ? "Yes" : "No") : "—"}
+        />
+      </PanelSection>
+
+      <PanelSection title="Modalities">
+        {inputModalities.length === 0 && outputModalities.length === 0 ? (
+          <span className="text-sm text-muted">Unknown.</span>
+        ) : (
+          /* A category set, not chips: these are the kinds a model accepts
+               and emits, and a list of kinds is read as a list. Mono uppercase
+               with the group label on the subtle rung, so `In` and `Out` name
+               the two sets without competing with their members. */
+          <div className="flex flex-col gap-2">
+            <ModalitySet label="In" values={inputModalities} />
+            <ModalitySet label="Out" values={outputModalities} />
           </div>
-          <PanelPriceEditor key={row.key} row={row} />
-        </PanelSection>
+        )}
+      </PanelSection>
 
-        <PanelSection title="Specs">
-          <Spec
-            label="Context window"
-            value={formatContext(row.contextWindow)}
-          />
-          <Spec
-            label="Max output"
-            value={formatContext(metadata?.max_output_tokens ?? null)}
-          />
-          <Spec
-            label="Knowledge cutoff"
-            value={metadata?.knowledge_cutoff ?? "—"}
-          />
-          <Spec
-            label="Released"
-            value={formatReleaseDate(metadata?.release_date)}
-          />
-          <Spec
-            label="Open weights"
-            value={metadata ? (metadata.open_weights ? "Yes" : "No") : "—"}
-          />
-        </PanelSection>
-
-        <PanelSection title="Modalities">
-          {inputModalities.length === 0 && outputModalities.length === 0 ? (
-            <span className="text-sm text-muted">Unknown.</span>
-          ) : (
-            <div className="flex flex-col gap-1.5 text-xs text-muted">
-              <div className="flex flex-wrap items-center gap-1">
-                <span>In:</span>
-                {inputModalities.map((m) => (
-                  <Chip key={m} size="sm" color="default">
-                    {MODALITY_LABELS[m] ?? m}
-                  </Chip>
-                ))}
-              </div>
-              <div className="flex flex-wrap items-center gap-1">
-                <span>Out:</span>
-                {outputModalities.map((m) => (
-                  <Chip key={m} size="sm" color="default">
-                    {MODALITY_LABELS[m] ?? m}
-                  </Chip>
-                ))}
-              </div>
-            </div>
-          )}
-        </PanelSection>
-
-        <PanelSection title="Capabilities">
-          {activeCaps.length > 0 ? (
-            <div className="flex flex-wrap gap-1.5">
-              {activeCaps.map(({ key, label }) => (
-                <Chip key={key} size="sm" color="default">
-                  {label}
-                </Chip>
-              ))}
-            </div>
-          ) : (
-            <span className="text-sm text-muted">
-              {metadataAvailable
-                ? "None reported."
-                : "Extended metadata unavailable (models.dev disabled or unreachable)."}
-            </span>
-          )}
-        </PanelSection>
-      </Card.Content>
-    </Card>
+      <PanelSection title="Capabilities">
+        {activeCaps.length > 0 ? (
+          <div className="flex flex-wrap gap-x-4 gap-y-1.5 font-mono text-[11px] tracking-[0.1em] text-muted uppercase">
+            {activeCaps.map(({ key, label }) => (
+              <span key={key}>{label}</span>
+            ))}
+          </div>
+        ) : (
+          <span className="text-sm text-muted">
+            {metadataAvailable
+              ? "None reported."
+              : "Extended metadata unavailable (models.dev disabled or unreachable)."}
+          </span>
+        )}
+      </PanelSection>
+    </section>
   )
 }
 
@@ -1223,7 +1231,7 @@ function PricingPolicyCell({
     <button
       type="button"
       aria-label={`Edit pricing policy for ${row.key}`}
-      className="max-w-40 text-right text-xs leading-5 text-muted hover:text-link hover:underline"
+      className="max-w-40 text-left font-mono text-[13px] leading-5 text-muted hover:text-foreground"
       onClick={(event) => {
         event.stopPropagation()
         onEdit()
@@ -1344,7 +1352,11 @@ function ModelTable({
         // the overline spec: uppercase costs width, and a wrapped header costs
         // a glance where a misleading one costs a wrong conclusion.
         header: "Pricing policy",
-        align: "end",
+        // Left-aligned, unlike the two numeric lanes before it, because it is a
+        // status rather than a quantity. That adjacency is the one the
+        // separation rule exists for: a right-aligned number and a left-aligned
+        // label land their content on the same pixel, so `globals.css` gives
+        // this lane explicit room on its left.
         cell: (row) => (
           <PricingPolicyCell row={row} onEdit={() => onEditPricing(row.key)} />
         ),
@@ -1359,21 +1371,23 @@ function ModelTable({
   )
 
   return (
-    <DataTable
-      ariaLabel="Models"
-      columns={columns}
-      rows={rows}
-      getRowKey={getModelRowKey}
-      isLoading={isLoading}
-      emptyContent={empty}
-      selectionMode="multiple"
-      selectedKeys={selectedKeys}
-      onSelectionChange={onSelectionChange}
-      sortDescriptor={sortDescriptor}
-      onSortChange={onSortChange}
-      onRowAction={onSelect}
-      rowClassName={rowClassName}
-    />
+    <TableScrollFrame className="otari-models-table">
+      <DataTable
+        ariaLabel="Models"
+        columns={columns}
+        rows={rows}
+        getRowKey={getModelRowKey}
+        isLoading={isLoading}
+        emptyContent={empty}
+        selectionMode="multiple"
+        selectedKeys={selectedKeys}
+        onSelectionChange={onSelectionChange}
+        sortDescriptor={sortDescriptor}
+        onSortChange={onSortChange}
+        onRowAction={onSelect}
+        rowClassName={rowClassName}
+      />
+    </TableScrollFrame>
   )
 }
 
@@ -1961,10 +1975,15 @@ export function ModelsPage() {
     : null
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader
-        title="Models"
-        description="Every model your providers can serve. Set a price on any model so budgets and usage tracking work."
-      />
+      <header className="pb-1">
+        <h1 className="font-display text-[28px] leading-[34px] font-semibold tracking-[-0.01em] text-foreground">
+          Models
+        </h1>
+        <p className="mt-1 max-w-[620px] text-sm text-muted">
+          Every model your providers can serve. Set a price on any model so
+          budgets and usage tracking work.
+        </p>
+      </header>
 
       <ErrorBanner
         error={
@@ -2089,26 +2108,22 @@ export function ModelsPage() {
           />
 
           {pricingRow ? (
-            <Card>
-              <Card.Content className="p-0">
-                <div className="flex items-center justify-between border-b border-border px-4 py-2">
-                  <span className="text-sm font-medium text-foreground">
-                    Edit pricing
-                  </span>
-                  <Button
-                    size="sm"
-                    variant="ghost"
-                    onPress={() => setPricingKey(null)}
-                  >
-                    Close
-                  </Button>
-                </div>
-                <InlinePriceForm
-                  row={pricingRow}
-                  onClose={() => setPricingKey(null)}
-                />
-              </Card.Content>
-            </Card>
+            <section className="flex flex-col border-y border-border">
+              <div className="flex items-center justify-between border-b border-border py-2">
+                <h2 className="text-title">Edit pricing</h2>
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  onPress={() => setPricingKey(null)}
+                >
+                  Close
+                </Button>
+              </div>
+              <InlinePriceForm
+                row={pricingRow}
+                onClose={() => setPricingKey(null)}
+              />
+            </section>
           ) : null}
 
           <TablePagination

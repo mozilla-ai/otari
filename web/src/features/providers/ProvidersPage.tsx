@@ -1,4 +1,4 @@
-import { Button, Card, Chip, Spinner } from "@heroui/react"
+import { Button, Chip, Spinner } from "@heroui/react"
 import { Link } from "@tanstack/react-router"
 import { type ReactNode, useEffect, useRef, useState } from "react"
 import type {
@@ -26,12 +26,11 @@ import {
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import { Field } from "@/shared/components/Field"
 import { SecretField } from "@/shared/components/SecretField"
+import { Dot, TableScrollFrame } from "@/shared/components/surface"
 import {
   ConfirmButton,
   ErrorBanner,
   errorMessage,
-  InfoBanner,
-  PageHeader,
 } from "@/shared/components/ui"
 import { formatRelative } from "@/shared/helpers/format"
 
@@ -374,39 +373,37 @@ function AddProviderForm({ onClose }: { onClose: () => void }) {
   const [tab, setTab] = useState<ProviderTab>("known")
 
   return (
-    <Card>
-      <Card.Content className="flex flex-col gap-4 p-5">
-        <div className="flex items-center justify-between">
-          <div className="flex items-center gap-1 rounded-lg bg-surface-alt p-1">
-            {(
-              [
-                ["known", "Known provider"],
-                ["custom", "Custom endpoint"],
-              ] as const
-            ).map(([id, label]) => (
-              <button
-                key={id}
-                type="button"
-                aria-pressed={tab === id}
-                onClick={() => setTab(id)}
-                className={
-                  tab === id
-                    ? "rounded-md bg-surface px-3 py-1.5 text-sm font-medium text-foreground shadow-elevation-sm"
-                    : "rounded-md px-3 py-1.5 text-sm text-muted hover:text-foreground"
-                }
-              >
-                {label}
-              </button>
-            ))}
-          </div>
+    <section className="flex flex-col gap-4 border-y border-border py-5">
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-1 rounded-lg bg-surface-alt p-1">
+          {(
+            [
+              ["known", "Known provider"],
+              ["custom", "Custom endpoint"],
+            ] as const
+          ).map(([id, label]) => (
+            <button
+              key={id}
+              type="button"
+              aria-pressed={tab === id}
+              onClick={() => setTab(id)}
+              className={
+                tab === id
+                  ? "rounded-md bg-surface px-3 py-1.5 text-sm font-medium text-foreground shadow-elevation-sm"
+                  : "rounded-md px-3 py-1.5 text-sm text-muted hover:text-foreground"
+              }
+            >
+              {label}
+            </button>
+          ))}
         </div>
-        {tab === "known" ? (
-          <KnownProviderForm onClose={onClose} />
-        ) : (
-          <CustomProviderForm onClose={onClose} />
-        )}
-      </Card.Content>
-    </Card>
+      </div>
+      {tab === "known" ? (
+        <KnownProviderForm onClose={onClose} />
+      ) : (
+        <CustomProviderForm onClose={onClose} />
+      )}
+    </section>
   )
 }
 
@@ -458,83 +455,81 @@ function EditProviderForm({
   }
 
   return (
-    <Card>
-      <Card.Content className="flex flex-col gap-4 p-5">
-        <div className="text-title">
-          Edit <code>{provider.instance}</code>
-        </div>
-        <ErrorBanner error={update.error} />
-        <div className="grid gap-4 sm:grid-cols-2">
-          <Field
-            label="Provider type"
-            value={providerType}
-            onChange={setProviderType}
-            placeholder="openai"
-          />
-          <Field
-            label="API base"
-            value={apiBase}
-            onChange={setApiBase}
-            placeholder="https://api.openai.com/v1"
-          />
-        </div>
-        <div className="flex flex-col gap-2">
-          {replacingKey ? (
-            <>
-              <SecretField
-                value={apiKey}
-                onChange={setApiKey}
-                label="New API key"
-                description="Stored encrypted. The old key is replaced when you save."
-              />
-              <button
-                type="button"
-                className="self-start text-xs font-medium text-link hover:text-link-hover"
-                onClick={() => {
-                  setReplacingKey(false)
-                  setApiKey("")
-                }}
-              >
-                Keep the current key
-              </button>
-            </>
-          ) : (
-            <div className="flex items-center gap-3">
-              <span className="text-sm text-muted">
-                API key:{" "}
-                <code>
-                  {provider.last4 ? `••••${provider.last4}` : "none set"}
-                </code>
-              </span>
-              <Button
-                size="sm"
-                variant="outline"
-                onPress={() => setReplacingKey(true)}
-              >
-                Replace key
-              </Button>
-            </div>
-          )}
-        </div>
-        <ClientArgsField
-          value={clientArgsText}
-          onChange={setClientArgsText}
-          error={clientArgs.ok ? null : clientArgs.error}
+    <section className="flex flex-col gap-4 border-y border-border py-5">
+      <div className="text-title">
+        Edit <code>{provider.instance}</code>
+      </div>
+      <ErrorBanner error={update.error} />
+      <div className="grid gap-4 sm:grid-cols-2">
+        <Field
+          label="Provider type"
+          value={providerType}
+          onChange={setProviderType}
+          placeholder="openai"
         />
-        <div className="flex gap-2">
-          <Button
-            variant="primary"
-            isDisabled={update.isPending || !clientArgs.ok}
-            onPress={submit}
-          >
-            {update.isPending ? "Saving…" : "Save changes"}
-          </Button>
-          <Button variant="ghost" onPress={onClose}>
-            Cancel
-          </Button>
-        </div>
-      </Card.Content>
-    </Card>
+        <Field
+          label="API base"
+          value={apiBase}
+          onChange={setApiBase}
+          placeholder="https://api.openai.com/v1"
+        />
+      </div>
+      <div className="flex flex-col gap-2">
+        {replacingKey ? (
+          <>
+            <SecretField
+              value={apiKey}
+              onChange={setApiKey}
+              label="New API key"
+              description="Stored encrypted. The old key is replaced when you save."
+            />
+            <button
+              type="button"
+              className="self-start text-xs font-medium text-link hover:text-link-hover"
+              onClick={() => {
+                setReplacingKey(false)
+                setApiKey("")
+              }}
+            >
+              Keep the current key
+            </button>
+          </>
+        ) : (
+          <div className="flex items-center gap-3">
+            <span className="text-sm text-muted">
+              API key:{" "}
+              <code>
+                {provider.last4 ? `••••${provider.last4}` : "none set"}
+              </code>
+            </span>
+            <Button
+              size="sm"
+              variant="outline"
+              onPress={() => setReplacingKey(true)}
+            >
+              Replace key
+            </Button>
+          </div>
+        )}
+      </div>
+      <ClientArgsField
+        value={clientArgsText}
+        onChange={setClientArgsText}
+        error={clientArgs.ok ? null : clientArgs.error}
+      />
+      <div className="flex gap-2">
+        <Button
+          variant="primary"
+          isDisabled={update.isPending || !clientArgs.ok}
+          onPress={submit}
+        >
+          {update.isPending ? "Saving…" : "Save changes"}
+        </Button>
+        <Button variant="ghost" onPress={onClose}>
+          Cancel
+        </Button>
+      </div>
+    </section>
   )
 }
 
@@ -742,10 +737,11 @@ function OnboardingPanel({
   secretKeyConfigured: boolean
 }) {
   return (
-    <Card>
-      <Card.Content className="flex flex-col gap-4 p-6">
+    <section className="flex flex-col gap-4 border-y border-border py-5">
+      <div className="flex items-start gap-3">
+        <Dot className="mt-2.5 bg-accent" />
         <div>
-          <h2 className="text-lg font-semibold text-foreground">
+          <h2 className="font-display text-xl font-semibold text-foreground">
             Welcome to Otari
           </h2>
           <p className="mt-1 text-sm text-muted">
@@ -753,62 +749,66 @@ function OnboardingPanel({
             quick steps.
           </p>
         </div>
-        <ol className="flex flex-col gap-3">
-          <Step n={1} title="Add a provider">
-            Enter a provider name (like <code>openai</code>) and its API key.
-            Keys are encrypted at rest.
-          </Step>
-          <Step n={2} title="Test the connection">
-            Use <strong>Test</strong> on the provider row to confirm the key
-            works and see how many models it serves.
-          </Step>
-          <Step n={3} title="Send your first request">
-            Once a provider exists, the <strong>Overview</strong> page usually
-            offers a setup guide that hands you an API key and the call to make.
-            Either way, point your app at <code>/v1</code> on this gateway with
-            an API key (the one printed in the server logs starts{" "}
-            <code>gw-…</code>). See the{" "}
-            {/* /welcome is served by the gateway itself, not by a client route, so this
+      </div>
+      <ol className="flex flex-col gap-3">
+        <Step n={1} title="Add a provider">
+          Enter a provider name (like <code>openai</code>) and its API key. Keys
+          are encrypted at rest.
+        </Step>
+        <Step n={2} title="Test the connection">
+          Use <strong>Test</strong> on the provider row to confirm the key works
+          and see how many models it serves.
+        </Step>
+        <Step n={3} title="Send your first request">
+          Once a provider exists, the <strong>Overview</strong> page usually
+          offers a setup guide that hands you an API key and the call to make.
+          Either way, point your app at <code>/v1</code> on this gateway with an
+          API key (the one printed in the server logs starts <code>gw-…</code>).
+          See the{" "}
+          {/* /welcome is served by the gateway itself, not by a client route, so this
                 stays a plain path anchor: a router Link would resolve to /#/welcome, which
                 the catch-all route sends back to the overview. It leaves the SPA, so open a
                 new tab and the operator keeps the dashboard (as the guide's links do). */}
-            <a
-              href="/welcome"
-              target="_blank"
-              rel="noreferrer"
-              className="font-medium text-link hover:text-link-hover"
-            >
-              quickstart
-            </a>
-            .
-          </Step>
-        </ol>
-        {needsPricing ? (
-          <p className="text-sm text-muted">
-            Tip: <code>require_pricing</code> is on, so requests are rejected
-            until pricing is set.{" "}
-            <button
-              type="button"
-              className="font-medium text-link hover:text-link-hover disabled:opacity-50"
-              disabled={enabling}
-              onClick={onEnablePricing}
-            >
-              Enable default pricing
-            </button>{" "}
-            to meter new models with public rates.
-          </p>
-        ) : null}
-        <div>
-          <Button
-            variant="primary"
-            isDisabled={!secretKeyConfigured}
-            onPress={onAddProvider}
+          <a
+            href="/welcome"
+            target="_blank"
+            rel="noreferrer"
+            className="font-medium text-link hover:text-link-hover"
           >
-            Add your first provider
-          </Button>
-        </div>
-      </Card.Content>
-    </Card>
+            quickstart
+          </a>
+          .
+        </Step>
+      </ol>
+      {needsPricing ? (
+        <p className="text-sm text-muted">
+          Tip: <code>require_pricing</code> is on, so requests are rejected
+          until pricing is set.{" "}
+          <button
+            type="button"
+            className="font-medium text-link hover:text-link-hover disabled:opacity-50"
+            disabled={enabling}
+            onClick={onEnablePricing}
+          >
+            Enable default pricing
+          </button>{" "}
+          to meter new models with public rates.
+        </p>
+      ) : null}
+      <div>
+        {/* Disabled at 0.4 rather than hidden. Blocked is not the same as
+              empty: an operator whose server has no secret key has to see the
+              action they are being denied, or the page reads as though adding a
+              provider is not a thing this product does. */}
+        <Button
+          variant="primary"
+          isDisabled={!secretKeyConfigured}
+          onPress={onAddProvider}
+        >
+          Add your first provider
+        </Button>
+      </div>
+    </section>
   )
 }
 
@@ -1032,26 +1032,35 @@ export function ProvidersPage() {
 
   return (
     <div className="flex flex-col gap-6">
-      <PageHeader
-        title="Providers"
-        description="Add provider API keys here to serve models without editing config.yml. Keys are encrypted at rest."
-        action={
-          // The first-run card supplies its own focused call to action. The form
-          // card has its own Close, so the header action is redundant while open.
-          addOpen || showOnboarding ? null : (
-            <Button
-              variant="primary"
-              isDisabled={!secretKeyConfigured}
-              onPress={() => {
-                setEditing(null)
-                setAddOpen(true)
-              }}
-            >
-              Add provider
-            </Button>
-          )
-        }
-      />
+      <header className="flex flex-col gap-4 pb-1 sm:flex-row sm:items-start sm:justify-between">
+        <div className="max-w-[620px]">
+          <h1 className="font-display text-[28px] leading-[34px] font-semibold tracking-[-0.01em] text-foreground">
+            Providers
+          </h1>
+          <p className="mt-1 text-sm text-muted">
+            Add provider API keys here to serve models without editing
+            config.yml. Keys are encrypted at rest.
+          </p>
+        </div>
+        {/* The first-run strip supplies its own focused call to action, and the
+            form has its own Close, so the header action is redundant while
+            either is open. Disabled rather than hidden when the server has no
+            secret key: an operator who cannot add a provider still needs to see
+            that adding one is the thing they are being denied. */}
+        {addOpen || showOnboarding ? null : (
+          <Button
+            variant="primary"
+            className="shrink-0"
+            isDisabled={!secretKeyConfigured}
+            onPress={() => {
+              setEditing(null)
+              setAddOpen(true)
+            }}
+          >
+            Add provider
+          </Button>
+        )}
+      </header>
 
       <ErrorBanner
         error={
@@ -1064,13 +1073,23 @@ export function ProvidersPage() {
         }
       />
 
+      {/* A band of the page, not a tinted box: a square danger dot, the setting
+          named in mono so it is copyable by eye, and the consequence in muted
+          prose. No fill, no border, no radius. */}
       {!secretKeyConfigured ? (
-        <InfoBanner tone="warning">
-          <code>OTARI_SECRET_KEY</code> is not set, so provider keys can't be
-          encrypted at rest and adding providers from the dashboard is disabled.
-          Set it on the server and restart to add providers here. Providers
-          defined in <code>config.yml</code> keep working without it.
-        </InfoBanner>
+        <div className="flex items-start gap-3 border-y border-border py-3 text-sm">
+          <Dot className="mt-2 bg-danger" />
+          <p className="text-muted">
+            <span className="font-mono text-[13px] text-foreground">
+              OTARI_SECRET_KEY
+            </span>{" "}
+            is not set, so provider keys can&rsquo;t be encrypted at rest and
+            adding providers from the dashboard is disabled. Set it on the
+            server and restart to add providers here. Providers defined in{" "}
+            <span className="font-mono text-[13px]">config.yml</span> keep
+            working without it.
+          </p>
+        </div>
       ) : null}
 
       {showOnboarding ? (
@@ -1123,14 +1142,16 @@ export function ProvidersPage() {
           panel owns the empty state, so a fresh gateway shows one call to action,
           not a panel stacked over a redundant "no rows" table. */}
       {showOnboarding ? null : (
-        <DataTable
-          ariaLabel="Providers"
-          columns={columns}
-          rows={rows}
-          getRowKey={(row) => row.instance}
-          isLoading={loading}
-          emptyContent="No providers yet. Add your first provider to start serving models."
-        />
+        <TableScrollFrame className="otari-providers-table">
+          <DataTable
+            ariaLabel="Providers"
+            columns={columns}
+            rows={rows}
+            getRowKey={(row) => row.instance}
+            isLoading={loading}
+            emptyContent="No providers yet. Add your first provider to start serving models."
+          />
+        </TableScrollFrame>
       )}
     </div>
   )

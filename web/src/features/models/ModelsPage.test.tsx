@@ -388,7 +388,9 @@ describe("ModelsPage", () => {
 
     const detail = await selectModel(user, "openai:gpt-4o")
 
-    expect(within(detail).getByText("configured")).toBeInTheDocument()
+    // The price's source is a dot and an uppercase word now. `configured` reads
+    // as CUSTOM, which is what it means: somebody set this deliberately.
+    expect(within(detail).getByText("CUSTOM")).toBeInTheDocument()
     expect(within(detail).getByText("128K")).toBeInTheDocument()
     expect(within(detail).getByText("2023-09")).toBeInTheDocument()
     expect(within(detail).getByText("Tool calling")).toBeInTheDocument()
@@ -1241,7 +1243,7 @@ describe("ModelsPage", () => {
 
     expect(
       within(await selectModel(user, "anthropic:claude-opus-4")).getByText(
-        "rate unknown",
+        "RATE UNKNOWN",
       ),
     ).toBeInTheDocument()
   })
@@ -1255,7 +1257,7 @@ describe("ModelsPage", () => {
 
     expect(
       within(await selectModel(user, "anthropic:claude-opus-4")).getByText(
-        "not priced",
+        "NOT PRICED",
       ),
     ).toBeInTheDocument()
   })
