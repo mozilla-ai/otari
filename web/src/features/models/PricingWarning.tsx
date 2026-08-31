@@ -2,8 +2,10 @@ import { Button } from "@heroui/react"
 import { Link } from "@tanstack/react-router"
 import { useState } from "react"
 
+import { isDeploymentOperator } from "@/features/organization/roles"
 import {
   useFailureCount,
+  useOrganizationContext,
   useSettings,
   useUpdateSettings,
 } from "@/shared/api/hooks"
@@ -22,7 +24,16 @@ import { HOUR_S } from "@/shared/helpers/timeRange"
 // now) rather than a static config note, and links into the activity log filtered
 // to those failures.
 export function PricingWarning() {
-  const settings = useSettings()
+  // Both the read behind the alarm and the button that clears it are
+  // deployment-operator-only (`require_deployment_operator` on `/v1/settings`),
+  // so the audience is stated here rather than left to be inferred from a
+  // refused query: without it every tenant page load fired a `GET /v1/settings`
+  // that 403s to feed a banner that could never render for them (#834). Off the
+  // organization context, which the shell reads anyway, for the reason
+  // `useProviderKeyEncryption` does: a second request to ask the same question
+  // is the cost this removes.
+  const organization = useOrganizationContext()
+  const settings = useSettings(isDeploymentOperator(organization.data))
   const updateSettings = useUpdateSettings()
   const [dismissed, setDismissed] = useState(false)
 

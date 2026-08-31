@@ -26,7 +26,11 @@ function jsonResponse(body: unknown, status = 200): Response {
   })
 }
 
-function mockSettings(settings: GatewaySettings, rejectedInLastHour = 0) {
+function mockSettings(
+  settings: GatewaySettings,
+  rejectedInLastHour = 0,
+  context = organizationContext(),
+) {
   let current = { ...settings }
   return vi
     .spyOn(globalThis, "fetch")
@@ -37,7 +41,7 @@ function mockSettings(settings: GatewaySettings, rejectedInLastHour = 0) {
       // routes or the organization-scoped ones (otari#837). Answered first, and
       // on an exact match, so it cannot shadow /v1/organizations/me/usage.
       if (url.endsWith("/v1/organizations/me")) {
-        return jsonResponse(organizationContext())
+        return jsonResponse(context)
       }
       const method = (init?.method ?? "GET").toUpperCase()
       if (url.includes("/v1/settings")) {
@@ -215,6 +219,30 @@ describe("PricingWarning", () => {
     expect(
       fetchMock.mock.calls.some(([u]) => String(u).includes("/v1/usage/count")),
     ).toBe(false)
+  })
+
+  it("asks nothing of the operator-only settings route for a tenant", async () => {
+    // The alarm and the button that clears it are both deployment-operator-only,
+    // so a caller who does not operate the deployment must not fire the read
+    // that feeds a banner they could never be shown (#834).
+    const fetchMock = mockSettings(
+      { ...BASE, require_pricing: true, default_pricing: false },
+      12,
+      organizationContext({ deployment_operator: false }),
+    )
+    renderPage(<PricingWarning />)
+
+    await waitFor(() =>
+      expect(
+        fetchMock.mock.calls.some(([u]) =>
+          String(u).endsWith("/v1/organizations/me"),
+        ),
+      ).toBe(true),
+    )
+    expect(
+      fetchMock.mock.calls.some(([u]) => String(u).includes("/v1/settings")),
+    ).toBe(false)
+    expect(screen.queryByText(/Requests are rejected/)).not.toBeInTheDocument()
   })
 
   it("can be dismissed", async () => {
