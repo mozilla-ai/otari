@@ -229,11 +229,18 @@
    *   bg-backdrop/50 darkens the page rather than inverting in dark mode. */
   --color-backdrop: #000000;
 
-  /* ── Elevation (light-mode shadow rhythm) ──────────────── */
-  --shadow-sm: 0 1px 2px rgb(8 9 10 / 0.04), 0 1px 3px rgb(8 9 10 / 0.06);
-  --shadow-md: 0 2px 4px rgb(8 9 10 / 0.06), 0 4px 8px rgb(8 9 10 / 0.08);
-  --shadow-lg: 0 8px 16px rgb(8 9 10 / 0.08), 0 16px 32px rgb(8 9 10 / 0.1);
-  --shadow-modal: 0 24px 60px rgb(8 9 10 / 0.22);
+  /* ── Elevation — none. The surface is one plane, divided by hairlines
+   *   rather than stacked, so nothing casts. Kept as declared keys rather
+   *   than deleted: `--shadow-elevation-sm|md|lg` and `--shadow-modal` are
+   *   registered utilities with call sites, `--surface-shadow` and
+   *   `--overlay-shadow` alias these below, and HeroUI's own card, popover,
+   *   modal and toast rules read `--shadow-overlay`. Deleting the values
+   *   would leave those reading an undefined variable; zeroing them keeps
+   *   one place to put elevation back if the direction changes. ──────── */
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: none;
+  --shadow-modal: none;
 
   /* ── Inverse code surface — dark in both themes, because a code block
    *    reads as a terminal rather than as another card. The bundled user
@@ -449,12 +456,16 @@
   /* ── Backdrop — dark in both themes (see light block comment) ────── */
   --color-backdrop: #000000;
 
-  /* ── Elevation (deeper shadows on dark) ────────────────── */
-  --shadow-sm: 0 0 0 1px rgb(255 255 255 / 0.05);
-  --shadow-md: 0 0 0 1px rgb(255 255 255 / 0.08);
-  --shadow-lg: 0 0 0 1px rgb(255 255 255 / 0.14);
-  --shadow-modal:
-    0 0 0 1px rgb(255 255 255 / 0.14), 0 24px 60px rgb(0 0 0 / 0.6);
+  /* ── Elevation — none, mirroring the light block. Worth knowing what
+   *   this removes: on dark these were never drop shadows but 1px white
+   *   rings, which is how a raised surface got an edge here. With them at
+   *   `none` a dark surface is separated by `--color-border` alone, which
+   *   is the divided-surface intent but is a visible change to every
+   *   popover and modal edge, not just to their shadows. ──────────────── */
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-lg: none;
+  --shadow-modal: none;
 
   /* Code surface stays inverse on dark too, one step below the card. */
   --color-code-surface: #10161a;
@@ -702,6 +713,31 @@
   --font-weight-semibold: 550;
   --font-weight-bold: 600;
   --tracking-tight: -0.015em;
+}
+
+/* =============================================================
+ * Corner radius, all of it. READ THE TYPE-SCALE NOTE ABOVE FIRST.
+ *
+ * The divided-surface direction is a single flat plane partitioned by
+ * hairlines, so nothing on it is rounded. Every corner in the app,
+ * HeroUI's own components included, derives from this one key: the
+ * emitted stylesheet declares `--radius`, `--field-radius` and
+ * `--radius-xl|2xl|3xl`, and the last three are `calc(var(--radius) * n)`.
+ * Setting it to zero squares 98 of the 102 `rounded-*` call sites here plus
+ * every internal corner HeroUI draws, so the alternative was ~140 edits.
+ *
+ * Unlayered for the same reason the type scale above is: `@heroui/styles`
+ * declares `--radius` inside its own `@layer base`, and a `@theme` override
+ * would be hoisted to the top theme layer, compile clean, and lose. An
+ * unlayered declaration outranks every layer, so this wins because of what
+ * it is rather than because of where it sits.
+ *
+ * What this does NOT reach, so nobody hunts for it here: `rounded-full`,
+ * bare `rounded`, arbitrary values like `rounded-[0.625rem]`, and the
+ * literal `border-radius` values in the component rules further down.
+ * ============================================================= */
+:root {
+  --radius: 0px;
 }
 
 /* =============================================================

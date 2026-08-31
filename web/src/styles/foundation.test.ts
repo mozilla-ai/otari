@@ -259,6 +259,100 @@ describe("the type scale's two halves", () => {
   })
 })
 
+describe("the flat surface: no corners, no elevation", () => {
+  // Both halves of the divided-surface direction are one-line token changes
+  // that reach the whole app, and both fail silently if they land in the wrong
+  // place: a squared corner that is still round, or a shadow zeroed in one
+  // theme only, compiles clean and reports nothing.
+
+  // The text between the end of the previous top-level block and the radius
+  // declaration. Enough to tell whether the declaration is unlayered: if a
+  // `@theme` or `@layer` opener sits in there, it is not.
+  const radiusContext = (() => {
+    const decl = CSS.indexOf("--radius: 0px;")
+    // Empty rather than an assertion when the declaration is gone, so the two
+    // tests below fail with their own messages instead of taking the whole
+    // file down at collection time.
+    if (decl === -1) return ""
+    // Comments stripped: the block below this one explains the cascade rule in
+    // prose, and the words `@theme` and `@layer` in a comment are not openers.
+    return CSS.slice(CSS.lastIndexOf("\n}\n", decl), decl).replace(
+      /\/\*[\s\S]*?\*\//g,
+      "",
+    )
+  })()
+
+  it("zeroes the one radius key every corner derives from", () => {
+    // `--radius-xl|2xl|3xl` and `--field-radius` are all `calc(var(--radius) * n)`
+    // in the emitted stylesheet, so this key is the whole radius surface.
+    const declarations = [...CSS.matchAll(/^\s*--radius:\s*([^;]+);/gm)].map(
+      ([, value]) => value.trim(),
+    )
+    expect(
+      declarations,
+      "`--radius` should be declared exactly once, at zero",
+    ).toEqual(["0px"])
+  })
+
+  it("declares the radius unlayered, where it can outrank @heroui/styles", () => {
+    // `@heroui/styles` declares `--radius` inside its own `@layer base`. An
+    // override written in `@theme` is hoisted to the top theme layer, compiles,
+    // emits, and loses on source order. Only an unlayered declaration wins.
+    expect(
+      radiusContext,
+      "the `--radius` declaration is not in a `:root` block",
+    ).toContain(":root {")
+    const opener = radiusContext.match(/^@(theme|layer)\b.*/m)
+    expect(
+      opener?.[0],
+      "the `--radius` declaration sits inside an at-rule block, so @heroui/styles' own value wins on source order",
+    ).toBeUndefined()
+  })
+
+  it("keeps the radius out of the theme blocks", () => {
+    // Same rule as the type metrics above: a corner has no theme axis, so
+    // declaring it twice only creates a way for the two themes to drift.
+    for (const [theme, tokens] of [
+      ["light", LIGHT],
+      ["dark", DARK],
+    ] as const) {
+      const offenders = [...tokens.keys()].filter((name) =>
+        name.startsWith("--radius"),
+      )
+      expect(
+        offenders,
+        `the ${theme} theme block declares radius keys (${offenders.join(", ")}); radius is declared once, unlayered`,
+      ).toEqual([])
+    }
+  })
+
+  it("zeroes every elevation token in both themes", () => {
+    // A shadow *does* have a theme axis, so unlike the radius these are
+    // declared per theme, and that is exactly what makes a half-done change
+    // possible: zeroed on light, still lifting on dark, invisible in whichever
+    // theme you happen to be looking at. `--shadow-elevation-sm|md|lg` and
+    // `--shadow-modal` (the registered utilities), `--surface-shadow` and
+    // `--overlay-shadow` (which HeroUI's card, popover, modal and toast rules
+    // read) all alias these four.
+    for (const [theme, tokens] of [
+      ["light", LIGHT],
+      ["dark", DARK],
+    ] as const) {
+      for (const key of [
+        "--shadow-sm",
+        "--shadow-md",
+        "--shadow-lg",
+        "--shadow-modal",
+      ]) {
+        expect(
+          tokens.get(key),
+          `${theme}'s ${key} still casts; the surface is one plane in both themes`,
+        ).toBe("none")
+      }
+    }
+  })
+})
+
 describe("design foundation tokens", () => {
   it("declares the same token set in both themes", () => {
     // Each theme block owns the complete set of variables it needs rather than
