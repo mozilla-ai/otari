@@ -129,9 +129,8 @@ export function bootstrap(
     // Null, because a fixture describes a deployment whose documentation is the
     // bundled guide; the tests about an operator-configured docs site set it.
     docs_url: null,
-    // Null both, because a self-hosted gateway publishes no legal pages of its
-    // own: Terms of service is then absent from the account menu and Data &
-    // Privacy is the disabled row. The account-menu tests set them.
+    // A self-hosted gateway publishes no legal pages. The account-menu tests
+    // set them.
     terms_url: null,
     privacy_url: null,
     // Not frozen, because a fixture describes a deployment somebody can sign

@@ -100,8 +100,7 @@ describe("AccountMenu", () => {
     await openMenu()
 
     expect(screen.queryByRole("link", { name: "Terms of service" })).toBeNull()
-    // Present but inert, which is the row a gateway with no notice to link
-    // still owes: the surface is coming, and omitting it reads as never.
+    // Present but inert rather than absent.
     const privacy = await screen.findByRole("button", {
       name: /^Data & Privacy \(/,
     })
@@ -119,8 +118,6 @@ describe("AccountMenu", () => {
     expect(terms).toHaveAttribute("href", "https://otari.ai/terms")
     expect(terms).toHaveAttribute("target", "_blank")
 
-    // otari-ai#1945: the notice lives on the marketing site beside the
-    // dashboard, and this row is how a signed-in user reaches it.
     const privacy = await screen.findByRole("link", { name: "Data & Privacy" })
     expect(privacy).toHaveAttribute("href", "https://otari.ai/privacy")
     expect(privacy).toHaveAttribute("target", "_blank")
@@ -143,8 +140,6 @@ describe("AccountMenu", () => {
     expect(
       await screen.findByRole("link", { name: "Terms of service" }),
     ).toHaveAttribute("href", "https://otari.ai/terms")
-    // The other direction of the same independence: one address published does
-    // not invent the other, so this row stays the disabled one.
     expect(
       screen.getByRole("button", { name: /^Data & Privacy \(/ }),
     ).toBeDisabled()

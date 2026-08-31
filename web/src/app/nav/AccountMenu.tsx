@@ -41,13 +41,10 @@ import {
 // the credential it was minted from (otari#653): a session is per-identity
 // since otari#647, and the identity holds a password of its own since otari#649,
 // so the row this menu carried disabled from the start now has a destination.
-// The two legal rows are the deployment's own documents, and each appears only
-// where there is one to point at: `terms_url` and `privacy_url`, the addresses
-// an operator configures and `GET /v1/bootstrap` publishes beside `docs_url`.
-// Terms of service is absent without one, because a gateway nobody wrote terms
-// for has none to show. Data & Privacy falls back to the disabled row instead
-// of vanishing, because the settings surface it will become is coming and a
-// menu that silently lacks it reads as a menu that never will.
+// The legal rows link `terms_url` and `privacy_url` where the deployment set
+// them. Data & Privacy stays a disabled row when unset rather than vanishing:
+// the settings surface it will become is coming, and a menu that silently
+// lacks it reads as a menu that never will.
 
 const THEME_LABELS: Record<ThemePreference, string> = {
   system: "System",
@@ -364,13 +361,6 @@ export function AccountMenu({ collapsed }: { collapsed: boolean }) {
               className="md:hidden"
             />
           )}
-          {/* Absent rather than pointing somewhere invented. This used to build
-              the address from `management_url` behind a `legal.terms`
-              entitlement, which no deployment could satisfy: that field is set
-              only for a hybrid gateway, which issues no session and so never
-              opens this menu, and nothing granted the capability. So a hosted
-              deployment with terms on its own site had no way to name them
-              (otari-ai#1945). */}
           {terms_url ? (
             <MenuExternalLink
               label="Terms of service"

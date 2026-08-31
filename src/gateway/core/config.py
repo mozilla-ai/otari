@@ -1773,10 +1773,8 @@ class GatewayConfig(BaseSettings):
         for the same reason ``platform.management_url`` is: a typo should be a
         startup error, not a Documentation link that silently goes nowhere.
 
-        One validator for the three because they are one kind of value: an
-        address a person follows out of the dashboard, with no downstream
-        consumer that builds a request from it. ``data_plane_url`` is held to a
-        stricter bar for exactly that reason and keeps its own.
+        ``data_plane_url`` keeps its own, stricter validator: a client builds a
+        request from it rather than following it.
 
         Userinfo is the one refusal the three share with ``data_plane_url``, and
         they share it for its reason rather than theirs: ``GET /v1/bootstrap``
