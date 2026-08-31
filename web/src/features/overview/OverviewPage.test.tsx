@@ -152,9 +152,11 @@ describe("OverviewPage", () => {
     expect(await screen.findByText("$200.00")).toBeInTheDocument()
     expect(screen.getByText("2,000")).toBeInTheDocument()
     expect(screen.getByText("2.0%")).toBeInTheDocument()
-    // The rate's denominator, which is what the cell shows in place of the
-    // status word the tile used to carry. See the note on the budget cell below
-    // about what that word did and where it went.
+    // The status word, paired with a dot so severity never rides on hue alone.
+    // Uppercased in the mark, so the assertion is on the rendered casing.
+    expect(screen.getByText("ELEVATED")).toBeInTheDocument()
+    // And the rate's denominator, which is what the cell states instead of a
+    // sparkline it has no series for.
     expect(screen.getByText("40 of 2,000 requests")).toBeInTheDocument()
   })
 
@@ -335,12 +337,9 @@ describe("OverviewPage", () => {
     })
     renderPage(<OverviewPage />)
     expect(await screen.findByText("125.0%")).toBeInTheDocument() // 25 / (10*2)
-    // The meter names the budget it is reporting on. The tile this replaced also
-    // carried a status word ("Over budget"), which existed so severity never rode
-    // on hue alone; the cell carries neither word nor hue now, so nothing is
-    // encoded in color that is not also in the number. Worth knowing that the
-    // judgment itself is gone, not just its color: 125% is stated and left to be
-    // read, and the attention strip above is what names it as a problem.
+    expect(screen.getByText("OVER BUDGET")).toBeInTheDocument()
+    // The meter names the budget it is reporting on, so the graphic is not a
+    // decoration a screen reader has to skip past.
     expect(
       screen.getByRole("img", { name: /Worst budget usage/ }),
     ).toBeInTheDocument()

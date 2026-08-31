@@ -90,6 +90,18 @@ function useWindows() {
   }, [dayKey])
 }
 
+// The severity a cell states under its number, paired with a dot so the
+// judgment never rides on hue alone. Restored after the teardown briefly
+// dropped them: the number alone says 3.8% and leaves the reader to decide
+// whether that is fine, which is the one thing an at-a-glance page should not
+// make them do.
+const ERROR_WORDS = { ok: "Healthy", warn: "Elevated", alert: "High" } as const
+const BUDGET_WORDS = {
+  ok: "On track",
+  warn: "Near limit",
+  alert: "Over budget",
+} as const
+
 /**
  * The landing route, which is the one page nobody navigates to on purpose.
  *
@@ -363,7 +375,16 @@ export function OverviewPage({
           // A real zero where zero is a fact, an em dash where the value is
           // unknown: a failed query must not read as "you spent nothing".
           value={todayTotals ? formatUsd(todayTotals.cost) : "—"}
-          subline={isEmpty ? "no prior spend" : undefined}
+          // "midnight" and not "00:00 UTC": `useWindows` builds this window from
+          // the operator's *local* midnight, deliberately and with a comment
+          // saying so, so a UTC string would be false for everyone not on it.
+          subline={
+            isEmpty
+              ? "no prior spend"
+              : todayTotals
+                ? "since midnight"
+                : "no data"
+          }
           graphic={
             !isEmpty && hasHourlyTrend ? (
               <Sparkline
@@ -377,7 +398,9 @@ export function OverviewPage({
         <KpiCell
           label="Spend, last 30 days"
           value={periodTotals ? formatUsd(periodTotals.cost) : "—"}
-          subline={isEmpty ? "no prior spend" : undefined}
+          subline={
+            isEmpty ? "no prior spend" : periodTotals ? undefined : "no data"
+          }
           // Spend falling is the improvement, so a rise paints danger while the
           // arrow keeps telling the truth about which way it went.
           delta={
@@ -402,7 +425,9 @@ export function OverviewPage({
         <KpiCell
           label="Requests, last 30 days"
           value={periodTotals ? formatNumber(periodTotals.request_count) : "—"}
-          subline={isEmpty ? "no prior traffic" : undefined}
+          subline={
+            isEmpty ? "no prior traffic" : periodTotals ? undefined : "no data"
+          }
           // Volume, so no polarity: more traffic through the gateway is neither
           // a win nor a regression on its own, and the error rate beside it is
           // what carries the judgment.
@@ -424,7 +449,21 @@ export function OverviewPage({
         <KpiCell
           label="Error rate, last 30 days"
           value={err.rate === null ? "—" : formatPct(err.rate)}
-          subline={isEmpty ? "NO REQUESTS YET" : undefined}
+          // The word is present whenever there is a rate to judge, "Healthy"
+          // included: a line that appears only when something is wrong makes
+          // its absence ambiguous with a page that has not loaded.
+          severity={
+            err.status === "neutral"
+              ? undefined
+              : { status: err.status, word: ERROR_WORDS[err.status] }
+          }
+          subline={
+            err.rate === null
+              ? isEmpty
+                ? "NO REQUESTS YET"
+                : "no requests in range"
+              : undefined
+          }
           // Errors falling is the improvement, as with spend.
           delta={
             errDelta !== null ? (
@@ -448,7 +487,23 @@ export function OverviewPage({
           value={
             budgets.data && budget.worst ? formatPct(budget.worst.pct) : "—"
           }
-          subline={isEmpty ? "NO BUDGETS SET" : undefined}
+          severity={
+            budgets.data && budget.worst && budget.status !== "neutral"
+              ? { status: budget.status, word: BUDGET_WORDS[budget.status] }
+              : undefined
+          }
+          // The defect this rule was written for: without it, a deployment with
+          // no budgets showed a bare em dash on the populated page and only
+          // explained itself in the empty state.
+          subline={
+            budgets.data && budget.worst
+              ? undefined
+              : isEmpty
+                ? "NO BUDGETS SET"
+                : budgets.data
+                  ? "no budgets set"
+                  : "no data"
+          }
           graphic={
             !isEmpty && budgets.data && budget.worst ? (
               <Meter
@@ -684,7 +739,7 @@ function AttentionStrip({
       role="alert"
       className={`${FULL_BLEED} ${BLEED_INSET} flex flex-col gap-2 border-y border-border py-3 text-sm sm:flex-row sm:flex-wrap sm:items-center`}
     >
-      <span className="flex items-center gap-2 font-medium text-foreground">
+      <span className="flex items-center gap-2 font-semibold text-foreground">
         <Dot className="bg-danger" />
         Needs attention
       </span>
@@ -741,12 +796,20 @@ function KpiStrip({
 function KpiCell({
   label,
   value,
+  severity,
   subline,
   delta,
   graphic,
 }: {
   label: string
   value: string
+  severity?: Severity
+  /**
+   * Why the value is what it is. Carried in every page state and not only in
+   * the empty one: an em dash with nothing under it makes the reader guess
+   * whether the number is missing or zero, and the empty state is simply the
+   * case where every cell has something to say.
+   */
   subline?: string
   delta?: ReactNode
   graphic?: ReactNode
@@ -754,10 +817,23 @@ function KpiCell({
   return (
     <div className="flex flex-col gap-1.5 border-border px-7 py-[18px] not-last:border-r">
       <span className="text-overline">{label}</span>
-      <span className="font-mono text-[30px] leading-[36px] font-medium text-foreground tabular-nums">
+      {/* 400, deliberately, where the rest of the page's emphasis is 550: at
+          30px the size is already the hierarchy, and a heavier numeral here
+          would out-weigh the page title above it. */}
+      <span className="font-mono text-[30px] leading-[36px] font-normal text-foreground tabular-nums">
         {value}
       </span>
-      <span className="min-h-[18px] text-xs text-muted">
+      {/* One line, always present, so no cell is shorter than its neighbors.
+          Severity and delta share it where a cell has both: dropping the delta
+          to make room would lose the comparison the strip is otherwise built
+          around. */}
+      <span className="flex min-h-[18px] items-center gap-2 text-xs text-muted">
+        {severity ? <SeverityMark severity={severity} /> : null}
+        {severity && delta ? (
+          <span aria-hidden className="text-subtle">
+            ·
+          </span>
+        ) : null}
         {subline ?? delta ?? null}
       </span>
       {/* Reserved rather than conditional: an absent sparkline must not make one
@@ -767,6 +843,31 @@ function KpiCell({
         <span className="flex h-10 items-center">{graphic}</span>
       ) : null}
     </div>
+  )
+}
+
+type Severity = { status: "ok" | "warn" | "alert"; word: string }
+
+/**
+ * A severity as a square dot plus its word, never as a color alone. `warn` and
+ * `alert` share the danger dot and differ in their ink, because the dot answers
+ * "is anything wrong here" and the word answers "how much".
+ */
+function SeverityMark({ severity }: { severity: Severity }) {
+  const { status, word } = severity
+  return (
+    <span
+      className={`flex items-center gap-2 font-mono ${
+        status === "alert"
+          ? "text-danger"
+          : status === "warn"
+            ? "text-muted"
+            : "text-subtle"
+      }`}
+    >
+      <Dot className={status === "ok" ? "bg-success" : "bg-danger"} />
+      {word.toUpperCase()}
+    </span>
   )
 }
 
@@ -1024,7 +1125,7 @@ function RailStat({ label, value }: { label: string; value: string }) {
   return (
     <div>
       <dt className="text-xs text-muted">{label}</dt>
-      <dd className="font-mono text-[30px] leading-[36px] font-medium text-foreground tabular-nums">
+      <dd className="font-mono text-[30px] leading-[36px] font-normal text-foreground tabular-nums">
         {value}
       </dd>
     </div>
