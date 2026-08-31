@@ -83,7 +83,7 @@ const MENU_DIVIDER = "h-px shrink-0 bg-border"
 // name: first boot provisions the identity with it (`OPERATOR_FULL_NAME`), and
 // the roster shows the same word in the same place.
 //
-// Three fallbacks, each for a real identity this deployment can hold. A member
+// Three answers, each for a real identity this deployment can hold. A member
 // added to the roster by address has no name until they claim it, so the
 // address stands in and is a better answer than a role. An identity with
 // neither, and a context that has not landed or could not be read, get
@@ -94,14 +94,23 @@ function sessionIdentity(caller: OrganizationContext["caller"]): {
   initials: string
 } {
   const named = caller?.full_name?.trim()
-  const addressed = caller?.email?.trim()
-  const name = named || addressed
-  if (!name) {
-    return { name: "Signed in", initials: "··" }
+  if (named) {
+    return { name: named, initials: initialsFor(named) }
   }
-  // `||`, not `??`: a name that is only whitespace trims to "" and has already
-  // lost the `name` slot to the address, so it must not keep the initials.
-  return { name, initials: initialsFor(named || localPart(name)) }
+  const addressed = caller?.email?.trim()
+  if (addressed) {
+    // An address has no words to take initials from, so its local part stands
+    // in, and that part is split on its own punctuation as well: an address
+    // spells a name with dots where a name uses spaces, so `ada.lovelace@…`
+    // initials as AL. A name is split on spaces alone, because the same
+    // punctuation means something else in one: `Ada Lovelace-Byron` is two
+    // names, and splitting the hyphen would initial her as AB.
+    return {
+      name: addressed,
+      initials: initialsFor(localPart(addressed), true),
+    }
+  }
+  return { name: "Signed in", initials: "··" }
 }
 
 /** The part of an address that names a person, which is the part before the host. */
@@ -110,16 +119,16 @@ function localPart(email: string): string {
 }
 
 // Two letters, taken the way an avatar takes them: the first letter of the
-// first and last word for a name in parts, and the first two letters of a name
-// that is one word. Addresses are split on their punctuation as well as on
-// spaces, so `ada.lovelace@…` initials as AL rather than AD.
+// first and last word, and the first two letters of a source that is one word.
 //
 // Counted in characters rather than in the code units `[0]` and `slice` count,
 // because a name outside the basic plane (an extension-B CJK character, an
 // emoji) is two units per character: indexing one takes half a surrogate pair
 // and the avatar draws the replacement mark instead of the letter.
-function initialsFor(source: string): string {
-  const words = source.split(/[\s._-]+/).filter(Boolean)
+function initialsFor(source: string, splitPunctuation = false): string {
+  const words = source
+    .split(splitPunctuation ? /[\s._-]+/ : /\s+/)
+    .filter(Boolean)
   if (words.length === 0) {
     return "··"
   }
@@ -289,7 +298,13 @@ export function AccountMenu({ collapsed }: { collapsed: boolean }) {
           otherwise leaves this a pill in the corner. */}
       <Button
         variant="ghost"
-        aria-label="Account"
+        // The identity this control exists to draw, folded into the name: a
+        // static `aria-label` wins over the children, so a screen reader
+        // otherwise hears "Account" and never who is signed in. On the
+        // collapsed rail the name is not rendered at all, so this is the only
+        // place it could reach anybody there. `AppearanceControl` folds its own
+        // visible state in for the same reason.
+        aria-label={`Account: ${identity.name}`}
         className={`${navRowClass({ collapsed })} w-auto! justify-start`}
       >
         <span className="flex h-[1.625rem] w-[1.625rem] shrink-0 items-center justify-center rounded-full border border-border bg-surface-alt text-chrome-initials font-semibold text-muted">

@@ -66,7 +66,11 @@ function settled(): Promise<HTMLElement> {
 
 async function openMenu(overrides: Partial<DeploymentBootstrap> = {}) {
   await renderMenu(overrides)
-  await userEvent.setup().click(screen.getByRole("button", { name: "Account" }))
+  // The trigger's accessible name carries who is signed in, so it is matched on
+  // its prefix rather than in full.
+  await userEvent
+    .setup()
+    .click(screen.getByRole("button", { name: /^Account:/ }))
 }
 
 afterEach(() => {
@@ -148,6 +152,36 @@ describe("AccountMenu", () => {
     // Off the local part, and split on its punctuation: the host names the
     // deployment rather than the person.
     expect(screen.getByText("AL")).toBeInTheDocument()
+  })
+
+  // A name is split on spaces alone. The address path below splits punctuation
+  // too, and one rule for both would initial a hyphenated surname off its
+  // second half.
+  it("initials a hyphenated surname off the name it belongs to", async () => {
+    mockCaller({
+      user_id: "77777777-7777-7777-7777-777777777777",
+      email: null,
+      full_name: "Ada Lovelace-Byron",
+    })
+    await renderMenu()
+
+    expect(await screen.findByText("Ada Lovelace-Byron")).toBeInTheDocument()
+    expect(screen.getByText("AL")).toBeInTheDocument()
+  })
+
+  // The label is the visible half of #832's fix; this is the half a screen
+  // reader gets, and on the collapsed rail it is the only half there is.
+  it("names the person in the trigger's accessible name too", async () => {
+    mockCaller({
+      user_id: "88888888-8888-8888-8888-888888888888",
+      email: "ada@example.com",
+      full_name: "Ada Lovelace",
+    })
+    await renderMenu()
+
+    expect(
+      await screen.findByRole("button", { name: "Account: Ada Lovelace" }),
+    ).toBeInTheDocument()
   })
 
   // Initials are two characters, not two UTF-16 code units: a name outside the

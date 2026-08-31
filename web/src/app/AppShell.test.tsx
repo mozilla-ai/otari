@@ -1064,7 +1064,7 @@ describe("AppShell entitlement gating", () => {
 
     // The header carried this until the sidebar grew an account block.
     expect(screen.queryByRole("button", { name: "Log out" })).toBeNull()
-    await user.click(screen.getByRole("button", { name: "Account" }))
+    await user.click(screen.getByRole("button", { name: /^Account:/ }))
     expect(
       await screen.findByRole("button", { name: "Log out" }),
     ).toBeInTheDocument()
@@ -1079,7 +1079,7 @@ describe("AppShell entitlement gating", () => {
     // mobile drawer contains, so without this row the guide has no control
     // pointing at it below the breakpoint. The row carries `md:hidden` for the
     // mirror-image reason: above it, the top bar already answers.
-    await user.click(screen.getByRole("button", { name: "Account" }))
+    await user.click(screen.getByRole("button", { name: /^Account:/ }))
     const guideRow = await screen.findByRole("link", { name: "Documentation" })
     expect(guideRow).toHaveAttribute("href", "/docs")
     expect(guideRow).toHaveClass("md:hidden")
