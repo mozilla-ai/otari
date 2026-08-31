@@ -36,7 +36,6 @@ import {
   ErrorBanner,
   errorMessage,
   FilterSelect,
-  InfoBanner,
 } from "@/shared/components/ui"
 import {
   formatContext,
@@ -1418,42 +1417,49 @@ function DiscoveredErrors({
     list.map((provider) => provider.provider).join(", ")
   const one = (list: typeof providers) => list.length === 1
   return (
-    <InfoBanner tone="warning">
-      {unreachable.length > 0 ? (
-        <span className="block">
-          Could not list {names(unreachable)}. Check{" "}
-          {one(unreachable) ? "that provider's" : "those providers'"}{" "}
-          credentials in config.yml; {one(unreachable) ? "its" : "their"} models
-          are missing from the list below.
-        </span>
-      ) : null}
-      {noDiscovery.length > 0 ? (
-        <span className="block">
-          {names(noDiscovery)} {one(noDiscovery) ? "does" : "do"} not offer
-          model discovery, so {one(noDiscovery) ? "its" : "their"} models are
-          missing from the list below.{" "}
-          {one(noDiscovery) ? "The provider" : "They"} may still serve requests.
-          Price a model by its selector to meter it here, or declare the model
-          ids {one(noDiscovery) ? "it serves" : "they serve"} under the{" "}
-          <code>models:</code> key in config.yml to list them all.
-          {/* Seeded with the prefix only when it is unambiguous: with several
+    // The Sheet-2 banner form: a square dot and muted prose between rules, no
+    // fill and no radius. Danger rather than caution because an unlistable
+    // provider means models are missing from the table under it, which is a
+    // wrong answer rather than a caveat.
+    <div className="flex items-start gap-3 border-y border-border py-3 text-sm text-muted">
+      <Dot className="mt-2 bg-danger" />
+      <div className="flex flex-col gap-1">
+        {unreachable.length > 0 ? (
+          <span className="block">
+            Could not list {names(unreachable)}. Check{" "}
+            {one(unreachable) ? "that provider's" : "those providers'"}{" "}
+            credentials in config.yml; {one(unreachable) ? "its" : "their"}{" "}
+            models are missing from the list below.
+          </span>
+        ) : null}
+        {noDiscovery.length > 0 ? (
+          <span className="block">
+            {names(noDiscovery)} {one(noDiscovery) ? "does" : "do"} not offer
+            model discovery, so {one(noDiscovery) ? "its" : "their"} models are
+            missing from the list below.{" "}
+            {one(noDiscovery) ? "The provider" : "They"} may still serve
+            requests. Price a model by its selector to meter it here, or declare
+            the model ids {one(noDiscovery) ? "it serves" : "they serve"} under
+            the <code>models:</code> key in config.yml to list them all.
+            {/* Seeded with the prefix only when it is unambiguous: with several
               providers lacking discovery, guessing one would put the operator on
               the wrong provider without saying so. */}
-          <Button
-            size="sm"
-            variant="outline"
-            className="mt-2"
-            onPress={() =>
-              onPriceModel(
-                one(noDiscovery) ? `${noDiscovery[0].provider}:` : "",
-              )
-            }
-          >
-            Price a model
-          </Button>
-        </span>
-      ) : null}
-    </InfoBanner>
+            <Button
+              size="sm"
+              variant="outline"
+              className="mt-2"
+              onPress={() =>
+                onPriceModel(
+                  one(noDiscovery) ? `${noDiscovery[0].provider}:` : "",
+                )
+              }
+            >
+              Price a model
+            </Button>
+          </span>
+        ) : null}
+      </div>
+    </div>
   )
 }
 
