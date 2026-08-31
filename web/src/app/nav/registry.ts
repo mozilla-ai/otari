@@ -307,18 +307,27 @@ const ORGANIZATION_NAV_SECTIONS = [
       // before (its refresh flow sat in the gateway's runtime Settings next to
       // the master key), so this is where it lives, while one model's rate stays
       // on Models, beside the model it prices.
+      //
+      // No `operatorOnly` any more, because the page behind it is not one
+      // answer: the roles matrix puts Model pricing at Edit for an admin
+      // (otari-ai#1943), and the server already agreed. The organization's own
+      // rate overrides are management-gated, and the catalog read serves any
+      // session; only the refresh flow and the policy read are the operator's,
+      // and the page withholds those from anyone else rather than refusing the
+      // whole destination. Reached from the organization rail, which the shell
+      // already opens only to a caller who manages the organization, so a plain
+      // member is not offered it.
       {
         to: "/organization/pricing",
         label: "Model pricing",
         // `pricing`, not `settings`: the table and the refresh flow are
         // `/v1/pricing`, its own router, and this page reads `/v1/settings` only
-        // for the policy banner. This gateway serves the surfaces as one set, so
-        // the two are the same answer here; the axis exists for the deployment
-        // where they come apart, and there this row would otherwise offer a page
-        // whose data is not served.
+        // for the policy banner an operator sees. This gateway serves the
+        // surfaces as one set, so the two are the same answer here; the axis
+        // exists for the deployment where they come apart, and there this row
+        // would otherwise offer a page whose data is not served.
         surface: "pricing",
         icon: FiTag,
-        operatorOnly: "refused",
       },
     ],
   },

@@ -4,8 +4,13 @@ import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type { GatewaySettings, PricingResponse } from "@/client"
+import type {
+  GatewaySettings,
+  OrganizationContext,
+  PricingResponse,
+} from "@/client"
 import { ModelPricingPage } from "@/features/pricing/ModelPricingPage"
+import { organizationContext } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
 
 const SETTINGS: GatewaySettings = {
@@ -55,14 +60,19 @@ function jsonResponse(body: unknown): Response {
   })
 }
 
+// The caller's standing, which decides how much of this page renders. An
+// operator by default, matching the fixture and the deployment most of these
+// tests describe; the admin cases below say otherwise.
 function mockApi(
   options: {
     settings?: Partial<GatewaySettings>
     pricing?: PricingResponse[]
+    context?: OrganizationContext
   } = {},
 ) {
   const settings = { ...SETTINGS, ...options.settings }
   const pricing = options.pricing ?? [price()]
+  const context = options.context ?? organizationContext()
   return vi
     .spyOn(globalThis, "fetch")
     .mockImplementation(async (input, init) => {
@@ -77,8 +87,15 @@ function mockApi(
       if (url.includes("/v1/pricing/refresh") && method === "POST") {
         return jsonResponse(PRICE_REFRESH)
       }
+      // Before the bare `/v1/pricing` arm below and before the context one: the
+      // organization's own overrides are a different surface from the catalog,
+      // and they answer the paged tenancy shape rather than a list.
+      if (url.includes("/v1/organizations/me/pricing")) {
+        return jsonResponse({ data: [], count: 0 })
+      }
       if (url.includes("/v1/settings")) return jsonResponse(settings)
       if (url.includes("/v1/pricing")) return jsonResponse(pricing)
+      if (url.includes("/v1/organizations/me")) return jsonResponse(context)
       return jsonResponse([])
     })
 }
@@ -275,5 +292,68 @@ describe("ModelPricingPage", () => {
           init?.method === "POST",
       ),
     ).toBe(true)
+  })
+
+  it("gives an organization admin the prices and its own overrides, not the catalog", async () => {
+    // The roles matrix puts Model pricing at Edit for an admin (otari-ai#1943),
+    // and the page is two halves: the organization's rate overrides, which the
+    // server already lets an owner or admin write, and the deployment's catalog
+    // controls, which it does not. So an admin gets the first and the price
+    // table, and the second is withheld rather than rendered as a refusal.
+    const fetchMock = mockApi({
+      // An admin, not the owner the fixture defaults to: the matrix row is
+      // about the admin, and `canManage` is what the overrides card asks.
+      context: organizationContext({
+        role: "admin",
+        deployment_operator: false,
+      }),
+    })
+    renderPage(<ModelPricingPage />)
+
+    expect(await screen.findByText("Rate overrides")).toBeInTheDocument()
+    await screen.findByRole("grid", { name: "Model prices" })
+    expect(screen.queryByText("Default pricing catalog")).toBeNull()
+    expect(
+      screen.queryByRole("button", { name: "Check for price updates" }),
+    ).toBeNull()
+    expect(screen.queryByText(/Default pricing is/)).toBeNull()
+
+    // Withheld at the request, not only in the markup. Both reads are
+    // `require_deployment_operator`, so firing them would put a 403 banner on a
+    // page that is the admin's to use (the shape otari#838 removed elsewhere).
+    const asked = fetchMock.mock.calls.map(([url]) => String(url))
+    expect(asked.some((url) => url.includes("/v1/settings"))).toBe(false)
+    expect(asked.some((url) => url.includes("/v1/pricing/refresh"))).toBe(false)
+  })
+
+  it("does not point an admin at an editor they would be refused", async () => {
+    // Since otari#867 a non-operator reads Models with every pricing affordance
+    // gone, and setting a catalog rate is operator-only, so the empty table says
+    // nothing is priced without offering to price one.
+    mockApi({
+      pricing: [],
+      context: organizationContext({ deployment_operator: false }),
+    })
+    renderPage(<ModelPricingPage />)
+
+    expect(
+      await screen.findByText("No model carries a stored price yet."),
+    ).toBeInTheDocument()
+    expect(screen.queryByText(/Price one from the Models page/)).toBeNull()
+    expect(screen.queryByText(/A rate is edited beside the model/)).toBeNull()
+  })
+
+  it("keeps the catalog controls for a deployment operator", async () => {
+    // The other side of the split, pinned so a future change cannot quietly take
+    // the catalog away from the caller it belongs to.
+    mockApi()
+    renderPage(<ModelPricingPage />)
+
+    expect(
+      await screen.findByText("Default pricing catalog"),
+    ).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Check for price updates" }),
+    ).toBeInTheDocument()
   })
 })

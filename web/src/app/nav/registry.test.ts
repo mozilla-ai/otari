@@ -96,15 +96,15 @@ describe("nav registry", () => {
     // reason (otari-ai#1941): members create and manage their own keys through
     // `/v1/organizations/me/keys`. Removing a row from here is as
     // much a design decision as adding one.
+    //
+    // Model pricing left it a third way (otari-ai#1943): the page behind it was
+    // never one answer. Its rate overrides are the organization's own and
+    // already management-gated, and its catalog read serves any session, so only
+    // two of its sections were ever the operator's and the page withholds those
+    // rather than the rail withholding the destination.
     expect(
       NAV_ITEMS.filter((item) => item.operatorOnly).map((item) => item.to),
-    ).toEqual([
-      "/providers",
-      "/budgets",
-      "/organization/pricing",
-      "/settings",
-      "/admin/accounts",
-    ])
+    ).toEqual(["/providers", "/budgets", "/settings", "/admin/accounts"])
   })
 
   it("puts each destination on exactly one rail", () => {

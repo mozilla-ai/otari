@@ -246,7 +246,7 @@ describe("AppShell responsive layout", () => {
     await renderShell()
 
     const overview = screen.getByRole("link", { name: "Overview" })
-    // Awaited: Providers is one of the eight rows gated `operatorOnly`, so it
+    // Awaited: Providers is one of the four rows gated `operatorOnly`, so it
     // arrives with the membership context rather than with the first paint.
     const providers = await screen.findByRole("link", { name: "Providers" })
     expect(overview).toHaveAttribute("aria-current", "page")
@@ -533,11 +533,11 @@ describe("AppShell surface gating", () => {
     // Same reasoning as above, for the other context: the organization rail is
     // its own registry, and nothing else compares it against a full list.
     await renderShell(bootstrap(), { url: "/organization/members" })
-    // Awaited, not assumed: four of these rows declare `operatorOnly`, so none
+    // Awaited, not assumed: three of these rows declare `operatorOnly`, so none
     // of them exists until `GET /v1/organizations/me` answers. Taking the
     // snapshot without waiting is a race that passes on a fast machine and fails
-    // on CI, which is what it did. One await covers all four, because the caller
-    // axis is one read and they appear in the same paint.
+    // on CI, which is what it did. One await covers all three, because the
+    // caller axis is one read and they appear in the same paint.
     await within(
       screen.getByRole("navigation", { name: "Sidebar" }),
     ).findByRole("link", { name: "Accounts" })
