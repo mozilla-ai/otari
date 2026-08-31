@@ -107,7 +107,11 @@ defaults apply. In hybrid mode, the control plane resolves the policy instead.
 
 ## Web search
 
-Start the bundled SearXNG backend:
+Otari reaches a licensed search API directly. Set `web_search_provider` to
+`tavily` or `brave` and `web_search_provider_api_key` to that provider's key;
+the key stays in the gateway process and never reaches a caller.
+
+For evaluation, the bundled SearXNG backend needs no key:
 
 ```bash
 docker compose --profile web-search up
@@ -123,9 +127,15 @@ Request it with:
 }
 ```
 
-The bundled service is useful for evaluation, but public SearXNG engines may
-rate-limit automated traffic. The repository includes Brave and Tavily adapters
-under `scripts/`, or `web_search_url` can point at another compatible backend.
+Public SearXNG engines may rate-limit automated traffic, so prefer a licensed
+provider for production. `web_search_url` points at any other backend exposing
+a SearXNG-compatible `/search?format=json` endpoint, and a configured provider
+wins over it.
+
+A deployment that runs its inference in a separate process serves that endpoint
+itself, at `GET /v1/web-search/search`, so the search key stays off the machine
+handling traffic. It is mounted only where `web_search_backend_token` is set,
+and requires that token as `X-Gateway-Token`.
 
 A runnable example lives under `demo/web-search/`.
 

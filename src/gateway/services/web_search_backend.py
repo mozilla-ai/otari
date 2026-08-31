@@ -44,6 +44,7 @@ from opentelemetry import trace
 from gateway.heap import release_free_heap
 from gateway.services.tool_usage import ToolUsageTally
 from gateway.services.url_safety import UnsafeURLError, validate_outbound_fetch_url
+from gateway.services.web_search_providers import WebSearchProviderError, provider_search
 
 if TYPE_CHECKING:
     from types import TracebackType
@@ -193,7 +194,9 @@ class WebSearchBackend:
     def __init__(
         self,
         *,
-        base_url: str,
+        base_url: str | None = None,
+        provider: str | None = None,
+        provider_api_key: str | None = None,
         engines: tuple[str, ...] = _DEFAULT_ENGINES,
         max_results: int = DEFAULT_MAX_RESULTS,
         allowed_domains: tuple[str, ...] = (),
@@ -207,7 +210,19 @@ class WebSearchBackend:
         auth_token: str | None = None,
         tally: ToolUsageTally | None = None,
     ) -> None:
-        self._base_url = base_url.rstrip("/")
+        # Exactly one of the two search paths, checked here rather than at the
+        # first query: a backend with neither would raise mid-completion, after
+        # the request has already been admitted and billed for its first turn.
+        if not base_url and not (provider and provider_api_key):
+            msg = "WebSearchBackend needs either a base_url or a provider with its api key"
+            raise ValueError(msg)
+        self._base_url = base_url.rstrip("/") if base_url else None
+        # A licensed search API this process calls itself, instead of the
+        # SearXNG-shaped service at ``base_url``. Set when the deployment
+        # configured one and holds its key, which on a hosted deployment is the
+        # control plane and never the data plane.
+        self._provider = provider
+        self._provider_api_key = provider_api_key
         # Per-request accounting, owned by the route and passed in. None when the
         # backend runs outside a billed request (tests, direct use).
         self._tally = tally
@@ -321,16 +336,21 @@ class WebSearchBackend:
             query = (arguments.get("query") or "").strip()
             span.set_attribute("web_search.query", query)
             span.set_attribute("web_search.provider", ",".join(self._engines))
-            span.set_attribute("web_search.backend_url", self._base_url)
+            if self._base_url:
+                span.set_attribute("web_search.backend_url", self._base_url)
+            if self._provider:
+                span.set_attribute("web_search.backend_provider", self._provider)
             if not query:
                 span.set_status(trace.StatusCode.ERROR, "empty query")
                 return "[tool error] empty query"
             try:
                 raw_results = await self._search(query)
-            except (httpx.HTTPError, ValueError, KeyError) as exc:
+            except (httpx.HTTPError, WebSearchProviderError, ValueError, KeyError) as exc:
                 span.record_exception(exc)
                 span.set_status(trace.StatusCode.ERROR, str(exc))
-                raise WebSearchNotReachableError(f"web_search failed against {self._base_url}: {exc}") from exc
+                raise WebSearchNotReachableError(
+                    f"web_search failed against {self._describe_backend()}: {exc}"
+                ) from exc
 
             filtered = self._apply_domain_filters(raw_results)[: self._max_results]
             if self._extract_content:
@@ -342,7 +362,36 @@ class WebSearchBackend:
 
     # ----- internals -----
 
+    def _describe_backend(self) -> str:
+        """What a span attribute and a failure message name this search's backend.
+
+        The provider's name or the backend URL, never the credential: this
+        string reaches a log line and an error the caller may see.
+        """
+        return self._provider if self._provider else str(self._base_url)
+
     async def _search(self, query: str) -> list[dict[str, Any]]:
+        """Run one search, through whichever backend this deployment configured.
+
+        A configured licensed provider wins over ``base_url``: an operator who
+        set both named the provider deliberately, and the URL is the fallback
+        the bundled SearXNG container fills.
+        """
+        assert self._client is not None
+        if self._provider and self._provider_api_key:
+            return await provider_search(
+                provider=self._provider,
+                api_key=self._provider_api_key,
+                query=query,
+                # The same opaque bag the SearXNG path forwards as query params.
+                # Each provider whitelists the keys it understands.
+                options=self._provider_options,
+                client=self._client,
+                timeout_s=self._search_timeout_s,
+            )
+        return await self._search_over_http(query)
+
+    async def _search_over_http(self, query: str) -> list[dict[str, Any]]:
         """Issue the backend's ``/search`` GET.
 
         ``q`` / ``format`` / ``engines`` are the fixed SearXNG params. Any

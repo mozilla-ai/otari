@@ -116,6 +116,7 @@ _CONFIG_VIEW: tuple[tuple[str, tuple[str, ...]], ...] = (
             "sandbox_session_image",
             "sandbox_allowed_session_images",
             "web_search_url",
+            "web_search_provider",
             "web_search_purpose_hint",
             "web_search_engines",
             "web_search_max_results",
@@ -186,6 +187,8 @@ _DELIBERATELY_OMITTED: tuple[str, ...] = (
     "smtp_password",
     "oauth_google_client_secret",
     "oauth_github_client_secret",
+    "web_search_provider_api_key",
+    "web_search_backend_token",
     # Structured blocks. ``ConfigField.value`` is bool/int/float/str/list[str],
     # so a dict or a nested model has no representation here at all. Each of
     # these has its own surface where it can be rendered as what it is

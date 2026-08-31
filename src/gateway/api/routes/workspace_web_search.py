@@ -17,7 +17,6 @@ from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import CurrentIdentity, get_config, get_db, verify_master_key
 from gateway.core.config import GatewayConfig
-from gateway.core.env import otari_env
 from gateway.services.tenancy.workspace_web_search_service import (
     WorkspaceWebSearchConfigPublic,
     WorkspaceWebSearchConfigUpdate,
@@ -47,7 +46,7 @@ def get_workspace_web_search_service(
     """
     return WorkspaceWebSearchService(
         db,
-        web_search_configured=bool(config.web_search_url or otari_env("WEB_SEARCH_URL")),
+        web_search_configured=config.web_search_configured(),
     )
 
 

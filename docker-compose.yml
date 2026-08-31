@@ -31,8 +31,13 @@ services:
       # In-network URL of the web-search backend — any HTTP service exposing
       # a SearXNG-compatible /search?format=json endpoint. The bundled
       # `searxng` profile container is the default; swap by changing this URL
-      # to point at any other adapter (commercial-API fronting service etc.).
+      # to point at any other backend.
       - OTARI_WEB_SEARCH_URL=${OTARI_WEB_SEARCH_URL:-http://searxng:8080}
+      # A licensed search API Otari calls itself, which needs no container and
+      # wins over the URL above when both are set. `tavily` or `brave`; the key
+      # stays in this process and is never handed to a caller.
+      - OTARI_WEB_SEARCH_PROVIDER=${OTARI_WEB_SEARCH_PROVIDER:-}
+      - OTARI_WEB_SEARCH_PROVIDER_API_KEY=${OTARI_WEB_SEARCH_PROVIDER_API_KEY:-}
       # Optional knobs. Defaults are conservative — see web_search_backend.py.
       - OTARI_WEB_SEARCH_ENGINES=${OTARI_WEB_SEARCH_ENGINES:-}
       - OTARI_WEB_SEARCH_MAX_RESULTS=${OTARI_WEB_SEARCH_MAX_RESULTS:-}
@@ -143,13 +148,12 @@ services:
   # OSS combination. Operators who enable scraping-of-major-engines do so
   # consciously and should review the upstream engines' Terms of Service.
   #
-  # For commercial / production use, swap this container for a service that
-  # uses a licensed API (Tavily, Brave Search API with key, Exa, Linkup,
-  # Serper). Any HTTP service that exposes a SearXNG-compatible
-  # /search?format=json shape is a drop-in replacement — just change
-  # OTARI_WEB_SEARCH_URL in Otari's environment. Bundled adapters:
-  # the `web-search-brave` profile (Brave API) and the `web-search-tavily`
-  # profile (Tavily API) below.
+  # For commercial / production use, run a licensed API instead. Tavily and
+  # Brave need no container at all: set OTARI_WEB_SEARCH_PROVIDER and
+  # OTARI_WEB_SEARCH_PROVIDER_API_KEY and Otari calls them directly, leaving
+  # OTARI_WEB_SEARCH_URL unset. Any other HTTP service exposing a
+  # SearXNG-compatible /search?format=json shape is still a drop-in
+  # replacement via OTARI_WEB_SEARCH_URL.
   #
   # Opt-in via the `web-search` compose profile so operators who don't use
   # the web_search tool aren't forced to pull this image. Bring it up with
@@ -177,58 +181,6 @@ services:
       # below is fine for a single-tenant Otari-internal deployment; rotate
       # via $SEARXNG_SECRET for multi-tenant or public-facing setups.
       - SEARXNG_SECRET=${SEARXNG_SECRET:-otari-local-dev-secret}
-    restart: unless-stopped
-
-  # Commercial-API web-search backend — a thin adapter that fronts the Brave
-  # Search API with the SearXNG-compatible /search?format=json shape the
-  # Otari expects. Use this instead of the `searxng` profile when the free
-  # metasearch engines rate-limit/CAPTCHA your IP and you want reliable
-  # results. Source + how-to live in scripts/web-search-brave-adapter/.
-  #
-  # Opt-in via the `web-search-brave` profile. To use it, set
-  #   OTARI_WEB_SEARCH_URL=http://brave-adapter:8080
-  #   BRAVE_API_KEY=<your key from https://brave.com/search/api/>
-  # then `docker compose --profile web-search-brave up -d --build brave-adapter otari`.
-  brave-adapter:
-    profiles: ["web-search-brave"]
-    build:
-      context: ./scripts/web-search-brave-adapter
-      dockerfile: Dockerfile
-    ports:
-      # Localhost-only, like the other internal backends — Otari reaches
-      # it over the Docker network at `brave-adapter:8080`; this mapping is for
-      # ad-hoc curl/debugging.
-      - "127.0.0.1:8182:8080"
-    environment:
-      # Brave Search API subscription token. Kept here, not in Otari.
-      - BRAVE_API_KEY=${BRAVE_API_KEY:-}
-    restart: unless-stopped
-
-  # Commercial-API web-search backend — a thin adapter that fronts the Tavily
-  # Search API with the SearXNG-compatible /search?format=json shape the
-  # Otari expects. Tavily is LLM-oriented (returns extracted page content
-  # directly), so Otari can skip its own per-URL fetch. Use this instead
-  # of the `searxng` profile when the free metasearch engines rate-limit your
-  # IP. Source + how-to live in scripts/web-search-tavily-adapter/.
-  #
-  # Opt-in via the `web-search-tavily` profile. To use it, set
-  #   OTARI_WEB_SEARCH_URL=http://tavily-adapter:8080
-  #   TAVILY_API_KEY=<your key from https://tavily.com/>
-  # then `docker compose --profile web-search-tavily up -d --build tavily-adapter otari`.
-  tavily-adapter:
-    profiles: ["web-search-tavily"]
-    build:
-      context: ./scripts/web-search-tavily-adapter
-      dockerfile: Dockerfile
-    ports:
-      # Localhost-only, like the other internal backends — Otari reaches
-      # it over the Docker network at `tavily-adapter:8080`; this mapping is for
-      # ad-hoc curl/debugging. 8184 is taken by encoderfile, so use 8185 to
-      # avoid a clash when the web-search-tavily and guardrails profiles run together.
-      - "127.0.0.1:8185:8080"
-    environment:
-      # Tavily Search API key. Kept here, not in Otari.
-      - TAVILY_API_KEY=${TAVILY_API_KEY:-}
     restart: unless-stopped
 
   # Guardrails service — the otari-anyguardrails container, a stateless FastAPI

@@ -38,9 +38,10 @@ fi
 # not running; callers tolerate it via `|| echo 0` / 2>&1.
 OTARI_CONTAINER=$(cd "$OTARI_ROOT" && docker compose ps -q otari 2>/dev/null | head -1 || true)
 SEARXNG_CONTAINER=$(cd "$OTARI_ROOT" && docker compose ps -q searxng 2>/dev/null | head -1 || true)
-# Brave adapter is up only when the gateway uses the `web-search-brave` profile
-# (./start.sh --brave). Empty otherwise — its log section is skipped.
-BRAVE_CONTAINER=$(cd "$OTARI_ROOT" && docker compose ps -q brave-adapter 2>/dev/null | head -1 || true)
+# With ./start.sh --brave the gateway calls Brave itself and no SearXNG
+# container runs, so the backend's log section is the gateway's own.
+USING_BRAVE=$(docker inspect "$OTARI_CONTAINER" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
+              | grep -c '^OTARI_WEB_SEARCH_PROVIDER=brave$' || true)
 
 OTARI_PORT=${OTARI_PORT:-8000}
 OTARI_URL=${OTARI_URL:-http://localhost:${OTARI_PORT}}
@@ -116,7 +117,6 @@ echo
 
 _gw_before=$(docker logs $OTARI_CONTAINER 2>&1 | wc -l | tr -d ' ' || echo 0)
 _sx_before=$(docker logs $SEARXNG_CONTAINER 2>&1 | wc -l | tr -d ' ' || echo 0)
-_bx_before=$(docker logs $BRAVE_CONTAINER 2>&1 | wc -l | tr -d ' ' || echo 0)
 
 if [[ "$stream" == "1" ]]; then
   curl -sN -X POST "$OTARI_URL/v1/chat/completions" \
@@ -228,12 +228,12 @@ docker logs $OTARI_CONTAINER 2>&1 \
   | grep -iE "POST .*chat|ERROR" \
   | sed "s/^/${DIM}  /; s/$/${RST}/" \
   || true
-if [[ -n "$BRAVE_CONTAINER" ]]; then
+if [[ "$USING_BRAVE" != "0" ]]; then
   echo
-  echo "${BOLD}${DIM}── brave-adapter saw ──${RST}"
-  docker logs $BRAVE_CONTAINER 2>&1 \
-    | tail -n +$((_bx_before + 1)) \
-    | grep -iE "GET /search|error" \
+  echo "${BOLD}${DIM}── brave search saw ──${RST}"
+  docker logs $OTARI_CONTAINER 2>&1 \
+    | tail -n +$((_gw_before + 1)) \
+    | grep -iE "web_search|brave|error" \
     | sed "s/^/${DIM}  /; s/$/${RST}/" \
     || true
 else

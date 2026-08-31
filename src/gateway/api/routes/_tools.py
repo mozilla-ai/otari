@@ -350,7 +350,7 @@ def web_search_max_results_baseline(config: GatewayConfig | None) -> int:
 
 def _build_web_search_backend(
     *,
-    base_url: str,
+    base_url: str | None,
     tool_entry: dict[str, Any],
     auth_token: str | None = None,
     config: GatewayConfig | None = None,
@@ -367,8 +367,17 @@ def _build_web_search_backend(
       * ``OTARI_WEB_SEARCH_EXTRACT`` — "0"/"false" to disable in-process
         content extraction (snippet-only mode).
       * ``OTARI_WEB_SEARCH_PURPOSE_HINT`` — per-deployment hint override.
+
+    ``base_url`` may be ``None`` when the deployment configured a licensed
+    search provider instead, which the backend then calls directly.
     """
     kwargs: dict[str, Any] = {"base_url": base_url, "tally": tally}
+
+    # A licensed provider this deployment holds the key for wins over the URL,
+    # and is how a deployment searches with no backend service in front of it.
+    if config is not None and config.web_search_provider_configured():
+        kwargs["provider"] = config.web_search_provider
+        kwargs["provider_api_key"] = config.web_search_provider_api_key
 
     # Operator knobs resolve from the effective config value (dashboard override /
     # env / YAML) first, falling back to the env var so pure-env deployments are

@@ -22,8 +22,8 @@ if grep -qE '^[A-Z_]+=.*REPLACE_ME' "$ENV_FILE"; then
   exit 1
 fi
 
-# --brave swaps the SearXNG metasearch backend for the Brave Search adapter
-# (scripts/web-search-brave-adapter/). Everything else passes through to
+# --brave points the gateway at the Brave Search API, which it calls itself, so
+# no search container comes up at all. Everything else passes through to
 # `docker compose up`.
 PROFILE="web-search"
 PASSTHRU=()
@@ -34,9 +34,10 @@ for arg in "$@"; do
         echo "--brave needs an uncommented BRAVE_API_KEY in $ENV_FILE (key: https://brave.com/search/api/)." >&2
         exit 1
       fi
-      PROFILE="web-search-brave"
-      export OTARI_WEB_SEARCH_URL=http://brave-adapter:8080
-      echo "ℹ --brave: web_search backed by the Brave adapter (OTARI_WEB_SEARCH_URL → brave-adapter:8080)"
+      PROFILE=""
+      OTARI_WEB_SEARCH_PROVIDER_API_KEY=$(grep -E '^BRAVE_API_KEY=' "$ENV_FILE" | head -1 | cut -d= -f2-)
+      export OTARI_WEB_SEARCH_PROVIDER=brave OTARI_WEB_SEARCH_PROVIDER_API_KEY
+      echo "ℹ --brave: web_search backed by the Brave Search API, called by the gateway itself"
       ;;
     *) PASSTHRU+=("$arg") ;;
   esac
@@ -57,7 +58,11 @@ if [[ -n "$branch" && "$branch" != "main" ]]; then
 EOF
 fi
 
-# The chosen profile opts in the right web-search backend container
-# (searxng by default, brave-adapter with --brave). gateway + postgres have
-# no profile, so they always come up.
-exec docker compose --env-file "$ENV_FILE" --profile "$PROFILE" up ${PASSTHRU[@]+"${PASSTHRU[@]}"}
+# The profile opts in the SearXNG container. --brave clears it, because the
+# gateway calls the Brave API itself and there is nothing to bring up. gateway +
+# postgres have no profile, so they always come up.
+PROFILE_ARGS=()
+if [[ -n "$PROFILE" ]]; then
+  PROFILE_ARGS=(--profile "$PROFILE")
+fi
+exec docker compose --env-file "$ENV_FILE" ${PROFILE_ARGS[@]+"${PROFILE_ARGS[@]}"} up ${PASSTHRU[@]+"${PASSTHRU[@]}"}

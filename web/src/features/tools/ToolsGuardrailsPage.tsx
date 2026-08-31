@@ -58,7 +58,7 @@ const SERVICES: {
     key: "web_search",
     label: "Web search",
     blurb:
-      "Backend for otari_web_search tools (a SearXNG instance or a search adapter).",
+      "Backend for otari_web_search tools. A SearXNG-shaped service at the URL below, or a licensed API (web_search_provider), which needs no URL.",
     pricingKey: "otari:web_search",
     toolId: "otari_web_search",
     order: [

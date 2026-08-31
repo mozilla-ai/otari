@@ -800,7 +800,6 @@ async def test_call_tool_span_records_error_when_backend_unreachable(monkeypatch
     assert attrs["exception.type"] == "httpx.ConnectError"
 
 
-
 # --- structured results for native citation blocks ---------------------------
 
 
@@ -952,10 +951,7 @@ def test_extraction_is_serialized_across_threads() -> None:
     async def main() -> None:
         loop = _asyncio.get_running_loop()
         await _asyncio.gather(
-            *(
-                loop.run_in_executor(_get_extract_executor(), _extract_markdown, f"<html>{i}</html>")
-                for i in range(8)
-            )
+            *(loop.run_in_executor(_get_extract_executor(), _extract_markdown, f"<html>{i}</html>") for i in range(8))
         )
 
     with patch("gateway.services.web_search_backend.trafilatura.extract", tracking_extract):
@@ -998,3 +994,58 @@ def test_extraction_does_not_occupy_the_shared_executor() -> None:
         elapsed = _asyncio.run(main())
 
     assert elapsed < 0.5, f"unrelated to_thread work waited {elapsed:.2f}s behind the extraction queue"
+
+
+@pytest.mark.asyncio
+async def test_provider_backend_calls_the_api_directly(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A configured provider replaces the /search hop, adapter container and all."""
+    transport = _patched_async_client(
+        {
+            (
+                "api.tavily.com",
+                "/search",
+            ): httpx.Response(
+                200,
+                json={"results": [{"url": "https://example.com/a", "title": "A", "content": "snippet a"}]},
+            )
+        },
+        monkeypatch,
+    )
+    async with WebSearchBackend(provider="tavily", provider_api_key="tvly-x", extract_content=False) as backend:
+        out = await backend.call_tool(WEB_SEARCH_TOOL_NAME, {"query": "claude code"})
+
+    assert "https://example.com/a" in out
+    assert transport.captured[0].url.host == "api.tavily.com"
+
+
+@pytest.mark.asyncio
+async def test_provider_wins_over_a_configured_backend_url(monkeypatch: pytest.MonkeyPatch) -> None:
+    transport = _patched_async_client(
+        {
+            ("api.tavily.com", "/search"): httpx.Response(200, json={"results": []}),
+            ("searxng", "/search"): httpx.Response(200, json=SEARXNG_OK_BODY),
+        },
+        monkeypatch,
+    )
+    async with WebSearchBackend(
+        base_url="http://searxng:8080",
+        provider="tavily",
+        provider_api_key="tvly-x",
+        extract_content=False,
+    ) as backend:
+        await backend.call_tool(WEB_SEARCH_TOOL_NAME, {"query": "q"})
+
+    assert [request.url.host for request in transport.captured] == ["api.tavily.com"]
+
+
+@pytest.mark.asyncio
+async def test_provider_failure_surfaces_as_unreachable(monkeypatch: pytest.MonkeyPatch) -> None:
+    _patched_async_client({("api.tavily.com", "/search"): httpx.Response(500, text="boom")}, monkeypatch)
+    async with WebSearchBackend(provider="tavily", provider_api_key="tvly-x") as backend:
+        with pytest.raises(WebSearchNotReachableError, match="tavily"):
+            await backend.call_tool(WEB_SEARCH_TOOL_NAME, {"query": "q"})
+
+
+def test_a_backend_with_no_way_to_search_is_refused_at_construction() -> None:
+    with pytest.raises(ValueError, match="base_url"):
+        WebSearchBackend()

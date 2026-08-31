@@ -91,9 +91,10 @@ docker compose --profile web-search up -d
 docker compose --profile guardrails up -d
 ```
 
-The Brave and Tavily search adapters have separate profiles and documentation
-under `scripts/`. These services are optional; requests that require an
-unconfigured backend fail without affecting ordinary inference.
+Web search needs no container when `web_search_provider` names a licensed API
+(`tavily` or `brave`) and `web_search_provider_api_key` carries its key. These
+services are optional; requests that require an unconfigured backend fail
+without affecting ordinary inference.
 
 See [Built-in tools](tools.md) and [Guardrails](guardrails.md).
 

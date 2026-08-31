@@ -117,6 +117,12 @@ MAIL_TRANSPORT_SETTINGS = ("auto", "smtp", "console", "none")
 # reject an unknown ``search_tools.<name>.provider`` without the config layer
 # importing the service layer.
 SEARCH_PROVIDERS = ("exa", "searxng")
+# Licensed search APIs the in-loop ``otari_web_search`` backend can call
+# directly, as an alternative to pointing ``web_search_url`` at a SearXNG-shaped
+# service. Declared here for the same reason as SEARCH_PROVIDERS above: startup
+# validation rejects an unknown ``web_search_provider`` without the config layer
+# importing `gateway.services.web_search_providers`, which imports this name.
+WEB_SEARCH_PROVIDERS = ("tavily", "brave")
 # Providers that authenticate with an API key, so a tool declaring one of them
 # without a key is a misconfiguration. A SearXNG-shaped backend is normally
 # keyless (the bundled container, a self-hosted adapter), which is why the key
@@ -1037,6 +1043,29 @@ class GatewayConfig(BaseSettings):
             "docker-compose sets this to the bundled SearXNG container."
         ),
     )
+    web_search_provider: str | None = Field(
+        default=None,
+        description=(
+            "Licensed search API the web-search backend calls directly ('tavily' or 'brave'), "
+            "instead of the SearXNG-shaped service web_search_url names. Requires "
+            "web_search_provider_api_key. When both are set, web_search_url is not needed."
+        ),
+    )
+    web_search_provider_api_key: str | None = Field(
+        default=None,
+        description=(
+            "Credential for web_search_provider. Held by whichever process runs the search: on a "
+            "hosted deployment that is the control plane, never the data plane."
+        ),
+    )
+    web_search_backend_token: str | None = Field(
+        default=None,
+        description=(
+            "Shared secret GET /v1/web-search/search requires as X-Gateway-Token. Set on a hosted "
+            "control plane so its data-plane gateway can search through it; without it the route "
+            "is not served, because it spends the deployment's own search quota."
+        ),
+    )
     web_search_purpose_hint: str | None = Field(
         default=None,
         description=(
@@ -1676,6 +1705,31 @@ class GatewayConfig(BaseSettings):
             return providers
         return {instance: ({} if entry is None else entry) for instance, entry in providers.items()}
 
+    def web_search_provider_configured(self) -> bool:
+        """Whether a licensed search API is configured for the in-loop tool.
+
+        Both halves, because either alone runs no search: a provider with no key
+        cannot authenticate, and a key with no provider names nothing to send it
+        to. When this is true the deployment can search without
+        ``web_search_url``, which is what lets it drop the adapter container that
+        used to sit between the two.
+        """
+        return bool(self.web_search_provider) and bool(self.web_search_provider_api_key)
+
+    def web_search_configured(self) -> bool:
+        """Whether this deployment can run ``otari_web_search`` at all.
+
+        The one question the request path, the per-workspace page and the tool
+        catalog all ask, so they cannot disagree about whether a workspace's
+        stored configuration governs anything.
+
+        ``web_search_url`` is read through ``otari_env`` as well as off the
+        field, matching every call site this replaces: the field is env-bridged,
+        so the two agree, and dropping the read here would quietly narrow what
+        counts as configured.
+        """
+        return bool(self.web_search_url or otari_env("WEB_SEARCH_URL")) or self.web_search_provider_configured()
+
     def search_tool_providers(self) -> set[str]:
         """The distinct providers backing the configured search tools.
 
@@ -1752,6 +1806,19 @@ class GatewayConfig(BaseSettings):
             provider = str(entry.get("provider") or name)
             if provider in SEARCH_PROVIDERS_REQUIRING_API_BASE and not entry.get("api_base"):
                 validate_search_tool_transport(name, self.web_search_url, entry.get("api_key"))
+
+    @field_validator("web_search_provider")
+    @classmethod
+    def _validate_web_search_provider(cls, value: str | None) -> str | None:
+        if value is None:
+            return None
+        normalized = value.strip().lower()
+        if not normalized:
+            return None
+        if normalized not in WEB_SEARCH_PROVIDERS:
+            msg = f"web_search_provider must be one of {sorted(WEB_SEARCH_PROVIDERS)}, got '{value}'"
+            raise ValueError(msg)
+        return normalized
 
     @field_validator("stream_missing_usage_policy")
     @classmethod

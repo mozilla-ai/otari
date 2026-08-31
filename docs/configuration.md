@@ -220,6 +220,7 @@ and guardrail configuration. Common startup settings are:
 
 - `sandbox_url`
 - `web_search_url`
+- `web_search_provider` and `web_search_provider_api_key`
 - `guardrails_url`
 - `mcp_allow_loopback` and `mcp_allow_private_hosts`
 - `web_search_allow_private_hosts`

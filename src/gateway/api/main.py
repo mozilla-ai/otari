@@ -51,6 +51,7 @@ from gateway.api.routes import (
     tools,
     usage,
     users,
+    web_search_backend,
     workspace_activation,
     workspace_code_execution_policy,
     workspace_mcp_servers,
@@ -122,6 +123,13 @@ def _register_core_routers(app: FastAPI, config: GatewayConfig) -> None:
     # browser learns which mode it reached, so it is the one management-adjacent
     # route a hybrid gateway still answers.
     app.include_router(bootstrap.router)
+    # The search backend a data-plane gateway calls, mounted only where it can
+    # both authenticate one and answer it: this deployment holds a search
+    # provider's credential and a token to recognize its own gateway by. Absent
+    # otherwise rather than mounted and refusing, because a deployment that
+    # configured neither is not offering this surface at all.
+    if config.web_search_provider_configured() and config.web_search_backend_token:
+        app.include_router(web_search_backend.router)
     # /v1/messages and /v1/responses now support hybrid mode (multi-attempt
     # fallback + usage reporting), so they're registered for hybrid too.
     if serves_data_plane:

@@ -2040,7 +2040,7 @@ class ToolContext:
         backend, the keyword was forwarded and any block in the transcript came from
         the provider that ran the search (see ``routes/messages.py``).
         """
-        return _web_search_intercept_enabled(self.config) and self.web_search_url is not None
+        return _web_search_intercept_enabled(self.config) and self.config.web_search_configured()
 
     @property
     def use_tool_loop(self) -> bool:
@@ -2492,7 +2492,7 @@ async def prepare_gateway_tools(
         # *to*, and claiming the keyword would turn a request the provider would have
         # served into a 400. So with no backend configured, or the toggle off, a
         # provider-named keyword passes through exactly as it always has.
-        intercept_web_search = _web_search_intercept_enabled(ctx.config) and web_search_url is not None
+        intercept_web_search = _web_search_intercept_enabled(ctx.config) and ctx.config.web_search_configured()
         web_search_tool_entry, remaining_user_tools = _extract_web_search_tool(
             tools_after_sandbox,
             intercept=intercept_web_search,
@@ -2504,7 +2504,7 @@ async def prepare_gateway_tools(
         web_search_auth_token: str | None = None
         use_web_search = False
         if web_search_tool_entry is not None:
-            if web_search_url is None:
+            if not ctx.config.web_search_configured():
                 raise adapter.error(400, WEB_SEARCH_NOT_CONFIGURED_DETAIL, ErrorKind.INVALID_REQUEST)
             if use_sandbox or mcp_servers:
                 raise adapter.error(400, WEB_SEARCH_CONFLICT_DETAIL, ErrorKind.INVALID_REQUEST)
@@ -2539,7 +2539,9 @@ async def prepare_gateway_tools(
                 # already trusts this token with for resolve). Never leak this
                 # high-privilege credential to a bundled SearXNG or a third-party
                 # adapter that an operator happened to point GATEWAY_WEB_SEARCH_URL at.
-                if url_targets_platform(web_search_url, ctx.config.platform.get("base_url")):
+                if web_search_url is not None and url_targets_platform(
+                    web_search_url, ctx.config.platform.get("base_url")
+                ):
                     web_search_auth_token = ctx.config.platform_token
                 web_search_policy = await _resolve_platform_web_search(
                     config=ctx.config,
@@ -3193,7 +3195,6 @@ async def dispatch_non_stream(
             return await adapter.run_tool_loop(kwargs, backend, tool_ctx.max_tool_iterations, on_first_response)
 
     assert tool_ctx.use_web_search
-    assert tool_ctx.web_search_url is not None  # guaranteed past the missing-URL 400 in prepare_gateway_tools
     assert tool_ctx.web_search_tool_entry is not None  # guaranteed by the web_search opt-in
     async with _build_web_search_backend(
         base_url=tool_ctx.web_search_url,
@@ -3276,7 +3277,6 @@ async def open_stream(
         return _eager_backend_stream(adapter, kwargs, sandbox_backend, tool_ctx)
 
     assert tool_ctx.use_web_search
-    assert tool_ctx.web_search_url is not None  # guaranteed past the missing-URL 400 in prepare_gateway_tools
     assert tool_ctx.web_search_tool_entry is not None  # guaranteed by the web_search opt-in
     web_search_backend = _build_web_search_backend(
         base_url=tool_ctx.web_search_url,
@@ -3900,7 +3900,6 @@ async def run_streaming_with_fallback(
         elif tool_ctx.use_sandbox:
             pool_for_loop = await backend_stack.enter_async_context(tool_ctx.build_sandbox_backend())
         elif tool_ctx.use_web_search:
-            assert tool_ctx.web_search_url is not None  # guaranteed past the missing-URL 400
             assert tool_ctx.web_search_tool_entry is not None  # guaranteed by the web_search opt-in
             pool_for_loop = await backend_stack.enter_async_context(
                 _build_web_search_backend(

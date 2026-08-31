@@ -128,10 +128,10 @@ done
 # loudly if the stack isn't brave-configured so the narration can't lie.
 if [[ "$USE_BRAVE" == "1" ]]; then
   _gw=$(cd "$OTARI_ROOT" && docker compose ps -q otari 2>/dev/null | head -1 || true)
-  _gw_url=$(docker inspect "$_gw" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
-            | grep '^OTARI_WEB_SEARCH_URL=' | cut -d= -f2- || true)
-  if [[ "$_gw_url" != *brave-adapter* ]]; then
-    echo "${RED}--brave: the gateway is not using the Brave adapter (OTARI_WEB_SEARCH_URL=${_gw_url:-unset}).${RST}" >&2
+  _gw_provider=$(docker inspect "$_gw" --format '{{range .Config.Env}}{{println .}}{{end}}' 2>/dev/null \
+            | grep '^OTARI_WEB_SEARCH_PROVIDER=' | cut -d= -f2- || true)
+  if [[ "$_gw_provider" != "brave" ]]; then
+    echo "${RED}--brave: the gateway is not using the Brave Search API (OTARI_WEB_SEARCH_PROVIDER=${_gw_provider:-unset}).${RST}" >&2
     echo "${YEL}Bring the stack up with the Brave backend first:  ./start.sh --brave${RST}" >&2
     exit 1
   fi
@@ -442,9 +442,9 @@ N=${#ENABLED[@]}
 if [[ "$USE_BRAVE" == "1" ]]; then
   present "1) Gateway-managed web search (Brave) — ${N} provider$( [[ $N -gt 1 ]] && echo s )" \
           "Every provider uses the SAME keyword (otari_web_search). The gateway" \
-          "runs the search via the Brave Search API adapter — reliable results," \
-          "no engine rate-limiting." \
-          "Watch the 'brave-adapter saw' lines: the adapter does the work."
+          "runs the search against the Brave Search API itself: reliable results," \
+          "no engine rate-limiting, no extra container." \
+          "Watch the 'brave search saw' lines: the gateway does the work."
 else
   present "1) Gateway-managed web search — ${N} provider$( [[ $N -gt 1 ]] && echo s )" \
           "Every provider uses the SAME keyword (otari_web_search) and the SAME" \
