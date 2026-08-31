@@ -11,11 +11,12 @@ import type {
 /**
  * A recording stand-in for the telemetry seam.
  *
- * The base module is a genuine no-op, so a test asserting that an event fires
- * has nothing to observe unless it replaces the module the way a superset build
- * does. That replacement is what this is: one shared spy, so the six consumers
- * that record something do not each invent their own shape for the tracker and
- * then agree with themselves about it.
+ * The base module is a no-op unless `VITE_MIXPANEL_TOKEN` is set, so a test
+ * asserting that an event fires has nothing to observe unless it replaces the
+ * module the way a superset build does. That replacement is what this is: one
+ * shared spy, so AppShell, TelemetryIdentity, and the six auth modules do
+ * not each invent their own shape for the tracker and then agree with
+ * themselves about it.
  *
  * A test reaches it through the async factory form, because `vi.mock` is hoisted
  * above the imports and a factory referencing one directly would run before it

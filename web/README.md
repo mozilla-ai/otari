@@ -70,6 +70,11 @@ filesystem events. Fall back to polling:
 VITE_USE_POLLING=1 pnpm run dev
 ```
 
+Dashboard analytics are gated by `VITE_MIXPANEL_TOKEN` (inlined at build time,
+also read from the repo-root `.env` by `make dashboard`). Without a token the
+SDK is never loaded. A local dashboard without a token logs `Mixpanel not
+initialized` once in the browser console.
+
 ## Build
 
 ```bash

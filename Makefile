@@ -26,6 +26,9 @@ dev:
 # degrades to the tutorial page) and before building a wheel. The Docker image
 # builds it in its own web stage and needs no local Node.
 dashboard: web/node_modules/.install-stamp
+	@set -a; \
+	if [ -f .env ]; then . ./.env; fi; \
+	set +a; \
 	pnpm --dir web run build
 
 # Reinstalling on every rebuild is the wrong price to pay now that the READMEs
