@@ -59,9 +59,10 @@ full guidance, with worked examples grounded in this dashboard's code, lives in 
    and invalidate only the keys a mutation changes. Guard with `isPending && !data` (never bare
    `isPending`, never `isLoading`) and give a filtered or paginated query
    `placeholderData: (prev) => prev`, or the page blanks on every filter change. Don't call
-   `fetch()` directly for authenticated management requests (the one exception is pre-auth
-   `validateMasterKey`), never mirror server state into `useState`, and never swallow a
-   mutation error. Bound every "fetch all" loop with a hard page cap. See
+   `fetch()` directly for authenticated management requests; `apiFetch` uses the HttpOnly
+   session cookie and signs out on 401, while public sign-in helpers stay outside that path.
+   Never mirror server state into `useState`, and never swallow a mutation error. Bound every
+   "fetch all" loop with a hard page cap. See
    [data-fetching.md](../skills/frontend-standards/data-fetching.md).
 
 5. **TypeScript + React hygiene.** `undefined` (not `null`) for absent values in your own

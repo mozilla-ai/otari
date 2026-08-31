@@ -46,7 +46,7 @@ Render's `postgresql://` connection string works without modification. Otari sel
 
 During initial setup, Render prompts for `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, `MISTRAL_API_KEY`, and `GEMINI_API_KEY`. Each field is optional, but at least one provider credential is required before the gateway can serve requests. Leave unused fields blank.
 
-The underlying [any-llm](https://github.com/mozilla-ai/any-llm) SDK reads each provider's native environment variables. To use any other provider from [`docs/models.md`](../../docs/models.md), add its variable on the service's Environment tab. Render prompts for variables marked `sync: false` only during initial creation, so add or rotate credentials for an existing service from that tab.
+The underlying [any-llm](https://github.com/mozilla-ai/any-llm) SDK reads each provider's native environment variables. To use another [supported provider](https://docs.mozilla.ai/any-llm/providers/), add its variable on the service's Environment tab. Render prompts for variables marked `sync: false` only during initial creation, so add or rotate credentials for an existing service from that tab.
 
 ### Pricing
 

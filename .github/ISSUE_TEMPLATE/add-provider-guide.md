@@ -9,7 +9,7 @@ labels: ["good first issue", "documentation"]
 
 Add a short setup guide for **&lt;Provider&gt;** at `docs/providers/<provider-key>.md`, matching the existing exemplar at `docs/providers/openai.md`.
 
-The provider is already in the reference table at `docs/models.md`. This issue adds the deeper "how to set it up, and the gotchas" page for it.
+The provider is already supported by any-llm. This issue adds the deeper "how to set it up, and the gotchas" page for Otari.
 
 ## Why
 
@@ -17,7 +17,7 @@ Each provider has its own auth, base URL, and model-naming quirks. A per-provide
 
 ## Steps
 
-1. Copy `docs/providers/openai.md` to `docs/providers/<provider-key>.md`. Use the config key from `docs/models.md` (for example `anthropic`, `mistral`, `groq`).
+1. Copy `docs/providers/openai.md` to `docs/providers/<provider-key>.md`. Use the ID from any-llm's [supported providers](https://docs.mozilla.ai/any-llm/providers/) (for example `anthropic`, `mistral`, `groq`).
 2. Fill in each section for this provider:
    - [ ] **Prerequisites**: where to get an API key (link the provider's console)
    - [ ] **Configure**: the `providers:` block; note if this provider needs `api_base` or extra fields (check `config.example.yml` and `docs/configuration.md`)
@@ -44,4 +44,5 @@ Anthropic, Mistral, Groq, or OpenRouter are good starter picks. Leave Vertex AI 
 
 - Exemplar: `docs/providers/openai.md`
 - Config schema: `config.example.yml`
-- Provider list and model format: `docs/models.md`
+- Supported providers: https://docs.mozilla.ai/any-llm/providers/
+- Model format: `docs/models.md`

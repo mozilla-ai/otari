@@ -83,7 +83,8 @@ documentation. See the official configuration reference above.
 ## Import Codex usage without routing
 
 Codex can export direct OpenAI usage to Otari over OTLP. This is for sessions
-that do not already route through Otari.
+that do not already route through Otari. Send it to a standalone or hosted
+gateway; hybrid gateways do not serve the OTLP endpoints.
 
 Create a dedicated API key with `exclude_from_budget: true`, then configure the
 HTTP logs exporter with the full Otari logs path:

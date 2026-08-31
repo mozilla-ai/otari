@@ -130,7 +130,7 @@ pools. It is not learned automatically from live traffic.
 The default learned-routing settings are `k=5`, a 20-example warm-up, and
 `trace_sticky` granularity. They are deployment settings named
 `router_k`, `router_seed_count`, `router_alpha`,
-`router_confidence_floor`, `router_embedding_model`, and
+`router_confidence_floor`, `router_embedding_model`, `router_granularity`, and
 `router_max_records_per_user`.
 
 Trace stickiness is process-local. A restart or request routed to another replica

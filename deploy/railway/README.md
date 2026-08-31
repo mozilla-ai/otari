@@ -43,7 +43,8 @@ Notes:
   traffic. To use another provider, add a variable with its native env var name
   (for example `ANTHROPIC_API_KEY`, `MISTRAL_API_KEY`, or `GEMINI_API_KEY`); the
   underlying [`any-llm`](https://github.com/mozilla-ai/any-llm) SDK reads these
-  directly. See [`docs/models.md`](../../docs/models.md) for the provider list.
+  directly. See any-llm's [supported providers](https://docs.mozilla.ai/any-llm/providers/)
+  for the current list.
 - Otari normalizes a `postgresql://` URL to the async driver automatically, so
   Railway's `DATABASE_URL` works without edits.
 - `OTARI_REQUIRE_PRICING=false` is deliberate. The image default is `true`

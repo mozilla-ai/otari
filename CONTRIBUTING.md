@@ -55,8 +55,9 @@ make postman-check
 - New features need tests covering the happy path and error cases.
 - Unit tests for pure logic (`tests/unit/`), integration tests for route or database behavior (`tests/integration/`).
 - Integration tests require PostgreSQL. They start Testcontainers by default;
-  without Docker, set `TEST_DATABASE_URL` to a server where the test workers
-  may create and drop databases.
+  without Docker, set `TEST_DATABASE_URL` to a test server where workers may
+  create and drop databases. Never use production, and do not run concurrent
+  suites against the same server URL because their worker database names collide.
 
 ## Pull requests
 

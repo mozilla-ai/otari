@@ -39,7 +39,7 @@
         "OPENAI_API_KEY": {
           "defaultValue": "",
           "isOptional": true,
-          "description": "OpenAI API key. Optional: set at least one provider key for the gateway to serve traffic. Any any-llm provider works by adding its native env var (ANTHROPIC_API_KEY, MISTRAL_API_KEY, GEMINI_API_KEY, ...); see https://github.com/mozilla-ai/any-llm and docs/models.md for the provider list."
+          "description": "OpenAI API key. Optional: set at least one provider key for the gateway to serve traffic. Any any-llm provider works by adding its native env var (ANTHROPIC_API_KEY, MISTRAL_API_KEY, GEMINI_API_KEY, ...); see https://docs.mozilla.ai/any-llm/providers/ for the current list."
         }
       }
     },

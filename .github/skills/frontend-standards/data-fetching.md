@@ -2,26 +2,24 @@
 
 All *authenticated* server state flows through TanStack Query hooks in `web/src/shared/api/hooks.ts`,
 which call `apiFetch` from `web/src/shared/api/client.ts`. Don't call `fetch()` directly for
-authenticated management requests, and never mirror server state into `useState`. (The one
-exception is pre-auth candidate-key validation, described under "The API boundary" below.)
+authenticated management requests, and never mirror server state into `useState`.
 
 ## The API boundary
 
 `apiFetch<T>(path, init)` is the single door to the gateway's management API. It:
 
-- attaches the master key as `Authorization: Bearer …`,
+- lets the browser attach the HttpOnly session cookie on same-origin requests,
 - sets JSON headers, extracts `detail` from error bodies into an `ApiError`,
-- treats **401 and 403** as "this session can't use the management API", it calls the
-  registered unauthorized handler (drops the key, bounces to sign-in) and throws.
+- treats **401** as an expired or revoked session, calls the registered unauthorized handler,
+  and throws. A 403 is an authorization refusal for a still-valid session.
 
-Because 401/403 are handled centrally, hooks don't need to. The query client
-(`web/src/app/provider.tsx`) also **never retries** an `ApiError` with status 401/403 (they won't
-fix themselves) and retries other failures twice.
+The query client (`web/src/app/provider.tsx`) does not retry an `ApiError` with status 401 or
+403, because neither will fix itself, and retries other failures twice.
 
-The one deliberate raw-`fetch` exception is **pre-auth**: `validateMasterKey` (`client.ts`)
-hits a master-key-gated endpoint to check a *candidate* key before it becomes the stored
-`masterKey`, so it can't use `apiFetch` (which would attach the not-yet-accepted key). Every
-request after sign-in goes through `apiFetch`.
+Pre-authentication helpers such as `createSession`, `signInWithPasskey`, and the OAuth helpers
+use public requests. They cannot use `apiFetch`, because a 401 while somebody is signing in
+must report a refused credential rather than bounce them back to the page they are already on.
+Every authenticated management request after sign-in goes through `apiFetch`.
 
 ## Query conventions
 
@@ -107,7 +105,7 @@ it through `ErrorBanner` and `errorMessage(error)`), or handle it in the hook. W
 acceptable is an `onError` that swallows: a delete that quietly did nothing is worse than one
 that says why it could not.
 
-401 and 403 are the exception and are already handled centrally, in `apiFetch`.
+401 sign-out and the query client's no-retry handling for 401 and 403 are centralized.
 
 ## Bounded pagination
 

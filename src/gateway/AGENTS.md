@@ -28,8 +28,8 @@ Completion requests follow this order:
 
 1. Extract and verify the API key or master key in `api/deps.py`.
 2. Resolve the billed user, workspace, and organization.
-3. Resolve pricing and reserve applicable budgets.
-4. Compile local routing or resolve a hybrid attempt plan.
+3. Compile local routing or resolve a hybrid attempt plan.
+4. Resolve pricing and reserve applicable budgets.
 5. Apply organization, policy, and request guardrails.
 6. Resolve MCP and gateway-run tool policy.
 7. Dispatch through any-llm.

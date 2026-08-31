@@ -63,7 +63,8 @@ one a default.
 ## Import Claude Code usage without routing
 
 Claude Code can send subscription usage to Otari over OpenTelemetry. This is for
-sessions that do not already route through Otari.
+sessions that do not already route through Otari. Send it to a standalone or
+hosted gateway; hybrid gateways do not serve the OTLP endpoints.
 
 Create a dedicated API key with `exclude_from_budget: true`, then configure the
 logs exporter. The optional metrics exporter adds content-free outcome counters.

@@ -37,7 +37,7 @@ for providers that already support a native search tool. It requires
 
 ## Pricing a gateway-run tool
 
-Gateway-run tools are priced per successful call:
+In standalone mode, gateway-run tools are priced per successful call:
 
 ```text
 otari:code_execution
@@ -148,9 +148,9 @@ connected control plane supplies workspace search configuration.
 
 ## Direct search
 
-`POST /v1/search` lets the caller submit a query directly instead of waiting
-for a model to request one. Configure its named providers through
-[`search_tools`](configuration.md#search-tools) or the Search tools API.
+In standalone mode, `POST /v1/search` lets the caller submit a query directly
+instead of waiting for a model to request one. Configure its named providers
+through [`search_tools`](configuration.md#search-tools) or the Search tools API.
 
 A SearXNG search tool can reuse `web_search_url`, so model-initiated and direct
 search can share one backend. They remain distinct surfaces with separate

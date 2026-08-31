@@ -58,7 +58,9 @@ commands are unchanged.
 ```
 
 `monitor` forwards flagged input and returns the verdict in the
-`X-Otari-Guardrails` header. `block` returns 403 without calling the model.
+`X-Otari-Guardrails` header for non-streaming responses. Streaming responses do
+not currently propagate this header. `block` still returns 403 before calling
+the model, including for streaming requests.
 See [Guardrails](../../docs/guardrails.md) for organization policy, failure
 behavior, and all request fields.
 

@@ -29,7 +29,7 @@ describe("DocsPage", () => {
     expect(
       screen.queryByRole("heading", { name: "First-run walkthrough" }),
     ).toBeNull()
-    expect(screen.queryByText(/Find your master key/)).toBeNull()
+    expect(screen.queryByText(/Start Otari in standalone mode/)).toBeNull()
     // The guide still covers setup and ongoing operation after the dropped section.
     expect(
       screen.getByRole("heading", { name: "The setup guide" }),

@@ -79,7 +79,7 @@ The organization view contains tenant-wide administration:
 
 - Workspaces and organization members
 - Spend and budgets
-- Organization pricing and guardrails
+- Organization pricing
 - Organization settings and, in hosted mode, provider keys
 
 Settings shows the effective non-secret configuration. Some values can be changed
@@ -113,8 +113,9 @@ workspace roles. Deployment-wide operations require an operator. See
 
 Password sign-in is always tied to an existing identity. Optional passkeys,
 Google OAuth, and GitHub OAuth add ways for that identity to sign in; they do not
-make an unknown account a member. Passkeys and OAuth require
-`public_base_url`; provider OAuth also requires its client ID and secret.
+make an unknown account a member. OAuth requires `public_base_url` plus the
+provider's client ID and secret. Passkeys can instead use `public_base_url`, or
+an explicit `webauthn_rp_id` and `webauthn_allowed_origins` pair.
 
 Mail is optional. Without SMTP, invitation links can still be copied and shared
 manually. See [Configuration](configuration.md#mail).

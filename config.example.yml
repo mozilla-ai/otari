@@ -25,7 +25,7 @@ providers:
   # discovery when the backend has no /v1/models endpoint.
   # home_lab:
   #   provider_type: openai
-  #   api_base: "http://gpu-box:8000/v1"
+  #   api_base: "https://models.example.com/v1"
   #   api_key: ${HOME_LAB_TOKEN}
   #   models: [qwen3-32b]
 

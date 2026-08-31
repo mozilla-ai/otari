@@ -46,12 +46,16 @@ maintenance instructions.
 ## Connect a gateway to otari.ai
 
 Create a gateway in otari.ai and copy its gateway token, then start Otari in
-hybrid mode:
+hybrid mode. Put the token in a private environment file:
+
+```dotenv
+OTARI_AI_TOKEN=gw_your_gateway_token
+```
 
 ```bash
 docker run --rm -p 8000:8000 \
-  -e OTARI_AI_TOKEN=gw_your_gateway_token \
-  mzdotai/otari:latest \
+  --env-file .env \
+  mzdotai/otari:0.4.0 \
   otari serve
 ```
 

@@ -1,6 +1,6 @@
 # OpenAI
 
-Route requests to OpenAI models (GPT-4o, GPT-4.1, the o-series, and others) through Otari. For the full provider list and the model-name format, see [Models](../models.md).
+Route requests to OpenAI models (GPT-4o, GPT-4.1, the o-series, and others) through Otari. See any-llm's [supported providers](https://docs.mozilla.ai/any-llm/providers/) for the current provider list and [Models](../models.md) for Otari's model-name format.
 
 ## What you'll set up
 

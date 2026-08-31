@@ -102,8 +102,9 @@ can link Vite's esbuild binary at all.
 - Manual polling with bare `setInterval`/`setTimeout`. Use TanStack Query's `refetchInterval`
   (see `useDashboardBuild`).
 - A raw `fetch()` for **authenticated** management requests. Go through `apiFetch`, which owns the
-  Bearer key, error extraction, and 401/403 sign-out. `validateMasterKey` is the one sanctioned
-  exception, and [data-fetching.md](./data-fetching.md) says why.
+  HttpOnly session-cookie flow, error extraction, and 401 sign-out. Pre-authentication helpers such
+  as `createSession` use public requests so a refused sign-in does not trigger that sign-out path;
+  [data-fetching.md](./data-fetching.md) says why.
 - Client-side filtering/sorting/pagination of large server datasets when the endpoint can do
   it. (Small, already-loaded lists rendered in a `Table` are fine.)
 - Memoization by reflex. The React Compiler is enabled; add `useMemo`/`useCallback`/`memo`

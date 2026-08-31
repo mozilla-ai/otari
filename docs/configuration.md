@@ -101,7 +101,7 @@ A custom or self-hosted endpoint can use a named instance:
 providers:
   home_lab:
     provider_type: openai
-    api_base: "http://gpu-box:8000/v1"
+    api_base: "https://models.example.com/v1"
     api_key: ${HOME_LAB_TOKEN}
     models: [qwen3-32b]
 ```
@@ -185,9 +185,9 @@ search_tools:
     api_base: "http://searxng:8080"
 ```
 
-Supported provider options and request filters are published by
-`GET /v1/search-tools/providers`. For model-initiated search and the bundled
-adapters, see [Built-in tools](tools.md).
+`GET /v1/search-tools/providers` publishes the supported providers and whether
+each requires an `api_key` or `api_base`. Provider options and request filters
+are covered in [Built-in tools](tools.md).
 
 ## Mail
 

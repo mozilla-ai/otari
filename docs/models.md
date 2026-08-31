@@ -50,7 +50,7 @@ when a self-hosted server speaks a compatible protocol:
 providers:
   home_lab:
     provider_type: openai
-    api_base: "http://gpu-box:8000/v1"
+    api_base: "https://models.example.com/v1"
     api_key: ${HOME_LAB_TOKEN}
     models:
       - qwen3-32b
@@ -122,6 +122,9 @@ aliases:
 Callers send the alias in `model`. Completion responses keep the alias while
 pricing, budgets, and usage use the resolved target. Configure the target's
 price, not a price under the alias.
+
+An alias also withholds its target from model listings in that workspace. This
+does not apply to routing-policy targets.
 
 Aliases are useful for a curated catalog. A routing policy is the broader form
 when a name needs conditions, failover, weighting, learned selection, or

@@ -29,8 +29,10 @@ Management routes use one of two authorization shapes:
   service layer.
 
 Data-plane routes use `verify_api_key_or_master_key`. They never accept a
-dashboard cookie, including a superuser session, because cookie authentication
-has no API key row from which to resolve billing and provider credentials.
+dashboard cookie, including a superuser session. A header master key is billed
+through the deployment's default workspace, but accepting a cookie here would
+let any signed-in organization member spend that default workspace's provider
+credentials and budget without holding a data-plane key.
 Read-only catalog routes use `verify_catalog_reader`.
 
 Using the operator gate on a tenant route is also wrong; it prevents members
@@ -64,6 +66,9 @@ not the usage-log writer, is the authority for spend.
 Treat zero as a value and `None` as missing. Falsy checks around cost, token
 counts, or limits can create free usage.
 
+New security-affecting configuration must default to the fail-closed behavior
+and reject unknown values during config loading.
+
 ### Respect deployment mode
 
 Standalone serves both planes, hosted serves only the control plane, and hybrid
@@ -84,8 +89,10 @@ Caller-fixable upstream 400, 404, and 422 errors may pass through only after
 billing failures, 5xx responses, and unknown failures use fixed public text.
 Expanding the pass-through set is a security change.
 
-Stored credentials are encrypted and responses expose only safe metadata such as
-`last4` or `has_token`. Key validation must not echo the submitted secret.
+API keys are stored as one-way SHA-256 hashes, never as plaintext. Recoverable
+provider and tool credentials are encrypted, and responses expose only safe
+metadata such as `last4` or `has_token`. Key validation must not echo the
+submitted secret.
 Sentry or other telemetry must scrub request headers and bodies.
 
 ## SSRF and untrusted model context
