@@ -9,6 +9,7 @@ import type {
   RoutingPolicyResponse,
 } from "@/client"
 import { ModelComboBox } from "@/features/models/ModelComboBox"
+import { isDeploymentOperator } from "@/features/organization/roles"
 import { RouterReadiness } from "@/features/routing/RouterReadiness"
 import { UserComboBox } from "@/features/users/UserComboBox"
 import {
@@ -16,6 +17,8 @@ import {
   useCreateAlias,
   useDeleteAlias,
   useDeleteRoutingPolicy,
+  useOrganizationContext,
+  useOrganizationRoutingPolicies,
   useRoutingPolicies,
   useSetRoutingPolicy,
   useToolSettings,
@@ -1243,8 +1246,23 @@ export function RoutingPage() {
   // selected workspace would therefore show an empty page while those policies
   // were live for that workspace's traffic, and hide a policy the moment it was
   // created. Scope this when resolution is scoped, not before.
-  const policies = useRoutingPolicies()
-  const aliases = useAliases()
+  //
+  // Which list is asked depends on who is signed in (otari-ai#1942): an
+  // operator reads the deployment-wide management view they edit from, and
+  // anyone else reads the tenant-scoped `/v1/organizations/me/routing-policies`
+  // read-only. The member read waits for the context to settle rather than
+  // taking "not yet an operator" as "member", so an operator's page does not
+  // fire a read it is about to drop. Aliases have no tenant-scoped sibling yet,
+  // so a member's table lists policies alone.
+  const organization = useOrganizationContext()
+  const isOperator = isDeploymentOperator(organization.data)
+  const isContextSettled =
+    organization.data !== undefined || organization.isError
+  const policies = useRoutingPolicies(isOperator)
+  const memberPolicies = useOrganizationRoutingPolicies(
+    isContextSettled && !isOperator,
+  )
+  const aliases = useAliases(isOperator)
   const deletePolicy = useDeleteRoutingPolicy()
   const deleteAlias = useDeleteAlias()
   // A deep link may pre-fill the add form with ?target=provider:model.
@@ -1259,16 +1277,25 @@ export function RoutingPage() {
   // Aliases and policies are listed together: an alias is the one-target case,
   // and this page is the only place either is managed.
   const rows: RoutingRow[] = [
-    ...(policies.data ?? []).map((policy) => ({
-      ...policy,
-      kind: "policy" as const,
-    })),
+    ...((isOperator ? policies.data : memberPolicies.data) ?? []).map(
+      (policy) => ({
+        ...policy,
+        kind: "policy" as const,
+      }),
+    ),
     ...(aliases.data ?? []).map(aliasAsRow),
   ].sort(
     (a, b) =>
       a.name.localeCompare(b.name) ||
       (a.user_id ?? "").localeCompare(b.user_id ?? ""),
   )
+  // The context counts as loading too: until it settles, neither list has been
+  // asked, and an empty table would read as "no policies" rather than "not yet".
+  const isListLoading =
+    !isContextSettled ||
+    (isOperator
+      ? policies.isLoading || aliases.isLoading
+      : memberPolicies.isLoading)
 
   // Stable so DataTable's row cache holds; see its docstring.
   const renderDetail = useCallback(
@@ -1285,8 +1312,8 @@ export function RoutingPage() {
     [],
   )
 
-  const columns = useMemo<DataTableColumn<RoutingRow>[]>(
-    () => [
+  const columns = useMemo<DataTableColumn<RoutingRow>[]>(() => {
+    const base: DataTableColumn<RoutingRow>[] = [
       {
         id: "name",
         header: "Policy",
@@ -1360,94 +1387,101 @@ export function RoutingPage() {
           </div>
         ),
       },
-      {
-        id: "actions",
-        header: "",
-        cell: (policy) => {
-          // Teaching is data, not configuration, so it is offered even for a policy
-          // defined in config.yml: an operator can score examples for a policy they
-          // cannot edit here, and without this that policy could never route.
-          // "Examples" rather than "Router": on a Routing page full of routing
-          // policies, "Router" names the thing rather than what opens, and the count
-          // of scored examples is the one number in there that changes. Outlined
-          // rather than ghost so it reads as the row's distinct affordance next to
-          // Edit and Delete.
-          // Only for a backend that learns: a weighted policy has nothing to teach,
-          // so offering Examples on one would promise a screen that cannot help it.
-          const readiness = routerBackendOf(policy.spec) === KNN_BACKEND && (
-            <Button
-              size="sm"
-              variant="outline"
-              onPress={() =>
-                setExpanded((current) =>
-                  current === rowKeyOf(policy) ? null : rowKeyOf(policy),
-                )
+    ]
+    // No actions column for a caller who cannot act: every affordance in it is
+    // either a write or the Examples panel, whose read is operator-only.
+    if (!isOperator) return base
+    base.push({
+      id: "actions",
+      header: "",
+      cell: (policy) => {
+        // Teaching is data, not configuration, so it is offered even for a policy
+        // defined in config.yml: an operator can score examples for a policy they
+        // cannot edit here, and without this that policy could never route.
+        // "Examples" rather than "Router": on a Routing page full of routing
+        // policies, "Router" names the thing rather than what opens, and the count
+        // of scored examples is the one number in there that changes. Outlined
+        // rather than ghost so it reads as the row's distinct affordance next to
+        // Edit and Delete.
+        // Only for a backend that learns: a weighted policy has nothing to teach,
+        // so offering Examples on one would promise a screen that cannot help it.
+        const readiness = routerBackendOf(policy.spec) === KNN_BACKEND && (
+          <Button
+            size="sm"
+            variant="outline"
+            onPress={() =>
+              setExpanded((current) =>
+                current === rowKeyOf(policy) ? null : rowKeyOf(policy),
+              )
+            }
+          >
+            {expanded === rowKeyOf(policy) ? "Hide examples" : "Examples"}
+          </Button>
+        )
+        return policy.source === "config" ? (
+          <div className="flex items-center justify-end gap-2">
+            {readiness}
+            <span className="text-xs text-muted">set in config.yml</span>
+          </div>
+        ) : (
+          <div className="flex items-center justify-end gap-2">
+            {readiness}
+            {isEditableInForm(policy.spec) ? (
+              <Button
+                size="sm"
+                variant="ghost"
+                onPress={() => {
+                  // The table stays mounted while the create form is open, so
+                  // Edit is still reachable from it. Closing the other panels
+                  // keeps this to one form: two stacked forms do not recover on
+                  // their own, since each only closes when cancelled.
+                  setAdding(false)
+                  setEditing(policy)
+                }}
+              >
+                Edit
+              </Button>
+            ) : (
+              <span className="text-xs text-muted">
+                Uses options this form cannot show yet. Edit it through the API
+                so nothing is lost.
+              </span>
+            )}
+            <ConfirmButton
+              confirmLabel="Confirm"
+              isPending={deletePolicy.isPending || deleteAlias.isPending}
+              onConfirm={() =>
+                policy.kind === "alias"
+                  ? deleteAlias.mutate({
+                      name: policy.name,
+                      userId: policy.user_id,
+                    })
+                  : deletePolicy.mutate({
+                      name: policy.name,
+                      userId: policy.user_id,
+                    })
               }
             >
-              {expanded === rowKeyOf(policy) ? "Hide examples" : "Examples"}
-            </Button>
-          )
-          return policy.source === "config" ? (
-            <div className="flex items-center justify-end gap-2">
-              {readiness}
-              <span className="text-xs text-muted">set in config.yml</span>
-            </div>
-          ) : (
-            <div className="flex items-center justify-end gap-2">
-              {readiness}
-              {isEditableInForm(policy.spec) ? (
-                <Button
-                  size="sm"
-                  variant="ghost"
-                  onPress={() => {
-                    // The table stays mounted while the create form is open, so
-                    // Edit is still reachable from it. Closing the other panels
-                    // keeps this to one form: two stacked forms do not recover on
-                    // their own, since each only closes when cancelled.
-                    setAdding(false)
-                    setEditing(policy)
-                  }}
-                >
-                  Edit
-                </Button>
-              ) : (
-                <span className="text-xs text-muted">
-                  Uses options this form cannot show yet. Edit it through the
-                  API so nothing is lost.
-                </span>
-              )}
-              <ConfirmButton
-                confirmLabel="Confirm"
-                isPending={deletePolicy.isPending || deleteAlias.isPending}
-                onConfirm={() =>
-                  policy.kind === "alias"
-                    ? deleteAlias.mutate({
-                        name: policy.name,
-                        userId: policy.user_id,
-                      })
-                    : deletePolicy.mutate({
-                        name: policy.name,
-                        userId: policy.user_id,
-                      })
-                }
-              >
-                Delete
-              </ConfirmButton>
-            </div>
-          )
-        },
+              Delete
+            </ConfirmButton>
+          </div>
+        )
       },
-    ],
-    [deletePolicy, deleteAlias, expanded],
-  )
+    })
+    return base
+  }, [deletePolicy, deleteAlias, expanded, isOperator])
 
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
         title="Routing"
-        description="Named models your callers send as `model`. A policy decides which real model serves each request, what is tried if that fails, and which guardrails always run. It can also split traffic across providers by weight, or let a router learn which prompts a cheaper model handles just as well."
+        description={
+          isOperator
+            ? "Named models your callers send as `model`. A policy decides which real model serves each request, what is tried if that fails, and which guardrails always run. It can also split traffic across providers by weight, or let a router learn which prompts a cheaper model handles just as well."
+            : "Named models your callers send as `model`. A policy decides which real model serves each request, what is tried if that fails, and which guardrails always run. These are the policies in force in your workspaces; a deployment operator manages them."
+        }
         action={
-          adding || editing !== null ? undefined : (
+          !isOperator || adding || editing !== null ? undefined : (
             <Button
               variant="primary"
               onPress={() => {
@@ -1464,6 +1498,7 @@ export function RoutingPage() {
       <ErrorBanner
         error={
           policies.error ??
+          memberPolicies.error ??
           aliases.error ??
           deletePolicy.error ??
           deleteAlias.error
@@ -1481,31 +1516,37 @@ export function RoutingPage() {
         <PolicyForm existing={editing} onClose={() => setEditing(null)} />
       ) : null}
 
-      {rows.length === 0 &&
-      !policies.isLoading &&
-      !aliases.isLoading &&
-      !adding ? (
-        <EmptyState title="No routing policies yet">
-          <ol className="flex list-decimal flex-col gap-1 pl-5 text-sm text-muted">
-            <li>
-              Create a policy and point it at the model that should normally
-              serve.
-            </li>
-            <li>
-              Add a fallback chain so a provider outage does not become a failed
-              request.
-            </li>
-            <li>
-              Or split the traffic across two providers by weight, and move the
-              shares as you learn.
-            </li>
-            <li>
-              Or let a router choose per request between a cheap and a strong
-              model, then teach it with a few scored examples.
-            </li>
-            <li>Have your callers send the policy name as their `model`.</li>
-          </ol>
-        </EmptyState>
+      {rows.length === 0 && !isListLoading && !adding ? (
+        isOperator ? (
+          <EmptyState title="No routing policies yet">
+            <ol className="flex list-decimal flex-col gap-1 pl-5 text-sm text-muted">
+              <li>
+                Create a policy and point it at the model that should normally
+                serve.
+              </li>
+              <li>
+                Add a fallback chain so a provider outage does not become a
+                failed request.
+              </li>
+              <li>
+                Or split the traffic across two providers by weight, and move
+                the shares as you learn.
+              </li>
+              <li>
+                Or let a router choose per request between a cheap and a strong
+                model, then teach it with a few scored examples.
+              </li>
+              <li>Have your callers send the policy name as their `model`.</li>
+            </ol>
+          </EmptyState>
+        ) : (
+          <EmptyState title="No routing policies yet">
+            <p className="text-sm text-muted">
+              Policies that apply in your workspaces will be listed here once a
+              deployment operator defines them.
+            </p>
+          </EmptyState>
+        )
       ) : (
         <DataTable
           ariaLabel="Routing policies"
@@ -1514,7 +1555,7 @@ export function RoutingPage() {
           getRowKey={rowKeyOf}
           detailKey={expanded}
           renderDetail={renderDetail}
-          isLoading={policies.isLoading || aliases.isLoading}
+          isLoading={isListLoading}
           emptyContent="No routing policies yet."
         />
       )}

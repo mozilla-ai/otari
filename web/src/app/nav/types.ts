@@ -174,7 +174,7 @@ export interface NavItemContribution {
  * with its two fields pointing at this registry's label sites. Both differ in
  * name for the reason the shapes differ: a section's heading is `label` here and
  * `header` there, and nesting is `children` here where there it is a single
- * `NavDisclosure`, so a section here can hold several disclosures (Gateway holds
+ * `NavDisclosure`, so a section here can hold several disclosures (Build holds
  * Routing and Tools) and a rename has to say which.
  */
 export interface NavLabelOverride {

@@ -18316,6 +18316,40 @@
         ]
       }
     },
+    "/v1/organizations/me/routing-policies": {
+      "get": {
+        "description": "List the routing policies in force in the workspaces this caller may see.\n\nStored policies from the caller's visible workspaces plus the config-file\npolicies, which are deployment-wide and resolve in every workspace. The\nresponse is the shape ``GET /v1/routing/policies`` answers, narrowed to the\ncaller's own organization; only an operator can write any of it.",
+        "operationId": "list_visible_routing_policies_v1_organizations_me_routing_policies_get",
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/PolicyResponse"
+                  },
+                  "title": "Response List Visible Routing Policies V1 Organizations Me Routing Policies Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Visible Routing Policies",
+        "tags": [
+          "routing"
+        ]
+      }
+    },
     "/v1/organizations/me/switch": {
       "post": {
         "description": "Point the caller's identity at another organization they belong to.\n\nDistinct from ``PATCH /me``, which renames the organization already active.\nThis changes which organization every later request is scoped to, so\nworkspaces, keys, budgets and usage all follow it. Answers 404 for an\norganization the caller holds no active membership in, whether or not it\nexists.",
@@ -24913,7 +24947,7 @@
     },
     "/v1/workspaces/{workspace_id}/mcp-servers": {
       "get": {
-        "description": "List the MCP servers configured for a workspace.\n\nOrganization owners/admins or this workspace's owners/admins. Reads are\ngated like writes because these rows name the endpoints the gateway\nconnects to on the workspace's behalf. Authorization tokens are never\nincluded; each server reports only whether it has one.",
+        "description": "List the MCP servers configured for a workspace.\n\nReadable by any member who can see the workspace: these servers act on\nevery request a member sends through it, so what they are is a member's\nto view (otari-ai#1942). Changing them stays with organization\nowners/admins or this workspace's owners/admins. Authorization tokens are\nnever included; each server reports only whether it has one.",
         "operationId": "list_workspace_mcp_servers_v1_workspaces__workspace_id__mcp_servers_get",
         "parameters": [
           {

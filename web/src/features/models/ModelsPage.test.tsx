@@ -11,11 +11,12 @@ import type {
   ModelMetadata,
   ModelMetadataResponse,
   ModelObject,
+  OrganizationContext,
   PricingResponse,
 } from "@/client"
 import { ModelsPage } from "@/features/models/ModelsPage"
 import * as apiClient from "@/shared/api/client"
-import { pricingResponse } from "@/tests/fixtures"
+import { organizationContext, pricingResponse } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
 import { pickOption, selectTrigger } from "@/tests/select"
 
@@ -208,6 +209,10 @@ function mockApi(
     discoverable?: DiscoverableModelsResponse
     metadata?: ModelMetadataResponse
     settings?: GatewaySettings
+    // The caller's membership context, an operator's by default: the page
+    // gates its deployment-wide reads and every write affordance on
+    // `deployment_operator`, so most tests here are about the operator view.
+    context?: OrganizationContext
   } = {},
 ) {
   return vi
@@ -220,6 +225,9 @@ function mockApi(
       }
       if (method === "DELETE") {
         return null as never
+      }
+      if (url.endsWith("/v1/organizations/me")) {
+        return (opts.context ?? organizationContext()) as never
       }
       if (url.includes("/v1/settings")) {
         return (opts.settings ?? SETTINGS) as never
@@ -347,9 +355,11 @@ describe("ModelsPage", () => {
     await screen.findByText("openai:gpt-4o")
 
     // The explanation lives in a tooltip anchored to the pricing header, reached
-    // via a labeled info trigger, rather than a persistent banner.
+    // via a labeled info trigger, rather than a persistent banner. Awaited: the
+    // trigger waits on the settings read, which itself waits on the membership
+    // context that says an operator is asking.
     expect(
-      within(table()).getByRole("button", {
+      await within(table()).findByRole("button", {
         name: /How unpriced models are metered/,
       }),
     ).toBeInTheDocument()
@@ -1258,5 +1268,45 @@ describe("ModelsPage", () => {
         "not priced",
       ),
     ).toBeInTheDocument()
+  })
+
+  it("shows a non-operator the catalog read-only and never fires the operator reads", async () => {
+    // The member half of otari-ai#1942: the catalog and the price list serve
+    // any session, and everything that writes or is operator-only is absent
+    // rather than refused.
+    const fetchMock = mockApi({
+      context: organizationContext({
+        deployment_operator: false,
+        role: "member",
+      }),
+    })
+    const user = userEvent.setup()
+    renderWithClient(<ModelsPage />)
+    await screen.findByText("openai:gpt-4o")
+
+    // The price numbers render as text rather than as edit controls.
+    expect(
+      screen.queryByRole("button", { name: /Edit input price for/ }),
+    ).not.toBeInTheDocument()
+
+    // The detail panel still reports the rates, without the write affordances.
+    await user.click(
+      screen.getByText("openai:gpt-4o").closest("tr") as HTMLElement,
+    )
+    const aside = panel()
+    expect(within(aside).getByText("Input")).toBeInTheDocument()
+    expect(
+      within(aside).queryByRole("button", { name: /Set price|Edit price/ }),
+    ).not.toBeInTheDocument()
+    expect(
+      within(aside).queryByRole("button", { name: "Reset" }),
+    ).not.toBeInTheDocument()
+
+    const urls = fetchMock.mock.calls.map(([input]) => String(input))
+    expect(urls.some((url) => url.includes("/v1/settings"))).toBe(false)
+    expect(urls.some((url) => url.includes("/v1/models/discoverable"))).toBe(
+      false,
+    )
+    expect(urls.some((url) => url.includes("/v1/models/metadata"))).toBe(false)
   })
 })

@@ -425,19 +425,46 @@ async def test_a_metadata_only_update_does_not_revalidate_the_url(async_db: Asyn
 # --------------------------------------------------------------------------- #
 
 
-async def test_a_plain_member_may_neither_read_nor_write(async_db: AsyncSession) -> None:
-    """Reads are gated too: these rows name the endpoints the gateway connects to."""
+async def test_a_plain_member_may_read_but_not_write(async_db: AsyncSession) -> None:
+    """The list is a member's to view (otari-ai#1942); changing a row is not."""
     organization = await _organization(async_db)
     owner = await _member(async_db, organization, role="owner", full_name="Owner")
     workspace = await _workspace(async_db, organization, owner=owner)
     member = await _member(async_db, organization, role="member", full_name="Member")
     await WorkspaceMemberRepository(async_db).create(workspace_id=workspace.id, user_id=member.id, role="member")
     service = WorkspaceMcpServerService(async_db)
+    created = await service.create_server(
+        user=owner, workspace_id=workspace.id, request=_create(authorization_token="secret")
+    )
 
+    listed = await service.list_servers(user=member, workspace_id=workspace.id)
+    assert [server.name for server in listed.data] == ["github"]
+    # Readable does not mean the credential is: the row reports only that one exists.
+    assert listed.data[0].has_token is True
+    assert not hasattr(listed.data[0], "authorization_token")
     with pytest.raises(NotAuthorizedError):
-        await service.list_servers(user=member, workspace_id=workspace.id)
+        await service.create_server(user=member, workspace_id=workspace.id, request=_create(name="other"))
     with pytest.raises(NotAuthorizedError):
-        await service.create_server(user=member, workspace_id=workspace.id, request=_create())
+        await service.update_server(
+            user=member,
+            workspace_id=workspace.id,
+            server_id=created.id,
+            request=WorkspaceMcpServerUpdate(enabled=False),
+        )
+    with pytest.raises(NotAuthorizedError):
+        await service.delete_server(user=member, workspace_id=workspace.id, server_id=created.id)
+
+
+async def test_an_organization_member_outside_the_workspace_cannot_read(async_db: AsyncSession) -> None:
+    """Member visibility is workspace membership, not organization membership."""
+    organization = await _organization(async_db)
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    workspace = await _workspace(async_db, organization, owner=owner)
+    outsider = await _member(async_db, organization, role="member", full_name="Outsider")
+    service = WorkspaceMcpServerService(async_db)
+
+    with pytest.raises(WorkspaceNotFoundError):
+        await service.list_servers(user=outsider, workspace_id=workspace.id)
 
 
 async def test_a_workspace_admin_may_manage_without_organization_admin(async_db: AsyncSession) -> None:

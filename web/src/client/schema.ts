@@ -1967,6 +1967,31 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/organizations/me/routing-policies": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Visible Routing Policies
+         * @description List the routing policies in force in the workspaces this caller may see.
+         *
+         *     Stored policies from the caller's visible workspaces plus the config-file
+         *     policies, which are deployment-wide and resolve in every workspace. The
+         *     response is the shape ``GET /v1/routing/policies`` answers, narrowed to the
+         *     caller's own organization; only an operator can write any of it.
+         */
+        get: operations["list_visible_routing_policies_v1_organizations_me_routing_policies_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/organizations/me/switch": {
         parameters: {
             query?: never;
@@ -3607,10 +3632,11 @@ export interface paths {
          * List Workspace Mcp Servers
          * @description List the MCP servers configured for a workspace.
          *
-         *     Organization owners/admins or this workspace's owners/admins. Reads are
-         *     gated like writes because these rows name the endpoints the gateway
-         *     connects to on the workspace's behalf. Authorization tokens are never
-         *     included; each server reports only whether it has one.
+         *     Readable by any member who can see the workspace: these servers act on
+         *     every request a member sends through it, so what they are is a member's
+         *     to view (otari-ai#1942). Changing them stays with organization
+         *     owners/admins or this workspace's owners/admins. Authorization tokens are
+         *     never included; each server reports only whether it has one.
          */
         get: operations["list_workspace_mcp_servers_v1_workspaces__workspace_id__mcp_servers_get"];
         put?: never;
@@ -12594,6 +12620,26 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_visible_routing_policies_v1_organizations_me_routing_policies_get: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["PolicyResponse"][];
                 };
             };
         };

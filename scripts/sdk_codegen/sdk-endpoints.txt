@@ -243,6 +243,7 @@ GET /v1/organizations/me/usage                              # dashboard-only
 GET /v1/organizations/me/usage/count                        # dashboard-only
 GET /v1/organizations/me/usage/summary                      # dashboard-only
 GET /v1/organizations/me/usage/series                       # dashboard-only
+GET /v1/organizations/me/routing-policies                   # dashboard-only
 GET /v1/organizations/me/guardrails                         # operator surface
 POST /v1/organizations/me/guardrails                        # operator surface
 PATCH /v1/organizations/me/guardrails/{guardrail_id}        # operator surface

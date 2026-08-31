@@ -89,13 +89,14 @@ describe("nav registry", () => {
     //
     // Activity and Usage left the list in otari#837, which is the other way a
     // row leaves it: not by loosening a gate but by the page behind it gaining a
-    // tenant-scoped read, so there is no longer a caller it refuses. Removing a
-    // row from here is as much a design decision as adding one.
+    // tenant-scoped read, so there is no longer a caller it refuses. Models and
+    // Routing left it the same way (otari-ai#1942): the catalog reads already
+    // served any session, and Routing gained
+    // `/v1/organizations/me/routing-policies`. Removing a row from here is as
+    // much a design decision as adding one.
     expect(
       NAV_ITEMS.filter((item) => item.operatorOnly).map((item) => item.to),
     ).toEqual([
-      "/models",
-      "/routing",
       "/keys",
       "/providers",
       "/budgets",
@@ -311,8 +312,10 @@ describe("nav registry", () => {
     // another repo, so every base heading and disclosure label renders as
     // declared.
     expect(OVERLAY_NAV_LABEL_OVERRIDES).toEqual([])
+    // The label is "Build" (the roles matrix's name for the section,
+    // otari-ai#1942) while the id stays "gateway", the key overlays address.
     const gateway = NAV_SECTIONS.find((section) => section.id === "gateway")
-    expect(gateway?.label).toBe("Gateway")
+    expect(gateway?.label).toBe("Build")
     expect(gateway?.items.map((item) => item.label)).toContain("Routing")
     const general = ORG_NAV_SECTIONS.find(
       (section) => section.id === "org-general",

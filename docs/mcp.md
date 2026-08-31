@@ -89,8 +89,9 @@ curl -X POST http://localhost:8000/v1/workspaces/$WORKSPACE_ID/mcp-servers \
 ```
 
 `GET` lists them, `PATCH /{server_id}` updates one, and `DELETE /{server_id}`
-removes it. Every operation, including the list, needs an organization
-owner/admin or an owner/admin of that workspace.
+removes it. The list is readable by any member who can see the workspace;
+creating, updating, or deleting a server needs an organization owner/admin or
+an owner/admin of that workspace.
 
 - The `authorization_token` is encrypted at rest with `OTARI_SECRET_KEY` and is
   never returned. Responses carry `has_token` instead. On a `PATCH`, omit the

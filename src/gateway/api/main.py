@@ -32,6 +32,7 @@ from gateway.api.routes import (
     org_provider_keys,
     organization_guardrails,
     organization_pricing,
+    organization_routing,
     organization_usage,
     organizations,
     otlp,
@@ -165,6 +166,9 @@ def _register_core_routers(app: FastAPI, config: GatewayConfig) -> None:
     # rather than beside ``usage.router``, because what it is scoped to is what
     # decides who may call it (otari#837).
     app.include_router(organization_usage.router)
+    # The tenant-scoped read over the same table ``/v1/routing/policies`` serves
+    # to an operator, mounted here for the same reason (otari-ai#1942).
+    app.include_router(organization_routing.router)
     app.include_router(workspaces.router)
     app.include_router(invitations.router)
     app.include_router(workspace_member_budget_policies.router)

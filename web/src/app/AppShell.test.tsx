@@ -494,7 +494,7 @@ describe("AppShell surface gating", () => {
   it("renders every destination the deployment serves", async () => {
     mockMatchMedia(false)
     await renderShell()
-    // Awaited for the reason the organization rail below is: four of these rows
+    // Awaited for the reason the organization rail below is: two of these rows
     // declare `operatorOnly` and arrive with the membership context, so the
     // snapshot is a race without it.
     await within(
@@ -589,14 +589,12 @@ describe("AppShell surface gating", () => {
   it("drops a section header once its whole group is gated away", async () => {
     mockMatchMedia(false)
     await renderShell(bootstrap({ surfaces: ["models"] }))
-    // The one row this deployment keeps is `operatorOnly`, so its heading is
-    // absent with it until the membership context lands.
     await screen.findByRole("link", { name: "Models" })
 
     // "Access" labels keys, providers and the workspace roster; with none of
     // them served, an empty heading over nothing is worse than no heading.
     expect(screen.queryByText("Access")).toBeNull()
-    expect(screen.getByText("Gateway")).toBeInTheDocument()
+    expect(screen.getByText("Build")).toBeInTheDocument()
     // "Observe" goes with them. It labels the request log and the usage
     // rollups, both gated on the usage surface, and the index that used to keep
     // the heading alive now sits in its own group above it. The front page is
@@ -624,14 +622,12 @@ describe("AppShell entitlement gating", () => {
     // would silently drop a page from the sidebar of every gateway.
     await renderShell(bootstrap(), { entitlements: { capabilities: [] } })
 
-    // Routing nests destinations, so it is the group's expander. Awaited
-    // because it declares `operatorOnly` as well, which the row below and the
-    // heading over both do not: the first query here has to be the waiting one.
+    // Routing nests destinations, so it is the group's expander.
     expect(
       await screen.findByRole("button", { name: "Routing" }),
     ).toBeInTheDocument()
     expect(screen.getByRole("link", { name: "Models" })).toBeInTheDocument()
-    expect(screen.getByText("Gateway")).toBeInTheDocument()
+    expect(screen.getByText("Build")).toBeInTheDocument()
   })
 
   it("answers a gated-off destination with a panel, not the page", async () => {

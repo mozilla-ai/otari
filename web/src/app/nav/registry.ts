@@ -39,10 +39,10 @@ import type {
  * it is the rail's destination rather than a member of a category: it is where
  * the sidebar puts you back, not one of the places you go from it. The three
  * below it are the design's: "Observe" is where you look (the request log and
- * the usage rollups over it), "Gateway" is what the gateway serves (models, the
- * policies that route over them, and the tools it can call), and "Access" is who
- * may call it (keys, the upstream credentials those keys spend, and the
- * workspace's roster).
+ * the usage rollups over it), "Build" is what the gateway serves (models, the
+ * policies that route over them, and the tools it can call; the roles matrix's
+ * name for the section, otari-ai#1942), and "Access" is who may call it (keys,
+ * the upstream credentials those keys spend, and the workspace's roster).
  *
  * Each entry declares its own gating, and the two axes are independent:
  * `surface` (does this deployment host it) and `capability` (is it entitled).
@@ -91,15 +91,21 @@ const BASE_NAV_SECTIONS = [
     ],
   },
   {
+    // The id stays "gateway" while the label reads "Build": overlay
+    // contributions and label overrides key on the id, so renaming it would
+    // silently drop whatever a superset build files under this section.
     id: "gateway",
-    label: "Gateway",
+    label: "Build",
     items: [
+      // No `operatorOnly` on Models or Routing any more, per the rule the axis
+      // carries: a row leaves the list by its page ceasing to refuse anyone
+      // (otari-ai#1942). Models reads the catalog any session may read, and
+      // Routing reads the tenant-scoped policy list for a non-operator.
       {
         to: "/models",
         label: "Models",
         surface: "models",
         icon: FiLayers,
-        operatorOnly: "refused",
       },
       // Deliberately not tagged `capability: "routing"`, though otari.ai's
       // registry tags its own Routing item that way. ARCHITECTURE.md's
@@ -114,7 +120,6 @@ const BASE_NAV_SECTIONS = [
         label: "Routing",
         surface: "routing",
         icon: FiRepeat,
-        operatorOnly: "refused",
         // Policies and Guardrails as the navigation prototype groups them. The
         // prototype's third entry, Aliases, is deliberately absent: this
         // dashboard lists an alias as the one-target policy it is, in the same

@@ -148,6 +148,10 @@ const SEARCH_TOOLS = "search-tools"
 const SEARCH_PROVIDERS = "search-providers"
 const ALIASES = "aliases"
 const ROUTING_POLICIES = "routing-policies"
+// The tenant-scoped sibling of ROUTING_POLICIES. Its own key: the two lists
+// answer different endpoints for different callers, and an operator's policy
+// write invalidates the deployment-wide one it changed.
+const ORGANIZATION_ROUTING_POLICIES = "organization-routing-policies"
 const ROUTER_STATUS = "router-status"
 // Deliberately not nested under MODELS: pricing mutations invalidate that key,
 // and a price change cannot alter which models a provider serves. Sharing the
@@ -271,13 +275,17 @@ export function useGatewayHealth() {
 // Live provider calls, cached gateway-side; kept fresh for the length of a
 // session rather than refetched per open, since the set of models a key can
 // reach does not move minute to minute.
-export function useDiscoverableModels() {
+//
+// `enabled` is the `useToolSettings` composition: the read is
+// deployment-operator-only, so a tenant-facing page declines to ask.
+export function useDiscoverableModels(enabled = true) {
   return useQuery({
     ...NO_RETRY,
     queryKey: [DISCOVERABLE],
     queryFn: () =>
       apiFetch<DiscoverableModelsResponse>("/v1/models/discoverable"),
     staleTime: 5 * 60_000,
+    enabled,
   })
 }
 
@@ -469,12 +477,15 @@ export function useTestProviderCredentials() {
 // Per-model metadata (modalities, capabilities, knowledge cutoff) from the
 // models.dev catalog, keyed by `provider:model`. The gateway fetches and caches
 // it, so this is cheap; kept fresh for a session since the catalog barely moves.
-export function useModelMetadata() {
+// `enabled` is the `useToolSettings` composition: the read is
+// deployment-operator-only, so a tenant-facing page declines to ask.
+export function useModelMetadata(enabled = true) {
   return useQuery({
     ...NO_RETRY,
     queryKey: [METADATA],
     queryFn: () => apiFetch<ModelMetadataResponse>("/v1/models/metadata"),
     staleTime: 10 * 60_000,
+    enabled,
   })
 }
 
@@ -483,20 +494,42 @@ export function useModelMetadata() {
 // resolution reads a process-wide name-keyed cache, so a filtered list would
 // hide live aliases. Leaving the argument here would be a loaded gun beside the
 // comment explaining why it must not be fired.
-export function useAliases() {
+//
+// `enabled` is the `useToolSettings` composition: the read is
+// deployment-operator-only, so a tenant-facing page declines to ask.
+export function useAliases(enabled = true) {
   return useQuery({
     queryKey: [ALIASES],
     queryFn: () => apiFetch<AliasResponse[]>("/v1/aliases"),
     staleTime: 60_000,
+    enabled,
   })
 }
 
-// Unscoped for the same reason as `useAliases` above.
-export function useRoutingPolicies() {
+// Unscoped for the same reason as `useAliases` above, `enabled` too.
+export function useRoutingPolicies(enabled = true) {
   return useQuery({
     queryKey: [ROUTING_POLICIES],
     queryFn: () => apiFetch<RoutingPolicyResponse[]>("/v1/routing/policies"),
     staleTime: 60_000,
+    enabled,
+  })
+}
+
+// The routing policies in force where the caller may see: stored rows from
+// their visible workspaces plus the deployment-wide config ones, the same
+// response shape as `useRoutingPolicies`. This is the read a signed-in member
+// gets (otari-ai#1942); the deployment-wide list above stays operator-only, so
+// the Routing page picks between the two off `isDeploymentOperator`.
+export function useOrganizationRoutingPolicies(enabled = true) {
+  return useQuery({
+    queryKey: [ORGANIZATION_ROUTING_POLICIES],
+    queryFn: () =>
+      apiFetch<RoutingPolicyResponse[]>(
+        "/v1/organizations/me/routing-policies",
+      ),
+    staleTime: 60_000,
+    enabled,
   })
 }
 
@@ -510,6 +543,9 @@ export function useSetRoutingPolicy() {
       }),
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [ROUTING_POLICIES] })
+      void queryClient.invalidateQueries({
+        queryKey: [ORGANIZATION_ROUTING_POLICIES],
+      })
       // A policy is listed as a model, so the catalog changes too.
       void queryClient.invalidateQueries({ queryKey: [MODELS] })
     },
@@ -538,6 +574,9 @@ export function useDeleteRoutingPolicy() {
     },
     onSuccess: () => {
       void queryClient.invalidateQueries({ queryKey: [ROUTING_POLICIES] })
+      void queryClient.invalidateQueries({
+        queryKey: [ORGANIZATION_ROUTING_POLICIES],
+      })
       void queryClient.invalidateQueries({ queryKey: [MODELS] })
     },
   })
@@ -638,11 +677,14 @@ export function useDeleteAlias() {
   })
 }
 
-export function useSettings() {
+// `enabled` is the `useToolSettings` composition: the read is
+// deployment-operator-only, so a tenant-facing page declines to ask.
+export function useSettings(enabled = true) {
   return useQuery({
     queryKey: [SETTINGS],
     queryFn: () => apiFetch<GatewaySettings>("/v1/settings"),
     staleTime: 60_000,
+    enabled,
   })
 }
 

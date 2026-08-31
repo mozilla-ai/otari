@@ -288,7 +288,7 @@ async def resolve_workspace_mcp_servers(
 
 
 class WorkspaceMcpServerService:
-    """CRUD for a workspace's MCP servers. Every operation is management-gated."""
+    """CRUD for a workspace's MCP servers. Writes are management-gated; the list is not."""
 
     def __init__(self, db: AsyncSession):
         self.db = db
@@ -297,12 +297,13 @@ class WorkspaceMcpServerService:
     async def _require_management(self, user: User, workspace_id: uuid.UUID) -> uuid.UUID:
         """Resolve the workspace and confirm the caller may manage it.
 
-        Reads are gated too, unlike the workspace surfaces beside this one
-        (`workspace_budget_default_service` opens its list to any member).
-        These rows name the external endpoints this gateway will connect to,
-        and which of them carry a credential, which is the platform's own
-        reason for admin-gating its reads; the URL of a workspace's internal
-        tool server is not something every member needs.
+        Writes only. The list used to sit behind this gate too, on the argument
+        that a server's URL is not something every member needs; the roles
+        matrix settled it the other way (otari-ai#1942): a member may *view*
+        what shapes their own requests, and these servers already act on every
+        request the member sends through the workspace. Tokens were never
+        exposed either way (`WorkspaceMcpServerPublic` carries `has_token`
+        alone), so the read gate is member visibility, in `list_servers`.
         """
         workspace = await authorization.resolve_visible_workspace(
             self.db, user=user, workspace_id=workspace_id, organizations=self.organizations
@@ -326,8 +327,17 @@ class WorkspaceMcpServerService:
         skip: int = 0,
         limit: int = 100,
     ) -> WorkspaceMcpServersPublic:
-        """List a page of the workspace's servers, plus the total."""
-        await self._require_management(user, workspace_id)
+        """List a page of the workspace's servers, plus the total.
+
+        Reachable by any member who can see the workspace, like the workspace
+        surfaces beside it (`workspace_budget_default_service` is the pattern);
+        see `_require_management` for why the gate here is visibility alone.
+        The rows never carry a token either way.
+        """
+        workspace = await authorization.resolve_visible_workspace(
+            self.db, user=user, workspace_id=workspace_id, organizations=self.organizations
+        )
+        workspace_id = workspace.id
         limit = min(limit, _MAX_LIST_LIMIT)
 
         count = (

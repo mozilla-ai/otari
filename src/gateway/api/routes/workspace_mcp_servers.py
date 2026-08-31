@@ -56,10 +56,11 @@ async def list_workspace_mcp_servers(
 ) -> WorkspaceMcpServersPublic:
     """List the MCP servers configured for a workspace.
 
-    Organization owners/admins or this workspace's owners/admins. Reads are
-    gated like writes because these rows name the endpoints the gateway
-    connects to on the workspace's behalf. Authorization tokens are never
-    included; each server reports only whether it has one.
+    Readable by any member who can see the workspace: these servers act on
+    every request a member sends through it, so what they are is a member's
+    to view (otari-ai#1942). Changing them stays with organization
+    owners/admins or this workspace's owners/admins. Authorization tokens are
+    never included; each server reports only whether it has one.
     """
     return await service.list_servers(user=current_identity, workspace_id=workspace_id, skip=skip, limit=limit)
 

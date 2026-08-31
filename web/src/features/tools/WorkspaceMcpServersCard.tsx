@@ -56,13 +56,13 @@ export function WorkspaceMcpServersCard({
 }) {
   const { selected, isLoading: workspaceLoading } = useSelectedWorkspace()
   const context = useOrganizationContext()
-  // The client half of the gate the service enforces, and it gates the *read*
-  // too: these rows name the external endpoints the gateway connects to on the
-  // workspace's behalf, so the service admin-gates listing them as well as
-  // changing them, and asking as a member would earn a 403 banner over a table
-  // that could never fill.
+  // The client half of the *write* gate the service enforces. The list is a
+  // member read now (otari-ai#1942): these servers act on every request the
+  // member sends through the workspace, and the token was never in the rows,
+  // so any member who can see the workspace reads the table and only an owner
+  // or admin gets the affordances that change it.
   const manages = canManageWorkspace(context.data, selected?.role)
-  const workspaceId = selected && manages ? selected.workspace_id : null
+  const workspaceId = selected ? selected.workspace_id : null
   const query = useWorkspaceMcpServers(workspaceId)
   const create = useCreateWorkspaceMcpServer()
   const update = useUpdateWorkspaceMcpServer()
@@ -84,19 +84,6 @@ export function WorkspaceMcpServersCard({
           {workspaceLoading
             ? "Reading the workspaces you belong to."
             : "MCP servers are registered on a workspace you belong to. An owner or admin can add you to one on the Workspaces page."}
-        </InfoBanner>
-      </section>
-    )
-  }
-
-  if (!manages) {
-    return (
-      <section className="flex flex-col gap-2">
-        {heading}
-        <InfoBanner>
-          The MCP servers for {selected.name} are managed by an owner or admin
-          of the workspace, or of the organization. They name endpoints the
-          gateway connects to, so only they can list them.
         </InfoBanner>
       </section>
     )
@@ -186,7 +173,9 @@ export function WorkspaceMcpServersCard({
         </Chip>
       ),
     },
-    {
+  ]
+  if (manages) {
+    columns.push({
       id: "actions",
       header: "",
       cell: (row) => (
@@ -199,16 +188,18 @@ export function WorkspaceMcpServersCard({
           </Button>
         </div>
       ),
-    },
-  ]
+    })
+  }
 
   return (
     <section className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center justify-between gap-2">
         {heading}
-        <Button size="sm" variant="primary" onPress={openAdd}>
-          Add MCP server
-        </Button>
+        {manages ? (
+          <Button size="sm" variant="primary" onPress={openAdd}>
+            Add MCP server
+          </Button>
+        ) : null}
       </div>
 
       <p className="text-sm text-muted">
@@ -217,6 +208,9 @@ export function WorkspaceMcpServersCard({
         request may still pass its own servers inline; these are the ones it
         does not have to carry a URL or a token for. Tokens are stored encrypted
         and are never shown again.
+        {manages
+          ? null
+          : " Registering or changing one is for an owner or admin of the workspace, or of the organization."}
       </p>
 
       <ErrorBanner error={query.error} />
@@ -232,7 +226,11 @@ export function WorkspaceMcpServersCard({
             // Deliberately asserts nothing about the workspace: an empty table
             // is also what a failed request leaves behind, and the banner above
             // is the only thing that knows which of the two happened.
-            emptyContent="No MCP server registered. Add one to let this workspace's requests name it by id."
+            emptyContent={
+              manages
+                ? "No MCP server registered. Add one to let this workspace's requests name it by id."
+                : "No MCP server registered."
+            }
           />
         </Card.Content>
       </Card>

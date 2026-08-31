@@ -4,8 +4,13 @@ import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type { PolicySpec, RoutingPolicyResponse } from "@/client"
+import type {
+  OrganizationContext,
+  PolicySpec,
+  RoutingPolicyResponse,
+} from "@/client"
 import { RoutingPage } from "@/features/routing/RoutingPage"
+import { organizationContext } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
 
 const policy = (
@@ -80,6 +85,14 @@ function mockApi(
     source: string
     user_id: string | null
   }[] = [],
+  opts: {
+    // The caller's membership context, an operator's by default: the page picks
+    // its list read off `deployment_operator`, and most tests here are about
+    // the management view.
+    context?: OrganizationContext
+    // What `/v1/organizations/me/routing-policies` answers, for member tests.
+    memberPolicies?: RoutingPolicyResponse[]
+  } = {},
 ) {
   let list = [...policies]
   let aliasList = [...aliases]
@@ -93,6 +106,12 @@ function mockApi(
         init?.body === undefined ? undefined : JSON.parse(String(init.body))
       calls.push({ url, method, body })
 
+      if (url.includes("/v1/organizations/me/routing-policies")) {
+        return jsonResponse(opts.memberPolicies ?? [])
+      }
+      if (url.endsWith("/v1/organizations/me")) {
+        return jsonResponse(opts.context ?? organizationContext())
+      }
       if (url.includes("/v1/routing/policies/explain")) {
         return jsonResponse({
           name: "fast",
@@ -1194,5 +1213,70 @@ describe("RoutingPage", () => {
     expect(
       within(row).getByRole("button", { name: "Examples" }),
     ).toBeInTheDocument()
+  })
+
+  it("lists the tenant-scoped policies read-only for a non-operator", async () => {
+    // The member half of otari-ai#1942: the page reads
+    // /v1/organizations/me/routing-policies and offers nothing that writes.
+    mockApi([], null, [], {
+      context: organizationContext({
+        deployment_operator: false,
+        role: "member",
+      }),
+      memberPolicies: [policy("fast", CHAIN)],
+    })
+    renderPage(<RoutingPage />)
+
+    const row = (await screen.findByText("fast")).closest("tr")!
+    expect(within(row).getByText(/openai:gpt-5-mini/)).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "New policy" }),
+    ).not.toBeInTheDocument()
+    expect(
+      within(row).queryByRole("button", { name: "Edit" }),
+    ).not.toBeInTheDocument()
+    expect(
+      within(row).queryByRole("button", { name: "Delete" }),
+    ).not.toBeInTheDocument()
+    // The Examples panel reads the operator-only /v1/routing/status, so its
+    // opener goes with the rest of the actions column.
+    expect(
+      within(row).queryByRole("button", { name: "Examples" }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("never fires the operator reads for a non-operator", async () => {
+    const { calls } = mockApi([], null, [], {
+      context: organizationContext({
+        deployment_operator: false,
+        role: "member",
+      }),
+      memberPolicies: [policy("fast", CHAIN)],
+    })
+    renderPage(<RoutingPage />)
+    await screen.findByText("fast")
+
+    const urls = calls.map((call) => call.url)
+    expect(urls.some((url) => url.endsWith("/v1/routing/policies"))).toBe(false)
+    expect(urls.some((url) => url.includes("/v1/aliases"))).toBe(false)
+    expect(urls.some((url) => url.includes("/v1/tool-settings"))).toBe(false)
+    expect(urls.some((url) => url.includes("/v1/users"))).toBe(false)
+  })
+
+  it("tells a member with no policies who defines them", async () => {
+    mockApi([], null, [], {
+      context: organizationContext({
+        deployment_operator: false,
+        role: "member",
+      }),
+      memberPolicies: [],
+    })
+    renderPage(<RoutingPage />)
+
+    expect(
+      await screen.findByText(/once a deployment operator defines them/),
+    ).toBeInTheDocument()
+    // The operator's numbered getting-started walkthrough is not for them.
+    expect(screen.queryByText(/Create a policy/)).not.toBeInTheDocument()
   })
 })

@@ -3,7 +3,7 @@ import { render, screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
-import type { WorkspaceMcpServer } from "@/client"
+import type { OrganizationContext, WorkspaceMcpServer } from "@/client"
 import { WorkspaceMcpServersCard } from "@/features/tools/WorkspaceMcpServersCard"
 import { SelectedWorkspaceProvider } from "@/shared/hooks/SelectedWorkspace"
 import { organizationContext, workspaceMcpServer } from "@/tests/fixtures"
@@ -21,11 +21,14 @@ function mockApi({
   servers = [] as WorkspaceMcpServer[],
   writeStatus,
   writeDetail,
+  role = "owner",
 }: {
   memberships?: { workspace_id: string; name: string; role: string }[]
   servers?: WorkspaceMcpServer[]
   writeStatus?: number
   writeDetail?: string
+  // The caller's organization role; a member-view test lowers it.
+  role?: OrganizationContext["role"]
 } = {}): Call[] {
   const calls: Call[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
@@ -52,7 +55,7 @@ function mockApi({
       return Response.json(servers[0] ?? workspaceMcpServer())
     }
     return Response.json(
-      organizationContext({ workspace_memberships: memberships }),
+      organizationContext({ role, workspace_memberships: memberships }),
     )
   })
   return calls
@@ -321,33 +324,42 @@ describe("WorkspaceMcpServersCard", () => {
     )
   })
 
-  it("does not list the servers at all for a member who cannot manage the workspace", async () => {
-    // The read takes the management role server-side, so asking would earn a
-    // 403 over a table that could never fill.
-    const requests: string[] = []
-    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
-      const url = String(input)
-      if (url.includes("/mcp-servers")) {
-        requests.push(url)
-        return new Response("forbidden", { status: 403 })
-      }
-      return Response.json(
-        organizationContext({
-          role: "member",
-          workspace_memberships: [
-            { workspace_id: ALPHA, name: "Alpha", role: "member" },
-          ],
-        }),
-      )
+  it("lists the servers read-only for a member who cannot manage the workspace", async () => {
+    // The list is a member read now (otari-ai#1942): the rows shape every
+    // request the member sends through the workspace. Only the affordances
+    // that change them take the management role.
+    const servers = [
+      workspaceMcpServer({
+        name: "github",
+        url: "https://mcp.example.com/github",
+        has_token: true,
+      }),
+    ]
+    const calls = mockApi({
+      memberships: [{ workspace_id: ALPHA, name: "Alpha", role: "member" }],
+      servers,
+      role: "member",
     })
-    renderCard()
+    const user = userEvent.setup()
+    await renderLoaded(servers)
 
+    expect(screen.getByText("https://mcp.example.com/github")).toBeVisible()
+    // The token stays write-only whoever is reading.
+    expect(screen.getByText("Stored")).toBeVisible()
     expect(
-      await screen.findByText(/managed by an owner or admin/i),
+      screen.getByText(/for an owner or admin of the workspace/),
     ).toBeVisible()
-    expect(requests).toHaveLength(0)
     expect(
-      screen.queryByRole("button", { name: "Add server" }),
+      screen.queryByRole("button", { name: "Add MCP server" }),
     ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Edit" }),
+    ).not.toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: "Delete" }),
+    ).not.toBeInTheDocument()
+    // Nothing on the page can write, so nothing did.
+    await user.click(screen.getByText("github"))
+    expect(writes(calls)).toHaveLength(0)
   })
 })

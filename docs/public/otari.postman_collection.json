@@ -3387,6 +3387,233 @@
     {
       "item": [
         {
+          "name": "List Visible Routing Policies",
+          "request": {
+            "description": "List the routing policies in force in the workspaces this caller may see.\n\nStored policies from the caller's visible workspaces plus the config-file\npolicies, which are deployment-wide and resolve in every workspace. The\nresponse is the shape ``GET /v1/routing/policies`` answers, narrowed to the\ncaller's own organization; only an operator can write any of it.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "routing-policies"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/routing-policies"
+            }
+          }
+        },
+        {
+          "name": "List Policies",
+          "request": {
+            "description": "List every routing policy in force, from config.yml and from storage.\n\nEvery scope at once, workspace-wide and user-scoped alike: this is the\nmaster-key management view, not what any one caller resolves.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "routing",
+                "policies"
+              ],
+              "query": [
+                {
+                  "description": "Only stored policies in this workspace. Config-file policies are always included, being deployment-wide. Omit to list the stored policies of every workspace.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/routing/policies?workspace_id="
+            }
+          }
+        },
+        {
+          "name": "Set Policy",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"name\": \"string\",\n  \"spec\": {}\n}"
+            },
+            "description": "Create or update a stored policy in one workspace, optionally for one user.\n\nThe spec is validated here and stored as given, so a row can never contain a\nbody this build would refuse at load. The cache is refreshed twice: once before\nvalidating (so the shadowing checks see other writers' policies) and once after\ncommitting (so this worker serves the new policy immediately).\n\n``rename_from`` renames the row instead of keying on ``name``. It is part of\nthis write rather than an endpoint of its own so that an edit which both renames\na policy and re-targets it cannot land half-applied, leaving the old name serving\nthe new spec. The new name is validated exactly as a fresh one is, because a\nrename can walk a policy into every collision a create can. Sending the field\nasserts the named policy is stored, so it never falls back to creating one.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "routing",
+                "policies"
+              ],
+              "raw": "{{baseUrl}}/v1/routing/policies"
+            }
+          }
+        },
+        {
+          "name": "Explain Policy",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"budget_remaining_usd\": 0,\n  \"budget_used_pct\": 0,\n  \"key_id\": \"string\",\n  \"name\": \"string\",\n  \"spec\": {},\n  \"user_id\": \"string\",\n  \"workspace_id\": \"00000000-0000-0000-0000-000000000000\"\n}"
+            },
+            "description": "Compile a policy and return the plan, without dispatching anything.\n\nMaster-key gated, and deliberately so: the response enumerates the policy's\ntargets, which is exactly the information a policy exists to keep off the wire.\nIt is a management surface, not a caller-facing one.\n\nAccepts an unsaved ``spec`` as well as a saved ``name``, so a form can validate\nwhat the operator is about to save. The response includes dropped candidates\nwith reasons, which is the part that catches a \"failover\" policy that has\nquietly compiled down to a single attempt.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "routing",
+                "policies",
+                "explain"
+              ],
+              "raw": "{{baseUrl}}/v1/routing/policies/explain"
+            }
+          }
+        },
+        {
+          "name": "Delete Policy",
+          "request": {
+            "description": "Delete a stored policy in one scope.\n\nScoped by ``workspace_id`` and ``user_id`` for the same reason the upsert is:\ndeleting one workspace's policy must not touch another's, deleting the\nworkspace-wide policy must not take a user's override with it, and deleting an\noverride must leave the workspace-wide one serving everyone else.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "routing",
+                "policies",
+                ":name"
+              ],
+              "query": [
+                {
+                  "description": "Delete the policy scoped to this user. Omit to delete the workspace-wide one.",
+                  "disabled": true,
+                  "key": "user_id",
+                  "value": ""
+                },
+                {
+                  "description": "Delete the policy in this workspace. Omit for the deployment's default workspace.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/routing/policies/:name?user_id=&workspace_id=",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "name",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Rank Candidates",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"user_id\": \"string\",\n  \"examples\": [\n    {\n      \"prompt\": \"string\",\n      \"scores\": {}\n    }\n  ]\n}"
+            },
+            "description": "Record scored examples: one routing-memory record each, plus an audit row.\n\nThe routing-memory record is written before its audit row for each example,\nbecause it is the load-bearing one (the router votes over it) and embedding it\ncan fail; writing the audit row only afterwards means a failed embedding never\nleaves an orphan audit row.\n\nA failed embedding is a 502 that names the model, not a 500. Every example in\nthe batch is embedded, so this is the call an operator makes most often and the\none most likely to meet a misconfigured ``router_embedding_model``.\n\nScore keys are stored canonically as ``instance:model`` (see\n:func:`_validated_scores`), which is the form the router canonicalizes its\ncandidates to, so how a policy spells a candidate cannot decide whether it\nmatches.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "routing",
+                "preferences",
+                "rank"
+              ],
+              "raw": "{{baseUrl}}/v1/routing/preferences/rank"
+            }
+          }
+        },
+        {
+          "name": "Routing Memory Status",
+          "request": {
+            "description": "Report how warm one user's routing memory is in one workspace, per pool.\n\n``user_id`` is required rather than optional because there is no aggregate\nanswer: warmth is per user, and a total across users would describe a pool\nthat no request ever votes over. The same holds across workspaces, which is\nwhy ``workspace_id`` narrows rather than aggregating; it merely defaults\ninstead of being required, because a single-workspace deployment has one\nanswer.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "routing",
+                "status"
+              ],
+              "query": [
+                {
+                  "description": "Whose routing memory to report on.",
+                  "disabled": false,
+                  "key": "user_id",
+                  "value": ""
+                },
+                {
+                  "description": "Which workspace's routing memory to report on. Omit for the default workspace.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/routing/status?user_id=&workspace_id="
+            }
+          }
+        }
+      ],
+      "name": "routing"
+    },
+    {
+      "item": [
+        {
           "name": "List Organization Usage",
           "request": {
             "description": "List the caller's organization's usage logs, most recent first.\n\nThe tenant-scoped counterpart of ``GET /v1/usage``: same filters, same bare\nJSON array, same separate ``/count`` for a paginator's total, confined to\nwhat the caller's membership lets them see. Scope is never a parameter here.",
@@ -4475,213 +4702,6 @@
         }
       ],
       "name": "responses"
-    },
-    {
-      "item": [
-        {
-          "name": "List Policies",
-          "request": {
-            "description": "List every routing policy in force, from config.yml and from storage.\n\nEvery scope at once, workspace-wide and user-scoped alike: this is the\nmaster-key management view, not what any one caller resolves.",
-            "header": [],
-            "method": "GET",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "v1",
-                "routing",
-                "policies"
-              ],
-              "query": [
-                {
-                  "description": "Only stored policies in this workspace. Config-file policies are always included, being deployment-wide. Omit to list the stored policies of every workspace.",
-                  "disabled": true,
-                  "key": "workspace_id",
-                  "value": ""
-                }
-              ],
-              "raw": "{{baseUrl}}/v1/routing/policies?workspace_id="
-            }
-          }
-        },
-        {
-          "name": "Set Policy",
-          "request": {
-            "body": {
-              "mode": "raw",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              },
-              "raw": "{\n  \"name\": \"string\",\n  \"spec\": {}\n}"
-            },
-            "description": "Create or update a stored policy in one workspace, optionally for one user.\n\nThe spec is validated here and stored as given, so a row can never contain a\nbody this build would refuse at load. The cache is refreshed twice: once before\nvalidating (so the shadowing checks see other writers' policies) and once after\ncommitting (so this worker serves the new policy immediately).\n\n``rename_from`` renames the row instead of keying on ``name``. It is part of\nthis write rather than an endpoint of its own so that an edit which both renames\na policy and re-targets it cannot land half-applied, leaving the old name serving\nthe new spec. The new name is validated exactly as a fresh one is, because a\nrename can walk a policy into every collision a create can. Sending the field\nasserts the named policy is stored, so it never falls back to creating one.",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "method": "POST",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "v1",
-                "routing",
-                "policies"
-              ],
-              "raw": "{{baseUrl}}/v1/routing/policies"
-            }
-          }
-        },
-        {
-          "name": "Explain Policy",
-          "request": {
-            "body": {
-              "mode": "raw",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              },
-              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"budget_remaining_usd\": 0,\n  \"budget_used_pct\": 0,\n  \"key_id\": \"string\",\n  \"name\": \"string\",\n  \"spec\": {},\n  \"user_id\": \"string\",\n  \"workspace_id\": \"00000000-0000-0000-0000-000000000000\"\n}"
-            },
-            "description": "Compile a policy and return the plan, without dispatching anything.\n\nMaster-key gated, and deliberately so: the response enumerates the policy's\ntargets, which is exactly the information a policy exists to keep off the wire.\nIt is a management surface, not a caller-facing one.\n\nAccepts an unsaved ``spec`` as well as a saved ``name``, so a form can validate\nwhat the operator is about to save. The response includes dropped candidates\nwith reasons, which is the part that catches a \"failover\" policy that has\nquietly compiled down to a single attempt.",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "method": "POST",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "v1",
-                "routing",
-                "policies",
-                "explain"
-              ],
-              "raw": "{{baseUrl}}/v1/routing/policies/explain"
-            }
-          }
-        },
-        {
-          "name": "Delete Policy",
-          "request": {
-            "description": "Delete a stored policy in one scope.\n\nScoped by ``workspace_id`` and ``user_id`` for the same reason the upsert is:\ndeleting one workspace's policy must not touch another's, deleting the\nworkspace-wide policy must not take a user's override with it, and deleting an\noverride must leave the workspace-wide one serving everyone else.",
-            "header": [],
-            "method": "DELETE",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "v1",
-                "routing",
-                "policies",
-                ":name"
-              ],
-              "query": [
-                {
-                  "description": "Delete the policy scoped to this user. Omit to delete the workspace-wide one.",
-                  "disabled": true,
-                  "key": "user_id",
-                  "value": ""
-                },
-                {
-                  "description": "Delete the policy in this workspace. Omit for the deployment's default workspace.",
-                  "disabled": true,
-                  "key": "workspace_id",
-                  "value": ""
-                }
-              ],
-              "raw": "{{baseUrl}}/v1/routing/policies/:name?user_id=&workspace_id=",
-              "variable": [
-                {
-                  "description": "path parameter",
-                  "key": "name",
-                  "value": ""
-                }
-              ]
-            }
-          }
-        },
-        {
-          "name": "Rank Candidates",
-          "request": {
-            "body": {
-              "mode": "raw",
-              "options": {
-                "raw": {
-                  "language": "json"
-                }
-              },
-              "raw": "{\n  \"user_id\": \"string\",\n  \"examples\": [\n    {\n      \"prompt\": \"string\",\n      \"scores\": {}\n    }\n  ]\n}"
-            },
-            "description": "Record scored examples: one routing-memory record each, plus an audit row.\n\nThe routing-memory record is written before its audit row for each example,\nbecause it is the load-bearing one (the router votes over it) and embedding it\ncan fail; writing the audit row only afterwards means a failed embedding never\nleaves an orphan audit row.\n\nA failed embedding is a 502 that names the model, not a 500. Every example in\nthe batch is embedded, so this is the call an operator makes most often and the\none most likely to meet a misconfigured ``router_embedding_model``.\n\nScore keys are stored canonically as ``instance:model`` (see\n:func:`_validated_scores`), which is the form the router canonicalizes its\ncandidates to, so how a policy spells a candidate cannot decide whether it\nmatches.",
-            "header": [
-              {
-                "key": "Content-Type",
-                "value": "application/json"
-              }
-            ],
-            "method": "POST",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "v1",
-                "routing",
-                "preferences",
-                "rank"
-              ],
-              "raw": "{{baseUrl}}/v1/routing/preferences/rank"
-            }
-          }
-        },
-        {
-          "name": "Routing Memory Status",
-          "request": {
-            "description": "Report how warm one user's routing memory is in one workspace, per pool.\n\n``user_id`` is required rather than optional because there is no aggregate\nanswer: warmth is per user, and a total across users would describe a pool\nthat no request ever votes over. The same holds across workspaces, which is\nwhy ``workspace_id`` narrows rather than aggregating; it merely defaults\ninstead of being required, because a single-workspace deployment has one\nanswer.",
-            "header": [],
-            "method": "GET",
-            "url": {
-              "host": [
-                "{{baseUrl}}"
-              ],
-              "path": [
-                "v1",
-                "routing",
-                "status"
-              ],
-              "query": [
-                {
-                  "description": "Whose routing memory to report on.",
-                  "disabled": false,
-                  "key": "user_id",
-                  "value": ""
-                },
-                {
-                  "description": "Which workspace's routing memory to report on. Omit for the default workspace.",
-                  "disabled": true,
-                  "key": "workspace_id",
-                  "value": ""
-                }
-              ],
-              "raw": "{{baseUrl}}/v1/routing/status?user_id=&workspace_id="
-            }
-          }
-        }
-      ],
-      "name": "routing"
     },
     {
       "item": [
@@ -6702,7 +6722,7 @@
         {
           "name": "List Workspace Mcp Servers",
           "request": {
-            "description": "List the MCP servers configured for a workspace.\n\nOrganization owners/admins or this workspace's owners/admins. Reads are\ngated like writes because these rows name the endpoints the gateway\nconnects to on the workspace's behalf. Authorization tokens are never\nincluded; each server reports only whether it has one.",
+            "description": "List the MCP servers configured for a workspace.\n\nReadable by any member who can see the workspace: these servers act on\nevery request a member sends through it, so what they are is a member's\nto view (otari-ai#1942). Changing them stays with organization\nowners/admins or this workspace's owners/admins. Authorization tokens are\nnever included; each server reports only whether it has one.",
             "header": [],
             "method": "GET",
             "url": {
