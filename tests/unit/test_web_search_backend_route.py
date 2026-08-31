@@ -198,7 +198,7 @@ def _warnings_from(config: GatewayConfig, caplog: pytest.LogCaptureFixture) -> s
     ],
 )
 def test_a_half_configured_provider_is_warned_about(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture, overrides: dict[str, str], expected: str
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, overrides: dict[str, Any], expected: str
 ) -> None:
     """Warned rather than refused, like half-configured OAuth: web search is one
     optional tool, and a compose file can default the provider name without being
@@ -222,7 +222,7 @@ def test_a_half_configured_provider_is_warned_about(
     [{}, {"web_search_provider": "tavily", "web_search_provider_api_key": "tvly-x"}],
 )
 def test_neither_half_and_both_halves_are_both_quiet(
-    tmp_path: Path, caplog: pytest.LogCaptureFixture, overrides: dict[str, str]
+    tmp_path: Path, caplog: pytest.LogCaptureFixture, overrides: dict[str, Any]
 ) -> None:
     """Configuring nothing is the ordinary state, not a mistake."""
     config = GatewayConfig(
