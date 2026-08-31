@@ -44,7 +44,11 @@ is the honest description of a real ceiling whose figure is set elsewhere.
 
 A budget named by a ``users`` row is skipped even on a single-organization
 deployment: that table is the deployment's own, with no tenancy column, so a
-budget handed to a gateway user is not the organization's to redefine.
+budget handed to a gateway user is not the organization's to redefine. A budget
+named by a ``budget_reset_logs`` row is skipped for the same reason one step
+removed: a reset record outlives the assignment that produced it, so such a
+budget *was* handed to a gateway user even where no live ``users`` row still
+points at it, and the reference goes on refusing a delete either way.
 
 ``ondelete="CASCADE"`` matches ``workspace.organization_id``, the neighbouring
 column in the tenancy model. Nothing can reach it yet: this gateway serves no
@@ -102,7 +106,8 @@ def _assign_sole_organization(bind: sa.Connection) -> None:
         sa.text(
             "UPDATE budgets SET organization_id = :organization_id "
             "WHERE organization_id IS NULL "
-            "AND budget_id NOT IN (SELECT budget_id FROM users WHERE budget_id IS NOT NULL)"
+            "AND budget_id NOT IN (SELECT budget_id FROM users WHERE budget_id IS NOT NULL) "
+            "AND budget_id NOT IN (SELECT budget_id FROM budget_reset_logs)"
         ),
         {"organization_id": organizations[0]},
     )

@@ -120,3 +120,128 @@ test.describe("organization rail", () => {
     await captureScreenshot(page, "organization-model-pricing")
   })
 })
+
+/**
+ * The organization-admin view of Spend & budgets.
+ *
+ * `/budgets` above captures the deployment-operator page, because `login`
+ * exchanges the master key and that session is the bootstrap operator, so
+ * `deployment_operator` is true and the route resolves to the other page every
+ * time. Nothing else in this suite renders the admin page, which the frontend
+ * standards owe a screenshot for.
+ *
+ * A seeded admin identity with a password would be the faithful way in, and this
+ * harness has no password login: `login` is the only auth path and it is
+ * master-key only. So the caller's own context read is stubbed instead, which is
+ * the technique `public.spec.ts` already uses for the invitation pages. The two
+ * organization-scoped reads are stubbed with it, because a master-key session is
+ * still what the gateway sees and it would answer them for the operator's
+ * organization rather than the shape this page is being captured for.
+ *
+ * What this does and does not cover: the layout, both themes and all three
+ * viewports, which is what the matrix is for. It is not a claim that the role
+ * gate works, which the vitest suite and the route tests own.
+ */
+async function stubAdminSpendView(page: Page): Promise<void> {
+  await page.route("**/v1/organizations/me", async (route) => {
+    const response = await route.fetch()
+    const context = await response.json()
+    await route.fulfill({
+      json: { ...context, role: "admin", deployment_operator: false },
+    })
+  })
+  await page.route("**/v1/organizations/me/budgets*", async (route) => {
+    await route.fulfill({
+      json: {
+        data: [
+          {
+            budget_id: "11111111-1111-1111-1111-111111111111",
+            organization_id: "22222222-2222-2222-2222-222222222222",
+            name: "Engineering monthly",
+            max_budget: 2500,
+            budget_duration_sec: null,
+            reset_alignment: "calendar_month",
+            ceiling_count: 2,
+            created_at: "2026-08-01T00:00:00+00:00",
+            updated_at: "2026-08-01T00:00:00+00:00",
+          },
+          {
+            budget_id: "33333333-3333-3333-3333-333333333333",
+            organization_id: "22222222-2222-2222-2222-222222222222",
+            name: "Trials, daily",
+            max_budget: 25,
+            budget_duration_sec: null,
+            reset_alignment: "calendar_day",
+            ceiling_count: 0,
+            created_at: "2026-08-02T00:00:00+00:00",
+            updated_at: "2026-08-02T00:00:00+00:00",
+          },
+        ],
+        count: 2,
+      },
+    })
+  })
+  await page.route("**/v1/organizations/me/spend-ceilings*", async (route) => {
+    await route.fulfill({
+      json: {
+        data: [
+          {
+            id: "44444444-4444-4444-4444-444444444444",
+            scope_type: "organization",
+            scope_id: "22222222-2222-2222-2222-222222222222",
+            provider_key_id: null,
+            budget_id: "11111111-1111-1111-1111-111111111111",
+            name: "Whole organization",
+            max_budget: 2500,
+            current_spend: 412.5,
+            reserved_spend: 3.25,
+            budget_duration_sec: null,
+            reset_alignment: "calendar_month",
+            period_start: "2026-08-01T00:00:00+00:00",
+            period_end: "2026-09-01T00:00:00+00:00",
+            manageable: true,
+            created_at: "2026-08-01T00:00:00+00:00",
+            updated_at: "2026-08-01T00:00:00+00:00",
+          },
+          {
+            // The row the otari-ai cutover writes: enforcing, and its figure set
+            // outside this organization. Included so the marker is captured.
+            id: "55555555-5555-5555-5555-555555555555",
+            scope_type: "workspace",
+            scope_id: "66666666-6666-6666-6666-666666666666",
+            provider_key_id: "openai-eu",
+            budget_id: "77777777-7777-7777-7777-777777777777",
+            name: null,
+            max_budget: 100,
+            current_spend: 12,
+            reserved_spend: 0,
+            budget_duration_sec: 86400,
+            reset_alignment: null,
+            period_start: "2026-08-30T00:00:00+00:00",
+            period_end: "2026-08-31T00:00:00+00:00",
+            manageable: false,
+            created_at: "2026-08-01T00:00:00+00:00",
+            updated_at: "2026-08-01T00:00:00+00:00",
+          },
+        ],
+        count: 2,
+      },
+    })
+  })
+}
+
+test.describe("organization admin", () => {
+  test("organization spend and budgets", async ({ page }) => {
+    await login(page)
+    await stubAdminSpendView(page)
+    await gotoRoute(page, "/budgets")
+    await expect(
+      page.getByRole("heading", { name: /spend & budgets/i }).first(),
+    ).toBeVisible()
+    // Awaited past the loading rows, so the capture is the populated tables
+    // rather than two spinners.
+    await expect(page.getByText("Engineering monthly")).toBeVisible()
+    await expect(page.getByText("Set at the deployment level")).toBeVisible()
+    await captureScreenshot(page, "organization-spend-budgets")
+  })
+})

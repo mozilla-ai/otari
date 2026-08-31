@@ -105,11 +105,19 @@ export function SpendCeilingDialog({
   ]
 
   const noBudgets = budgetOptions.length === 0
+  // Labelling the deployment-level option is what makes the current selection
+  // readable; this is what stops it being *saved* unchanged. The endpoint
+  // resolves a ceiling's budget against the organization's own, so submitting
+  // that id is a guaranteed 404, and an enabled Save that always fails is worse
+  // than one that says what it needs.
+  const budgetIsOwned = budgets.some((budget) => budget.budget_id === budgetId)
   const blockedReason = noBudgets
     ? "Add a budget first. A ceiling enforces a budget, so there is nothing for this one to hold."
     : budgetId === ""
       ? "Choose the budget this ceiling enforces."
-      : undefined
+      : budgetIsOwned
+        ? undefined
+        : "This ceiling holds a budget set at the deployment level. Choose one of your own to take it over."
 
   const submit = () => {
     if (blockedReason !== undefined) return

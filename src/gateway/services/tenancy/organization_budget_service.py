@@ -774,10 +774,11 @@ class OrganizationBudgetService:
         )
         period_start, period_end = window if window is not None else (None, None)
 
-        # Checked before the insert rather than caught as an IntegrityError,
-        # because the two partial unique indexes on `scoped_budgets` are what
-        # would refuse it and neither is nameable in a message a human can act on.
-        # The race that leaves is closed by the index itself, which still refuses.
+        # Checked before the insert rather than only caught, because the two
+        # partial unique indexes on `scoped_budgets` are what would refuse it and
+        # neither is nameable in a message a human can act on. The race this
+        # leaves is closed by the index, and translated at the commit below so it
+        # is the same 409 rather than a 500.
         await self._require_no_existing_ceiling(request)
 
         ceiling = ScopedBudget(
@@ -790,7 +791,16 @@ class OrganizationBudgetService:
             period_end=period_end,
         )
         self.db.add(ceiling)
-        await self.db.commit()
+        try:
+            await self.db.commit()
+        except IntegrityError:
+            # The pre-check above is a read, so two concurrent creates can both
+            # pass it and one commit then loses to the partial unique index. The
+            # index is what actually enforces "one ceiling per scope and
+            # provider", and the loser failed for exactly the reason the
+            # pre-check describes, so it gets the same 409 rather than a 500.
+            await self.db.rollback()
+            raise OrganizationScopedBudgetAlreadyExistsError(request.scope_type, request.scope_id) from None
         await self.db.refresh(ceiling)
         return OrganizationScopedBudgetPublic.from_model(ceiling, budget, organization_id=organization.id)
 

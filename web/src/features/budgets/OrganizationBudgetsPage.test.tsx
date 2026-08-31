@@ -358,6 +358,34 @@ describe("OrganizationBudgetsPage", () => {
     expect(await screen.findByText(/Add a budget first/)).toBeInTheDocument()
   })
 
+  it("will not save a ceiling still holding a budget the organization does not own", async () => {
+    // `FilterSelect` carries an unmatched value as its own option rather than
+    // dropping it, so the deployment budget stays selected and Save looked
+    // enabled while submitting an id the endpoint answers 404 for.
+    mockApi({
+      ceilings: [
+        spendCeiling({
+          manageable: false,
+          // A budget id that is not among the organization's own, which is what
+          // `manageable: false` means on the wire.
+          budget_id: "dddddddd-9999-9999-9999-999999999999",
+        }),
+      ],
+    })
+    const user = userEvent.setup()
+    renderPage()
+    const table = await screen.findByRole("grid", {
+      name: "Organization spend ceilings",
+    })
+
+    await user.click(await within(table).findByRole("button", { name: "Edit" }))
+
+    expect(
+      await screen.findByText(/Choose one of your own to take it over/),
+    ).toBeInTheDocument()
+    expect(screen.getByRole("button", { name: "Save ceiling" })).toBeDisabled()
+  })
+
   it("sends only the label and the budget when editing a ceiling", async () => {
     // The endpoint ignores the scope on a PATCH, because changing it would move
     // the ceiling to another identity while carrying its spend.

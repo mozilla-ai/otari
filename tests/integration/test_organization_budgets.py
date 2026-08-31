@@ -17,6 +17,7 @@ tenant's.
 """
 
 import uuid
+from datetime import UTC, datetime
 from decimal import Decimal
 from typing import Any
 
@@ -27,7 +28,16 @@ from sqlalchemy import select
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from gateway.models.entities import APIKey, Budget, ScopedBudget, WorkspaceBudgetDefault
+from gateway.models.entities import (
+    APIKey,
+    Budget,
+    BudgetResetLog,
+    ScopedBudget,
+    WorkspaceBudgetDefault,
+)
+from gateway.models.entities import (
+    User as ApiUser,
+)
 from gateway.models.tenancy import Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.repositories.tenancy import (
     OrganizationMemberRepository,
@@ -38,6 +48,7 @@ from gateway.repositories.tenancy import (
 )
 from gateway.services.tenancy.errors import (
     NotAuthorizedError,
+    OrganizationBudgetHeldElsewhereError,
     OrganizationBudgetInUseError,
     OrganizationBudgetNotFoundError,
     OrganizationScopedBudgetAlreadyExistsError,
@@ -935,6 +946,111 @@ async def test_a_delete_is_refused_while_a_workspace_default_names_the_budget(as
     await async_db.flush()
 
     with pytest.raises(OrganizationBudgetInUseError, match="workspace member default"):
+        await service.delete_budget(user=owner, budget_id=budget.budget_id)
+
+
+@pytest.mark.asyncio
+async def test_a_concurrent_duplicate_ceiling_is_a_conflict_not_a_crash(
+    async_db: AsyncSession,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The race the pre-check cannot close, translated rather than escaping as a 500.
+
+    The pre-check is a read, so two creates can both pass it and one commit then
+    loses to the partial unique index. Simulated deterministically by inserting
+    the colliding row after the pre-check would have run and before the commit,
+    which is the same ordering a concurrent writer produces.
+    """
+    organization = await _organization(async_db, slug="acme-race")
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = OrganizationBudgetService(async_db)
+    budget = await service.create_budget(user=owner, request=_create())
+    request = OrganizationScopedBudgetCreate(
+        scope_type="organization",
+        scope_id=str(organization.id),
+        budget_id=budget.budget_id,
+    )
+
+    original = service._require_no_existing_ceiling
+
+    async def insert_the_winner(candidate: OrganizationScopedBudgetCreate) -> None:
+        await original(candidate)
+        # The competing writer, landing between the check and this call's commit.
+        async_db.add(
+            ScopedBudget(
+                scope_type=candidate.scope_type,
+                scope_id=candidate.scope_id,
+                budget_id=candidate.budget_id,
+            )
+        )
+        await async_db.flush()
+
+    # Through `monkeypatch` rather than a bare assignment, which mypy refuses on
+    # a bound method and which would leave the patch in place if the assertion
+    # below raised.
+    monkeypatch.setattr(service, "_require_no_existing_ceiling", insert_the_winner)
+
+    with pytest.raises(OrganizationScopedBudgetAlreadyExistsError):
+        await service.create_ceiling(user=owner, request=request)
+
+@pytest.mark.asyncio
+async def test_an_explicit_null_clears_the_cap_as_the_schema_says(async_db: AsyncSession) -> None:
+    """The behavior the update model's description used to deny.
+
+    Each field is tri-state on `model_fields_set`, so an explicit null is a value:
+    it clears the cap back to uncapped rather than being ignored. The description
+    said clearing was a delete, which is published in the OpenAPI schema and would
+    have sent a client to the wrong endpoint.
+    """
+    organization = await _organization(async_db, slug="acme-clear-cap")
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = OrganizationBudgetService(async_db)
+    budget = await service.create_budget(user=owner, request=_create(max_budget=100.0))
+    assert budget.max_budget == 100.0
+
+    cleared = await service.update_budget(
+        user=owner,
+        budget_id=budget.budget_id,
+        request=OrganizationBudgetUpdate(max_budget=None),
+    )
+
+    assert cleared.max_budget is None
+    # And an omitted field is still left alone, which is what makes it a patch.
+    renamed = await service.update_budget(
+        user=owner,
+        budget_id=budget.budget_id,
+        request=OrganizationBudgetUpdate(name="Uncapped"),
+    )
+    assert renamed.max_budget is None
+    assert renamed.name == "Uncapped"
+
+@pytest.mark.asyncio
+async def test_a_delete_is_refused_while_a_reset_record_names_the_budget(async_db: AsyncSession) -> None:
+    """The reference that outlives the assignment which produced it.
+
+    A user can detach after a reset, leaving no live `users.budget_id` while the
+    `budget_reset_logs` row remains and goes on refusing the delete.
+    """
+    organization = await _organization(async_db, slug="acme-reset-hold")
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = OrganizationBudgetService(async_db)
+    budget = await service.create_budget(user=owner, request=_create())
+    async_db.add(ApiUser(user_id="detached-user", budget_id=None))
+    await async_db.flush()
+    async_db.add(
+        BudgetResetLog(
+            user_id="detached-user",
+            budget_id=budget.budget_id,
+            previous_spend=Decimal("1.5"),
+            reset_at=datetime.now(UTC),
+        )
+    )
+    await async_db.flush()
+
+    # `OrganizationBudgetHeldElsewhereError`, not the in-use error: a reset log is
+    # not a tenant's row to be told about, and its NOT NULL column makes the
+    # ORM's null-out fail at the commit rather than being caught by a count.
+    with pytest.raises(OrganizationBudgetHeldElsewhereError):
         await service.delete_budget(user=owner, budget_id=budget.budget_id)
 
 

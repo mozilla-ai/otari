@@ -90,7 +90,7 @@ def _add_budget(engine: Engine, budget_id: str) -> None:
         )
 
 
-def _add_gateway_user(engine: Engine, *, user_id: str, budget_id: str) -> None:
+def _add_gateway_user(engine: Engine, *, user_id: str, budget_id: str | None) -> None:
     with engine.begin() as connection:
         connection.execute(
             text(
@@ -203,6 +203,37 @@ def test_a_budget_handed_to_a_gateway_user_is_skipped(sqlite_before: tuple[Confi
     command.upgrade(config, _REVISION)
 
     assert _owners(engine) == {"shared": None, "tenant-only": organization_id}
+
+
+def test_a_budget_with_a_reset_record_is_skipped(sqlite_before: tuple[Config, Engine]) -> None:
+    """A reset record outlives the assignment that produced it.
+
+    So a budget carrying one was handed to a gateway user even where no live
+    ``users`` row still points at it, and the reference goes on refusing a delete
+    either way. Skipped for the same reason the live assignment is.
+    """
+    config, engine = sqlite_before
+    organization_id = _sole_organization(engine)
+    _add_budget(engine, "had-a-user")
+    _add_budget(engine, "never-had-one")
+    # The exact shape that makes this distinct from the live-assignment case: the
+    # user has since detached, so `users.budget_id` is null and the `users` clause
+    # does not exclude the budget, while the reset record still names it.
+    # `budget_reset_logs.user_id` is NOT NULL at this revision, so the row needs a
+    # user to hang off.
+    _add_gateway_user(engine, user_id="detached", budget_id=None)
+    with engine.begin() as connection:
+        connection.execute(
+            text(
+                "INSERT INTO budget_reset_logs (user_id, budget_id, previous_spend, reset_at) "
+                "VALUES ('detached', 'had-a-user', 1.0, :n)"
+            ),
+            {"n": _NOW},
+        )
+
+    command.upgrade(config, _REVISION)
+
+    assert _owners(engine) == {"had-a-user": None, "never-had-one": organization_id}
 
 
 def test_the_downgrade_removes_the_column(sqlite_before: tuple[Config, Engine]) -> None:
