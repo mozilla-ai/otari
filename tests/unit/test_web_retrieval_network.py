@@ -1,19 +1,28 @@
 """Focused tests for DNS admission, pinning, redirects, and network bounds."""
 
 import asyncio
+import gzip
 import ipaddress
 import ssl
+import tracemalloc
+import zlib
 from collections.abc import AsyncIterator, Sequence
+from datetime import UTC, datetime, timedelta
+from pathlib import Path
 from typing import Any
 
 import httpcore
 import httpx
 import pytest
+from cryptography import x509
+from cryptography.hazmat.primitives import hashes, serialization
+from cryptography.hazmat.primitives.asymmetric import rsa
 from httpcore._backends.base import AsyncNetworkBackend, AsyncNetworkStream
 
 from gateway.services.web_retrieval_network import (
     PINNED_TARGET_EXTENSION,
     CappedBody,
+    ContentDecodingError,
     NetworkDeadline,
     NetworkDeadlineExceeded,
     PinnedAsyncHTTPTransport,
@@ -41,6 +50,14 @@ _PUBLIC_V4 = ipaddress.ip_address("93.184.216.34")
 _OTHER_PUBLIC_V4 = ipaddress.ip_address("8.8.8.8")
 _PUBLIC_V6 = ipaddress.ip_address("2606:4700:4700::1111")
 _PRIVATE_V4 = ipaddress.ip_address("10.0.0.5")
+
+
+class OneChunkByteStream(httpx.AsyncByteStream):
+    def __init__(self, content: bytes) -> None:
+        self._content = content
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        yield self._content
 
 
 class StaticResolver:
@@ -281,6 +298,71 @@ async def test_transport_dials_pinned_ip_but_preserves_tls_and_http_authority() 
     assert b"Host: example.com:8443\r\n" in request_bytes
 
 
+def _write_test_certificate(tmp_path: Path, hostname: str) -> tuple[Path, Path]:
+    key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+    subject = x509.Name([x509.NameAttribute(x509.NameOID.COMMON_NAME, hostname)])
+    now = datetime.now(UTC)
+    certificate = (
+        x509.CertificateBuilder()
+        .subject_name(subject)
+        .issuer_name(subject)
+        .public_key(key.public_key())
+        .serial_number(x509.random_serial_number())
+        .not_valid_before(now - timedelta(minutes=1))
+        .not_valid_after(now + timedelta(minutes=5))
+        .add_extension(x509.SubjectAlternativeName([x509.DNSName(hostname)]), critical=False)
+        .add_extension(x509.BasicConstraints(ca=True, path_length=None), critical=True)
+        .sign(key, hashes.SHA256())
+    )
+    certificate_path = tmp_path / "certificate.pem"
+    key_path = tmp_path / "key.pem"
+    certificate_path.write_bytes(certificate.public_bytes(serialization.Encoding.PEM))
+    key_path.write_bytes(
+        key.private_bytes(
+            serialization.Encoding.PEM,
+            serialization.PrivateFormat.PKCS8,
+            serialization.NoEncryption(),
+        )
+    )
+    return certificate_path, key_path
+
+
+@pytest.mark.asyncio
+async def test_pinned_tls_verifies_certificate_against_canonical_hostname(tmp_path: Path) -> None:
+    hostname = "canonical.example"
+    certificate_path, key_path = _write_test_certificate(tmp_path, hostname)
+    server_context = ssl.SSLContext(ssl.PROTOCOL_TLS_SERVER)
+    server_context.load_cert_chain(certificate_path, key_path)
+
+    async def serve(reader: asyncio.StreamReader, writer: asyncio.StreamWriter) -> None:
+        try:
+            await reader.readuntil(b"\r\n\r\n")
+            writer.write(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nOK")
+            await writer.drain()
+        finally:
+            writer.close()
+            await writer.wait_closed()
+
+    server = await asyncio.start_server(serve, "127.0.0.1", 0, ssl=server_context)
+    assert server.sockets
+    port = int(server.sockets[0].getsockname()[1])
+    client_context = ssl.create_default_context(cafile=str(certificate_path))
+    transport = PinnedAsyncHTTPTransport(ssl_context=client_context)
+    loopback = ipaddress.ip_address("127.0.0.1")
+    matching = ValidatedTarget(canonicalize_web_url(f"https://{hostname}:{port}/"), (loopback,))
+    wrong_host = ValidatedTarget(canonicalize_web_url(f"https://wrong.example:{port}/"), (loopback,))
+
+    try:
+        async with httpx.AsyncClient(transport=transport) as client:
+            response = await _request_with_target(client, matching)
+            assert await response.aread() == b"OK"
+            with pytest.raises(httpx.ConnectError):
+                await _request_with_target(client, wrong_host)
+    finally:
+        server.close()
+        await server.wait_closed()
+
+
 @pytest.mark.asyncio
 async def test_transport_does_not_repeat_dns_after_validation() -> None:
     class RebindingResolver:
@@ -501,15 +583,57 @@ async def test_capped_body_distinguishes_exact_limit() -> None:
 
 
 @pytest.mark.asyncio
-async def test_capped_body_applies_to_decoded_content() -> None:
-    import gzip
+async def test_capped_body_bounds_compressed_expansion_memory() -> None:
+    max_bytes = 5 * 1024 * 1024
+    expanded = b"a" * (20 * 1024 * 1024)
+    response = httpx.Response(
+        200,
+        headers={"Content-Encoding": "gzip"},
+        stream=OneChunkByteStream(gzip.compress(expanded, compresslevel=9)),
+    )
 
-    expanded = b"a" * 100
-    response = httpx.Response(200, headers={"Content-Encoding": "gzip"}, content=gzip.compress(expanded))
+    tracemalloc.start()
+    tracemalloc.reset_peak()
+    try:
+        body = await read_capped_decoded_body(response, deadline=NetworkDeadline(1), max_bytes=max_bytes)
+        _current, peak = tracemalloc.get_traced_memory()
+    finally:
+        tracemalloc.stop()
 
-    body = await read_capped_decoded_body(response, deadline=NetworkDeadline(1), max_bytes=10)
+    assert body == CappedBody(content=b"a" * max_bytes, truncated=True)
+    assert peak < max_bytes * 4
 
-    assert body == CappedBody(content=b"a" * 10, truncated=True)
+
+@pytest.mark.parametrize(
+    ("encoding", "compressed"),
+    [
+        ("gzip", gzip.compress(b"decoded body")),
+        ("deflate", zlib.compress(b"decoded body")),
+    ],
+)
+@pytest.mark.asyncio
+async def test_capped_body_completes_supported_compressed_streams(encoding: str, compressed: bytes) -> None:
+    response = httpx.Response(
+        200,
+        headers={"Content-Encoding": encoding},
+        stream=OneChunkByteStream(compressed),
+    )
+
+    body = await read_capped_decoded_body(response, deadline=NetworkDeadline(1))
+
+    assert body == CappedBody(content=b"decoded body", truncated=False)
+
+
+@pytest.mark.asyncio
+async def test_capped_body_rejects_unsupported_content_encoding() -> None:
+    response = httpx.Response(
+        200,
+        headers={"Content-Encoding": "br"},
+        stream=OneChunkByteStream(b"not decoded"),
+    )
+
+    with pytest.raises(ContentDecodingError, match="unsupported"):
+        await read_capped_decoded_body(response, deadline=NetworkDeadline(1))
 
 
 @pytest.mark.asyncio
