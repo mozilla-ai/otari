@@ -14,13 +14,10 @@
  * a row with a longer label that wraps grows instead of squashing, and so a row
  * is a comfortable touch target on the mobile drawer without a second rule.
  *
- * **Hover and selection move in opposite directions off the rail.** The rail
- * itself is `--color-background-muted`, and every state is one or two steps
- * along the neutral ramp from there. A transient pointer state presses *into*
- * the chrome, a persistent selection lifts *out* of it, which is what lets each
- * step stay this subtle and still be tellable apart: hover and selection are
- * both one step off the rail, so if they moved the same way they would be
- * neighbors on the ramp and read as the same fill.
+ * **Hover and selection are steps off the rail, and press no longer is.** Every
+ * state is one or two steps along the neutral ramp from whatever the rail is.
+ * Hover and selection deliberately move by different amounts rather than in the
+ * same direction by different degrees, so they cannot read as one fill.
  *
  * | state            | light                | dark                 |
  * | ---------------- | -------------------- | -------------------- |
@@ -30,21 +27,29 @@
  * | selected         | `surface-alt`        | `surface-alt`        |
  * | selected + hover | `surface-alt` (none) | `surface-alt` (none) |
  *
- * Hover and selection move in opposite directions off the rail, and press moves
- * in a third. The rail itself is `--color-background-muted`. A hover lifts one
- * step away from the chrome to `surface-subtle`; a persistent selection lifts a
- * smaller step to `surface-muted`; a press goes the other way entirely, onto
- * `--color-background`, the page canvas showing through. Four distinct fills, in
- * both themes, at matched perceptual steps - no `dark:` override is needed for
- * any of them, because the surface family is staggered one rung above the
- * background family in both themes. An earlier ladder put `surface` *below*
- * chrome in dark and needed `dark:bg-surface` to produce a lift; under the
- * current mapping that override resolves to the rail's own value and erases the
- * selection, which is why it is gone.
+ * No `dark:` override is needed for any of them, because the surface family is
+ * staggered one rung above the background family in both themes. An earlier
+ * ladder put `surface` *below* chrome in dark and needed `dark:bg-surface` to
+ * produce a lift; under the current mapping that override resolves to the
+ * rail's own value and erases the selection, which is why it is gone.
  *
- * Measured on the running page in dark, as L* from the rail: pressed -2.20,
- * selected +4.56, hover +7.63. Light mirrors it, and the four fills are
- * distinct in both themes.
+ * **The pressed fill currently does nothing, and that is a known open item
+ * rather than an oversight here.** The rail was `--color-background-muted`, one
+ * rung above the canvas, and a press was the canvas showing through it. The
+ * shell is flat now: the rail *is* `--color-background`, so `active:bg-background`
+ * paints the rail's own value. Measured on the running page as L* from the rail:
+ *
+ * |          | dark  | light |
+ * | -------- | ----- | ----- |
+ * | hover    | +9.83 | -5.18 |
+ * | selected | +6.77 | -2.41 |
+ * | pressed  |  0.00 |  0.00 |
+ *
+ * Hover and selection still read, and gained contrast from the rail dropping a
+ * rung. Press has nowhere below the ground to go, so restoring it means picking
+ * a different direction for it, which is a design decision and not one to make
+ * from inside this file. The classes are left in place rather than deleted so
+ * the state has somewhere to land when that is decided.
  *
  * The selected row is a lifted chip rather than a tinted one, which is why it
  * is no longer `bg-primary-subtle`.

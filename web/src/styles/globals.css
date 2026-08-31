@@ -102,13 +102,18 @@
        #f7f8f8   background       (canvas)
        #f0f1f2   background-subtle          ·  surface-muted
        #e8e9eb                                 surface-subtle
-     The consequence to expect rather than fix: the nav rail is pure white
-     and the page canvas is DARKER than it. That is the deliberate mirror of
-     dark, where the rail (#0f1011) sits above the canvas (#08090a), and it
-     is what keeps chrome reading distinctly from cards in both themes.
-     HeroUI's default-variant controls (chips, Switch tracks, Checkbox boxes,
-     bound to `--color-default` → `--color-background-muted`) stay visible
-     against the canvas for the same reason.                            */
+     `--color-background-muted` is no longer the rail. The shell is flat: the
+     rail, the top bar and the content all sit on `--color-background`, divided
+     by hairlines rather than by level. What still reads this rung is
+     `--color-default`, which HeroUI binds to it.
+
+     That mapping used to be justified here as keeping "chips, Switch tracks,
+     Checkbox boxes and secondary Buttons" visible against the canvas. Measured
+     on the running app, only chips cash it: no HeroUI Switch, Checkbox or Radio
+     renders anywhere in this dashboard, and the fields read
+     `--field-background` rather than `--default`. Chips are the only real
+     dependent, and they are scheduled to go, so the rung is close to having no
+     consumer at all.                                                   */
   --color-background: #f7f8f8; /* page canvas */
   --color-background-muted: #ffffff; /* nav/sidebar chrome, one rung above the canvas */
   --color-background-subtle: #f0f1f2; /* hover/pressed on muted */
@@ -327,6 +332,12 @@
   --border: var(--color-border);
   --default: var(--color-background-muted);
   --default-foreground: var(--color-text);
+  /* Two spellings to never write, because they compile and do nothing:
+     `bg-background-secondary` and `bg-background-tertiary`. HeroUI's `@theme`
+     registers both roles, so Tailwind emits the classes, but this mapping
+     declares neither variable, so each resolves to an undefined custom property
+     and paints nothing at all. The working spellings for those two rungs are
+     `bg-surface-alt` and `bg-surface-subtle`. */
   --accent: var(--color-primary);
   --accent-foreground: var(--color-primary-foreground);
   --focus: var(--color-focus);
@@ -394,10 +405,9 @@
        #0f1011   background-muted (chrome)  ·  surface        (cards)
        #191a1b   background-subtle          ·  surface-muted
        #1f2023                                 surface-subtle
-     Chrome therefore sits one rung ABOVE the canvas here exactly as it sits
-     one rung above it in light, which is what keeps `--default`-backed
-     controls (Switch track, Checkbox box, default Chip, secondary Button)
-     visible against the cards they sit on.                             */
+     Chrome is flat here as it is in light, so this rung's only consumer is
+     `--default`, and the only thing that actually reads it is a Chip. See the
+     light block for what was measured.                                 */
   --color-background: #08090a;
   --color-background-muted: #0f1011;
   --color-background-subtle: #191a1b;

@@ -126,8 +126,8 @@ export function WorkspaceSwitcher({
           // the chrome rather than as the first item in the list.
           className={
             collapsed
-              ? `min-h-14 w-full! items-center justify-center border border-border bg-background-alt px-0 hover:border-accent ${NAV_TRANSITION}`
-              : `min-h-14 w-full! items-center justify-start gap-2.5 border border-border bg-background-alt px-2.5 py-2 text-left hover:border-accent ${NAV_TRANSITION}`
+              ? `min-h-14 w-full! items-center justify-center border border-border bg-background px-0 hover:border-accent ${NAV_TRANSITION}`
+              : `min-h-14 w-full! items-center justify-start gap-2.5 border border-border bg-background px-2.5 py-2 text-left hover:border-accent ${NAV_TRANSITION}`
           }
         >
           {/* The mark is the switcher's hero, as in the prototype: the product

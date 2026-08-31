@@ -686,7 +686,7 @@ function AppShellChrome() {
           tabIndex={-1}
           inert={isMobile && !mobileNavOpen ? true : undefined}
           className={clsx(
-            "flex flex-col gap-4 border-r border-border bg-background-alt p-3 focus:outline-none",
+            "flex flex-col gap-4 border-r border-border bg-background p-3 focus:outline-none",
             isMobile
               ? clsx(
                   // Full width, starting below the top bar: `top-14` pairs with
