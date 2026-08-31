@@ -221,11 +221,18 @@ def test_an_organization_owner_is_still_not_a_deployment_operator(
         refused = _call(client, "GET", "/v1/keys")
         # ...while the organization they do own answers as before.
         own = _call(client, "GET", "/v1/organizations/me")
+        # Probed at owner rather than member because the provider-keys list is
+        # organization-management-gated (otari-ai#1944), which is what took it
+        # out of `_TENANT_SCOPED_PROBES`. Its own 403 would be
+        # indistinguishable there from this file's; here it says the
+        # deployment-operator gate is still off that router.
+        keys = _call(client, "GET", "/v1/organizations/me/provider-keys")
     finally:
         client.cookies.clear()
 
     assert refused == 403
     assert own == 200
+    assert keys == 200
 
 
 # =============================================================================
