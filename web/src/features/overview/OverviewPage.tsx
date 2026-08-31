@@ -297,8 +297,10 @@ function OrganizationOverview() {
   const { today, period, previous, recent } = useUsageOverview()
 
   // Recent activity is excluded for the operator page's reason: it renders its
-  // own inline banner, so including it here would double-report.
-  const loadError = today.error ?? period.error
+  // own inline banner, so including it here would double-report. The previous
+  // window is included: its only reader is the trend chips, so its failure
+  // would otherwise just silently strip them.
+  const loadError = today.error ?? period.error ?? previous.error
 
   const refresh = () => {
     void today.refetch()
@@ -428,6 +430,7 @@ export function OverviewPage({
     setupError ??
     today.error ??
     period.error ??
+    previous.error ??
     health.error ??
     budgets.error ??
     keys.error ??

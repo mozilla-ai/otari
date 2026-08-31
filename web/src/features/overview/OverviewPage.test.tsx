@@ -767,6 +767,37 @@ describe("OverviewIndex for a caller who does not operate the deployment", () =>
     )
   })
 
+  it("reports a failed previous window instead of silently dropping the trends", async () => {
+    // The previous window's only reader is the trend chips, so its failure has
+    // no tile of its own to show it: without the banner it would just strip
+    // every "vs prev" chip and look like there was nothing to compare.
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input)
+      if (url.endsWith("/v1/admin/access")) {
+        return jsonResponse({ granted: false })
+      }
+      if (url.endsWith("/v1/organizations/me")) {
+        return jsonResponse(organizationContext({ deployment_operator: false }))
+      }
+      if (url.includes("/v1/organizations/me/usage/summary")) {
+        if (url.includes("end_date="))
+          return jsonResponse({ detail: "previous window exploded" }, 500)
+        return jsonResponse(summary({ cost: 200, request_count: 2000 }))
+      }
+      if (url.includes("/v1/organizations/me/usage")) {
+        return jsonResponse([])
+      }
+      return jsonResponse({ detail: "forbidden" }, 403)
+    })
+    renderPage(<OverviewIndex />)
+
+    // Both current windows read the same body here, hence findAllByText.
+    expect((await screen.findAllByText("$200.00")).length).toBeGreaterThan(0)
+    expect(
+      await screen.findByText(/previous window exploded/),
+    ).toBeInTheDocument()
+  })
+
   it("reports a failed scoped summary instead of a silent wall of dashes", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
