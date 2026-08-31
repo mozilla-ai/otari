@@ -222,9 +222,9 @@ describe("OrganizationProviderKeysPage", () => {
     // organization has no keys rather than that they cannot see them.
     const requests = mockApi({
       keys: [orgProviderKey()],
-      // Not an operator either: the fixture's default identity is one, and the
-      // server admits a superuser whatever their organization role, so a plain
-      // member has to say both.
+      // Both flags, not just the role: the fixture's default identity is a
+      // deployment operator, and this page's gate is `canManage` alone, so
+      // saying only the role would leave the case under test ambiguous.
       context: organizationContext({
         role: "member",
         deployment_operator: false,
@@ -250,23 +250,6 @@ describe("OrganizationProviderKeysPage", () => {
         request.url.includes("/v1/organizations/me/provider-keys"),
       ),
     ).toBe(false)
-  })
-
-  it("still lists the keys for a deployment operator whose org role is member", async () => {
-    // The server's gate admits a superuser whatever their organization role, so
-    // the read follows `deployment_operator`, the nearest authority the context
-    // publishes. The write controls keep their own narrower gate.
-    mockApi({
-      keys: [orgProviderKey()],
-      context: organizationContext({
-        role: "member",
-        deployment_operator: true,
-      }),
-    })
-    renderPage(<OrganizationProviderKeysPage />)
-
-    expect(await screen.findByText("Production")).toBeInTheDocument()
-    expect(screen.queryByText(/Only organization owners and admins/)).toBeNull()
   })
 
   it("disables adding a key when the deployment cannot encrypt one", async () => {

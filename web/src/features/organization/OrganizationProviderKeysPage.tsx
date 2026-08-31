@@ -35,7 +35,7 @@ import {
 } from "@/shared/components/ui"
 import { formatRelative } from "@/shared/helpers/format"
 
-import { canManage, isDeploymentOperator } from "./roles"
+import { canManage } from "./roles"
 
 // The organization's own upstream credentials: one BYO key per provider that
 // every workspace under the tenant inherits.
@@ -214,22 +214,21 @@ function KeyForm({
 
 export function OrganizationProviderKeysPage() {
   const context = useOrganizationContext()
-  const canEdit = canManage(context.data)
-  // The list read is organization-management-gated on the server too
-  // (otari-ai#1944): a member cannot see these rows, not only leave them alone.
-  // Withheld rather than fired and refused, the way WorkspacesPage withholds
-  // the operator-only budget reads.
+  // One predicate for the whole page now that the list read is
+  // organization-management-gated on the server too (otari-ai#1944): a member
+  // cannot see these rows, not only leave them alone. Withheld rather than
+  // fired and refused, the way `OrganizationGuardrailsCard` gates its own read
+  // and WorkspacesPage withholds the operator-only budget ones.
   //
-  // Wider than `canEdit`, and only because the server is: the gate is
-  // `require_active_organization_management_access`, which admits a superuser
-  // whatever their organization role, and `deployment_operator` is the nearest
-  // thing the context publishes to that (`roles.ts` says why `is_superuser`
-  // itself is not on the contract). Withholding the list from an operator who
-  // is a plain member would hide rows the server would hand them. The write
-  // controls keep the narrowing `roles.ts` documents, which is theirs and not
-  // this read's to change.
-  const canRead = canEdit || isDeploymentOperator(context.data)
-  const keys = useOrgProviderKeys(canRead)
+  // Deliberately not widened to `isDeploymentOperator`: the server also admits
+  // a superuser whatever their organization role, and `roles.ts` records that
+  // divergence, why it narrows in the safe direction, and that closing it means
+  // growing the membership context a superuser field. `deployment_operator` is
+  // not that field, since it also admits a non-superuser bootstrap identity the
+  // server would refuse, and the rail row is `canManage`-gated too, so no such
+  // caller had a route here to lose.
+  const canEdit = canManage(context.data)
+  const keys = useOrgProviderKeys(canEdit)
   // Same gate the `/providers` page applies, for the same reason: without
   // `OTARI_SECRET_KEY` the gateway cannot encrypt a credential, so the write
   // would fail at submit time.
@@ -406,11 +405,11 @@ export function OrganizationProviderKeysPage() {
         }
       />
 
-      {/* Held back until the context has actually answered: `canRead` is false
+      {/* Held back until the context has actually answered: `canEdit` is false
           while the role is still resolving, and a banner that flashes "you may
           not do this" on every load would be telling most people the opposite
           of the truth. */}
-      {context.data && !canRead ? (
+      {context.data && !canEdit ? (
         <InfoBanner>
           Only organization owners and admins can see this organization's
           provider keys.
@@ -454,7 +453,7 @@ export function OrganizationProviderKeysPage() {
           paint is the table they are about to get rather than an empty state,
           and withheld again if the context read is what failed, since neither
           an empty table nor a spinner is a true answer there. */}
-      {canRead || context.isPending ? (
+      {canEdit || context.isPending ? (
         <DataTable
           ariaLabel="Organization provider keys"
           columns={columns}
