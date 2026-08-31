@@ -513,12 +513,32 @@ describe("headings wear a type role", () => {
         ).toMatch(/\btext-(?:display|heading|title)\b/)
       } else {
         // No string literal, so the one acceptable shape left is an
-        // expression (Login.tsx's HEADING constant). A heading with no
-        // className at all is the bare case the base layer turns serif.
+        // expression. A heading with no className at all is the bare case
+        // the base layer turns serif.
+        const expression = attributes.match(/className=\{([^}]*)\}/)
         expect(
-          attributes,
+          expression,
           `${match[0]} in ${name} is a bare heading, which the base layer renders in the display face; give it a type role`,
-        ).toContain("className={")
+        ).not.toBeNull()
+        let value = (expression as RegExpMatchArray)[1].trim()
+        // A lone identifier is read through its declaration in the same
+        // file, which is how Login.tsx spells its HEADING constant. Any
+        // other expression (a ternary, a template) has to name a role in
+        // its own text.
+        if (/^\w+$/.test(value)) {
+          const declaration = source.match(
+            new RegExp(`\\b${value} = "([^"]*)"`),
+          )
+          expect(
+            declaration,
+            `${match[0]} in ${name} reads ${value}, which is not a same-file string constant this test can check; use a literal or a const`,
+          ).not.toBeNull()
+          value = (declaration as RegExpMatchArray)[1]
+        }
+        expect(
+          value,
+          `${match[0]} in ${name} hand-rolls its type; use text-display, text-heading, or text-title`,
+        ).toMatch(/\btext-(?:display|heading|title)\b/)
       }
     }
   })

@@ -191,7 +191,7 @@ meaning.
 
 Zilla Slab is spent on `text-display` alone; every other role, `text-heading` included, is set
 in Mozilla Text, because at 18px a slab serif competes with the page title instead of sitting
-under it (otari#807). Keys, IDs, and code are Fira Code. A bare `h1`-`h6` still defaults to the
+under it (mozilla-ai/otari#807). Keys, IDs, and code are Fira Code. A bare `h1`-`h6` still defaults to the
 display face through the `@layer base` rule in the same file, which is why a heading always
 wears a role: left bare it renders serif, and at any size but the display's that reads as an
 accident. The faces are self-hosted in `web/public/fonts/` under
