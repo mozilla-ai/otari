@@ -137,6 +137,7 @@ describe("AccountMenu", () => {
   })
 
   it("leaves Data & Privacy disabled for a deployment that published terms alone", async () => {
+    mockCaller(OPERATOR)
     await openMenu({ terms_url: "https://otari.ai/terms" })
 
     expect(

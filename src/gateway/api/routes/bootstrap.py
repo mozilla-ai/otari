@@ -180,23 +180,25 @@ class DeploymentBootstrap(BaseModel):
             "bundled with the gateway. Set, the dashboard's Documentation links open it in a "
             "new tab; null, they go to the bundled guide at /#/docs, which stays served either "
             "way. A link target an operator configured, validated at startup as an absolute "
-            "http(s) URL."
+            "http(s) URL carrying no credential, since this response is unauthenticated."
         )
     )
     terms_url: str | None = Field(
         description=(
             "Where this deployment's terms of service live. Set, the account menu carries a "
-            "Terms of service row pointing at them; null, it carries none, because a "
-            "deployment nobody wrote terms for has none to show. A link target an operator "
-            "configured, validated at startup as an absolute http(s) URL."
+            "Terms of service row pointing at them; null, no address is configured and the "
+            "menu carries no such row. A link target an operator configured, validated at "
+            "startup as an absolute http(s) URL carrying no credential, since this response "
+            "is unauthenticated."
         )
     )
     privacy_url: str | None = Field(
         description=(
             "Where this deployment's privacy notice lives. Set, the account menu's Data & "
-            "Privacy row links to it; null, that row stays disabled, which is what a gateway "
-            "storing its data locally and reporting nothing outward has to say. A link target "
-            "an operator configured, validated at startup as an absolute http(s) URL."
+            "Privacy row links to it; null, no address is configured and that row stays "
+            "disabled, carrying the standing note that there is nothing to configure there "
+            "yet. A link target an operator configured, validated at startup as an absolute "
+            "http(s) URL carrying no credential, since this response is unauthenticated."
         )
     )
     sign_in_methods: list[SignInMethod] = Field(

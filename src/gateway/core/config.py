@@ -1777,6 +1777,12 @@ class GatewayConfig(BaseSettings):
         address a person follows out of the dashboard, with no downstream
         consumer that builds a request from it. ``data_plane_url`` is held to a
         stricter bar for exactly that reason and keeps its own.
+
+        Userinfo is the one refusal the three share with ``data_plane_url``, and
+        they share it for its reason rather than theirs: ``GET /v1/bootstrap``
+        is unauthenticated, so a credential written into any of these would
+        reach every browser that asked, which no redaction in the operator-gated
+        config viewer would cover.
         """
         normalized = (value or "").strip()
         if not normalized:
@@ -1784,6 +1790,11 @@ class GatewayConfig(BaseSettings):
         parsed = urlsplit(normalized)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
             msg = f"{info.field_name} must be an absolute http(s) URL, got '{value}'"
+            raise ValueError(msg)
+        if parsed.username is not None or parsed.password is not None:
+            # The value is left out of the message, as it is for
+            # ``data_plane_url``: the offending part of it is the credential.
+            msg = f"{info.field_name} must carry no username or password"
             raise ValueError(msg)
         return normalized
 

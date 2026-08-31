@@ -249,9 +249,8 @@ privacy_url: "https://example.com/privacy"
 Each is independent. Unset, the Terms of service row is absent and the Data &
 Privacy row stays disabled. A deployment whose dashboard sits beside a site that
 owns the documents points at that site. `GET /v1/bootstrap` publishes both
-addresses unauthenticated, so do not put a credential in either; unlike
-`data_plane_url`, which refuses one, these are checked only for an absolute
-HTTP or HTTPS scheme.
+addresses unauthenticated, so a credential in either is refused at startup, the
+way `data_plane_url` refuses one. The same check covers `docs_url`.
 
 ## The data-plane address
 

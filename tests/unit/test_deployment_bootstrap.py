@@ -534,6 +534,45 @@ def test_a_blank_legal_url_is_an_unset_one(field: str) -> None:
     assert getattr(GatewayConfig.model_validate({field: "   "}), field) is None
 
 
+@pytest.mark.parametrize("field", ["docs_url", "terms_url", "privacy_url"])
+@pytest.mark.parametrize(
+    "configured",
+    ["https://token@otari.ai/terms", "https://user:secret@otari.ai/terms"],
+)
+def test_a_link_url_carrying_a_credential_is_refused_at_load(field: str, configured: str) -> None:
+    """The refusal ``data_plane_url`` already made, for the same reason.
+
+    ``GET /v1/bootstrap`` is unauthenticated, so a credential written into any
+    of these link fields would reach every browser that asked for it, which no
+    redaction in the operator-gated config viewer would cover. ``docs_url`` is
+    covered too: it rides the same validator and the same response.
+    """
+    with pytest.raises(ValidationError, match="no username or password"):
+        GatewayConfig.model_validate({field: configured})
+
+
+def test_the_unauthenticated_bootstrap_cannot_publish_a_legal_page_credential(tmp_path: Path) -> None:
+    """The end the refusal above exists to protect, asserted through the route.
+
+    The validator test says the value cannot be built; this says the published
+    payload is what a browser gets, so the two cannot drift apart if somebody
+    later relaxes one of them.
+    """
+    app = create_app(
+        _hosted(
+            tmp_path,
+            terms_url="https://otari.ai/terms",
+            privacy_url="https://otari.ai/privacy",
+        )
+    )
+
+    with TestClient(app) as client:
+        body = client.get("/v1/bootstrap").text
+
+    for field in ('"terms_url"', '"privacy_url"'):
+        assert "@" not in body.split(field)[1].split(",")[0]
+
+
 
 def test_a_hosted_control_plane_publishes_where_its_data_plane_is(tmp_path: Path) -> None:
     """The field otari#823 exists for: the dashboard's snippets are built from it.
