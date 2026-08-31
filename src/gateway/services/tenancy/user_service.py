@@ -243,7 +243,7 @@ async def create_user_for_signup(
     password: str,
     full_name: str | None = None,
     terms_accepted: bool = False,
-) -> None:
+) -> User | None:
     """Claim an identity ``organization_service`` already put on the roster, or do nothing.
 
     This edition's signup only ever completes an identity an admin already
@@ -267,6 +267,11 @@ async def create_user_for_signup(
     first means a bad password answers the same way whether or not the
     address is real.
 
+    Returns the identity that was claimed, or ``None`` on every enumeration-safe
+    path, so a caller can tell the two apart without the response doing so. That
+    is what lets the route notify ``GrowthSignalPort`` of a genuine signup and
+    stay silent otherwise.
+
     Refuses before writing anything if this deployment cannot mail the
     verification link: a signup that could never be verified would strand the
     caller in the unverified, hard-blocked state #650's sign-in gate enforces.
@@ -289,7 +294,7 @@ async def create_user_for_signup(
         # of the gap the way ``authenticate`` already does for a sign-in on an
         # address with no stored hash.
         await verify_absent_password_async(password)
-        return
+        return None
 
     identity.full_name = identity.full_name or full_name
     identity.hashed_password = await hash_password_async(password)
@@ -310,6 +315,7 @@ async def create_user_for_signup(
             expiry_hours=config.email_verification_expiry_hours,
         ),
     )
+    return identity
 
 
 async def verify_email(db: AsyncSession, *, token: str) -> User:

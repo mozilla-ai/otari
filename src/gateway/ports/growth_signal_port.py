@@ -36,6 +36,14 @@ class GrowthActivationEvent(StrEnum):
     Owned by the port rather than by whichever vendor answers it, so a caller
     never imports a vendor-flavored constant: it names the milestone in domain
     terms and leaves the vendor's own vocabulary to the adapter.
+
+    ``SIGNED_UP`` overlaps :meth:`GrowthSignalPort.record_signup`, and a signup
+    fires that method alone: it carries the address, the name and the creation
+    time a vendor needs to make the record in the first place, where this enum
+    carries only an identity. The value stays because an adapter whose vendor
+    models signup as one more activation event needs something to map onto, but
+    nothing in this tree emits it, so an adapter can treat it as an overlay's
+    own vocabulary rather than a second notification to de-duplicate against.
     """
 
     SIGNED_UP = "signed_up"
@@ -73,6 +81,27 @@ class GrowthSignalPort(Protocol):
         Callers detect first occurrence themselves, as they already must to
         decide whether to call this at all; an adapter may additionally
         de-duplicate on its own end, so a redundant call is safe.
+
+        Only ``API_KEY_CREATED`` is emitted, from
+        ``POST /v1/organizations/me/keys``, where first occurrence is the owner
+        holding no key yet. The other three stay uncalled, and an overlay should
+        not expect them:
+
+        - ``FIRST_ROUTE_CONFIGURED`` and ``BUDGET_RULE_SET`` would fire from
+          ``POST /v1/routing/policies`` and ``POST /v1/budgets``, which are
+          deployment-wide and gated on ``require_deployment_operator``. The
+          milestone would then name whoever holds deployment-wide authority: on
+          a hosted deployment the operator running it rather than any of the
+          tenants whose activation a vendor is watching, and under a header
+          master key nobody at all, since that credential resolves to the
+          bootstrap operator, which deliberately holds no address
+          (``services/tenancy/provisioning_service``). The same reason picks the
+          member key route over the operator's ``POST /v1/keys``.
+        - ``FIRST_REQUEST_ROUTED`` has no moment to fire from.
+          ``services/tenancy/workspace_activation_service`` derives activation
+          from the first successful usage row every time the guide is read,
+          rather than recording it, so there is no instant at which a workspace
+          becomes activated, only a polled read that would notify on every load.
         """
         ...
 
@@ -111,7 +140,15 @@ class GrowthSignalPort(Protocol):
         email: str,
         full_name: str | None,
     ) -> None:
-        """Notify of an edited display name worth reflecting on the vendor's record."""
+        """Notify of an edited display name worth reflecting on the vendor's record.
+
+        Nothing calls this, for the reason ``record_onboarding_completed``
+        gives about its own answers: the surface is not in this tree. An
+        identity's ``full_name`` is written at signup and by OAuth and never
+        edited again, and ``PATCH /v1/users`` edits the ``alias`` on a
+        request-plane attribution row, which is a billing label rather than a
+        person's display name.
+        """
         ...
 
     async def record_account_deleted(
@@ -125,5 +162,12 @@ class GrowthSignalPort(Protocol):
 
         Called with primitives captured before the delete, so an adapter must
         not assume the user row still exists when its background task runs.
+
+        Nothing calls this either: no route here deletes an account.
+        ``DELETE /v1/users`` soft-deletes an attribution row and revokes the
+        keys on it, which ends a spend identity rather than a person, and the
+        one thing that touches an identity itself is
+        ``PATCH /v1/admin/users/{user_id}`` deactivating it, which an operator
+        can undo and which this port has no counterpart for.
         """
         ...

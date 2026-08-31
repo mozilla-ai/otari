@@ -36,14 +36,20 @@ import uuid
 from datetime import datetime
 from typing import Annotated, Any
 
-from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi import APIRouter, BackgroundTasks, Depends, HTTPException, Query, status
 from pydantic import BaseModel, Field
 from sqlalchemy import select
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlmodel import col
 
-from gateway.api.deps import CurrentIdentity, get_config, get_db, verify_master_key
+from gateway.api.deps import (
+    CurrentIdentity,
+    GrowthSignalPortDep,
+    get_config,
+    get_db,
+    verify_master_key,
+)
 from gateway.api.routes.keys import (
     _KEY_EXCEEDS_USER_DETAIL,
     CreateKeyResponse,
@@ -55,6 +61,7 @@ from gateway.core.config import GatewayConfig
 from gateway.models.entities import APIKey, User
 from gateway.models.tenancy import User as TenancyUser
 from gateway.models.tenancy import Workspace
+from gateway.ports.growth_signal_port import GrowthActivationEvent
 from gateway.repositories.users_repository import get_or_create_attribution_user
 from gateway.services.model_access import is_allowlist_subset, validate_allowed_models
 from gateway.services.tenancy import OrganizationService
@@ -148,8 +155,10 @@ async def _caller_context(db: AsyncSession, identity: TenancyUser) -> tuple[uuid
 async def create_own_key(
     request: CreateOwnKeyRequest,
     identity: CurrentIdentity,
+    background_tasks: BackgroundTasks,
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
+    growth: GrowthSignalPortDep,
 ) -> CreateKeyResponse:
     """Create an API key owned by the caller, in a workspace they may see.
 
@@ -229,6 +238,14 @@ async def create_own_key(
     if not is_allowlist_subset(allowed_models, owner.allowed_models):
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=_KEY_EXCEEDS_USER_DETAIL)
 
+    # ``record_activation`` puts first-occurrence detection on the caller, and
+    # this schema has nowhere to record "already notified", so the milestone is
+    # derived from the owner's own keys: an index seek on ``api_keys.user_id``,
+    # read before the insert below because afterwards there is always one.
+    first_key = (
+        await db.execute(select(APIKey.id).where(APIKey.user_id == owner.user_id).limit(1))
+    ).scalar_one_or_none() is None
+
     api_key = generate_api_key()
     db_key = APIKey(
         id=str(uuid.uuid4()),
@@ -255,6 +272,18 @@ async def create_own_key(
             detail="Database error",
         ) from None
     await db.refresh(db_key)
+
+    if first_key and identity.email is not None:
+        # Skipped for an identity with no address, which is the bootstrap
+        # operator's normal state (`services/tenancy/provisioning_service`): the
+        # port's ``email`` is what a vendor keys a person on, and there is
+        # nothing to send in its place.
+        await growth.record_activation(
+            background_tasks=background_tasks,
+            event=GrowthActivationEvent.API_KEY_CREATED,
+            user_id=identity.id,
+            email=identity.email,
+        )
 
     key_info = KeyInfo.from_model(db_key)
     return CreateKeyResponse(
