@@ -303,4 +303,90 @@ describe("WorkspacesPage", () => {
     const bravo = (await screen.findByText("Bravo")).closest("tr")!
     expect(within(bravo).getByText("None")).toBeInTheDocument()
   })
+
+  it("withholds the budget column and its reads from a non-operator admin", async () => {
+    // An organization admin who does not operate the deployment may manage
+    // workspaces, but the budgets list answers them 403 (#821). Neither that
+    // read nor the defaults fan-out that only feeds this column is made, and
+    // the column goes with them rather than echoing UUID fragments.
+    const requests = mockApi({
+      context: organizationContext({ deployment_operator: false }),
+      workspaces: [workspace(), workspace({ id: SECOND, name: "Bravo" })],
+      budgetDefaults: {
+        "44444444-4444-4444-4444-444444444444": [
+          workspaceBudgetDefault({ budget_id: "bud-team" }),
+        ],
+      },
+    })
+    renderPage(<WorkspacesPage />)
+
+    await screen.findByText("Bravo")
+    expect(screen.queryByText("Default member budget")).toBeNull()
+    expect(
+      requests.some((request) => request.url.includes("/v1/budgets")),
+    ).toBe(false)
+    expect(
+      requests.some((request) =>
+        request.url.includes("member-budget-policies"),
+      ),
+    ).toBe(false)
+  })
+
+  it("offers a non-operator no default-budget picker on the create form", async () => {
+    const requests = mockApi({
+      context: organizationContext({ deployment_operator: false }),
+    })
+    const user = userEvent.setup()
+    renderPage(<WorkspacesPage />)
+
+    await user.click(
+      await screen.findByRole("button", { name: "Create workspace" }),
+    )
+    await user.type(screen.getByLabelText("Name"), "Research")
+    expect(
+      screen.queryByRole("button", { name: /Default member budget/ }),
+    ).toBeNull()
+    await user.click(screen.getByRole("button", { name: "Create workspace" }))
+
+    // The create itself is theirs to make; only the picker is withheld.
+    const post = requests.find((request) => request.method === "POST")
+    expect(post?.body).toEqual({ name: "Research", description: null })
+    expect(
+      requests.some((request) => request.url.includes("/v1/budgets")),
+    ).toBe(false)
+  })
+
+  it("withholds the default-budget controls from a non-operator's edit form", async () => {
+    const requests = mockApi({
+      context: organizationContext({ deployment_operator: false }),
+    })
+    const user = userEvent.setup()
+    renderPage(<WorkspacesPage />)
+
+    await user.click(await screen.findByRole("button", { name: "Edit" }))
+    const name = await screen.findByLabelText("Name")
+    expect(
+      screen.queryByRole("button", { name: /Default member budget/ }),
+    ).toBeNull()
+    expect(screen.queryByText("Per-provider defaults")).toBeNull()
+
+    // The rename is theirs to make, and saving does not touch the withheld
+    // default: no delete for a "none" the caller never picked.
+    await user.clear(name)
+    await user.type(name, "Renamed")
+    await user.click(screen.getByRole("button", { name: "Save changes" }))
+
+    const patch = requests.find((request) => request.method === "PATCH")
+    expect(patch?.body).toEqual({ name: "Renamed", description: null })
+    const operatorOnly = [
+      "/v1/budgets",
+      "/v1/providers",
+      "member-budget-policies",
+    ]
+    expect(
+      requests.filter((request) =>
+        operatorOnly.some((path) => request.url.includes(path)),
+      ),
+    ).toEqual([])
+  })
 })

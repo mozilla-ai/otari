@@ -2,7 +2,7 @@ import { Button, Card, Chip, Spinner } from "@heroui/react"
 import { useEffect, useMemo, useRef, useState } from "react"
 
 import type { Budget, Workspace, WorkspaceBudgetDefault } from "@/client"
-import { canManage } from "@/features/organization/roles"
+import { canManage, isDeploymentOperator } from "@/features/organization/roles"
 import { ApiError } from "@/shared/api/client"
 import {
   useAllWorkspaceBudgetDefaults,
@@ -266,7 +266,16 @@ export function CreateWorkspaceForm({
 }) {
   const create = useCreateWorkspace()
   const createDefault = useCreateWorkspaceBudgetDefault()
-  const budgets = useBudgets()
+  // The budgets list is a deployment-wide read that answers 403 to an
+  // organization admin who does not operate the deployment (#821), so it is not
+  // asked for unless the caller may read it, and the default-budget picker it
+  // feeds is withheld with it (the OrganizationMembersPage pattern, otari#838):
+  // offered anyway, the picker could only say "No default", which misreads as
+  // the deployment having no budgets. Resolved here rather than passed in
+  // because the workspace switcher offers this same form.
+  const context = useOrganizationContext()
+  const operates = isDeploymentOperator(context.data)
+  const budgets = useBudgets(operates)
   const [name, setName] = useState("")
   const [description, setDescription] = useState("")
   const [budgetId, setBudgetId] = useState(NO_DEFAULT)
@@ -357,11 +366,13 @@ export function CreateWorkspaceForm({
           value={description}
           onChange={setDescription}
         />
-        <DefaultBudgetPicker
-          budgets={budgets.data ?? []}
-          value={budgetId}
-          onChange={setBudgetId}
-        />
+        {operates ? (
+          <DefaultBudgetPicker
+            budgets={budgets.data ?? []}
+            value={budgetId}
+            onChange={setBudgetId}
+          />
+        ) : null}
         <div className="flex gap-2">
           <Button
             variant="primary"
@@ -463,8 +474,18 @@ function EditWorkspaceForm({
   onClose: () => void
 }) {
   const update = useUpdateWorkspace()
-  const budgets = useBudgets()
-  const defaults = useWorkspaceBudgetDefaults(workspace.id)
+  // Budgets and providers are deployment-wide reads that answer 403 to an
+  // organization admin who does not operate the deployment (#821), so neither is
+  // asked for unless the caller may read it, and the default-budget controls
+  // they feed are withheld with them (the OrganizationMembersPage pattern,
+  // otari#838): rendered anyway, the picker showed the current default as a raw
+  // UUID and the per-provider section had no provider to offer. The defaults
+  // read itself is workspace-scoped and would answer, but this form only reads
+  // it into those controls, so it is declined together with them.
+  const context = useOrganizationContext()
+  const operates = isDeploymentOperator(context.data)
+  const budgets = useBudgets(operates)
+  const defaults = useWorkspaceBudgetDefaults(operates ? workspace.id : null)
   const createDefault = useCreateWorkspaceBudgetDefault()
   const updateDefault = useUpdateWorkspaceBudgetDefault()
   const deleteDefault = useDeleteWorkspaceBudgetDefault()
@@ -476,7 +497,7 @@ function EditWorkspaceForm({
   const narrowed = (defaults.data ?? []).filter(
     (row) => row.provider_key_id !== null,
   )
-  const providers = useProviders()
+  const providers = useProviders(operates)
   const [name, setName] = useState(workspace.name)
   const [description, setDescription] = useState(workspace.description ?? "")
   const [budgetId, setBudgetId] = useState<string | null>(null)
@@ -491,6 +512,10 @@ function EditWorkspaceForm({
   // Three outcomes rather than one call: the default is its own row, so moving
   // between "none" and a budget is a create or a delete, not a field write.
   const saveDefault = async (): Promise<void> => {
+    // With the picker withheld, an untouched `selectedBudget` over an unfetched
+    // defaults list would read as "none" and delete nothing, but say so rather
+    // than lean on that coincidence.
+    if (!operates) return
     if (selectedBudget === NO_DEFAULT) {
       if (aggregate) {
         await deleteDefault.mutateAsync({
@@ -537,25 +562,29 @@ function EditWorkspaceForm({
           value={description}
           onChange={setDescription}
         />
-        <DefaultBudgetPicker
-          budgets={budgets.data ?? []}
-          value={selectedBudget}
-          onChange={setBudgetId}
-        />
-        <span className="max-w-md text-xs text-muted">
-          Every member of this workspace is held to this budget, each with their
-          own allowance. Changing it applies to members who join afterwards;
-          members already here keep the budget they were given, though editing
-          that budget still moves them.
-        </span>
-        <NarrowedDefaults
-          workspaceId={workspace.id}
-          budgets={budgets.data ?? []}
-          narrowed={narrowed}
-          providers={(providers.data?.providers ?? []).map(
-            (provider) => provider.instance,
-          )}
-        />
+        {operates ? (
+          <>
+            <DefaultBudgetPicker
+              budgets={budgets.data ?? []}
+              value={selectedBudget}
+              onChange={setBudgetId}
+            />
+            <span className="max-w-md text-xs text-muted">
+              Every member of this workspace is held to this budget, each with
+              their own allowance. Changing it applies to members who join
+              afterwards; members already here keep the budget they were given,
+              though editing that budget still moves them.
+            </span>
+            <NarrowedDefaults
+              workspaceId={workspace.id}
+              budgets={budgets.data ?? []}
+              narrowed={narrowed}
+              providers={(providers.data?.providers ?? []).map(
+                (provider) => provider.instance,
+              )}
+            />
+          </>
+        ) : null}
         <div className="flex gap-2">
           <Button
             variant="primary"
@@ -593,7 +622,13 @@ function EditWorkspaceForm({
 export function WorkspacesPage() {
   const context = useOrganizationContext()
   const workspaces = useWorkspaces()
-  const budgets = useBudgets()
+  // The budgets read is deployment-wide and answers 403 to an organization
+  // admin who does not operate the deployment (#821), so it is not asked for
+  // unless the caller may read it, and the column it names is withheld with it
+  // (the OrganizationMembersPage pattern, otari#838): without the names, every
+  // cell could only echo a UUID fragment of the default's id.
+  const operates = isDeploymentOperator(context.data)
+  const budgets = useBudgets(operates)
   const remove = useDeleteWorkspace()
 
   const [creating, setCreating] = useState(false)
@@ -602,7 +637,12 @@ export function WorkspacesPage() {
 
   const rows = workspaces.data ?? []
   const workspaceIds = useMemo(() => rows.map((row) => row.id), [rows])
-  const workspaceDefaults = useAllWorkspaceBudgetDefaults(workspaceIds)
+  // Emptied rather than fetched for a non-operator: the fan-out itself is
+  // workspace-scoped and would answer, but this page only reads it into the
+  // withheld column below.
+  const workspaceDefaults = useAllWorkspaceBudgetDefaults(
+    operates ? workspaceIds : [],
+  )
   // The budget each workspace hands to its members, by workspace. Only the
   // aggregate default (no provider narrowing) is named: that is the one the
   // edit form sets, and a narrowed one is the budget's business, where it shows
@@ -632,8 +672,10 @@ export function WorkspacesPage() {
   const editingWorkspace = rows.find((row) => row.id === editing) ?? null
   const showOnboarding = !workspaces.isLoading && rows.length === 0 && !creating
 
-  const columns = useMemo<DataTableColumn<Workspace>[]>(
-    () => [
+  // The default-budget column is dropped, not emptied, for a caller who cannot
+  // read the budget names it shows; see the note on `operates` above.
+  const columns = useMemo<DataTableColumn<Workspace>[]>(() => {
+    const all: DataTableColumn<Workspace>[] = [
       {
         id: "name",
         header: "Workspace",
@@ -712,9 +754,9 @@ export function WorkspacesPage() {
           </div>
         ),
       },
-    ],
-    [manages, isOnlyWorkspace, defaultBudgetName],
-  )
+    ]
+    return all.filter((column) => operates || column.id !== "default-budget")
+  }, [manages, isOnlyWorkspace, defaultBudgetName, operates])
 
   return (
     <div className="flex flex-col gap-6">

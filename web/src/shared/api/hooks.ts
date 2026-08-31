@@ -284,11 +284,17 @@ export function useDiscoverableModels() {
 // Static metadata for every configured provider: capabilities, doc and pricing
 // links, display name. Network-free gateway-side (bundled datasets), so it does
 // not move within a session; kept fresh for a few minutes like discovery.
-export function useProviders() {
+//
+// `enabled` is for the same composition `useBudgets` documents: this read is
+// deployment-wide and answers 403 to anyone who does not operate the deployment
+// (#821), so a tenant-facing page declines to ask rather than surfacing the
+// refusal (otari#838).
+export function useProviders(enabled = true) {
   return useQuery({
     queryKey: [PROVIDERS],
     queryFn: () => apiFetch<ProvidersResponse>("/v1/providers"),
     staleTime: 5 * 60_000,
+    enabled,
   })
 }
 
