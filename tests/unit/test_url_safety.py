@@ -4,6 +4,7 @@ import pytest
 
 from gateway.services.url_safety import (
     UnsafeURLError,
+    redact_url_secrets,
     validate_mcp_url,
     validate_outbound_fetch_url,
     validate_provider_api_base,
@@ -201,3 +202,35 @@ async def test_provider_api_base_off_enables_gate(monkeypatch: pytest.MonkeyPatc
 async def test_provider_api_base_on_keeps_allow_all(monkeypatch: pytest.MonkeyPatch) -> None:
     monkeypatch.setenv("OTARI_PROVIDER_ALLOW_PRIVATE_HOSTS", "on")
     await validate_provider_api_base("https://10.0.0.5/v1")
+
+
+# ---------------------------------------------------------------------------
+# redact_url_secrets
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize(
+    ("raw", "expected"),
+    [
+        # A password is masked and the username kept, so a reader can still see
+        # which account the endpoint authenticates as.
+        ("https://user:pass@example.com/mcp", "https://user:***@example.com/mcp"),
+        # A lone userinfo component is more likely a bearer token than a name.
+        ("https://token@example.com/mcp", "https://***@example.com/mcp"),
+        # Every query value goes, keys stay: a denylist of credential-looking
+        # keys cannot be complete.
+        ("https://example.com/mcp?api_key=secret", "https://example.com/mcp?api_key=***"),
+        # An IPv6 literal keeps its brackets, or the rebuilt URL is malformed.
+        ("https://user:pass@[::1]:8080/mcp", "https://user:***@[::1]:8080/mcp"),
+        # A port that is not a number reaches this function, because nothing
+        # rejects one on the way in: `validate_mcp_url` reads `hostname` and
+        # never the port. Rebuilding through `SplitResult.port` raised
+        # ValueError here, which turned a member's read of a stored MCP server
+        # into a 500 rather than a masked URL.
+        ("https://svc:token@example.com:bad/mcp", "https://svc:***@example.com:bad/mcp"),
+        # Nothing to mask is returned untouched, not rebuilt.
+        ("https://example.com/mcp", "https://example.com/mcp"),
+    ],
+)
+def test_redact_url_secrets_masks_credentials_without_raising(raw: str, expected: str) -> None:
+    assert redact_url_secrets(raw) == expected

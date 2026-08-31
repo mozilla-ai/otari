@@ -62,16 +62,18 @@ def redact_url_secrets(value: str) -> str:
 
     netloc = parts.netloc
     if parts.username is not None or parts.password is not None:
-        host = parts.hostname or ""
-        # An IPv6 literal must keep its brackets or the rebuilt URL is malformed.
-        if ":" in host:
-            host = f"[{host}]"
-        if parts.port is not None:
-            host = f"{host}:{parts.port}"
+        # Everything after the last "@" is host[:port], taken as written rather
+        # than rebuilt from `hostname` and `port`. Deliberately not
+        # `SplitResult.port`, which parses lazily and raises ValueError on a
+        # malformed port ("host:bad"): nothing rejects such a URL on the way in
+        # (`validate_mcp_url` reads `hostname` and never the port), so rebuilding
+        # would turn a redaction into a 500 on the read. Taking the text also
+        # keeps an IPv6 literal's brackets without a special case.
+        host_and_port = parts.netloc.rpartition("@")[2]
         if parts.password is not None:
-            netloc = f"{parts.username or ''}:***@{host}"
+            netloc = f"{parts.username or ''}:***@{host_and_port}"
         else:
-            netloc = f"***@{host}"
+            netloc = f"***@{host_and_port}"
 
     query = parts.query
     if query:
