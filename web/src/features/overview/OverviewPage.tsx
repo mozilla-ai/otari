@@ -783,6 +783,10 @@ function KpiStrip({
 }) {
   return (
     <section
+      // Auto rows in groups of four, one group per row of cells, so the cells
+      // below can subgrid onto them and line their four parts up with each
+      // other. Without it a label that wraps makes its own cell taller and
+      // drops its value below the others'.
       className={`${FULL_BLEED} ${BLEED_INSET} grid grid-cols-2 border-y border-border sm:grid-cols-3 xl:grid-cols-5`}
       // The graphic row is dropped uniformly in the empty state, so the strip
       // gets shorter without any cell changing shape relative to its neighbors.
@@ -815,8 +819,17 @@ function KpiCell({
   graphic?: ReactNode
 }) {
   return (
-    <div className="flex flex-col gap-1.5 border-border px-7 py-[18px] not-last:border-r">
-      <span className="text-overline">{label}</span>
+    // `grid-rows-subgrid` over `row-span-4` is what keeps the five values on one
+    // baseline. The cells are equal-height grid items, so a wrapped label used
+    // to make its own cell taller and push its value down while the other four
+    // stayed put (measured with a 1180px column: value tops 241 against 223).
+    // Subgridding the cell's four parts onto the strip's own rows lines the
+    // labels, values, deltas and graphics up with their neighbors instead, and
+    // reserves nothing when no label wraps, so it costs no dead space wide.
+    // `items-end` on the label is what makes a one-line label sit on the same
+    // baseline as the last line of a two-line one.
+    <div className="grid row-span-4 grid-rows-subgrid gap-1.5 border-border px-7 py-[18px] not-last:border-r">
+      <span className="flex items-end text-overline">{label}</span>
       {/* 400, deliberately, where the rest of the page's emphasis is 550: at
           30px the size is already the hierarchy, and a heavier numeral here
           would out-weigh the page title above it. */}
@@ -1037,7 +1050,7 @@ function StatusMark({ status }: { status: string }) {
         : "bg-success"
   const text = word === "error" ? "text-danger" : "text-muted"
   return (
-    <span className={`flex items-center gap-2 ${text}`}>
+    <span className={`flex items-center gap-2 font-mono text-[13px] ${text}`}>
       <Dot className={dot} />
       {word.toUpperCase()}
     </span>

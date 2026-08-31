@@ -17,13 +17,18 @@ describe("navRowClass", () => {
     expect(resting).not.toMatch(/(?<![\w:-])bg-/)
   })
 
-  it("hovers and focuses a resting row onto the same step off the rail", () => {
-    // One step, not two: the same fill for both means a focused row is never
-    // weaker than a hovered one, which is what the design asks for.
-    for (const variant of ["hover", "focus-visible"]) {
-      expect(resting).toContain(`${variant}:bg-surface-subtle`)
-      expect(resting).toContain(`${variant}:text-foreground`)
-    }
+  it("hovers a resting row one step off the rail, and focuses it with the ring alone", () => {
+    // Hover takes a fill; focus deliberately does not. A row that can be
+    // selected cannot also spend the fill channel on focus, and the ring is
+    // what focus is drawn with everywhere. Both still brighten the ink, so a
+    // focused row is not weaker than a hovered one, it is differently marked.
+    expect(resting).toContain("hover:bg-surface-subtle")
+    expect(resting).toContain("hover:text-foreground")
+    expect(resting).toContain("focus-visible:text-foreground")
+    // The regression this replaces: a fill outlives the click that focused the
+    // row where a hover does not outlive the pointer, so a group trigger
+    // clicked open kept the fill and read as selected.
+    expect(resting).not.toContain("focus-visible:bg-")
   })
 
   it("presses a resting row the other way off the rail", () => {

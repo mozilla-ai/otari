@@ -148,7 +148,16 @@ const ROW_BASE = `flex min-h-11 w-full items-center gap-3 rounded-lg px-3 font-s
 const ROW_PRESSED =
   "active:bg-background active:text-foreground data-[pressed]:bg-background data-[pressed]:text-foreground"
 
-const ROW_RESTING = `text-muted hover:bg-surface-subtle hover:text-foreground focus-visible:bg-surface-subtle focus-visible:text-foreground ${ROW_PRESSED}`
+/**
+ * Focus takes the ring and nothing else. It used to take `bg-surface-subtle` as
+ * well, the same fill as hover, which cost two things. A row that can be
+ * selected cannot also spend the fill channel on focus: the central ring exists
+ * so focus never has to borrow another state's paint. And because a fill
+ * outlives the click that put focus on the row while a pointer's hover does not
+ * outlive the pointer, a group trigger clicked open kept a fill afterwards and
+ * read as selected when it was only focused.
+ */
+const ROW_RESTING = `text-muted hover:bg-surface-subtle hover:text-foreground focus-visible:text-foreground ${ROW_PRESSED}`
 
 const ROW_SELECTED = "bg-surface-alt text-foreground"
 
