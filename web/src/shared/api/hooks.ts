@@ -3153,8 +3153,9 @@ export function useCreateOrganizationBudget() {
   })
 }
 
-// PATCH, not PUT: an omitted field is left alone, so the form sends only what it
-// changed and clearing a cap back to uncapped is a delete rather than a null.
+// PATCH, not PUT: an omitted field is left alone and an explicit null clears it,
+// which is what lets the dialog send `max_budget: null` to take a budget back to
+// uncapped without deleting it.
 export function useUpdateOrganizationBudget() {
   const queryClient = useQueryClient()
   return useMutation({

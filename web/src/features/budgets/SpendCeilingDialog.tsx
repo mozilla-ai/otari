@@ -70,10 +70,28 @@ export function SpendCeilingDialog({
     setName(editing?.name ?? "")
   }, [isOpen, editing, budgets])
 
-  const budgetOptions = budgets.map((budget) => ({
+  const ownOptions = budgets.map((budget) => ({
     value: budget.budget_id,
     label: `${budgetLabel(budget)} — ${limitLabel(budget.max_budget)}`,
   }))
+  // A ceiling holding a budget set at the deployment level opens on an id no
+  // option carries, and `FilterSelect` renders such a value as itself: a raw
+  // uuid where the budget's name belongs. Carried as its own labelled option
+  // instead, so the current selection reads as what it is and choosing one of
+  // the organization's own is still the way out.
+  const editingIsForeign =
+    editing !== undefined &&
+    !editing.manageable &&
+    !budgets.some((budget) => budget.budget_id === editing.budget_id)
+  const budgetOptions = editingIsForeign
+    ? [
+        {
+          value: editing.budget_id,
+          label: `Set at the deployment level — ${limitLabel(editing.max_budget)}`,
+        },
+        ...ownOptions,
+      ]
+    : ownOptions
 
   const targetOptions = [
     {
@@ -86,7 +104,7 @@ export function SpendCeilingDialog({
     })),
   ]
 
-  const noBudgets = budgets.length === 0
+  const noBudgets = budgetOptions.length === 0
   const blockedReason = noBudgets
     ? "Add a budget first. A ceiling enforces a budget, so there is nothing for this one to hold."
     : budgetId === ""
