@@ -522,6 +522,7 @@ flag.
 | Env var | Default | Notes |
 |---|---|---|
 | `OTARI_AI_TOKEN` | none | Setting this enables hybrid mode. |
+| `PLATFORM_HEALTH_PATH` | `/utils/health-check/` | Path under `base_url` that `GET /health` probes to report `platform_reachable`. Point it at a route the peer actually serves: any status below `500`, a `404` included, counts as reachable. |
 | `PLATFORM_RESOLVE_TIMEOUT_MS` | `5000` | Per-resolve timeout. |
 | `PLATFORM_USAGE_TIMEOUT_MS` | `5000` | Per-usage-report timeout. |
 | `PLATFORM_USAGE_INLINE_TIMEOUT_MS` | `1500` | Budget for the one usage report the response path waits on to attach inline cost. Expiry ships the response without cost; the report itself continues. |

@@ -396,6 +396,7 @@ def test_load_config_platform_env_overrides(tmp_path: Path, monkeypatch: pytest.
 
     monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
     monkeypatch.setenv("PLATFORM_BASE_URL", "http://localhost:8100/api/v1")
+    monkeypatch.setenv("PLATFORM_HEALTH_PATH", "/healthz")
     monkeypatch.setenv("PLATFORM_RESOLVE_TIMEOUT_MS", "1234")
     monkeypatch.setenv("PLATFORM_USAGE_TIMEOUT_MS", "2345")
     monkeypatch.setenv("PLATFORM_USAGE_INLINE_TIMEOUT_MS", "150")
@@ -405,6 +406,7 @@ def test_load_config_platform_env_overrides(tmp_path: Path, monkeypatch: pytest.
 
     assert config.is_hybrid_mode
     assert config.platform["base_url"] == "http://localhost:8100/api/v1"
+    assert config.platform["health_path"] == "/healthz"
     assert config.platform["resolve_timeout_ms"] == 1234
     assert config.platform["usage_timeout_ms"] == 2345
     assert config.platform["usage_inline_timeout_ms"] == 150
