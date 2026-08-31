@@ -423,10 +423,13 @@ function CreateKeyForm({
   const ownerMissing = isDeploymentWide && userId.trim() === ""
   // The workspace comes from the organization context, which resolves after the
   // form paints. Submitting before it does would send no workspace and land the
-  // key in the server's default rather than the one the switcher is showing, so
-  // the button waits for that read. It waits for the read, not for a workspace:
-  // a caller who belongs to none resolves to null and must still be able to
-  // create a key, which the server puts in its default.
+  // key somewhere other than the one the switcher is showing, so the button
+  // waits for that read. It waits for the read, not for a workspace: a caller
+  // who belongs to none resolves to null and still submits, and what an omitted
+  // workspace means is then the server's to say. The operator surface mints into
+  // the organization's default; the member surface refuses with a 409 unless the
+  // caller belongs to that default, which is the answer this form surfaces
+  // rather than pre-empting.
   const workspaceUnresolved = workspaceLoading
 
   const submit = () => {

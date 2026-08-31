@@ -13,7 +13,10 @@ established for usage reads (otari#837), applied to a write surface:
   string, the row ``get_or_create_attribution_user`` mints and the activation
   guide already keys on), and every load below carries that owner predicate.
   There is no ``user_id`` parameter, so there is nothing for an escalation to
-  travel on, and somebody else's key answers the 404 a nonexistent one does.
+  travel on, and somebody else's key answers the 404 a nonexistent one does. An
+  owner an operator has revoked through ``DELETE /v1/users`` stays revoked: this
+  surface refuses rather than reviving the row, which is what would restore the
+  spend that route deactivated.
 * **The workspace must be one the caller may see.** A named ``workspace_id``
   goes through ``resolve_workspace_in_organization``, so a workspace in another
   organization, or one in this organization the caller is not a member of,
@@ -198,6 +201,23 @@ async def create_own_key(
         allowed_models = validate_allowed_models(config, request.allowed_models)
     except ValueError as exc:
         raise HTTPException(status_code=status.HTTP_400_BAD_REQUEST, detail=str(exc)) from exc
+
+    # ``get_or_create_attribution_user`` revives a soft-deleted row. That is what
+    # the membership paths calling it want (re-adding a member must find their
+    # existing owner, not mint a second one) and the wrong answer here.
+    # ``DELETE /v1/users`` is the operator's revocation of a spend identity: it
+    # soft-deletes the row and deactivates every key it holds, and the data plane
+    # then refuses a request whose owner is deleted. Reviving it is therefore
+    # restoring spend, which is not a member's to do for themselves, so this
+    # refuses where ``POST /v1/keys`` refuses the same owner.
+    revoked = (
+        await db.execute(select(User.deleted_at).where(User.user_id == str(identity.id)))
+    ).scalar_one_or_none()
+    if revoked is not None:
+        raise HTTPException(
+            status_code=status.HTTP_409_CONFLICT,
+            detail="Your spend identity has been deactivated on this deployment; ask an operator to restore it.",
+        )
 
     owner = await get_or_create_attribution_user(
         db,

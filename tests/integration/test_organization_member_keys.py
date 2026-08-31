@@ -26,6 +26,7 @@ from fastapi import status
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
+from gateway.auth.models import generate_api_key, hash_key, key_prefix
 from gateway.models.entities import APIKey, DashboardSession
 from gateway.models.entities import User as BillingUser
 from gateway.models.tenancy import Organization, OrganizationMember, User, Workspace, WorkspaceMember
@@ -271,6 +272,38 @@ def test_an_omitted_workspace_refuses_a_caller_outside_the_default_one(client: T
     assert "workspace" in body["detail"]
 
 
+def test_a_revoked_spend_identity_cannot_mint_its_way_back(
+    client: TestClient, world: _World, master_key_header: dict[str, str]
+) -> None:
+    """``DELETE /v1/users`` is the operator's revocation, and this surface must not undo it.
+
+    That route soft-deletes the spend identity and deactivates every key it
+    holds, and the data plane refuses a request whose owner is deleted.
+    ``get_or_create_attribution_user`` revives a soft-deleted row, which is what
+    the membership paths want and what a member must not be able to trigger for
+    themselves: the revival makes the identity live again and a fresh key spends.
+    """
+    owner_id = str(world.users["alpha_member"])
+    workspace = str(world.workspaces["alpha_one"])
+    code, first = _create(client, world, "alpha_member", {"key_name": "before", "workspace_id": workspace})
+    assert code == status.HTTP_200_OK, first
+
+    revoke = client.delete(f"/v1/users/{owner_id}", headers=master_key_header)
+    assert revoke.status_code == status.HTTP_204_NO_CONTENT, revoke.text
+
+    code, body = _create(client, world, "alpha_member", {"key_name": "after", "workspace_id": workspace})
+    assert code == status.HTTP_409_CONFLICT, body
+
+    # The revocation still stands afterwards, which is what the operator surface
+    # refusing the same owner reports.
+    response = client.post(
+        "/v1/keys",
+        headers=master_key_header,
+        json={"key_name": "operator", "user_id": owner_id, "workspace_id": workspace},
+    )
+    assert response.status_code == status.HTTP_404_NOT_FOUND, response.text
+
+
 def test_a_stale_organization_pointer_grants_nothing(client: TestClient, world: _World) -> None:
     """``active_organization_id`` without a live membership refuses, as everywhere on this surface."""
     code, body = _create(client, world, "impostor", {"key_name": "stolen"})
@@ -324,52 +357,15 @@ def test_a_member_lists_their_own_keys_and_not_a_colleagues(client: TestClient, 
     assert theirs["id"] not in ids
 
 
-def test_a_key_assigned_to_the_member_in_their_organization_is_listed(
-    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
-) -> None:
-    """Ownership is the billing row, however the key was minted.
-
-    Inserted directly rather than over ``POST /v1/keys``, because the operator
-    acts in the deployment's default organization and cannot mint into alpha;
-    what a handed-over key looks like is a row in the member's workspace billed
-    to their attribution user. Dropping the owner predicate from the list query
-    would still pass the colleague test (a different owner), so this is the
-    positive half that pins the predicate itself.
-    """
-    handed_id = str(uuid.uuid4())
-    session = db_session_factory()
-    try:
-        # The attribution row first: api_keys.user_id is a foreign key, and the
-        # member has minted nothing yet in this test's fresh database.
-        session.add(BillingUser(user_id=str(world.users["alpha_member"]), alias="member@alpha.test"))
-        session.commit()
-        session.add(
-            APIKey(
-                id=handed_id,
-                workspace_id=world.workspaces["alpha_one"],
-                key_hash=f"hash-{handed_id}",
-                key_name="handed-over",
-                user_id=str(world.users["alpha_member"]),
-            )
-        )
-        session.commit()
-    finally:
-        session.close()
-
-    code, listed = _request(client, world, "alpha_member", "GET", _PREFIX)
-    assert code == status.HTTP_200_OK
-    assert handed_id in {row["id"] for row in listed}
-
-
-def test_an_operator_minted_key_outside_the_organization_stays_off_the_list(
+def test_an_operator_minted_key_outside_the_organization_stays_invisible(
     client: TestClient, world: _World, master_key_header: dict[str, str]
 ) -> None:
-    """The organization predicate holds even when the owner matches.
+    """A key billed to the member but minted elsewhere is still out of scope.
 
-    The operator acts in the deployment's default organization, so a key they
-    mint with the member's attribution id lands in a workspace outside alpha;
-    the member's list is confined to their active organization and must not
-    show it.
+    The operator acts in the deployment's default organization, so an ownership
+    assignment alone does not reach alpha: the mint lands in that organization's
+    default workspace, and the organization predicate keeps it off this list even
+    though the owner predicate would admit it.
     """
     code, listed = _request(client, world, "alpha_member", "GET", _PREFIX)
     assert code == status.HTTP_200_OK
@@ -388,6 +384,55 @@ def test_an_operator_minted_key_outside_the_organization_stays_off_the_list(
     after = {row["id"] for row in listed}
     assert after == before
     assert handed["id"] not in after
+
+
+def test_a_key_the_member_owns_but_did_not_mint_is_theirs_to_manage(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
+) -> None:
+    """Ownership is the billing row, however the key got there.
+
+    The handed-over case the docstrings promise, which no request can set up:
+    ``POST /v1/keys`` names an owner but mints into the *operator's* organization,
+    so the row is written directly into alpha instead. What is asserted is the
+    owner predicate on its own, and that it carries the whole lifecycle rather
+    than the list alone.
+    """
+    raw = generate_api_key()
+    key_id = str(uuid.uuid4())
+    owner_id = str(world.users["alpha_member"])
+    session = db_session_factory()
+    try:
+        # The attribution row a membership would already have minted; the key's
+        # foreign key needs it before the row it hangs off can exist.
+        session.add(BillingUser(user_id=owner_id, alias="Member"))
+        session.commit()
+        session.add(
+            APIKey(
+                id=key_id,
+                workspace_id=world.workspaces["alpha_one"],
+                key_hash=hash_key(raw),
+                key_prefix=key_prefix(raw),
+                key_name="handed-over",
+                user_id=owner_id,
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    code, listed = _request(client, world, "alpha_member", "GET", _PREFIX)
+    assert code == status.HTTP_200_OK
+    assert key_id in {row["id"] for row in listed}
+
+    # And nobody else's, on the same row: the colleague shares the workspace.
+    code, listed = _request(client, world, "alpha_colleague", "GET", _PREFIX)
+    assert code == status.HTTP_200_OK
+    assert key_id not in {row["id"] for row in listed}
+
+    code, _ = _request(client, world, "alpha_colleague", "DELETE", f"{_PREFIX}/{key_id}")
+    assert code == status.HTTP_404_NOT_FOUND
+    code, _ = _request(client, world, "alpha_member", "DELETE", f"{_PREFIX}/{key_id}")
+    assert code == status.HTTP_204_NO_CONTENT
 
 
 def test_the_workspace_filter_narrows_and_never_widens(client: TestClient, world: _World) -> None:
