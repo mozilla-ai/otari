@@ -1103,7 +1103,7 @@ requires-dist = [
     { name = "dnspython", specifier = ">=2.7.0" },
     { name = "fastapi", specifier = ">=0.115.0" },
     { name = "genai-prices", specifier = ">=0.1.0" },
-    { name = "idna", specifier = ">=3.7" },
+    { name = "idna", specifier = ">=3.10" },
     { name = "markitdown", extras = ["docx", "pptx", "xlsx", "pdf"], specifier = ">=0.1.0" },
     { name = "mcp", specifier = ">=1.28.1,<1.29.0" },
     { name = "numpy", marker = "extra == 'ocr'", specifier = ">=1.26.0" },
