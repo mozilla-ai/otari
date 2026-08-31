@@ -60,20 +60,32 @@ def _standalone(tmp_path: Path, docs_url: str | None = None) -> GatewayConfig:
     )
 
 
-def _hosted(tmp_path: Path, data_plane_url: str | None = None) -> GatewayConfig:
+def _hosted(
+    tmp_path: Path,
+    data_plane_url: str | None = None,
+    *,
+    terms_url: str | None = None,
+    privacy_url: str | None = None,
+) -> GatewayConfig:
     return GatewayConfig(
         mode="hosted",
         database_url=f"sqlite:///{tmp_path / 'bootstrap.db'}",
         master_key=MASTER_KEY,
         data_plane_url=data_plane_url,
+        terms_url=terms_url,
+        privacy_url=privacy_url,
     )
 
 
-def _hybrid(*, docs_url: str | None = None, **platform: str) -> GatewayConfig:
+def _hybrid(
+    *, docs_url: str | None = None, terms_url: str | None = None, privacy_url: str | None = None, **platform: str
+) -> GatewayConfig:
     return GatewayConfig(
         mode="hybrid",
         platform={"base_url": "http://localhost:8100/api/v1", **platform},
         docs_url=docs_url,
+        terms_url=terms_url,
+        privacy_url=privacy_url,
     )
 
 
@@ -92,6 +104,8 @@ def test_standalone_reports_a_local_operator_and_the_full_surface_set(tmp_path: 
         "management_url": None,
         "data_plane_url": None,
         "docs_url": None,
+        "terms_url": None,
+        "privacy_url": None,
         "maintenance_mode": False,
         "passkeys_ready": False,
         "oauth_providers": [],
@@ -316,6 +330,8 @@ def test_hybrid_reports_no_session_no_surfaces_and_the_hosted_url(monkeypatch: p
         "management_url": "https://otari.ai",
         "data_plane_url": None,
         "docs_url": None,
+        "terms_url": None,
+        "privacy_url": None,
         "maintenance_mode": False,
         "passkeys_ready": False,
         "oauth_providers": [],
@@ -435,6 +451,88 @@ def test_a_docs_url_that_is_not_an_http_link_is_refused_at_load(configured: str)
 def test_a_blank_docs_url_is_an_unset_one(configured: str) -> None:
     """A container templating an empty value has not configured a docs site."""
     assert GatewayConfig(docs_url=configured).docs_url is None
+
+
+def test_a_deployment_with_no_legal_urls_leaves_the_account_menu_as_it_was(tmp_path: Path) -> None:
+    """Null both, which is what a self-hosted gateway publishes.
+
+    The dashboard reads that as no Terms of service row and a Data & Privacy row
+    that stays disabled with the reason it has always carried, rather than as a
+    missing field.
+    """
+    app = create_app(_standalone(tmp_path))
+
+    with TestClient(app) as client:
+        body = client.get("/v1/bootstrap").json()
+
+    assert body["terms_url"] is None
+    assert body["privacy_url"] is None
+
+
+
+def test_a_hosted_deployment_publishes_the_legal_pages_on_its_own_site(tmp_path: Path) -> None:
+    """otari-ai#1945: the privacy notice needs a home the composed dashboard can reach.
+
+    A hosted control plane serves its dashboard beside a marketing site that owns
+    the notice and the terms, and it publishes both addresses so the account menu
+    can name them. Nothing else could: ``management_url`` is null here, since
+    this deployment *is* the control plane.
+    """
+    app = create_app(
+        _hosted(
+            tmp_path,
+            terms_url="https://otari.ai/terms",
+            privacy_url="https://otari.ai/privacy",
+        )
+    )
+
+    with TestClient(app) as client:
+        body = client.get("/v1/bootstrap").json()
+
+    assert body["management_url"] is None
+    assert body["terms_url"] == "https://otari.ai/terms"
+    assert body["privacy_url"] == "https://otari.ai/privacy"
+
+
+
+def test_a_hybrid_gateway_carries_its_own_legal_pages_too(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Deployment-wide, like ``docs_url``: whoever runs the gateway may have terms of their own."""
+    monkeypatch.setenv("OTARI_AI_TOKEN", PLATFORM_TOKEN)
+    app = create_app(_hybrid(terms_url="https://otari.ai/terms", privacy_url="https://otari.ai/privacy"))
+
+    with TestClient(app) as client:
+        body = client.get("/v1/bootstrap").json()
+
+    assert body["terms_url"] == "https://otari.ai/terms"
+    assert body["privacy_url"] == "https://otari.ai/privacy"
+
+
+
+@pytest.mark.parametrize("field", ["terms_url", "privacy_url"])
+def test_a_legal_url_is_read_from_the_environment(field: str, monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """OTARI_TERMS_URL and OTARI_PRIVACY_URL are the whole configuration surface a container needs."""
+    monkeypatch.setenv(f"OTARI_{field.upper()}", "https://otari.ai/legal")
+
+    config = GatewayConfig(database_url=f"sqlite:///{tmp_path / 'env.db'}")
+
+    assert getattr(config, field) == "https://otari.ai/legal"
+
+
+@pytest.mark.parametrize("field", ["terms_url", "privacy_url"])
+@pytest.mark.parametrize("configured", ["javascript:alert(1)", "otari.ai/terms", "/terms"])
+def test_a_legal_url_that_is_not_an_http_link_is_refused_at_load(field: str, configured: str) -> None:
+    """Held to ``docs_url``'s bar, and by the same validator: the browser turns each into an anchor."""
+    with pytest.raises(ValidationError, match=field):
+        # Built through model_validate so the field name can be a parameter; the
+        # constructor's keywords are typed one field at a time.
+        GatewayConfig.model_validate({field: configured})
+
+
+@pytest.mark.parametrize("field", ["terms_url", "privacy_url"])
+def test_a_blank_legal_url_is_an_unset_one(field: str) -> None:
+    """A container templating an empty value has published no legal page."""
+    assert getattr(GatewayConfig.model_validate({field: "   "}), field) is None
+
 
 
 def test_a_hosted_control_plane_publishes_where_its_data_plane_is(tmp_path: Path) -> None:

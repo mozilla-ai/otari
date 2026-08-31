@@ -95,6 +95,47 @@ describe("AccountMenu", () => {
     expect(link).not.toHaveAttribute("target")
   })
 
+  it("names no legal page a deployment has not published", async () => {
+    mockCaller(OPERATOR)
+    await openMenu()
+
+    expect(screen.queryByRole("link", { name: "Terms of service" })).toBeNull()
+    // Present but inert, which is the row a gateway with no notice to link
+    // still owes: the surface is coming, and omitting it reads as never.
+    const privacy = await screen.findByRole("button", {
+      name: /^Data & Privacy \(/,
+    })
+    expect(privacy).toBeDisabled()
+  })
+
+  it("links both legal rows at the pages a hosted deployment published", async () => {
+    mockCaller(OPERATOR)
+    await openMenu({
+      terms_url: "https://otari.ai/terms",
+      privacy_url: "https://otari.ai/privacy",
+    })
+
+    const terms = await screen.findByRole("link", { name: "Terms of service" })
+    expect(terms).toHaveAttribute("href", "https://otari.ai/terms")
+    expect(terms).toHaveAttribute("target", "_blank")
+
+    // otari-ai#1945: the notice lives on the marketing site beside the
+    // dashboard, and this row is how a signed-in user reaches it.
+    const privacy = await screen.findByRole("link", { name: "Data & Privacy" })
+    expect(privacy).toHaveAttribute("href", "https://otari.ai/privacy")
+    expect(privacy).toHaveAttribute("target", "_blank")
+  })
+
+  it("keeps the two legal rows independent of each other", async () => {
+    mockCaller(OPERATOR)
+    await openMenu({ privacy_url: "https://otari.ai/privacy" })
+
+    expect(
+      await screen.findByRole("link", { name: "Data & Privacy" }),
+    ).toHaveAttribute("href", "https://otari.ai/privacy")
+    expect(screen.queryByRole("link", { name: "Terms of service" })).toBeNull()
+  })
+
   it("retargets the phone's Documentation row at the deployment's own docs site", async () => {
     mockCaller(OPERATOR)
     await openMenu({ docs_url: "https://docs.otari.ai/en/" })

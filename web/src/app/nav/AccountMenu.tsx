@@ -15,7 +15,6 @@ import {
 import type { OrganizationContext } from "@/client"
 import { useAuth } from "@/features/auth/AuthContext"
 import { useOrganizationContext } from "@/shared/api/hooks"
-import { EntitlementGate } from "@/shared/components/EntitlementGate"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 import {
   THEME_PREFERENCES,
@@ -42,10 +41,13 @@ import {
 // the credential it was minted from (otari#653): a session is per-identity
 // since otari#647, and the identity holds a password of its own since otari#649,
 // so the row this menu carried disabled from the start now has a destination.
-// Data & Privacy is still disabled with the reason rather than omitted, because
-// it is coming and a menu that silently lacks it reads as a menu that never
-// will. Terms of service is different again, and gated: it is a hosted
-// document, so it appears only for a deployment that has one to point at.
+// The two legal rows are the deployment's own documents, and each appears only
+// where there is one to point at: `terms_url` and `privacy_url`, the addresses
+// an operator configures and `GET /v1/bootstrap` publishes beside `docs_url`.
+// Terms of service is absent without one, because a gateway nobody wrote terms
+// for has none to show. Data & Privacy falls back to the disabled row instead
+// of vanishing, because the settings surface it will become is coming and a
+// menu that silently lacks it reads as a menu that never will.
 
 const THEME_LABELS: Record<ThemePreference, string> = {
   system: "System",
@@ -285,7 +287,7 @@ function AppearanceControl() {
 
 export function AccountMenu({ collapsed }: { collapsed: boolean }) {
   const { logout } = useAuth()
-  const { management_url, docs_url } = useDeployment()
+  const { docs_url, terms_url, privacy_url } = useDeployment()
   const organization = useOrganizationContext()
   const [open, setOpen] = useState(false)
   const identity = sessionIdentity(organization.data?.caller)
@@ -362,25 +364,34 @@ export function AccountMenu({ collapsed }: { collapsed: boolean }) {
               className="md:hidden"
             />
           )}
-          {/* Hosted-only, and gated twice over: the entitlement says the
-              deployment has terms to show, and `management_url` is where they
-              are. A self-hosted gateway is neither, so the row is absent rather
-              than pointing somewhere invented. */}
-          {management_url ? (
-            <EntitlementGate capability="legal.terms">
-              <MenuExternalLink
-                label="Terms of service"
-                icon={FiFileText}
-                href={`${management_url.replace(/\/$/, "")}/terms`}
-              />
-            </EntitlementGate>
+          {/* Absent rather than pointing somewhere invented. This used to build
+              the address from `management_url` behind a `legal.terms`
+              entitlement, which no deployment could satisfy: that field is set
+              only for a hybrid gateway, which issues no session and so never
+              opens this menu, and nothing granted the capability. So a hosted
+              deployment with terms on its own site had no way to name them
+              (otari-ai#1945). */}
+          {terms_url ? (
+            <MenuExternalLink
+              label="Terms of service"
+              icon={FiFileText}
+              href={terms_url}
+            />
           ) : null}
-          <MenuItem
-            label="Data & Privacy"
-            icon={FiShield}
-            title="The gateway stores its data locally and reports nothing outward, so there is nothing to configure here yet."
-            isDisabled
-          />
+          {privacy_url ? (
+            <MenuExternalLink
+              label="Data & Privacy"
+              icon={FiShield}
+              href={privacy_url}
+            />
+          ) : (
+            <MenuItem
+              label="Data & Privacy"
+              icon={FiShield}
+              title="The gateway stores its data locally and reports nothing outward, so there is nothing to configure here yet."
+              isDisabled
+            />
+          )}
           <div className={MENU_DIVIDER} />
           {/* Neutral, not danger-colored. Ending a session is reversible by
               signing in again, so red here spends the color that marks the

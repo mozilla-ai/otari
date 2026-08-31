@@ -53,6 +53,10 @@ test.describe("hybrid deployment", () => {
       // gateway may carry a hosted documentation link, and this one configures
       // none, so the bundled guide stays the target.
       docs_url: null,
+      // Deployment-wide for the same reason, and unset here too: a hybrid
+      // gateway may carry legal pages of its own, and this one configures none.
+      terms_url: null,
+      privacy_url: null,
       // Never frozen, because the freeze is on a sign-in this deployment does
       // not serve: a hybrid gateway mints no session for maintenance mode to
       // refuse. Its control plane owns that, as it owns the sign-in itself.

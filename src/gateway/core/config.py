@@ -14,7 +14,7 @@ import yaml
 from any_llm import AnyLLM, LLMProvider
 from any_llm.exceptions import AnyLLMError
 from dotenv import load_dotenv
-from pydantic import BaseModel, Field, PrivateAttr, field_validator, model_validator
+from pydantic import BaseModel, Field, PrivateAttr, ValidationInfo, field_validator, model_validator
 from pydantic_settings import BaseSettings, SettingsConfigDict
 
 from gateway.core.addresses import normalized_address
@@ -452,6 +452,27 @@ class GatewayConfig(BaseSettings):
             "right default for a self-hosted deployment. Set it to retarget those links at "
             "a product documentation site instead; the bundled guide stays reachable at "
             "/#/docs either way."
+        ),
+    )
+    terms_url: str | None = Field(
+        default=None,
+        description=(
+            "Where this deployment's terms of service live, as an absolute http(s) URL "
+            "(e.g. 'https://otari.ai/terms'). Unset, the account menu shows no terms row: a "
+            "deployment nobody wrote terms for has none to point at, which is the ordinary "
+            "case for a self-hosted gateway. Set it and the row appears. A link target an "
+            "operator configured, held to the same bar as docs_url."
+        ),
+    )
+    privacy_url: str | None = Field(
+        default=None,
+        description=(
+            "Where this deployment's privacy notice lives, as an absolute http(s) URL "
+            "(e.g. 'https://otari.ai/privacy'). Unset, the account menu's Data & Privacy row "
+            "stays disabled with the reason it carries today, which is honest for a gateway "
+            "that stores its data locally and reports nothing outward. Set it and the row "
+            "becomes a link to the notice. A link target an operator configured, held to the "
+            "same bar as docs_url."
         ),
     )
     data_plane_url: str | None = Field(
@@ -1741,23 +1762,28 @@ class GatewayConfig(BaseSettings):
             raise ValueError(msg)
         return normalized
 
-    @field_validator("docs_url")
+    @field_validator("docs_url", "terms_url", "privacy_url")
     @classmethod
-    def _validate_docs_url(cls, value: str | None) -> str | None:
-        """Reject a documentation link that is not an absolute http(s) URL.
+    def _validate_link_url(cls, value: str | None, info: ValidationInfo) -> str | None:
+        """Reject a menu link that is not an absolute http(s) URL.
 
-        The deployment bootstrap publishes this to the browser as a link target,
-        so a scheme that is not http(s) would be a script URL an operator put in
-        their own config. Rejected at load rather than dropped per request, for
-        the same reason ``platform.management_url`` is: a typo should be a
+        The deployment bootstrap publishes each of these to the browser as a link
+        target, so a scheme that is not http(s) would be a script URL an operator
+        put in their own config. Rejected at load rather than dropped per request,
+        for the same reason ``platform.management_url`` is: a typo should be a
         startup error, not a Documentation link that silently goes nowhere.
+
+        One validator for the three because they are one kind of value: an
+        address a person follows out of the dashboard, with no downstream
+        consumer that builds a request from it. ``data_plane_url`` is held to a
+        stricter bar for exactly that reason and keeps its own.
         """
         normalized = (value or "").strip()
         if not normalized:
             return None
         parsed = urlsplit(normalized)
         if parsed.scheme not in {"http", "https"} or not parsed.netloc:
-            msg = f"docs_url must be an absolute http(s) URL, got '{value}'"
+            msg = f"{info.field_name} must be an absolute http(s) URL, got '{value}'"
             raise ValueError(msg)
         return normalized
 

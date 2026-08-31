@@ -301,6 +301,21 @@ def test_config_view_shows_the_documentation_link_target() -> None:
     assert by_key["docs_url"].settable is False
 
 
+def test_config_view_shows_the_legal_link_targets() -> None:
+    # Same reason as docs_url above: set in YAML or the environment, with no
+    # control for them in the dashboard, so the config viewer is where an
+    # operator confirms the account menu will carry them. Public link targets,
+    # not credentials, so shown verbatim.
+    config = GatewayConfig(terms_url="https://otari.ai/terms", privacy_url="https://otari.ai/privacy")
+    by_key = {field.key: field for field in _config_fields(config)}
+
+    assert by_key["terms_url"].value == "https://otari.ai/terms"
+    assert by_key["privacy_url"].value == "https://otari.ai/privacy"
+    # Read-only: where the legal pages live is a restart-time decision.
+    assert by_key["terms_url"].settable is False
+    assert by_key["privacy_url"].settable is False
+
+
 def test_every_config_field_is_shown_or_deliberately_omitted() -> None:
     """The roster is hand-maintained, so its completeness is checked rather than remembered.
 

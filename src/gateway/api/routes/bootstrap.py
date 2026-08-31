@@ -9,8 +9,8 @@ which mode the gateway is in.
 Registered in both modes, and unauthenticated by necessity: this is what tells a
 browser whether a sign-in screen is even the right thing to show. It therefore
 carries no secret. In particular it never carries the platform token, and
-``management_url``, ``data_plane_url`` and ``docs_url`` are addresses an operator
-configured, not credentials.
+``management_url``, ``data_plane_url``, ``docs_url``, ``terms_url`` and
+``privacy_url`` are addresses an operator configured, not credentials.
 
 The contract is shared with otari.ai, which serves the same shape for its hosted
 deployment (mozilla-ai/otari-ai#1591). ``deployment_type`` and ``session_type``
@@ -183,6 +183,22 @@ class DeploymentBootstrap(BaseModel):
             "http(s) URL."
         )
     )
+    terms_url: str | None = Field(
+        description=(
+            "Where this deployment's terms of service live. Set, the account menu carries a "
+            "Terms of service row pointing at them; null, it carries none, because a "
+            "deployment nobody wrote terms for has none to show. A link target an operator "
+            "configured, validated at startup as an absolute http(s) URL."
+        )
+    )
+    privacy_url: str | None = Field(
+        description=(
+            "Where this deployment's privacy notice lives. Set, the account menu's Data & "
+            "Privacy row links to it; null, that row stays disabled, which is what a gateway "
+            "storing its data locally and reporting nothing outward has to say. A link target "
+            "an operator configured, validated at startup as an absolute http(s) URL."
+        )
+    )
     sign_in_methods: list[SignInMethod] = Field(
         description=(
             "How POST /v1/auth/session may be authenticated right now, sorted. 'master_key' is the "
@@ -266,6 +282,8 @@ async def get_bootstrap(
             # page is the address that reaches the API.
             data_plane_url=None,
             docs_url=config.docs_url,
+            terms_url=config.terms_url,
+            privacy_url=config.privacy_url,
             maintenance_mode=False,
             passkeys_ready=False,
             oauth_providers=[],
@@ -289,6 +307,8 @@ async def get_bootstrap(
         # plane is not, and publishes wherever its operator says the gateway is.
         data_plane_url=config.data_plane_url if hosted else None,
         docs_url=config.docs_url,
+        terms_url=config.terms_url,
+        privacy_url=config.privacy_url,
         maintenance_mode=await _maintenance_mode(db),
         passkeys_ready=config.webauthn_enabled,
         oauth_providers=list(config.oauth_providers),

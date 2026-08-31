@@ -126,6 +126,12 @@ This guide is bundled into the dashboard at `/#/docs`. Set `docs_url` to make
 the dashboard's Documentation link open a different site. The bundled route
 remains available.
 
+## Legal pages
+
+`terms_url` and `privacy_url` name where this deployment's terms of service and
+privacy notice live. The account menu links each row it has an address for; see
+[Configuration](configuration.md#legal-pages).
+
 ## Development
 
 The dashboard source is under `web/`. The published Docker image includes the

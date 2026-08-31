@@ -46,6 +46,11 @@ test("the deployment bootstrap is served unauthenticated", async ({
     // links stay on the operator guide bundled with this gateway; see
     // docs/configuration.md#documentation-links.
     docs_url: null,
+    // No terms_url or privacy_url in this e2e environment, so the account menu
+    // carries no Terms of service row and its Data & Privacy row stays
+    // disabled; see docs/configuration.md#legal-pages.
+    terms_url: null,
+    privacy_url: null,
     // Sign-ins are open, which is the resting state: maintenance mode is a
     // stored row an operator sets to freeze them during a redeploy, and
     // nothing in this environment sets it.

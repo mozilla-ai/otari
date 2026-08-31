@@ -234,6 +234,23 @@ By default the dashboard's Documentation link opens the bundled guide at
 `/#/docs`. Set `docs_url` or `OTARI_DOCS_URL` to point it at an absolute
 HTTP or HTTPS URL. The bundled guide remains available.
 
+## Legal pages
+
+The account menu carries a Terms of service row and a Data & Privacy row for
+whichever of them this deployment has published. Set `terms_url` or
+`OTARI_TERMS_URL`, and `privacy_url` or `OTARI_PRIVACY_URL`, to absolute HTTP or
+HTTPS URLs:
+
+```yaml
+terms_url: "https://example.com/terms"
+privacy_url: "https://example.com/privacy"
+```
+
+Each is independent. Unset, the Terms of service row is absent and the Data &
+Privacy row stays disabled. A deployment whose dashboard sits beside a site that
+owns the documents points at that site; `GET /v1/bootstrap` publishes both
+addresses unauthenticated, so neither may carry a credential.
+
 ## The data-plane address
 
 A hosted control plane does not serve inference. Set `data_plane_url` or
