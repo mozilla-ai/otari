@@ -22,7 +22,7 @@ describe("navRowClass", () => {
     // selected cannot also spend the fill channel on focus, and the ring is
     // what focus is drawn with everywhere. Both still brighten the ink, so a
     // focused row is not weaker than a hovered one, it is differently marked.
-    expect(resting).toContain("hover:bg-surface-subtle")
+    expect(resting).toContain("hover:bg-surface-alt")
     expect(resting).toContain("hover:text-foreground")
     expect(resting).toContain("focus-visible:text-foreground")
     // The regression this replaces: a fill outlives the click that focused the
@@ -44,9 +44,18 @@ describe("navRowClass", () => {
     }
   })
 
-  it("lifts a selected row off the rail with one class in both themes", () => {
-    expect(selected).toContain("bg-surface-alt")
+  it("marks a selected row with the quieter fill and an edge hover cannot borrow", () => {
+    // The louder of the two rungs on purpose, which is the swap: selection used
+    // to take `surface-alt` while hover took `surface-subtle`, the louder one,
+    // so the pointer made any row look more current than the current one.
+    expect(selected).toContain("bg-surface-subtle")
     expect(selected).toContain("text-foreground")
+    // Two adjacent rungs are a fragile way to carry "which page am I on", so
+    // the state also gets a structural channel no transient state paints.
+    expect(selected).toContain("border-l-2")
+    expect(selected).toContain("border-foreground")
+    // And the 2px is given back, so a selected label stays in its siblings' lane.
+    expect(selected).toContain("pl-[calc(0.75rem-2px)]")
     // No `dark:` override. The surface family sits one rung above the
     // background family in both themes, so `surface-alt` is a step off the
     // rail either way. An override here would resolve to the rail's own value

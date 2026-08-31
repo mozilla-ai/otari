@@ -417,7 +417,7 @@
 
   /* ── Text ──────────────────────────────────────────────── */
   --color-text: #f7f8f8;
-  --color-text-muted: #d0d6e0;
+  --color-text-muted: #c2c8d2;
   --color-text-subtle: #8a8f98;
   /* White, not the near-black this held before. That value was correct while
      the dark accent was a lifted light teal; this palette uses the same

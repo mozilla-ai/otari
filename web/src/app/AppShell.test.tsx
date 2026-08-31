@@ -691,13 +691,17 @@ describe("AppShell entitlement gating", () => {
 
     const members = await screen.findByRole("link", { name: "Members & roles" })
     const parent = screen.getByRole("link", { name: "Org settings" })
-    // The selected fill, which the navigation design draws as a lifted chip
-    // (`--color-surface-muted`, reached through `bg-surface-alt`) rather than the
-    // tinted `bg-primary-subtle` this rail used to wear. Asserted as the class
-    // because it is what a reader of the rail actually sees; `aria-current` is
-    // covered separately.
-    expect(members.className).toContain("bg-surface-alt")
-    expect(parent.className).not.toContain("bg-surface-alt")
+    // The selected treatment, asserted as the classes because they are what a
+    // reader of the rail actually sees; `aria-current` is covered separately.
+    // The fill is `bg-surface-subtle`, the louder of the two rungs; hover takes
+    // the quieter `surface-alt`, so a transient state cannot out-shout a
+    // permanent one. The left edge is the part hover can never borrow, which is why it is
+    // asserted here rather than left to `rowStyles.test.ts`: this is the test
+    // that proves exactly one row wears it.
+    expect(members.className).toContain("bg-surface-subtle")
+    expect(members.className).toContain("border-l-2")
+    expect(parent.className).not.toContain("bg-surface-subtle")
+    expect(parent.className).not.toContain("border-l-2")
   })
 
   it("names a gated-off child route after the child, not its parent", async () => {

@@ -157,9 +157,27 @@ const ROW_PRESSED =
  * outlive the pointer, a group trigger clicked open kept a fill afterwards and
  * read as selected when it was only focused.
  */
-const ROW_RESTING = `text-muted hover:bg-surface-subtle hover:text-foreground focus-visible:text-foreground ${ROW_PRESSED}`
+const ROW_RESTING = `text-muted hover:bg-surface-alt hover:text-foreground focus-visible:text-foreground ${ROW_PRESSED}`
 
-const ROW_SELECTED = "bg-surface-alt text-foreground"
+/**
+ * The selected row, and the two things that make it unmistakable.
+ *
+ * Its fill and hover's have swapped. Selection had `surface-alt` and hover had
+ * `surface-subtle`, and `surface-subtle` is the louder of the two on both
+ * themes (lighter on dark, darker on light), so the transient state was
+ * shouting over the permanent one and moving the pointer made any row look more
+ * current than the row that actually was. Selection takes the louder rung now,
+ * which also realigns with the mapping table, where an active control's fill is
+ * `surface-subtle`.
+ *
+ * The 2px left edge is what a hover can never borrow. Two adjacent rungs of one
+ * ramp are a fragile way to carry "which page am I on", so the state also gets a
+ * structural channel, in the rules-not-fills vocabulary the rest of the redesign
+ * is built from. The left padding gives the 2px back so a selected row's label
+ * stays in the same lane as its siblings'.
+ */
+const ROW_SELECTED =
+  "bg-surface-subtle text-foreground border-l-2 border-foreground pl-[calc(0.75rem-2px)]"
 
 /** The class list for one sidebar row. */
 export function navRowClass({
