@@ -26,18 +26,32 @@ export function Toggle({
       aria-label={label}
       disabled={disabled}
       onClick={() => onChange(!checked)}
+      // 44x24 with a 1px edge, filled with the page ground rather than a
+      // surface step: on a flat plane the track is a drawn outline, not a
+      // raised trough, so the state is carried entirely by the knob's color.
+      //
       // The visible track stays 24px, which is what the settings rows are drawn
       // around, while `before` carries the 44px touch floor the phone viewport
       // requires past it (responsiveness.md). Absolutely positioned on a
       // `relative` button, so it grows the hit area without moving a row. Same
       // device the master-key reveal toggle uses on the sign-in screen.
-      className={`relative inline-flex h-6 w-11 shrink-0 items-center rounded-full outline-none transition-colors before:absolute before:-inset-y-2.5 before:inset-x-0 focus-visible:ring-2 focus-visible:ring-accent disabled:opacity-50 ${
-        checked ? "bg-accent" : "bg-surface-subtle"
-      }`}
+      className="relative inline-flex h-6 w-11 shrink-0 items-center border border-control-border bg-background outline-none before:absolute before:inset-x-0 before:-inset-y-2.5 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-accent disabled:opacity-50"
     >
       <span
-        className={`inline-block h-5 w-5 transform rounded-full bg-surface shadow-elevation-sm transition-transform ${
-          checked ? "translate-x-5" : "translate-x-0.5"
+        // 20x20 inset 1px from the track's inner edge, which `items-center`
+        // already gives vertically once the border is accounted for. No border,
+        // no ring and no shadow on the knob in either theme: the edge it used
+        // to carry was `shadow-elevation-sm`, which on dark was a 1px white
+        // ring rather than a shadow, and both are gone with nothing in their
+        // place. Contrast against the ground is what separates it now.
+        //
+        // `transition-transform` and not `transition-colors`: the fill changes
+        // with the state and should read as instant, while the travel is what
+        // benefits from being followed.
+        className={`inline-block h-5 w-5 transform transition-transform duration-150 motion-reduce:transition-none ${
+          checked
+            ? "translate-x-[21px] bg-accent"
+            : "translate-x-px bg-control-thumb"
         }`}
       />
     </button>

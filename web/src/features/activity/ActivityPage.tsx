@@ -214,7 +214,7 @@ function InFlightControl({
             page that would otherwise animate indefinitely. Still at zero, where
             a pulse would suggest activity that is not there. */}
         <span
-          className={`mr-1.5 inline-block h-1.5 w-1.5 rounded-full motion-reduce:animate-none ${
+          className={`mr-1.5 inline-block h-1.5 w-1.5 motion-reduce:animate-none ${
             data.total > 0 ? "animate-pulse bg-accent" : "bg-muted"
           }`}
           aria-hidden="true"

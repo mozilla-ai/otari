@@ -194,9 +194,13 @@ function SettingControl({
         <span className="text-sm tabular-nums text-foreground">
           {formatValue(field)}
         </span>
-        <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted">
-          startup-only
-        </span>
+        {/* A label, not a chip. The pill it used to be was a bordered capsule
+            next to a value on a surface that no longer has boxes on it, so the
+            shape was doing the work the type should. `text-overline` is exactly
+            that role and already carries the size, weight, tracking, uppercase
+            and muted color, so this is the role rather than a seventh hand-rolled
+            spelling of it. */}
+        <span className="text-overline">startup-only</span>
       </div>
     )
   }

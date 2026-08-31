@@ -114,7 +114,7 @@ const HEADING = "text-display"
  * `bg-surface-muted` is declared nowhere and would compile to nothing at all.
  */
 const CODE_CHIP =
-  "rounded bg-surface-alt px-1 py-px font-mono text-xs whitespace-nowrap text-foreground"
+  "bg-surface-alt px-1 py-px font-mono text-xs whitespace-nowrap text-foreground"
 
 /** Sits on the label row beside a refusal. */
 function AlertIcon() {

@@ -644,7 +644,7 @@ function HealthPill({ health }: { health: ProviderHealth | undefined }) {
       title={title}
       className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium ${styles}`}
     >
-      <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${dot}`} />
+      <span aria-hidden className={`h-1.5 w-1.5 ${dot}`} />
       {health.ok
         ? "Reachable"
         : degraded
@@ -679,7 +679,7 @@ function HealthSummary({
   const recheck = useRecheckProviderHealth()
   return (
     <div className="flex flex-wrap items-center gap-3 rounded-xl border border-border bg-surface px-4 py-2.5 text-sm">
-      <span aria-hidden className={`h-2 w-2 rounded-full ${dot}`} />
+      <span aria-hidden className={`h-2 w-2 ${dot}`} />
       <span className="font-medium text-foreground">
         {healthy} of {total} provider{total === 1 ? "" : "s"} reachable
       </span>
@@ -715,7 +715,7 @@ function Step({
 }) {
   return (
     <li className="flex gap-3">
-      <span className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-primary-subtle text-xs font-semibold text-primary-subtle-foreground">
+      <span className="flex h-6 w-6 shrink-0 items-center justify-center bg-primary-subtle text-xs font-semibold text-primary-subtle-foreground">
         {n}
       </span>
       <div className="text-sm">

@@ -53,10 +53,15 @@ export function CheckboxVisual({
       onPointerDown={() => {
         if (!isDisabled) setFlash(!isSelected)
       }}
-      className={`flex h-4 w-4 items-center justify-center rounded border transition-colors ${
+      // Square, and outlined in the control edge rather than the divider
+      // border: `--color-border` is a 0.06 alpha tuned to separate two surfaces
+      // of nearly the same value, which leaves a 16px box on the page ground
+      // almost invisible. Checked drops the border entirely so the accent fill
+      // is the whole shape.
+      className={`flex h-4 w-4 items-center justify-center transition-colors ${
         showChecked
-          ? "border-accent bg-accent text-accent-foreground"
-          : "border-border bg-surface"
+          ? "bg-accent text-accent-foreground"
+          : "border border-control-border bg-background"
       } group-data-[focus-visible]:outline-2 group-data-[focus-visible]:outline-accent`}
     >
       {isIndeterminate && flash === null ? (

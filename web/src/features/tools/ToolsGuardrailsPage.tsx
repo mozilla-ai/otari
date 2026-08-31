@@ -551,7 +551,7 @@ function HowToCallCard({ tool }: { tool: ManagedTool }) {
           {tool.accepted_types.map((type) => (
             <code
               key={type}
-              className="rounded border border-border bg-surface px-1.5 py-0.5 text-xs"
+              className="border border-border bg-surface px-1.5 py-0.5 text-xs"
             >
               {type}
             </code>

@@ -146,7 +146,7 @@ function StatusRow({ label, status }: { label: string; status: Status }) {
       <span
         className={`inline-flex items-center gap-1.5 rounded-full border px-2.5 py-0.5 text-xs font-medium ${pill}`}
       >
-        <span aria-hidden className={`h-1.5 w-1.5 rounded-full ${dot}`} />
+        <span aria-hidden className={`h-1.5 w-1.5 ${dot}`} />
         {status.state}
       </span>
     </div>

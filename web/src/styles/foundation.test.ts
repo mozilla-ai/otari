@@ -444,6 +444,8 @@ describe("design foundation tokens", () => {
     ["text-link-hover", "ours"],
     ["text-primary-subtle-foreground", "ours"],
     ["bg-code-surface", "ours"],
+    ["border-control-border", "ours"],
+    ["bg-control-thumb", "ours"],
     ["text-accent", "heroui"],
     ["bg-accent", "heroui"],
     ["text-accent-foreground", "heroui"],

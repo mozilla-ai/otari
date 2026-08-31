@@ -133,6 +133,23 @@
   ); /* form-field outlines, prominent borders */
   --color-border-subtle: rgb(0 0 0 / 0.03); /* faint internal dividers */
 
+  /* ── Controls — the outline and knob of a toggle or checkbox, which the
+     border ramp above cannot supply. `--color-border` is a 0.06 alpha meant
+     to divide two surfaces of nearly the same value; a control has to read as
+     an object on the page ground, so it needs an opaque edge with real
+     contrast, and the tertiary text step is the one rung that already has it.
+
+     Two names rather than one, and both aliases rather than values. The names
+     exist so a call site says which part of a control it is drawing, and so
+     the two can come apart later without touching a component; the alias
+     exists because a control's edge is not a new color, it is an existing rung
+     used for a second purpose. The coupling that buys is real and worth
+     stating: retune the tertiary text step and every switch and checkbox on
+     the page moves with it. That is the trade the naming makes visible rather
+     than one it prevents. ──────────────────────────────────────────────── */
+  --color-control-border: var(--color-text-subtle);
+  --color-control-thumb: var(--color-text-subtle); /* the off-state knob */
+
   /* ── Primary ───────────────────────────────────────────────────────────
      `#0098a4`. Its ink is near-black, not white: white on it measures 3.48:1
      and fails, `#08090a` measures 5.72:1. `--color-primary-foreground` is
@@ -405,6 +422,13 @@
   --color-border-strong: rgb(255 255 255 / 0.14);
   --color-border-subtle: rgb(255 255 255 / 0.05);
 
+  /* ── Controls — see the light block. Same rung on this theme, which is why
+     the edge and the off-state knob are one value here: the tertiary text step
+     is light enough on this ground that a knob at it reads as an object rather
+     than as a thickening of its own outline. ───────────────────────────── */
+  --color-control-border: var(--color-text-subtle);
+  --color-control-thumb: var(--color-text-subtle);
+
   /* ── Primary ───────────────────────────────────────────────────────────
      The same accent as light, unchanged: it clears AA on these grounds
      without lifting. Hover brightens, active drops back one step.       */
@@ -614,6 +638,12 @@
   --color-code-border: var(--color-code-border);
   --color-code-control: var(--color-code-control);
   --color-code-foreground: var(--color-code-foreground);
+  /* Control edge and knob. Registered because HeroUI has no counterpart for
+   * either, so `border-control-border` and `bg-control-thumb` are classes only
+   * if they are declared here. Self-referential like the roles above: the real
+   * values live in the theme blocks. */
+  --color-control-border: var(--color-control-border);
+  --color-control-thumb: var(--color-control-thumb);
   --shadow-elevation-sm: var(--shadow-sm);
   --shadow-elevation-md: var(--shadow-md);
   --shadow-elevation-lg: var(--shadow-lg);
@@ -1042,6 +1072,18 @@ body {
   --border: var(--color-border-strong);
 }
 
+/* The one focus ring in the emitted stylesheet that does not follow its
+   element's corner. Every other ring here is a `box-shadow` or an `outline`,
+   both of which take the element's own `border-radius`, so zeroing `--radius`
+   squared them; HeroUI's combo-box trigger sets `border-radius: .25rem` inside
+   its own focus rule, which nothing about the token can reach. Found by reading
+   the compiled CSS rather than the page: the trigger renders on Keys and
+   Budgets, not on the screens this pass was checked against. */
+.combo-box__trigger:focus-visible:not(:focus),
+.combo-box__trigger[data-focus-visible="true"] {
+  border-radius: 0;
+}
+
 .tooltip__content {
   padding: 0.5rem 0.75rem;
   font-size: 0.8125rem;
@@ -1059,7 +1101,11 @@ body {
 }
 *::-webkit-scrollbar-thumb {
   background-color: color-mix(in oklch, var(--color-text) 20%, transparent);
-  border-radius: 9999px;
+  /* Square like everything else. The original comment on this rule is about
+     consuming tokens so dark mode is correct; it never gave the pill a
+     reason, and a capsule thumb is the one rounded thing left on a page
+     otherwise made of hairlines. */
+  border-radius: 0;
   border: 2px solid transparent;
   background-clip: padding-box;
 }
@@ -1111,22 +1157,23 @@ body {
 
 /* Shared DataTable styling (HeroUI's Table).
 
-   HeroUI's Table.Root already IS a card: its default `primary` variant gives the
-   root its own gray surface, a 32px border-radius, and 4px inner padding. Wrapping
-   it in a second card (our border + rounded-xl) left two mismatched radii and a
-   4px inset gap, so the header floated instead of meeting the card corner. Fix it
-   by making `.otari-table` the single card: neutralize the variant's surface,
-   radius, and padding, then own the container styling here. The header fills to
-   the edges and the root's `overflow: hidden` clips it (and the last row) to one
-   12px radius, so header and card share the same corner.
+   HeroUI's Table.Root ships as a card: its default `primary` variant gives the
+   root its own gray surface, a 32px border-radius, and 4px inner padding. This
+   rule neutralizes all three. A table is not a box on the page; it is a region
+   of the one surface, bounded by the section rules around it and by its own
+   header and row hairlines. That is why there is no outer border here and no
+   radius: the border and the 12px corner both existed to make the root and its
+   header share one card corner, and there is no card corner left to share.
+
+   `overflow: hidden` stays. It no longer clips a corner, but it is what keeps a
+   wide table from painting outside the region it was given.
 
    Column selectors are replicated with the `.otari-table` prefix so they outrank
    HeroUI's own first/last-column radius rules (which are more specific than a
    bare `.table__column`). */
 .otari-table.table-root {
   background-color: var(--color-surface);
-  border: 1px solid var(--color-border);
-  border-radius: 0.75rem; /* rounded-xl */
+  border-radius: 0;
   padding: 0;
   overflow: hidden;
 }
@@ -1346,13 +1393,13 @@ body {
   background-color: var(--color-primary-subtle);
   color: var(--color-text);
   padding: 0.1rem 0.35rem;
-  border-radius: 0.35rem;
+  border-radius: 0;
 }
 .otari-markdown pre {
   margin: 1rem 0;
   padding: 0.85rem 1rem;
   background-color: var(--color-code-surface);
-  border-radius: 0.6rem;
+  border-radius: 0;
   overflow-x: auto;
 }
 .otari-markdown pre code {
