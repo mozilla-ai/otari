@@ -58,16 +58,19 @@ from typing import Literal, get_args
 
 from pydantic import BaseModel, Field
 from sqlalchemy import func, or_, select
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.ext.asyncio import AsyncSession
 from sqlalchemy.sql.elements import ColumnElement
 from sqlmodel import col
 
 from gateway.models.entities import APIKey, Budget, ScopedBudget, WorkspaceBudgetDefault
+from gateway.models.entities import User as GatewayUser
 from gateway.models.money import MAX_USD_LIMIT, as_float, to_usd_or_none
 from gateway.models.tenancy import Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.services.budget_periods import ResetAlignment, period_window
 from gateway.services.budget_retiming import cadence_of, retime_ceilings_for_budget
 from gateway.services.tenancy.errors import (
+    OrganizationBudgetHeldElsewhereError,
     OrganizationBudgetInUseError,
     OrganizationBudgetNotFoundError,
     OrganizationScopedBudgetAlreadyExistsError,
@@ -155,12 +158,13 @@ class OrganizationBudgetCreate(OrganizationBudgetRates):
 class OrganizationBudgetUpdate(OrganizationBudgetRates):
     """Replace a budget's label, figure and period.
 
-    A full statement rather than a patch, matching ``PATCH /v1/budgets/{id}``'s
-    own fields: every one is optional and an omitted one is left alone, so
-    clearing a cap back to uncapped is not expressible here and is a delete. The
-    period pair is still mutually exclusive, and setting one does not clear the
-    other, which is why :func:`_require_single_period_source` re-checks the
-    *resulting* pair rather than the submitted one.
+    Every field is optional and keyed on ``model_fields_set``, matching
+    ``PATCH /v1/budgets/{id}``'s own: an *omitted* field is left alone, and an
+    explicit null clears it, so sending ``max_budget: null`` takes a budget back
+    to uncapped, which is what the dashboard's dialog does. The period pair is
+    still mutually exclusive, and setting one does not clear the other, which is
+    why :func:`_require_single_period_source` re-checks the *resulting* pair
+    rather than the submitted one.
     """
 
 
@@ -589,10 +593,21 @@ class OrganizationBudgetService:
         ``scoped_budgets.budget_id`` and ``workspace_budget_defaults.budget_id``
         are both RESTRICT, so the database would refuse anyway, as an
         ``IntegrityError`` with nothing naming what to go and change. Checked here
-        so the refusal can say which. ``users.budget_id`` is the deployment's own
-        table and cannot name a tenant's budget through any route this service
-        offers, so it is not counted: saying "3 users" to an admin who cannot see
-        the users page would name a thing they cannot act on.
+        so the refusal can say which.
+
+        ``users.budget_id`` is counted but not named. It can hold a tenant's
+        budget, because ``GET /v1/budgets`` is unfiltered and ``POST /v1/users``
+        accepts any id it lists, and ``Budget.users`` is a plain relationship, so
+        deleting the budget would not refuse: the ORM nulls the column out and
+        the assignment an operator made disappears with no refusal to either of
+        them. The count is what stops that, and it says only that the budget is
+        held, because saying "3 users" to an admin who cannot see the users page
+        would name a thing they cannot act on.
+
+        ``budget_reset_logs.budget_id`` is the same shape with a NOT NULL column,
+        so its null-out fails instead, as an ``IntegrityError`` at the commit.
+        Guarded there rather than counted, since a reset log only exists for a
+        budget a user already held.
         """
         organization = await self._managed_organization(user)
         budget = await self._require_own_budget(organization=organization, budget_id=budget_id)
@@ -608,8 +623,20 @@ class OrganizationBudgetService:
         if ceilings or defaults:
             raise OrganizationBudgetInUseError(budget.budget_id, ceilings=ceilings, defaults=defaults)
 
+        assigned = (
+            await self.db.execute(
+                select(func.count()).select_from(GatewayUser).where(GatewayUser.budget_id == budget.budget_id)
+            )
+        ).scalar_one()
+        if assigned:
+            raise OrganizationBudgetHeldElsewhereError(budget.budget_id)
+
         await self.db.delete(budget)
-        await self.db.commit()
+        try:
+            await self.db.commit()
+        except IntegrityError:
+            await self.db.rollback()
+            raise OrganizationBudgetHeldElsewhereError(budget_id) from None
 
     async def _ceiling_count(self, budget_id: str) -> int:
         return (

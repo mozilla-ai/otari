@@ -194,6 +194,37 @@ def test_every_recognized_alignment_is_accepted(
         assert created.json()["reset_alignment"] == alignment
 
 
+def test_a_budget_a_gateway_user_holds_is_refused_rather_than_unassigned(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """The delete refuses instead of silently clearing ``users.budget_id``.
+
+    An operator can assign a gateway user to any budget ``GET /v1/budgets``
+    lists, tenant-owned ones included. ``Budget.users`` is a plain relationship,
+    so an unchecked delete does not fail: the ORM nulls the column out, and an
+    admin who cannot see that table removes the operator's assignment with it.
+    """
+    budget = client.post(_BUDGETS, json=_budget_body(), headers=master_key_header).json()
+    user_id = f"holder-{uuid.uuid4().hex[:8]}"
+    created = client.post(
+        "/v1/users",
+        json={"user_id": user_id, "budget_id": budget["budget_id"]},
+        headers=master_key_header,
+    )
+    assert created.status_code in {status.HTTP_200_OK, status.HTTP_201_CREATED}, created.text
+
+    refused = client.delete(f"{_BUDGETS}/{budget['budget_id']}", headers=master_key_header)
+    assert refused.status_code == status.HTTP_409_CONFLICT, refused.text
+    assert "still in use" in refused.json()["detail"]
+
+    # The assignment is still the operator's, and the budget is still there.
+    still_assigned = client.get(f"/v1/users/{user_id}", headers=master_key_header)
+    assert still_assigned.status_code == status.HTTP_200_OK, still_assigned.text
+    assert still_assigned.json()["budget_id"] == budget["budget_id"]
+    assert client.get(_BUDGETS, headers=master_key_header).json()["count"] == 1
+
+
 def test_an_unknown_budget_is_not_found(client: TestClient, master_key_header: dict[str, str]) -> None:
     missing = client.patch(f"{_BUDGETS}/nope", json={"name": "x"}, headers=master_key_header)
     assert missing.status_code == status.HTTP_404_NOT_FOUND, missing.text

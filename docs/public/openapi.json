@@ -6205,7 +6205,7 @@
         "type": "object"
       },
       "OrganizationBudgetUpdate": {
-        "description": "Replace a budget's label, figure and period.\n\nA full statement rather than a patch, matching ``PATCH /v1/budgets/{id}``'s\nown fields: every one is optional and an omitted one is left alone, so\nclearing a cap back to uncapped is not expressible here and is a delete. The\nperiod pair is still mutually exclusive, and setting one does not clear the\nother, which is why :func:`_require_single_period_source` re-checks the\n*resulting* pair rather than the submitted one.",
+        "description": "Replace a budget's label, figure and period.\n\nEvery field is optional and keyed on ``model_fields_set``, matching\n``PATCH /v1/budgets/{id}``'s own: an *omitted* field is left alone, and an\nexplicit null clears it, so sending ``max_budget: null`` takes a budget back\nto uncapped, which is what the dashboard's dialog does. The period pair is\nstill mutually exclusive, and setting one does not clear the other, which is\nwhy :func:`_require_single_period_source` re-checks the *resulting* pair\nrather than the submitted one.",
         "properties": {
           "budget_duration_sec": {
             "anyOf": [

@@ -844,6 +844,23 @@ class OrganizationBudgetInUseError(TenancyConflictError):
         )
 
 
+class OrganizationBudgetHeldElsewhereError(TenancyConflictError):
+    """Something outside this organization's own surface still names the budget.
+
+    ``users.budget_id`` and ``budget_reset_logs.budget_id``, neither of which is
+    a tenant's to see: an operator can assign a gateway user to any budget
+    ``GET /v1/budgets`` lists, tenant-owned ones included. Left unchecked the
+    first is nulled out by the ORM and the second fails at the commit, so the
+    refusal says the budget is held without naming the rows holding it.
+    """
+
+    def __init__(self, budget_id: object):
+        super().__init__(
+            f"Budget {budget_id} is still in use outside this organization and cannot be deleted. "
+            "Ask a deployment operator to release it."
+        )
+
+
 class OrganizationScopeNotFoundError(TenancyNotFoundError):
     """The identity a ceiling would cap is not one in the caller's organization.
 
@@ -1090,6 +1107,7 @@ __all__ = [
     "OrgProviderKeyNotFoundError",
     "OrgProviderKeyUnknownProviderError",
     "OrgProviderKeyUnsafeApiBaseError",
+    "OrganizationBudgetHeldElsewhereError",
     "OrganizationBudgetInUseError",
     "OrganizationBudgetNotFoundError",
     "OrganizationGuardrailAlreadyExistsError",

@@ -6936,12 +6936,13 @@ export interface components {
          * OrganizationBudgetUpdate
          * @description Replace a budget's label, figure and period.
          *
-         *     A full statement rather than a patch, matching ``PATCH /v1/budgets/{id}``'s
-         *     own fields: every one is optional and an omitted one is left alone, so
-         *     clearing a cap back to uncapped is not expressible here and is a delete. The
-         *     period pair is still mutually exclusive, and setting one does not clear the
-         *     other, which is why :func:`_require_single_period_source` re-checks the
-         *     *resulting* pair rather than the submitted one.
+         *     Every field is optional and keyed on ``model_fields_set``, matching
+         *     ``PATCH /v1/budgets/{id}``'s own: an *omitted* field is left alone, and an
+         *     explicit null clears it, so sending ``max_budget: null`` takes a budget back
+         *     to uncapped, which is what the dashboard's dialog does. The period pair is
+         *     still mutually exclusive, and setting one does not clear the other, which is
+         *     why :func:`_require_single_period_source` re-checks the *resulting* pair
+         *     rather than the submitted one.
          */
         OrganizationBudgetUpdate: {
             /**
