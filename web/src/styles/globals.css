@@ -1448,6 +1448,112 @@ body {
   min-width: 180px;
 }
 
+/* The activity log. Nine lanes plus selection, and the only table so far whose
+   identity is not its first column: a request is named by what ran, but a log
+   is read chronologically, so Time leads and Model is third.
+
+   The frozen region therefore runs from the first lane through the row header
+   inclusive, Time + User + Model, which is the general rule rather than a
+   special case here: everything up to and including the identity is held,
+   because holding only the identity would leave it floating away from the
+   columns that qualify it. 120 + 150 + 204 is 474px, about a third of the
+   table, which is the ceiling the rule sets; past that the column order is the
+   thing to fix, not the pin.
+
+   Rows are 59px rather than the 45 an activity preview uses, because the
+   Routing cell is two lines by design: it names the policy the caller asked for
+   and then what actually served, and the tail is the part that matters. */
+.otari-activity-table .otari-table.table-root {
+  background-color: transparent;
+  border-top: 1px solid var(--color-border);
+  border-bottom: 1px solid var(--color-border);
+}
+.otari-activity-table .otari-table .table__header {
+  background-color: transparent;
+  border-bottom: 1px solid var(--color-border);
+}
+.otari-activity-table .otari-table .table__row,
+.otari-activity-table .table__row .table__cell {
+  border-color: var(--color-border-subtle);
+}
+.otari-activity-table .table__row .table__cell {
+  min-height: 59px;
+}
+.otari-activity-table .table__column[data-key="time"] {
+  width: 120px;
+  min-width: 120px;
+}
+.otari-activity-table .table__column[data-key="user"] {
+  width: 150px;
+  min-width: 150px;
+}
+.otari-activity-table .table__column[data-key="model"] {
+  min-width: 204px;
+}
+.otari-activity-table .table__column[data-key="routing"] {
+  min-width: 200px;
+}
+.otari-activity-table .table__column[data-key="api_key"] {
+  width: 150px;
+  min-width: 150px;
+}
+.otari-activity-table .table__column[data-key="tokens"],
+.otari-activity-table .table__column[data-key="latency"] {
+  width: 120px;
+  min-width: 120px;
+}
+.otari-activity-table .table__column[data-key="cost"] {
+  width: 110px;
+  min-width: 110px;
+}
+.otari-activity-table .table__column[data-key="status"] {
+  width: 120px;
+  min-width: 120px;
+}
+
+/* The frozen region: the selection box and the three lanes up to and including
+   the identity, each offset by the width of everything pinned before it.
+   Measured on the page, the held lanes are 474px of a 1416px table, 33%, under
+   the third-of-the-width ceiling the rule sets.
+
+   The selection box is held with them rather than left to scroll: it acts on the
+   row, and a checkbox that has slid away from the row it selects is worse than
+   no pin at all. */
+.otari-activity-table .table__column:first-child,
+.otari-activity-table .table__row .table__cell:first-child {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background-color: var(--color-background);
+}
+.otari-activity-table .table__column[data-key="time"],
+.otari-activity-table .table__cell[data-key="time"] {
+  position: sticky;
+  left: 48px;
+  z-index: 1;
+  background-color: var(--color-background);
+}
+.otari-activity-table .table__column[data-key="user"],
+.otari-activity-table .table__cell[data-key="user"] {
+  position: sticky;
+  left: 168px;
+  z-index: 1;
+  background-color: var(--color-background);
+}
+.otari-activity-table .table__column[data-key="model"],
+.otari-activity-table .table__cell[data-key="model"] {
+  position: sticky;
+  left: 318px;
+  z-index: 1;
+  background-color: var(--color-background);
+}
+/* One boundary, at the edge of the held region, and only while it is holding
+   something back. */
+.otari-activity-table[data-scrolled="true"] .table__column[data-key="model"],
+.otari-activity-table[data-scrolled="true"] .table__cell[data-key="model"] {
+  border-right: 1px solid var(--color-control-border);
+}
+
 /* The API keys table. Same terms as the others (page ground, rule-bounded
    overline header, faint separators), plus the lanes from the frozen artboard
    and a two-line name cell that sets the 58px row.
@@ -1553,9 +1659,10 @@ body {
   border-bottom: 1px solid var(--color-border);
 }
 .otari-overview-activity .table__column[data-key="time"] {
-  /* 130 and not 120: a relative time is product voice ("6 minutes ago"), and it
-     does not fit 120px at 14px. The residual column absorbs the difference. */
-  width: 130px;
+  /* Back to 120. This was widened to 130 because "6 minutes ago" did not fit,
+     which was a layout fix for a copy problem; the copy is compact now ("6m
+     ago") and the lane no longer has to pay for the phrase. */
+  width: 120px;
 }
 /* A relative time is short but wraps at this lane width ("4 minutes ago" is
    three words), and a wrapped cell is the one thing that can break the row

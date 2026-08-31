@@ -256,7 +256,8 @@ describe("ActivityPage", () => {
     expect(within(row).getByText("1,500")).toBeInTheDocument()
     expect(within(row).getByText("842 ms")).toBeInTheDocument()
     expect(within(row).getByText("$0.0123")).toBeInTheDocument()
-    expect(within(row).getByText("success")).toBeInTheDocument()
+    // Status is a dot plus an uppercase word now, not a pill.
+    expect(within(row).getByText("SUCCESS")).toBeInTheDocument()
   })
 
   it("shows the api key column, and an em-dash for master-key rows", async () => {
@@ -397,7 +398,7 @@ describe("ActivityPage", () => {
     renderPage(<ActivityPage />)
 
     const row = (await screen.findByText("gpt-4o")).closest("tr")!
-    expect(within(row).getByText("error")).toBeInTheDocument()
+    expect(within(row).getByText("ERROR")).toBeInTheDocument()
 
     await user.click(row)
     // The dashboard is admin-only, so the stored error text is shown verbatim,
@@ -1465,10 +1466,13 @@ describe("ActivityPage", () => {
         ),
       ).toBe(true),
     )
-    // The visible half of the same bug: the preset row still highlights 24h rather
-    // than falling back to the custom sentinel, which highlights nothing.
-    expect(screen.getByRole("button", { name: "24h" }).className).toContain(
-      "button--primary",
+    // The visible half of the same bug: the preset row still marks 24h active
+    // rather than falling back to the custom sentinel, which marks nothing. The
+    // presets are tabs now, so the assertion is on the state a tab reports
+    // rather than on a button variant class.
+    expect(screen.getByRole("button", { name: "24h" })).toHaveAttribute(
+      "aria-pressed",
+      "true",
     )
   })
 

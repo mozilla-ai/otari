@@ -30,6 +30,7 @@ import { BulkActionBar } from "@/shared/components/BulkActionBar"
 import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import { type FilterChip, FilterChips } from "@/shared/components/FilterChips"
+import { Dot, TableScrollFrame } from "@/shared/components/surface"
 import {
   PAGE_SIZE_OPTIONS,
   TablePagination,
@@ -39,9 +40,9 @@ import {
   ErrorBanner,
   FilterMultiComboBox,
   FilterSelect,
-  PageHeader,
   RefreshButton,
 } from "@/shared/components/ui"
+import { formatRelative } from "@/shared/helpers/format"
 import {
   resolveSelectedIds,
   useTableSelection,
@@ -116,17 +117,6 @@ function absolute(iso: string): string {
 
 // Relative time reads better in a scan than a full timestamp; the absolute value
 // stays available as a tooltip.
-function timeAgo(iso: string): string {
-  const then = new Date(iso).getTime()
-  if (Number.isNaN(then)) return iso
-  const secs = Math.max(0, Math.round((Date.now() - then) / 1000))
-  if (secs < 60) return `${secs}s ago`
-  const mins = Math.round(secs / 60)
-  if (mins < 60) return `${mins}m ago`
-  const hours = Math.round(mins / 60)
-  if (hours < 24) return `${hours}h ago`
-  return `${Math.round(hours / 24)}d ago`
-}
 
 // ---------- requests in flight ----------
 //
@@ -407,20 +397,26 @@ function resolveExtentWindow(
 
 // ---------- small presentational pieces ----------
 
-// Status as a pill, failure-forward: errors use the shared red status surface so
-// they pop in a scan; success uses the muted brand tint.
-function StatusPill({ status }: { status: string }) {
-  const cls =
+/**
+ * Status as a square dot and a word, failure-forward.
+ *
+ * `error` is the only one that colors its text, which is what keeps a failure
+ * findable in a scan of fifty rows. `absorbed` is deliberately neutral rather
+ * than caution: a routing policy recovered from it, so the request was served,
+ * and painting it as a warning made a working gateway look like a failing one.
+ * It reads as the third thing it is, on the subtle rung in both channels.
+ */
+function StatusMark({ status }: { status: string }) {
+  const { dot, ink } =
     status === "error"
-      ? "border-danger bg-danger-subtle text-danger"
+      ? { dot: "bg-danger", ink: "text-danger" }
       : status === "absorbed"
-        ? "border-warning bg-warning-subtle text-warning"
-        : "border-border bg-primary-subtle text-primary-subtle-foreground"
+        ? { dot: "bg-surface-subtle", ink: "text-subtle" }
+        : { dot: "bg-success", ink: "text-muted" }
   return (
-    <span
-      className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-xs font-medium ${cls}`}
-    >
-      {status}
+    <span className={`flex items-center gap-2 font-mono text-[13px] ${ink}`}>
+      <Dot className={dot} />
+      {status.toUpperCase()}
     </span>
   )
 }
@@ -1854,7 +1850,7 @@ export function ActivityPage() {
         header: "Time",
         cell: (e) => (
           <span title={absolute(e.timestamp)} className="text-muted">
-            {timeAgo(e.timestamp)}
+            {formatRelative(e.timestamp)}
           </span>
         ),
       },
@@ -1878,12 +1874,18 @@ export function ActivityPage() {
               {/* A generic span does not reliably expose aria-label, so the
                   badge takes the img role: the label is the whole meaning, and
                   the count inside is a summary of it. */}
+              {/* A marker, not a badge: an accent dot and the count in mono
+                  uppercase, on the same terms as every other marker in the
+                  product. A generic span does not reliably expose aria-label,
+                  so it takes the img role; the label is the whole meaning and
+                  the count inside is a summary of it. */}
               <span
                 role="img"
-                className="inline-flex items-center rounded-full border border-border bg-primary-subtle px-1.5 py-0.5 text-[11px] font-medium text-primary-subtle-foreground"
+                className="inline-flex items-center gap-1.5 font-mono text-[11px] tracking-[0.1em] text-muted uppercase"
                 title={detail}
                 aria-label={`Gateway tools: ${detail}`}
               >
+                <Dot className="bg-accent" />
                 {calls} {calls === 1 ? "tool" : "tools"}
               </span>
             </span>
@@ -1930,17 +1932,22 @@ export function ActivityPage() {
       {
         id: "status",
         header: "Status",
-        cell: (e) => <StatusPill status={e.status} />,
+        cell: (e) => <StatusMark status={e.status} />,
       },
     ]
   }, [groupOutcomes])
 
   return (
-    <div className="flex flex-col gap-6">
-      <PageHeader
-        title="Activity"
-        description="A per-request log of what the gateway served: tokens, cost, latency, and failures. No request or response content is stored."
-      />
+    <div className="flex flex-col">
+      <header className="pb-5">
+        <h1 className="font-display text-[28px] leading-[34px] font-semibold tracking-[-0.01em] text-foreground">
+          Activity
+        </h1>
+        <p className="mt-1 max-w-[620px] text-sm text-muted">
+          A per-request log of what the gateway served: tokens, cost, latency,
+          and failures. No request or response content is stored.
+        </p>
+      </header>
 
       {/* The timeline's summary error is included so a failed series request
           reads as a failure, not as an empty "No activity in this range" strip. */}
@@ -2111,28 +2118,30 @@ export function ActivityPage() {
         </BulkActionBar>
       ) : null}
 
-      <DataTable
-        ariaLabel="Activity log"
-        columns={columns}
-        rows={rows}
-        getRowKey={getActivityRowKey}
-        isLoading={usage.isLoading}
-        emptyContent={
-          anyFilter
-            ? "No requests match these filters."
-            : "No requests recorded yet."
-        }
-        selectionMode={showSelection ? "multiple" : "none"}
-        selectedKeys={selection.selectedKeys}
-        onSelectionChange={selection.onSelectionChange}
-        disabledKeys={disabledKeys}
-        onRowAction={(key) =>
-          setExpandedId((current) => (current === key ? null : key))
-        }
-        rowClassName={activityRowClassName}
-        detailKey={expandedId}
-        renderDetail={renderDetail}
-      />
+      <TableScrollFrame className="otari-activity-table">
+        <DataTable
+          ariaLabel="Activity log"
+          columns={columns}
+          rows={rows}
+          getRowKey={getActivityRowKey}
+          isLoading={usage.isLoading}
+          emptyContent={
+            anyFilter
+              ? "No requests match these filters."
+              : "No requests recorded yet."
+          }
+          selectionMode={showSelection ? "multiple" : "none"}
+          selectedKeys={selection.selectedKeys}
+          onSelectionChange={selection.onSelectionChange}
+          disabledKeys={disabledKeys}
+          onRowAction={(key) =>
+            setExpandedId((current) => (current === key ? null : key))
+          }
+          rowClassName={activityRowClassName}
+          detailKey={expandedId}
+          renderDetail={renderDetail}
+        />
+      </TableScrollFrame>
 
       <TablePagination
         page={page}

@@ -45,9 +45,11 @@ export interface ChartPoint {
 // rather than an inline background-color style, per the dashboard's no-inline-
 // styles convention.
 function SeriesMarker({ color }: { color: string }) {
+  // Square, like every other marker in the product. The 1.5 corner it used to
+  // carry was the last rounded thing in a chart legend.
   return (
     <svg aria-hidden="true" viewBox="0 0 8 8" className="h-2 w-2 shrink-0">
-      <rect width="8" height="8" rx="1.5" fill={color} />
+      <rect width="8" height="8" fill={color} />
     </svg>
   )
 }
@@ -178,6 +180,8 @@ export function TrendChart({
   // `"preserveStartEnd"` thins by pixel gap instead, which makes the label
   // density a function of the window width rather than of the data.
   xTickInterval,
+  // Recharts' default is 5. A short strip wants fewer.
+  yTickCount,
   onSelectRange,
   window: windowRange,
 }: {
@@ -190,6 +194,7 @@ export function TrendChart({
   showYAxis?: boolean
   showTotal?: boolean
   xTickInterval?: number
+  yTickCount?: number
   onSelectRange?: (startIndex: number, endIndex: number) => void
   window?: { startIndex: number; endIndex: number } | null
 }) {
@@ -284,6 +289,7 @@ export function TrendChart({
           />
           {showYAxis ? (
             <YAxis
+              tickCount={yTickCount}
               width={52}
               tickLine={false}
               axisLine={false}

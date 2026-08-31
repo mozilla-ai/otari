@@ -9,6 +9,7 @@ import {
   type StackedPoint,
   TrendChart,
 } from "@/shared/components/charts"
+import { Tab, TabRow } from "@/shared/components/surface"
 import {
   bucketDurationMs,
   bucketIndexRange,
@@ -256,23 +257,25 @@ export function ActivityTimeline({
   return (
     <div className="flex flex-col gap-2">
       <div className="flex flex-wrap items-center gap-2">
-        {presets.map((preset) => (
-          <Button
-            key={preset.key}
-            size="sm"
-            variant={extentKey === preset.key ? "primary" : "outline"}
-            onPress={() => onPreset(preset)}
-          >
-            {preset.label}
-          </Button>
-        ))}
+        <TabRow>
+          {presets.map((preset) => (
+            <Tab
+              key={preset.key}
+              isActive={extentKey === preset.key}
+              onPress={() => onPreset(preset)}
+            >
+              {preset.label}
+            </Tab>
+          ))}
+        </TabRow>
         <div className="ml-auto flex items-center gap-3">
           <span className="text-xs text-muted">Showing {label} · UTC</span>
           {action}
         </div>
       </div>
 
-      <div className="rounded-xl border border-border bg-surface p-2">
+      {/* A band of the page between rules, not a card. */}
+      <div className="border-y border-border py-3">
         <div className="flex items-center justify-between gap-2 px-1 pb-1">
           <span className="flex items-center gap-3">
             <span className="text-overline">
@@ -282,7 +285,7 @@ export function ActivityTimeline({
           </span>
           <div className="flex items-center gap-1.5">
             <span className="hidden text-xs text-muted sm:inline">
-              drag across the chart to zoom
+              Drag to filter a range
             </span>
             <Button
               size="sm"
@@ -351,6 +354,11 @@ export function ActivityTimeline({
               formatXTick={(iso) => formatTick(iso, bucket)}
               ariaLabel={ariaLabel}
               height={90}
+              // Three steps: this strip is a shape to drag on rather than a
+              // chart to read values off, and five would put more numbers
+              // beside it than it has room to justify.
+              showYAxis
+              yTickCount={3}
               onSelectRange={commit}
               window={zoomed || panSel ? sel : null}
             />
