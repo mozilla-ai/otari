@@ -1273,6 +1273,12 @@ export function RoutingPage() {
   // describes one policy and the operator clicked that policy. A card above the
   // table would put the panel nowhere near the control that opened it.
   const [expanded, setExpanded] = useState<string | null>(null)
+  // `adding` is seeded from ?target= before the membership context settles, so
+  // the role is applied here rather than in the initializer: gating the
+  // initializer would drop an operator's deep link, since `isOperator` is still
+  // false at the moment it runs. A member arriving on that link gets the
+  // read-only empty state instead of a form whose only outcome is a refusal.
+  const isAdding = adding && isOperator
 
   // Aliases and policies are listed together: an alias is the one-target case,
   // and this page is the only place either is managed.
@@ -1505,7 +1511,7 @@ export function RoutingPage() {
         }
       />
 
-      {adding ? (
+      {isAdding ? (
         <PolicyForm
           existing={null}
           initialTarget={initialTarget}
@@ -1516,7 +1522,7 @@ export function RoutingPage() {
         <PolicyForm existing={editing} onClose={() => setEditing(null)} />
       ) : null}
 
-      {rows.length === 0 && !isListLoading && !adding ? (
+      {rows.length === 0 && !isListLoading && !isAdding ? (
         isOperator ? (
           <EmptyState title="No routing policies yet">
             <ol className="flex list-decimal flex-col gap-1 pl-5 text-sm text-muted">

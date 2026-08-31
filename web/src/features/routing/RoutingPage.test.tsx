@@ -223,13 +223,13 @@ function mockApi(
   return { spy, calls }
 }
 
-function renderPage(ui: ReactElement) {
+function renderPage(ui: ReactElement, url = "/") {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
   return render(
     <QueryClientProvider client={client}>{ui}</QueryClientProvider>,
-    { wrapper: withRouter() },
+    { wrapper: withRouter({ url }) },
   )
 }
 
@@ -1261,6 +1261,37 @@ describe("RoutingPage", () => {
     expect(urls.some((url) => url.includes("/v1/aliases"))).toBe(false)
     expect(urls.some((url) => url.includes("/v1/tool-settings"))).toBe(false)
     expect(urls.some((url) => url.includes("/v1/users"))).toBe(false)
+  })
+
+  it("withholds the deep-linked add form from a member", async () => {
+    // ?target= seeds `adding` before the membership context settles, so the
+    // role has to be applied at render time. Without that a member on this URL
+    // gets a create form whose only outcome is a refusal, and the read-only
+    // empty state is suppressed behind it.
+    mockApi([], null, [], {
+      context: organizationContext({
+        deployment_operator: false,
+        role: "member",
+      }),
+      memberPolicies: [],
+    })
+    renderPage(<RoutingPage />, "/routing?target=openai:gpt-4o")
+
+    expect(
+      await screen.findByText(/once a deployment operator defines them/),
+    ).toBeInTheDocument()
+    expect(
+      screen.queryByRole("button", { name: /Create policy/i }),
+    ).not.toBeInTheDocument()
+  })
+
+  it("keeps the deep-linked add form for an operator", async () => {
+    mockApi([], null, [], { context: organizationContext() })
+    renderPage(<RoutingPage />, "/routing?target=openai:gpt-4o")
+
+    expect(
+      await screen.findByRole("button", { name: /Create policy/i }),
+    ).toBeInTheDocument()
   })
 
   it("tells a member with no policies who defines them", async () => {

@@ -1302,6 +1302,24 @@ describe("ModelsPage", () => {
       within(aside).queryByRole("button", { name: "Reset" }),
     ).not.toBeInTheDocument()
 
+    // Discovery was never read, so the panel says nothing about it rather than
+    // reporting every model as missing from a list it never fetched.
+    expect(within(aside).queryByText("not discovered")).toBeNull()
+
+    // The three filters that read an operator-only endpoint are absent: with
+    // discovery and metadata withheld, every value but "all" would empty the
+    // table.
+    const filterTrigger = (label: string) =>
+      screen.queryByRole("button", {
+        name: (name) => name === label || name.endsWith(` ${label}`),
+      })
+    expect(filterTrigger("Filter by source")).toBeNull()
+    expect(filterTrigger("Filter by capability")).toBeNull()
+    expect(filterTrigger("Filter by release date")).toBeNull()
+    // The ones that read only the catalog stay.
+    expect(filterTrigger("Filter by provider")).not.toBeNull()
+    expect(filterTrigger("Filter by pricing")).not.toBeNull()
+
     const urls = fetchMock.mock.calls.map(([input]) => String(input))
     expect(urls.some((url) => url.includes("/v1/settings"))).toBe(false)
     expect(urls.some((url) => url.includes("/v1/models/discoverable"))).toBe(

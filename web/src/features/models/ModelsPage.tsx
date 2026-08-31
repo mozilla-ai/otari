@@ -822,12 +822,17 @@ function ModelDetailPanel({
   metadata,
   metadataAvailable,
   canEditPricing,
+  discoveryKnown,
   onClose,
 }: {
   row: ModelRow
   metadata: ModelMetadata | undefined
   metadataAvailable: boolean
   canEditPricing: boolean
+  // False when `/v1/models/discoverable` was never read, which is the
+  // non-operator case: `isDiscovered` is then absent rather than negative, so
+  // the row says nothing about discovery instead of claiming it failed.
+  discoveryKnown: boolean
   onClose: () => void
 }) {
   const inputModalities = metadata?.input_modalities ?? []
@@ -876,7 +881,7 @@ function ModelDetailPanel({
         <PanelSection title="Pricing">
           <div className="flex items-center gap-2">
             <SourceChip source={row.source} />
-            {row.isDiscovered ? null : (
+            {row.isDiscovered || !discoveryKnown ? null : (
               <span className="text-xs text-muted">not discovered</span>
             )}
           </div>
@@ -2072,28 +2077,38 @@ export function ModelsPage() {
                 { value: "unpriced", label: "Unpriced" },
               ]}
             />
-            <FilterSelect
-              ariaLabel="Filter by source"
-              value={sourceFilter}
-              onChange={changeFilter(setSourceFilter)}
-              options={[
-                { value: "all", label: "Any source" },
-                { value: "discovered", label: "Discovered" },
-                { value: "custom", label: "Custom (not discovered)" },
-              ]}
-            />
-            <FilterSelect
-              ariaLabel="Filter by capability"
-              value={capabilityFilter}
-              onChange={changeFilter(setCapabilityFilter)}
-              options={[
-                { value: "all", label: "Any capability" },
-                ...MODEL_FILTER_CAPABILITIES.map((entry) => ({
-                  value: entry.value,
-                  label: entry.label,
-                })),
-              ]}
-            />
+            {/* Source, capability and release date all read a
+                deployment-operator-only endpoint (`/v1/models/discoverable`
+                for the first, `/v1/models/metadata` for the other two). For a
+                caller those reads were withheld from, every value but "all"
+                would empty the table, so the control is absent rather than
+                offered as one that can only fail. */}
+            {isOperator ? (
+              <FilterSelect
+                ariaLabel="Filter by source"
+                value={sourceFilter}
+                onChange={changeFilter(setSourceFilter)}
+                options={[
+                  { value: "all", label: "Any source" },
+                  { value: "discovered", label: "Discovered" },
+                  { value: "custom", label: "Custom (not discovered)" },
+                ]}
+              />
+            ) : null}
+            {isOperator ? (
+              <FilterSelect
+                ariaLabel="Filter by capability"
+                value={capabilityFilter}
+                onChange={changeFilter(setCapabilityFilter)}
+                options={[
+                  { value: "all", label: "Any capability" },
+                  ...MODEL_FILTER_CAPABILITIES.map((entry) => ({
+                    value: entry.value,
+                    label: entry.label,
+                  })),
+                ]}
+              />
+            ) : null}
             <FilterSelect
               ariaLabel="Minimum context window"
               value={minContext}
@@ -2112,12 +2127,14 @@ export function ModelsPage() {
               onChange={setComparisonContext}
               options={PRICE_COMPARISON_OPTIONS}
             />
-            <FilterSelect
-              ariaLabel="Filter by release date"
-              value={releaseFilter}
-              onChange={changeFilter(setReleaseFilter)}
-              options={RELEASE_OPTIONS}
-            />
+            {isOperator ? (
+              <FilterSelect
+                ariaLabel="Filter by release date"
+                value={releaseFilter}
+                onChange={changeFilter(setReleaseFilter)}
+                options={RELEASE_OPTIONS}
+              />
+            ) : null}
           </div>
 
           <DiscoveredErrors
@@ -2202,6 +2219,7 @@ export function ModelsPage() {
               metadata={metadataByKey[selectedRow.key]}
               metadataAvailable={metadataAvailable}
               canEditPricing={isOperator}
+              discoveryKnown={isOperator}
               onClose={() => setSelectedKey(null)}
             />
           </aside>
