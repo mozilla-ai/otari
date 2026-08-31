@@ -49,26 +49,33 @@ _BRAVE_ENDPOINT = "https://api.search.brave.com/res/v1/web/search"
 _BRAVE_MAX_COUNT = 20
 _BRAVE_DEFAULT_COUNT = 10
 
-_DEFAULT_TIMEOUT_S = 15.0
+# Brave spells recency as ``freshness``. Both the single and the plural forms of
+# each window are accepted, matching Tavily's own ``time_range`` vocabulary, so
+# one workspace's ``provider_options`` reads the same whichever provider serves
+# it.
+_BRAVE_FRESHNESS = {
+    "d": "pd",
+    "day": "pd",
+    "w": "pw",
+    "week": "pw",
+    "m": "pm",
+    "month": "pm",
+    "y": "py",
+    "year": "py",
+}
 
-# How much of an upstream error body reaches the log line. Enough to identify
-# the refusal, short of pasting a provider's HTML error page into it.
-_ERROR_BODY_CHARS = 500
+_DEFAULT_TIMEOUT_S = 15.0
 
 # Tavily request fields a ``provider_options`` bag may set. Anything else is
 # dropped: the bag is opaque to the gateway and reaches here unvalidated, so
 # forwarding it wholesale would let a workspace set Tavily request fields the
-# deployment never chose.
+# deployment never chose. Tavily takes ``time_range`` by that name; Brave spells
+# the same knob ``freshness`` and is mapped in :data:`_BRAVE_FRESHNESS`.
 _TAVILY_OPTION_KEYS = ("max_results", "search_depth", "topic", "time_range", "include_answer")
 
 
 class WebSearchProviderError(RuntimeError):
     """The search provider could not be reached or returned malformed data."""
-
-
-def provider_configured(provider: str | None, api_key: str | None) -> bool:
-    """Whether this deployment can run a search through a first-party provider."""
-    return bool(provider) and provider in WEB_SEARCH_PROVIDERS and bool(api_key)
 
 
 async def provider_search(
@@ -166,12 +173,17 @@ async def _search_brave(
     if isinstance(max_results, int) and max_results > 0:
         count = min(max_results, _BRAVE_MAX_COUNT)
 
+    params: dict[str, Any] = {"q": query, "count": count}
+    freshness = _BRAVE_FRESHNESS.get(str(options.get("time_range") or "").strip().lower())
+    if freshness is not None:
+        params["freshness"] = freshness
+
     payload = await _request(
         BRAVE_PROVIDER,
         client,
         "GET",
         _BRAVE_ENDPOINT,
-        params={"q": query, "count": count},
+        params=params,
         headers={"X-Subscription-Token": api_key, "Accept": "application/json"},
         timeout_s=timeout_s,
     )
@@ -182,15 +194,25 @@ async def _search_brave(
         msg = "brave search returned a results field that is not a list"
         raise WebSearchProviderError(msg)
 
-    return [
-        {
+    results: list[dict[str, Any]] = []
+    for hit in hits:
+        if not isinstance(hit, dict) or not hit.get("url"):
+            continue
+        result: dict[str, Any] = {
             "url": str(hit["url"]),
             "title": str(hit.get("title", "")),
             "content": str(hit.get("description", "")),
         }
-        for hit in hits
-        if isinstance(hit, dict) and hit.get("url")
-    ]
+        # ``page_age`` is an ISO 8601 timestamp and ``age`` is human-readable
+        # ("3 days ago"); they are different formats rather than alternatives, so
+        # prefer the parseable one and fall back only where Brave sent none.
+        # Forwarded as the opaque string it arrived as, which is what
+        # ``_format_results_for_model`` renders as a result's recency.
+        published_date = hit.get("page_age") or hit.get("age")
+        if published_date:
+            result["published_date"] = str(published_date)
+        results.append(result)
+    return results
 
 
 async def _request(
@@ -206,9 +228,11 @@ async def _request(
 ) -> dict[str, Any]:
     """One provider call, with every failure collapsed onto one error type.
 
-    The upstream status and a bounded slice of its body stay in the message,
-    which reaches the gateway's log; no caller-facing response repeats it, for
-    the reason ``search_backend._json_object`` gives.
+    The message names the provider and the upstream status and stops there. It
+    is raised through ``WebSearchNotReachableError`` into the request log and an
+    OTel span, and a provider's error body can carry back what was sent to it,
+    so it is one of the raw bodies the security guidance keeps out of logs. The
+    status is what identifies the fault: 401 is the key, 429 is the quota.
     """
     try:
         response = await client.request(
@@ -224,7 +248,7 @@ async def _request(
         raise WebSearchProviderError(msg) from exc
 
     if response.status_code >= httpx.codes.BAD_REQUEST:
-        msg = f"{provider} search returned HTTP {response.status_code}: {response.text[:_ERROR_BODY_CHARS]}"
+        msg = f"{provider} search returned HTTP {response.status_code}"
         raise WebSearchProviderError(msg)
 
     try:

@@ -14,11 +14,7 @@ from typing import Any
 import httpx
 import pytest
 
-from gateway.services.web_search_providers import (
-    WebSearchProviderError,
-    provider_configured,
-    provider_search,
-)
+from gateway.services.web_search_providers import WebSearchProviderError, provider_search
 
 TAVILY_HOST = "api.tavily.com"
 BRAVE_HOST = "api.search.brave.com"
@@ -65,19 +61,15 @@ BRAVE_OK = {
     }
 }
 
-
-@pytest.mark.parametrize(
-    ("provider", "api_key", "expected"),
-    [
-        ("tavily", "tvly-x", True),
-        ("brave", "brv-x", True),
-        ("tavily", None, False),
-        (None, "tvly-x", False),
-        ("exa", "exa-x", False),
-    ],
-)
-def test_provider_configured_needs_both_halves(provider: str | None, api_key: str | None, expected: bool) -> None:
-    assert provider_configured(provider, api_key) is expected
+BRAVE_DATED = {
+    "web": {
+        "results": [
+            {"url": "https://a.example", "title": "A", "description": "a", "page_age": "2026-08-30T00:00:00"},
+            {"url": "https://b.example", "title": "B", "description": "b", "age": "3 days ago"},
+            {"url": "https://c.example", "title": "C", "description": "c"},
+        ]
+    }
+}
 
 
 @pytest.mark.asyncio
@@ -185,3 +177,57 @@ async def test_unknown_provider_is_refused() -> None:
     async with client:
         with pytest.raises(ValueError, match="web_search_provider"):
             await provider_search(provider="exa", api_key="k", query="q", client=client)
+
+
+@pytest.mark.parametrize(
+    ("time_range", "expected"),
+    [("day", "pd"), ("d", "pd"), ("week", "pw"), ("w", "pw"), ("month", "pm"), ("year", "py"), ("Y", "py")],
+)
+@pytest.mark.asyncio
+async def test_brave_sends_time_range_as_freshness(time_range: str, expected: str) -> None:
+    """The adapter this replaces mapped the same vocabulary, so a stored
+    ``provider_options`` keeps filtering by recency instead of silently going wide."""
+    client, recorder = _client(httpx.Response(200, json=BRAVE_OK))
+    async with client:
+        await provider_search(
+            provider="brave", api_key="brv-x", query="q", options={"time_range": time_range}, client=client
+        )
+
+    assert recorder.requests[0].url.params["freshness"] == expected
+
+
+@pytest.mark.asyncio
+async def test_brave_sends_no_freshness_without_a_time_range() -> None:
+    client, recorder = _client(httpx.Response(200, json=BRAVE_OK))
+    async with client:
+        await provider_search(provider="brave", api_key="brv-x", query="q", client=client)
+
+    assert "freshness" not in recorder.requests[0].url.params
+
+
+@pytest.mark.asyncio
+async def test_brave_carries_the_recency_signal_back() -> None:
+    """``published_date`` is what the model-facing result block renders as a date.
+
+    ``page_age`` is preferred over ``age``: they are different formats, not
+    alternatives, and only the first is parseable.
+    """
+    client, _ = _client(httpx.Response(200, json=BRAVE_DATED))
+    async with client:
+        results = await provider_search(provider="brave", api_key="brv-x", query="q", client=client)
+
+    assert [hit.get("published_date") for hit in results] == ["2026-08-30T00:00:00", "3 days ago", None]
+
+
+@pytest.mark.asyncio
+async def test_an_upstream_error_body_never_reaches_the_message() -> None:
+    """A provider's error text can echo back what was sent to it, and the message
+    reaches the request log and an OTel span. The status is what identifies the fault."""
+    client, _ = _client(httpx.Response(401, text="invalid api key tvly-secret for account acme"))
+    async with client:
+        with pytest.raises(WebSearchProviderError) as raised:
+            await provider_search(provider="tavily", api_key="tvly-secret", query="q", client=client)
+
+    assert "401" in str(raised.value)
+    assert "tvly-secret" not in str(raised.value)
+    assert "acme" not in str(raised.value)

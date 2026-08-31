@@ -132,10 +132,28 @@ provider for production. `web_search_url` points at any other backend exposing
 a SearXNG-compatible `/search?format=json` endpoint, and a configured provider
 wins over it.
 
-A deployment that runs its inference in a separate process serves that endpoint
-itself, at `GET /v1/web-search/search`, so the search key stays off the machine
-handling traffic. It is mounted only where `web_search_backend_token` is set,
-and requires that token as `X-Gateway-Token`.
+Where the search key must not sit on the machine serving traffic, a deployment
+can also serve the search itself at `GET /v1/web-search/search`. This is the
+hosted shape: the control plane holds the key and runs the query, and its
+**hybrid** data plane calls it by setting `web_search_url` to
+`{control-plane}/v1/web-search`. That address has to be under the gateway's
+`PLATFORM_BASE_URL`, because a gateway forwards its platform token only to its
+own control plane, and that token is what the route recognizes.
+
+Set `web_search_backend_token` on the serving process to the token its own
+gateway presents. Without it the route is not mounted at all, since it spends
+the deployment's search quota and a control plane is reachable from the
+internet. A gateway someone else self-hosts presents a credential of its own and
+is refused, deliberately: that is the same boundary that keeps a deployment's
+provider keys off a foreign process. Such a gateway configures its own
+`web_search_provider` or `web_search_url` instead, and the per-workspace policy
+below still governs it.
+
+Migrating from the Brave or Tavily adapter container: set `web_search_provider`
+and `web_search_provider_api_key` and unset `web_search_url`. The adapters, and
+the `web-search-brave` and `web-search-tavily` compose profiles that ran them,
+were removed. A `web_search_url` still pointing at one keeps the deployment
+looking configured while every search fails, so change both together.
 
 A runnable example lives under `demo/web-search/`.
 

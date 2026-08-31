@@ -585,9 +585,9 @@ def _format_results_for_model(query: str, results: list[dict[str, Any]]) -> str:
         body = extracted or snippet
         if len(body) > _CONTENT_TRUNCATE_CHARS:
             body = body[:_CONTENT_TRUNCATE_CHARS].rstrip() + "…"
-        # Optional: only backends that supply a recency signal (e.g. the
-        # Brave adapter's provider_options time_range support) set this. The
-        # model can't judge how current a result is from the snippet alone,
+        # Optional: only backends that supply a recency signal set this, which
+        # for the first-party providers means Brave answering a `time_range`.
+        # The model can't judge how current a result is from the snippet alone,
         # so surface it when present instead of silently dropping it.
         # Collapsed to one line and length-capped as rendering hygiene, not a
         # security boundary: title/content above aren't normalized the same

@@ -8,8 +8,12 @@ call :mod:`gateway.services.web_search_providers` in-process instead; the two
 share that module, so both surfaces answer a query the same way.
 
 The contract is the one ``WebSearchBackend`` already speaks to a SearXNG
-container, so pointing ``web_search_url`` at ``{control-plane}/v1/web-search``
-is the whole of the client-side configuration.
+container, so the client side is one setting: a hybrid gateway's
+``web_search_url`` pointed at ``{control-plane}/v1/web-search``. It has to be
+that host and path, under the gateway's own ``PLATFORM_BASE_URL``, because
+``url_targets_platform`` is what decides whether the platform token is forwarded
+at all, and that token is the credential below. A standalone gateway forwards no
+such token and cannot call this; it configures a provider of its own.
 
 **Authenticated, and only mounted when it can be.** The route spends the
 deployment's own search quota, and a control plane is internet-reachable, so it
@@ -23,6 +27,7 @@ response carries public search results.
 
 from __future__ import annotations
 
+from hashlib import sha256
 from secrets import compare_digest
 from typing import Annotated
 
@@ -57,15 +62,22 @@ class WebSearchBackendResponse(BaseModel):
     results: list[WebSearchBackendResult]
 
 
+def _digest(token: str) -> bytes:
+    return sha256(token.encode("utf-8", errors="surrogateescape")).digest()
+
+
 def _authorize(config: GatewayConfig, presented: str | None) -> None:
     """Refuse anything but the deployment's own gateway.
 
-    Compared as digests through :func:`secrets.compare_digest`, so neither the
-    length nor the leading characters of the configured token leak through the
-    comparison's timing.
+    Hashed before comparing, then compared under :func:`secrets.compare_digest`,
+    so neither the length nor the leading characters of the configured token leak
+    through the comparison's timing. Hashed rather than compared directly because
+    ``compare_digest`` raises on a non-ASCII string, and Starlette decodes a
+    header as latin-1: a byte above 0x7f in ``X-Gateway-Token`` would otherwise
+    be an unhandled 500 from an unauthenticated caller rather than a refusal.
     """
     expected = config.web_search_backend_token
-    if not expected or not presented or not compare_digest(presented, expected):
+    if not expected or not presented or not compare_digest(_digest(presented), _digest(expected)):
         raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Web search backend authentication failed")
 
 
@@ -116,8 +128,9 @@ async def web_search(
             client=get_search_client(),
         )
     except WebSearchProviderError as exc:
-        # The provider's own status and body stay in the log through the raised
-        # message; the caller is told only that the upstream failed.
+        # The caller is told only that the upstream failed. The provider's status
+        # is on the chained error for a traceback to carry, and its body is never
+        # read: a provider's error text can echo back what was sent to it.
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
             detail=f"The {provider} search provider could not serve this query",

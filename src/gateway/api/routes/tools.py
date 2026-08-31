@@ -72,12 +72,12 @@ def _managed_tools(config: GatewayConfig) -> list[ManagedTool]:
     # Same resolution the request path uses: the effective config value, falling back
     # to the env var so a pure-env deployment reports accurately.
     sandbox_configured = bool(config.sandbox_url or otari_env("SANDBOX_URL"))
-    web_search_configured = config.web_search_configured()
+    can_web_search = config.web_search_configured()
     return [
         ManagedTool(
             id=Tool.WEB_SEARCH,
             description=web_search["description"],
-            available=web_search_configured,
+            available=can_web_search,
             accepted_types=web_search_declaration_forms(config),
             input_schema=web_search["parameters"],
             example={"type": Tool.WEB_SEARCH},

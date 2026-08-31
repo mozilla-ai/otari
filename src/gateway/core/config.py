@@ -1793,6 +1793,26 @@ class GatewayConfig(BaseSettings):
                 images.append(image)
         return tuple(images)
 
+    def validate_web_search_provider(self) -> None:
+        """Refuse a half-configured licensed search provider at startup.
+
+        Either half alone runs no search, and the failure is otherwise silent:
+        ``web_search_configured`` falls through to ``web_search_url``, and a
+        deployment that set the provider precisely so it would not need a URL
+        then answers every ``otari_web_search`` request with the
+        not-configured 400. The same call ``SEARCH_PROVIDERS_REQUIRING_API_KEY``
+        makes for a search tool.
+        """
+        if self.web_search_provider and not self.web_search_provider_api_key:
+            msg = (
+                f"web_search_provider is '{self.web_search_provider}' but web_search_provider_api_key is not set; "
+                "both are needed to run a search, and neither is read without the other"
+            )
+            raise ValueError(msg)
+        if self.web_search_provider_api_key and not self.web_search_provider:
+            msg = "web_search_provider_api_key is set but web_search_provider names no provider to send it to"
+            raise ValueError(msg)
+
     def validate_search_tools(self) -> None:
         """Validate the ``search_tools`` map at startup so misconfig fails fast.
 
@@ -2267,6 +2287,7 @@ def load_config(config_path: str | None = None) -> GatewayConfig:
     config.validate_aliases()
     config.validate_routing_policies()
     config.validate_search_tools()
+    config.validate_web_search_provider()
     config.validate_mail_transport()
     config.validate_webauthn_relying_party()
     config.warn_about_half_configured_oauth()

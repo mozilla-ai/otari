@@ -12,9 +12,11 @@ from typing import Any
 
 import httpx
 import pytest
+from fastapi import HTTPException
 from fastapi.testclient import TestClient
 
 from gateway.api.deps import reset_config
+from gateway.api.routes.web_search_backend import _authorize
 from gateway.core.config import GatewayConfig
 from gateway.core.database import reset_db
 from gateway.main import create_app
@@ -155,3 +157,48 @@ def test_upstream_failure_does_not_leak_the_provider_body(tmp_path: Path, monkey
 
     assert response.status_code == 502
     assert "tvly-secret" not in response.text
+
+
+def test_a_non_ascii_token_is_a_refusal_not_a_crash(tmp_path: Path) -> None:
+    """Starlette decodes a header as latin-1, so a byte above 0x7f reaches the
+    comparison as a non-ASCII string, on which ``compare_digest`` raises.
+
+    Asserted against ``_authorize`` rather than over HTTP because httpx refuses
+    to *send* such a header, while curl or a raw socket sends it happily. Without
+    the hash it is an unhandled 500 from an unauthenticated caller.
+    """
+    config = GatewayConfig(
+        database_url=f"sqlite:///{tmp_path / 'x.db'}",
+        master_key="sk-test-master",
+        web_search_backend_token=BACKEND_TOKEN,
+    )
+    with pytest.raises(HTTPException) as raised:
+        _authorize(config, "gw-\u00e9\u00e9\u00e9")
+    assert raised.value.status_code == 401
+
+
+def test_a_half_configured_provider_is_refused_at_startup(tmp_path: Path) -> None:
+    """Either half alone runs no search, and without this the deployment that set
+    the provider precisely so it would need no URL answers 400 to every search."""
+    with pytest.raises(ValueError, match="web_search_provider_api_key"):
+        GatewayConfig(
+            database_url=f"sqlite:///{tmp_path / 'x.db'}",
+            master_key="sk-test-master",
+            web_search_provider="tavily",
+        ).validate_web_search_provider()
+
+    with pytest.raises(ValueError, match="names no provider"):
+        GatewayConfig(
+            database_url=f"sqlite:///{tmp_path / 'x.db'}",
+            master_key="sk-test-master",
+            web_search_provider_api_key="tvly-x",
+        ).validate_web_search_provider()
+
+
+def test_both_halves_together_pass_startup(tmp_path: Path) -> None:
+    GatewayConfig(
+        database_url=f"sqlite:///{tmp_path / 'x.db'}",
+        master_key="sk-test-master",
+        web_search_provider="tavily",
+        web_search_provider_api_key="tvly-x",
+    ).validate_web_search_provider()
