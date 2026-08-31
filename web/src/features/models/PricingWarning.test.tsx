@@ -249,11 +249,10 @@ describe("PricingWarning", () => {
     expect(screen.queryByText(/Requests are rejected/)).not.toBeInTheDocument()
   })
 
-  it("keeps an operator's cached settings out of a tenant's shell", async () => {
-    // A disabled query still serves whatever sits under its key, and the query
-    // client outlives a sign-out, so the session that follows an operator's in
-    // the same tab would otherwise be shown their banner and a button that
-    // would be refused.
+  it("keeps cached settings out of the banner once the caller is not an operator", async () => {
+    // A disabled query still serves whatever sits under its key, so a caller
+    // demoted mid-session would otherwise keep the banner, and a button that
+    // PATCHes a route now refusing them.
     const client = new QueryClient({
       defaultOptions: { queries: { retry: false } },
     })

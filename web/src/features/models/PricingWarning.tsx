@@ -38,10 +38,9 @@ export function PricingWarning() {
   const updateSettings = useUpdateSettings()
   const [dismissed, setDismissed] = useState(false)
 
-  // The render is gated on the same answer the request is, because a disabled
-  // query still serves whatever sits under its key and the query client outlives
-  // a sign-out: without this, a session that follows an operator's in the same
-  // tab renders their settings and a button that would be refused.
+  // Read through `isOperator` for the reason `ModelsPage` does: a disabled query
+  // still hands back whatever sits under its key, so a caller demoted mid-session
+  // would keep the banner and a button that PATCHes a route now refusing them.
   const needsPricing =
     isOperator &&
     settings.data?.require_pricing === true &&
