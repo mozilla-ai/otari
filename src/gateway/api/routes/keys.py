@@ -392,11 +392,16 @@ async def update_key(
     """
     key = await _load_key_in_organization(db, key_id, organization_id)
 
-    if request.key_name is not None:
+    # Tri-state via model_fields_set, like allowed_models below: both columns
+    # are nullable and the dashboard's edit form sends null to clear them
+    # ("Blank clears the expiry"), which an ``is not None`` guard silently
+    # dropped. ``is_active`` and ``exclude_from_budget`` are not nullable, so
+    # ``is not None`` is the whole distinction there.
+    if "key_name" in request.model_fields_set:
         key.key_name = request.key_name
     if request.is_active is not None:
         key.is_active = request.is_active
-    if request.expires_at is not None:
+    if "expires_at" in request.model_fields_set:
         key.expires_at = request.expires_at
     if request.exclude_from_budget is not None:
         key.exclude_from_budget = request.exclude_from_budget

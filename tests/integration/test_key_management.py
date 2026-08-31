@@ -154,6 +154,44 @@ def test_update_api_key(client: TestClient, master_key_header: dict[str, str], a
     assert data["is_active"] is False
 
 
+def test_update_with_null_clears_the_name_and_the_expiry(
+    client: TestClient, master_key_header: dict[str, str], api_key_obj: dict[str, Any]
+) -> None:
+    """Absent means unchanged, null means clear.
+
+    The dashboard's edit form sends null for a blanked name or expiry
+    ("Blank clears the expiry"), which an ``is not None`` guard used to drop
+    silently, so both fields follow the tri-state the allow-list already uses.
+    """
+    expires_at = (datetime.now(UTC) + timedelta(days=30)).isoformat()
+    response = client.patch(
+        f"/v1/keys/{api_key_obj['id']}",
+        json={"key_name": "named", "expires_at": expires_at},
+        headers=master_key_header,
+    )
+    assert response.status_code == 200
+
+    # A body naming neither field changes neither.
+    response = client.patch(
+        f"/v1/keys/{api_key_obj['id']}",
+        json={"is_active": True},
+        headers=master_key_header,
+    )
+    assert response.status_code == 200
+    assert response.json()["key_name"] == "named"
+    assert response.json()["expires_at"] is not None
+
+    response = client.patch(
+        f"/v1/keys/{api_key_obj['id']}",
+        json={"key_name": None, "expires_at": None},
+        headers=master_key_header,
+    )
+    assert response.status_code == 200
+    data = response.json()
+    assert data["key_name"] is None
+    assert data["expires_at"] is None
+
+
 def test_update_api_key_metadata(
     client: TestClient, master_key_header: dict[str, str], api_key_obj: dict[str, Any]
 ) -> None:

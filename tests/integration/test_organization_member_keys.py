@@ -26,7 +26,7 @@ from fastapi import status
 from fastapi.testclient import TestClient
 from sqlalchemy.orm import Session
 
-from gateway.models.entities import DashboardSession
+from gateway.models.entities import APIKey, DashboardSession
 from gateway.models.entities import User as BillingUser
 from gateway.models.tenancy import Organization, OrganizationMember, User, Workspace, WorkspaceMember
 from gateway.services.dashboard_session_service import SESSION_COOKIE_NAME, hash_session_token
@@ -324,21 +324,57 @@ def test_a_member_lists_their_own_keys_and_not_a_colleagues(client: TestClient, 
     assert theirs["id"] not in ids
 
 
-def test_an_operator_minted_key_assigned_to_the_member_is_theirs_to_see(
-    client: TestClient, world: _World, master_key_header: dict[str, str]
+def test_a_key_assigned_to_the_member_in_their_organization_is_listed(
+    client: TestClient, world: _World, db_session_factory: Callable[[], Session]
 ) -> None:
     """Ownership is the billing row, however the key was minted.
 
-    The operator acts in the deployment's default organization, so the key is
-    minted into the member's workspace explicitly; what is being asserted is the
-    owner predicate, not the operator's own scope.
+    Inserted directly rather than over ``POST /v1/keys``, because the operator
+    acts in the deployment's default organization and cannot mint into alpha;
+    what a handed-over key looks like is a row in the member's workspace billed
+    to their attribution user. Dropping the owner predicate from the list query
+    would still pass the colleague test (a different owner), so this is the
+    positive half that pins the predicate itself.
+    """
+    handed_id = str(uuid.uuid4())
+    session = db_session_factory()
+    try:
+        # The attribution row first: api_keys.user_id is a foreign key, and the
+        # member has minted nothing yet in this test's fresh database.
+        session.add(BillingUser(user_id=str(world.users["alpha_member"]), alias="member@alpha.test"))
+        session.commit()
+        session.add(
+            APIKey(
+                id=handed_id,
+                workspace_id=world.workspaces["alpha_one"],
+                key_hash=f"hash-{handed_id}",
+                key_name="handed-over",
+                user_id=str(world.users["alpha_member"]),
+            )
+        )
+        session.commit()
+    finally:
+        session.close()
+
+    code, listed = _request(client, world, "alpha_member", "GET", _PREFIX)
+    assert code == status.HTTP_200_OK
+    assert handed_id in {row["id"] for row in listed}
+
+
+def test_an_operator_minted_key_outside_the_organization_stays_off_the_list(
+    client: TestClient, world: _World, master_key_header: dict[str, str]
+) -> None:
+    """The organization predicate holds even when the owner matches.
+
+    The operator acts in the deployment's default organization, so a key they
+    mint with the member's attribution id lands in a workspace outside alpha;
+    the member's list is confined to their active organization and must not
+    show it.
     """
     code, listed = _request(client, world, "alpha_member", "GET", _PREFIX)
     assert code == status.HTTP_200_OK
     before = {row["id"] for row in listed}
 
-    # The operator's surface takes a client-named owner; naming the member's
-    # attribution id is how a key gets handed to them today.
     response = client.post(
         "/v1/keys",
         headers=master_key_header,
@@ -350,8 +386,6 @@ def test_an_operator_minted_key_assigned_to_the_member_is_theirs_to_see(
     code, listed = _request(client, world, "alpha_member", "GET", _PREFIX)
     assert code == status.HTTP_200_OK
     after = {row["id"] for row in listed}
-    # The operator minted into their own organization's default workspace, which
-    # is outside alpha, so the organization predicate keeps it off this list.
     assert after == before
     assert handed["id"] not in after
 
@@ -406,6 +440,37 @@ def test_a_member_updates_rotates_and_revokes_their_own_key(client: TestClient, 
     code, listed = _request(client, world, "alpha_member", "GET", _PREFIX)
     assert code == status.HTTP_200_OK
     assert created["id"] not in {row["id"] for row in listed}
+
+
+def test_an_update_with_null_clears_the_name_and_the_expiry(client: TestClient, world: _World) -> None:
+    """Absent means unchanged and null means clear, the tri-state the dashboard's edit form sends."""
+    code, created = _create(
+        client,
+        world,
+        "alpha_member",
+        {"key_name": "named", "expires_at": "2030-01-01T00:00:00+00:00"},
+    )
+    assert code == status.HTTP_200_OK
+
+    # A body that names neither field changes neither.
+    code, updated = _request(
+        client, world, "alpha_member", "PATCH", f"{_PREFIX}/{created['id']}", json={"is_active": True}
+    )
+    assert code == status.HTTP_200_OK, updated
+    assert updated["key_name"] == "named"
+    assert updated["expires_at"] is not None
+
+    code, updated = _request(
+        client,
+        world,
+        "alpha_member",
+        "PATCH",
+        f"{_PREFIX}/{created['id']}",
+        json={"key_name": None, "expires_at": None},
+    )
+    assert code == status.HTTP_200_OK, updated
+    assert updated["key_name"] is None
+    assert updated["expires_at"] is None
 
 
 @pytest.mark.parametrize(
@@ -473,7 +538,12 @@ def test_the_deployment_wide_router_still_refuses_a_member(client: TestClient, w
 
 
 def test_a_member_minted_key_authenticates_on_the_data_plane(client: TestClient, world: _World) -> None:
-    """The key is a real credential, not a dashboard artifact: a bad model on it answers 404, not 401."""
+    """The key is a real credential, not a dashboard artifact.
+
+    An unknown model on it earns the model resolver's own 400, which only a
+    request that authenticated can reach; a rejected credential would have
+    stopped at 401.
+    """
     code, created = _create(client, world, "alpha_member", {"key_name": "live"})
     assert code == status.HTTP_200_OK
 
@@ -482,4 +552,5 @@ def test_a_member_minted_key_authenticates_on_the_data_plane(client: TestClient,
         headers={"Authorization": f"Bearer {created['key']}"},
         json={"model": "does-not-exist:nope", "messages": [{"role": "user", "content": "hi"}]},
     )
-    assert response.status_code != status.HTTP_401_UNAUTHORIZED
+    assert response.status_code == status.HTTP_400_BAD_REQUEST, response.text
+    assert "Unknown or unsupported model" in response.json()["detail"]

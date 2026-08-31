@@ -290,11 +290,15 @@ async def update_own_key(
     organization_id, owner_user_id = await _caller_context(db, identity)
     key = await _load_key_in_organization(db, key_id, organization_id, owner_user_id=owner_user_id)
 
-    if request.key_name is not None:
+    # Tri-state via model_fields_set: both columns are nullable and the
+    # dashboard's edit form sends null to clear them, so "absent" and "null"
+    # have to be told apart. ``is_active`` is not nullable, so ``is not None``
+    # is the whole distinction there.
+    if "key_name" in request.model_fields_set:
         key.key_name = request.key_name
     if request.is_active is not None:
         key.is_active = request.is_active
-    if request.expires_at is not None:
+    if "expires_at" in request.model_fields_set:
         key.expires_at = request.expires_at
     if "reject_user_mismatch" in request.model_fields_set:
         key.reject_user_mismatch = request.reject_user_mismatch
