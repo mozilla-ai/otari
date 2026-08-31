@@ -1657,6 +1657,88 @@ export interface paths {
         patch: operations["update_organization_guardrail_v1_organizations_me_guardrails__guardrail_id__patch"];
         trace?: never;
     };
+    "/v1/organizations/me/keys": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * List Own Keys
+         * @description List the caller's own API keys in their active organization, newest first.
+         *
+         *     Only keys billed to the caller's own user: an operator-minted key assigned
+         *     to them is theirs to see here, and nobody else's key ever is. Naming a
+         *     workspace outside their organization lists nothing rather than refusing, so
+         *     the filter reports no more than the unfiltered read does.
+         */
+        get: operations["list_own_keys_v1_organizations_me_keys_get"];
+        put?: never;
+        /**
+         * Create Own Key
+         * @description Create an API key owned by the caller, in a workspace they may see.
+         *
+         *     The member-scoped counterpart of ``POST /v1/keys``: the owner is always the
+         *     caller's own attribution user, the key is always budget-enforced, and the
+         *     workspace must be visible to the caller (a member of it, or an organization
+         *     owner/admin/superuser, who see every workspace). The secret is returned once.
+         */
+        post: operations["create_own_key_v1_organizations_me_keys_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
+    "/v1/organizations/me/keys/{key_id}": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        post?: never;
+        /**
+         * Delete Own Key
+         * @description Delete (revoke) one of the caller's own API keys.
+         */
+        delete: operations["delete_own_key_v1_organizations_me_keys__key_id__delete"];
+        options?: never;
+        head?: never;
+        /**
+         * Update Own Key
+         * @description Update one of the caller's own API keys.
+         */
+        patch: operations["update_own_key_v1_organizations_me_keys__key_id__patch"];
+        trace?: never;
+    };
+    "/v1/organizations/me/keys/{key_id}/rotate": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        get?: never;
+        put?: never;
+        /**
+         * Rotate Own Key
+         * @description Rotate the secret of one of the caller's own API keys, in place.
+         *
+         *     Same contract as the operator's rotate: the row keeps its identity, the new
+         *     raw key is returned once, and the previous secret stops authenticating
+         *     immediately with no grace window.
+         */
+        post: operations["rotate_own_key_v1_organizations_me_keys__key_id__rotate_post"];
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/organizations/me/member-invitations": {
         parameters: {
             query?: never;
@@ -5112,6 +5194,53 @@ export interface components {
             user_id: string | null;
         };
         /**
+         * CreateOwnKeyRequest
+         * @description Create-key body for the member surface.
+         *
+         *     Deliberately not ``CreateKeyRequest``: it carries no ``user_id`` (the owner
+         *     is always the caller) and no ``exclude_from_budget`` (a member must not
+         *     exempt their own spend from enforcement).
+         */
+        CreateOwnKeyRequest: {
+            /**
+             * Allowed Models
+             * @description Model allow-list: null = any model your user default allows, [] = deny all, or canonical instance:model entries. A key can only narrow your own model access, never broaden it.
+             */
+            allowed_models?: string[] | null;
+            /**
+             * Capture Agent Telemetry
+             * @description Per-key override of the deployment-wide capture_agent_telemetry setting: null (default) inherits it, true always stores this key's coding-agent telemetry, false always discards it.
+             */
+            capture_agent_telemetry?: boolean | null;
+            /**
+             * Expires At
+             * @description Optional expiration timestamp
+             */
+            expires_at?: string | null;
+            /**
+             * Key Name
+             * @description Optional name for the key
+             */
+            key_name?: string | null;
+            /**
+             * Metadata
+             * @description Optional metadata
+             */
+            metadata?: {
+                [key: string]: unknown;
+            };
+            /**
+             * Reject User Mismatch
+             * @description Per-key override of the deployment-wide reject_user_mismatch setting: null (default) inherits it, true always rejects a request naming a different 'user', false always accepts it. Spend binds to your own user either way.
+             */
+            reject_user_mismatch?: boolean | null;
+            /**
+             * Workspace Id
+             * @description Workspace this key belongs to, which must be one you may see in your active organization. Omitted means that organization's default workspace, refused when you are not a member of it.
+             */
+            workspace_id?: string | null;
+        };
+        /**
          * CreateScopedBudgetRequest
          * @description Request model for creating a scoped budget.
          */
@@ -8389,6 +8518,33 @@ export interface components {
              * @description True to freeze new dashboard sign-ins, false to allow them again.
              */
             enabled: boolean;
+        };
+        /**
+         * UpdateOwnKeyRequest
+         * @description Update-key body for the member surface.
+         *
+         *     The operator's ``UpdateKeyRequest`` minus ``exclude_from_budget``, for the
+         *     reason the create body gives. The tri-state fields follow the same
+         *     ``model_fields_set`` idiom: absent = unchanged, null = clear to inherit,
+         *     a value = pin it.
+         */
+        UpdateOwnKeyRequest: {
+            /** Allowed Models */
+            allowed_models?: string[] | null;
+            /** Capture Agent Telemetry */
+            capture_agent_telemetry?: boolean | null;
+            /** Expires At */
+            expires_at?: string | null;
+            /** Is Active */
+            is_active?: boolean | null;
+            /** Key Name */
+            key_name?: string | null;
+            /** Metadata */
+            metadata?: {
+                [key: string]: unknown;
+            } | null;
+            /** Reject User Mismatch */
+            reject_user_mismatch?: boolean | null;
         };
         /**
          * UpdateScopedBudgetRequest
@@ -12055,6 +12211,168 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["OrganizationGuardrailPublic"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    list_own_keys_v1_organizations_me_keys_get: {
+        parameters: {
+            query?: {
+                skip?: number;
+                limit?: number;
+                /** @description Only keys in this workspace. */
+                workspace_id?: string | null;
+            };
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KeyInfo"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    create_own_key_v1_organizations_me_keys_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["CreateOwnKeyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateKeyResponse"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    delete_own_key_v1_organizations_me_keys__key_id__delete: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            204: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content?: never;
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    update_own_key_v1_organizations_me_keys__key_id__patch: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody: {
+            content: {
+                "application/json": components["schemas"]["UpdateOwnKeyRequest"];
+            };
+        };
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["KeyInfo"];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    rotate_own_key_v1_organizations_me_keys__key_id__rotate_post: {
+        parameters: {
+            query?: never;
+            header?: never;
+            path: {
+                key_id: string;
+            };
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["CreateKeyResponse"];
                 };
             };
             /** @description Validation Error */

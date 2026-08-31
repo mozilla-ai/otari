@@ -1270,7 +1270,7 @@ export function ActivityPage() {
   // Deployment-wide and left that way: its registry entries carry no workspace,
   // so there is nothing in them to scope to a tenant yet. A non-operator is not
   // shown a strip reporting somebody else's traffic, and does not ask for one.
-  const inFlight = useInFlightRequests(scope.deploymentWide)
+  const inFlight = useInFlightRequests(scope.isDeploymentWide)
 
   // How far behind the frozen page has fallen. Polled while the count it is
   // compared against is not (see `useUsageCount`), so the difference is "rows that
@@ -1716,7 +1716,8 @@ export function ActivityPage() {
   // who cannot make them is not offered the selection that leads to them: the
   // bulk bar is rendered off `hasSelection`, which this gates.
   const showSelection =
-    scope.deploymentWide && (selectableKeys.length > 0 || selection.allMatching)
+    scope.isDeploymentWide &&
+    (selectableKeys.length > 0 || selection.allMatching)
 
   const deleteUsage = useDeleteUsage()
   const setPrice = useSetUsagePrice()
@@ -1749,11 +1750,11 @@ export function ActivityPage() {
         </div>
         <RequestDetail
           entry={entry}
-          onPriceModel={scope.deploymentWide ? setModelPriceKey : null}
+          onPriceModel={scope.isDeploymentWide ? setModelPriceKey : null}
         />
       </div>
     ),
-    [scope.deploymentWide],
+    [scope.isDeploymentWide],
   )
 
   // A bulk op targets either the current page selection (ids) or, once the operator

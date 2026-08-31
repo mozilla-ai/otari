@@ -174,12 +174,16 @@ const BASE_NAV_SECTIONS = [
     id: "access",
     label: "Access",
     items: [
+      // No `operatorOnly`, for the reason Activity and Usage dropped theirs
+      // (otari-ai#1941 this time): the page reads and mints through
+      // `/v1/organizations/me/keys` for a caller who does not operate the
+      // deployment, so the destination serves every signed-in identity
+      // something true, their own keys.
       {
         to: "/keys",
         label: "API keys",
         surface: "keys",
         icon: FiKey,
-        operatorOnly: "refused",
       },
       // "Providers", not "Provider credentials": the page manages the
       // credential *and* the instance it belongs to, the rail has one line for

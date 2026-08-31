@@ -13,6 +13,9 @@ import type {
   ApiKey,
   CreateKeyRequest,
   CreateKeyResponse,
+  CreateOwnKeyRequest,
+  UpdateKeyRequest,
+  UpdateOwnKeyRequest,
   User,
 } from "@/client"
 import {
@@ -25,6 +28,7 @@ import {
   useCreateKey,
   useDeleteKey,
   useKeys,
+  useKeysScope,
   useRotateKey,
   useUpdateKey,
   useUsers,
@@ -380,15 +384,22 @@ function UserMismatchPicker({
   )
 }
 
+// `isDeploymentWide` is which key surface this caller acts on (useKeysScope): an
+// operator names an owner and may exempt the key from budget; a member's key is
+// always their own and always enforced, so neither control is rendered and the
+// body sent is the member surface's narrower shape.
 function CreateKeyForm({
+  isDeploymentWide,
   onClose,
   onCreated,
 }: {
+  isDeploymentWide: boolean
   onClose: () => void
   onCreated: (result: CreateKeyResponse) => void
 }) {
   const create = useCreateKey()
-  const users = useUsers()
+  // `/v1/users` is operator-only; a member's form has no owner picker to feed.
+  const users = useUsers(isDeploymentWide)
   const { selected: workspace, isLoading: workspaceLoading } =
     useSelectedWorkspace()
   const [keyName, setKeyName] = useState("")
@@ -405,10 +416,11 @@ function CreateKeyForm({
 
   const expiresInPast =
     expiresAt !== "" && new Date(expiresAt).getTime() < Date.now()
-  // User-first: a key must name its owner (an existing user or a new id, which the
-  // API creates as a named user). This is what keeps the dashboard from minting the
-  // anonymous virtual users an omitted id would.
-  const ownerMissing = userId.trim() === ""
+  // User-first: an operator's key must name its owner (an existing user or a new
+  // id, which the API creates as a named user). This is what keeps the dashboard
+  // from minting the anonymous virtual users an omitted id would. A member's key
+  // is always their own, so there is nothing to require.
+  const ownerMissing = isDeploymentWide && userId.trim() === ""
   // The workspace comes from the organization context, which resolves after the
   // form paints. Submitting before it does would send no workspace and land the
   // key in the server's default rather than the one the switcher is showing, so
@@ -420,18 +432,25 @@ function CreateKeyForm({
   const submit = () => {
     if (create.isPending || !scopeValid || ownerMissing || workspaceUnresolved)
       return
-    const body: CreateKeyRequest = {
+    const shared = {
       key_name: keyName.trim() || null,
       // The workspace the shell is on. A key belongs to exactly one, and it is
       // what every request on that key is billed to, so it is decided here
       // rather than left to the server's default.
       workspace_id: workspace?.workspace_id,
-      user_id: userId.trim(),
       expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
       allowed_models: allowedModels,
-      exclude_from_budget: excludeFromBudget,
       reject_user_mismatch: rejectUserMismatch,
     }
+    // The member surface derives the owner and refuses a budget exemption, so
+    // its body carries neither field rather than sending values it would ignore.
+    const body: CreateKeyRequest | CreateOwnKeyRequest = isDeploymentWide
+      ? {
+          ...shared,
+          user_id: userId.trim(),
+          exclude_from_budget: excludeFromBudget,
+        }
+      : shared
     create.mutate(body, {
       onSuccess: (result) => {
         // Capture the secret into the reveal BEFORE closing the form, so a render
@@ -473,12 +492,19 @@ function CreateKeyForm({
             }
           />
         </div>
-        <UserComboBox
-          value={userId}
-          onChange={setUserId}
-          users={users.data ?? []}
-          memberLabels={memberLabels}
-        />
+        {isDeploymentWide ? (
+          <UserComboBox
+            value={userId}
+            onChange={setUserId}
+            users={users.data ?? []}
+            memberLabels={memberLabels}
+          />
+        ) : (
+          <p className="text-xs text-muted">
+            This key is yours: requests on it are billed to you and count
+            against your budget.
+          </p>
+        )}
         <button
           type="button"
           className="self-start text-xs font-medium text-link hover:text-link-hover"
@@ -488,21 +514,33 @@ function CreateKeyForm({
         </button>
         {showAdvanced ? (
           <div className="flex flex-col gap-4 rounded-lg border border-border p-4">
-            <OwnerAccessNote userId={userId} users={users.data ?? []} />
+            {isDeploymentWide ? (
+              <OwnerAccessNote userId={userId} users={users.data ?? []} />
+            ) : null}
             <ModelScopeControl
               title="Restrict this key's models"
-              description="By default this key inherits its owner's access. Optionally narrow it to a subset; a key can never exceed its owner's allowed models."
-              anyLabel="Inherit owner access"
+              description={
+                isDeploymentWide
+                  ? "By default this key inherits its owner's access. Optionally narrow it to a subset; a key can never exceed its owner's allowed models."
+                  : "By default this key inherits your model access. Optionally narrow it to a subset; a key can never exceed your allowed models."
+              }
+              anyLabel={
+                isDeploymentWide
+                  ? "Inherit owner access"
+                  : "Inherit your access"
+              }
               initial={null}
               onChange={(value, valid) => {
                 setAllowedModels(value)
                 setScopeValid(valid)
               }}
             />
-            <BudgetExemptToggle
-              checked={excludeFromBudget}
-              onChange={setExcludeFromBudget}
-            />
+            {isDeploymentWide ? (
+              <BudgetExemptToggle
+                checked={excludeFromBudget}
+                onChange={setExcludeFromBudget}
+              />
+            ) : null}
             <UserMismatchPicker
               value={rejectUserMismatch}
               onChange={setRejectUserMismatch}
@@ -532,14 +570,18 @@ function CreateKeyForm({
 }
 
 function EditKeyForm({
+  isDeploymentWide,
   apiKey,
   onClose,
 }: {
+  isDeploymentWide: boolean
   apiKey: ApiKey
   onClose: () => void
 }) {
   const update = useUpdateKey()
-  const users = useUsers()
+  // Operator-only, like the create form's picker; a member edits only their own
+  // key and the note it feeds names other owners.
+  const users = useUsers(isDeploymentWide)
   const [keyName, setKeyName] = useState(apiKey.key_name ?? "")
   const [expiresAt, setExpiresAt] = useState(toDatetimeLocal(apiKey.expires_at))
   const [allowedModels, setAllowedModels] = useState<string[] | null>(
@@ -555,19 +597,17 @@ function EditKeyForm({
 
   const submit = () => {
     if (update.isPending || !scopeValid) return
-    update.mutate(
-      {
-        id: apiKey.id,
-        body: {
-          key_name: keyName.trim() || null,
-          expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
-          allowed_models: allowedModels,
-          exclude_from_budget: excludeFromBudget,
-          reject_user_mismatch: rejectUserMismatch,
-        },
-      },
-      { onSuccess: onClose },
-    )
+    const shared = {
+      key_name: keyName.trim() || null,
+      expires_at: expiresAt ? new Date(expiresAt).toISOString() : null,
+      allowed_models: allowedModels,
+      reject_user_mismatch: rejectUserMismatch,
+    }
+    // The member surface has no budget exemption to send (see CreateKeyForm).
+    const body: UpdateKeyRequest | UpdateOwnKeyRequest = isDeploymentWide
+      ? { ...shared, exclude_from_budget: excludeFromBudget }
+      : shared
+    update.mutate({ id: apiKey.id, body }, { onSuccess: onClose })
   }
 
   return (
@@ -592,23 +632,31 @@ function EditKeyForm({
             description="Blank clears the expiry."
           />
         </div>
-        {apiKey.user_id ? (
+        {isDeploymentWide && apiKey.user_id ? (
           <OwnerAccessNote userId={apiKey.user_id} users={users.data ?? []} />
         ) : null}
         <ModelScopeControl
           title="Restrict this key's models"
-          description="This key inherits its owner's access by default. Narrow it to a subset here; it can never exceed the owner's allowed models."
-          anyLabel="Inherit owner access"
+          description={
+            isDeploymentWide
+              ? "This key inherits its owner's access by default. Narrow it to a subset here; it can never exceed the owner's allowed models."
+              : "This key inherits your model access by default. Narrow it to a subset here; it can never exceed your allowed models."
+          }
+          anyLabel={
+            isDeploymentWide ? "Inherit owner access" : "Inherit your access"
+          }
           initial={apiKey.allowed_models}
           onChange={(value, valid) => {
             setAllowedModels(value)
             setScopeValid(valid)
           }}
         />
-        <BudgetExemptToggle
-          checked={excludeFromBudget}
-          onChange={setExcludeFromBudget}
-        />
+        {isDeploymentWide ? (
+          <BudgetExemptToggle
+            checked={excludeFromBudget}
+            onChange={setExcludeFromBudget}
+          />
+        ) : null}
         <UserMismatchPicker
           value={rejectUserMismatch}
           onChange={setRejectUserMismatch}
@@ -675,6 +723,11 @@ export function KeysPage() {
   // Scoped to the workspace the switcher is on: a key belongs to exactly one,
   // and this page is in the workspace context.
   const { selected: workspace } = useSelectedWorkspace()
+  // Which surface the caller acts on decides the page's voice as well as the
+  // endpoints: an operator manages every key in the organization, a member
+  // manages their own (otari-ai#1941).
+  const scope = useKeysScope()
+  const isDeploymentWide = scope.isDeploymentWide
   const keys = useKeys(workspace?.workspace_id)
   const updateKey = useUpdateKey()
   const rotateKey = useRotateKey()
@@ -689,7 +742,10 @@ export function KeysPage() {
   } | null>(null)
 
   const rows = keys.data ?? []
-  const loading = keys.isLoading
+  // An unresolved scope is a loading state: which surface the page reads, and
+  // which affordances it draws, are both undecided until the organization
+  // context answers, and a disabled query reports `isLoading` false.
+  const loading = !scope.isReady || keys.isLoading
   const editingKey = rows.find((k) => k.id === editing) ?? null
   const showOnboarding = !loading && rows.length === 0 && !addOpen
   const selection = useTableSelection()
@@ -783,32 +839,45 @@ export function KeysPage() {
         header: "Status",
         cell: (k) => <StatusChip apiKey={k} />,
       },
-      {
-        id: "owner",
-        header: "Owner",
-        // A member is named; anything else keeps the raw id, which for a
-        // hand-made owner like `ci-bot` is already the readable form. The id
-        // stays in the title so the value actually sent on a request is still
-        // recoverable from this column.
-        cell: (k) => {
-          if (isVirtualUser(k.user_id)) {
-            return (
-              <Chip size="sm" color="default">
-                virtual
-              </Chip>
-            )
-          }
-          const member = k.user_id ? memberLabels.get(k.user_id) : undefined
-          if (member) {
-            return (
-              <span className="text-sm text-foreground" title={k.user_id ?? ""}>
-                {member}
-              </span>
-            )
-          }
-          return <code className="text-xs text-muted">{k.user_id ?? "—"}</code>
-        },
-      },
+      // Every key on a member's page is their own, so an Owner column there
+      // would repeat one name down the table.
+      ...(isDeploymentWide
+        ? [
+            {
+              id: "owner",
+              header: "Owner",
+              // A member is named; anything else keeps the raw id, which for a
+              // hand-made owner like `ci-bot` is already the readable form. The id
+              // stays in the title so the value actually sent on a request is still
+              // recoverable from this column.
+              cell: (k: ApiKey) => {
+                if (isVirtualUser(k.user_id)) {
+                  return (
+                    <Chip size="sm" color="default">
+                      virtual
+                    </Chip>
+                  )
+                }
+                const member = k.user_id
+                  ? memberLabels.get(k.user_id)
+                  : undefined
+                if (member) {
+                  return (
+                    <span
+                      className="text-sm text-foreground"
+                      title={k.user_id ?? ""}
+                    >
+                      {member}
+                    </span>
+                  )
+                }
+                return (
+                  <code className="text-xs text-muted">{k.user_id ?? "—"}</code>
+                )
+              },
+            } satisfies DataTableColumn<ApiKey>,
+          ]
+        : []),
       {
         id: "key",
         header: "Key",
@@ -913,6 +982,7 @@ export function KeysPage() {
       setActive,
       regenerate,
       memberLabels,
+      isDeploymentWide,
     ],
   )
 
@@ -924,7 +994,11 @@ export function KeysPage() {
     <div className="flex flex-col gap-6">
       <PageHeader
         title="API keys"
-        description="Issue and revoke the keys that authenticate callers to this gateway. Secrets are shown once at creation."
+        description={
+          isDeploymentWide
+            ? "Issue and revoke the keys that authenticate callers to this gateway. Secrets are shown once at creation."
+            : "Create and manage your own keys for calling this gateway. Secrets are shown once at creation."
+        }
         action={
           addOpen ? null : (
             <Button
@@ -949,24 +1023,33 @@ export function KeysPage() {
       {/* A key's owner and its spending limit are both set elsewhere now, on the
           organization rail. This page is where an operator arrives looking for
           them, so it says where they went rather than leaving the sidebar to be
-          re-learned. */}
-      <p className="text-sm text-muted">
-        A key spends against its owner's budget. Owners live under{" "}
-        <Link
-          to="/organization/members"
-          className="font-medium text-link hover:text-link-hover"
-        >
-          Organization → Members &amp; roles
-        </Link>
-        , and their limits under{" "}
-        <Link
-          to="/budgets"
-          className="font-medium text-link hover:text-link-hover"
-        >
-          Spend &amp; budgets
-        </Link>
-        .
-      </p>
+          re-learned. A member's keys are their own and both destinations refuse
+          them, so their page states the ownership rule instead of pointing at
+          pages they cannot open. */}
+      {isDeploymentWide ? (
+        <p className="text-sm text-muted">
+          A key spends against its owner's budget. Owners live under{" "}
+          <Link
+            to="/organization/members"
+            className="font-medium text-link hover:text-link-hover"
+          >
+            Organization → Members &amp; roles
+          </Link>
+          , and their limits under{" "}
+          <Link
+            to="/budgets"
+            className="font-medium text-link hover:text-link-hover"
+          >
+            Spend &amp; budgets
+          </Link>
+          .
+        </p>
+      ) : (
+        <p className="text-sm text-muted">
+          These are your keys: requests on them are billed to you and spend
+          against your budget.
+        </p>
+      )}
 
       {showOnboarding ? (
         <EmptyState
@@ -982,6 +1065,7 @@ export function KeysPage() {
 
       {addOpen ? (
         <CreateKeyForm
+          isDeploymentWide={isDeploymentWide}
           onClose={() => setAddOpen(false)}
           onCreated={(result) =>
             setRevealed({ title: "API key created", result })
@@ -994,6 +1078,7 @@ export function KeysPage() {
       {editingKey ? (
         <EditKeyForm
           key={editingKey.id}
+          isDeploymentWide={isDeploymentWide}
           apiKey={editingKey}
           onClose={() => setEditing(null)}
         />
@@ -1020,21 +1105,25 @@ export function KeysPage() {
           >
             Disable
           </Button>
-          <Button
-            size="sm"
-            variant="outline"
-            isDisabled={bulkPending}
-            onPress={() =>
-              void runBulk(selectedKeys, (k) =>
-                updateKey.mutateAsync({
-                  id: k.id,
-                  body: { exclude_from_budget: true },
-                }),
-              )
-            }
-          >
-            Budget-exempt
-          </Button>
+          {/* A member cannot exempt their own spend from enforcement, so the
+              bulk form of the toggle is operator-only like the per-key one. */}
+          {isDeploymentWide ? (
+            <Button
+              size="sm"
+              variant="outline"
+              isDisabled={bulkPending}
+              onPress={() =>
+                void runBulk(selectedKeys, (k) =>
+                  updateKey.mutateAsync({
+                    id: k.id,
+                    body: { exclude_from_budget: true },
+                  }),
+                )
+              }
+            >
+              Budget-exempt
+            </Button>
+          ) : null}
           <Button
             size="sm"
             variant="danger"

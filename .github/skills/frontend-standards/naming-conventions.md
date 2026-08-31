@@ -14,8 +14,11 @@ thing is and what it does without opening it.
 ## Variables
 
 Say what the value is, not what type it happens to be. `data`, `info`, `item`, `obj`, and
-`res` describe nothing. Booleans read as a predicate: `isPending`, `hasBudget`,
-`canRevokeKey`, `shouldShowBanner`.
+`res` describe nothing. Booleans read as a predicate, a yes/no question in English:
+`isPending`, `hasBudget`, `canRevokeKey`, `shouldShowBanner`. That covers every boolean a
+reader meets, including props and the boolean fields of a hook's return value
+(`useKeysScope()` answers `isDeploymentWide` and `isReady`, not `deploymentWide` and
+`ready`): a bare noun phrase reads as the thing itself rather than as a question about it.
 
 ```ts
 const isSignedIn = session !== undefined

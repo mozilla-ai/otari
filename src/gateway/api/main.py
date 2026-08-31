@@ -31,6 +31,7 @@ from gateway.api.routes import (
     moderations,
     org_provider_keys,
     organization_guardrails,
+    organization_keys,
     organization_pricing,
     organization_routing,
     organization_usage,
@@ -169,6 +170,11 @@ def _register_core_routers(app: FastAPI, config: GatewayConfig) -> None:
     # The tenant-scoped read over the same table ``/v1/routing/policies`` serves
     # to an operator, mounted here for the same reason (otari-ai#1942).
     app.include_router(organization_routing.router)
+    # The member-scoped key surface: the caller's own keys, in workspaces they
+    # may see. Mounted here for the reason the usage sibling above is; the
+    # deployment-wide ``keys.router`` keeps its operator gate unchanged
+    # (mozilla-ai/otari-ai#1941).
+    app.include_router(organization_keys.router)
     app.include_router(workspaces.router)
     app.include_router(invitations.router)
     app.include_router(workspace_member_budget_policies.router)

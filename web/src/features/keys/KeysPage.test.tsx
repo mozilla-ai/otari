@@ -63,11 +63,18 @@ const NEW_SECRET = "gw-NEWSECRET0000000000000000000000000000000000000000000000"
 const REGEN_SECRET =
   "gw-REGEN00000000000000000000000000000000000000000000000000"
 
+// Both key surfaces answer identical shapes, so one handler serves them: the
+// operator's `/v1/keys` and the member's `/v1/organizations/me/keys`
+// (otari-ai#1941). Which one the page asked is what the member-view cases
+// assert, off the spy's recorded URLs.
+const KEYS_URL = /\/v1\/(?:organizations\/me\/)?keys(?:\/|\?|$)/
+
 function mockApi(
   opts: {
     keys?: ApiKey[]
     users?: User[]
     members?: ReturnType<typeof organizationMember>[]
+    deploymentOperator?: boolean
   } = {},
 ) {
   let list = [...(opts.keys ?? [])]
@@ -80,7 +87,7 @@ function mockApi(
       const url = String(input)
       const method = (init?.method ?? "GET").toUpperCase()
 
-      if (url.includes("/v1/keys")) {
+      if (KEYS_URL.test(url)) {
         if (url.endsWith("/rotate") && method === "POST") {
           const id = url.split("/").slice(-2)[0]
           const prefix = REGEN_SECRET.slice(0, 10)
@@ -90,7 +97,7 @@ function mockApi(
           const row = list.find((k) => k.id === id) ?? apiKey({ id })
           return jsonResponse({ ...row, key: REGEN_SECRET, key_prefix: prefix })
         }
-        if (method === "POST" && url.endsWith("/v1/keys")) {
+        if (method === "POST") {
           const body = JSON.parse(String(init?.body)) as {
             key_name?: string | null
             user_id?: string | null
@@ -125,6 +132,28 @@ function mockApi(
       // this, and `fetchAllPaged` reads `data`/`count` rather than a bare list.
       if (url.includes("/v1/organizations/me/members")) {
         return jsonResponse({ data: members, count: members.length })
+      }
+      // Seeds the scope: `deployment_operator` is what routes the page onto the
+      // operator surface or the member one. These suites default to the
+      // operator's view, and the member cases flip it.
+      if (url.endsWith("/v1/organizations/me")) {
+        return jsonResponse({
+          organization_member_id: "om-1",
+          role: "member",
+          status: "active",
+          organization: {
+            id: "org-1",
+            name: "Acme",
+            slug: "acme",
+            created_by_user_id: null,
+            created_at: "2026-01-01T00:00:00+00:00",
+            updated_at: null,
+          },
+          byo_provider_keys_allowed: true,
+          deployment_operator: opts.deploymentOperator ?? true,
+          provider_key_encryption_available: true,
+          workspace_memberships: [],
+        })
       }
       if (url.includes("/v1/users")) {
         return jsonResponse(users)
@@ -894,5 +923,107 @@ describe("KeysPage", () => {
     // readable form, so the column is unchanged from before members existed.
     const row = (await screen.findByText("ci")).closest("tr")!
     expect(within(row).getByText("ci-bot")).toBeInTheDocument()
+  })
+
+  // The member's view of the same page (otari-ai#1941): every hook reads and
+  // writes `/v1/organizations/me/keys`, and the operator-only affordances (the
+  // owner picker, the budget exemption, the Owner column, the links to pages a
+  // member cannot open) are absent rather than present and refused.
+  describe("as a member", () => {
+    it("lists through the member surface, without the Owner column or operator links", async () => {
+      const fetchMock = mockApi({
+        deploymentOperator: false,
+        keys: [apiKey({ id: "key-1", key_name: "mine" })],
+      })
+      renderPage(<KeysPage />)
+
+      const row = (await screen.findByText("mine")).closest("tr")!
+      expect(within(row).getByText("Active")).toBeInTheDocument()
+
+      // The read went to the member surface, and never to the operator one.
+      const listCalls = fetchMock.mock.calls
+        .map(([u]) => String(u))
+        .filter((u) => KEYS_URL.test(u))
+      expect(listCalls.length).toBeGreaterThan(0)
+      for (const u of listCalls) {
+        expect(u).toContain("/v1/organizations/me/keys")
+      }
+
+      // Every key here is the caller's own, so no Owner column; and the pages
+      // the operator paragraph links to would refuse a member.
+      expect(
+        screen.queryByRole("columnheader", { name: "Owner" }),
+      ).not.toBeInTheDocument()
+      expect(
+        screen.queryByRole("link", { name: /Spend & budgets/ }),
+      ).not.toBeInTheDocument()
+    })
+
+    it("creates a key with no owner picker and no budget exemption", async () => {
+      const fetchMock = mockApi({ deploymentOperator: false, keys: [] })
+      const usr = userEvent.setup()
+      renderPage(<KeysPage />)
+
+      await screen.findByText("No API keys yet")
+      await usr.click(
+        screen.getByRole("button", { name: "Create your first key" }),
+      )
+
+      // No owner to pick: the key is the caller's own, and Create does not wait
+      // for one.
+      expect(
+        screen.queryByPlaceholderText(/Pick a user/),
+      ).not.toBeInTheDocument()
+      expect(screen.getByRole("button", { name: "Create key" })).toBeEnabled()
+
+      await usr.click(screen.getByRole("button", { name: "Advanced" }))
+      expect(
+        screen.queryByLabelText("Exempt this key from budget"),
+      ).not.toBeInTheDocument()
+
+      await usr.type(screen.getByPlaceholderText("ci-bot"), "my-key")
+      await usr.click(screen.getByRole("button", { name: "Create key" }))
+      const dialog = await screen.findByRole("dialog")
+      expect(within(dialog).getByDisplayValue(NEW_SECRET)).toBeInTheDocument()
+
+      const post = fetchMock.mock.calls.find(
+        ([u, init]) =>
+          String(u).endsWith("/v1/organizations/me/keys") &&
+          (init?.method ?? "") === "POST",
+      )
+      expect(post).toBeDefined()
+      const body = JSON.parse(String(post?.[1]?.body))
+      expect(body.key_name).toBe("my-key")
+      // The member body carries neither escalation field.
+      expect(body).not.toHaveProperty("user_id")
+      expect(body).not.toHaveProperty("exclude_from_budget")
+    })
+
+    it("edits through the member surface, with no budget exemption to send", async () => {
+      const fetchMock = mockApi({
+        deploymentOperator: false,
+        keys: [apiKey({ id: "key-1", key_name: "mine" })],
+      })
+      const usr = userEvent.setup()
+      renderPage(<KeysPage />)
+
+      const row = (await screen.findByText("mine")).closest("tr")!
+      await usr.click(within(row).getByRole("button", { name: "Edit" }))
+      expect(
+        screen.queryByLabelText("Exempt this key from budget"),
+      ).not.toBeInTheDocument()
+
+      await usr.click(screen.getByRole("button", { name: "Save changes" }))
+
+      const patch = fetchMock.mock.calls.find(
+        ([u, init]) =>
+          String(u).endsWith("/v1/organizations/me/keys/key-1") &&
+          (init?.method ?? "") === "PATCH",
+      )
+      expect(patch).toBeDefined()
+      expect(JSON.parse(String(patch?.[1]?.body))).not.toHaveProperty(
+        "exclude_from_budget",
+      )
+    })
   })
 })

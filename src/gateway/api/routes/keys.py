@@ -51,7 +51,13 @@ async def _caller_organization_id(
 CallerOrganization = Annotated[uuid.UUID, Depends(_caller_organization_id)]
 
 
-async def _load_key_in_organization(db: AsyncSession, key_id: str, organization_id: uuid.UUID) -> APIKey:
+async def _load_key_in_organization(
+    db: AsyncSession,
+    key_id: str,
+    organization_id: uuid.UUID,
+    *,
+    owner_user_id: str | None = None,
+) -> APIKey:
     """Load a key by id within one organization, or raise 404.
 
     Joined to the workspace rather than loaded by id alone: a key belongs to
@@ -61,12 +67,19 @@ async def _load_key_in_organization(db: AsyncSession, key_id: str, organization_
     ``resolve_workspace_in_organization`` rule in
     `services/tenancy/authorization.py`: a 403 would confirm the id names a real
     key somewhere.
+
+    ``owner_user_id`` narrows the load to keys billed to that owner, for the
+    member-scoped routes in ``organization_keys.py``: somebody else's key in the
+    caller's own organization answers the same 404, for the same reason.
     """
-    result = await db.execute(
+    statement = (
         select(APIKey)
         .join(Workspace, col(Workspace.id) == col(APIKey.workspace_id))
         .where(col(APIKey.id) == key_id, col(Workspace.organization_id) == organization_id)
     )
+    if owner_user_id is not None:
+        statement = statement.where(col(APIKey.user_id) == owner_user_id)
+    result = await db.execute(statement)
     key = result.scalar_one_or_none()
 
     if not key:

@@ -2760,6 +2760,96 @@
         "title": "CreateKeyResponse",
         "type": "object"
       },
+      "CreateOwnKeyRequest": {
+        "description": "Create-key body for the member surface.\n\nDeliberately not ``CreateKeyRequest``: it carries no ``user_id`` (the owner\nis always the caller) and no ``exclude_from_budget`` (a member must not\nexempt their own spend from enforcement).",
+        "properties": {
+          "allowed_models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Model allow-list: null = any model your user default allows, [] = deny all, or canonical instance:model entries. A key can only narrow your own model access, never broaden it.",
+            "title": "Allowed Models"
+          },
+          "capture_agent_telemetry": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per-key override of the deployment-wide capture_agent_telemetry setting: null (default) inherits it, true always stores this key's coding-agent telemetry, false always discards it.",
+            "title": "Capture Agent Telemetry"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional expiration timestamp",
+            "title": "Expires At"
+          },
+          "key_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Optional name for the key",
+            "title": "Key Name"
+          },
+          "metadata": {
+            "additionalProperties": true,
+            "description": "Optional metadata",
+            "title": "Metadata",
+            "type": "object"
+          },
+          "reject_user_mismatch": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Per-key override of the deployment-wide reject_user_mismatch setting: null (default) inherits it, true always rejects a request naming a different 'user', false always accepts it. Spend binds to your own user either way.",
+            "title": "Reject User Mismatch"
+          },
+          "workspace_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "Workspace this key belongs to, which must be one you may see in your active organization. Omitted means that organization's default workspace, refused when you are not a member of it.",
+            "title": "Workspace Id"
+          }
+        },
+        "title": "CreateOwnKeyRequest",
+        "type": "object"
+      },
       "CreateScopedBudgetRequest": {
         "description": "Request model for creating a scoped budget.",
         "properties": {
@@ -9688,6 +9778,95 @@
           "enabled"
         ],
         "title": "UpdateMaintenanceModeRequest",
+        "type": "object"
+      },
+      "UpdateOwnKeyRequest": {
+        "description": "Update-key body for the member surface.\n\nThe operator's ``UpdateKeyRequest`` minus ``exclude_from_budget``, for the\nreason the create body gives. The tri-state fields follow the same\n``model_fields_set`` idiom: absent = unchanged, null = clear to inherit,\na value = pin it.",
+        "properties": {
+          "allowed_models": {
+            "anyOf": [
+              {
+                "items": {
+                  "type": "string"
+                },
+                "type": "array"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Allowed Models"
+          },
+          "capture_agent_telemetry": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Capture Agent Telemetry"
+          },
+          "expires_at": {
+            "anyOf": [
+              {
+                "format": "date-time",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Expires At"
+          },
+          "is_active": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Is Active"
+          },
+          "key_name": {
+            "anyOf": [
+              {
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Key Name"
+          },
+          "metadata": {
+            "anyOf": [
+              {
+                "additionalProperties": true,
+                "type": "object"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Metadata"
+          },
+          "reject_user_mismatch": {
+            "anyOf": [
+              {
+                "type": "boolean"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Reject User Mismatch"
+          }
+        },
+        "title": "UpdateOwnKeyRequest",
         "type": "object"
       },
       "UpdateScopedBudgetRequest": {
@@ -17341,6 +17520,296 @@
         "summary": "Update Organization Guardrail",
         "tags": [
           "organization-guardrails"
+        ]
+      }
+    },
+    "/v1/organizations/me/keys": {
+      "get": {
+        "description": "List the caller's own API keys in their active organization, newest first.\n\nOnly keys billed to the caller's own user: an operator-minted key assigned\nto them is theirs to see here, and nobody else's key ever is. Naming a\nworkspace outside their organization lists nothing rather than refusing, so\nthe filter reports no more than the unfiltered read does.",
+        "operationId": "list_own_keys_v1_organizations_me_keys_get",
+        "parameters": [
+          {
+            "in": "query",
+            "name": "skip",
+            "required": false,
+            "schema": {
+              "default": 0,
+              "minimum": 0,
+              "title": "Skip",
+              "type": "integer"
+            }
+          },
+          {
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 100,
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          },
+          {
+            "description": "Only keys in this workspace.",
+            "in": "query",
+            "name": "workspace_id",
+            "required": false,
+            "schema": {
+              "anyOf": [
+                {
+                  "format": "uuid",
+                  "type": "string"
+                },
+                {
+                  "type": "null"
+                }
+              ],
+              "description": "Only keys in this workspace.",
+              "title": "Workspace Id"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "items": {
+                    "$ref": "#/components/schemas/KeyInfo"
+                  },
+                  "title": "Response List Own Keys V1 Organizations Me Keys Get",
+                  "type": "array"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "List Own Keys",
+        "tags": [
+          "organization-keys"
+        ]
+      },
+      "post": {
+        "description": "Create an API key owned by the caller, in a workspace they may see.\n\nThe member-scoped counterpart of ``POST /v1/keys``: the owner is always the\ncaller's own attribution user, the key is always budget-enforced, and the\nworkspace must be visible to the caller (a member of it, or an organization\nowner/admin/superuser, who see every workspace). The secret is returned once.",
+        "operationId": "create_own_key_v1_organizations_me_keys_post",
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/CreateOwnKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateKeyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Create Own Key",
+        "tags": [
+          "organization-keys"
+        ]
+      }
+    },
+    "/v1/organizations/me/keys/{key_id}": {
+      "delete": {
+        "description": "Delete (revoke) one of the caller's own API keys.",
+        "operationId": "delete_own_key_v1_organizations_me_keys__key_id__delete",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "204": {
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Delete Own Key",
+        "tags": [
+          "organization-keys"
+        ]
+      },
+      "patch": {
+        "description": "Update one of the caller's own API keys.",
+        "operationId": "update_own_key_v1_organizations_me_keys__key_id__patch",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "requestBody": {
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/UpdateOwnKeyRequest"
+              }
+            }
+          },
+          "required": true
+        },
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/KeyInfo"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Update Own Key",
+        "tags": [
+          "organization-keys"
+        ]
+      }
+    },
+    "/v1/organizations/me/keys/{key_id}/rotate": {
+      "post": {
+        "description": "Rotate the secret of one of the caller's own API keys, in place.\n\nSame contract as the operator's rotate: the row keeps its identity, the new\nraw key is returned once, and the previous secret stops authenticating\nimmediately with no grace window.",
+        "operationId": "rotate_own_key_v1_organizations_me_keys__key_id__rotate_post",
+        "parameters": [
+          {
+            "in": "path",
+            "name": "key_id",
+            "required": true,
+            "schema": {
+              "title": "Key Id",
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/CreateKeyResponse"
+                }
+              }
+            },
+            "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
+          }
+        },
+        "security": [
+          {
+            "ApiKeyAuth": []
+          },
+          {
+            "XApiKeyAuth": []
+          }
+        ],
+        "summary": "Rotate Own Key",
+        "tags": [
+          "organization-keys"
         ]
       }
     },

@@ -60,8 +60,11 @@ dashboard session. It does not prove that the session may act deployment-wide.
 
 Tenant lookups include the tenant predicate and return 404 for a foreign ID.
 Client filters may narrow the server-derived scope and never widen it. A tenant
-that needs a deployment-wide read gets a separately scoped endpoint, as
-organization usage does; do not loosen the original route.
+that needs a deployment-wide route gets a separately scoped endpoint, as
+organization usage does for reads and `/v1/organizations/me/keys`
+(`organization_keys.py`) does for writes; do not loosen the original route. A
+member's key surface derives its owner as well as its scope, so it takes no
+`user_id` and mints nothing budget-exempt.
 
 The API key determines the billed workspace. Client `user`, workspace, or
 organization fields cannot move billing or credential resolution.

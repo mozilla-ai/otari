@@ -244,6 +244,14 @@ GET /v1/organizations/me/usage/count                        # dashboard-only
 GET /v1/organizations/me/usage/summary                      # dashboard-only
 GET /v1/organizations/me/usage/series                       # dashboard-only
 GET /v1/organizations/me/routing-policies                   # dashboard-only
+# The member's own keys (otari-ai#1941), excluded for the same reason as the
+# usage reads above: scoped by the caller's dashboard session, which an SDK
+# caller does not hold.
+GET /v1/organizations/me/keys                               # dashboard-only
+POST /v1/organizations/me/keys                              # dashboard-only
+PATCH /v1/organizations/me/keys/{key_id}                    # dashboard-only
+DELETE /v1/organizations/me/keys/{key_id}                   # dashboard-only
+POST /v1/organizations/me/keys/{key_id}/rotate              # dashboard-only
 GET /v1/organizations/me/guardrails                         # operator surface
 POST /v1/organizations/me/guardrails                        # operator surface
 PATCH /v1/organizations/me/guardrails/{guardrail_id}        # operator surface

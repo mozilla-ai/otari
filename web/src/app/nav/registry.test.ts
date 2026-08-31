@@ -92,12 +92,13 @@ describe("nav registry", () => {
     // tenant-scoped read, so there is no longer a caller it refuses. Models and
     // Routing left it the same way (otari-ai#1942): the catalog reads already
     // served any session, and Routing gained
-    // `/v1/organizations/me/routing-policies`. Removing a row from here is as
+    // `/v1/organizations/me/routing-policies`. API keys left it for the same
+    // reason (otari-ai#1941): members create and manage their own keys through
+    // `/v1/organizations/me/keys`. Removing a row from here is as
     // much a design decision as adding one.
     expect(
       NAV_ITEMS.filter((item) => item.operatorOnly).map((item) => item.to),
     ).toEqual([
-      "/keys",
       "/providers",
       "/budgets",
       "/organization/pricing",

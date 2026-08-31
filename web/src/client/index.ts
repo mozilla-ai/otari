@@ -208,6 +208,10 @@ export type ApiKey = Schemas["KeyInfo"]
 export type CreateKeyRequest = Schemas["CreateKeyRequest"]
 export type CreateKeyResponse = Schemas["CreateKeyResponse"]
 export type UpdateKeyRequest = Schemas["UpdateKeyRequest"]
+// The member surface's bodies (otari-ai#1941): the operator shapes minus the
+// owner and the budget exemption, which that surface derives or refuses.
+export type CreateOwnKeyRequest = Schemas["CreateOwnKeyRequest"]
+export type UpdateOwnKeyRequest = Schemas["UpdateOwnKeyRequest"]
 export type Budget = Schemas["BudgetResponse"]
 export type CreateBudgetRequest = Schemas["CreateBudgetRequest"]
 export type UpdateBudgetRequest = Schemas["UpdateBudgetRequest"]

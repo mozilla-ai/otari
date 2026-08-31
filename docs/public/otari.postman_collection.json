@@ -2779,6 +2779,184 @@
     {
       "item": [
         {
+          "name": "List Own Keys",
+          "request": {
+            "description": "List the caller's own API keys in their active organization, newest first.\n\nOnly keys billed to the caller's own user: an operator-minted key assigned\nto them is theirs to see here, and nobody else's key ever is. Naming a\nworkspace outside their organization lists nothing rather than refusing, so\nthe filter reports no more than the unfiltered read does.",
+            "header": [],
+            "method": "GET",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "keys"
+              ],
+              "query": [
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "skip",
+                  "value": ""
+                },
+                {
+                  "description": "",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                },
+                {
+                  "description": "Only keys in this workspace.",
+                  "disabled": true,
+                  "key": "workspace_id",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/keys?skip=&limit=&workspace_id="
+            }
+          }
+        },
+        {
+          "name": "Create Own Key",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"reject_user_mismatch\": false,\n  \"workspace_id\": \"00000000-0000-0000-0000-000000000000\"\n}"
+            },
+            "description": "Create an API key owned by the caller, in a workspace they may see.\n\nThe member-scoped counterpart of ``POST /v1/keys``: the owner is always the\ncaller's own attribution user, the key is always budget-enforced, and the\nworkspace must be visible to the caller (a member of it, or an organization\nowner/admin/superuser, who see every workspace). The secret is returned once.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "keys"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/keys"
+            }
+          }
+        },
+        {
+          "name": "Update Own Key",
+          "request": {
+            "body": {
+              "mode": "raw",
+              "options": {
+                "raw": {
+                  "language": "json"
+                }
+              },
+              "raw": "{\n  \"allowed_models\": [\n    \"string\"\n  ],\n  \"capture_agent_telemetry\": false,\n  \"expires_at\": \"2024-01-01T00:00:00Z\",\n  \"is_active\": false,\n  \"key_name\": \"string\",\n  \"metadata\": {},\n  \"reject_user_mismatch\": false\n}"
+            },
+            "description": "Update one of the caller's own API keys.",
+            "header": [
+              {
+                "key": "Content-Type",
+                "value": "application/json"
+              }
+            ],
+            "method": "PATCH",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "keys",
+                ":key_id"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/keys/:key_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Delete Own Key",
+          "request": {
+            "description": "Delete (revoke) one of the caller's own API keys.",
+            "header": [],
+            "method": "DELETE",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "keys",
+                ":key_id"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/keys/:key_id",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        },
+        {
+          "name": "Rotate Own Key",
+          "request": {
+            "description": "Rotate the secret of one of the caller's own API keys, in place.\n\nSame contract as the operator's rotate: the row keeps its identity, the new\nraw key is returned once, and the previous secret stops authenticating\nimmediately with no grace window.",
+            "header": [],
+            "method": "POST",
+            "url": {
+              "host": [
+                "{{baseUrl}}"
+              ],
+              "path": [
+                "v1",
+                "organizations",
+                "me",
+                "keys",
+                ":key_id",
+                "rotate"
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/keys/:key_id/rotate",
+              "variable": [
+                {
+                  "description": "path parameter",
+                  "key": "key_id",
+                  "value": ""
+                }
+              ]
+            }
+          }
+        }
+      ],
+      "name": "organization-keys"
+    },
+    {
+      "item": [
+        {
           "name": "List Organization Pricing",
           "request": {
             "description": "List the organization's rate overrides.\n\nReadable by any member: these rates decide what the caller's own requests\ncost, so they are not withheld from the people billed at them. Writing needs\nan owner or admin.\n\nPaged on the same bounds the rest of the tenancy surface uses, because the\ntable grows a row per model per period. ``count`` is the total, so a client\nknows whether another page is owed.",
