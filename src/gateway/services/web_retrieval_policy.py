@@ -105,30 +105,31 @@ def canonicalize_host(value: str, *, error_type: type[ValueError] = WebURLValida
     """
     if not value or _contains_control_character(value):
         raise error_type("hostname is empty or contains a control character")
-    if value.endswith(".."):
-        raise error_type("hostname may contain at most one terminal root dot")
-    canonical_candidate = value[:-1] if value.endswith(".") else value
-    if not canonical_candidate or ".." in canonical_candidate:
-        raise error_type("hostname contains an empty label")
-    if "%" in canonical_candidate and ":" in canonical_candidate:
+    if "%" in value and ":" in value:
         raise error_type("scoped IPv6 addresses are not allowed")
 
     try:
-        parsed_ip = ipaddress.ip_address(canonical_candidate)
+        parsed_ip = ipaddress.ip_address(value)
     except ValueError:
         parsed_ip = None
     if parsed_ip is not None:
         return CanonicalHost(value=parsed_ip.compressed, ip=parsed_ip)
 
-    dns_name = canonical_candidate
-
     try:
-        ascii_name = idna.encode(dns_name, uts46=True, std3_rules=True).decode("ascii").lower()
+        ascii_name = idna.encode(value, uts46=True, std3_rules=True).decode("ascii").lower()
     except idna.IDNAError as exc:
         raise error_type("hostname is not valid IDNA") from exc
-    if not ascii_name or ".." in ascii_name:
+    if ascii_name.endswith(".."):
+        raise error_type("hostname may contain at most one terminal root dot")
+    canonical_candidate = ascii_name[:-1] if ascii_name.endswith(".") else ascii_name
+    if not canonical_candidate or ".." in canonical_candidate:
         raise error_type("hostname contains an empty label")
-    return CanonicalHost(value=ascii_name)
+
+    try:
+        mapped_ip = ipaddress.ip_address(canonical_candidate)
+    except ValueError:
+        return CanonicalHost(value=canonical_candidate)
+    return CanonicalHost(value=mapped_ip.compressed, ip=mapped_ip)
 
 
 def canonicalize_web_url(value: str, *, max_length: int = MAX_WEB_URL_LENGTH) -> CanonicalWebURL:
@@ -162,7 +163,9 @@ def canonicalize_web_url(value: str, *, max_length: int = MAX_WEB_URL_LENGTH) ->
         explicit_or_default_port = parsed.port
     except httpx.InvalidURL as exc:
         raise WebURLValidationError("URL has an invalid port") from exc
-    effective_port = explicit_or_default_port or _DEFAULT_PORTS[scheme]
+    effective_port = (
+        explicit_or_default_port if explicit_or_default_port is not None else _DEFAULT_PORTS[scheme]
+    )
     if not 1 <= effective_port <= 65535:
         raise WebURLValidationError("URL port is outside the valid range")
 

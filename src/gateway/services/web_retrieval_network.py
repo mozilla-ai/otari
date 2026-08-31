@@ -12,7 +12,8 @@ import asyncio
 import ipaddress
 import socket
 import ssl
-from collections.abc import AsyncIterable, Awaitable, Callable, Sequence
+import zlib
+from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from time import monotonic
 from typing import Any, Protocol, TypeAlias, TypeVar
@@ -37,6 +38,7 @@ PINNED_TARGET_EXTENSION = "otari.validated_target"
 MAX_WEB_REDIRECTS = 5
 MAX_DECODED_BODY_BYTES = 5 * 1024 * 1024
 NETWORK_DEADLINE_SECONDS = 5.0
+_MAX_DECODE_CHUNK_BYTES = 64 * 1024
 _REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 
 T = TypeVar("T")
@@ -65,6 +67,10 @@ class RedirectValidationError(ValueError):
 
 class NetworkDeadlineExceeded(TimeoutError):
     """Raised when the one wall-clock retrieval deadline expires."""
+
+
+class ContentDecodingError(ValueError):
+    """Raised when a response encoding is unsupported, malformed, or incomplete."""
 
 
 class AddressResolver(Protocol):
@@ -431,6 +437,57 @@ class CappedBody:
     truncated: bool
 
 
+async def _iter_bounded_decoded_chunks(
+    response: httpx.Response,
+    *,
+    chunk_size: int,
+) -> AsyncIterator[bytes]:
+    """Decode a streamed body without allowing one decoder call to inflate freely."""
+    try:
+        loaded_content = response.content
+    except httpx.ResponseNotRead:
+        loaded_content = None
+    if loaded_content is not None:
+        for offset in range(0, len(loaded_content), chunk_size):
+            yield loaded_content[offset : offset + chunk_size]
+        return
+
+    encodings = [
+        encoding.strip().lower()
+        for value in response.headers.get_list("content-encoding")
+        for encoding in value.split(",")
+        if encoding.strip()
+    ]
+    if not encodings or encodings == ["identity"]:
+        async for raw_chunk in response.aiter_raw(chunk_size=chunk_size):
+            yield raw_chunk
+        return
+    if len(encodings) != 1 or encodings[0] not in {"gzip", "x-gzip", "deflate"}:
+        raise ContentDecodingError("response uses an unsupported content encoding")
+
+    encoding = encodings[0]
+    decompressor = zlib.decompressobj(zlib.MAX_WBITS | 16 if encoding in {"gzip", "x-gzip"} else zlib.MAX_WBITS)
+    can_retry_raw_deflate = encoding == "deflate"
+    async for raw_chunk in response.aiter_raw(chunk_size=chunk_size):
+        pending = raw_chunk
+        while pending:
+            try:
+                decoded = decompressor.decompress(pending, max_length=chunk_size)
+            except zlib.error as exc:
+                if not can_retry_raw_deflate:
+                    raise ContentDecodingError("response content encoding is malformed") from exc
+                decompressor = zlib.decompressobj(-zlib.MAX_WBITS)
+                can_retry_raw_deflate = False
+                pending = raw_chunk
+                continue
+            can_retry_raw_deflate = False
+            pending = decompressor.unconsumed_tail
+            if decoded:
+                yield decoded
+    if not decompressor.eof or decompressor.unused_data:
+        raise ContentDecodingError("response content encoding is incomplete or has trailing data")
+
+
 async def read_capped_decoded_body(
     response: httpx.Response,
     *,
@@ -441,18 +498,20 @@ async def read_capped_decoded_body(
     """Read at most ``max_bytes`` decoded response bytes under the deadline.
 
     One byte beyond the cap is observed, but never retained, so a body exactly at
-    the ceiling is distinguishable from a truncated body. ``aiter_bytes`` applies
-    HTTPX content decoding before this bound, limiting compressed expansion as the
-    application receives it.
+    the ceiling is distinguishable from a truncated body. Compressed streams are
+    decoded incrementally with a hard output bound on every decoder call, before
+    any decoded chunk reaches the retained-body buffer.
     """
     if max_bytes < 0:
         raise ValueError("max_bytes cannot be negative")
     if chunk_size <= 0:
         raise ValueError("chunk_size must be positive")
 
+    decode_chunk_size = min(chunk_size, _MAX_DECODE_CHUNK_BYTES)
+
     async def read() -> CappedBody:
         buffer = bytearray()
-        async for chunk in response.aiter_bytes(chunk_size=chunk_size):
+        async for chunk in _iter_bounded_decoded_chunks(response, chunk_size=decode_chunk_size):
             remaining = max_bytes - len(buffer)
             if len(chunk) > remaining:
                 if remaining > 0:
