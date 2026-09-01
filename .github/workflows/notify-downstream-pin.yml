@@ -1,0 +1,47 @@
+name: Notify Downstream Pin
+
+# Tell a downstream repository that pins this one as a submodule that main has
+# moved, so its pin can follow within minutes instead of waiting for its own
+# scheduled dependency pass.
+#
+# Outbound only, and deliberately the weakest coupling that does the job: this
+# sends a commit SHA and nothing else, reads nothing back, and knows nothing
+# about what the downstream does with it. Otari does not depend on that
+# repository and this does not make it start.
+#
+# Inert without OTARI_AI_DISPATCH_TOKEN, which is what a fork sees: the job runs
+# and does nothing rather than failing main for a secret it was never going to
+# have. The secret is safe here for the ordinary reason a `push` secret is: a
+# fork cannot raise a push event on this repository, so only a merge to main
+# ever reaches it.
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+permissions: {}
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    env:
+      DISPATCH_TOKEN: ${{ secrets.OTARI_AI_DISPATCH_TOKEN }}
+    steps:
+      - name: Announce the new main to mozilla-ai/otari-ai
+        if: env.DISPATCH_TOKEN != ''
+        uses: actions/github-script@3a2844b7e9c422d3c10d287c895573f7108da1b3 # v9.0.0
+        with:
+          github-token: ${{ env.DISPATCH_TOKEN }}
+          script: |
+            await github.rest.repos.createDispatchEvent({
+              owner: 'mozilla-ai',
+              repo: 'otari-ai',
+              event_type: 'otari-main-updated',
+              client_payload: { sha: context.sha },
+            })
+            core.info(`Announced ${context.sha}.`)
+
+      - name: Report a missing token without failing the branch
+        if: env.DISPATCH_TOKEN == ''
+        run: echo "::notice::No OTARI_AI_DISPATCH_TOKEN configured; nothing announced."
