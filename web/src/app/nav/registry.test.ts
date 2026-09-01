@@ -242,16 +242,24 @@ describe("nav registry", () => {
   })
 
   it("gates every declared-but-unserved destination on a surface", () => {
-    // The design's organization rail draws two rows this gateway has no endpoint
-    // for and still declares. Each is declared so the rail matches on a
-    // deployment that does serve them, and gated on a surface
-    // `STANDALONE_SURFACES` does not report so the row is absent here. Pinned as
-    // the whole set, because the failure mode is silent in both directions: a
-    // missing gate ships a link to a page that cannot work, and a gate on a
-    // surface the bootstrap *does* report hides a page that can.
+    // The organization rail draws three rows this gateway does not offer and
+    // still declares. Each is declared so the rail matches on a deployment that
+    // does serve them, and gated on a surface `STANDALONE_SURFACES` does not
+    // report so the row is absent here. Pinned as the whole set, because the
+    // failure mode is silent in both directions: a missing gate ships a link to
+    // a page that cannot work, and a gate on a surface the bootstrap *does*
+    // report hides a page that can. A typo in a surface name is silent the same
+    // way, since `NavItemBase.surface` is a bare string.
+    //
+    // The first two have no endpoint behind them here. `/organization/usage` is
+    // withheld for a different reason (otari-ai#1963): the router *is* mounted
+    // on standalone, and the row is held back because standalone's organization
+    // is the deployment, so `/usage` already answers the same question whole.
+    // Same mechanism, so it belongs in the same set.
     const unserved = new Map([
       ["/organization/provider-keys", "organization_providers"],
       ["/organization/guardrails", "organization_guardrails"],
+      ["/organization/usage", "organization_usage"],
     ])
     for (const [to, surface] of unserved) {
       expect(navItemForPath(to)?.surface).toBe(surface)

@@ -347,6 +347,13 @@ describe("UsagePage", () => {
           String(url).includes("workspace_id=ws-1"),
       ),
     ).toBe(true)
+    // The workspace rail takes its scope from the switcher and offers no
+    // workspace picker, so the roster this page never shows is not fetched.
+    expect(
+      fetchMock.mock.calls.some(([url]) =>
+        String(url).includes("/v1/workspaces"),
+      ),
+    ).toBe(false)
   })
 
   it("asks for the whole organization on the organization page, whatever the switcher selects", async () => {
@@ -397,6 +404,10 @@ describe("UsagePage", () => {
     renderPage(<UsagePage scope="organization" />)
     await screen.findByText("$1,240.50")
 
+    // Through the disclosure a person uses. jsdom does not apply Tailwind's
+    // `.hidden`, so the select is reachable without this and the case would
+    // keep passing if the control became unreachable in a browser.
+    await user.click(screen.getByRole("button", { name: "Add filter" }))
     await pickOption(user, "Workspace", "Research")
 
     const summaryCalls = fetchMock.mock.calls

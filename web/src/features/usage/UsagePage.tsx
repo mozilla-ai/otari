@@ -639,7 +639,11 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
   // Named on the share card's face. A card whose numbers came from a filtered
   // window has to say so, or a reader takes the figure for the whole gateway.
   const shareScopeSuffix = [
-    workspaceFilter !== undefined ? workspaceLabel(workspaceFilter) : null,
+    // Named, like the counted phrases below it: a bare workspace name among
+    // them reads as a stray token rather than as the scope it states.
+    workspaceFilter !== undefined
+      ? `workspace ${workspaceLabel(workspaceFilter)}`
+      : null,
     userFilters.length > 0
       ? `${userFilters.length} user${userFilters.length > 1 ? "s" : ""}`
       : null,
@@ -1102,7 +1106,7 @@ export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
       >
         {orgWide ? (
           <FilterSelect
-            ariaLabel="Workspace"
+            label="Workspace"
             value={workspaceFilter ?? ""}
             onChange={(value) => setWorkspaceFilter(value || undefined)}
             options={[
