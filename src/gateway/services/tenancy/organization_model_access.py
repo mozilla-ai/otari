@@ -40,6 +40,7 @@ from gateway.repositories.tenancy.org_provider_key_repository import (
 )
 from gateway.services.provider_kwargs import provider_key
 from gateway.services.tenancy.authorization import resolve_visible_workspace_scope
+from gateway.services.tenancy.errors import TenancyForbiddenError, TenancyNotFoundError
 from gateway.services.tenancy.organization_service import OrganizationService
 
 
@@ -99,10 +100,20 @@ async def resolve_session_model_allowlist(
     workspace's disable or model restriction is theirs to lift) and bounded: the
     per-workspace walk below costs a query per workspace, which is fine for the
     handful a member belongs to and not for a large tenant's whole list.
+
+    A caller with no live organization membership is answered with the configured
+    instances rather than refused. That is the same rule applied to an empty
+    tenant, not a fallback around one: they reach no BYO key because there is no
+    organization holding any, and the configured instances are deployment-wide.
+    The routers that exist to answer "which organization" still refuse such a
+    caller; a catalog read is not one of them.
     """
     services = organizations if organizations is not None else OrganizationService(db)
-    scope = await resolve_visible_workspace_scope(db, user=user, organizations=services)
     entries = {f"{instance}:*" for instance in config.providers}
+    try:
+        scope = await resolve_visible_workspace_scope(db, user=user, organizations=services)
+    except (TenancyForbiddenError, TenancyNotFoundError):
+        return sorted(entries)
     if scope.sees_every_workspace:
         providers = await OrgProviderKeyRepository(db).list_provider_names(scope.organization.id)
         entries.update(f"{provider_key(provider)}:*" for provider in providers)

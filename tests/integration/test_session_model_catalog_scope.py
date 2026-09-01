@@ -89,6 +89,30 @@ def _identity(
     return token
 
 
+def _unmembered_identity(session: Session, *, email: str, organization_id: uuid.UUID) -> str:
+    """A signed-in identity pointed at a real organization it holds no membership in.
+
+    ``users.active_organization_id`` is a foreign key, so a pointer at nothing is
+    not a state the database can hold; a pointer with no membership behind it is,
+    and it is the one the scope resolver refuses.
+    """
+    user = User(email=email, full_name="Orphan", active_organization_id=organization_id)
+    session.add(user)
+    session.commit()
+    session.refresh(user)
+    token = f"otari-sess-{email}"
+    session.add(
+        DashboardSession(
+            token_hash=hash_session_token(token),
+            user_id=user.id,
+            created_at=datetime.now(UTC),
+            expires_at=datetime.now(UTC) + timedelta(hours=12),
+        )
+    )
+    session.commit()
+    return token
+
+
 def _byo_key(session: Session, *, organization_id: uuid.UUID, provider: str) -> uuid.UUID:
     key = OrgProviderKey(
         organization_id=organization_id,
@@ -153,6 +177,9 @@ def world(client: TestClient, master_key_header: dict[str, str], db_session_fact
                 email="member@beta.test",
                 organization_id=beta.id,
                 workspace_ids=(beta_one.id,),
+            ),
+            "orphan": _unmembered_identity(
+                session, email="orphan@nowhere.test", organization_id=beta.id
             ),
             "superuser": _identity(
                 session,
@@ -253,3 +280,16 @@ def test_a_single_model_read_agrees_with_the_listing(client: TestClient, world: 
         assert client.get(f"/v1/models/{_ANTHROPIC_MODEL}").status_code == status.HTTP_404_NOT_FOUND
     finally:
         client.cookies.clear()
+
+
+def test_an_identity_with_no_live_membership_is_answered_rather_than_refused(
+    client: TestClient, world: _World
+) -> None:
+    """A catalog read is not one of the routes whose whole question is "which organization".
+
+    The pointer is not the authority, so this caller reaches no organization's
+    keys, which is an empty list here (the test deployment configures no
+    ``providers:`` block) rather than a 403 over a page that used to render. In
+    particular it must not be shown Beta's models just because it points there.
+    """
+    assert _catalog_as(client, world, "orphan") == set()
