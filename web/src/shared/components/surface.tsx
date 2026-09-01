@@ -110,26 +110,56 @@ export function PageIntro({
 export function SettingsGroup({
   title,
   count,
+  description,
   children,
 }: {
-  title: string
+  /**
+   * Omitted where the page's own title already names the group, which happens
+   * when a page is a filtered view of one service. The rows band keeps its
+   * rules either way; what goes is the heading band above it.
+   */
+  title?: string
   /** Shown beside the title where a group's size is worth knowing up front. */
   count?: number
+  /**
+   * What the group is, under its heading and inside the same band. Capped to a
+   * readable measure, because a band spans the page and a sentence should not.
+   * A node rather than a string so a caller can put a link, or the group's own
+   * error banner, in the same place.
+   */
+  description?: ReactNode
   children: ReactNode
 }) {
   return (
     <>
-      <Section className="border-t border-border pt-6 pb-3">
-        <h2 className="text-title">
-          {title}
-          {count === undefined ? null : (
-            <span className="font-normal text-subtle"> ({count})</span>
+      {title === undefined && description === undefined ? null : (
+        <Section
+          className="border-t border-border pt-6 pb-3"
+          contentClassName="flex flex-col gap-2"
+        >
+          {title === undefined ? null : (
+            <h2 className="text-title">
+              {title}
+              {count === undefined ? null : (
+                <span className="font-normal text-subtle"> ({count})</span>
+              )}
+            </h2>
           )}
-        </h2>
-      </Section>
+          {description ? (
+            <div className="max-w-prose text-sm text-muted">{description}</div>
+          ) : null}
+        </Section>
+      )}
+      {/* `border-subtle` between the rows, `border` around the group. The two
+          tiers are the structure: a section rule divides the page, a row
+          separator divides repeated things inside one section, and using the
+          section tier for both flattens the hierarchy into one weight. This is
+          the third place that mis-assignment has been found, so it is fixed
+          here rather than at a call site: every settings list in the app is
+          this component now, and none of them names a tier. */}
       <Section
         className="border-y border-border"
-        contentClassName="flex flex-col divide-y divide-border"
+        contentClassName="flex flex-col divide-y divide-border-subtle"
       >
         {children}
       </Section>
@@ -360,7 +390,18 @@ export function SpendMeter({
     <span
       role="progressbar"
       aria-label={ariaLabel}
-      aria-valuenow={Math.round(share * 100)}
+      // Clamped, because a progressbar's value is documented to sit inside its
+      // range and a widget that reports 137 out of 100 is malformed. The number
+      // that matters is not lost: it goes in `aria-valuetext`, which is the
+      // field for the human reading of a value, so a screen reader is told both
+      // that the bar is full and that the spend is 37% past the limit. Neither
+      // field is abused to carry the other's fact.
+      aria-valuenow={Math.min(100, Math.round(share * 100))}
+      aria-valuetext={
+        state === "over"
+          ? `${Math.round(share * 100)}% of limit — over budget`
+          : `${Math.round(share * 100)}% of limit`
+      }
       aria-valuemin={0}
       aria-valuemax={100}
       className={`flex h-[3px] w-full bg-surface-subtle ${className}`}

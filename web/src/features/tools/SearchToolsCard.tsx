@@ -1,4 +1,4 @@
-import { Button, Card } from "@heroui/react"
+import { Button } from "@heroui/react"
 import { useEffect, useState } from "react"
 import type {
   ConfigSearchTool,
@@ -12,6 +12,7 @@ import {
   useSearchTools,
   useUpdateSearchTool,
 } from "@/shared/api/hooks"
+import { SettingsGroup } from "@/shared/components/surface"
 import {
   Badge,
   ConfirmButton,
@@ -306,42 +307,39 @@ export function SearchToolsCard({
   const fromConfig = tools.data?.config ?? []
 
   return (
-    <section className="flex flex-col gap-2">
-      <h2 className="text-title">Search tools</h2>
-      <p className="text-sm text-muted">
-        The tools <code className="font-mono">POST /v1/search</code> dispatches
-        against. A searxng tool that declares no backend URL uses the web-search
-        URL above, so one entry here exposes the same backend on the direct
-        endpoint.
-      </p>
-      <ErrorBanner error={tools.error ?? providers.error} />
-      <Card>
-        <Card.Content className="flex flex-col divide-y divide-border px-5 py-1">
-          {stored.map((tool) => (
-            <StoredToolRow
-              key={tool.name}
-              tool={tool}
-              providers={known}
-              onSaved={onSaved}
-            />
-          ))}
-          {fromConfig.map((tool) => (
-            <ConfigToolRow key={tool.name} tool={tool} />
-          ))}
-          {stored.length === 0 &&
-          fromConfig.length === 0 &&
-          !tools.isLoading ? (
-            <p className="py-4 text-sm text-muted">
-              No search tools configured, so{" "}
-              <code className="font-mono">POST /v1/search</code> refuses every
-              request.
-            </p>
-          ) : null}
-          {known.length > 0 ? (
-            <AddToolForm providers={known} onSaved={onSaved} />
-          ) : null}
-        </Card.Content>
-      </Card>
-    </section>
+    <SettingsGroup
+      title="Search tools"
+      description={
+        <>
+          The tools <code className="font-mono">POST /v1/search</code>{" "}
+          dispatches against. A searxng tool that declares no backend URL uses
+          the web-search URL above, so one entry here exposes the same backend
+          on the direct endpoint.
+          <ErrorBanner error={tools.error ?? providers.error} />
+        </>
+      }
+    >
+      {stored.map((tool) => (
+        <StoredToolRow
+          key={tool.name}
+          tool={tool}
+          providers={known}
+          onSaved={onSaved}
+        />
+      ))}
+      {fromConfig.map((tool) => (
+        <ConfigToolRow key={tool.name} tool={tool} />
+      ))}
+      {stored.length === 0 && fromConfig.length === 0 && !tools.isLoading ? (
+        <p className="py-4 text-sm text-muted">
+          No search tools configured, so{" "}
+          <code className="font-mono">POST /v1/search</code> refuses every
+          request.
+        </p>
+      ) : null}
+      {known.length > 0 ? (
+        <AddToolForm providers={known} onSaved={onSaved} />
+      ) : null}
+    </SettingsGroup>
   )
 }

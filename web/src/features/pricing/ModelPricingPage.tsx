@@ -283,6 +283,15 @@ const COLUMNS: DataTableColumn<PriceRow>[] = [
       <span className="text-muted">{formatRelative(row.updatedAt)}</span>
     ),
   },
+  // Unlabelled and empty, and it is the only lane in either table that is.
+  // Something has to absorb the width a table does not use, and every candidate
+  // that carries data is the wrong one: a date given the slack rendered in a
+  // 985px lane, a value floating alone in a field with a hit area to match, and
+  // handing it to the model key instead threw the rates against the right edge.
+  // A lane with nothing in it can take any width without lying about anything,
+  // which also keeps the rate lanes at the widths the overrides table below
+  // uses, so the two still line up.
+  { id: "spacer", header: "", cell: () => null },
 ]
 
 function PriceTable() {

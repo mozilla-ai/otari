@@ -19,7 +19,7 @@ import {
   useTools,
   useUpdateToolSettings,
 } from "@/shared/api/hooks"
-import { Dot, Section } from "@/shared/components/surface"
+import { Dot, SettingsGroup } from "@/shared/components/surface"
 import {
   ErrorBanner,
   errorMessage,
@@ -160,7 +160,11 @@ function FieldLabel({
     <div className="min-w-0 sm:col-start-1">
       <code className="text-sm font-medium text-foreground">{field.key}</code>
       {field.description ? (
-        <p className="mt-1 text-sm text-muted">{field.description}</p>
+        // Capped for the reason every full-bleed row's prose is: the row
+        // spans the page, the sentence does not.
+        <p className="mt-1 max-w-prose text-sm text-muted">
+          {field.description}
+        </p>
       ) : null}
       {help ? <p className="mt-1 text-xs text-muted">{help}</p> : null}
     </div>
@@ -545,23 +549,34 @@ function HowToCallCard({ tool }: { tool: ManagedTool }) {
           </span>
         )}
       </div>
-      <p className="text-sm text-muted">{tool.description}</p>
+      <p className="max-w-prose text-sm text-muted">{tool.description}</p>
       <div className="flex flex-col gap-1">
         <span className="text-xs font-medium text-foreground">
           Accepted tools[].type
         </span>
-        <div className="flex flex-wrap gap-1.5">
-          {tool.accepted_types.map((type) => (
-            <code
-              key={type}
-              className="border border-control-border bg-surface px-1.5 py-0.5 text-xs"
-            >
-              {type}
-            </code>
+        <div className="flex flex-wrap items-center gap-x-1.5">
+          {tool.accepted_types.map((type, index) => (
+            // Mono on the page ground with a separator between entries, not a
+            // boxed chip: these are values to read, and the box was the only
+            // thing making a list of type names look like a set of controls.
+            <span key={type} className="flex items-center gap-1.5">
+              {index > 0 ? (
+                <span aria-hidden className="text-subtle">
+                  ·
+                </span>
+              ) : null}
+              <code className="font-mono text-xs text-foreground">{type}</code>
+            </span>
           ))}
         </div>
       </div>
-      <pre className="overflow-x-auto border border-control-border bg-surface p-3 text-xs">
+      {/* Bounded by rules, not by a border. `border-control-border bg-surface`
+          is the floating-surface recipe, which belongs to things that sit above
+          the page (a popover, a menu); applied to a block that is part of the
+          page it makes a card of it, which is the shape this whole direction
+          removes. The rules say where the example starts and stops, and the
+          block scrolls inside them. */}
+      <pre className="overflow-x-auto border-y border-border py-3 text-xs">
         <code>{`POST /v1/chat/completions\n${JSON.stringify(request, null, 2)}`}</code>
       </pre>
     </div>
@@ -741,16 +756,14 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
           return (
             <Fragment key={service.key}>
               <section className="flex flex-col gap-2">
-                {/* Dropped when the page is narrowed to this one service: the
-                    page title already says it, and repeating it reads as two
-                    headings for the same thing. */}
-                {only ? null : <h2 className="text-title">{service.label}</h2>}
-                <p className="text-sm text-muted">{service.blurb}</p>
-                {/* A settings list: rows divided by rules, on the page ground,
-                    with no box around them. */}
-                <Section
-                  className="border-y border-border"
-                  contentClassName="flex flex-col divide-y divide-border"
+                {/* The shared settings list rather than a hand-rolled one, so
+                    this cannot pick a separator tier of its own. The heading is
+                    dropped on a filtered view, where the page title already
+                    names the service and repeating it reads as two headings for
+                    the same thing. */}
+                <SettingsGroup
+                  title={only ? undefined : service.label}
+                  description={service.blurb}
                 >
                   {service.pricingKey ? (
                     <ToolPriceRow
@@ -782,7 +795,7 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
                     />
                   ))}
                   {managed ? <HowToCallCard tool={managed} /> : null}
-                </Section>
+                </SettingsGroup>
               </section>
               {/* Directly below the in-loop web-search settings, because a searxng
                 search tool that declares no backend URL of its own inherits the

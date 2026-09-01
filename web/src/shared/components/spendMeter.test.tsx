@@ -70,13 +70,23 @@ describe("SpendMeter", () => {
     expect(painted[0]).toContain("w-full")
   })
 
-  it("reports the real share past the limit, not a capped one", () => {
-    // The bar is full, but a screen reader is told 140, because "at the limit"
-    // and "40% past it" are different facts about a budget.
+  it("keeps the widget well formed and still says how far past the limit it is", () => {
+    // Two facts, two fields. `aria-valuenow` stays inside the declared range,
+    // because a progressbar reporting 140 out of 100 is malformed; the real
+    // share goes in `aria-valuetext`, which is the field for a value's human
+    // reading. Carrying the overshoot in `valuenow` was the earlier version and
+    // abused one field to say the other's thing.
     render(<SpendMeter spent={140} allocated={100} ariaLabel="Spend" />)
+    const bar = screen.getByRole("progressbar")
+    expect(bar).toHaveAttribute("aria-valuenow", "100")
+    expect(bar).toHaveAttribute("aria-valuetext", "140% of limit — over budget")
+  })
+
+  it("names the share in words below the limit too", () => {
+    render(<SpendMeter spent={31} allocated={100} ariaLabel="Spend" />)
     expect(screen.getByRole("progressbar")).toHaveAttribute(
-      "aria-valuenow",
-      "140",
+      "aria-valuetext",
+      "31% of limit",
     )
   })
 })

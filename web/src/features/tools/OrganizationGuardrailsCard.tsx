@@ -1,4 +1,4 @@
-import { Button, Card } from "@heroui/react"
+import { Button } from "@heroui/react"
 import { useEffect, useState } from "react"
 
 import type { OrganizationGuardrail, Workspace } from "@/client"
@@ -11,6 +11,7 @@ import {
   useUpdateOrganizationGuardrail,
   useWorkspaces,
 } from "@/shared/api/hooks"
+import { SettingsGroup } from "@/shared/components/surface"
 import {
   Badge,
   ConfirmButton,
@@ -459,16 +460,10 @@ export function OrganizationGuardrailsCard({
   const known = workspaces.data ?? []
 
   return (
-    <section className="flex flex-col gap-2">
-      <h2 className="text-title">Organization guardrails</h2>
-      <p className="text-sm text-muted">
-        Guardrails that run on every request from the workspaces below, whether
-        the caller asked for them or not. They compose with the deployment
-        settings above rather than replacing them: an entry with no endpoint of
-        its own is sent to the guardrails URL set there, and an organization
-        that mandates nothing leaves every request checked exactly as it is
-        today.
-      </p>
+    <SettingsGroup
+      title="Organization guardrails"
+      description="Guardrails that run on every request from the workspaces below, whether the caller asked for them or not. They compose with the deployment settings above rather than replacing them: an entry with no endpoint of its own is sent to the guardrails URL set there, and an organization that mandates nothing leaves every request checked exactly as it is today."
+    >
       {manages ? null : (
         <InfoBanner>
           Organization guardrails are set by an owner or admin of the
@@ -478,27 +473,23 @@ export function OrganizationGuardrailsCard({
       {manages ? (
         <>
           <ErrorBanner error={guardrails.error ?? workspaces.error} />
-          <Card>
-            <Card.Content className="flex flex-col divide-y divide-border px-5 py-1">
-              {entries.map((guardrail) => (
-                <GuardrailRow
-                  key={guardrail.id}
-                  guardrail={guardrail}
-                  workspaces={known}
-                  onSaved={onSaved}
-                />
-              ))}
-              {entries.length === 0 && !guardrails.isLoading ? (
-                <p className="py-4 text-sm text-muted">
-                  No organization guardrails, so only the guardrails a caller
-                  asks for run.
-                </p>
-              ) : null}
-              <AddGuardrailForm workspaces={known} onSaved={onSaved} />
-            </Card.Content>
-          </Card>
+          {entries.map((guardrail) => (
+            <GuardrailRow
+              key={guardrail.id}
+              guardrail={guardrail}
+              workspaces={known}
+              onSaved={onSaved}
+            />
+          ))}
+          {entries.length === 0 && !guardrails.isLoading ? (
+            <p className="py-4 text-sm text-muted">
+              No organization guardrails, so only the guardrails a caller asks
+              for run.
+            </p>
+          ) : null}
+          <AddGuardrailForm workspaces={known} onSaved={onSaved} />
         </>
       ) : null}
-    </section>
+    </SettingsGroup>
   )
 }

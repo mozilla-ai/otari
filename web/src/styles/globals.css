@@ -653,6 +653,19 @@
    * if they are declared here. Self-referential like the roles above: the real
    * values live in the theme blocks. */
   --color-control-border: var(--color-control-border);
+  /* The faint tier, registered so it can be reached as `border-border-subtle`
+     and `divide-border-subtle` rather than only as raw CSS.
+
+     It had been a plain `:root` variable since it was written, which meant every
+     consumer of it lived in this file as a hand-written `border-color`
+     declaration, and the first component that tried to name it as a class got a
+     class that does not exist: no rule is emitted, nothing errors, and the
+     separator quietly renders on the section tier instead. Registering it is
+     what makes the correct tier reachable from a component, which is the point
+     of having two tiers at all. Self-referential in the same way its neighbours
+     above are: the name is registered here and the value stays in the two theme
+     blocks, so light and dark each own theirs. */
+  --color-border-subtle: var(--color-border-subtle);
   --color-control-thumb: var(--color-control-thumb);
   --shadow-elevation-sm: var(--shadow-sm);
   --shadow-elevation-md: var(--shadow-md);
@@ -1696,6 +1709,36 @@ main {
   border-right: 1px solid var(--color-control-border);
 }
 
+/* A workspace's MCP servers. Same terms as the others; the row is 52px because
+   every cell here is one line. */
+.otari-mcp-table .otari-table.table-root {
+  background-color: transparent;
+}
+.otari-mcp-table .otari-table .table__header {
+  background-color: transparent;
+  border-bottom: 1px solid var(--color-border);
+}
+.otari-mcp-table .otari-table .table__row,
+.otari-mcp-table .table__row .table__cell {
+  border-color: var(--color-border-subtle);
+}
+.otari-mcp-table .table__row .table__cell {
+  height: 52px;
+  padding-block: 0;
+}
+.otari-mcp-table .table__column[data-key="token"] {
+  width: 140px;
+  min-width: 140px;
+}
+.otari-mcp-table .table__column[data-key="enabled"] {
+  width: 140px;
+  min-width: 140px;
+}
+.otari-mcp-table .table__column[data-key="actions"] {
+  width: 160px;
+  min-width: 160px;
+}
+
 /* Budgets. Same terms as the others; the row is 58px because the usage cell is
    two lines, a figure over its meter. */
 .otari-budgets-table .otari-table.table-root {
@@ -1898,18 +1941,24 @@ main {
   padding-inline: 10px;
 }
 .otari-pricing-table .table__column[data-key="tiers"] {
-  width: 120px;
-  min-width: 120px;
-}
-/* Deliberately unconstrained, and it is the only lane in either table that is.
-   Some column has to absorb the width a table does not otherwise use, and if
-   that column is the model key then the rates get pushed to the far right: on
-   this page the two tables' `Input / 1M` lanes measured 679px apart, which is
-   the same quantity twice at two different places on one screen. The trailing
-   lane takes the slack in both tables instead (`Period` in the overrides one),
-   so the rate lanes start at the same x and can be read straight down. */
-.otari-pricing-table .table__column[data-key="updatedAt"] {
+  width: 130px;
   min-width: 130px;
+}
+.otari-pricing-table .table__column[data-key="updatedAt"] {
+  width: 130px;
+  min-width: 130px;
+}
+/* Deliberately unconstrained, and the only lane in either table that is.
+   Something has to absorb the width a table does not otherwise use. The model
+   key was doing it first, and the rates ended up 679px apart between this table
+   and the overrides one below, which is the same quantity twice at two places
+   on one screen. Handing it to the trailing data lane fixed that and cost
+   something else: `Updated` measured 985px, a date alone in an empty field with
+   a hit area to match, and the lane widths stopped matching the table below at
+   the point where the two tables' columns diverge. An empty lane can take any
+   width without lying about anything. */
+.otari-pricing-table .table__column[data-key="spacer"] {
+  min-width: 0;
 }
 .otari-rate-overrides-table .table__column[data-key="period"] {
   min-width: 200px;
