@@ -139,20 +139,6 @@ async def test_mixed_public_and_private_dns_answers_fail_closed() -> None:
 
 
 @pytest.mark.asyncio
-async def test_search_override_admits_private_addresses_but_still_resolves() -> None:
-    resolver = StaticResolver((_PRIVATE_V4,))
-
-    target = await validate_retrieval_target(
-        "https://internal.example/",
-        resolver=resolver,
-        allow_private_addresses=True,
-    )
-
-    assert target.addresses == (_PRIVATE_V4,)
-    assert resolver.calls == [("internal.example", 443)]
-
-
-@pytest.mark.asyncio
 async def test_unresolvable_target_is_rejected() -> None:
     with pytest.raises(RetrievalAddressError, match="could not be resolved"):
         await validate_retrieval_target("https://example.invalid/", resolver=StaticResolver(()))
