@@ -192,9 +192,7 @@ function SettingControl({
   if (!field.settable) {
     return (
       <div className="flex items-center gap-2">
-        <span className="text-sm tabular-nums text-foreground">
-          {formatValue(field)}
-        </span>
+        <span className="text-body tabular-nums">{formatValue(field)}</span>
         <span className="rounded-full border border-border px-2 py-0.5 text-caption">
           startup-only
         </span>
@@ -259,7 +257,7 @@ function ConfigRow({
   return (
     <div className="flex items-start justify-between gap-6 py-4">
       <div className="min-w-0">
-        <code className="text-sm font-medium text-foreground">{field.key}</code>
+        <code className="font-mono text-body">{field.key}</code>
         {field.description ? (
           <p className="mt-1 text-sm text-muted">{field.description}</p>
         ) : null}
@@ -457,9 +455,7 @@ function MasterKeyRow({ source }: { source: "configured" | "generated" }) {
     <div className="flex flex-col gap-4 py-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <code className="text-sm font-medium text-foreground">
-            master_key
-          </code>
+          <code className="font-mono text-body">master_key</code>
           <p className="mt-1 max-w-3xl text-sm text-muted">
             {isGenerated
               ? "This gateway uses its first-run generated dashboard key. Regeneration invalidates the current key immediately."
@@ -507,9 +503,7 @@ function SecretKeyRow() {
     <div className="flex flex-col gap-4 py-4">
       <div className="flex flex-wrap items-start justify-between gap-3">
         <div className="min-w-0">
-          <code className="text-sm font-medium text-foreground">
-            OTARI_SECRET_KEY
-          </code>
+          <code className="font-mono text-body">OTARI_SECRET_KEY</code>
           <p className="mt-1 max-w-3xl text-sm text-muted">
             Generate a new key with <code>uv run otari gen-secret-key</code>,
             then restart with{" "}
@@ -657,7 +651,7 @@ export function SettingsPage() {
           onKeyDown={(event) => {
             if (event.key === "Escape") setSearch("")
           }}
-          className="min-w-0 flex-1 rounded-lg border border-border bg-surface-alt px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
+          className="min-w-0 flex-1 rounded-lg border border-border bg-surface-alt px-3 py-2 text-body focus:border-accent focus:outline-none"
         />
         <Checkbox isSelected={settableOnly} onChange={setSettableOnly}>
           Settable only

@@ -812,7 +812,7 @@ function RoutingPlan({ entry }: { entry: UsageEntry }) {
   return (
     <div className="flex flex-col gap-2">
       <span className="text-overline">Routing plan · {entry.policy_name}</span>
-      <span className="text-sm text-foreground">{summary}</span>
+      <span className="text-body">{summary}</span>
       <div className="overflow-x-auto rounded-lg border border-border">
         <table
           className="w-full text-xs"
@@ -919,12 +919,12 @@ function DetailField({
         <CopyableValue
           value={copyValue}
           label={copyLabel ?? label.toLowerCase()}
-          className="text-sm text-foreground break-all"
+          className="text-body break-all"
         >
           {children}
         </CopyableValue>
       ) : (
-        <span className="text-sm text-foreground break-all">{children}</span>
+        <span className="text-body break-all">{children}</span>
       )}
     </div>
   )
@@ -1745,9 +1745,7 @@ export function ActivityPage() {
     (entry: UsageEntry) => (
       <div>
         <div className="flex items-center justify-between border-b border-border px-4 py-2">
-          <span className="text-sm font-medium text-foreground">
-            Request detail
-          </span>
+          <span className="text-body">Request detail</span>
           <Button size="sm" variant="ghost" onPress={() => setExpandedId(null)}>
             Close
           </Button>

@@ -39,7 +39,7 @@ export function Field({
     >
       {/* No manual "*": HeroUI marks a required field's label through CSS
           ([data-required=true] > .label::after), so adding one renders two. */}
-      <Label className="text-sm font-medium text-foreground">{label}</Label>
+      <Label className="text-body">{label}</Label>
       <Input type={type} placeholder={placeholder} autoFocus={autoFocus} />
       {description ? (
         // HeroUI's Description renders through the TextField's "description" slot,

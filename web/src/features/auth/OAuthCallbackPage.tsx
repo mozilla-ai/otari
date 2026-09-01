@@ -190,7 +190,7 @@ export function OAuthCallbackPage({
       title="That sign-in did not complete"
       footer={<PublicAuthLink to="#/">Back to sign in</PublicAuthLink>}
     >
-      <p className="text-center text-sm text-foreground">{failure}</p>
+      <p className="text-center text-body">{failure}</p>
     </PublicAuthLayout>
   )
 }

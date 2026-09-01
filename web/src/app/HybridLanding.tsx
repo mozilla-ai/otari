@@ -80,7 +80,7 @@ export function HybridLanding() {
             <CopyableValue
               value={baseUrl}
               label="gateway base URL"
-              className="font-mono text-sm text-foreground"
+              className="font-mono text-body"
             />
             <p className="text-sm text-muted">
               Use it as the base URL of any OpenAI-compatible client, with an

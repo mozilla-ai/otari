@@ -114,7 +114,7 @@ export function AcceptInvitationPage() {
             <>
               {/* No article before the role: two of the three ("a owner", "a
                   admin") read wrong, and the roles are the server's words. */}
-              <p className="text-center text-sm text-foreground">
+              <p className="text-center text-body">
                 You're now a member of{" "}
                 <strong>{accept.data.organization_name}</strong>, with the{" "}
                 <strong>{accept.data.role}</strong> role.
@@ -194,7 +194,7 @@ export function AcceptInvitationPage() {
             </>
           ) : preview.data ? (
             <>
-              <p className="text-center text-sm text-foreground">
+              <p className="text-center text-body">
                 <strong>{preview.data.organization_name}</strong> has invited{" "}
                 <strong>{preview.data.email}</strong> to join with the{" "}
                 <strong>{preview.data.role}</strong> role.

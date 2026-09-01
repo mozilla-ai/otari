@@ -130,7 +130,7 @@ export function UserComboBox({
       // reach instead of stretching across a wide form.
       className="flex max-w-md flex-col gap-1"
     >
-      <Label className="text-sm font-medium text-foreground">{label}</Label>
+      <Label className="text-body">{label}</Label>
       <ComboBox.InputGroup>
         {/* Not a credential field: keep password managers out, and select on focus
             so typing replaces the current value rather than appending. */}

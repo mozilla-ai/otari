@@ -93,7 +93,7 @@ export function SpendCeilingsCard({
       isRowHeader: true,
       cell: (row) => (
         <div className="flex flex-col gap-0.5">
-          <span className="text-sm text-foreground">
+          <span className="text-body">
             {scopeLabel(row, { organizationName, workspaces: workspaceRows })}
           </span>
           {row.name ? <span className="text-caption">{row.name}</span> : null}

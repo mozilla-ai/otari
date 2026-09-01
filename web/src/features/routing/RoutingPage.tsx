@@ -304,8 +304,8 @@ function ScopePicker({
       onClick={() => onChange(value ? "" : null)}
       className={
         scoped === value
-          ? "rounded-md bg-surface px-3 py-1.5 text-sm font-medium text-foreground shadow-sm"
-          : "rounded-md px-3 py-1.5 text-sm text-muted hover:text-foreground"
+          ? "rounded-md bg-surface px-3 py-1.5 text-body shadow-sm"
+          : "rounded-md px-3 py-1.5 text-body text-muted hover:text-foreground"
       }
     >
       {label}
@@ -315,7 +315,7 @@ function ScopePicker({
   return (
     <div className="flex flex-col gap-3">
       <div>
-        <span className="text-sm font-medium text-foreground">Applies to</span>
+        <span className="text-body">Applies to</span>
         <p className="text-caption">
           A global policy resolves for every caller. A user-scoped one resolves
           only for that user, and takes precedence over a global policy of the
@@ -363,7 +363,7 @@ function ModeToggle({
 }) {
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-sm font-medium text-foreground">{label}</span>
+      <span className="text-body">{label}</span>
       <div className="flex w-fit items-center gap-1 rounded-lg bg-surface-alt p-1">
         {MODE_VALUES.map((mode) => (
           <button
@@ -373,8 +373,8 @@ function ModeToggle({
             onClick={() => onChange(mode)}
             className={
               value === mode
-                ? "rounded-md bg-surface px-3 py-1 text-sm font-medium text-foreground shadow-sm"
-                : "rounded-md px-3 py-1 text-sm text-muted hover:text-foreground"
+                ? "rounded-md bg-surface px-3 py-1 text-body shadow-sm"
+                : "rounded-md px-3 py-1 text-body text-muted hover:text-foreground"
             }
           >
             {mode}
@@ -642,9 +642,7 @@ function PolicyForm({
           <div className="grid gap-4 sm:grid-cols-2">
             {editingAlias ? (
               <div className="flex flex-col gap-1">
-                <span className="text-sm font-medium text-foreground">
-                  Alias name
-                </span>
+                <span className="text-body">Alias name</span>
                 <code className="text-sm text-muted">{previousName}</code>
                 <span className="text-caption">
                   An alias name is its key and cannot be changed here. Delete
@@ -683,10 +681,8 @@ function PolicyForm({
             )}
             {routed ? (
               <div className="flex flex-col gap-1">
-                <span className="text-sm font-medium text-foreground">
-                  Serves
-                </span>
-                <span className="text-sm text-foreground">
+                <span className="text-body">Serves</span>
+                <span className="text-body">
                   {effectiveTarget.trim() === "" ? (
                     <span className="text-muted">
                       whichever model you mark below
@@ -725,7 +721,7 @@ function PolicyForm({
           {conditions.length > 0 ? (
             <div className="flex flex-col gap-3 rounded-lg border border-border p-3">
               <div>
-                <span className="text-sm font-medium text-foreground">
+                <span className="text-body">
                   Instead, when the budget fills up
                 </span>
                 <p className="text-caption">
@@ -789,7 +785,7 @@ function PolicyForm({
           {candidates.length > 0 ? (
             <div className="flex flex-col gap-3 rounded-lg border border-border p-3">
               <div>
-                <span className="text-sm font-medium text-foreground">
+                <span className="text-body">
                   {weighted
                     ? "Split traffic between"
                     : "The router chooses between"}
@@ -945,9 +941,7 @@ function PolicyForm({
           {chain.length > 0 ? (
             <div className="flex flex-col gap-3 rounded-lg border border-border p-3">
               <div>
-                <span className="text-sm font-medium text-foreground">
-                  If that fails, try
-                </span>
+                <span className="text-body">If that fails, try</span>
                 <p className="text-caption">
                   Tried in order after a retryable failure. Not tried once
                   tokens have started streaming, or after a 400/401/403, which
@@ -1005,9 +999,7 @@ function PolicyForm({
           {guardrails.length > 0 ? (
             <div className="flex flex-col gap-3 rounded-lg border border-border p-3">
               <div>
-                <span className="text-sm font-medium text-foreground">
-                  Always check
-                </span>
+                <span className="text-body">Always check</span>
                 <p className="text-caption">
                   Runs on every request through this policy. Callers can add
                   their own guardrails but cannot weaken these.
@@ -1334,9 +1326,7 @@ export function RoutingPage() {
         header: "Serves",
         cell: (policy) => (
           <div className="flex items-center gap-2">
-            <span className="text-sm text-foreground">
-              {servesSummary(policy)}
-            </span>
+            <span className="text-body">{servesSummary(policy)}</span>
             {candidatesOf(policy.spec).length > 0 ? (
               <Chip size="sm" color="accent">
                 {routerLabelOf(policy.spec)}
@@ -1357,7 +1347,7 @@ export function RoutingPage() {
           if (guardrails.length === 0)
             return <span className="text-muted">–</span>
           return (
-            <span className="text-sm text-foreground">
+            <span className="text-body">
               {guardrails
                 .map((guardrail) => `${guardrail.profile} (${guardrail.mode})`)
                 .join(", ")}

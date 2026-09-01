@@ -324,7 +324,7 @@ function ListeningRow({
           </>
         ) : (
           <>
-            <span className="text-sm font-medium text-foreground">
+            <span className="text-body">
               {checkFailed
                 ? "The gateway could not be checked"
                 : "Listening for your first request"}

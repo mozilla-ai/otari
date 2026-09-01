@@ -30,7 +30,7 @@ export function SecretField({
       onChange={onChange}
       className="flex max-w-md flex-col gap-1"
     >
-      <Label className="text-sm font-medium text-foreground">{label}</Label>
+      <Label className="text-body">{label}</Label>
       <Input
         type="password"
         placeholder={placeholder ?? "sk-…"}

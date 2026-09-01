@@ -125,9 +125,7 @@ function NarrowedDefaults({
 
   return (
     <div className="flex flex-col gap-2">
-      <span className="text-sm font-medium text-foreground">
-        Per-provider defaults
-      </span>
+      <span className="text-body">Per-provider defaults</span>
       <ErrorBanner
         error={
           createDefault.error ?? updateDefault.error ?? deleteDefault.error
@@ -682,9 +680,7 @@ export function WorkspacesPage() {
         isRowHeader: true,
         cell: (workspace) => (
           <div className="flex flex-col gap-0.5">
-            <span className="text-sm font-medium text-foreground">
-              {workspace.name}
-            </span>
+            <span className="text-body">{workspace.name}</span>
             {workspace.description ? (
               <span className="text-caption">{workspace.description}</span>
             ) : null}

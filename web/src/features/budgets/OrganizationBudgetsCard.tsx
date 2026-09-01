@@ -62,9 +62,7 @@ export function OrganizationBudgetsCard() {
       id: "name",
       header: "Budget",
       isRowHeader: true,
-      cell: (row) => (
-        <span className="text-sm text-foreground">{budgetLabel(row)}</span>
-      ),
+      cell: (row) => <span className="text-body">{budgetLabel(row)}</span>,
     },
     {
       id: "limit",

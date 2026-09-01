@@ -587,9 +587,7 @@ function Spec({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
       <span className="text-caption">{label}</span>
-      <span className="text-right text-sm text-foreground tabular-nums">
-        {value}
-      </span>
+      <span className="text-right text-body tabular-nums">{value}</span>
     </div>
   )
 }
@@ -879,7 +877,7 @@ function ModelDetailPanel({
         </div>
 
         {metadata?.description ? (
-          <p className="text-sm text-foreground">{metadata.description}</p>
+          <p className="text-body">{metadata.description}</p>
         ) : null}
 
         <PanelSection title="Pricing">
@@ -2189,9 +2187,7 @@ export function ModelsPage() {
             <Card>
               <Card.Content className="p-0">
                 <div className="flex items-center justify-between border-b border-border px-4 py-2">
-                  <span className="text-sm font-medium text-foreground">
-                    Edit pricing
-                  </span>
+                  <span className="text-body">Edit pricing</span>
                   <Button
                     size="sm"
                     variant="ghost"

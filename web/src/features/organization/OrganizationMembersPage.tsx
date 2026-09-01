@@ -231,9 +231,7 @@ function AddMemberForm({ onClose }: { onClose: () => void }) {
         </div>
         {workspaces.data && workspaces.data.length > 0 ? (
           <fieldset className="flex flex-col gap-2">
-            <legend className="text-sm font-medium text-foreground">
-              Workspaces (optional)
-            </legend>
+            <legend className="text-body">Workspaces (optional)</legend>
             <span className="text-caption">
               Joined as a member of each, in the same request, so someone never
               exists without the access they were added for. Workspace roles are
@@ -393,9 +391,7 @@ function InviteMemberForm({ onClose }: { onClose: () => void }) {
         </div>
         {workspaces.data && workspaces.data.length > 0 ? (
           <fieldset className="flex flex-col gap-2">
-            <legend className="text-sm font-medium text-foreground">
-              Workspaces (optional)
-            </legend>
+            <legend className="text-body">Workspaces (optional)</legend>
             <span className="text-caption">
               Granted once the invitation is accepted, not before.
             </span>
@@ -658,9 +654,7 @@ function MemberEditor({
         )}
 
         <div className="flex flex-col gap-2">
-          <span className="text-sm font-medium text-foreground">
-            Workspace access
-          </span>
+          <span className="text-body">Workspace access</span>
           <div className="max-w-3xl overflow-x-auto">
             <table className="w-full min-w-lg text-sm">
               <thead>
@@ -850,9 +844,7 @@ export function OrganizationMembersPage() {
         isRowHeader: true,
         cell: (member) => (
           <div className="flex flex-col gap-0.5">
-            <span className="text-sm text-foreground">
-              {memberLabel(member)}
-            </span>
+            <span className="text-body">{memberLabel(member)}</span>
             {member.email && member.full_name ? (
               <span className="text-caption">{member.email}</span>
             ) : null}
@@ -991,9 +983,7 @@ export function OrganizationMembersPage() {
           }
           return (
             <div className="flex flex-col items-end gap-0.5">
-              <span className="text-sm text-foreground">
-                {usd.format(spendRow.spend)}
-              </span>
+              <span className="text-body">{usd.format(spendRow.spend)}</span>
               {spendRow.reserved > 0 ? (
                 <span className="text-caption">
                   {usd.format(spendRow.reserved)} in flight

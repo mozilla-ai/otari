@@ -393,8 +393,8 @@ function AddProviderForm({ onClose }: { onClose: () => void }) {
                 onClick={() => setTab(id)}
                 className={
                   tab === id
-                    ? "rounded-md bg-surface px-3 py-1.5 text-sm font-medium text-foreground shadow-sm"
-                    : "rounded-md px-3 py-1.5 text-sm text-muted hover:text-foreground"
+                    ? "rounded-md bg-surface px-3 py-1.5 text-body shadow-sm"
+                    : "rounded-md px-3 py-1.5 text-body text-muted hover:text-foreground"
                 }
               >
                 {label}

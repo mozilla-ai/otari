@@ -124,8 +124,8 @@ export function ModelScopeControl({
       onClick={() => chooseMode(value)}
       className={
         mode === value
-          ? "rounded-md bg-surface px-3 py-1.5 text-sm font-medium text-foreground shadow-sm"
-          : "rounded-md px-3 py-1.5 text-sm text-muted hover:text-foreground"
+          ? "rounded-md bg-surface px-3 py-1.5 text-body shadow-sm"
+          : "rounded-md px-3 py-1.5 text-body text-muted hover:text-foreground"
       }
     >
       {label}
@@ -138,7 +138,7 @@ export function ModelScopeControl({
   return (
     <div className="flex flex-col gap-3">
       <div>
-        <span className="text-sm font-medium text-foreground">{title}</span>
+        <span className="text-body">{title}</span>
         <p className="text-caption">
           {description ??
             "Which models this key may list and call. The master key is never restricted, so blocking a key cannot lock you out of the dashboard."}

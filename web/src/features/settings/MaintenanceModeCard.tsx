@@ -37,9 +37,7 @@ export function MaintenanceModeCard() {
             {data ? (
               <div className="flex flex-wrap items-start justify-between gap-4">
                 <div className="min-w-0">
-                  <p className="text-sm font-medium text-foreground">
-                    Freeze new dashboard sign-ins
-                  </p>
+                  <p className="text-body">Freeze new dashboard sign-ins</p>
                   <p className="mt-1 max-w-3xl text-sm text-muted">
                     {enabled
                       ? "Nobody can start a new dashboard session. Sessions already open keep working, and the API and management endpoints still answer the master key, so you can turn this back off from here or with your key."

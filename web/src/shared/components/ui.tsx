@@ -123,7 +123,7 @@ export function Checkbox({
       isSelected={isSelected}
       onChange={onChange}
       isDisabled={isDisabled}
-      className="group flex w-fit items-center gap-2 text-sm text-foreground"
+      className="group flex w-fit items-center gap-2 text-body"
     >
       {({ isSelected: selected, isDisabled: disabled }) => (
         <>

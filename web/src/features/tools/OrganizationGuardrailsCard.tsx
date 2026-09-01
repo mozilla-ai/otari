@@ -212,9 +212,7 @@ function GuardrailRow({
   return (
     <div className="flex flex-col gap-2 py-4">
       <div className="flex flex-wrap items-center gap-2">
-        <code className="text-sm font-medium text-foreground">
-          {guardrail.profile}
-        </code>
+        <code className="font-mono text-body">{guardrail.profile}</code>
         <Badge tone="muted">{scopeLabel(guardrail, workspaces)}</Badge>
         {guardrail.url ? <Badge tone="muted">own endpoint</Badge> : null}
         {guardrail.has_credential ? (
@@ -359,9 +357,7 @@ function AddGuardrailForm({
 
   return (
     <div className="flex flex-col gap-2 py-4">
-      <span className="text-sm font-medium text-foreground">
-        Mandate a guardrail
-      </span>
+      <span className="text-body">Mandate a guardrail</span>
       <div className="flex flex-wrap items-end gap-2">
         <input
           type="text"

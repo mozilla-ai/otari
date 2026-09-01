@@ -38,7 +38,7 @@ export function AuthEmailField({
       isReadOnly={isReadOnly}
       className="flex flex-col gap-1"
     >
-      <Label className="text-sm font-medium text-foreground">{label}</Label>
+      <Label className="text-body">{label}</Label>
       {/* autoComplete="username" and not "email": this is the handle the
           sign-in form asks for, so a password manager should file it against
           the credential it is being set beside. */}
@@ -88,7 +88,7 @@ export function AuthPasswordField({
       isRequired
       className="flex flex-col gap-1"
     >
-      <Label className="text-sm font-medium text-foreground">{label}</Label>
+      <Label className="text-body">{label}</Label>
       <Input autoComplete={autoComplete} />
       {description ? (
         <Description className="text-caption">{description}</Description>
@@ -116,7 +116,7 @@ export function AuthTextField({
       onChange={onChange}
       className="flex flex-col gap-1"
     >
-      <Label className="text-sm font-medium text-foreground">{label}</Label>
+      <Label className="text-body">{label}</Label>
       <Input autoComplete={autoComplete} />
       {description ? (
         <Description className="text-caption">{description}</Description>

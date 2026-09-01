@@ -33,7 +33,7 @@ export function CheckEmailPage({ hash }: { hash: string }) {
         </>
       }
     >
-      <p className="text-center text-sm text-foreground">
+      <p className="text-center text-body">
         Open the link in that message to confirm the address. Signing in is
         blocked until you do.
       </p>

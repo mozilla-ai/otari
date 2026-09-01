@@ -79,9 +79,7 @@ export function DeploymentAccountsPage() {
         isRowHeader: true,
         cell: (account) => (
           <div className="flex flex-col gap-0.5">
-            <span className="text-sm text-foreground">
-              {accountLabel(account)}
-            </span>
+            <span className="text-body">{accountLabel(account)}</span>
             {/* `full_name?.trim()`, matching `accountLabel`: a name that is
                 only whitespace falls back to the email up there, so testing the
                 untrimmed value here would print the same address twice. */}

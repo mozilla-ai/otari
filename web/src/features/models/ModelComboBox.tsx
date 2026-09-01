@@ -110,7 +110,7 @@ export function ModelComboBox({
       className="flex max-w-md flex-col gap-1"
     >
       {/* HeroUI marks a required field's label through CSS; see Field. */}
-      <Label className="text-sm font-medium text-foreground">{label}</Label>
+      <Label className="text-body">{label}</Label>
       <ComboBox.InputGroup>
         <Input placeholder={placeholder} autoFocus={autoFocus} />
         <ComboBox.Trigger />

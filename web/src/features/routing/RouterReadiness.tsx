@@ -28,7 +28,7 @@ function Warmth({
           style={{ width: `${pct}%` }}
         />
       </div>
-      <span className="text-sm text-foreground">
+      <span className="text-body">
         {records} / {seed} examples
       </span>
       <Chip size="sm" color={warm ? "accent" : "default"}>
@@ -75,7 +75,7 @@ export function RouterReadiness({
   return (
     <div>
       <div className="flex items-center justify-between border-b border-border px-4 py-2">
-        <span className="text-sm font-medium text-foreground">
+        <span className="text-body">
           Examples for <code>{policyName}</code>
         </span>
         <Button size="sm" variant="ghost" onPress={onClose}>
@@ -86,7 +86,7 @@ export function RouterReadiness({
       <div className="flex flex-col gap-5 px-4 py-4">
         <div className="flex flex-col gap-1">
           <span className="text-caption">Candidates</span>
-          <span className="text-sm text-foreground">
+          <span className="text-body">
             <code>{backend}</code> ranks {candidates.join(", ")} for each
             request.
           </span>
@@ -131,9 +131,7 @@ export function RouterReadiness({
           ) : status.data ? (
             <div className="flex flex-col gap-2">
               <div className="flex flex-wrap items-center gap-3">
-                <span className="text-sm font-medium text-foreground">
-                  Default pool
-                </span>
+                <span className="text-body">Default pool</span>
                 <Warmth
                   records={status.data.default_pool.records}
                   seed={status.data.seed_count}
@@ -145,9 +143,7 @@ export function RouterReadiness({
                   key={pool.task_id}
                   className="flex flex-wrap items-center gap-3"
                 >
-                  <code className="text-sm text-foreground">
-                    {pool.task_id}
-                  </code>
+                  <code className="font-mono text-body">{pool.task_id}</code>
                   <Warmth
                     records={pool.records}
                     seed={status.data.seed_count}

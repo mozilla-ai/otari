@@ -134,7 +134,7 @@ function PeriodPicker({
 
   return (
     <div className="flex flex-col gap-2">
-      <span className="text-sm font-medium text-foreground">Reset period</span>
+      <span className="text-body">Reset period</span>
       <div className="flex flex-wrap gap-2">
         {PERIOD_PRESETS.map((preset) => (
           <Button
@@ -927,7 +927,7 @@ function DeploymentBudgetsPage() {
         <Card>
           <Card.Content className="p-0">
             <div className="flex items-center justify-between border-b border-border px-4 py-2">
-              <span className="text-sm font-medium text-foreground">
+              <span className="text-body">
                 Reset history — {budgetLabel(historyBudget)}
               </span>
               <Button

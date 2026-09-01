@@ -90,7 +90,7 @@ function PricingRefreshDialog({
               {preview.protected_model_count === 1 ? "" : "s"} remain unchanged.
             </p>
             {preview.changes.length > 0 ? (
-              <ul className="max-h-60 list-disc overflow-auto pl-5 text-sm text-foreground">
+              <ul className="max-h-60 list-disc overflow-auto pl-5 text-body">
                 {preview.changes.map((change) => (
                   <li key={change.model_key}>
                     {change.model_key}: {change.change}
@@ -140,9 +140,7 @@ function PricingRefreshSection() {
         <Card.Content className="flex flex-col gap-4 p-5">
           <div className="flex flex-wrap items-start justify-between gap-3">
             <div className="min-w-0">
-              <div className="text-sm font-medium text-foreground">
-                genai-prices defaults
-              </div>
+              <div className="text-body">genai-prices defaults</div>
               <p className="mt-1 max-w-3xl text-sm text-muted">
                 Fetch the latest upstream catalog, review the proposed change
                 summary, then accept or reject it. Accepted data is stored as{" "}
@@ -264,9 +262,7 @@ const COLUMNS: DataTableColumn<PriceRow>[] = [
     id: "modelKey",
     header: "Model",
     isRowHeader: true,
-    cell: (row) => (
-      <span className="font-mono text-sm text-foreground">{row.modelKey}</span>
-    ),
+    cell: (row) => <span className="font-mono text-body">{row.modelKey}</span>,
   },
   {
     id: "input",

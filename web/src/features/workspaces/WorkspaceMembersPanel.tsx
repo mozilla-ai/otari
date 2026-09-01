@@ -162,7 +162,7 @@ export function WorkspaceMembersPanel({
               key={member.id}
               className="flex flex-wrap items-center gap-3 rounded-lg border border-border bg-surface-alt px-3 py-2"
             >
-              <span className="text-sm text-foreground">
+              <span className="text-body">
                 {nameByUserId.get(member.user_id) ??
                   `Identity ${member.user_id.slice(0, 8)}`}
               </span>

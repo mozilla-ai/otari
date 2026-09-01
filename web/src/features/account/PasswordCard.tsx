@@ -43,7 +43,7 @@ function PasswordField({
       isRequired
       className="flex max-w-md flex-col gap-1"
     >
-      <Label className="text-sm font-medium text-foreground">{label}</Label>
+      <Label className="text-body">{label}</Label>
       <Input autoComplete={autoComplete} />
       {description ? (
         // HeroUI's Description renders through the TextField's "description"
@@ -225,9 +225,7 @@ export function PasswordCard() {
                 isRequired
                 className="flex max-w-md flex-col gap-1"
               >
-                <Label className="text-sm font-medium text-foreground">
-                  Email
-                </Label>
+                <Label className="text-body">Email</Label>
                 {/* autoComplete="username" and not "email": this is the handle
                     the sign-in form will ask for, so a password manager should
                     file it against the credential it is being set beside. */}

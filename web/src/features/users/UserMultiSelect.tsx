@@ -80,7 +80,7 @@ export function UserMultiSelect({
   return (
     <div className="flex flex-col gap-2">
       <div>
-        <span className="text-sm font-medium text-foreground">{label}</span>
+        <span className="text-body">{label}</span>
         {description ? <p className="text-caption">{description}</p> : null}
       </div>
       {value.length > 0 ? (

@@ -369,7 +369,7 @@ function UserMismatchPicker({
       {/* The label carries markup (`user` as code), which FilterSelect's own
           `label` cannot, so it stays here with `htmlFor` on the trigger and
           `ariaLabel` naming the control for assistive tech. */}
-      <label htmlFor={selectId} className="text-sm font-medium text-foreground">
+      <label htmlFor={selectId} className="text-body">
         Mismatched <code>user</code> field
       </label>
       <FilterSelect
@@ -882,10 +882,7 @@ export function KeysPage() {
                   : undefined
                 if (member) {
                   return (
-                    <span
-                      className="text-sm text-foreground"
-                      title={k.user_id ?? ""}
-                    >
+                    <span className="text-body" title={k.user_id ?? ""}>
                       {member}
                     </span>
                   )

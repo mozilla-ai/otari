@@ -144,9 +144,7 @@ function KeyForm({
           // uniqueness constraint and the whole of what dispatch matches on),
           // and the API's update body cannot change it.
           <div className="flex flex-col gap-1">
-            <span className="text-sm font-medium text-foreground">
-              Provider
-            </span>
+            <span className="text-body">Provider</span>
             <span className="text-sm text-muted">
               {editing.provider}. Create a second key to use another provider.
             </span>

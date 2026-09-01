@@ -52,7 +52,7 @@ function OrganizationDetails({
           description="What this deployment's tenant is called across the dashboard. The slug below is set when the organization is provisioned and does not follow a rename."
         />
         <div className="flex flex-col gap-1">
-          <span className="text-sm font-medium text-foreground">Slug</span>
+          <span className="text-body">Slug</span>
           <CopyableValue value={slug} label="organization slug">
             <code className="font-mono text-caption">{slug}</code>
           </CopyableValue>

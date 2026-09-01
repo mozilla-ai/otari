@@ -152,9 +152,7 @@ export function SpendCeilingDialog({
                 <ErrorBanner error={error} />
                 {editing ? (
                   <div className="flex flex-col gap-1">
-                    <span className="text-sm font-medium text-foreground">
-                      Capping
-                    </span>
+                    <span className="text-body">Capping</span>
                     <span className="text-sm text-muted">
                       {scopeLabel(editing, { organizationName, workspaces })}
                       {editing.provider_key_id
