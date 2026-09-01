@@ -21,7 +21,7 @@ import {
   TableScrollFrame,
 } from "@/shared/components/surface"
 import { ErrorBanner, InfoBanner, PageLoading } from "@/shared/components/ui"
-import { formatCost } from "@/shared/helpers/format"
+import { formatCost, formatRelative } from "@/shared/helpers/format"
 
 // The organization's model pricing: what the gateway meters a request at, and
 // where the numbers come from.
@@ -270,6 +270,18 @@ const COLUMNS: DataTableColumn<PriceRow>[] = [
     header: "Tiers",
     align: "end",
     cell: (row) => (row.tiers === 0 ? "—" : `${row.tiers} configured`),
+  },
+  // The row has carried this since it was built and never rendered it. It earns
+  // the lane now because something has to absorb the width this table does not
+  // use, and the alternative was a gap: when a rate last moved is the question
+  // an operator brings to a price they did not expect.
+  {
+    id: "updatedAt",
+    header: "Updated",
+    align: "end",
+    cell: (row) => (
+      <span className="text-muted">{formatRelative(row.updatedAt)}</span>
+    ),
   },
 ]
 

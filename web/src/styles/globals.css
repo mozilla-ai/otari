@@ -1696,6 +1696,52 @@ main {
   border-right: 1px solid var(--color-control-border);
 }
 
+/* Workspaces. Same terms as the others, and the same 58px row the Members and
+   Keys tables take, set by the two-line identity cell: a name over the
+   description that says what the workspace is for. */
+.otari-workspaces-table .otari-table.table-root {
+  background-color: transparent;
+}
+.otari-workspaces-table .otari-table .table__header {
+  background-color: transparent;
+  border-bottom: 1px solid var(--color-border);
+}
+.otari-workspaces-table .otari-table .table__row,
+.otari-workspaces-table .table__row .table__cell {
+  border-color: var(--color-border-subtle);
+}
+.otari-workspaces-table .table__row .table__cell {
+  height: 58px;
+  padding-block: 0;
+}
+.otari-workspaces-table .table__column[data-key="created"] {
+  width: 140px;
+  min-width: 140px;
+}
+/* The slack absorber, for the reason the pricing tables' trailing lane is one:
+   without it the identity lane takes every unused pixel and throws the three
+   lanes after it against the right edge, with a void in between. */
+.otari-workspaces-table .table__column[data-key="default-budget"] {
+  min-width: 220px;
+}
+.otari-workspaces-table .table__column[data-key="actions"] {
+  width: 190px;
+  min-width: 190px;
+}
+.otari-workspaces-table .table__column[data-key="name"],
+.otari-workspaces-table .table__cell[data-key="name"] {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background-color: var(--color-background);
+  width: 440px;
+  min-width: 440px;
+}
+.otari-workspaces-table[data-scrolled="true"] .table__column[data-key="name"],
+.otari-workspaces-table[data-scrolled="true"] .table__cell[data-key="name"] {
+  border-right: 1px solid var(--color-control-border);
+}
+
 /* Model pricing's two tables, on the same terms as every other: page ground, a
    rule-bounded overline header, faint separators, and fixed numeric lanes so a
    rate can be read down the column against its neighbors. The model key takes
@@ -1744,6 +1790,10 @@ main {
 .otari-pricing-table .table__cell[data-key="cacheRead"] {
   padding-inline: 10px;
 }
+.otari-pricing-table .table__column[data-key="tiers"] {
+  width: 120px;
+  min-width: 120px;
+}
 /* Deliberately unconstrained, and it is the only lane in either table that is.
    Some column has to absorb the width a table does not otherwise use, and if
    that column is the model key then the rates get pushed to the far right: on
@@ -1751,8 +1801,8 @@ main {
    the same quantity twice at two different places on one screen. The trailing
    lane takes the slack in both tables instead (`Period` in the overrides one),
    so the rate lanes start at the same x and can be read straight down. */
-.otari-pricing-table .table__column[data-key="tiers"] {
-  min-width: 90px;
+.otari-pricing-table .table__column[data-key="updatedAt"] {
+  min-width: 130px;
 }
 .otari-rate-overrides-table .table__column[data-key="period"] {
   min-width: 200px;
