@@ -142,7 +142,7 @@ function StatusMark({ status }: { status: string }) {
               word: membershipLabel(status),
             }
           : {
-              dot: "bg-surface-subtle",
+              dot: "bg-text-subtle",
               ink: "text-subtle",
               word: membershipLabel(status),
             }

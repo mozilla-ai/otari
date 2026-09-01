@@ -665,7 +665,7 @@ function EditKeyForm({
  */
 function StatusMark({ apiKey }: { apiKey: ApiKey }) {
   const { word, dot, ink } = !apiKey.is_active
-    ? { word: "Disabled", dot: "bg-surface-subtle", ink: "text-subtle" }
+    ? { word: "Disabled", dot: "bg-text-subtle", ink: "text-subtle" }
     : isExpired(apiKey)
       ? { word: "Expired", dot: "bg-danger", ink: "text-muted" }
       : { word: "Active", dot: "bg-success", ink: "text-muted" }

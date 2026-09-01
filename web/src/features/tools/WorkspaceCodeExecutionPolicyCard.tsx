@@ -275,7 +275,7 @@ export function WorkspaceCodeExecutionPolicyCard({
           // The absence of a stored row, stated rather than boxed: this
           // workspace has not departed from the deployment default.
           <span className="flex items-center gap-2 font-mono text-[13px] text-subtle">
-            <Dot className="bg-surface-subtle" />
+            <Dot className="bg-text-subtle" />
             NO POLICY SET
           </span>
         ) : null}

@@ -319,7 +319,7 @@ export function InfoBanner({
   return (
     <div className="flex items-start gap-3 border-y border-border py-3 text-sm text-muted">
       <Dot
-        className={`mt-2 ${tone === "warning" ? "bg-danger" : "bg-surface-subtle"}`}
+        className={`mt-2 ${tone === "warning" ? "bg-danger" : "bg-text-subtle"}`}
       />
       {/* Capped for the reason the page header and the settings rows are: a
           banner is a full-bleed row now, and its sentence would otherwise run

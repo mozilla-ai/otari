@@ -951,9 +951,7 @@ export function ProvidersPage() {
       cell: (row) => (
         <span className="flex items-center gap-2 font-mono text-[13px] text-muted">
           <Dot
-            className={
-              row.source === "stored" ? "bg-accent" : "bg-surface-subtle"
-            }
+            className={row.source === "stored" ? "bg-accent" : "bg-text-subtle"}
           />
           {row.source === "stored" ? "STORED" : "CONFIG"}
         </span>

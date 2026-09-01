@@ -267,7 +267,7 @@ export function OrganizationProviderKeysPage() {
           ) : null}
           {row.archived_at ? (
             <span className="flex items-center gap-2 font-mono text-[13px] text-subtle">
-              <Dot className="bg-surface-subtle" />
+              <Dot className="bg-text-subtle" />
               ARCHIVED
             </span>
           ) : null}

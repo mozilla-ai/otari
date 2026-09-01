@@ -666,6 +666,14 @@
      above are: the name is registered here and the value stays in the two theme
      blocks, so light and dark each own theirs. */
   --color-border-subtle: var(--color-border-subtle);
+  /* Registered so a status dot can be `bg-text-subtle`. Same latent shape as
+     the tier above: it has been a plain `:root` variable, reachable from this
+     stylesheet and from the `text-subtle` utility, and from nowhere else. A dot
+     asking for it as a class got a class that does not exist, so the quiet
+     state fell back to a surface value and rendered at 1.14:1, which is
+     invisible rather than quiet. Dots take values off the TEXT ramp; the
+     surface ramp is for the things behind them. */
+  --color-text-subtle: var(--color-text-subtle);
   --color-control-thumb: var(--color-control-thumb);
   --shadow-elevation-sm: var(--shadow-sm);
   --shadow-elevation-md: var(--shadow-md);
@@ -2398,15 +2406,19 @@ main {
 .otari-markdown li > ol {
   margin: 0.25rem 0;
 }
+/* The face is the marker, and nothing else is. This was a tinted chip, which
+   made it the last place in the product where the accent was decoration rather
+   than data ink, a graphic fill, or a status dot. Fira Code beside the body
+   face is already an unmistakable change of voice, which is exactly how an
+   identifier is marked in every table here; a fill on top of it was saying the
+   same thing twice and spending the accent to do it.
+
+   No size reduction either. `0.85em` shrank an identifier a reader has to copy
+   by eye below the prose it sits in, and the mono face already reads smaller at
+   a matched size. */
 .otari-markdown code {
   font-family: var(--font-mono);
-  font-size: 0.85em;
-  /* Tinted chip, text ink. Coloring the text with the accent instead would put
-     the accent on its own tint, which clears AA in neither theme. */
-  background-color: var(--color-primary-subtle);
-  color: var(--color-text);
-  padding: 0.1rem 0.35rem;
-  border-radius: 0;
+  color: inherit;
 }
 /* A code block is a small object of its own on the prose ground, which is the
    one place in this product where an edge is right: it is a verbatim thing to
@@ -2451,13 +2463,13 @@ main {
 .otari-markdown .otari-code-label button:hover {
   opacity: 1;
 }
+/* A block's code keeps its own size and its own ink: it sits on the code
+   surface rather than in the prose, so it is not inheriting the paragraph
+   around it the way an inline identifier now does. */
 .otari-markdown pre code {
-  background-color: transparent;
   color: var(--color-code-foreground);
-  padding: 0;
-  border-radius: 0;
-  font-size: 0.82rem;
-  line-height: 1.55;
+  font-size: 13px;
+  line-height: 20px;
 }
 .otari-markdown blockquote {
   margin: 1rem 0;
@@ -2477,24 +2489,31 @@ main {
   max-width: 100%;
   overflow-x: auto;
 }
+/* The same table the rest of the product has: rows on the page ground divided
+   by rules, with the header told from them by a rule and by weight rather than
+   by a fill. It was a grid of boxed cells under an accent-tinted header row,
+   which was the second place the accent survived as decoration and also the one
+   table in the product that did not look like the others. */
 .otari-markdown table {
   border-collapse: collapse;
-  font-size: 0.85rem;
+  width: 100%;
+  font-size: 14px;
+  line-height: 20px;
 }
 .otari-markdown th,
 /* biome-ignore lint/style/noDescendingSpecificity: the earlier, more specific td rule is scoped to .otari-table, so these two never apply to the same cell */
 .otari-markdown td {
-  border: 1px solid var(--color-border);
-  padding: 0.4rem 0.7rem;
+  border: 0;
+  border-bottom: 1px solid var(--color-border-subtle);
+  padding: 0.5rem 0.75rem 0.5rem 0;
   text-align: left;
   vertical-align: top;
 }
 .otari-markdown th {
-  background-color: var(--color-primary-subtle);
+  border-bottom: 1px solid var(--color-border);
   color: var(--color-text);
-  font-weight: 600;
+  font-weight: var(--font-weight-semibold);
 }
-.otari-markdown tbody tr:hover td,
-.otari-markdown tr:hover td {
+.otari-markdown tbody tr:hover td {
   background-color: var(--color-surface-muted);
 }

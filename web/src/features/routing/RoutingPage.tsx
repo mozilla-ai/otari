@@ -1345,7 +1345,7 @@ export function RoutingPage() {
             <span className="flex items-center gap-2 font-mono text-[13px] text-muted">
               <Dot
                 className={
-                  row.source === "config" ? "bg-surface-subtle" : "bg-accent"
+                  row.source === "config" ? "bg-text-subtle" : "bg-accent"
                 }
               />
               {row.source.toUpperCase()}

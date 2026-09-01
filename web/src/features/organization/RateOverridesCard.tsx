@@ -57,7 +57,7 @@ const STATUS_LABEL: Record<
 const STATUS_DOT: Record<ReturnType<typeof overrideStatus>, string> = {
   active: "bg-success",
   scheduled: "bg-accent",
-  expired: "bg-surface-subtle",
+  expired: "bg-text-subtle",
 }
 
 function rate(value: number | null | undefined): string {

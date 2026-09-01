@@ -47,7 +47,7 @@ function AccessMark({ account }: { account: DeploymentUser }) {
     ? { dot: "bg-accent", ink: "text-muted", word: "Bootstrap operator" }
     : account.is_superuser
       ? { dot: "bg-accent", ink: "text-muted", word: "Operator" }
-      : { dot: "bg-surface-subtle", ink: "text-subtle", word: "Member" }
+      : { dot: "bg-text-subtle", ink: "text-subtle", word: "Member" }
   return (
     <span className={`flex items-center gap-2 font-mono text-[13px] ${ink}`}>
       <Dot className={dot} />

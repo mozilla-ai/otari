@@ -411,7 +411,7 @@ function StatusMark({ status }: { status: string }) {
     status === "error"
       ? { dot: "bg-danger", ink: "text-danger" }
       : status === "absorbed"
-        ? { dot: "bg-surface-subtle", ink: "text-subtle" }
+        ? { dot: "bg-text-subtle", ink: "text-subtle" }
         : { dot: "bg-success", ink: "text-muted" }
   return (
     <span className={`flex items-center gap-2 font-mono text-[13px] ${ink}`}>

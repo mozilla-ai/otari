@@ -986,7 +986,7 @@ function StatusMark({ status }: { status: string }) {
     word === "error"
       ? "bg-danger"
       : word === "absorbed"
-        ? "bg-surface-subtle"
+        ? "bg-text-subtle"
         : "bg-success"
   const text = word === "error" ? "text-danger" : "text-muted"
   return (

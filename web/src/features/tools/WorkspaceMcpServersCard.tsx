@@ -186,7 +186,7 @@ export function WorkspaceMcpServersCard({
       // door already use.
       cell: (row) => (
         <span className="flex items-center gap-2 font-mono text-[13px] text-muted">
-          <Dot className={row.enabled ? "bg-success" : "bg-surface-subtle"} />
+          <Dot className={row.enabled ? "bg-success" : "bg-text-subtle"} />
           {row.enabled ? "ENABLED" : "DISABLED"}
         </span>
       ),

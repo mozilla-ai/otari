@@ -522,14 +522,14 @@ function SourceMark({ source }: { source: PriceSource }) {
     source === "configured"
       ? { word: "Custom", dot: "bg-accent", ink: "text-foreground" }
       : source === "default" || source === "alias"
-        ? { word: source, dot: "bg-surface-subtle", ink: "text-muted" }
+        ? { word: source, dot: "bg-text-subtle", ink: "text-muted" }
         : source === "unknown"
           ? {
               word: "rate unknown",
-              dot: "bg-surface-subtle",
+              dot: "bg-text-subtle",
               ink: "text-subtle",
             }
-          : { word: "not priced", dot: "bg-surface-subtle", ink: "text-subtle" }
+          : { word: "not priced", dot: "bg-text-subtle", ink: "text-subtle" }
   return (
     <span className={`flex items-center gap-2 font-mono text-[13px] ${ink}`}>
       <Dot className={dot} />
