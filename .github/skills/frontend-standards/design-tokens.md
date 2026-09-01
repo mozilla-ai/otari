@@ -173,8 +173,8 @@ through.
 
 ## Type scale
 
-Seven roles, each an `@utility` in the same file. Pick the one whose **meaning** matches the
-text, not its size:
+Two scales, each role an `@utility` in the same file. Seven roles carry the content of a page.
+Pick the one whose **meaning** matches the text, not its size:
 
 `text-display` (one per route) · `text-heading` (section) · `text-title` (card/dialog) ·
 `text-body` (default, matches `<body>`) · `text-emphasis` (rare) · `text-caption` (metadata) ·
@@ -189,20 +189,36 @@ card title nested two sections deep may be an `<h3>` or an `<h4>` and still wear
 `text-title`. Pick the level that keeps the outline unbroken, then the role that matches the
 meaning.
 
-A role carries family, size, line-height, tracking, weight and ink together, so writing any of
-those beside one is a bug rather than a refinement: `@utility` definitions are emitted ahead of
-the theme's own utilities, so the `text-xs` in `text-caption text-xs` wins the size and the role
-compiles, emits and does nothing. `text-xs text-muted` is the caption role spelled that way, a
-point small and repeating an ink the role already sets. `src/styles/foundation.test.ts` sweeps
-`src` for both. The single deliberate pairing is `font-mono`, because a role sets the body face
-and an identifier does not belong in it.
+A content role carries family, size, line-height, tracking, weight and ink together, so writing
+any of those beside one is a bug rather than a refinement. `@utility` definitions are emitted
+ahead of the theme's own utilities, so the `text-xs` in `text-caption text-xs` wins the size and
+the role compiles, emits and does nothing, and the `text-muted` in `text-caption text-muted`
+repeats an ink the role already sets. `text-xs text-muted` is that role hand-rolled, a point
+small and stating an ink twice. `src/styles/foundation.test.ts` sweeps `src` for all three. The
+one deliberate pairing is `font-mono`, because a content role sets the body face and an
+identifier does not belong in it.
 
-Zilla Slab is spent on `text-display` alone; every other role, `text-heading` included, is set
-in Mozilla Text, because at 18px a slab serif competes with the page title instead of sitting
-under it (mozilla-ai/otari#807). Keys, IDs, and code are Fira Code. A bare `h1`-`h6` still defaults to the
-display face through the `@layer base` rule in the same file, which is why a heading always
-wears a role: left bare it renders serif, and at any size but the display's that reads as an
-accident. The faces are self-hosted in `web/public/fonts/` under
+The shell chrome is the other scale: the rails, the account menu and the top bar, which read a
+step below the content roles because they are furniture around a page rather than part of one.
+
+`text-chrome-row` (13px, the caption step: a row label in either rail, the menu, or the top bar)
+· `text-chrome-meta` (12px, `--text-xs`: the second line under one of those labels) ·
+`text-chrome-initials` (9px, sized to a 26px avatar).
+
+These three carry metrics only. No weight and no ink, because one menu row is `text-foreground`
+resting and `text-muted` disabled and an identity line is medium over semibold, so the call site
+is where the weight and the colour belong: `text-chrome-meta text-muted` is the shape to write,
+not a wart to clean up. That is the opposite of the content contract above, so check which scale
+a role belongs to before deciding a class beside it is redundant. `text-chrome-initials` is the
+one documented off-scale size, and globals.css says why: two letters in a 26px avatar are
+recognized rather than read.
+
+Zilla Slab is spent on `text-display` alone; every other content role, `text-heading`
+included, is set in Mozilla Text, because at 18px a slab serif competes with the page title
+instead of sitting under it (mozilla-ai/otari#807). Keys, IDs, and code are Fira Code. A bare
+`h1`-`h6` still defaults to the display face through the `@layer base` rule in the same file,
+which is why a heading always wears a role: left bare it renders serif, and at any size but the
+display's that reads as an accident. The faces are self-hosted in `web/public/fonts/` under
 SIL OFL 1.1, with each family's license shipped beside it (see the README there), so the
 dashboard's typography needs no third-party request and an air-gapped gateway looks like a
 connected one. Adding a family means adding its license in the same commit;
