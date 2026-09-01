@@ -1,4 +1,4 @@
-import { Button, Card, Chip, Spinner } from "@heroui/react"
+import { Button, Spinner } from "@heroui/react"
 import { useEffect, useMemo, useState } from "react"
 import type {
   Budget,
@@ -23,11 +23,17 @@ import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import { Field } from "@/shared/components/Field"
 import {
+  PageIntro,
+  Section,
+  SpendMeter,
+  spendState,
+  TableScrollFrame,
+} from "@/shared/components/surface"
+import {
   CopyableValue,
   EmptyState,
   ErrorBanner,
   InfoBanner,
-  PageHeader,
 } from "@/shared/components/ui"
 import {
   resolveSelectedIds,
@@ -254,57 +260,58 @@ function BudgetForm({
   }
 
   return (
-    <Card>
-      <Card.Content className="flex flex-col gap-4 p-5">
-        <div className="text-title">{title}</div>
-        <ErrorBanner error={error} />
-        <Field
-          label="Name (optional)"
-          value={name}
-          onChange={setName}
-          autoFocus
-          placeholder="team-free-tier"
-          description="A label to recognize this budget later."
+    <Section
+      className="border-y border-border py-5"
+      contentClassName="flex flex-col gap-4"
+    >
+      <div className="text-title">{title}</div>
+      <ErrorBanner error={error} />
+      <Field
+        label="Name (optional)"
+        value={name}
+        onChange={setName}
+        autoFocus
+        placeholder="team-free-tier"
+        description="A label to recognize this budget later."
+      />
+      <Field
+        label="Spending limit (USD)"
+        value={limit}
+        onChange={setLimit}
+        placeholder="100.00"
+        description={
+          parsed.valid ? (
+            "The most a single user on this budget may spend per period. Leave blank for no limit."
+          ) : (
+            <span className="text-danger">
+              Enter a non-negative number, or leave blank for no limit.
+            </span>
+          )
+        }
+      />
+      <PeriodPicker
+        value={durationSec}
+        onChange={setDurationSec}
+        onInvalidChange={setPeriodInvalid}
+      />
+      {assignUsers ? (
+        <UserMultiSelect
+          label="Assign to people (optional)"
+          description="Everyone selected is held to this budget, each with their own allowance rather than a shared pool."
+          value={userIds}
+          onChange={setUserIds}
+          users={assignUsers}
         />
-        <Field
-          label="Spending limit (USD)"
-          value={limit}
-          onChange={setLimit}
-          placeholder="100.00"
-          description={
-            parsed.valid ? (
-              "The most a single user on this budget may spend per period. Leave blank for no limit."
-            ) : (
-              <span className="text-danger">
-                Enter a non-negative number, or leave blank for no limit.
-              </span>
-            )
-          }
-        />
-        <PeriodPicker
-          value={durationSec}
-          onChange={setDurationSec}
-          onInvalidChange={setPeriodInvalid}
-        />
-        {assignUsers ? (
-          <UserMultiSelect
-            label="Assign to people (optional)"
-            description="Everyone selected is held to this budget, each with their own allowance rather than a shared pool."
-            value={userIds}
-            onChange={setUserIds}
-            users={assignUsers}
-          />
-        ) : null}
-        <div className="flex gap-2">
-          <Button variant="primary" isDisabled={!canSubmit} onPress={submit}>
-            {isPending ? "Saving…" : submitLabel}
-          </Button>
-          <Button variant="ghost" isDisabled={isPending} onPress={onClose}>
-            Cancel
-          </Button>
-        </div>
-      </Card.Content>
-    </Card>
+      ) : null}
+      <div className="flex gap-2">
+        <Button variant="primary" isDisabled={!canSubmit} onPress={submit}>
+          {isPending ? "Saving…" : submitLabel}
+        </Button>
+        <Button variant="ghost" isDisabled={isPending} onPress={onClose}>
+          Cancel
+        </Button>
+      </div>
+    </Section>
   )
 }
 
@@ -327,27 +334,22 @@ function UsageCell({ budget }: { budget: Budget }) {
     )
   }
   const allocated = budget.max_budget * budget.user_count
-  const pct = allocated > 0 ? Math.min(100, (spent / allocated) * 100) : 0
-  const over = spent > allocated
+  const state = spendState(spent, allocated)
   return (
     <div className="flex min-w-[140px] flex-col gap-1">
       <div className="flex items-baseline justify-between gap-2 text-xs">
-        <span className="text-foreground">{formatUSD(spent)}</span>
+        {/* The one number in this product that changes color, and only in the
+            state that has already gone past the limit. */}
+        <span className={state === "over" ? "text-danger" : "text-foreground"}>
+          {formatUSD(spent)}
+        </span>
         <span className="text-muted">of {formatUSD(allocated)}</span>
       </div>
-      <div
-        className="h-1.5 w-full overflow-hidden rounded-full bg-surface-subtle"
-        role="progressbar"
-        aria-valuenow={Math.round(pct)}
-        aria-valuemin={0}
-        aria-valuemax={100}
-        aria-label="Aggregate spend against total allocation"
-      >
-        <div
-          className={`h-full rounded-full ${over ? "bg-danger" : "bg-accent"}`}
-          style={{ width: `${Math.max(pct, over ? 100 : 2)}%` }}
-        />
-      </div>
+      <SpendMeter
+        spent={spent}
+        allocated={allocated}
+        ariaLabel="Aggregate spend against total allocation"
+      />
     </div>
   )
 }
@@ -623,12 +625,19 @@ export function BudgetsPage() {
           if (!holders || holders.length === 0) {
             return <span className="text-xs text-muted">&mdash;</span>
           }
+          // Names in prose, not chips, as everywhere else a row lists what
+          // points at it.
           return (
-            <div className="flex flex-wrap gap-1">
-              {holders.map((holder) => (
-                <Chip key={holder} size="sm">
-                  {holder}
-                </Chip>
+            <div className="flex flex-wrap items-center gap-x-2 text-xs">
+              {holders.map((holder, index) => (
+                <span key={holder} className="flex items-center gap-2">
+                  {index > 0 ? (
+                    <span aria-hidden className="text-subtle">
+                      ·
+                    </span>
+                  ) : null}
+                  <span className="text-foreground">{holder}</span>
+                </span>
               ))}
             </div>
           )
@@ -752,10 +761,9 @@ export function BudgetsPage() {
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      <PageHeader
+    <div className="flex flex-col">
+      <PageIntro
         title="Budgets"
-        description="Define spending limits and reset schedules. Assign a budget to users to enforce it."
         action={
           addOpen || showOnboarding ? null : (
             <Button
@@ -771,7 +779,10 @@ export function BudgetsPage() {
             </Button>
           )
         }
-      />
+      >
+        Define spending limits and reset schedules. Assign a budget to users to
+        enforce it.
+      </PageIntro>
 
       <ErrorBanner
         error={
@@ -888,37 +899,37 @@ export function BudgetsPage() {
           panel owns the empty state, so a fresh gateway shows one call to action,
           not a panel stacked over a redundant "no rows" table. */}
       {showOnboarding ? null : (
-        <DataTable
-          ariaLabel="Budgets"
-          columns={columns}
-          rows={rows}
-          getRowKey={getBudgetRowKey}
-          isLoading={loading}
-          emptyContent="No budgets yet. Create one to cap spending."
-          selectionMode="multiple"
-          selectedKeys={selection.selectedKeys}
-          onSelectionChange={selection.onSelectionChange}
-        />
+        <TableScrollFrame className="otari-budgets-table">
+          <DataTable
+            ariaLabel="Budgets"
+            columns={columns}
+            rows={rows}
+            getRowKey={getBudgetRowKey}
+            isLoading={loading}
+            emptyContent="No budgets yet. Create one to cap spending."
+            selectionMode="multiple"
+            selectedKeys={selection.selectedKeys}
+            onSelectionChange={selection.onSelectionChange}
+          />
+        </TableScrollFrame>
       )}
 
       {historyBudget ? (
-        <Card>
-          <Card.Content className="p-0">
-            <div className="flex items-center justify-between border-b border-border px-4 py-2">
-              <span className="text-sm font-medium text-foreground">
-                Reset history — {budgetLabel(historyBudget)}
-              </span>
-              <Button
-                size="sm"
-                variant="ghost"
-                onPress={() => setHistoryOpen(null)}
-              >
-                Close
-              </Button>
-            </div>
-            <ResetHistory budgetId={historyBudget.budget_id} />
-          </Card.Content>
-        </Card>
+        <Section className="border-y border-border">
+          <div className="flex items-center justify-between border-b border-border py-2">
+            <span className="text-sm font-medium text-foreground">
+              Reset history — {budgetLabel(historyBudget)}
+            </span>
+            <Button
+              size="sm"
+              variant="ghost"
+              onPress={() => setHistoryOpen(null)}
+            >
+              Close
+            </Button>
+          </div>
+          <ResetHistory budgetId={historyBudget.budget_id} />
+        </Section>
       ) : null}
 
       <ConfirmDialog

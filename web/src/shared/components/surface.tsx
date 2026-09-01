@@ -296,6 +296,98 @@ export function Meter({
   )
 }
 
+/** How far along its allocation a spend is, which decides how it is drawn. */
+export type SpendState = "on-track" | "near-limit" | "over"
+
+/**
+ * The one place a spend is classified, so the bar and the figure beside it
+ * cannot disagree about which of the three states this is.
+ *
+ * `nearLimitAt` is the share of the allocation past which spend stops being
+ * unremarkable. It is a fraction of the limit and not an absolute, because
+ * "nearly out" means the same thing on a $50 budget and a $5,000 one.
+ */
+export function spendState(
+  spent: number,
+  allocated: number,
+  nearLimitAt = 0.8,
+): SpendState {
+  if (allocated <= 0) return "on-track"
+  if (spent > allocated) return "over"
+  return spent >= allocated * nearLimitAt ? "near-limit" : "on-track"
+}
+
+/**
+ * A spend against its allocation, in three states rather than the two the code
+ * carried before, where everything under the limit looked identical and the
+ * first thing anyone learned was that they had already gone past.
+ *
+ * | state      | bar                                    | figure  |
+ * | ---------- | -------------------------------------- | ------- |
+ * | on-track   | accent to the spend                    | normal  |
+ * | near-limit | accent to the threshold, danger beyond | normal  |
+ * | over       | danger, full width                     | danger  |
+ *
+ * The middle state is two segments and not a second color for the whole bar,
+ * which is what makes it legible without hue: the overshoot past the threshold
+ * is a distinct block with a hairline of track showing between it and the
+ * accent, so in grayscale, or to anyone who cannot separate teal from red, the
+ * bar still says "there is a part of this that is past the mark". A single
+ * recolored bar would say nothing at all under those conditions.
+ *
+ * The figure changing color is reserved for `over`, and it is the only number
+ * anywhere in this product that changes color. That is the point: it has to be
+ * worth something when it happens.
+ */
+export function SpendMeter({
+  spent,
+  allocated,
+  ariaLabel,
+  nearLimitAt = 0.8,
+  className = "",
+}: {
+  spent: number
+  allocated: number
+  ariaLabel: string
+  nearLimitAt?: number
+  className?: string
+}) {
+  const state = spendState(spent, allocated, nearLimitAt)
+  const share = allocated > 0 ? spent / allocated : 0
+  const pct = Math.max(0, Math.min(1, share)) * 100
+  const thresholdPct = nearLimitAt * 100
+  return (
+    <span
+      role="progressbar"
+      aria-label={ariaLabel}
+      aria-valuenow={Math.round(share * 100)}
+      aria-valuemin={0}
+      aria-valuemax={100}
+      className={`flex h-[3px] w-full bg-surface-subtle ${className}`}
+    >
+      {state === "over" ? (
+        <span className="block h-full w-full bg-danger" />
+      ) : state === "near-limit" ? (
+        <>
+          <span
+            className="block h-full bg-accent"
+            style={{ width: `${thresholdPct}%` }}
+          />
+          {/* The hairline that makes the two segments read as two. It is track,
+              not a border, so it cannot pick up a color of its own. */}
+          <span className="block h-full w-px shrink-0" />
+          <span
+            className="block h-full bg-danger"
+            style={{ width: `${Math.max(pct - thresholdPct, 0)}%` }}
+          />
+        </>
+      ) : (
+        <span className="block h-full bg-accent" style={{ width: `${pct}%` }} />
+      )}
+    </span>
+  )
+}
+
 /**
  * A tab in a row of them, which is what this product's segmented choices are
  * now: an active tab takes the `surface-subtle` fill and the foreground ink, an
