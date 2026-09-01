@@ -1,4 +1,4 @@
-import { Button, Card, Chip } from "@heroui/react"
+import { Button } from "@heroui/react"
 import { useState } from "react"
 
 import type {
@@ -27,11 +27,16 @@ import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import { Field } from "@/shared/components/Field"
 import { SecretField } from "@/shared/components/SecretField"
 import {
+  Dot,
+  PageIntro,
+  Section,
+  TableScrollFrame,
+} from "@/shared/components/surface"
+import {
   Checkbox,
   ConfirmButton,
   ErrorBanner,
   InfoBanner,
-  PageHeader,
 } from "@/shared/components/ui"
 import { formatRelative } from "@/shared/helpers/format"
 
@@ -132,83 +137,84 @@ function KeyForm({
   }
 
   return (
-    <Card>
-      <Card.Content className="flex flex-col gap-4 p-5">
-        <div className="text-title">
-          {editing ? `Edit ${editing.name}` : "Add provider key"}
+    <Section
+      className="border-y border-border py-5"
+      contentClassName="flex flex-col gap-4"
+    >
+      <h2 className="text-title">
+        {editing ? `Edit ${editing.name}` : "Add provider key"}
+      </h2>
+      <ErrorBanner error={create.error ?? update.error} />
+
+      {editing ? (
+        // The provider is part of the key's identity (it is half of the
+        // uniqueness constraint and the whole of what dispatch matches on),
+        // and the API's update body cannot change it.
+        <div className="flex flex-col gap-1">
+          <span className="text-sm font-medium text-foreground">Provider</span>
+          <span className="text-sm text-muted">
+            {editing.provider}. Create a second key to use another provider.
+          </span>
         </div>
-        <ErrorBanner error={create.error ?? update.error} />
-
-        {editing ? (
-          // The provider is part of the key's identity (it is half of the
-          // uniqueness constraint and the whole of what dispatch matches on),
-          // and the API's update body cannot change it.
-          <div className="flex flex-col gap-1">
-            <span className="text-sm font-medium text-foreground">
-              Provider
-            </span>
-            <span className="text-sm text-muted">
-              {editing.provider}. Create a second key to use another provider.
-            </span>
-          </div>
-        ) : (
-          <ProviderComboBox
-            label="Provider"
-            value={draft.provider}
-            onChange={(provider) => setDraft({ ...draft, provider })}
-            description="Which upstream this credential is for. The gateway matches it against the provider half of a model name."
-          />
-        )}
-
-        <Field
-          label="Name"
-          value={draft.name}
-          onChange={(name) => setDraft({ ...draft, name })}
-          isRequired
-          placeholder="Production"
-          description="What this key is called in the organization. Unique per provider, so a second OpenAI key needs a different name."
+      ) : (
+        <ProviderComboBox
+          label="Provider"
+          value={draft.provider}
+          onChange={(provider) => setDraft({ ...draft, provider })}
+          description="Which upstream this credential is for. The gateway matches it against the provider half of a model name."
         />
+      )}
 
-        <SecretField
-          label="API key"
-          value={draft.apiKey}
-          onChange={(apiKey) => setDraft({ ...draft, apiKey })}
-          description={
-            editing
-              ? "Encrypted at rest and never shown again. Leave blank to keep the current key."
-              : "Encrypted at rest and never shown again; only the last 4 characters come back."
-          }
-        />
+      <Field
+        label="Name"
+        value={draft.name}
+        onChange={(name) => setDraft({ ...draft, name })}
+        isRequired
+        placeholder="Production"
+        description="What this key is called in the organization. Unique per provider, so a second OpenAI key needs a different name."
+      />
 
-        <Field
-          label="API base URL"
-          value={draft.apiBase}
-          onChange={(apiBase) => setDraft({ ...draft, apiBase })}
-          placeholder="https://api.example.com/v1"
-          description="Optional. Point this key at a compatible endpoint of your own instead of the provider's default."
-        />
+      <SecretField
+        label="API key"
+        value={draft.apiKey}
+        onChange={(apiKey) => setDraft({ ...draft, apiKey })}
+        description={
+          editing
+            ? "Encrypted at rest and never shown again. Leave blank to keep the current key."
+            : "Encrypted at rest and never shown again; only the last 4 characters come back."
+        }
+      />
 
-        <ClientArgsField
-          value={draft.clientArgs}
-          onChange={(clientArgs) => setDraft({ ...draft, clientArgs })}
-          error={clientArgsError}
-        />
+      <Field
+        label="API base URL"
+        value={draft.apiBase}
+        onChange={(apiBase) => setDraft({ ...draft, apiBase })}
+        placeholder="https://api.example.com/v1"
+        description="Optional. Point this key at a compatible endpoint of your own instead of the provider's default."
+      />
 
-        <div className="flex gap-2">
-          <Button
-            variant="primary"
-            isDisabled={!canSubmit}
-            isPending={pending}
-            onPress={submit}
-          >
-            {editing ? "Save" : "Add provider key"}
-          </Button>
-          <Button variant="ghost" isDisabled={pending} onPress={onClose}>
-            Close
-          </Button>
-        </div>
-      </Card.Content>
-    </Card>
+      <ClientArgsField
+        value={draft.clientArgs}
+        onChange={(clientArgs) => setDraft({ ...draft, clientArgs })}
+        error={clientArgsError}
+      />
+
+      {/* Under a rule of its own, so the row that commits the form is divided
+          from the fields rather than floating after them. */}
+      <div className="flex items-center justify-end gap-3 border-t border-border pt-4">
+        <Button variant="ghost" isDisabled={pending} onPress={onClose}>
+          Close
+        </Button>
+        <Button
+          variant="primary"
+          isDisabled={!canSubmit}
+          isPending={pending}
+          onPress={submit}
+        >
+          {editing ? "Save" : "Add provider key"}
+        </Button>
+      </div>
+    </Section>
   )
 }
 
@@ -247,17 +253,23 @@ export function OrganizationProviderKeysPage() {
       header: "Name",
       isRowHeader: true,
       cell: (row) => (
-        <div className="flex items-center gap-2">
+        // The marker states what is true, not what is missing: a key that is
+        // the organization's default is marked, and one that is merely
+        // available carries nothing. Archived takes the subtle dot, because it
+        // is a row still present rather than a problem.
+        <div className="flex items-center gap-3">
           <span className="font-medium text-foreground">{row.name}</span>
           {row.is_org_default ? (
-            <Chip size="sm" color="accent">
-              default
-            </Chip>
+            <span className="flex items-center gap-2 font-mono text-[13px] text-muted">
+              <Dot className="bg-accent" />
+              DEFAULT
+            </span>
           ) : null}
           {row.archived_at ? (
-            <Chip size="sm" color="default">
-              archived
-            </Chip>
+            <span className="flex items-center gap-2 font-mono text-[13px] text-subtle">
+              <Dot className="bg-surface-subtle" />
+              ARCHIVED
+            </span>
           ) : null}
         </div>
       ),
@@ -365,10 +377,9 @@ export function OrganizationProviderKeysPage() {
   }
 
   return (
-    <div className="flex flex-col gap-6">
-      <PageHeader
+    <div className="flex flex-col">
+      <PageIntro
         title="Providers"
-        description="The organization's own upstream credentials. Every workspace in the organization can use them, and the default for a provider is the one a request gets when it names no instance. Keys are encrypted at rest and never shown again."
         action={
           canEdit && !adding ? (
             <Button
@@ -383,7 +394,12 @@ export function OrganizationProviderKeysPage() {
             </Button>
           ) : null
         }
-      />
+      >
+        The organization&rsquo;s own upstream credentials. Every workspace in
+        the organization can use them, and the default for a provider is the one
+        a request gets when it names no instance. Keys are encrypted at rest and
+        never shown again.
+      </PageIntro>
 
       <ErrorBanner
         error={
@@ -430,20 +446,26 @@ export function OrganizationProviderKeysPage() {
         />
       ) : null}
 
+      {/* The page is a stack of bands that set their own spacing now, so this
+          one carries the air it used to get from a column gap. */}
       {archivedCount > 0 ? (
-        <Checkbox isSelected={showArchived} onChange={setShowArchived}>
-          Show archived ({archivedCount})
-        </Checkbox>
+        <div className="pb-3">
+          <Checkbox isSelected={showArchived} onChange={setShowArchived}>
+            Show archived ({archivedCount})
+          </Checkbox>
+        </div>
       ) : null}
 
-      <DataTable
-        ariaLabel="Organization provider keys"
-        columns={columns}
-        rows={rows}
-        getRowKey={(row) => row.id}
-        isLoading={keys.isLoading}
-        emptyContent="No provider keys yet. Add one to let every workspace in this organization call that provider."
-      />
+      <TableScrollFrame className="otari-provider-keys-table">
+        <DataTable
+          ariaLabel="Organization provider keys"
+          columns={columns}
+          rows={rows}
+          getRowKey={(row) => row.id}
+          isLoading={keys.isLoading}
+          emptyContent="No provider keys yet. Add one to let every workspace in this organization call that provider."
+        />
+      </TableScrollFrame>
     </div>
   )
 }
