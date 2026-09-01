@@ -1696,6 +1696,97 @@ main {
   border-right: 1px solid var(--color-control-border);
 }
 
+/* Model pricing's two tables, on the same terms as every other: page ground, a
+   rule-bounded overline header, faint separators, and fixed numeric lanes so a
+   rate can be read down the column against its neighbors. The model key takes
+   what is left, because it is the one value here with no bound.
+
+   The rate lanes sit adjacent at 20px, tighter than the default pitch: four
+   prices for one model are a group, and the default gap read as four unrelated
+   columns that happened to be next to each other. */
+.otari-pricing-table .otari-table.table-root,
+.otari-rate-overrides-table .otari-table.table-root {
+  background-color: transparent;
+}
+.otari-pricing-table .otari-table .table__header,
+.otari-rate-overrides-table .otari-table .table__header {
+  background-color: transparent;
+  border-bottom: 1px solid var(--color-border);
+}
+.otari-pricing-table .otari-table .table__row,
+.otari-pricing-table .table__row .table__cell,
+.otari-rate-overrides-table .otari-table .table__row,
+.otari-rate-overrides-table .table__row .table__cell {
+  border-color: var(--color-border-subtle);
+}
+.otari-pricing-table .table__row .table__cell,
+.otari-rate-overrides-table .table__row .table__cell {
+  height: 52px;
+  padding-block: 0;
+}
+.otari-pricing-table .table__column[data-key="input"],
+.otari-pricing-table .table__column[data-key="output"],
+.otari-pricing-table .table__column[data-key="cacheRead"],
+.otari-rate-overrides-table .table__column[data-key="input"],
+.otari-rate-overrides-table .table__column[data-key="output"],
+.otari-rate-overrides-table .table__column[data-key="cache_read"],
+.otari-rate-overrides-table .table__column[data-key="cache_write"] {
+  width: 130px;
+  min-width: 130px;
+  padding-inline: 10px;
+}
+.otari-rate-overrides-table .table__cell[data-key="input"],
+.otari-rate-overrides-table .table__cell[data-key="output"],
+.otari-rate-overrides-table .table__cell[data-key="cache_read"],
+.otari-rate-overrides-table .table__cell[data-key="cache_write"],
+.otari-pricing-table .table__cell[data-key="input"],
+.otari-pricing-table .table__cell[data-key="output"],
+.otari-pricing-table .table__cell[data-key="cacheRead"] {
+  padding-inline: 10px;
+}
+/* Deliberately unconstrained, and it is the only lane in either table that is.
+   Some column has to absorb the width a table does not otherwise use, and if
+   that column is the model key then the rates get pushed to the far right: on
+   this page the two tables' `Input / 1M` lanes measured 679px apart, which is
+   the same quantity twice at two different places on one screen. The trailing
+   lane takes the slack in both tables instead (`Period` in the overrides one),
+   so the rate lanes start at the same x and can be read straight down. */
+.otari-pricing-table .table__column[data-key="tiers"] {
+  min-width: 90px;
+}
+.otari-rate-overrides-table .table__column[data-key="period"] {
+  min-width: 200px;
+}
+.otari-rate-overrides-table .table__column[data-key="status"] {
+  width: 130px;
+  min-width: 130px;
+}
+.otari-rate-overrides-table .table__column[data-key="actions"] {
+  width: 160px;
+  min-width: 160px;
+}
+/* One width for both, so the model key occupies the same lane in the catalog
+   and in the overrides below it. */
+.otari-pricing-table .table__column[data-key="modelKey"],
+.otari-pricing-table .table__cell[data-key="modelKey"],
+.otari-rate-overrides-table .table__column[data-key="model_key"],
+.otari-rate-overrides-table .table__cell[data-key="model_key"] {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background-color: var(--color-background);
+  width: 257px;
+  min-width: 257px;
+}
+.otari-pricing-table[data-scrolled="true"] .table__column[data-key="modelKey"],
+.otari-pricing-table[data-scrolled="true"] .table__cell[data-key="modelKey"],
+.otari-rate-overrides-table[data-scrolled="true"]
+  .table__column[data-key="model_key"],
+.otari-rate-overrides-table[data-scrolled="true"]
+  .table__cell[data-key="model_key"] {
+  border-right: 1px solid var(--color-control-border);
+}
+
 /* The organization's provider keys. Same terms as the others, and the same
    58px row, though the identity cell here is one line: the marker sits beside
    the name rather than under it, because a key that is the default is a fact

@@ -1,4 +1,4 @@
-import { Button, Card, Chip } from "@heroui/react"
+import { Button } from "@heroui/react"
 import { useState } from "react"
 
 import type { OrganizationPricingOverride } from "@/client"
@@ -11,6 +11,7 @@ import {
 } from "@/shared/api/hooks"
 import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
+import { Dot, Section, TableScrollFrame } from "@/shared/components/surface"
 import { ErrorBanner, InfoBanner } from "@/shared/components/ui"
 import { formatCost, formatDateTime } from "@/shared/helpers/format"
 import {
@@ -38,9 +39,25 @@ const STATUS_LABEL: Record<
   ReturnType<typeof overrideStatus>,
   { label: string; className: string }
 > = {
-  active: { label: "Active", className: "text-success" },
-  scheduled: { label: "Scheduled", className: "text-info" },
-  expired: { label: "Expired", className: "text-muted" },
+  active: { label: "Active", className: "text-muted" },
+  scheduled: { label: "Scheduled", className: "text-muted" },
+  expired: { label: "Expired", className: "text-subtle" },
+}
+
+/**
+ * The dot carries the state; the words stay quiet.
+ *
+ * Ink used to carry it alone, which spent the danger and success channels on
+ * three states none of which is a problem: an override that has expired did
+ * what it was for. So the words drop to the neutral rungs and the mark says
+ * which of the three this is, which is the same division the rest of the
+ * surface uses. Expired is the one that recedes, since it no longer bills
+ * anything.
+ */
+const STATUS_DOT: Record<ReturnType<typeof overrideStatus>, string> = {
+  active: "bg-success",
+  scheduled: "bg-accent",
+  expired: "bg-surface-subtle",
 }
 
 function rate(value: number | null | undefined): string {
@@ -150,10 +167,16 @@ export function RateOverridesCard() {
       header: "Status",
       cell: (row) => {
         const status = STATUS_LABEL[overrideStatus(row)]
+        // The dot-and-word the rest of the surface uses, not a chip. The dot
+        // carries the same severity the words already did, so the state is
+        // legible without reading the label and without a box around it.
         return (
-          <Chip size="sm" variant="secondary">
-            <span className={status.className}>{status.label}</span>
-          </Chip>
+          <span
+            className={`flex items-center gap-2 font-mono text-[13px] ${status.className}`}
+          >
+            <Dot className={STATUS_DOT[overrideStatus(row)]} />
+            {status.label.toUpperCase()}
+          </span>
         )
       },
     },
@@ -186,23 +209,37 @@ export function RateOverridesCard() {
   ]
 
   return (
-    <section className="flex flex-col gap-2">
-      <div className="flex flex-wrap items-center justify-between gap-2">
-        <h2 className="text-title">Rate overrides</h2>
-        <Button
-          size="sm"
-          variant="primary"
-          isDisabled={!canEdit}
-          onPress={openAdd}
-        >
-          Add override
-        </Button>
-      </div>
+    <>
+      {/* The group is introduced by its heading and closed by the rows' own
+          separators. The rows stay a table rather than becoming a list of
+          settings rows: four of the lanes are prices for the same model, and a
+          price that cannot be read down the column against its neighbors is a
+          number with nothing to compare it to. */}
+      <Section
+        aria-labelledby="rate-overrides-title"
+        className="border-t border-border pt-6 pb-3"
+        contentClassName="flex flex-col gap-2"
+      >
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <h2 id="rate-overrides-title" className="text-title">
+            Rate overrides
+          </h2>
+          <Button
+            size="sm"
+            variant="primary"
+            isDisabled={!canEdit}
+            onPress={openAdd}
+          >
+            Add override
+          </Button>
+        </div>
 
-      <p className="text-sm text-muted">
-        This organization&rsquo;s own rate for a model, applied ahead of the
-        catalog above. A model with no override here is priced by that catalog.
-      </p>
+        <p className="max-w-prose text-sm text-muted">
+          This organization&rsquo;s own rate for a model, applied ahead of the
+          catalog above. A model with no override here is priced by that
+          catalog.
+        </p>
+      </Section>
 
       {canEdit ? null : (
         <InfoBanner>
@@ -213,21 +250,19 @@ export function RateOverridesCard() {
 
       <ErrorBanner error={overrides.error} />
 
-      <Card>
-        <Card.Content className="p-0">
-          <DataTable
-            ariaLabel="Organization rate overrides"
-            columns={columns}
-            rows={rows}
-            getRowKey={(row) => row.id}
-            isLoading={overrides.isPending && !overrides.data}
-            // Deliberately asserts nothing about the catalog: an empty table is
-            // also what a failed request leaves behind, and the banner above is
-            // the only thing that knows which of the two happened.
-            emptyContent="No override yet. Add one to bill this organization at its own rate for a model."
-          />
-        </Card.Content>
-      </Card>
+      <TableScrollFrame className="otari-rate-overrides-table">
+        <DataTable
+          ariaLabel="Organization rate overrides"
+          columns={columns}
+          rows={rows}
+          getRowKey={(row) => row.id}
+          isLoading={overrides.isPending && !overrides.data}
+          // Deliberately asserts nothing about the catalog: an empty table is
+          // also what a failed request leaves behind, and the banner above is
+          // the only thing that knows which of the two happened.
+          emptyContent="No override yet. Add one to bill this organization at its own rate for a model."
+        />
+      </TableScrollFrame>
 
       <PricingOverrideDialog
         isOpen={isDialogOpen}
@@ -260,6 +295,6 @@ export function RateOverridesCard() {
           })
         }}
       />
-    </section>
+    </>
   )
 }

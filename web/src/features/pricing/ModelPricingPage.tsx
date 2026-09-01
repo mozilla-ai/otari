@@ -1,4 +1,4 @@
-import { AlertDialog, Button, Card } from "@heroui/react"
+import { AlertDialog, Button } from "@heroui/react"
 import { Link } from "@tanstack/react-router"
 
 import type { PricingRefreshPreview, PricingResponse } from "@/client"
@@ -16,11 +16,11 @@ import {
 } from "@/shared/api/hooks"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import {
-  ErrorBanner,
-  InfoBanner,
-  PageHeader,
-  PageLoading,
-} from "@/shared/components/ui"
+  PageIntro,
+  Section,
+  TableScrollFrame,
+} from "@/shared/components/surface"
+import { ErrorBanner, InfoBanner, PageLoading } from "@/shared/components/ui"
 import { formatCost } from "@/shared/helpers/format"
 
 // The organization's model pricing: what the gateway meters a request at, and
@@ -116,36 +116,37 @@ function PricingRefreshSection() {
   }
 
   return (
-    <section className="flex flex-col gap-2">
-      <h2 className="text-title">Default pricing catalog</h2>
-      <Card>
-        <Card.Content className="flex flex-col gap-4 p-5">
-          <div className="flex flex-wrap items-start justify-between gap-3">
-            <div className="min-w-0">
-              <div className="text-sm font-medium text-foreground">
-                genai-prices defaults
-              </div>
-              <p className="mt-1 max-w-3xl text-sm text-muted">
-                Fetch the latest upstream catalog, review the proposed change
-                summary, then accept or reject it. Accepted data is stored as{" "}
-                <code>genai-prices</code>; custom prices remain separate and
-                always take precedence.
-              </p>
-            </div>
-            <Button
-              size="sm"
-              variant="outline"
-              isDisabled={previewRefresh.isPending || isPending}
-              onPress={() => previewRefresh.mutate()}
-            >
-              {previewRefresh.isPending
-                ? "Checking prices…"
-                : "Check for price updates"}
-            </Button>
+    <>
+      <Section
+        aria-labelledby="pricing-catalog-title"
+        className="border-y border-border py-5"
+        contentClassName="flex flex-col gap-4"
+      >
+        <div className="flex flex-wrap items-start justify-between gap-3">
+          <div className="min-w-0">
+            <h2 id="pricing-catalog-title" className="text-title">
+              Default pricing catalog
+            </h2>
+            <p className="mt-1 max-w-3xl text-sm text-muted">
+              Fetch the latest upstream catalog, review the proposed change
+              summary, then accept or reject it. Accepted data is stored as{" "}
+              <code>genai-prices</code>; custom prices remain separate and
+              always take precedence.
+            </p>
           </div>
-          <ErrorBanner error={previewRefresh.error} />
-        </Card.Content>
-      </Card>
+          <Button
+            size="sm"
+            variant="outline"
+            isDisabled={previewRefresh.isPending || isPending}
+            onPress={() => previewRefresh.mutate()}
+          >
+            {previewRefresh.isPending
+              ? "Checking prices…"
+              : "Check for price updates"}
+          </Button>
+        </div>
+        <ErrorBanner error={previewRefresh.error} />
+      </Section>
       <AlertDialog
         isOpen={preview !== undefined}
         onOpenChange={(isOpen) => (!isOpen ? reject() : undefined)}
@@ -167,7 +168,7 @@ function PricingRefreshSection() {
           />
         ) : null}
       </AlertDialog>
-    </section>
+    </>
   )
 }
 
@@ -279,41 +280,47 @@ function PriceTable() {
   if (pricing.isLoading) return <PageLoading label="Loading model prices…" />
 
   return (
-    <section className="flex flex-col gap-2">
-      <h2 className="text-title">Model prices</h2>
+    <>
+      {/* The group's heading and the rule under it are what introduce the rows,
+          which then sit straight on the page ground. No box: the header rule
+          and the row separators already say where the group starts and ends. */}
+      <Section className="pt-6 pb-3">
+        <h2 className="text-title">Model prices</h2>
+      </Section>
       <ErrorBanner error={pricing.error} />
-      <Card>
-        <Card.Content className="p-0">
-          <DataTable
-            ariaLabel="Model prices"
-            columns={COLUMNS}
-            rows={rows}
-            getRowKey={(row) => row.modelKey}
-            emptyContent="No model carries a stored price yet. Price one from the Models page."
-          />
-        </Card.Content>
-      </Card>
-      <p className="text-sm text-muted">
-        A rate is edited beside the model it applies to, on{" "}
-        <Link
-          to="/models"
-          className="font-medium text-link hover:text-link-hover"
-        >
-          Models
-        </Link>
-        .
-      </p>
-    </section>
+      <TableScrollFrame className="otari-pricing-table">
+        <DataTable
+          ariaLabel="Model prices"
+          columns={COLUMNS}
+          rows={rows}
+          getRowKey={(row) => row.modelKey}
+          emptyContent="No model carries a stored price yet. Price one from the Models page."
+        />
+      </TableScrollFrame>
+      <Section className="pt-3">
+        <p className="text-sm text-muted">
+          A rate is edited beside the model it applies to, on{" "}
+          <Link
+            to="/models"
+            className="font-medium text-link hover:text-link-hover"
+          >
+            Models
+          </Link>
+          .
+        </p>
+      </Section>
+    </>
   )
 }
 
 export function ModelPricingPage() {
   return (
-    <div className="flex flex-col gap-6">
-      <PageHeader
-        title="Model pricing"
-        description="What this gateway meters a request at. The catalog applies to every workspace and every key in the organization; a rate override below applies to this organization ahead of it."
-      />
+    <div className="flex flex-col">
+      <PageIntro title="Model pricing">
+        What this gateway meters a request at. The catalog applies to every
+        workspace and every key in the organization; a rate override below
+        applies to this organization ahead of it.
+      </PageIntro>
       <CatalogPolicy />
       <PricingRefreshSection />
       <PriceTable />
