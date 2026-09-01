@@ -560,12 +560,13 @@ describe("the shell chrome's type roles", () => {
     // produces no CSS, on text that looks merely unstyled rather than broken.
     expect(CSS).toContain(`@utility ${role} {`)
   })
+})
 
+// The scale's smallest step is 12px (`--text-xs`), so a size written at a call
+// site is either a duplicate of a step or under the floor. This was scoped to
+// `src/app/nav` while the chrome roles were the only ones being enforced.
+describe("no font size is written at a call site", () => {
   it("leaves no arbitrary font size anywhere in the tree", () => {
-    // Scoped to `src/app/nav` when the chrome roles landed, and tree-wide now
-    // that the rest of the pages are on the scale too. The floor the scale
-    // offers is 12px (`--text-xs`), and every spelling under it was an
-    // arbitrary value at a call site: 10px axis ticks, 10px and 11px badges.
     const SRC = join(WEB, "src")
     const offenders = readdirSync(SRC, { recursive: true })
       .map((name) => String(name).replaceAll("\\", "/"))
@@ -607,6 +608,10 @@ describe("checkboxes come from the design foundation", () => {
   const sources = readdirSync(SRC, { recursive: true })
     .map((name) => String(name).replaceAll("\\", "/"))
     .filter((name) => name.endsWith(".tsx") && !name.endsWith(".test.tsx"))
+
+  it("covers the source tree", () => {
+    expect(sources.length).toBeGreaterThan(30)
+  })
 
   it.each(sources)("uses no raw checkbox in %s", (name) => {
     expect(
