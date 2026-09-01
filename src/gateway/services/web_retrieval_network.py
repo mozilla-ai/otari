@@ -13,6 +13,7 @@ import ipaddress
 import socket
 import ssl
 import zlib
+from collections import OrderedDict
 from collections.abc import AsyncIterable, AsyncIterator, Awaitable, Callable, Sequence
 from dataclasses import dataclass, field
 from time import monotonic
@@ -38,11 +39,18 @@ PINNED_TARGET_EXTENSION = "otari.validated_target"
 MAX_WEB_REDIRECTS = 5
 MAX_DECODED_BODY_BYTES = 5 * 1024 * 1024
 NETWORK_DEADLINE_SECONDS = 5.0
+MAX_PINNED_POOLS = 100
 _MAX_DECODE_CHUNK_BYTES = 64 * 1024
 _REDIRECT_STATUSES = frozenset({301, 302, 303, 307, 308})
 
 T = TypeVar("T")
 PoolKey: TypeAlias = tuple[str, str, int, str]
+
+
+@dataclass(slots=True)
+class _PoolEntry:
+    pool: httpcore.AsyncConnectionPool
+    active_responses: int = 0
 
 
 class RetrievalTargetError(ValueError):
@@ -305,13 +313,42 @@ class _PinnedNetworkBackend(AsyncNetworkBackend):
         await self._backend.sleep(seconds)
 
 
+class _LeasedAsyncResponseStream(httpx.AsyncByteStream):
+    """Release one transport pool lease when its response stream closes."""
+
+    def __init__(
+        self,
+        stream: AsyncIterable[bytes],
+        release: Callable[[], Awaitable[None]],
+    ) -> None:
+        self._stream = AsyncResponseStream(stream)
+        self._release = release
+        self._closed = False
+
+    async def __aiter__(self) -> AsyncIterator[bytes]:
+        async for chunk in self._stream:
+            yield chunk
+
+    async def aclose(self) -> None:
+        if self._closed:
+            return
+        self._closed = True
+        try:
+            await self._stream.aclose()
+        finally:
+            await self._release()
+
+
 class PinnedAsyncHTTPTransport(httpx.AsyncBaseTransport):
     """HTTPX transport with pools isolated by canonical origin and pinned IP.
 
     Each address has its own HTTP Core pool. A later validation may reuse a
     connection only when that exact address remains in the target's admitted
-    address set. Connect failures retry only the remaining validated addresses;
-    no retry performs fresh DNS resolution.
+    address set. Idle pools are evicted in least-recently-used order at the
+    configured bound; if every retained pool is active, a new origin fails fast
+    rather than closing an in-use connection or growing without limit. Connect
+    failures retry only the remaining validated addresses; no retry performs
+    fresh DNS resolution.
     """
 
     def __init__(
@@ -322,13 +359,17 @@ class PinnedAsyncHTTPTransport(httpx.AsyncBaseTransport):
         max_connections: int = 10,
         max_keepalive_connections: int = 10,
         keepalive_expiry: float = 5.0,
+        max_pools: int = MAX_PINNED_POOLS,
     ) -> None:
+        if max_pools <= 0:
+            raise ValueError("max_pools must be positive")
         self._ssl_context = ssl_context or httpx.create_ssl_context(verify=True, trust_env=False)
         self._backend_factory = backend_factory
         self._max_connections = max_connections
         self._max_keepalive_connections = max_keepalive_connections
         self._keepalive_expiry = keepalive_expiry
-        self._pools: dict[PoolKey, httpcore.AsyncConnectionPool] = {}
+        self._max_pools = max_pools
+        self._pools: OrderedDict[PoolKey, _PoolEntry] = OrderedDict()
         self._pool_lock = asyncio.Lock()
         self._closed = False
 
@@ -341,30 +382,57 @@ class PinnedAsyncHTTPTransport(httpx.AsyncBaseTransport):
             str(address),
         )
 
-    async def _get_pool(self, target: ValidatedTarget, address: IPAddress) -> httpcore.AsyncConnectionPool:
+    async def _acquire_pool(self, target: ValidatedTarget, address: IPAddress) -> tuple[PoolKey, _PoolEntry]:
         key = self._pool_key(target, address)
+        evicted: _PoolEntry | None = None
         async with self._pool_lock:
             if self._closed:
                 raise PinnedTransportError("web retrieval transport is closed")
-            pool = self._pools.get(key)
-            if pool is None:
+            entry = self._pools.get(key)
+            if entry is None:
+                if len(self._pools) >= self._max_pools:
+                    for candidate_key, candidate in self._pools.items():
+                        if candidate.active_responses == 0:
+                            evicted = candidate
+                            del self._pools[candidate_key]
+                            break
+                    else:
+                        raise PinnedTransportError("web retrieval connection pool capacity is in use")
                 network_backend = _PinnedNetworkBackend(
                     origin=target.origin,
                     address=address,
                     backend=self._backend_factory(),
                 )
-                pool = httpcore.AsyncConnectionPool(
-                    ssl_context=self._ssl_context,
-                    max_connections=self._max_connections,
-                    max_keepalive_connections=self._max_keepalive_connections,
-                    keepalive_expiry=self._keepalive_expiry,
-                    http1=True,
-                    http2=False,
-                    retries=0,
-                    network_backend=network_backend,
+                entry = _PoolEntry(
+                    pool=httpcore.AsyncConnectionPool(
+                        ssl_context=self._ssl_context,
+                        max_connections=self._max_connections,
+                        max_keepalive_connections=self._max_keepalive_connections,
+                        keepalive_expiry=self._keepalive_expiry,
+                        http1=True,
+                        http2=False,
+                        retries=0,
+                        network_backend=network_backend,
+                    )
                 )
-                self._pools[key] = pool
-            return pool
+                self._pools[key] = entry
+            else:
+                self._pools.move_to_end(key)
+            entry.active_responses += 1
+
+        if evicted is not None:
+            try:
+                await evicted.pool.aclose()
+            except BaseException:
+                await self._release_pool(key, entry)
+                raise
+        return key, entry
+
+    async def _release_pool(self, key: PoolKey, entry: _PoolEntry) -> None:
+        async with self._pool_lock:
+            entry.active_responses -= 1
+            if self._pools.get(key) is entry:
+                self._pools.move_to_end(key)
 
     @staticmethod
     def _target_from_request(request: httpx.Request) -> ValidatedTarget:
@@ -386,7 +454,7 @@ class PinnedAsyncHTTPTransport(httpx.AsyncBaseTransport):
 
         last_connect_error: httpx.ConnectError | httpx.ConnectTimeout | None = None
         for address in target.addresses:
-            pool = await self._get_pool(target, address)
+            key, entry = await self._acquire_pool(target, address)
             core_request = httpcore.Request(
                 method=request.method,
                 url=httpcore.URL(
@@ -401,16 +469,24 @@ class PinnedAsyncHTTPTransport(httpx.AsyncBaseTransport):
             )
             try:
                 with map_httpcore_exceptions():
-                    response = await pool.handle_async_request(core_request)
+                    response = await entry.pool.handle_async_request(core_request)
             except (httpx.ConnectError, httpx.ConnectTimeout) as exc:
                 last_connect_error = exc
+                await self._release_pool(key, entry)
                 continue
+            except BaseException:
+                await self._release_pool(key, entry)
+                raise
 
             assert isinstance(response.stream, AsyncIterable)
+            stream = _LeasedAsyncResponseStream(
+                response.stream,
+                lambda: self._release_pool(key, entry),
+            )
             return httpx.Response(
                 status_code=response.status,
                 headers=response.headers,
-                stream=AsyncResponseStream(response.stream),
+                stream=stream,
                 extensions=response.extensions,
             )
 
@@ -423,7 +499,7 @@ class PinnedAsyncHTTPTransport(httpx.AsyncBaseTransport):
             if self._closed:
                 return
             self._closed = True
-            pools = tuple(self._pools.values())
+            pools = tuple(entry.pool for entry in self._pools.values())
             self._pools.clear()
         await asyncio.gather(*(pool.aclose() for pool in pools))
 
