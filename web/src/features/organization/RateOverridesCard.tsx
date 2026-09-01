@@ -143,7 +143,7 @@ export function RateOverridesCard() {
     {
       id: "period",
       header: "Period",
-      cell: (row) => <span className="text-xs text-muted">{period(row)}</span>,
+      cell: (row) => <span className="text-caption">{period(row)}</span>,
     },
     {
       id: "status",

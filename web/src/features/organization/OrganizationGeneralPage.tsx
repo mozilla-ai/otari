@@ -54,7 +54,7 @@ function OrganizationDetails({
         <div className="flex flex-col gap-1">
           <span className="text-sm font-medium text-foreground">Slug</span>
           <CopyableValue value={slug} label="organization slug">
-            <code className="text-xs text-muted">{slug}</code>
+            <code className="font-mono text-caption">{slug}</code>
           </CopyableValue>
         </div>
         <div>

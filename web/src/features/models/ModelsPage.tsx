@@ -403,7 +403,7 @@ function PricingTierEditor({
           <div className="text-xs font-medium text-foreground">
             Long-context price tiers
           </div>
-          <p className="text-xs text-muted">
+          <p className="text-caption">
             At a threshold, listed rates replace the base rate for the whole
             request.
           </p>
@@ -417,7 +417,7 @@ function PricingTierEditor({
           key={tier.id}
           className="flex flex-wrap items-end gap-2 border-t border-border pt-2"
         >
-          <label className="flex flex-col gap-1 text-xs text-muted">
+          <label className="flex flex-col gap-1 text-caption">
             Context ≥ tokens
             <input
               type="number"
@@ -432,7 +432,7 @@ function PricingTierEditor({
               className="w-28 rounded-md border border-field-border bg-field px-2 py-1 text-right text-sm tabular-nums focus:border-accent focus:outline-none"
             />
           </label>
-          <label className="flex flex-col gap-1 text-xs text-muted">
+          <label className="flex flex-col gap-1 text-caption">
             Input
             <MoneyInput
               value={tier.input}
@@ -440,7 +440,7 @@ function PricingTierEditor({
               ariaLabel="Tier input price"
             />
           </label>
-          <label className="flex flex-col gap-1 text-xs text-muted">
+          <label className="flex flex-col gap-1 text-caption">
             Output
             <MoneyInput
               value={tier.output}
@@ -448,7 +448,7 @@ function PricingTierEditor({
               ariaLabel="Tier output price"
             />
           </label>
-          <label className="flex flex-col gap-1 text-xs text-muted">
+          <label className="flex flex-col gap-1 text-caption">
             Cache read
             <MoneyInput
               value={tier.cacheRead}
@@ -456,7 +456,7 @@ function PricingTierEditor({
               ariaLabel="Tier cache read price"
             />
           </label>
-          <label className="flex flex-col gap-1 text-xs text-muted">
+          <label className="flex flex-col gap-1 text-caption">
             Cache write
             <MoneyInput
               value={tier.cacheWrite}
@@ -464,7 +464,7 @@ function PricingTierEditor({
               ariaLabel="Tier cache write price"
             />
           </label>
-          <label className="flex flex-col gap-1 text-xs text-muted">
+          <label className="flex flex-col gap-1 text-caption">
             1h write
             <MoneyInput
               value={tier.cacheWrite1h}
@@ -503,9 +503,9 @@ function SourceChip({ source }: { source: PriceSource }) {
     )
   }
   if (source === "unknown") {
-    return <span className="text-xs text-muted">rate unknown</span>
+    return <span className="text-caption">rate unknown</span>
   }
-  return <span className="text-xs text-muted">not priced</span>
+  return <span className="text-caption">not priced</span>
 }
 
 // A small info affordance: an "i" bubble that reveals a tooltip on hover or
@@ -586,7 +586,7 @@ function PricingInfo() {
 function Spec({ label, value }: { label: string; value: ReactNode }) {
   return (
     <div className="flex items-baseline justify-between gap-3">
-      <span className="text-xs text-muted">{label}</span>
+      <span className="text-caption">{label}</span>
       <span className="text-right text-sm text-foreground tabular-nums">
         {value}
       </span>
@@ -674,7 +674,7 @@ function PanelPriceEditor({
     return (
       <div className="flex flex-col gap-2">
         <div className="flex items-center justify-between gap-2">
-          <span className="text-xs text-muted">Input $ / 1M</span>
+          <span className="text-caption">Input $ / 1M</span>
           <MoneyInput
             value={input}
             onChange={setInput}
@@ -682,7 +682,7 @@ function PanelPriceEditor({
           />
         </div>
         <div className="flex items-center justify-between gap-2">
-          <span className="text-xs text-muted">Output $ / 1M</span>
+          <span className="text-caption">Output $ / 1M</span>
           <MoneyInput
             value={output}
             onChange={setOutput}
@@ -690,7 +690,7 @@ function PanelPriceEditor({
           />
         </div>
         <div className="flex items-center justify-between gap-2">
-          <span className="text-xs text-muted">Cache read $ / 1M</span>
+          <span className="text-caption">Cache read $ / 1M</span>
           <MoneyInput
             value={cacheRead}
             onChange={setCacheRead}
@@ -698,7 +698,7 @@ function PanelPriceEditor({
           />
         </div>
         <div className="flex items-center justify-between gap-2">
-          <span className="text-xs text-muted">Cache write $ / 1M</span>
+          <span className="text-caption">Cache write $ / 1M</span>
           <MoneyInput
             value={cacheWrite}
             onChange={setCacheWrite}
@@ -706,7 +706,7 @@ function PanelPriceEditor({
           />
         </div>
         <div className="flex items-center justify-between gap-2">
-          <span className="text-xs text-muted">1h cache write $ / 1M</span>
+          <span className="text-caption">1h cache write $ / 1M</span>
           <MoneyInput
             value={cacheWrite1h}
             onChange={setCacheWrite1h}
@@ -858,14 +858,14 @@ function ModelDetailPanel({
                 </Chip>
               ) : null}
             </div>
-            <p className="mt-1 text-xs break-all text-muted">
+            <p className="mt-1 text-caption break-all">
               Selector:{" "}
               <CopyableValue value={row.key} label="model id">
                 <code>{row.key}</code>
               </CopyableValue>
             </p>
             {metadata?.family ? (
-              <p className="text-xs text-muted">{metadata.family}</p>
+              <p className="text-caption">{metadata.family}</p>
             ) : null}
           </div>
           <button
@@ -886,7 +886,7 @@ function ModelDetailPanel({
           <div className="flex items-center gap-2">
             <SourceChip source={row.source} />
             {row.isDiscovered || !discoveryKnown ? null : (
-              <span className="text-xs text-muted">not discovered</span>
+              <span className="text-caption">not discovered</span>
             )}
           </div>
           <PanelPriceEditor
@@ -923,7 +923,7 @@ function ModelDetailPanel({
           {inputModalities.length === 0 && outputModalities.length === 0 ? (
             <span className="text-sm text-muted">Unknown.</span>
           ) : (
-            <div className="flex flex-col gap-1.5 text-xs text-muted">
+            <div className="flex flex-col gap-1.5 text-caption">
               <div className="flex flex-wrap items-center gap-1">
                 <span>In:</span>
                 {inputModalities.map((m) => (
@@ -1077,10 +1077,8 @@ function InlinePriceForm({
   return (
     <div className="flex flex-col gap-3 px-4 py-3">
       <div className="flex flex-wrap items-center gap-3">
-        <span className="text-xs font-medium break-all text-muted">
-          {row.key}
-        </span>
-        <label className="flex items-center gap-1.5 text-xs text-muted">
+        <span className="text-caption break-all">{row.key}</span>
+        <label className="flex items-center gap-1.5 text-caption">
           Input $ / 1M
           <MoneyInput
             value={input}
@@ -1088,7 +1086,7 @@ function InlinePriceForm({
             ariaLabel={`Input price for ${row.key}`}
           />
         </label>
-        <label className="flex items-center gap-1.5 text-xs text-muted">
+        <label className="flex items-center gap-1.5 text-caption">
           Output $ / 1M
           <MoneyInput
             value={output}
@@ -1096,7 +1094,7 @@ function InlinePriceForm({
             ariaLabel={`Output price for ${row.key}`}
           />
         </label>
-        <label className="flex items-center gap-1.5 text-xs text-muted">
+        <label className="flex items-center gap-1.5 text-caption">
           Cache read $ / 1M
           <MoneyInput
             value={cacheRead}
@@ -1104,7 +1102,7 @@ function InlinePriceForm({
             ariaLabel={`Cache read price for ${row.key}`}
           />
         </label>
-        <label className="flex items-center gap-1.5 text-xs text-muted">
+        <label className="flex items-center gap-1.5 text-caption">
           Cache write $ / 1M
           <MoneyInput
             value={cacheWrite}
@@ -1112,7 +1110,7 @@ function InlinePriceForm({
             ariaLabel={`Cache write price for ${row.key}`}
           />
         </label>
-        <label className="flex items-center gap-1.5 text-xs text-muted">
+        <label className="flex items-center gap-1.5 text-caption">
           1h cache write $ / 1M
           <MoneyInput
             value={cacheWrite1h}
@@ -1237,7 +1235,7 @@ function CachingCell({
   const label = entries.length > 0 ? entries.join(" · ") : "Input-rate fallback"
   if (onEdit === undefined) {
     return (
-      <span className="inline-block max-w-44 text-right text-xs leading-5 text-muted">
+      <span className="inline-block max-w-44 text-right text-caption">
         {label}
       </span>
     )
@@ -1246,7 +1244,7 @@ function CachingCell({
     <button
       type="button"
       aria-label={`Edit caching price for ${rowKey}`}
-      className="max-w-44 text-right text-xs leading-5 text-muted hover:text-link hover:underline"
+      className="max-w-44 text-right text-caption hover:text-link hover:underline"
       onClick={(event) => {
         event.stopPropagation()
         onEdit()
@@ -1274,7 +1272,7 @@ function PricingPolicyCell({
       : `${thresholds.length} tier${thresholds.length === 1 ? "" : "s"} · ≥ ${thresholds.join(", ")}`
   if (onEdit === undefined) {
     return (
-      <span className="inline-block max-w-40 text-right text-xs leading-5 text-muted">
+      <span className="inline-block max-w-40 text-right text-caption">
         {label}
       </span>
     )
@@ -1283,7 +1281,7 @@ function PricingPolicyCell({
     <button
       type="button"
       aria-label={`Edit pricing policy for ${row.key}`}
-      className="max-w-40 text-right text-xs leading-5 text-muted hover:text-link hover:underline"
+      className="max-w-40 text-right text-caption hover:text-link hover:underline"
       onClick={(event) => {
         event.stopPropagation()
         onEdit()
@@ -2017,7 +2015,7 @@ export function ModelsPage() {
             ? "No models yet. Add a provider on the Providers page."
             : "No models yet. A deployment operator adds providers."}
       </span>
-      <span className="text-xs text-muted">
+      <span className="text-caption">
         A provider that serves no model listing still answers requests, so a
         model you can call may not be listed here.
       </span>

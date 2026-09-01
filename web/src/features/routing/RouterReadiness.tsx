@@ -85,12 +85,12 @@ export function RouterReadiness({
 
       <div className="flex flex-col gap-5 px-4 py-4">
         <div className="flex flex-col gap-1">
-          <span className="text-xs font-medium text-muted">Candidates</span>
+          <span className="text-caption">Candidates</span>
           <span className="text-sm text-foreground">
             <code>{backend}</code> ranks {candidates.join(", ")} for each
             request.
           </span>
-          <span className="text-xs text-muted">
+          <span className="text-caption">
             <code>{defaultTarget}</code> serves whenever it declines: too few
             examples, a weakly supported pick, a request carrying tools, or{" "}
             <code>Otari-Router: off</code>.
@@ -98,7 +98,7 @@ export function RouterReadiness({
         </div>
 
         <div className="flex flex-col gap-2">
-          <span className="text-xs font-medium text-muted">Examples</span>
+          <span className="text-caption">Examples</span>
           {scopedUserId === null ? (
             <UserComboBox
               label="Whose memory"
@@ -114,7 +114,7 @@ export function RouterReadiness({
               }
             />
           ) : (
-            <span className="text-xs text-muted">
+            <span className="text-caption">
               Scoped to user <code>{scopedUserId}</code>, so that is the only
               memory it can use.
             </span>
@@ -156,13 +156,13 @@ export function RouterReadiness({
                 </div>
               ))}
               {status.data.tasks.length > 0 ? (
-                <span className="text-xs text-muted">
+                <span className="text-caption">
                   The default pool counts every example this user has, including
                   the ones filed under a task, so it can be warm while a task
                   partition is not.
                 </span>
               ) : null}
-              <span className="text-xs text-muted">
+              <span className="text-caption">
                 Scoring with <code>{status.data.embedding_model}</code>,{" "}
                 {status.data.k} nearest examples per decision, cost dial{" "}
                 {status.data.alpha}, deciding once per{" "}
@@ -177,10 +177,8 @@ export function RouterReadiness({
         </div>
 
         <div className="flex flex-col gap-1">
-          <span className="text-xs font-medium text-muted">
-            Adding examples
-          </span>
-          <span className="text-xs text-muted">
+          <span className="text-caption">Adding examples</span>
+          <span className="text-caption">
             Examples are recorded over the API, with{" "}
             <code>POST /v1/routing/preferences/rank</code>. Score a batch of
             prompts from 0 (bad) to 1 (great) per candidate; two good answers is

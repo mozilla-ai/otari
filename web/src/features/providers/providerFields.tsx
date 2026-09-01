@@ -85,7 +85,7 @@ export function ClientArgsField({
         className="font-mono text-xs"
       />
       <Description
-        className={error ? "text-xs text-danger" : "text-xs text-muted"}
+        className={error ? "text-caption text-danger" : "text-caption"}
       >
         {error ??
           // Unlike the API key, these are stored and returned unencrypted, so say

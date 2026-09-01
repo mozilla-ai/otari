@@ -139,7 +139,7 @@ export function ModelScopeControl({
     <div className="flex flex-col gap-3">
       <div>
         <span className="text-sm font-medium text-foreground">{title}</span>
-        <p className="text-xs text-muted">
+        <p className="text-caption">
           {description ??
             "Which models this key may list and call. The master key is never restricted, so blocking a key cannot lock you out of the dashboard."}
         </p>
@@ -161,7 +161,7 @@ export function ModelScopeControl({
         <div className="flex flex-col gap-2">
           <div className="flex flex-wrap gap-1.5">
             {entries.length === 0 ? (
-              <span className="text-xs text-muted">
+              <span className="text-caption">
                 Pick at least one model below, or choose “Block all”.
               </span>
             ) : (
@@ -184,7 +184,7 @@ export function ModelScopeControl({
             )}
           </div>
           {catalogEmpty ? (
-            <span className="text-xs text-muted">
+            <span className="text-caption">
               No providers or models discovered yet. Configure a provider first,
               then scope this key.
             </span>
