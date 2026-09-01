@@ -84,8 +84,12 @@ class GrowthSignalPort(Protocol):
 
         Only ``API_KEY_CREATED`` is emitted, from
         ``POST /v1/organizations/me/keys``, where first occurrence is the owner
-        holding no key yet. The other three stay uncalled, and an overlay should
-        not expect them:
+        holding no key yet. That derivation is a read of current state, not a
+        once-per-person guarantee: deleting every key re-arms it, and two
+        concurrent creates can both read zero, so an adapter that must fire once
+        per person de-duplicates on its own end rather than relying on this.
+
+        The other three stay uncalled, and an overlay should not expect them:
 
         - ``FIRST_ROUTE_CONFIGURED`` and ``BUDGET_RULE_SET`` would fire from
           ``POST /v1/routing/policies`` and ``POST /v1/budgets``, which are

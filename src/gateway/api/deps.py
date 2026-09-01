@@ -550,7 +550,18 @@ def get_entitlement_port(db: PortSessionDep, container: ContainerDep) -> Entitle
     return container.resolve(EntitlementPort, db)
 
 
-def get_growth_signal_port(db: PortSessionDep, container: ContainerDep) -> GrowthSignalPort:
+# ``get_db`` rather than ``PortSessionDep``, for the reason
+# ``get_telemetry_storage_port`` below gives: both surfaces resolving this port
+# (signup, and a member minting their own key) are standalone-only and already
+# hold a session from ``get_db``, and FastAPI caches a dependency per callable.
+# Naming the same one hands the adapter the caller's session instead of opening
+# a second, independent one against the same database for the same request,
+# which is what an adapter writing an outbox row or a "notified" stamp would
+# need to land its write in a transaction someone commits.
+def get_growth_signal_port(
+    db: Annotated[AsyncSession, Depends(get_db)],
+    container: ContainerDep,
+) -> GrowthSignalPort:
     """Resolve the growth-signal adapter this build bound at startup."""
     return container.resolve(GrowthSignalPort, db)
 
