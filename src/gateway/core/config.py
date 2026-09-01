@@ -2289,8 +2289,6 @@ def _apply_platform_env_overrides(config: dict[str, Any]) -> None:
     env_mappings: dict[str, tuple[str, type[Any]]] = {
         "PLATFORM_BASE_URL": ("base_url", str),
         "PLATFORM_MANAGEMENT_URL": ("management_url", str),
-        # The reachability probe's path under base_url. A peer that does not serve
-        # the default answers 404, which the probe still counts as reachable.
         "PLATFORM_HEALTH_PATH": ("health_path", str),
         "PLATFORM_RESOLVE_TIMEOUT_MS": ("resolve_timeout_ms", int),
         "PLATFORM_USAGE_TIMEOUT_MS": ("usage_timeout_ms", int),

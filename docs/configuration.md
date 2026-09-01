@@ -268,9 +268,10 @@ this value without authentication.
 ## otari.ai variables
 
 Hybrid mode requires `OTARI_AI_TOKEN`. Optional platform settings control the
-platform API URL, management URL, resolution timeout, usage-report timeout and
-retries, and first-chunk fallback timeout. See [Modes](modes.md) and the
-normative [hybrid-mode protocol](hybrid-mode-protocol.md).
+platform API URL, management URL, health-probe path, resolution timeout,
+usage-report timeout and retries, and first-chunk fallback timeout. See
+[Modes](modes.md) and the normative
+[hybrid-mode protocol](hybrid-mode-protocol.md).
 
 ## Extending Otari with a bootstrap module
 
