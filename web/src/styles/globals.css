@@ -674,6 +674,13 @@
      invisible rather than quiet. Dots take values off the TEXT ramp; the
      surface ramp is for the things behind them. */
   --color-text-subtle: var(--color-text-subtle);
+  /* The third of them, registered before anything asks for it rather than
+     after. Two of the three "subtle" tokens turned out to be declared in both
+     theme blocks and reachable from no component, and both times the symptom
+     was a class that compiles clean, lints clean and changes nothing. This one
+     has no consumer yet, which is exactly why it is registered now: the next
+     person to want `bg-background-subtle` should get it, not a silent no-op. */
+  --color-background-subtle: var(--color-background-subtle);
   --color-control-thumb: var(--color-control-thumb);
   --shadow-elevation-sm: var(--shadow-sm);
   --shadow-elevation-md: var(--shadow-md);
