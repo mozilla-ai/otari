@@ -225,6 +225,20 @@ describe("ActivityTimeline", () => {
     expect(pan).toHaveAttribute("aria-valuenow", "1")
   })
 
+  it("gives the pan handle a 44px grab area, not the stripe's 10px", () => {
+    // The handle is what a finger has to land on, and the stripe it draws is a
+    // 10px child of it. jsdom does not lay out, so the assertion is on the
+    // classes that decide the box: a 44px row (`h-11`, the HIG floor) with the
+    // handle spanning it top to bottom.
+    renderTimeline({
+      windowStart: "2026-07-11T00:00:00.000Z",
+      windowEnd: "2026-07-12T00:00:00.000Z",
+    })
+    const pan = screen.getByRole("slider", { name: "Pan the selected window" })
+    expect(pan.className).toContain("inset-y-0")
+    expect(pan.parentElement?.className).toContain("h-11")
+  })
+
   it("renders no pan rail at the full extent (nothing to pan)", () => {
     renderTimeline()
     expect(

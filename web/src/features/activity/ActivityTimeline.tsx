@@ -358,10 +358,19 @@ export function ActivityTimeline({
                 rendered while zoomed (at the full extent there is nothing to
                 pan), so it never takes space or a tab stop otherwise. */}
             {zoomed || panSel ? (
+              // The row is 44px so the handle inside it is a real touch target;
+              // the track and the handle keep the 10px they read best at, drawn
+              // as children so the grab area is the whole height rather than
+              // the stripe. A thumb the size of the stripe is unpannable on a
+              // phone, which is the only place the zoom is hard to redo.
               <div
                 ref={railRef}
-                className="relative h-2.5 w-full rounded-full bg-surface-alt"
+                className="relative flex h-11 w-full items-center"
               >
+                <div
+                  aria-hidden="true"
+                  className="absolute inset-x-0 h-2.5 rounded-full bg-surface-alt"
+                />
                 <div
                   role="slider"
                   aria-label="Pan the selected window"
@@ -370,7 +379,7 @@ export function ActivityTimeline({
                   aria-valuenow={Math.min(sel.startIndex, panMax)}
                   aria-valuetext={`Window starting at ${formatTick(starts[sel.startIndex] ?? starts[0], bucket)}`}
                   tabIndex={0}
-                  className="absolute inset-y-0 cursor-grab touch-none rounded-full bg-accent/40 outline-none hover:bg-accent/60 focus-visible:ring-2 focus-visible:ring-accent active:cursor-grabbing"
+                  className="group absolute inset-y-0 flex cursor-grab touch-none items-center outline-none active:cursor-grabbing"
                   style={{
                     left: `${loPct}%`,
                     width: `${Math.max(2, hiPct - loPct)}%`,
@@ -388,7 +397,9 @@ export function ActivityTimeline({
                   onPointerMove={onPanMove}
                   onPointerUp={endPan}
                   onPointerCancel={endPan}
-                />
+                >
+                  <div className="h-2.5 w-full rounded-full bg-accent/40 group-hover:bg-accent/60 group-focus-visible:ring-2 group-focus-visible:ring-accent" />
+                </div>
               </div>
             ) : null}
           </div>

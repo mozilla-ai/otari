@@ -882,6 +882,25 @@ body {
   display: inline-flex;
 }
 
+/* Touch targets on the phone viewport. Apple's HIG floor is 44px and HeroUI's
+ * `size="sm"` button is 32, which is the size every table row's actions, every
+ * filter chip and every pagination control is written at: ~180 call sites, and
+ * the next one would start out under the floor again.
+ *
+ * A floor rather than a size, so it raises what is under it and leaves the
+ * larger sizes alone, and it is `min-*` so an explicit `h-8` on a button still
+ * decides the desktop height. `[data-slot="button"]` is only ever HeroUI's
+ * Button, which is why the hook is narrow enough to be safe.
+ *
+ * 767px is the shell's own MOBILE_QUERY boundary (`AppShell`), so the rule
+ * applies exactly where the sidebar has already become a drawer. */
+@media (max-width: 767px) {
+  [data-slot="button"] {
+    min-height: 2.75rem;
+    min-width: 2.75rem;
+  }
+}
+
 /* Modal sizing: v3's default container is sm:w-fit which under-sizes
  * wider modals. Allow growth to content, with a sensible min/max. */
 @media (min-width: 640px) {
