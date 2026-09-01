@@ -31,15 +31,18 @@ export function WorkspaceMembersPage() {
   // An organization's owners and admins manage every workspace in it, and so
   // does an owner/admin of this workspace specifically, which is the rule the
   // workspace service enforces server-side.
-  const manages = canManageWorkspace(context.data, selected?.role)
+  const canManageSelectedWorkspace = canManageWorkspace(
+    context.data,
+    selected?.role,
+  )
   // Withheld until the context answers, rather than treating a pending read as
   // "does not manage": an owner would otherwise be shown a roster they have a
   // better page for and have it swapped for the pointer to it one paint later.
   // A context that *failed* does read as "does not manage", which offers the
   // roster rather than withholding it, and the server authorizes that read
   // either way.
-  const organizationAnswered = !context.isLoading
-  const managesOrganization = canManage(context.data)
+  const hasOrganizationAnswered = !context.isLoading
+  const canManageOrganization = canManage(context.data)
 
   return (
     <div className="flex flex-col gap-6">
@@ -62,7 +65,7 @@ export function WorkspaceMembersPage() {
           workspaceName={selected.name}
           orgMembers={orgMembers.data ?? []}
           rosterResolved={orgMembers.isSuccess}
-          canManageWorkspace={manages}
+          canManageWorkspace={canManageSelectedWorkspace}
         />
       ) : (
         // An empty roster would read as "this workspace has nobody in it",
@@ -78,14 +81,14 @@ export function WorkspaceMembersPage() {
           }
         />
       )}
-      {organizationAnswered && !managesOrganization ? (
+      {hasOrganizationAnswered && !canManageOrganization ? (
         <OrganizationRosterCard
           members={orgMembers.data ?? []}
           isLoading={orgMembers.isPending && !orgMembers.data}
           organizationName={context.data?.organization?.name}
         />
       ) : null}
-      {organizationAnswered && managesOrganization ? (
+      {hasOrganizationAnswered && canManageOrganization ? (
         <p className="text-sm text-muted">
           Everyone in the organization, and the role each of them holds, is on{" "}
           <Link
