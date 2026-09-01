@@ -699,9 +699,9 @@ describe("AppShell entitlement gating", () => {
     // asserted here rather than left to `rowStyles.test.ts`: this is the test
     // that proves exactly one row wears it.
     expect(members.className).toContain("bg-surface-subtle")
-    expect(members.className).toContain("border-l-2")
+    expect(members.className).toContain("border-foreground")
     expect(parent.className).not.toContain("bg-surface-subtle")
-    expect(parent.className).not.toContain("border-l-2")
+    expect(parent.className).not.toContain("border-foreground")
   })
 
   it("names a gated-off child route after the child, not its parent", async () => {

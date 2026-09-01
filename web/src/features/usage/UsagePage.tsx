@@ -32,10 +32,9 @@ import {
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import { type FilterChip, FilterChips } from "@/shared/components/FilterChips"
 import {
-  BLEED_INSET,
-  FULL_BLEED,
   KpiCell,
   KpiStrip,
+  Section,
   Tab,
   TableScrollFrame,
   TabRow,
@@ -1231,8 +1230,9 @@ export function UsagePage() {
           {/* The analytics chart: metric × group-by, brushable. A band of the
               page between two rules rather than a card, so the plot's own
               baseline is the only box on it. */}
-          <section
-            className={`${FULL_BLEED} ${BLEED_INSET} flex flex-col gap-3 border-b border-border py-5`}
+          <Section
+            className="border-b border-border py-5"
+            contentClassName="flex flex-col gap-3"
           >
             <div className="flex flex-wrap items-center justify-between gap-3">
               <TabRow>
@@ -1354,7 +1354,7 @@ export function UsagePage() {
                 </figcaption>
               </figure>
             )}
-          </section>
+          </Section>
 
           {shareOpen ? (
             <ShareDialog
@@ -1448,8 +1448,9 @@ export function UsagePage() {
               table asking to be explained, and where it does appear it answers a
               question none of the other tables can ("what did search cost me"). */}
           {toolRows.length ? (
-            <section
-              className={`${FULL_BLEED} ${BLEED_INSET} flex flex-col border-t border-border py-5`}
+            <Section
+              className="border-t border-border py-5"
+              contentClassName="flex flex-col"
             >
               <div className="mb-3 flex flex-col gap-1">
                 <h2 className="text-title">Gateway-run tools</h2>
@@ -1465,7 +1466,7 @@ export function UsagePage() {
                 onDrill={(tool) => drillTo({ tool })}
                 loading={summary.isLoading}
               />
-            </section>
+            </Section>
           ) : null}
         </>
       )}

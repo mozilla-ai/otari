@@ -835,7 +835,11 @@ function AppShellChrome() {
           {/* The account block, set off by a rule as in the navigation prototype:
               the way onto the organization rail, the bundled guide, and the
               account control whose menu carries appearance and sign-out. */}
-          <div className="flex flex-col gap-1 border-t border-border pt-1 pb-[env(safe-area-inset-bottom)]">
+          {/* `-mx-3 px-3` so the rule runs the rail's full width and meets its
+              right border, while the rows inside keep the rail's padding. A
+              divider that stops short of the edge reads as a box's top border
+              rather than as a division of the rail. */}
+          <div className="-mx-3 flex flex-col gap-1 border-t border-border px-3 pt-1 pb-[env(safe-area-inset-bottom)]">
             {/* The way into the organization rail. Only in the workspace
                 context, since the organization one has its own way back, and
                 only for someone who manages the organization: it is the single

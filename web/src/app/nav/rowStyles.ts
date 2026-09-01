@@ -19,13 +19,14 @@
  * Hover and selection deliberately move by different amounts rather than in the
  * same direction by different degrees, so they cannot read as one fill.
  *
- * | state            | light                | dark                 |
- * | ---------------- | -------------------- | -------------------- |
- * | resting          | no fill              | no fill              |
- * | hover / focused  | `surface-subtle`     | `surface-subtle`     |
- * | pressed          | `background`         | `background`         |
- * | selected         | `surface-alt`        | `surface-alt`        |
- * | selected + hover | `surface-alt` (none) | `surface-alt` (none) |
+ * | state            | light                   | dark                    |
+ * | ---------------- | ----------------------- | ----------------------- |
+ * | resting          | no fill                 | no fill                 |
+ * | hover            | `surface-alt`           | `surface-alt`           |
+ * | focused          | no fill (the ring only) | no fill (the ring only) |
+ * | pressed          | `background`            | `background`            |
+ * | selected         | `surface-subtle` + edge | `surface-subtle` + edge |
+ * | selected + hover | `surface-subtle` (none) | `surface-subtle` (none) |
  *
  * No `dark:` override is needed for any of them, because the surface family is
  * staggered one rung above the background family in both themes. An earlier
@@ -135,7 +136,23 @@ const ROW_FOCUS =
  * it would also outrank `status-disabled`'s `--cursor-disabled` on the account
  * control, so a disabled row would promise a click.
  */
-const ROW_BASE = `flex min-h-11 w-full items-center gap-3 rounded-lg px-3 font-sans text-sm font-medium leading-[1.375rem] ${NAV_TRANSITION} ${ROW_FOCUS}`
+// The 2px selection edge is reserved on every row here, and *colored* by the
+// two state constants below: `border-transparent` on a resting row,
+// `border-foreground` on the selected one. Reserving the width is what keeps
+// the indent honest, since the selected state used to add `border-l-2` *and*
+// subtract 2px of left padding to compensate, and on a nested row that padding
+// override collided with the child's own `pl-[3.125rem]`, so selecting a child
+// dropped it back to its parent's lane. A border every row already carries
+// cannot move anything.
+//
+// The color cannot live here alongside the width, which is the trap this
+// replaces and it is invisible in the source: `border-transparent` and
+// `border-foreground` are both `border-color` utilities at equal specificity,
+// so the class attribute's order decides nothing and Tailwind's emitted order
+// does. It emits `border-transparent` last, so a row carrying both measured
+// `rgba(0, 0, 0, 0)` on the page while reading as correct in the JSX. Exactly
+// one border-color utility reaches a row now.
+const ROW_BASE = `flex min-h-11 w-full items-center gap-3 rounded-lg border-l-2 px-3 font-sans text-sm font-medium leading-[1.375rem] ${NAV_TRANSITION} ${ROW_FOCUS}`
 
 /**
  * `data-pressed` alongside `active` because a rail row is three different
@@ -157,7 +174,7 @@ const ROW_PRESSED =
  * outlive the pointer, a group trigger clicked open kept a fill afterwards and
  * read as selected when it was only focused.
  */
-const ROW_RESTING = `text-muted hover:bg-surface-alt hover:text-foreground focus-visible:text-foreground ${ROW_PRESSED}`
+const ROW_RESTING = `border-transparent text-muted hover:bg-surface-alt hover:text-foreground focus-visible:text-foreground ${ROW_PRESSED}`
 
 /**
  * The selected row, and the two things that make it unmistakable.
@@ -176,8 +193,7 @@ const ROW_RESTING = `text-muted hover:bg-surface-alt hover:text-foreground focus
  * is built from. The left padding gives the 2px back so a selected row's label
  * stays in the same lane as its siblings'.
  */
-const ROW_SELECTED =
-  "bg-surface-subtle text-foreground border-l-2 border-foreground pl-[calc(0.75rem-2px)]"
+const ROW_SELECTED = "bg-surface-subtle text-foreground border-foreground"
 
 /** The class list for one sidebar row. */
 export function navRowClass({

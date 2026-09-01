@@ -119,24 +119,29 @@ export function WorkspaceSwitcher({
           // the popover itself is what names the current workspace (it marks it
           // with a check), and this label is what assistive tech reads.
           aria-label={`Switch workspace, currently ${workspaceName} in ${organizationName}`}
-          // 56px tall in both states, so the rail's first block is the same height
-          // whichever context it is in: the organization rail's "Back to" row sits
-          // in a box of exactly this height. The fill is the rail's own ground with
-          // a border, not a white card, which is what keeps it reading as part of
-          // the chrome rather than as the first item in the list.
+          // A row, not a box. It had a border and its own fill, which made the
+          // rail open with an outlined card sitting above a list of flat rows;
+          // the artboard draws it blended into the chrome, distinguished by its
+          // height and its mark rather than by an edge. So it takes the same
+          // hover fill the nav rows take and nothing else.
+          //
+          // 56px tall in both states, so the rail's first block is the same
+          // height whichever context it is in: the organization rail's "Back to"
+          // row sits in a box of exactly this height.
           className={
             collapsed
-              ? `min-h-14 w-full! items-center justify-center border border-control-border bg-background px-0 hover:border-accent ${NAV_TRANSITION}`
-              : `min-h-14 w-full! items-center justify-start gap-2.5 border border-control-border bg-background px-2.5 py-2 text-left hover:border-accent ${NAV_TRANSITION}`
+              ? `min-h-14 w-full! items-center justify-center px-0 hover:bg-surface-alt ${NAV_TRANSITION}`
+              : `min-h-14 w-full! items-center justify-start gap-2.5 px-3 py-2 text-left hover:bg-surface-alt ${NAV_TRANSITION}`
           }
         >
           {/* The mark is the switcher's hero, as in the prototype: the product
             name is not repeated in the header, so this is where it lives. */}
-          <img
-            src="/favicon.svg"
-            alt=""
-            className="h-[1.875rem] w-[1.875rem] shrink-0"
-          />
+          {/* A 28px square on the active-control fill, which is what the
+              artboard draws: the mark sits in a tile the way a nav row's icon
+              sits in its lane, rather than floating at its own size. */}
+          <span className="flex h-7 w-7 shrink-0 items-center justify-center bg-surface-subtle">
+            <img src="/favicon.svg" alt="" className="h-5 w-5" />
+          </span>
           {collapsed ? null : (
             <>
               <span className="flex min-w-0 flex-1 flex-col gap-px">

@@ -1039,6 +1039,58 @@ body {
  * suppresses it. That is deliberate for the two places that need it and is the
  * reason `@utility otari-focus-ring` exists below; anywhere else, `outline-none`
  * silently removes the ring and should not be written. */
+/* =============================================================
+ * Full-bleed sections inside a centered column.
+ *
+ * `<main>`'s content sits in a centered `max-width` column, which is right for
+ * the reading measure and wrong for the rules: a section divider that stops at
+ * the column's edge reads as a card's border rather than as a division of the
+ * page, which is the whole distinction this redesign is built on. So a section
+ * spans the scroll area edge to edge while the content inside it stays in the
+ * column.
+ *
+ * Container query units rather than `100vw`, and this is the reason: `<main>`
+ * sits beside the rail, so a viewport-width section would run underneath the
+ * sidebar. `100cqw` is the width of `<main>` itself, which is the region a
+ * section belongs to. `container-type: inline-size` on `<main>` is what makes
+ * that unit resolve; it constrains inline size only, so the scroll container
+ * still scrolls.
+ * ============================================================= */
+main {
+  container-type: inline-size;
+}
+.otari-bleed {
+  width: 100cqw;
+  margin-inline: calc((100cqw - 100%) / -2);
+}
+
+/* =============================================================
+ * The pointer cursor, once.
+ *
+ * Tailwind v4's preflight leaves `<button>` on the browser default, which is an
+ * arrow, so every hand-rolled control in this product (tabs, nav rows, row
+ * actions, disclosure triggers, pagination) looked inert under the pointer while
+ * HeroUI's own components looked clickable. That is a difference nobody chose.
+ *
+ * In `@layer base` so a component's own rule still wins, and keyed on what the
+ * element *is* rather than on a class a call site has to remember. A disabled
+ * control takes the not-allowed cursor instead, which is the value HeroUI's
+ * `--cursor-disabled` already uses for its own.
+ * ============================================================= */
+@layer base {
+  button:not(:disabled),
+  summary,
+  [role="button"]:not([aria-disabled="true"]),
+  [role="switch"]:not(:disabled),
+  [role="tab"]:not([aria-disabled="true"]) {
+    cursor: pointer;
+  }
+  button:disabled,
+  [aria-disabled="true"] {
+    cursor: not-allowed;
+  }
+}
+
 @layer base {
   :focus-visible {
     outline: 2px solid var(--color-focus);

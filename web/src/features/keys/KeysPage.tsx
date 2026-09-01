@@ -33,12 +33,7 @@ import { ConfirmDialog } from "@/shared/components/ConfirmDialog"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import { Field } from "@/shared/components/Field"
 import { MissingGatewayAddressNotice } from "@/shared/components/MissingGatewayAddressNotice"
-import {
-  BLEED_INSET,
-  Dot,
-  FULL_BLEED,
-  TableScrollFrame,
-} from "@/shared/components/surface"
+import { Dot, Section, TableScrollFrame } from "@/shared/components/surface"
 import {
   CopyField,
   EmptyState,
@@ -152,12 +147,13 @@ function RevealSecretStrip({
     : undefined
 
   return (
-    <section
+    <Section
       // `alert` rather than `status`: this is the one message on the page that
       // is gone forever if it is missed.
       role="alert"
       aria-labelledby="reveal-title"
-      className={`${FULL_BLEED} ${BLEED_INSET} flex flex-col gap-4 border-y border-border py-5`}
+      className="border-y border-border py-5"
+      contentClassName="flex flex-col gap-4"
     >
       <div className="flex items-start gap-3">
         <Dot className="mt-2 bg-danger" />
@@ -203,7 +199,7 @@ function RevealSecretStrip({
           I&rsquo;ve saved this key
         </Button>
       </div>
-    </section>
+    </Section>
   )
 }
 
@@ -461,8 +457,9 @@ function CreateKeyForm({
   }
 
   return (
-    <section
-      className={`${FULL_BLEED} ${BLEED_INSET} flex flex-col gap-4 border-y border-border py-5`}
+    <Section
+      className="border-y border-border py-5"
+      contentClassName="flex flex-col gap-4"
     >
       <h2 className="text-title">Create API key</h2>
       <ErrorBanner error={create.error} />
@@ -546,7 +543,7 @@ function CreateKeyForm({
           {create.isPending ? "Creating…" : "Create key"}
         </Button>
       </div>
-    </section>
+    </Section>
   )
 }
 
@@ -590,8 +587,9 @@ function EditKeyForm({
   }
 
   return (
-    <section
-      className={`${FULL_BLEED} ${BLEED_INSET} flex flex-col gap-4 border-y border-border py-5`}
+    <Section
+      className="border-y border-border py-5"
+      contentClassName="flex flex-col gap-4"
     >
       <h2 className="text-title">
         Edit{" "}
@@ -648,7 +646,7 @@ function EditKeyForm({
           {update.isPending ? "Saving…" : "Save changes"}
         </Button>
       </div>
-    </section>
+    </Section>
   )
 }
 

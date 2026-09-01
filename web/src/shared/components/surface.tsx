@@ -1,4 +1,4 @@
-import { type ReactNode, useEffect, useRef } from "react"
+import { type HTMLAttributes, type ReactNode, useEffect, useRef } from "react"
 
 /**
  * The shared vocabulary of the divided surface: the full-bleed rule, the square
@@ -10,13 +10,47 @@ import { type ReactNode, useEffect, useRef } from "react"
  */
 
 /**
- * Every section on this page breaks out of `<main>`'s column padding so its
- * rules reach the page edge. Kept as one constant rather than repeated, because
- * a section that forgets it does not look broken, it looks like a card.
+ * A band of the page: rules that run the full width of the scroll area, with
+ * the content inside them still in the centered column.
+ *
+ * Two elements, and that is the point. A section that is both full-width and
+ * centered cannot be one element, and the earlier single-class version only
+ * escaped `<main>`'s padding, so on a wide viewport every rule stopped at the
+ * column's edge and the page read as a stack of cards again. `.otari-bleed`
+ * does the escaping (see globals.css for why it is container units and not
+ * `100vw`); the inner element restores the column.
+ *
+ * `className` styles the band: its rules, its vertical padding, its own layout
+ * if the content is a single row. `contentClassName` styles the column inside.
  */
-export const FULL_BLEED = "-mx-4 md:-mx-6"
-/** The padding a full-bleed section puts back inside its own rules. */
-export const BLEED_INSET = "px-4 md:px-6"
+export function Section({
+  className = "",
+  contentClassName = "",
+  children,
+  ...rest
+}: {
+  className?: string
+  contentClassName?: string
+  children: ReactNode
+} & Omit<HTMLAttributes<HTMLElement>, "className" | "children">) {
+  return (
+    <section className={`otari-bleed ${className}`} {...rest}>
+      <div
+        className={`mx-auto w-full max-w-[1800px] px-4 md:px-6 ${contentClassName}`}
+      >
+        {children}
+      </div>
+    </section>
+  )
+}
+
+/**
+ * The escape half on its own, for a band that is not a `<section>`: a header
+ * row, a page-level notice. Pair it with `BLEED_INSET` on an inner element.
+ */
+export const FULL_BLEED = "otari-bleed"
+/** The column a full-bleed band restores inside itself. */
+export const BLEED_INSET = "mx-auto w-full max-w-[1800px] px-4 md:px-6"
 
 /** A 6px square. The page's one status mark, in every place it appears. */
 export function Dot({ className }: { className: string }) {
@@ -36,18 +70,19 @@ export function KpiStrip({
   empty: boolean
 }) {
   return (
-    <section
+    <Section
       // Auto rows in groups of four, one group per row of cells, so the cells
       // below can subgrid onto them and line their four parts up with each
       // other. Without it a label that wraps makes its own cell taller and
       // drops its value below the others'.
-      className={`${FULL_BLEED} ${BLEED_INSET} grid grid-cols-2 border-y border-border sm:grid-cols-3 xl:grid-cols-5`}
+      className="border-y border-border"
+      contentClassName="grid grid-cols-2 sm:grid-cols-3 xl:grid-cols-5"
       // The graphic row is dropped uniformly in the empty state, so the strip
       // gets shorter without any cell changing shape relative to its neighbors.
       data-empty={empty ? "true" : undefined}
     >
       {children}
-    </section>
+    </Section>
   )
 }
 

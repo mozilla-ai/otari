@@ -25,12 +25,11 @@ import {
 import { Sparkline } from "@/shared/components/charts"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import {
-  BLEED_INSET,
   Dot,
-  FULL_BLEED,
   KpiCell,
   KpiStrip,
   Meter,
+  Section,
 } from "@/shared/components/surface"
 import { TrendChip } from "@/shared/components/TrendChip"
 import {
@@ -603,8 +602,9 @@ function GetStartedStrip() {
   const addProviderRoute = useAddProviderRoute()
 
   return (
-    <section
-      className={`${FULL_BLEED} ${BLEED_INSET} flex flex-col gap-4 border-y border-border py-5 sm:flex-row sm:items-center sm:justify-between`}
+    <Section
+      className="border-y border-border py-5"
+      contentClassName="flex flex-col gap-4 sm:flex-row sm:items-center sm:justify-between"
     >
       <div className="flex items-start gap-3">
         <Dot className="mt-2.5 bg-accent" />
@@ -625,7 +625,7 @@ function GetStartedStrip() {
       >
         Add your first provider
       </Button>
-    </section>
+    </Section>
   )
 }
 
@@ -633,12 +633,13 @@ function GetStartedStrip() {
 // surfaced in the ErrorBanner, but this preserves context at the status area.
 function NeutralStrip({ text }: { text: string }) {
   return (
-    <section
+    <Section
       role="status"
-      className={`${FULL_BLEED} ${BLEED_INSET} border-t border-border py-3 text-sm text-muted`}
+      className="border-t border-border py-3"
+      contentClassName="text-sm text-muted"
     >
       {text}
-    </section>
+    </Section>
   )
 }
 
@@ -729,9 +730,10 @@ function AttentionStrip({
   // rules, and the square danger dot is what carries the urgency the tinted
   // attention fill used to.
   return (
-    <section
+    <Section
       role="alert"
-      className={`${FULL_BLEED} ${BLEED_INSET} flex flex-col gap-2 border-y border-border py-3 text-sm sm:flex-row sm:flex-wrap sm:items-center`}
+      className="border-y border-border py-3"
+      contentClassName="flex flex-col gap-2 text-sm sm:flex-row sm:flex-wrap sm:items-center"
     >
       <span className="flex items-center gap-2 font-semibold text-foreground">
         <Dot className="bg-danger" />
@@ -759,7 +761,7 @@ function AttentionStrip({
           )}
         </span>
       ))}
-    </section>
+    </Section>
   )
 }
 
@@ -780,19 +782,19 @@ function SpendChart({
   series: { bucket_start: string; cost: number }[]
   ready: boolean
 }) {
+  const [hovered, setHovered] = useState<number | null>(null)
   if (!ready || series.length < 2) {
     return null
   }
   const peak = Math.max(...series.map((p) => p.cost), 0)
+  const hoveredPoint = hovered === null ? null : (series[hovered] ?? null)
   // A rounded ceiling rather than the peak itself, so the top label is a number
   // somebody would say out loud and the steps between are even.
   const top = niceCeiling(peak)
   // Top-down, which is the order they are drawn in.
   const steps = [1, 0.75, 0.5, 0.25, 0].map((f) => top * f)
   return (
-    <section
-      className={`${FULL_BLEED} ${BLEED_INSET} border-b border-border py-5`}
-    >
+    <Section className="border-b border-border py-5" contentClassName="">
       <div className="flex items-baseline justify-between">
         <h2 className="text-title">Spend, last 30 days</h2>
         <Link
@@ -819,20 +821,40 @@ function SpendChart({
           <div
             role="img"
             aria-label={`Daily spend over the last 30 days, peaking at ${formatUsd(peak)}`}
-            className="flex h-[180px] items-end gap-[3px] border-b border-border"
+            className="relative flex h-[180px] items-end gap-[3px] border-b border-border"
+            onPointerLeave={() => setHovered(null)}
           >
-            {series.map((point) => (
-              <span
+            {series.map((point, i) => (
+              // The hit area is the whole column, not the drawn bar: a day with
+              // almost no spend is two pixels tall, and a tooltip you can only
+              // reach by hitting two pixels is one nobody reaches.
+              <button
+                type="button"
                 key={point.bucket_start}
-                className="min-w-px flex-1 bg-accent"
-                style={{
-                  height:
-                    top > 0
-                      ? `${Math.max(1, (point.cost / top) * 100)}%`
-                      : "1px",
-                }}
-              />
+                aria-label={`${shortDate(point.bucket_start)}: ${formatUsd(point.cost)}`}
+                className="group flex min-w-px flex-1 items-end self-stretch"
+                onPointerEnter={() => setHovered(i)}
+                onFocus={() => setHovered(i)}
+                onBlur={() => setHovered(null)}
+              >
+                <span
+                  className="w-full bg-accent group-hover:bg-accent-hover"
+                  style={{
+                    height:
+                      top > 0
+                        ? `${Math.max(1, (point.cost / top) * 100)}%`
+                        : "1px",
+                  }}
+                />
+              </button>
             ))}
+            {hoveredPoint ? (
+              <ChartHoverCard
+                date={shortDate(hoveredPoint.bucket_start)}
+                value={formatUsd(hoveredPoint.cost)}
+                atPercent={((hovered as number) + 0.5) / series.length}
+              />
+            ) : null}
           </div>
           {/* Every fourth day, which lands nine labels across a thirty-day
               window: enough to date a bar, few enough not to become a second
@@ -853,7 +875,48 @@ function SpendChart({
         Daily totals for the selected workspace. Unpriced requests are recorded
         at zero.
       </p>
-    </section>
+    </Section>
+  )
+}
+
+/**
+ * The chart's hover card: the same small divided surface the Usage chart's
+ * tooltip is, on the floating rule (surface fill, control edge, square, no
+ * shadow). A mono date over a rule, then the value.
+ *
+ * Positioned as a percentage of the plot rather than at a pixel, and clamped by
+ * `translate` so the card at either end stays inside the plot instead of
+ * hanging off it.
+ */
+function ChartHoverCard({
+  date,
+  value,
+  atPercent,
+}: {
+  date: string
+  value: string
+  atPercent: number
+}) {
+  return (
+    <span
+      aria-hidden
+      className="pointer-events-none absolute bottom-full z-10 mb-2 min-w-[7.5rem] border border-control-border bg-surface text-xs"
+      style={{
+        left: `${atPercent * 100}%`,
+        transform: `translateX(-${Math.min(90, Math.max(10, atPercent * 100))}%)`,
+      }}
+    >
+      <span className="block border-b border-border px-2.5 py-1.5 font-mono text-[11px] text-subtle">
+        {date}
+      </span>
+      <span className="flex items-center gap-2 px-2.5 py-1.5">
+        <Dot className="bg-accent" />
+        <span className="text-muted">Spend</span>
+        <span className="ml-auto font-mono text-[13px] text-foreground tabular-nums">
+          {value}
+        </span>
+      </span>
+    </span>
   )
 }
 

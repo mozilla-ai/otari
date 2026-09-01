@@ -52,10 +52,28 @@ describe("navRowClass", () => {
     expect(selected).toContain("text-foreground")
     // Two adjacent rungs are a fragile way to carry "which page am I on", so
     // the state also gets a structural channel no transient state paints.
-    expect(selected).toContain("border-l-2")
     expect(selected).toContain("border-foreground")
-    // And the 2px is given back, so a selected label stays in its siblings' lane.
-    expect(selected).toContain("pl-[calc(0.75rem-2px)]")
+    // The edge is reserved on every row and only colored when selected, which is
+    // what stops selection moving anything. The compensating `pl-` this
+    // replaces collided with a nested row's own indent, so selecting a child
+    // dropped it back into its parent's lane.
+    expect(resting).toContain("border-l-2")
+    expect(resting).toContain("border-transparent")
+    // Only one border-color utility may reach a row. Carrying both, with the
+    // width in the base and the two colors in the states, compiles clean and
+    // measures transparent on the selected row: they are the same utility at
+    // the same specificity, so Tailwind's emitted order decides, and it emits
+    // `border-transparent` last.
+    expect(selected).not.toContain("border-transparent")
+    expect(selected).not.toMatch(/(?<![\w:-])pl-/)
+  })
+
+  it("keeps a nested row's indent when it is the selected one", () => {
+    const nested = navRowClass({ nested: true })
+    const nestedSelected = navRowClass({ nested: true, isActive: true })
+    for (const row of [nested, nestedSelected]) {
+      expect(row).toContain("pl-[3.125rem]")
+    }
     // No `dark:` override. The surface family sits one rung above the
     // background family in both themes, so `surface-alt` is a step off the
     // rail either way. An override here would resolve to the rail's own value
