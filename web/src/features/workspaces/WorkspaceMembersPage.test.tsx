@@ -184,7 +184,10 @@ describe("WorkspaceMembersPage", () => {
 
   it("shows a member the organization roster they have no other page for", async () => {
     mockApi({
-      context: organizationContext({ role: "member" }),
+      context: organizationContext({
+        role: "member",
+        deployment_operator: false,
+      }),
       memberships: [{ workspace_id: ALPHA, name: "Alpha", role: "member" }],
       orgMembers: [
         organizationMember({
@@ -217,7 +220,10 @@ describe("WorkspaceMembersPage", () => {
     // The caller with the most use for it: nothing else on this page answers
     // for them, and who to ask about a workspace is on the list.
     mockApi({
-      context: organizationContext({ role: "member" }),
+      context: organizationContext({
+        role: "member",
+        deployment_operator: false,
+      }),
       memberships: [],
     })
     await renderPage()
@@ -226,6 +232,28 @@ describe("WorkspaceMembersPage", () => {
     expect(
       await screen.findByRole("grid", { name: "Organization members" }),
     ).toBeInTheDocument()
+  })
+
+  it("reports a failed roster to a member rather than an empty organization", async () => {
+    // The card cannot tell an empty organization from an unanswered read, so the
+    // page's banner is what says which happened.
+    mockApi({
+      context: organizationContext({
+        role: "member",
+        deployment_operator: false,
+      }),
+      memberships: [{ workspace_id: ALPHA, name: "Alpha", role: "member" }],
+      rosterFails: true,
+    })
+    await renderPage()
+
+    expect(await screen.findByRole("alert")).toHaveTextContent(
+      "Roster unavailable",
+    )
+    const roster = await screen.findByRole("grid", {
+      name: "Organization members",
+    })
+    expect(within(roster).getByText("No members to show.")).toBeInTheDocument()
   })
 
   it("points a manager at the organization page instead of repeating its roster", async () => {
