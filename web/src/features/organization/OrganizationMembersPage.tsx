@@ -210,7 +210,7 @@ function AddMemberForm({ onClose }: { onClose: () => void }) {
   return (
     <Card>
       <Card.Content className="flex flex-col gap-4 p-5">
-        <div className="text-title">Add member</div>
+        <h2 className="text-title">Add member</h2>
         <ErrorBanner error={add.error} />
         <div className="grid gap-4 sm:grid-cols-2">
           <Field
@@ -332,7 +332,7 @@ function InviteMemberForm({ onClose }: { onClose: () => void }) {
     return (
       <Card>
         <Card.Content className="flex flex-col gap-4 p-5">
-          <div className="text-title">Invitation sent</div>
+          <h2 className="text-title">Invitation sent</h2>
           {result.mail_sent ? (
             <InfoBanner>
               An email with an accept link was sent to{" "}
@@ -368,7 +368,7 @@ function InviteMemberForm({ onClose }: { onClose: () => void }) {
   return (
     <Card>
       <Card.Content className="flex flex-col gap-4 p-5">
-        <div className="text-title">Invite member</div>
+        <h2 className="text-title">Invite member</h2>
         <ErrorBanner error={invite.error} />
         <div className="grid gap-4 sm:grid-cols-2">
           <Field
@@ -637,7 +637,7 @@ function MemberEditor({
   return (
     <Card>
       <Card.Content className="flex flex-col gap-5 p-5">
-        <div className="text-title">Edit {memberLabel(member)}</div>
+        <h2 className="text-title">Edit {memberLabel(member)}</h2>
         <ErrorBanner error={error} />
 
         {!operates ? null : spendRow ? (
@@ -665,10 +665,16 @@ function MemberEditor({
             <table className="w-full min-w-lg text-sm">
               <thead>
                 <tr className="text-left text-xs text-muted">
-                  <th className="py-1 font-medium">Workspace</th>
-                  <th className="py-1 font-medium">Role</th>
+                  <th scope="col" className="py-1 font-medium">
+                    Workspace
+                  </th>
+                  <th scope="col" className="py-1 font-medium">
+                    Role
+                  </th>
                   {operates ? (
-                    <th className="py-1 font-medium">Budget</th>
+                    <th scope="col" className="py-1 font-medium">
+                      Budget
+                    </th>
                   ) : null}
                 </tr>
               </thead>
@@ -679,18 +685,14 @@ function MemberEditor({
                   return (
                     <tr key={workspace.id} className="border-t border-border">
                       <td className="py-1.5">
-                        <label className="flex items-center gap-2 text-foreground">
-                          <input
-                            type="checkbox"
-                            checked={row.member}
-                            onChange={(event) =>
-                              setRow(workspace.id, {
-                                member: event.target.checked,
-                              })
-                            }
-                          />
+                        <Checkbox
+                          isSelected={row.member}
+                          onChange={(isSelected) =>
+                            setRow(workspace.id, { member: isSelected })
+                          }
+                        >
                           {workspace.name}
-                        </label>
+                        </Checkbox>
                       </td>
                       <td className="py-1.5">
                         <FilterSelect

@@ -4,6 +4,7 @@ import { useState } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
 
 import {
+  ConfirmButton,
   CopyableValue,
   CopyButton,
   EmptyState,
@@ -139,13 +140,54 @@ describe("CopyButton", () => {
     const { container } = render(
       <CopyButton value="openai:gpt-4o" label="model id" />,
     )
-    expect(container.textContent).toBe("")
+    // `sr-only` is clipped and taken out of flow, so the announcement below is
+    // not part of what the cell lays out; everything else here would be.
+    const laidOut = () => {
+      const clone = container.cloneNode(true) as HTMLElement
+      for (const node of clone.querySelectorAll(".sr-only")) node.remove()
+      return clone.textContent
+    }
+    expect(laidOut()).toBe("")
 
     await user.click(screen.getByRole("button", { name: "Copy model id" }))
     await screen.findByText("Copied!")
 
     // The confirmation is an overlay, not a sibling of the id it copied.
-    expect(container.textContent).toBe("")
+    expect(laidOut()).toBe("")
+  })
+
+  it("announces the outcome, which a press-opened tooltip does not", async () => {
+    const user = userEvent.setup()
+    const { container } = render(
+      <CopyButton value="openai:gpt-4o" label="model id" />,
+    )
+    const live = container.querySelector("[aria-live]") as HTMLElement
+    expect(live.textContent).toBe("")
+
+    await user.click(screen.getByRole("button", { name: "Copy model id" }))
+
+    await waitFor(() =>
+      expect(live.textContent).toBe("Copied model id to clipboard."),
+    )
+  })
+
+  it("announces a blocked copy rather than staying silent", async () => {
+    const user = userEvent.setup()
+    vi.spyOn(navigator.clipboard, "writeText").mockRejectedValue(
+      new Error("not a secure context"),
+    )
+    const { container } = render(
+      <CopyButton value="openai:gpt-4o" label="model id" />,
+    )
+
+    await user.click(screen.getByRole("button", { name: "Copy model id" }))
+
+    const live = container.querySelector("[aria-live]") as HTMLElement
+    await waitFor(() =>
+      expect(live.textContent).toBe(
+        "Could not copy model id. Select the value and press Ctrl/Cmd-C.",
+      ),
+    )
   })
 
   it("clears the confirmation on its own", async () => {
@@ -416,5 +458,66 @@ describe("FilterMultiComboBox", () => {
     expect(remaining).toHaveAttribute("aria-disabled", "true")
     await user.click(remaining)
     expect(onChange).toHaveBeenCalledTimes(1)
+  })
+})
+
+describe("ConfirmButton", () => {
+  it("hands focus to the confirm and back on cancel", async () => {
+    const user = userEvent.setup()
+    render(
+      <ConfirmButton confirmLabel="Delete permanently" onConfirm={() => {}}>
+        Delete
+      </ConfirmButton>,
+    )
+
+    const trigger = screen.getByRole("button", { name: "Delete" })
+    await user.click(trigger)
+
+    // Arming unmounts the trigger, which drops focus to <body> unless the pair
+    // that replaces it takes it: this is the delete button of a table row.
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: "Delete permanently" }),
+      ),
+    )
+
+    await user.click(screen.getByRole("button", { name: "Cancel" }))
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: "Delete" }),
+      ),
+    )
+  })
+
+  it("leaves focus alone until it is armed", () => {
+    render(
+      <>
+        <button type="button">elsewhere</button>
+        <ConfirmButton confirmLabel="Delete permanently" onConfirm={() => {}}>
+          Delete
+        </ConfirmButton>
+      </>,
+    )
+    const elsewhere = screen.getByRole("button", { name: "elsewhere" })
+    elsewhere.focus()
+
+    // Mounting a row of these must not pull focus out of whatever the operator
+    // was doing.
+    expect(document.activeElement).toBe(elsewhere)
+  })
+
+  it("confirms through the second press", async () => {
+    const onConfirm = vi.fn()
+    const user = userEvent.setup()
+    render(
+      <ConfirmButton confirmLabel="Delete permanently" onConfirm={onConfirm}>
+        Delete
+      </ConfirmButton>,
+    )
+
+    await user.click(screen.getByRole("button", { name: "Delete" }))
+    expect(onConfirm).not.toHaveBeenCalled()
+    await user.click(screen.getByRole("button", { name: "Delete permanently" }))
+    expect(onConfirm).toHaveBeenCalledTimes(1)
   })
 })

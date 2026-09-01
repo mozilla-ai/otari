@@ -12,6 +12,7 @@ import {
   useUpdateSettings,
 } from "@/shared/api/hooks"
 import {
+  Checkbox,
   ErrorBanner,
   FilterSelect,
   InfoBanner,
@@ -658,15 +659,9 @@ export function SettingsPage() {
           }}
           className="min-w-0 flex-1 rounded-lg border border-border bg-surface-alt px-3 py-2 text-sm text-foreground focus:border-accent focus:outline-none"
         />
-        <label className="flex items-center gap-2 text-sm text-muted">
-          <input
-            type="checkbox"
-            checked={settableOnly}
-            onChange={(event) => setSettableOnly(event.target.checked)}
-            className="h-4 w-4 accent-accent"
-          />
+        <Checkbox isSelected={settableOnly} onChange={setSettableOnly}>
           Settable only
-        </label>
+        </Checkbox>
       </div>
 
       {data ? (

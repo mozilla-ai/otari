@@ -561,16 +561,87 @@ describe("the shell chrome's type roles", () => {
     expect(CSS).toContain(`@utility ${role} {`)
   })
 
-  it("leaves no arbitrary font size in the nav chrome", () => {
-    const NAV = join(WEB, "src", "app", "nav")
-    const offenders = readdirSync(NAV)
+  it("leaves no arbitrary font size anywhere in the tree", () => {
+    // Scoped to `src/app/nav` when the chrome roles landed, and tree-wide now
+    // that the rest of the pages are on the scale too. The floor the scale
+    // offers is 12px (`--text-xs`), and every spelling under it was an
+    // arbitrary value at a call site: 10px axis ticks, 10px and 11px badges.
+    const SRC = join(WEB, "src")
+    const offenders = readdirSync(SRC, { recursive: true })
+      .map((name) => String(name).replaceAll("\\", "/"))
       .filter((name) => /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name))
       .filter((name) =>
         // `text-[` followed by a digit: an arbitrary size, as opposed to an
         // arbitrary color, which the token rules above already cover.
-        /text-\[\d/.test(readFileSync(join(NAV, name), "utf8")),
+        /text-\[\d/.test(readFileSync(join(SRC, name), "utf8")),
       )
 
-    expect(offenders, "use a text-chrome-* role, or add one").toEqual([])
+    expect(
+      offenders,
+      "use a type role (text-caption, text-overline, …) or a text-chrome-* one, or add one",
+    ).toEqual([])
+  })
+})
+
+// Touch targets. The rule ("at least 44px on the phone viewport") is in the
+// frontend-standards responsiveness guide and was written at ~180 `size="sm"`
+// call sites that do not meet it, so it is enforced as one floor in the
+// stylesheet rather than as a className each of them has to remember.
+describe("the phone viewport's touch-target floor", () => {
+  it("raises every HeroUI button to 44px below the shell's mobile boundary", () => {
+    // `[data-slot="button"]` is HeroUI's Button and nothing else, and 767px is
+    // AppShell's own MOBILE_QUERY, so the rule turns on exactly where the
+    // sidebar becomes a drawer.
+    expect(CSS).toMatch(
+      /@media \(max-width: 767px\) \{\s*\[data-slot="button"\] \{\s*min-height: 2\.75rem;\s*min-width: 2\.75rem;/,
+    )
+  })
+})
+
+// Form controls. The shared `Checkbox` (`shared/components/ui.tsx`) is the one
+// on the tokens, and a bare `<input type="checkbox">` is the browser's own:
+// system blue in both themes, and a 13px box on a page whose smallest touch
+// target is meant to be 44.
+describe("checkboxes come from the design foundation", () => {
+  const SRC = join(WEB, "src")
+  const sources = readdirSync(SRC, { recursive: true })
+    .map((name) => String(name).replaceAll("\\", "/"))
+    .filter((name) => name.endsWith(".tsx") && !name.endsWith(".test.tsx"))
+
+  it.each(sources)("uses no raw checkbox in %s", (name) => {
+    expect(
+      readFileSync(join(SRC, name), "utf8"),
+      `${name} hand-rolls a checkbox; use Checkbox from shared/components/ui`,
+    ).not.toContain('type="checkbox"')
+  })
+})
+
+// Column headers. A `<th>` with no `scope` leaves a screen reader guessing
+// which cells it heads, and the dashboard's hand-rolled tables (the ones that
+// are not `DataTable`, which gets this from react-aria) are where they live.
+describe("every column header says what it heads", () => {
+  const SRC = join(WEB, "src")
+  const sources = readdirSync(SRC, { recursive: true })
+    .map((name) => String(name).replaceAll("\\", "/"))
+    .filter((name) => name.endsWith(".tsx") && !name.endsWith(".test.tsx"))
+
+  it("covers the source tree", () => {
+    expect(sources.length).toBeGreaterThan(30)
+  })
+
+  it.each(sources)("gives every <th> in %s a scope", (name) => {
+    // Block comments first, for the same reason the heading sweep above drops
+    // them: `ActivityPage` explains its header row in a JSX comment that spells
+    // `<th>` in prose.
+    const source = readFileSync(join(SRC, name), "utf8").replace(
+      /\/\*[\s\S]*?\*\//g,
+      "",
+    )
+    for (const match of source.matchAll(/<th\b([^>]*)>/g)) {
+      expect(
+        match[1],
+        `${match[0]} in ${name} has no scope; a column header is scope="col" and a row header scope="row"`,
+      ).toMatch(/\bscope=/)
+    }
   })
 })

@@ -13,6 +13,7 @@ import {
 } from "@/shared/api/hooks"
 import {
   Badge,
+  Checkbox,
   ConfirmButton,
   ErrorBanner,
   errorMessage,
@@ -96,19 +97,15 @@ function WorkspaceScope({
       {everywhere ? null : (
         <div className="flex flex-wrap gap-3">
           {workspaces.map((workspace) => (
-            <label
+            <Checkbox
               key={workspace.id}
-              className="flex items-center gap-1 text-sm text-muted"
+              ariaLabel={`${scopeName}: ${workspace.name}`}
+              isSelected={selected.includes(workspace.id)}
+              isDisabled={disabled}
+              onChange={() => onToggle(workspace.id)}
             >
-              <input
-                type="checkbox"
-                aria-label={`${scopeName}: ${workspace.name}`}
-                checked={selected.includes(workspace.id)}
-                disabled={disabled}
-                onChange={() => onToggle(workspace.id)}
-              />
               {workspace.name}
-            </label>
+            </Checkbox>
           ))}
           {workspaces.length === 0 ? (
             <span className="text-xs text-muted">

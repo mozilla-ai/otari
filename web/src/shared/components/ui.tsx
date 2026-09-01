@@ -20,6 +20,7 @@ import { Checkbox as AriaCheckbox } from "react-aria-components"
 import { ApiError } from "@/shared/api/client"
 import { copyToClipboard } from "@/shared/helpers/clipboard"
 import { formatRelative } from "@/shared/helpers/format"
+import { useConfirmationFocus } from "@/shared/hooks/useConfirmationFocus"
 
 // The box visual, split out so it can hold optimistic state: react-aria only
 // reports the new `isSelected` after the whole collection re-renders (O(rows)
@@ -102,15 +103,23 @@ export function Checkbox({
   isSelected,
   onChange,
   isDisabled = false,
+  ariaLabel,
   children,
 }: {
   isSelected: boolean
   onChange: (isSelected: boolean) => void
   isDisabled?: boolean
+  /**
+   * An accessible name that says more than the visible label does, for a group
+   * whose labels repeat across the page (one workspace list per guardrail, say).
+   * Keep the visible text inside it, so speech input still reaches the control.
+   */
+  ariaLabel?: string
   children: ReactNode
 }) {
   return (
     <AriaCheckbox
+      aria-label={ariaLabel}
       isSelected={isSelected}
       onChange={onChange}
       isDisabled={isDisabled}
@@ -655,6 +664,16 @@ export function CopyButton({ value, label }: { value: string; label: string }) {
           ? "Copy blocked, select the value and press Ctrl/Cmd-C"
           : "Copied!"}
       </Tooltip.Content>
+      {/* A tooltip opened by a press rather than by focus is not announced, and
+          the outcome is the whole point of the press. `CopyField` says its own
+          the same way. */}
+      <span aria-live="polite" className="sr-only">
+        {state === "copied"
+          ? `Copied ${label} to clipboard.`
+          : state === "failed"
+            ? `Could not copy ${label}. Select the value and press Ctrl/Cmd-C.`
+            : ""}
+      </span>
     </Tooltip.Root>
   )
 }
@@ -762,11 +781,13 @@ export function ConfirmButton({
   isPending?: boolean
 }) {
   const [armed, setArmed] = useState(false)
+  const { triggerRef, confirmRef } = useConfirmationFocus(armed)
 
   if (armed) {
     return (
       <span className="inline-flex items-center gap-1">
         <Button
+          ref={confirmRef}
           size="sm"
           variant="danger"
           isDisabled={isPending}
@@ -787,7 +808,12 @@ export function ConfirmButton({
   }
 
   return (
-    <Button size="sm" variant="danger-soft" onPress={() => setArmed(true)}>
+    <Button
+      ref={triggerRef}
+      size="sm"
+      variant="danger-soft"
+      onPress={() => setArmed(true)}
+    >
       {children}
     </Button>
   )
