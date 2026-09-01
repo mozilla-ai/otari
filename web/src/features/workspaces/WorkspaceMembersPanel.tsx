@@ -146,7 +146,7 @@ export function WorkspaceMembersPanel({
 
   return (
     <div className="flex flex-col gap-4 p-4">
-      <div className="text-title">Members of {workspaceName}</div>
+      <h2 className="text-title">Members of {workspaceName}</h2>
       <ErrorBanner
         error={members.error ?? updateRole.error ?? removeMember.error}
       />

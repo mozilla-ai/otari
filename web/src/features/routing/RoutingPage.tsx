@@ -623,7 +623,7 @@ function PolicyForm({
     <div className="flex flex-col gap-4">
       <Card>
         <Card.Content className="flex flex-col gap-5 p-5">
-          <div className="text-title">
+          <h2 className="text-title">
             {editing ? (
               <>
                 Edit {existing.kind === "alias" ? "alias" : "policy"}{" "}
@@ -638,7 +638,7 @@ function PolicyForm({
             ) : (
               "New routing policy"
             )}
-          </div>
+          </h2>
           <ErrorBanner error={save.error ?? saveAlias.error} />
 
           <div className="grid gap-4 sm:grid-cols-2">

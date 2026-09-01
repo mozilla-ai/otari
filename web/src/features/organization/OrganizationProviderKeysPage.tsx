@@ -134,9 +134,9 @@ function KeyForm({
   return (
     <Card>
       <Card.Content className="flex flex-col gap-4 p-5">
-        <div className="text-title">
+        <h2 className="text-title">
           {editing ? `Edit ${editing.name}` : "Add provider key"}
-        </div>
+        </h2>
         <ErrorBanner error={create.error ?? update.error} />
 
         {editing ? (

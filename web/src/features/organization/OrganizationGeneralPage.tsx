@@ -42,7 +42,7 @@ function OrganizationDetails({
   return (
     <Card>
       <Card.Content className="flex flex-col gap-4 p-5">
-        <div className="text-title">Details</div>
+        <h2 className="text-title">Details</h2>
         <ErrorBanner error={update.error} />
         <Field
           label="Organization name"

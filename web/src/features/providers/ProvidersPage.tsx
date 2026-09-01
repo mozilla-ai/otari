@@ -462,9 +462,9 @@ function EditProviderForm({
   return (
     <Card>
       <Card.Content className="flex flex-col gap-4 p-5">
-        <div className="text-title">
+        <h2 className="text-title">
           Edit <code>{provider.instance}</code>
-        </div>
+        </h2>
         <ErrorBanner error={update.error} />
         <div className="grid gap-4 sm:grid-cols-2">
           <Field

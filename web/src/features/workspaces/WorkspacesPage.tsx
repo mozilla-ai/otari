@@ -325,7 +325,7 @@ export function CreateWorkspaceForm({
   return (
     <Card>
       <Card.Content className="flex flex-col gap-4 p-5">
-        <div className="text-title">Create workspace</div>
+        <h2 className="text-title">Create workspace</h2>
         {/* A refusal about the name is carried by the name, not by a block above
             the form that resizes whatever frames it. What is left here is what
             no field state can honestly say: a failure the operator cannot
@@ -545,9 +545,9 @@ function EditWorkspaceForm({
   return (
     <Card>
       <Card.Content className="flex flex-col gap-4 p-5">
-        <div className="text-title">
+        <h2 className="text-title">
           Edit <code>{workspace.name}</code>
-        </div>
+        </h2>
         <ErrorBanner
           error={
             update.error ??
