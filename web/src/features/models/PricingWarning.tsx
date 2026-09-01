@@ -33,7 +33,14 @@ export function PricingWarning() {
   // `useProviderKeyEncryption` does: a second request to ask the same question
   // is the cost this removes.
   const organization = useOrganizationContext()
-  const isOperator = isDeploymentOperator(organization.data)
+  // Fails open on a failed context read, which is what the rail does with the
+  // same class of gate: `/v1/settings` is `require_deployment_operator`, so it
+  // refuses with a 403 rather than a 404, and `nav/types.ts` settles what that
+  // means with no answer. Here it costs more than a hidden row, because the
+  // banner is the only thing reporting that traffic is being dropped right now.
+  // The ordinary tenant path, a resolved context saying no, still asks nothing.
+  const isOperator =
+    isDeploymentOperator(organization.data) || organization.isError
   const settings = useSettings(isOperator)
   const updateSettings = useUpdateSettings()
   const [dismissed, setDismissed] = useState(false)

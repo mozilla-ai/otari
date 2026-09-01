@@ -3,7 +3,7 @@ import { render, screen, waitFor } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
-import type { GatewaySettings } from "@/client"
+import type { GatewaySettings, OrganizationContext } from "@/client"
 import { PricingWarning } from "@/features/models/PricingWarning"
 import { organizationContext } from "@/tests/fixtures"
 import { withRouter } from "@/tests/router"
@@ -26,10 +26,13 @@ function jsonResponse(body: unknown, status = 200): Response {
   })
 }
 
+// A context the caller has, or the status the read failed with.
+type ContextResult = OrganizationContext | { failsWith: number }
+
 function mockSettings(
   settings: GatewaySettings,
   rejectedInLastHour = 0,
-  context = organizationContext(),
+  context: ContextResult = organizationContext(),
 ) {
   let current = { ...settings }
   return vi
@@ -41,7 +44,9 @@ function mockSettings(
       // routes or the organization-scoped ones (otari#837). Answered first, and
       // on an exact match, so it cannot shadow /v1/organizations/me/usage.
       if (url.endsWith("/v1/organizations/me")) {
-        return jsonResponse(context)
+        return "failsWith" in context
+          ? jsonResponse({ detail: "Not found" }, context.failsWith)
+          : jsonResponse(context)
       }
       const method = (init?.method ?? "GET").toUpperCase()
       if (url.includes("/v1/settings")) {
@@ -82,7 +87,9 @@ function renderPage(
 // the gate was still undecided.
 async function settleContext(client: QueryClient) {
   await waitFor(() =>
-    expect(client.getQueryData(["organizations", "context"])).toBeDefined(),
+    expect(client.getQueryState(["organizations", "context"])?.status).not.toBe(
+      "pending",
+    ),
   )
 }
 
@@ -273,6 +280,27 @@ describe("PricingWarning", () => {
     expect(
       screen.queryByRole("button", { name: "Enable default pricing" }),
     ).not.toBeInTheDocument()
+  })
+
+  it("still alarms an operator whose organization context fails to load", async () => {
+    // `/v1/settings` refuses with a 403, not a 404, so a failed read of the
+    // signal fails open the way an `operatorOnly: "refused"` rail row does
+    // (`nav/types.ts`). The banner is the only thing reporting that the gateway
+    // is dropping traffic, so withholding it on an unrelated failure strands the
+    // one person who can act.
+    mockSettings(
+      { ...BASE, require_pricing: true, default_pricing: false },
+      12,
+      {
+        failsWith: 404,
+      },
+    )
+    renderPage(<PricingWarning />)
+
+    expect(await screen.findByText(/Requests are rejected/)).toBeInTheDocument()
+    expect(
+      screen.getByRole("button", { name: "Enable default pricing" }),
+    ).toBeInTheDocument()
   })
 
   it("can be dismissed", async () => {
