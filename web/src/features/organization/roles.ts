@@ -190,6 +190,21 @@ export function membershipChangeBlockedReason({
   return undefined
 }
 
+/**
+ * The key a roster row is listed under: its own membership id, falling back to
+ * the identity or the address a pending invitation names, since that row has no
+ * membership yet.
+ */
+export function memberRowKey(member: OrganizationMember): string {
+  return (
+    member.organization_member_id ??
+    member.invitation_id ??
+    member.user_id ??
+    member.email ??
+    "unknown"
+  )
+}
+
 /** How a member is named on screen: their name, then their email, then their id. */
 export function memberLabel(member: OrganizationMember): string {
   return (

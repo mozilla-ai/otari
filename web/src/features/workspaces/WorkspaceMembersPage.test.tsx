@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { render, screen } from "@testing-library/react"
+import { screen, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import { afterEach, describe, expect, it, vi } from "vitest"
 import { WorkspaceMembersPage } from "@/features/workspaces/WorkspaceMembersPage"
@@ -9,6 +9,7 @@ import {
   organizationMember,
   workspaceMember,
 } from "@/tests/fixtures"
+import { renderWithRouter } from "@/tests/router"
 import { pickOption } from "@/tests/select"
 
 const ALPHA = "11111111-1111-1111-1111-111111111111"
@@ -53,16 +54,19 @@ function mockApi({
   return requests
 }
 
+// In a router, because the page links to Organization > Members & roles for a
+// caller who manages the organization.
 function renderPage() {
   const client = new QueryClient({
     defaultOptions: { queries: { retry: false } },
   })
-  return render(
+  return renderWithRouter(
     <QueryClientProvider client={client}>
       <SelectedWorkspaceProvider>
         <WorkspaceMembersPage />
       </SelectedWorkspaceProvider>
     </QueryClientProvider>,
+    { url: "/members" },
   )
 }
 
@@ -74,7 +78,7 @@ describe("WorkspaceMembersPage", () => {
 
   it("shows the roster of the selected workspace, named by the organization", async () => {
     mockApi()
-    renderPage()
+    await renderPage()
 
     // The page is about the selected workspace, and says which one.
     expect(await screen.findByText("Members of Alpha")).toBeInTheDocument()
@@ -82,7 +86,7 @@ describe("WorkspaceMembersPage", () => {
 
   it("says so rather than showing an empty roster when there is no workspace", async () => {
     mockApi({ memberships: [] })
-    renderPage()
+    await renderPage()
 
     // An empty roster would read as "this workspace has nobody in it", which is
     // a different fact from "you are in no workspace".
@@ -96,7 +100,7 @@ describe("WorkspaceMembersPage", () => {
     mockApi({
       memberships: [{ workspace_id: ALPHA, name: "Alpha", role: "owner" }],
     })
-    renderPage()
+    await renderPage()
 
     await screen.findByText("Members of Alpha")
     expect(await screen.findByRole("button", { name: "Remove" })).toBeEnabled()
@@ -111,7 +115,7 @@ describe("WorkspaceMembersPage", () => {
     // The one organization member is already in the workspace, which in a
     // standalone deployment is the permanent state until sign-in lands.
     mockApi()
-    renderPage()
+    await renderPage()
 
     expect(
       await screen.findByText(/already in this workspace/),
@@ -123,7 +127,7 @@ describe("WorkspaceMembersPage", () => {
     // An empty candidate list is only "everyone is already here" once the
     // roster has answered; a failed one has to say so instead.
     mockApi({ rosterFails: true })
-    renderPage()
+    await renderPage()
 
     expect(await screen.findByRole("alert")).toHaveTextContent(
       "Roster unavailable",
@@ -144,7 +148,7 @@ describe("WorkspaceMembersPage", () => {
       ],
     })
     const user = userEvent.setup()
-    renderPage()
+    await renderPage()
 
     await pickOption(user, "Organization member", "Analyst")
     await pickOption(user, "Role", "Admin")
@@ -168,9 +172,73 @@ describe("WorkspaceMembersPage", () => {
       context: organizationContext({ role: "viewer" }),
       memberships: [{ workspace_id: ALPHA, name: "Alpha", role: "viewer" }],
     })
-    renderPage()
+    await renderPage()
 
     await screen.findByText("Members of Alpha")
     expect(await screen.findByRole("button", { name: "Remove" })).toBeDisabled()
+  })
+
+  // otari-ai#1960: the organization's roster is Members & roles, on a rail the
+  // shell opens only to a caller who manages the organization, so a member had
+  // nowhere to read who else is in their organization.
+
+  it("shows a member the organization roster they have no other page for", async () => {
+    mockApi({
+      context: organizationContext({ role: "member" }),
+      memberships: [{ workspace_id: ALPHA, name: "Alpha", role: "member" }],
+      orgMembers: [
+        organizationMember({
+          user_id: USER,
+          full_name: "Alex Avery",
+          role: "member",
+        }),
+        organizationMember({
+          organization_member_id: "owner-membership",
+          user_id: "77777777-7777-7777-7777-777777777777",
+          full_name: "Bea Brooks",
+          role: "owner",
+        }),
+      ],
+    })
+    await renderPage()
+
+    const roster = await screen.findByRole("grid", {
+      name: "Organization members",
+    })
+    // Someone the workspace roster above does not name: the point of the card is
+    // the organization beyond this workspace.
+    expect(within(roster).getByText("Bea Brooks")).toBeInTheDocument()
+    expect(within(roster).getByText("Owner")).toBeInTheDocument()
+    // Read-only: the roles and the removals are the management page's.
+    expect(within(roster).queryByRole("button")).toBeNull()
+  })
+
+  it("shows the organization roster to a member who is in no workspace yet", async () => {
+    // The caller with the most use for it: nothing else on this page answers
+    // for them, and who to ask about a workspace is on the list.
+    mockApi({
+      context: organizationContext({ role: "member" }),
+      memberships: [],
+    })
+    await renderPage()
+
+    expect(await screen.findByText("No workspace selected")).toBeInTheDocument()
+    expect(
+      await screen.findByRole("grid", { name: "Organization members" }),
+    ).toBeInTheDocument()
+  })
+
+  it("points a manager at the organization page instead of repeating its roster", async () => {
+    // An owner or admin has Members & roles, which lists the same people and
+    // can change them, so the read-only copy would be the same table twice.
+    mockApi()
+    await renderPage()
+
+    expect(
+      await screen.findByRole("link", { name: /Members & roles/ }),
+    ).toHaveAttribute("href", "/organization/members")
+    expect(
+      screen.queryByRole("grid", { name: "Organization members" }),
+    ).toBeNull()
   })
 })

@@ -20,6 +20,7 @@ import {
   accessLabel,
   ModelScopeControl,
 } from "@/features/models/ModelScopeControl"
+import { MembershipStatusChip } from "@/features/organization/MembershipStatusChip"
 import {
   useAddOrganizationMember,
   useAddWorkspaceMember,
@@ -62,6 +63,7 @@ import {
   isDeploymentOperator,
   MEMBERSHIP_ROLES,
   memberLabel,
+  memberRowKey,
   membershipChangeBlockedReason,
   membershipLabel,
 } from "./roles"
@@ -113,42 +115,6 @@ const ROLE_OPTIONS = MEMBERSHIP_ROLES.map((role) => ({
   value: role,
   label: membershipLabel(role),
 }))
-
-// A membership row is keyed by its own id, and a pending invitation has none
-// yet, so those fall back to the identity or the address they name.
-function memberRowKey(member: OrganizationMember): string {
-  return (
-    member.organization_member_id ??
-    member.invitation_id ??
-    member.user_id ??
-    member.email ??
-    "unknown"
-  )
-}
-
-function StatusChip({ status }: { status: string }) {
-  // Not a membership status: it is the gateway refusing this person's keys, and
-  // it is shown here because the membership is active while every request fails.
-  if (status === "blocked") {
-    return (
-      <Chip size="sm" color="danger">
-        Blocked
-      </Chip>
-    )
-  }
-  if (status === "active") {
-    return (
-      <Chip size="sm" color="accent">
-        Active
-      </Chip>
-    )
-  }
-  return (
-    <Chip size="sm" color={status === "suspended" ? "warning" : "default"}>
-      {membershipLabel(status)}
-    </Chip>
-  )
-}
 
 // Adding someone is an address plus a role, and optionally the workspaces to
 // drop them into in the same request. A local identity is created for an address
@@ -909,9 +875,9 @@ export function OrganizationMembersPage() {
           // active, and every request the person makes is still refused, which
           // is what someone reading this column wants to know.
           return spendRow?.blocked ? (
-            <StatusChip status="blocked" />
+            <MembershipStatusChip status="blocked" />
           ) : (
-            <StatusChip status={member.status} />
+            <MembershipStatusChip status={member.status} />
           )
         },
       },

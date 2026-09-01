@@ -20,6 +20,9 @@ const WORKSPACE_ROUTES: ReadonlyArray<{
   { route: "/routing", name: "routing", heading: /routing/i },
   { route: "/providers", name: "providers", heading: /provider/i },
   { route: "/keys", name: "keys", heading: /keys/i },
+  // The selected workspace's roster, which is not the organization one below:
+  // this page is on the workspace rail and stops at the workspace it names.
+  { route: "/members", name: "members", heading: /members/i },
   { route: "/budgets", name: "budgets", heading: /budgets/i },
   // The member roster now carries what the users page used to: model access,
   // blocking, and per-person spend. It is on the organization rail, which this
@@ -229,6 +232,38 @@ async function stubAdminSpendView(page: Page): Promise<void> {
     })
   })
 }
+
+/**
+ * The member view of the workspace Members page.
+ *
+ * The organization's own roster is read-only there for a caller who does not
+ * manage the organization (otari-ai#1960), because Members & roles is on the
+ * organization rail and the shell opens that rail to nobody else. `login` is the
+ * bootstrap operator, who is an owner, so the only way to capture the other
+ * caller is to stub their context, as `stubAdminSpendView` does above and for
+ * the same reason. The roster itself is served for real.
+ */
+test.describe("organization member", () => {
+  test("workspace members", async ({ page }) => {
+    await login(page)
+    await page.route("**/v1/organizations/me", async (route) => {
+      const response = await route.fetch()
+      const context = await response.json()
+      await route.fulfill({
+        json: { ...context, role: "member", deployment_operator: false },
+      })
+    })
+    await gotoRoute(page, "/members")
+    await expect(
+      page.getByRole("heading", { name: /^members$/i }).first(),
+    ).toBeVisible()
+    // Awaited past the loading rows, so the capture is the populated table.
+    await expect(
+      page.getByRole("heading", { name: "Organization members" }),
+    ).toBeVisible()
+    await captureScreenshot(page, "members-organization-roster")
+  })
+})
 
 test.describe("organization admin", () => {
   test("organization spend and budgets", async ({ page }) => {
