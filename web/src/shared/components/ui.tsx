@@ -321,7 +321,11 @@ export function InfoBanner({
       <Dot
         className={`mt-2 ${tone === "warning" ? "bg-danger" : "bg-surface-subtle"}`}
       />
-      <div className="min-w-0">{children}</div>
+      {/* Capped for the reason the page header and the settings rows are: a
+          banner is a full-bleed row now, and its sentence would otherwise run
+          the width of the page, which is roughly twice a readable measure on a
+          wide viewport. The rule spans the page; the words do not. */}
+      <div className="min-w-0 max-w-prose">{children}</div>
     </div>
   )
 }

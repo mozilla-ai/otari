@@ -1696,6 +1696,57 @@ main {
   border-right: 1px solid var(--color-control-border);
 }
 
+/* The deployment's accounts. Same terms as the others, and the 58px row the
+   two-line identity cell sets. */
+.otari-accounts-table .otari-table.table-root {
+  background-color: transparent;
+}
+.otari-accounts-table .otari-table .table__header {
+  background-color: transparent;
+  border-bottom: 1px solid var(--color-border);
+}
+.otari-accounts-table .otari-table .table__row,
+.otari-accounts-table .table__row .table__cell {
+  border-color: var(--color-border-subtle);
+}
+.otari-accounts-table .table__row .table__cell {
+  height: 58px;
+  padding-block: 0;
+}
+.otari-accounts-table .table__column[data-key="last-sign-in"] {
+  width: 140px;
+  min-width: 140px;
+}
+.otari-accounts-table .table__column[data-key="status"] {
+  width: 160px;
+  min-width: 160px;
+}
+.otari-accounts-table .table__column[data-key="access"] {
+  width: 190px;
+  min-width: 190px;
+}
+.otari-accounts-table .table__column[data-key="actions"] {
+  width: 220px;
+  min-width: 220px;
+}
+/* The slack absorber, so the lanes after the identity stay adjacent to it. */
+.otari-accounts-table .table__column[data-key="organizations"] {
+  min-width: 200px;
+}
+.otari-accounts-table .table__column[data-key="account"],
+.otari-accounts-table .table__cell[data-key="account"] {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background-color: var(--color-background);
+  width: 300px;
+  min-width: 300px;
+}
+.otari-accounts-table[data-scrolled="true"] .table__column[data-key="account"],
+.otari-accounts-table[data-scrolled="true"] .table__cell[data-key="account"] {
+  border-right: 1px solid var(--color-control-border);
+}
+
 /* Workspaces. Same terms as the others, and the same 58px row the Members and
    Keys tables take, set by the two-line identity cell: a name over the
    description that says what the workspace is for. */

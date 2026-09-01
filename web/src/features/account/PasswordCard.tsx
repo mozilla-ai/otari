@@ -1,14 +1,8 @@
-import {
-  Button,
-  Card,
-  Description,
-  Input,
-  Label,
-  TextField,
-} from "@heroui/react"
+import { Button, Description, Input, Label, TextField } from "@heroui/react"
 import { useState } from "react"
 
 import { useSetPassword } from "@/shared/api/hooks"
+import { Section } from "@/shared/components/surface"
 import { ErrorBanner } from "@/shared/components/ui"
 import {
   MAX_PASSWORD_BYTES,
@@ -173,121 +167,119 @@ export function PasswordCard() {
   }
 
   return (
-    <section className="flex flex-col gap-2">
+    <Section
+      className="border-t border-border pt-6 pb-5"
+      contentClassName="flex flex-col gap-4"
+    >
       <h2 className="text-title">
         {isClaimed ? "Dashboard password" : "Claim this deployment"}
       </h2>
-      <Card>
-        <Card.Content className="flex flex-col gap-4 px-5 py-5">
-          <p className="max-w-3xl text-sm text-muted">
-            {isClaimed
-              ? "The password you sign in to this dashboard with. Changing it ends every other session this identity holds; this one stays signed in."
-              : "This gateway still signs in with its master key. Set an address and a password to sign in as yourself from now on. The master key stays the credential for the management API, and it can still reset this password if you forget it. Claiming is the operator's to do: if your own account already has a password, this form will refuse it, and your password changes once they have claimed."}
-          </p>
 
-          {outcome ? (
-            <p
-              role="status"
-              aria-live="polite"
-              className="max-w-3xl text-sm text-success"
-            >
-              {outcome.claimed
-                ? `Saved. Sign in as ${outcome.email} from now on: the master key no longer signs in to this dashboard, and it stays the credential for the management API.`
-                : `Saved. Your other sessions have ended; sign in as ${outcome.email} next time.`}
-            </p>
-          ) : null}
+      <p className="max-w-3xl text-sm text-muted">
+        {isClaimed
+          ? "The password you sign in to this dashboard with. Changing it ends every other session this identity holds; this one stays signed in."
+          : "This gateway still signs in with its master key. Set an address and a password to sign in as yourself from now on. The master key stays the credential for the management API, and it can still reset this password if you forget it. Claiming is the operator's to do: if your own account already has a password, this form will refuse it, and your password changes once they have claimed."}
+      </p>
 
-          <form
-            className="flex flex-col gap-4"
-            onSubmit={(event) => {
-              event.preventDefault()
-              submit()
+      {outcome ? (
+        <p
+          role="status"
+          aria-live="polite"
+          className="max-w-3xl text-sm text-success"
+        >
+          {outcome.claimed
+            ? `Saved. Sign in as ${outcome.email} from now on: the master key no longer signs in to this dashboard, and it stays the credential for the management API.`
+            : `Saved. Your other sessions have ended; sign in as ${outcome.email} next time.`}
+        </p>
+      ) : null}
+
+      <form
+        className="flex flex-col gap-4"
+        onSubmit={(event) => {
+          event.preventDefault()
+          submit()
+        }}
+      >
+        {isClaimed ? (
+          <PasswordField
+            label="Current password"
+            value={currentPassword}
+            onChange={(next) => {
+              setCurrentPassword(next)
+              clearResult()
             }}
+            autoComplete="current-password"
+          />
+        ) : (
+          <TextField
+            value={email}
+            onChange={(next) => {
+              setEmail(next)
+              clearResult()
+            }}
+            type="email"
+            isRequired
+            className="flex max-w-md flex-col gap-1"
           >
-            {isClaimed ? (
-              <PasswordField
-                label="Current password"
-                value={currentPassword}
-                onChange={(next) => {
-                  setCurrentPassword(next)
-                  clearResult()
-                }}
-                autoComplete="current-password"
-              />
-            ) : (
-              <TextField
-                value={email}
-                onChange={(next) => {
-                  setEmail(next)
-                  clearResult()
-                }}
-                type="email"
-                isRequired
-                className="flex max-w-md flex-col gap-1"
-              >
-                <Label className="text-sm font-medium text-foreground">
-                  Email
-                </Label>
-                {/* autoComplete="username" and not "email": this is the handle
-                    the sign-in form will ask for, so a password manager should
-                    file it against the credential it is being set beside. */}
-                {/* No autoFocus: this is a page, not a dialog, and focusing
-                    a field on mount raises the soft keyboard over the
-                    explanation above it before the operator has asked to
-                    type. */}
-                <Input placeholder="you@example.com" autoComplete="username" />
-                <Description className="text-xs text-muted">
-                  Changing this address later is not supported yet, so pick the
-                  one you will keep.
-                </Description>
-              </TextField>
-            )}
+            <Label className="text-sm font-medium text-foreground">Email</Label>
+            {/* autoComplete="username" and not "email": this is the handle
+                the sign-in form will ask for, so a password manager should
+                file it against the credential it is being set beside. */}
+            {/* No autoFocus: this is a page, not a dialog, and focusing
+                a field on mount raises the soft keyboard over the
+                explanation above it before the operator has asked to
+                type. */}
+            <Input placeholder="you@example.com" autoComplete="username" />
+            <Description className="text-xs text-muted">
+              Changing this address later is not supported yet, so pick the one
+              you will keep.
+            </Description>
+          </TextField>
+        )}
 
-            <PasswordField
-              label="New password"
-              value={newPassword}
-              onChange={(next) => {
-                setNewPassword(next)
-                clearResult()
-              }}
-              autoComplete="new-password"
-              description={`At least ${MIN_PASSWORD_LENGTH} characters, and at most ${MAX_PASSWORD_BYTES} bytes.`}
-            />
-            <PasswordField
-              label="Confirm new password"
-              value={confirmPassword}
-              onChange={(next) => {
-                setConfirmPassword(next)
-                clearResult()
-              }}
-              autoComplete="new-password"
-            />
+        <PasswordField
+          label="New password"
+          value={newPassword}
+          onChange={(next) => {
+            setNewPassword(next)
+            clearResult()
+          }}
+          autoComplete="new-password"
+          description={`At least ${MIN_PASSWORD_LENGTH} characters, and at most ${MAX_PASSWORD_BYTES} bytes.`}
+        />
+        <PasswordField
+          label="Confirm new password"
+          value={confirmPassword}
+          onChange={(next) => {
+            setConfirmPassword(next)
+            clearResult()
+          }}
+          autoComplete="new-password"
+        />
 
-            {problem ? (
-              <p role="alert" className="text-sm text-danger">
-                {problem}
-              </p>
-            ) : null}
-            {unchanged ? (
-              <p role="alert" className="text-sm text-danger">
-                The new password cannot be the one you already use.
-              </p>
-            ) : null}
-            <ErrorBanner error={setPassword.error} />
+        {problem ? (
+          <p role="alert" className="text-sm text-danger">
+            {problem}
+          </p>
+        ) : null}
+        {unchanged ? (
+          <p role="alert" className="text-sm text-danger">
+            The new password cannot be the one you already use.
+          </p>
+        ) : null}
+        <ErrorBanner error={setPassword.error} />
 
-            <div>
-              <Button
-                type="submit"
-                variant="primary"
-                isPending={setPassword.isPending}
-                isDisabled={!canSubmit}
-              >
-                {isClaimed ? "Change password" : "Set password"}
-              </Button>
-            </div>
-          </form>
-        </Card.Content>
-      </Card>
-    </section>
+        <div>
+          <Button
+            type="submit"
+            variant="primary"
+            isPending={setPassword.isPending}
+            isDisabled={!canSubmit}
+          >
+            {isClaimed ? "Change password" : "Set password"}
+          </Button>
+        </div>
+      </form>
+    </Section>
   )
 }
