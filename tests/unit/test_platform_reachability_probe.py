@@ -6,6 +6,7 @@ The default path is a platform route. A peer that does not serve it answers
 env-only deployment.
 """
 
+from pathlib import Path
 from typing import Any
 
 import httpx
@@ -38,9 +39,15 @@ def transport(monkeypatch: pytest.MonkeyPatch) -> _RecordingTransport:
 
 
 @pytest.fixture(autouse=True)
-def _isolated_platform_env(monkeypatch: pytest.MonkeyPatch) -> None:
+def _isolated_platform_env(monkeypatch: pytest.MonkeyPatch, tmp_path: Path) -> None:
+    """Give each test the env these tests set and nothing else.
+
+    ``load_config`` reads a ``.env`` from the working directory, which would put
+    a contributor's local ``PLATFORM_*`` values back after the deletes below.
+    """
     for name in ("OTARI_AI_TOKEN", "PLATFORM_BASE_URL", "PLATFORM_HEALTH_PATH", "OTARI_MODE"):
         monkeypatch.delenv(name, raising=False)
+    monkeypatch.chdir(tmp_path)
 
 
 @pytest.mark.asyncio
