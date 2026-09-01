@@ -631,11 +631,22 @@ async def test_dns_resolution_observes_network_deadline() -> None:
 
 
 @pytest.mark.asyncio
-async def test_capped_body_rejects_already_read_response() -> None:
-    response = httpx.Response(200, content=b"already buffered")
+async def test_capped_body_closes_consumed_response_and_releases_pool() -> None:
+    transport = PinnedAsyncHTTPTransport(backend_factory=BackendFactory())
+    target = ValidatedTarget(canonicalize_web_url("http://example.com/page"), (_PUBLIC_V4,))
 
-    with pytest.raises(httpx.StreamConsumed):
-        await read_capped_decoded_body(response, deadline=NetworkDeadline(1))
+    async with httpx.AsyncClient(transport=transport) as client:
+        response = await _request_with_target(client, target, stream=True)
+        entry = transport._pools[transport._pool_key(target, _PUBLIC_V4)]  # noqa: SLF001
+        chunks = response.aiter_raw()
+        assert await anext(chunks) == b"OK"
+        assert entry.active_responses == 1
+
+        with pytest.raises(httpx.StreamConsumed):
+            await read_capped_decoded_body(response, deadline=NetworkDeadline(1))
+
+        assert response.is_closed
+        assert entry.active_responses == 0
 
 
 @pytest.mark.asyncio
