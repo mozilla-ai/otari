@@ -273,3 +273,20 @@ def test_the_deployment_wide_writers_still_refuse_a_tenant(client: TestClient, w
         "/v1/aliases",
         {"name": "x", "target": _ALPHA_TARGET},
     ).status_code == status.HTTP_403_FORBIDDEN
+
+
+def test_both_lists_are_bounded(client: TestClient, world: _World) -> None:
+    """A tenant's routing configuration is a read with a server-enforced cap."""
+    for name in ("bound-a", "bound-b", "bound-c"):
+        assert _post(client, world, "alpha_admin", _POLICIES, _policy_body(world, name=name)).status_code == 200
+        alias = {"name": f"{name}-alias", "target": _ALPHA_TARGET, "workspace_id": str(world.workspaces["alpha_one"])}
+        assert _post(client, world, "alpha_admin", _ALIASES, alias).status_code == status.HTTP_200_OK
+
+    for path in (_POLICIES, _ALIASES):
+        bounded = _get(client, world, "alpha_admin", f"{path}?limit=2")
+        assert bounded.status_code == status.HTTP_200_OK, bounded.text
+        assert len(bounded.json()) == 2
+        # The cap is a cap, not a page size the caller can lift.
+        assert _get(client, world, "alpha_admin", f"{path}?limit=100000").status_code == (
+            status.HTTP_422_UNPROCESSABLE_CONTENT
+        )

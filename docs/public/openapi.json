@@ -17899,6 +17899,22 @@
       "get": {
         "description": "List the aliases in force in the workspaces this caller may see.\n\nThe policies list's sibling, over ``model_aliases``, and scoped the same way:\nstored rows from the caller's visible workspaces, plus the config-file\naliases, which are deployment-wide.",
         "operationId": "list_visible_aliases_v1_organizations_me_aliases_get",
+        "parameters": [
+          {
+            "description": "Maximum entries to return, stored and config-file together.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 1000,
+              "description": "Maximum entries to return, stored and config-file together.",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -17913,6 +17929,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [
@@ -19809,6 +19835,22 @@
       "get": {
         "description": "List the routing policies in force in the workspaces this caller may see.\n\nStored policies from the caller's visible workspaces plus the config-file\npolicies, which are deployment-wide and resolve in every workspace. The\nresponse is the shape ``GET /v1/routing/policies`` answers, narrowed to the\ncaller's own organization.",
         "operationId": "list_visible_routing_policies_v1_organizations_me_routing_policies_get",
+        "parameters": [
+          {
+            "description": "Maximum entries to return, stored and config-file together.",
+            "in": "query",
+            "name": "limit",
+            "required": false,
+            "schema": {
+              "default": 1000,
+              "description": "Maximum entries to return, stored and config-file together.",
+              "maximum": 1000,
+              "minimum": 1,
+              "title": "Limit",
+              "type": "integer"
+            }
+          }
+        ],
         "responses": {
           "200": {
             "content": {
@@ -19823,6 +19865,16 @@
               }
             },
             "description": "Successful Response"
+          },
+          "422": {
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/HTTPValidationError"
+                }
+              }
+            },
+            "description": "Validation Error"
           }
         },
         "security": [

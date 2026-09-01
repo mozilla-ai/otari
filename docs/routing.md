@@ -186,8 +186,9 @@ aliases through `/v1/organizations/me/routing-policies` and
 `/v1/organizations/me/aliases`, which the Routing page uses for a caller who
 does not operate the deployment. Those routes require the workspace named, must
 name a workspace of the caller's own organization, accept no user scope, and
-refuse a target the organization holds no provider access for. A member of the
-organization reads the same two lists and writes neither.
+refuse a target the organization holds no provider access for. Both reads take a
+server-capped `limit`, which bounds the response rather than paginating it. A
+member of the organization reads the same two lists and writes neither.
 
 The authenticating API key determines which workspace resolves a policy.
 User-scoped entries take precedence over wider entries. A config-file policy

@@ -12542,7 +12542,10 @@ export interface operations {
     };
     list_visible_aliases_v1_organizations_me_aliases_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Maximum entries to return, stored and config-file together. */
+                limit?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -12556,6 +12559,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["AliasResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };
@@ -13645,7 +13657,10 @@ export interface operations {
     };
     list_visible_routing_policies_v1_organizations_me_routing_policies_get: {
         parameters: {
-            query?: never;
+            query?: {
+                /** @description Maximum entries to return, stored and config-file together. */
+                limit?: number;
+            };
             header?: never;
             path?: never;
             cookie?: never;
@@ -13659,6 +13674,15 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["PolicyResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
                 };
             };
         };

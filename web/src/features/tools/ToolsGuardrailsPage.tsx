@@ -789,7 +789,11 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
                   <p className="text-sm text-muted">{service.blurb}</p>
                   <Card>
                     <Card.Content className="flex flex-col divide-y divide-border px-5 py-1">
-                      {service.pricingKey ? (
+                      {/* Operator-only inside a card a member now also sees:
+                          the rate comes from `/v1/pricing`, whose read is still
+                          operator-gated, so a member would get an editable "Not
+                          priced" row that can only fail on save. */}
+                      {isOperator && service.pricingKey ? (
                         <ToolPriceRow
                           pricingKey={service.pricingKey}
                           configured={

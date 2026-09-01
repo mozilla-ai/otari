@@ -18,6 +18,12 @@ member, Edit for an admin (otari-ai#1942, otari-ai#1969).
   a member or viewer reads the ones they actively belong to. A member who
   belongs to no workspace still gets the config-file entries, which are
   deployment-wide and in force in every workspace they could ever join.
+* **Both reads are bounded.** ``limit`` caps the stored rows a request
+  materializes, and the config-file entries are appended within the same cap, so
+  neither response grows with the tenant. The default is the cap rather than a
+  page, because the dashboard renders policies and aliases as one sorted table
+  and a page of one beside every row of the other would be incoherent; the bound
+  is there for the organization that outgrows the page, not to paginate the page.
 * **A write needs a named workspace, resolved inside the organization.** There is
   no default-workspace fallback here, unlike the operator routers: the
   deployment's default workspace is not the tenant's to write into unless it
@@ -92,6 +98,11 @@ aliases_router = APIRouter(
     tags=["aliases"],
     dependencies=[Depends(verify_master_key)],
 )
+
+# The cap on either list, and its default. High enough that no real organization's
+# routing configuration is truncated by it, low enough that one row per name is
+# never an unbounded read.
+_MAX_ROWS = 1000
 
 
 async def _writable_workspace_id(
@@ -195,11 +206,15 @@ def _visible_workspace_ids(scope: VisibleWorkspaceScope) -> Select[tuple[uuid.UU
     return statement.where(false())
 
 
+_LIMIT = Query(ge=1, le=_MAX_ROWS, description="Maximum entries to return, stored and config-file together.")
+
+
 @policies_router.get("")
 async def list_visible_routing_policies(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     current_identity: CurrentIdentity,
+    limit: Annotated[int, _LIMIT] = _MAX_ROWS,
 ) -> list[PolicyResponse]:
     """List the routing policies in force in the workspaces this caller may see.
 
@@ -210,7 +225,7 @@ async def list_visible_routing_policies(
     """
     scope = await resolve_visible_workspace_scope(db, user=current_identity, organizations=OrganizationService(db))
     statement = select(RoutingPolicy).where(col(RoutingPolicy.workspace_id).in_(_visible_workspace_ids(scope)))
-    rows = (await db.execute(statement.order_by(RoutingPolicy.name))).scalars().all()
+    rows = (await db.execute(statement.order_by(RoutingPolicy.name).limit(limit))).scalars().all()
     policies = []
     for row in rows:
         try:
@@ -226,6 +241,8 @@ async def list_visible_routing_policies(
     # Config last, matching the operator list: deployment-wide, in force in every
     # workspace, listed once and unscoped.
     for name, spec in config.routing.policies.items():
+        if len(policies) >= limit:
+            break
         policies.append(
             PolicyResponse(
                 name=name,
@@ -288,6 +305,7 @@ async def list_visible_aliases(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
     current_identity: CurrentIdentity,
+    limit: Annotated[int, _LIMIT] = _MAX_ROWS,
 ) -> list[AliasResponse]:
     """List the aliases in force in the workspaces this caller may see.
 
@@ -297,11 +315,12 @@ async def list_visible_aliases(
     """
     scope = await resolve_visible_workspace_scope(db, user=current_identity, organizations=OrganizationService(db))
     statement = select(ModelAlias).where(col(ModelAlias.workspace_id).in_(_visible_workspace_ids(scope)))
-    rows = (await db.execute(statement.order_by(ModelAlias.name))).scalars().all()
+    rows = (await db.execute(statement.order_by(ModelAlias.name).limit(limit))).scalars().all()
     aliases = [AliasResponse.from_model(row) for row in rows]
-    aliases.extend(
-        AliasResponse(name=name, target=target, source="config") for name, target in config.aliases.items()
-    )
+    for name, target in config.aliases.items():
+        if len(aliases) >= limit:
+            break
+        aliases.append(AliasResponse(name=name, target=target, source="config"))
     return sorted(aliases, key=lambda alias: (alias.name, str(alias.workspace_id or ""), alias.user_id or ""))
 
 

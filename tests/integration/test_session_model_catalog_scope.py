@@ -293,3 +293,34 @@ def test_an_identity_with_no_live_membership_is_answered_rather_than_refused(
     particular it must not be shown Beta's models just because it points there.
     """
     assert _catalog_as(client, world, "orphan") == set()
+
+
+def test_a_foreign_workspaces_alias_names_are_not_listed(
+    client: TestClient, master_key_header: dict[str, str], world: _World
+) -> None:
+    """An alias name is not filtered by the allow-list, so the layer has to be scoped.
+
+    ``services/alias_service`` reads the deployment's default workspace when no
+    workspace is named, which is what the master-key write below means and what a
+    session used to be answered from. The alias points at a target Alpha *can*
+    reach, so the model allow-list permits it and only the workspace scoping keeps
+    the name out: the case a filter over targets cannot catch (otari-ai#1969).
+    """
+    created = client.post(
+        "/v1/aliases",
+        json={"name": "acme-confidential-summarizer", "target": _OPENAI_MODEL},
+        headers=master_key_header,
+    )
+    assert created.status_code == status.HTTP_200_OK, created.text
+
+    listed = _catalog_as(client, world, "alpha_member")
+    assert "acme-confidential-summarizer" not in listed
+    # The providers themselves are unaffected: this withholds another workspace's
+    # names, not a tenant's models. The target stays listed for the member, and
+    # correctly so: an alias withholds its target to keep the indirection intact,
+    # and there is no indirection here for a caller who is shown no alias.
+    assert listed == {_OPENAI_MODEL, _OPENAI_OTHER}
+
+    # The control: an operator is answered from the workspace the alias lives in,
+    # so the name is still there for the caller it belongs to.
+    assert "acme-confidential-summarizer" in _catalog_as(client, world, "superuser")

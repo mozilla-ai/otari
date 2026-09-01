@@ -99,6 +99,7 @@ function mockApi(
       target: string
       source: string
       user_id: string | null
+      workspace_id?: string
     }[]
   } = {},
 ) {
@@ -141,6 +142,7 @@ function mockApi(
             target: body.target as string,
             source: "stored",
             user_id: null,
+            workspace_id: body.workspace_id as string | undefined,
           }
           memberAliasList = [
             ...memberAliasList.filter((item) => item.name !== row.name),
@@ -1543,6 +1545,66 @@ describe("RoutingPage for an organization admin", () => {
 
     expect(await screen.findByText("mine")).toBeInTheDocument()
     expect(screen.getByText("tenant-alias")).toBeInTheDocument()
+  })
+
+  it("writes an alias edit back to the alias's own workspace", async () => {
+    // The sibling of the policy case above, and it was the one that regressed:
+    // `aliasAsRow` dropped `workspace_id`, so every alias row fell back to the
+    // selected workspace and an edit landed in the wrong one silently.
+    const OTHER_WORKSPACE = "66666666-6666-6666-6666-666666666666"
+    const { calls } = mockApi([], null, [], {
+      context: adminContext(),
+      memberPolicies: [],
+      memberAliases: [
+        {
+          name: "elsewhere-alias",
+          target: "openai:gpt-5",
+          source: "stored",
+          user_id: null,
+          workspace_id: OTHER_WORKSPACE,
+        },
+      ],
+    })
+    const user = userEvent.setup()
+    renderInWorkspace(<RoutingPage />)
+
+    await screen.findByText("elsewhere-alias")
+    await user.click(screen.getByRole("button", { name: "Edit" }))
+    await user.click(await screen.findByRole("button", { name: "Save" }))
+
+    const written = calls.find(
+      (call) =>
+        call.method === "POST" &&
+        call.url.includes("/v1/organizations/me/aliases"),
+    )
+    expect(written?.body).toMatchObject({ workspace_id: OTHER_WORKSPACE })
+  })
+
+  it("deletes an alias from the alias's own workspace", async () => {
+    const OTHER_WORKSPACE = "77777777-7777-7777-7777-777777777777"
+    const { calls } = mockApi([], null, [], {
+      context: adminContext(),
+      memberPolicies: [],
+      memberAliases: [
+        {
+          name: "doomed-alias",
+          target: "openai:gpt-5",
+          source: "stored",
+          user_id: null,
+          workspace_id: OTHER_WORKSPACE,
+        },
+      ],
+    })
+    const user = userEvent.setup()
+    renderInWorkspace(<RoutingPage />)
+
+    await screen.findByText("doomed-alias")
+    await user.click(screen.getByRole("button", { name: "Delete" }))
+    await user.click(screen.getByRole("button", { name: "Confirm" }))
+
+    const deleted = calls.find((call) => call.method === "DELETE")
+    expect(deleted?.url).toContain("/v1/organizations/me/aliases/")
+    expect(deleted?.url).toContain(`workspace_id=${OTHER_WORKSPACE}`)
   })
 
   it("withholds the write affordances from an admin in no workspace", async () => {

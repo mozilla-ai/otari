@@ -641,6 +641,9 @@ describe("ToolsGuardrailsPage by caller role", () => {
     // The service endpoints never arrive, so nothing renders them either.
     expect(screen.queryByText("web_search_url")).not.toBeInTheDocument()
     expect(screen.queryByText("guardrails_url")).not.toBeInTheDocument()
+    // Nor the per-call rate: `/v1/pricing` is still operator-only, so this row
+    // would show a member an editable "Not priced" field that only fails on save.
+    expect(screen.queryByText("Price per call")).not.toBeInTheDocument()
   })
 
   it("keeps a narrowed service page working for a non-operator", async () => {

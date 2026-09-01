@@ -105,6 +105,13 @@ reach, narrowed by any workspace model restriction. A deployment whose providers
 all come from `config.yml` therefore shows every tenant the same catalog it
 always did.
 
+Aliases and stored routing policies are workspace-scoped rows, and the catalog
+reads them for a workspace rather than filtering them by target, so a name alone
+would cross a tenant boundary that the allow-list cannot see. A session is
+therefore shown that layer only where the workspace it comes from is one the
+caller may see, which on a single-tenant deployment is everyone in it. An API key
+is unaffected: it names its own workspace.
+
 ## Capabilities
 
 `model_capabilities` can correct image and PDF support when a compatible

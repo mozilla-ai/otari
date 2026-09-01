@@ -11,7 +11,7 @@ one workspace at a time.
 """
 
 import uuid
-from collections.abc import Sequence
+from collections.abc import Collection, Sequence
 
 from sqlalchemy import delete, func, select, update
 from sqlalchemy.ext.asyncio import AsyncSession
@@ -388,6 +388,57 @@ class WorkspaceProviderKeyOverrideRepository:
         )
         return [(key, override) for key, override in result.all()]
 
+    async def candidates_for_workspaces(
+        self,
+        *,
+        organization_id: uuid.UUID,
+        workspace_ids: Collection[uuid.UUID],
+    ) -> dict[uuid.UUID, list[Candidate]]:
+        """:meth:`all_candidates` for several workspaces in one query.
+
+        Keyed by workspace, each list ordered oldest-first as
+        ``resolve_active_key``'s fallback tier requires. A workspace with no
+        override rows still appears, holding the organization's keys with no
+        override beside them, so a caller can read the answer for every id it
+        asked about without a second pass.
+
+        The override join carries ``workspace_id`` into the row rather than
+        filtering on one, which is what lets the query span workspaces: the same
+        key appears once per workspace, with that workspace's override or none.
+        """
+        requested = list(dict.fromkeys(workspace_ids))
+        if not requested:
+            return {}
+        result = await self.db.execute(
+            select(OrgProviderKey, WorkspaceProviderKeyOverride)
+            .outerjoin(
+                WorkspaceProviderKeyOverride,
+                (col(WorkspaceProviderKeyOverride.org_provider_key_id) == col(OrgProviderKey.id))
+                & col(WorkspaceProviderKeyOverride.workspace_id).in_(requested),
+            )
+            .where(
+                col(OrgProviderKey.organization_id) == organization_id,
+                col(OrgProviderKey.archived_at).is_(None),
+            )
+            .order_by(col(OrgProviderKey.provider), col(OrgProviderKey.created_at), col(OrgProviderKey.id))
+        )
+        rows = result.all()
+        # Every requested workspace gets an entry, so an id with no override rows
+        # is answered rather than missing. A key joined to no override belongs to
+        # all of them; one joined to an override belongs to that workspace alone.
+        by_workspace: dict[uuid.UUID, list[Candidate]] = {workspace_id: [] for workspace_id in requested}
+        overridden: dict[tuple[uuid.UUID, uuid.UUID], WorkspaceProviderKeyOverride] = {
+            (override.workspace_id, key.id): override for key, override in rows if override is not None
+        }
+        seen: set[uuid.UUID] = set()
+        for key, _ in rows:
+            if key.id in seen:
+                continue
+            seen.add(key.id)
+            for workspace_id in requested:
+                by_workspace[workspace_id].append((key, overridden.get((workspace_id, key.id))))
+        return by_workspace
+
     async def get_active_key_for_workspace_provider(
         self,
         *,
@@ -419,6 +470,40 @@ class WorkspaceProviderModelRestrictionRepository:
             .order_by(col(WorkspaceProviderModelRestriction.model))
         )
         return list(result.scalars().all())
+
+    async def list_for_workspace_keys(
+        self, pairs: Collection[tuple[uuid.UUID, uuid.UUID]]
+    ) -> dict[tuple[uuid.UUID, uuid.UUID], list[str]]:
+        """:meth:`list_for_workspace_key` for several (workspace, key) pairs at once.
+
+        Only pairs with at least one restriction appear. An absent pair means
+        every model of that key is allowed, which is what an absent row means
+        everywhere else, so a caller must not read a missing key as an empty
+        allow-list.
+        """
+        wanted = set(pairs)
+        if not wanted:
+            return {}
+        result = await self.db.execute(
+            select(
+                col(WorkspaceProviderModelRestriction.workspace_id),
+                col(WorkspaceProviderModelRestriction.org_provider_key_id),
+                col(WorkspaceProviderModelRestriction.model),
+            )
+            .where(
+                col(WorkspaceProviderModelRestriction.workspace_id).in_({workspace for workspace, _ in wanted}),
+                col(WorkspaceProviderModelRestriction.org_provider_key_id).in_({key for _, key in wanted}),
+            )
+            .order_by(col(WorkspaceProviderModelRestriction.model))
+        )
+        # Filtered on the two columns independently, which is one query rather
+        # than one per pair but can also match a pair nobody asked about, so the
+        # combination is checked here.
+        grouped: dict[tuple[uuid.UUID, uuid.UUID], list[str]] = {}
+        for workspace_id, key_id, model in result.all():
+            if (workspace_id, key_id) in wanted:
+                grouped.setdefault((workspace_id, key_id), []).append(model)
+        return grouped
 
     async def get(
         self, *, workspace_id: uuid.UUID, org_provider_key_id: uuid.UUID, model: str

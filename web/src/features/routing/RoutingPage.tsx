@@ -67,6 +67,10 @@ function aliasAsRow(alias: AliasResponse): RoutingRow {
     spec: { select: [{ default: alias.target }] },
     source: alias.source,
     user_id: alias.user_id,
+    // Carried, not dropped: an edit or a delete goes back to the workspace the
+    // row lives in, and a row without it falls back to the *selected* workspace,
+    // which for an admin whose list spans the organization is a different one.
+    workspace_id: alias.workspace_id,
     is_dynamic: false,
     created_at: alias.created_at,
     updated_at: alias.updated_at,
@@ -613,7 +617,11 @@ function PolicyForm({
       conditions.length > 0 ||
       guardrails.length > 0 ||
       candidates.length > 0)
-  const pending = save.isPending || saveAlias.isPending
+  const pending =
+    save.isPending ||
+    saveAlias.isPending ||
+    saveOrgPolicy.isPending ||
+    saveOrgAlias.isPending
 
   const submit = () => {
     if (!canSubmit || outgrewAlias) return

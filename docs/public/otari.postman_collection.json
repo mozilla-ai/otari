@@ -481,7 +481,15 @@
                 "me",
                 "aliases"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/aliases"
+              "query": [
+                {
+                  "description": "Maximum entries to return, stored and config-file together.",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/aliases?limit="
             }
           }
         },
@@ -3951,7 +3959,15 @@
                 "me",
                 "routing-policies"
               ],
-              "raw": "{{baseUrl}}/v1/organizations/me/routing-policies"
+              "query": [
+                {
+                  "description": "Maximum entries to return, stored and config-file together.",
+                  "disabled": true,
+                  "key": "limit",
+                  "value": ""
+                }
+              ],
+              "raw": "{{baseUrl}}/v1/organizations/me/routing-policies?limit="
             }
           }
         },

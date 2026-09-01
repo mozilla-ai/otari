@@ -3,6 +3,7 @@
 import calendar
 import uuid
 from collections.abc import Sequence
+from dataclasses import dataclass
 from typing import TYPE_CHECKING, Annotated
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
@@ -48,7 +49,7 @@ from gateway.services.pricing_service import (
 )
 from gateway.services.provider_kwargs import normalize_pricing_key
 from gateway.services.tenancy.deployment_user_service import DeploymentUserService
-from gateway.services.tenancy.organization_model_access import resolve_session_model_allowlist
+from gateway.services.tenancy.organization_model_access import resolve_session_catalog_scope
 
 if TYPE_CHECKING:
     from any_llm.types.model import Model
@@ -340,15 +341,41 @@ def _dynamic_policy_model(policy_name: str) -> ModelObject:
     )
 
 
+def _catalog_aliases(
+    config: GatewayConfig,
+    *,
+    caller_user_id: str | None,
+    caller_workspace_id: uuid.UUID | None,
+    workspace_layer: bool,
+) -> dict[str, str]:
+    """The aliases to list, with or without the workspace-scoped rows.
+
+    ``workspace_layer`` is false only for a session that may not see the
+    workspace ``effective_aliases`` would read (see
+    ``services/tenancy/organization_model_access``), where the configured aliases
+    are the whole answer: an alias name is not filtered by the model allow-list,
+    because the target it resolves to can be one every tenant may reach.
+    """
+    if not workspace_layer:
+        return dict(config.aliases)
+    return effective_aliases(config, caller_user_id, workspace_id=caller_workspace_id)
+
+
 def _policy_catalog_entries(
-    config: GatewayConfig, caller_user_id: str | None, caller_workspace_id: uuid.UUID | None
+    config: GatewayConfig,
+    caller_user_id: str | None,
+    caller_workspace_id: uuid.UUID | None,
+    *,
+    workspace_layer: bool = True,
 ) -> tuple[dict[str, str], dict[str, PolicySpec]]:
     """Split the policies in force into ``{name: target}`` and dynamic ones.
 
     Reads through :func:`effective_policies`, so stored policies are listed
     alongside the ones from ``config.yml`` and a caller's user-scoped policy wins,
     exactly as it does at request time. Listing only the configured ones would mean
-    a policy created in the dashboard worked but was invisible in the catalog.
+    a policy created in the dashboard worked but was invisible in the catalog. The
+    exception is ``workspace_layer=False``, which is :func:`_catalog_aliases`'s
+    and for the same reason: a stored policy is a workspace's row too.
 
     A static policy is an alias in every way the catalog cares about (one name, one
     target, priced from the target), so it is folded into the alias map and listed
@@ -356,9 +383,13 @@ def _policy_catalog_entries(
     note in :func:`list_models`. A dynamic one is listed separately by
     :func:`_dynamic_policy_model`.
     """
+    if not workspace_layer:
+        policies = dict(config.routing.policies) if config.routing.enabled else {}
+    else:
+        policies = effective_policies(config, caller_user_id, workspace_id=caller_workspace_id)
     static: dict[str, str] = {}
     dynamic: dict[str, PolicySpec] = {}
-    for name, spec in effective_policies(config, caller_user_id, workspace_id=caller_workspace_id).items():
+    for name, spec in policies.items():
         if spec.is_dynamic:
             dynamic[name] = spec
         else:
@@ -442,28 +473,53 @@ async def _get_pricing_map(
     return {p.model_key: p for p in pricings}
 
 
-async def _catalog_allowlist(
+@dataclass(frozen=True)
+class _CatalogScope:
+    """What one caller may be shown of the catalog."""
+
+    allowlist: list[str] | None
+    """``None`` is unrestricted."""
+
+    reads_workspace_layer: bool
+    """Whether the workspace-scoped alias and policy rows may be read at all.
+
+    False only for a dashboard session that may not see the workspace those rows
+    would come from. Every other caller keeps the layer it always read: an API
+    key names its own workspace, and a master key reads the deployment's default,
+    which is where its own writes land.
+    """
+
+
+async def _catalog_scope(
     db: AsyncSession,
     config: GatewayConfig,
     *,
     auth: tuple[APIKey | None, bool],
     session_identity: TenancyUser | None,
-) -> list[str] | None:
-    """The allow-list governing what this caller may be shown. ``None`` is unrestricted.
+) -> _CatalogScope:
+    """What this caller may be shown, by the rule that fits how they authenticated.
 
-    Three callers reach the catalog and each is answered by its own rule. An API
-    key gets its stored allow-list, as it always has. A header master key is the
-    deployment credential itself, so it is unrestricted. A dashboard session is
-    unrestricted only while it operates the deployment; otherwise it is answered
-    by its membership, so a member sees the providers their own organization
-    holds rather than every tenant's (otari-ai#1969).
+    Three callers reach the catalog. An API key gets its stored allow-list, as it
+    has always done. A header master key is the deployment credential itself, so
+    it is unrestricted. A dashboard session is unrestricted only while it
+    operates the deployment; otherwise it is answered by its membership, so a
+    member sees the providers their own organization holds rather than every
+    tenant's, and the workspace-scoped rows only where that workspace is theirs
+    (otari-ai#1969).
     """
     if session_identity is not None:
         if await DeploymentUserService(db).has_administration_access(session_identity):
-            return None
-        return await resolve_session_model_allowlist(db, config, user=session_identity)
+            return _CatalogScope(allowlist=None, reads_workspace_layer=True)
+        scope = await resolve_session_catalog_scope(db, config, user=session_identity)
+        return _CatalogScope(
+            allowlist=scope.allowlist,
+            reads_workspace_layer=scope.reads_default_workspace,
+        )
     api_key, is_master_key = auth
-    return None if is_master_key else await resolve_request_allowlist(db, api_key)
+    return _CatalogScope(
+        allowlist=None if is_master_key else await resolve_request_allowlist(db, api_key),
+        reads_workspace_layer=True,
+    )
 
 
 @catalog_router.get("/models")
@@ -487,6 +543,10 @@ async def list_models(
     # workspace's, which is where its own writes land.
     caller_user_id = auth[0].user_id if auth[0] is not None else None
     caller_workspace_id = auth[0].workspace_id if auth[0] is not None else None
+    # Resolved before the alias and policy layers are read, not only before they
+    # are filtered: it decides whether the workspace-scoped rows may be read at
+    # all, which no filter over targets can decide afterwards.
+    scope = await _catalog_scope(db, config, auth=auth, session_identity=session_identity)
     pricing_map = await _get_pricing_map(db, provider_filter=provider)
     # Snapshot before phase 1 mutates ``pricing_map`` (it pops matched keys), so
     # alias pricing can still be looked up by the target's canonical key. Keys are
@@ -501,8 +561,18 @@ async def list_models(
     # priced from the target), so it joins the alias map and is listed the same
     # way. Startup validation refuses a policy that collides with an alias name,
     # so this merge cannot silently shadow one.
-    configured_aliases = effective_aliases(config, caller_user_id, workspace_id=caller_workspace_id)
-    static_policies, dynamic_policies = _policy_catalog_entries(config, caller_user_id, caller_workspace_id)
+    configured_aliases = _catalog_aliases(
+        config,
+        caller_user_id=caller_user_id,
+        caller_workspace_id=caller_workspace_id,
+        workspace_layer=scope.reads_workspace_layer,
+    )
+    static_policies, dynamic_policies = _policy_catalog_entries(
+        config,
+        caller_user_id,
+        caller_workspace_id,
+        workspace_layer=scope.reads_workspace_layer,
+    )
     aliases = {**configured_aliases, **static_policies}
     # Alias targets are withheld from every phase that could surface the real
     # model, discovery (phase 1) as well as pricing-only (phase 2): publishing the
@@ -604,7 +674,7 @@ async def list_models(
     # catalog never advertises a model that would 403 at inference. Both surfaces
     # feed the SAME matcher the SAME canonical instance:model key; an alias id is a
     # display name, so it is matched on its resolved target. Master key sees all.
-    key_allowlist = await _catalog_allowlist(db, config, auth=auth, session_identity=session_identity)
+    key_allowlist = scope.allowlist
     if key_allowlist is not None:
         # A dynamic policy is listed when the key may use *any* of its candidates,
         # which is what the compiler will do at request time: it drops the ones the
@@ -712,20 +782,22 @@ async def get_model(
 ) -> ModelObject:
     """Get details for a specific model."""
     api_key, _is_master_key = auth
-    # Same scoping as the listing: the caller's own aliases, plus their
-    # workspace's and the configured ones. A master-key caller has neither, so it
-    # reads the configured layer and the default workspace's.
-    aliases = effective_aliases(
+    # Same scoping as the listing, the workspace layer included: the caller's own
+    # aliases, plus their workspace's and the configured ones. A master-key caller
+    # has neither, so it reads the configured layer and the default workspace's.
+    scope = await _catalog_scope(db, config, auth=auth, session_identity=session_identity)
+    aliases = _catalog_aliases(
         config,
-        api_key.user_id if api_key is not None else None,
-        workspace_id=api_key.workspace_id if api_key is not None else None,
+        caller_user_id=api_key.user_id if api_key is not None else None,
+        caller_workspace_id=api_key.workspace_id if api_key is not None else None,
+        workspace_layer=scope.reads_workspace_layer,
     )
 
     # Model access control: a denied model returns 404, indistinguishable from a
     # missing one, so this endpoint cannot be used to probe which models exist
     # behind an allow-list. Uses the same matcher/canonical key as the listing and
     # inference. Master key bypasses.
-    key_allowlist = await _catalog_allowlist(db, config, auth=auth, session_identity=session_identity)
+    key_allowlist = scope.allowlist
     if key_allowlist is not None:
         target = aliases.get(model_id, model_id)
         if not is_model_allowed(key_allowlist, normalize_pricing_key(config, target)):
