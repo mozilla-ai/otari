@@ -10,7 +10,7 @@
     "type": "bearer"
   },
   "info": {
-    "description": "otari management + inference collection, generated from the OpenAPI spec by scripts/generate_postman.py. Stopgap client for driving a running Otari server until the web UI lands.\n\nSet the `baseUrl` and `otariKey` collection variables (or override them with a Postman environment). Auth is sent as an `Authorization: Bearer <otariKey>` header on every request via collection-level auth.",
+    "description": "otari management + inference collection, generated from the OpenAPI spec by scripts/generate_postman.py. Stopgap client for driving a running Otari server until the web UI lands.\n\nSet the `baseUrl` and `otariKey` collection variables (or override them with a Postman environment). Auth is sent as an `Authorization: Bearer <otariKey>` header on every request via collection-level auth. The web-search backend request is the exception: it is one gateway calling another and reads `gatewayToken` instead, the serving deployment's `web_search_backend_token`.",
     "name": "otari API",
     "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json"
   },
@@ -6396,7 +6396,12 @@
           "name": "Web Search",
           "request": {
             "description": "Run one search through this deployment's configured search provider.\n\nThe declared query params are the ``provider_options`` keys the providers\nunderstand. Everything else the caller sends, ``format`` and ``engines``\nincluded, is ignored rather than forwarded: the bag is opaque to the gateway\nthat filled it, so passing it upstream unread would let a workspace set\nprovider request fields this deployment never chose.",
-            "header": [],
+            "header": [
+              {
+                "key": "X-Gateway-Token",
+                "value": "{{gatewayToken}}"
+              }
+            ],
             "method": "GET",
             "url": {
               "host": [
@@ -7400,6 +7405,11 @@
     },
     {
       "key": "otariKey",
+      "type": "string",
+      "value": ""
+    },
+    {
+      "key": "gatewayToken",
       "type": "string",
       "value": ""
     }

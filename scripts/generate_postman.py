@@ -33,6 +33,11 @@ DEFAULT_OUTPUT = REPO_ROOT / "docs" / "public" / "otari.postman_collection.json"
 # aligned with the documented curl examples.
 DEFAULT_BASE_URL = "http://localhost:8000"
 
+# Security schemes the collection-level bearer auth does not cover, mapped to the
+# collection variable holding that credential. An operation carrying one of these
+# gets the header on the request itself; without it a mounted route answers 401.
+EXTRA_AUTH_VARIABLES = {"GatewayTokenAuth": "gatewayToken"}
+
 # Methods that carry a JSON request body worth templating.
 BODY_METHODS = {"post", "put", "patch"}
 HTTP_METHODS = ("get", "post", "put", "patch", "delete")
@@ -246,6 +251,19 @@ def build_url(path: str, operation: dict[str, Any], spec: dict[str, Any]) -> dic
     return url
 
 
+def auth_headers(operation: dict[str, Any], spec: dict[str, Any]) -> list[tuple[str, str]]:
+    """The header name and collection variable for each scheme bearer auth misses."""
+    schemes = spec.get("components", {}).get("securitySchemes", {})
+    found: list[tuple[str, str]] = []
+    for requirement in operation.get("security") or []:
+        for name in requirement:
+            variable = EXTRA_AUTH_VARIABLES.get(name)
+            header = schemes.get(name, {}).get("name")
+            if variable and header and (header, variable) not in found:
+                found.append((header, variable))
+    return found
+
+
 def build_item(path: str, method: str, operation: dict[str, Any], spec: dict[str, Any]) -> dict[str, Any]:
     """Build a single Postman request item from an operation."""
     name = operation.get("summary") or operation.get("operationId") or f"{method.upper()} {path}"
@@ -260,6 +278,9 @@ def build_item(path: str, method: str, operation: dict[str, Any], spec: dict[str
     description = operation.get("description")
     if description:
         request["description"] = description
+
+    for scheme_name, variable in auth_headers(operation, spec):
+        headers.append({"key": scheme_name, "value": f"{{{{{variable}}}}}"})
 
     if method in BODY_METHODS:
         body = EXAMPLE_BODY_OVERRIDES.get((method.upper(), path)) or request_body_example(operation, spec)
@@ -306,7 +327,9 @@ def build_collection(spec: dict[str, Any]) -> dict[str, Any]:
         f"Set the `baseUrl` and `otariKey` collection variables (or override them "
         "with a Postman environment). Auth is sent as an "
         "`Authorization: Bearer <otariKey>` header on every request via "
-        "collection-level auth."
+        "collection-level auth. The web-search backend request is the exception: "
+        "it is one gateway calling another and reads `gatewayToken` instead, the "
+        "serving deployment's `web_search_backend_token`."
     )
 
     return {
@@ -324,6 +347,9 @@ def build_collection(spec: dict[str, Any]) -> dict[str, Any]:
         "variable": [
             {"key": "baseUrl", "value": DEFAULT_BASE_URL, "type": "string"},
             {"key": "otariKey", "value": "", "type": "string"},
+            # Deployment-scoped, and not an API key: it is what one gateway
+            # presents to another's search backend, so only those requests read it.
+            {"key": "gatewayToken", "value": "", "type": "string"},
         ],
         "item": items,
     }

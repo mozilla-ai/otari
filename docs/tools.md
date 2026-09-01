@@ -151,11 +151,14 @@ provider keys off a foreign process. Such a gateway configures its own
 `web_search_provider` or `web_search_url` instead, and the per-workspace policy
 below still governs it.
 
-Migrating from the Brave or Tavily adapter container: set `web_search_provider`
-and `web_search_provider_api_key` and unset `web_search_url`. The adapters, and
-the `web-search-brave` and `web-search-tavily` compose profiles that ran them,
-were removed. A `web_search_url` still pointing at one keeps the deployment
-looking configured while every search fails, so change both together.
+Migrating from the Brave or Tavily adapter container: on the process that holds
+the key, set `web_search_provider` and `web_search_provider_api_key` and unset
+`web_search_url`. A hybrid data plane holds no key, so it keeps a
+`web_search_url` and points it at its control plane's `/v1/web-search` instead.
+The adapters, and the `web-search-brave` and `web-search-tavily` compose
+profiles that ran them, were removed. A `web_search_url` still pointing at one
+keeps the deployment looking configured while every search fails, so change both
+together.
 
 A runnable example lives under `demo/web-search/`.
 

@@ -15,7 +15,7 @@ from typing_extensions import override
 from gateway.api.deps import set_config
 from gateway.api.main import register_routers
 from gateway.container import build_container
-from gateway.core.config import API_KEY_HEADER, X_API_KEY_HEADER, GatewayConfig
+from gateway.core.config import API_KEY_HEADER, GATEWAY_TOKEN_HEADER, X_API_KEY_HEADER, GatewayConfig
 from gateway.core.database import create_session, init_db
 from gateway.dashboard import DASHBOARD_PACKAGE_PATH, get_dashboard_build_id, get_dashboard_dir
 from gateway.inflight import InFlightMiddleware, InFlightRegistry
@@ -99,6 +99,11 @@ _COOKIE_AUTH_PREFIXES = ("/v1/auth/session",)
 # request's own token, and bootstrap's changes with the deployment's
 # configuration, so a shared cache must not serve any of them to a different
 # caller/gateway.
+# Paths a gateway calls on another gateway, authenticated by the deployment's own
+# shared token rather than by either API-key header. Stamped separately below
+# because the difference is not decoration: an API key does not open these, and
+# a published contract that says it does sends a caller to a 401.
+_GATEWAY_TOKEN_PATHS = frozenset({"/v1/web-search/search"})
 _UNAUTHENTICATED_PATHS = frozenset(
     {
         "/v1/bootstrap",
@@ -573,13 +578,27 @@ def create_app(config: GatewayConfig) -> FastAPI:
             "name": X_API_KEY_HEADER,
             "description": "Anthropic-native clients send credentials here (no Bearer prefix).",
         }
+        openapi_schema["components"]["securitySchemes"]["GatewayTokenAuth"] = {
+            "type": "apiKey",
+            "in": "header",
+            "name": GATEWAY_TOKEN_HEADER,
+            "description": (
+                "A deployment's own data-plane gateway identifies itself here. Not an API key: "
+                "no key or session opens these paths, and no application holds this credential."
+            ),
+        }
 
         for path, path_item in openapi_schema.get("paths", {}).items():
             if path in _UNAUTHENTICATED_PATHS or path.startswith(_PUBLIC_PREFIXES + _COOKIE_AUTH_PREFIXES):
                 continue
+            requirement: list[dict[str, list[str]]] = (
+                [{"GatewayTokenAuth": []}]
+                if path in _GATEWAY_TOKEN_PATHS
+                else [{"ApiKeyAuth": []}, {"XApiKeyAuth": []}]
+            )
             for operation in path_item.values():
                 if isinstance(operation, dict):
-                    operation["security"] = [{"ApiKeyAuth": []}, {"XApiKeyAuth": []}]
+                    operation["security"] = requirement
 
         app.openapi_schema = openapi_schema
         return app.openapi_schema

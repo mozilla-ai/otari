@@ -13472,6 +13472,12 @@
         "name": "Otari-Key",
         "type": "apiKey"
       },
+      "GatewayTokenAuth": {
+        "description": "A deployment's own data-plane gateway identifies itself here. Not an API key: no key or session opens these paths, and no application holds this credential.",
+        "in": "header",
+        "name": "X-Gateway-Token",
+        "type": "apiKey"
+      },
       "XApiKeyAuth": {
         "description": "Anthropic-native clients send credentials here (no Bearer prefix).",
         "in": "header",
@@ -25098,10 +25104,7 @@
         },
         "security": [
           {
-            "ApiKeyAuth": []
-          },
-          {
-            "XApiKeyAuth": []
+            "GatewayTokenAuth": []
           }
         ],
         "summary": "Web Search",

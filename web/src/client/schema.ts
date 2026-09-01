@@ -3529,6 +3529,32 @@ export interface paths {
         patch?: never;
         trace?: never;
     };
+    "/v1/web-search/search": {
+        parameters: {
+            query?: never;
+            header?: never;
+            path?: never;
+            cookie?: never;
+        };
+        /**
+         * Web Search
+         * @description Run one search through this deployment's configured search provider.
+         *
+         *     The declared query params are the ``provider_options`` keys the providers
+         *     understand. Everything else the caller sends, ``format`` and ``engines``
+         *     included, is ignored rather than forwarded: the bag is opaque to the gateway
+         *     that filled it, so passing it upstream unread would let a workspace set
+         *     provider request fields this deployment never chose.
+         */
+        get: operations["web_search_v1_web_search_search_get"];
+        put?: never;
+        post?: never;
+        delete?: never;
+        options?: never;
+        head?: never;
+        patch?: never;
+        trace?: never;
+    };
     "/v1/workspaces": {
         parameters: {
             query?: never;
@@ -9324,6 +9350,42 @@ export interface components {
             count: number;
             /** Data */
             data: components["schemas"]["WebAuthnCredentialPublic"][];
+        };
+        /**
+         * WebSearchBackendResponse
+         * @description A SearXNG-compatible ``/search`` body.
+         */
+        WebSearchBackendResponse: {
+            /** Results */
+            results: components["schemas"]["WebSearchBackendResult"][];
+        };
+        /**
+         * WebSearchBackendResult
+         * @description One hit, in the shape ``WebSearchBackend`` reads off a SearXNG response.
+         */
+        WebSearchBackendResult: {
+            /**
+             * Content
+             * @default
+             */
+            content: string;
+            /**
+             * Extracted Content
+             * @description The page's own text, when the provider returned it, so the caller can skip fetching the page.
+             */
+            extracted_content?: string | null;
+            /**
+             * Published Date
+             * @description The provider's own recency string for the page, forwarded unparsed. Declared so a search over this hop renders the same date an in-process one does.
+             */
+            published_date?: string | null;
+            /**
+             * Title
+             * @default
+             */
+            title: string;
+            /** Url */
+            url: string;
         };
         /**
          * WorkspaceActivationPublic
@@ -15330,6 +15392,45 @@ export interface operations {
                 };
                 content: {
                     "application/json": components["schemas"]["UsageLogResponse"][];
+                };
+            };
+            /** @description Validation Error */
+            422: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["HTTPValidationError"];
+                };
+            };
+        };
+    };
+    web_search_v1_web_search_search_get: {
+        parameters: {
+            query: {
+                /** @description The search query. */
+                q: string;
+                max_results?: number | null;
+                search_depth?: string | null;
+                topic?: string | null;
+                time_range?: string | null;
+                include_answer?: boolean | null;
+            };
+            header?: {
+                "x-gateway-token"?: string | null;
+            };
+            path?: never;
+            cookie?: never;
+        };
+        requestBody?: never;
+        responses: {
+            /** @description Successful Response */
+            200: {
+                headers: {
+                    [name: string]: unknown;
+                };
+                content: {
+                    "application/json": components["schemas"]["WebSearchBackendResponse"];
                 };
             };
             /** @description Validation Error */

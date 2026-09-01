@@ -33,6 +33,9 @@ PROVIDER_TYPE_ALIASES = {
     "anthropic_compatible": "anthropic",
 }
 X_API_KEY_HEADER = "x-api-key"  # Anthropic-native clients send credentials here (no Bearer prefix).
+# How a deployment's own data-plane gateway identifies itself to the search
+# backend it calls. Not an API key: no key or dashboard session opens that route.
+GATEWAY_TOKEN_HEADER = "X-Gateway-Token"
 
 # The OAuth providers a deployment may configure dashboard sign-in with, in the
 # spelling that appears in a config key (``oauth_google_client_id``), on the

@@ -266,6 +266,17 @@ def test_a_non_ascii_token_is_a_refusal_not_a_crash(tmp_path: Path) -> None:
     assert raised.value.status_code == 401
 
 
+def test_the_published_contract_names_the_token_it_actually_takes(tmp_path: Path) -> None:
+    """No API key and no session opens this route, so stamping it with the
+    API-key schemes every other path carries would send a caller to a 401."""
+    with _configured(tmp_path, enable_docs=True) as client:
+        spec = client.get("/openapi.json").json()
+
+    operation = spec["paths"]["/v1/web-search/search"]["get"]
+    assert operation["security"] == [{"GatewayTokenAuth": []}]
+    assert spec["components"]["securitySchemes"]["GatewayTokenAuth"]["name"] == "X-Gateway-Token"
+
+
 def _warnings_from(config: GatewayConfig, caplog: pytest.LogCaptureFixture) -> str:
     """What the (non-propagating) gateway logger said, per ``test_chat_output_cap``."""
     gateway_logger.addHandler(caplog.handler)
