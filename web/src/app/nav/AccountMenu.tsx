@@ -175,7 +175,7 @@ function MenuItem({
           takes, so the one row that carries a value does not push its own label
           out of the column the others sit in. */}
       {trailing ? (
-        <span className="w-11 shrink-0 text-right text-xs font-normal text-muted">
+        <span className="w-11 shrink-0 text-right text-chrome-meta font-normal text-muted">
           {trailing}
         </span>
       ) : (
