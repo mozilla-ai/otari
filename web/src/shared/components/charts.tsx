@@ -137,10 +137,7 @@ export function ChartLegend({ series }: { series: SeriesDef[] }) {
   return (
     <div className="flex flex-wrap items-center gap-x-3 gap-y-1">
       {series.map((s) => (
-        <span
-          key={s.key}
-          className="flex items-center gap-1.5 text-xs text-muted"
-        >
+        <span key={s.key} className="flex items-center gap-1.5 text-caption">
           <SeriesMarker color={s.color} />
           {s.label}
         </span>

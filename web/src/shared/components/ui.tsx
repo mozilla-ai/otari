@@ -251,7 +251,7 @@ export function StatCard({
           misalignment visible; a tile with no chart and nothing to say reserves
           nothing, so a lone tile carries no dead space. */}
       {trend || hint || chart ? (
-        <span className="flex min-h-10.5 flex-wrap items-center gap-x-2 gap-y-1 text-xs tabular-nums text-muted">
+        <span className="flex min-h-10.5 flex-wrap items-center gap-x-2 gap-y-1 text-caption tabular-nums">
           {trend}
           {/* Its own element, not a bare text node beside the chip: the two
               are separate statements, and a node keeps the hint addressable
@@ -413,7 +413,7 @@ export function RefreshButton({
   return (
     <span className="inline-flex items-center gap-2">
       {freshness ? (
-        <span className="text-xs text-muted">Updated {freshness}</span>
+        <span className="text-caption">Updated {freshness}</span>
       ) : null}
       <Button
         variant="outline"
@@ -561,7 +561,7 @@ export function CopyField({
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center justify-between">
-        <label htmlFor={fieldId} className="text-xs font-medium text-muted">
+        <label htmlFor={fieldId} className="text-caption">
           {label}
         </label>
         <Button size="sm" variant="outline" onPress={copy}>
@@ -593,7 +593,7 @@ export function CopyField({
         {copied ? "Copied to clipboard." : ""}
       </span>
       {selectHint ? (
-        <span className="text-xs text-muted">
+        <span className="text-caption">
           Selected. Press Ctrl/Cmd-C to copy.
         </span>
       ) : null}
@@ -905,9 +905,7 @@ export function FilterSelect({
         if (key != null) onChange(optionValue(String(key)))
       }}
     >
-      {label ? (
-        <Label className="text-xs font-medium text-muted">{label}</Label>
-      ) : null}
+      {label ? <Label className="text-caption">{label}</Label> : null}
       <Select.Trigger id={id}>
         <Select.Value />
         <Select.Indicator />
@@ -1014,7 +1012,7 @@ export function FilterMultiComboBox({
       }}
       className="flex flex-col gap-1"
     >
-      <Label className="text-xs font-medium text-muted">{label}</Label>
+      <Label className="text-caption">{label}</Label>
       <ComboBox.InputGroup>
         <Input
           placeholder={

@@ -42,7 +42,7 @@ export function SecretField({
         data-lpignore="true"
       />
       {description ? (
-        <Description className="text-xs text-muted">{description}</Description>
+        <Description className="text-caption">{description}</Description>
       ) : null}
     </TextField>
   )
