@@ -543,6 +543,109 @@ describe("headings wear a type role", () => {
   })
 })
 
+// The content scale's roles, and the spelling that kept them empty. Before this
+// sweep `text-caption` had one consumer, `text-body`, `text-emphasis` and
+// `text-overline` between them a handful, and 174 sites wrote the caption role
+// out as `text-xs text-muted`: a size a point under the role's own and an ink
+// the role already sets. A scale nobody uses is documentation, so the roles are
+// enforced here the way the chrome's are below.
+//
+// A role sets family, size, line-height, tracking, weight and ink together, and
+// each of those is a utility somebody can write beside it. That pairing is not a
+// style preference: Tailwind emits `@utility` definitions ahead of its own
+// theme-derived utilities, so a `text-xs` beside `text-caption` wins the size
+// and leaves the role compiling, emitting, and doing nothing. `font-mono` is the
+// one pairing deliberately left alone, because a role sets the body face and an
+// identifier does not belong in it.
+describe("content text wears a type role", () => {
+  const ROLES = [
+    "text-display",
+    "text-heading",
+    "text-title",
+    "text-body",
+    "text-emphasis",
+    "text-caption",
+    "text-overline",
+  ] as const
+  const ANY_ROLE = `text-(?:${ROLES.map((role) => role.slice(5)).join("|")})`
+  // The ink each role sets for itself, and therefore the one a call site wearing
+  // it never repeats.
+  const ROLE_INK: Array<[string, string]> = [
+    ["text-(?:caption|overline)", "text-muted"],
+    ["text-(?:display|heading|title|body|emphasis)", "text-foreground"],
+  ]
+
+  it.each(ROLES)("declares %s in globals.css", (role) => {
+    // Same failure the documented-utilities list guards against: a role named in
+    // the scale's comment but never declared is a className that produces no CSS.
+    expect(CSS).toContain(`@utility ${role} {`)
+  })
+
+  /**
+   * Two utilities inside one class list. The span between them may not cross a
+   * quote, so `className={ok ? "text-caption" : "text-xs text-muted"}` reads as
+   * the two lists it is rather than as one. Each name is anchored against a
+   * variant prefix and against a longer name, which leaves `sm:text-xs` and
+   * `hover:text-muted` the deliberate overrides they look like.
+   */
+  const together = (first: string, second: string): RegExp => {
+    const alone = (name: string) => `(?<![:\\w-])(?:${name})(?![\\w-])`
+    return new RegExp(
+      `${alone(first)}[^"'\`\\n]*${alone(second)}|${alone(second)}[^"'\`\\n]*${alone(first)}`,
+    )
+  }
+
+  const SRC = join(WEB, "src")
+  const sources = readdirSync(SRC, { recursive: true })
+    .map((name) => String(name).replaceAll("\\", "/"))
+    .filter((name) => /\.tsx?$/.test(name) && !/\.test\.tsx?$/.test(name))
+  // Block comments go first, for the reason the heading sweep drops them:
+  // `ActivityPage` explains in a JSX comment, in backticks, why a `<th>` on
+  // `text-overline` carries no `text-muted`.
+  const read = (name: string) =>
+    readFileSync(join(SRC, name), "utf8").replace(/\/\*[\s\S]*?\*\//g, "")
+
+  it("covers the source tree", () => {
+    // Same guard as the sweeps above: an empty list passes vacuously.
+    expect(sources.length).toBeGreaterThan(30)
+  })
+
+  it.each(sources)("spells the caption role in %s as text-caption", (name) => {
+    expect(
+      read(name),
+      `${name} hand-rolls the caption role as \`text-xs text-muted\`: 12px where the role is 13, plus the ink it already sets. Use text-caption`,
+    ).not.toMatch(together("text-xs", "text-muted"))
+  })
+
+  it.each(sources)("overrides no type role's own metrics in %s", (name) => {
+    const source = read(name)
+    for (const [what, utility] of [
+      ["a font size", "text-(?:xs|sm|base|lg|xl|2xl)"],
+      [
+        "a font weight",
+        "font-(?:thin|extralight|light|normal|medium|semibold|bold|extrabold|black)",
+      ],
+      ["a line height", String.raw`leading-[\w./%\[\]-]+`],
+      ["a tracking", String.raw`tracking-[\w./%\[\]-]+`],
+    ]) {
+      expect(
+        source,
+        `${name} puts ${what} beside a type role; the role carries its own, and the utility beside it wins with nothing to show for it`,
+      ).not.toMatch(together(ANY_ROLE, utility))
+    }
+  })
+
+  it.each(sources)("repeats no type role's own ink in %s", (name) => {
+    const source = read(name)
+    for (const [role, ink] of ROLE_INK) {
+      expect(
+        source,
+        `${name} pairs a type role with \`${ink}\`, which that role already sets`,
+      ).not.toMatch(together(role, ink))
+    }
+  })
+})
+
 // The chrome's own type roles, added because the nav files had grown six
 // arbitrary sizes between them (13.5px twice, 13px, 11.5px, 11px, 9px), which is
 // a scale with no single place to read it and nothing to keep it from growing a
