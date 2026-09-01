@@ -774,7 +774,7 @@ function PolicyForm({
             // Withheld rather than disabled: a user id is a deployment-wide
             // identifier, so the tenant-scoped writer refuses one outright and
             // an organization's entries are workspace-wide.
-            <p className="text-xs text-muted">
+            <p className="text-caption">
               This applies to everyone in the selected workspace.
             </p>
           ) : (

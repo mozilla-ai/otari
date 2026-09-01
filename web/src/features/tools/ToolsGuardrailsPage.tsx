@@ -582,9 +582,7 @@ function ReadOnlyRow({ field }: { field: ToolSettingField }) {
   return (
     <div className={ROW_CLASS}>
       <FieldLabel field={field} />
-      <span className="break-words text-sm text-foreground sm:col-start-2">
-        {shown}
-      </span>
+      <span className="break-words text-body sm:col-start-2">{shown}</span>
     </div>
   )
 }
