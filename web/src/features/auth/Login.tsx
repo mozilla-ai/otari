@@ -832,10 +832,7 @@ export function Login() {
                   and an unlabeled line reads as the latter. One rule for both
                   groups, however many buttons follow it, because they are all
                   the same alternative: another way to prove the same thing. */}
-              <div
-                className="flex items-center gap-3 text-xs text-muted"
-                aria-hidden
-              >
+              <div className="flex items-center gap-3 text-caption" aria-hidden>
                 <span className="h-px flex-1 bg-border" />
                 or
                 <span className="h-px flex-1 bg-border" />
@@ -892,7 +889,7 @@ export function Login() {
           ) : null}
 
           <div className="flex flex-col items-center gap-3">
-            <p className="text-center text-xs text-balance text-muted">
+            <p className="text-center text-caption text-balance">
               Sent once and exchanged for a session cookie. Never stored in the
               browser.
             </p>

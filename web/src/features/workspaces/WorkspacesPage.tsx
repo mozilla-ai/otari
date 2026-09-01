@@ -134,7 +134,7 @@ function NarrowedDefaults({
         }
       />
       {narrowed.length === 0 ? (
-        <span className="text-xs text-muted">
+        <span className="text-caption">
           None. The budget above applies on every provider.
         </span>
       ) : (
@@ -569,7 +569,7 @@ function EditWorkspaceForm({
               value={selectedBudget}
               onChange={setBudgetId}
             />
-            <span className="max-w-md text-xs text-muted">
+            <span className="max-w-md text-caption">
               Every member of this workspace is held to this budget, each with
               their own allowance. Changing it applies to members who join
               afterwards; members already here keep the budget they were given,
@@ -686,9 +686,7 @@ export function WorkspacesPage() {
               {workspace.name}
             </span>
             {workspace.description ? (
-              <span className="text-xs text-muted">
-                {workspace.description}
-              </span>
+              <span className="text-caption">{workspace.description}</span>
             ) : null}
           </div>
         ),
@@ -708,7 +706,7 @@ export function WorkspacesPage() {
           return name ? (
             <Chip size="sm">{name}</Chip>
           ) : (
-            <span className="text-xs text-muted">None</span>
+            <span className="text-caption">None</span>
           )
         },
       },

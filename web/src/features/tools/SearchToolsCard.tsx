@@ -161,7 +161,7 @@ function ConfigToolRow({ tool }: { tool: ConfigSearchTool }) {
       {tool.shadowed ? (
         <Badge tone="warn">Overridden by the stored tool of this name</Badge>
       ) : null}
-      <span className="text-xs text-muted">
+      <span className="text-caption">
         {tool.api_base ?? "no api_base declared"} · editable only where the
         config file is defined
       </span>
@@ -280,7 +280,7 @@ function AddToolForm({
           {create.isPending ? "Adding…" : "Add"}
         </Button>
       </div>
-      <span className="text-xs text-muted">
+      <span className="text-caption">
         Callers name the tool in{" "}
         <code className="font-mono">search_tool_name</code>, or in the{" "}
         <code className="font-mono">POST /v1/search/{"{tool}"}</code> path.

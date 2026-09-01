@@ -195,7 +195,7 @@ function SettingControl({
         <span className="text-sm tabular-nums text-foreground">
           {formatValue(field)}
         </span>
-        <span className="rounded-full border border-border px-2 py-0.5 text-xs text-muted">
+        <span className="rounded-full border border-border px-2 py-0.5 text-caption">
           startup-only
         </span>
       </div>
@@ -303,7 +303,7 @@ function CopyField({
   return (
     <div className="flex flex-col gap-1">
       <div className="flex items-center justify-between">
-        <span className="text-xs font-medium text-muted">New master key</span>
+        <span className="text-caption">New master key</span>
         <Button size="sm" variant="outline" onPress={copy}>
           {copied ? "Copied" : "Copy"}
         </Button>
@@ -324,7 +324,7 @@ function CopyField({
         {copied ? "Copied to clipboard." : ""}
       </span>
       {selectHint ? (
-        <span className="text-xs text-muted">
+        <span className="text-caption">
           Selected. Press Ctrl/Cmd-C to copy.
         </span>
       ) : null}
@@ -665,7 +665,7 @@ export function SettingsPage() {
       </div>
 
       {data ? (
-        <p className="text-xs text-muted">
+        <p className="text-caption">
           Showing {filtered.length} of {allFields.length} settings
         </p>
       ) : null}
@@ -708,7 +708,7 @@ export function SettingsPage() {
       <MaintenanceModeCard />
 
       {data ? (
-        <p className="text-xs text-muted">
+        <p className="text-caption">
           Mode: {data.mode} · Version {data.version}
           {data.require_pricing ? " · require_pricing on" : ""}
         </p>

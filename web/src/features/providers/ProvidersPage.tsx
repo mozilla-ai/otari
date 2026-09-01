@@ -576,7 +576,7 @@ function TestOutcome({ state }: { state: TestState | undefined }) {
   if (!state) return null
   if (state.status === "pending") {
     return (
-      <span className="inline-flex items-center gap-1.5 text-xs text-muted">
+      <span className="inline-flex items-center gap-1.5 text-caption">
         {/* Hidden rather than left as HeroUI's own role="status": its
             "Loading" name would contradict the "Testing…" beside it. */}
         <Spinner size="sm" aria-hidden="true" /> Testing…
@@ -623,7 +623,7 @@ function TestOutcome({ state }: { state: TestState | undefined }) {
 // warning state rather than the red one (issue #447).
 function HealthPill({ health }: { health: ProviderHealth | undefined }) {
   if (!health) {
-    return <span className="text-xs text-muted">—</span>
+    return <span className="text-caption">—</span>
   }
   const degraded = !health.ok && health.discovery_unsupported
   const styles = health.ok
@@ -1018,7 +1018,7 @@ export function ProvidersPage() {
             <TestOutcome state={tests[row.instance]} />
           </div>
         ) : (
-          <span className="block text-right text-xs text-muted">
+          <span className="block text-right text-caption">
             managed in config.yml
           </span>
         ),

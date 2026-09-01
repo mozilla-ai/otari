@@ -152,7 +152,7 @@ export function UserComboBox({
           )}
         </ListBox>
       </ComboBox.Popover>
-      <Description className="text-xs text-muted">{creatingHint}</Description>
+      <Description className="text-caption">{creatingHint}</Description>
     </ComboBox.Root>
   )
 }

@@ -191,7 +191,7 @@ function PeriodPicker({
           />
         </div>
       ) : null}
-      <span className="text-xs text-muted">
+      <span className="text-caption">
         Spend returns to zero each period. A user&rsquo;s clock starts when the
         budget is assigned to them.
       </span>
@@ -320,7 +320,7 @@ function BudgetForm({
 // collectively allowed (cap × users). A bar only when both are meaningful.
 function UsageCell({ budget }: { budget: Budget }) {
   if (budget.user_count === 0) {
-    return <span className="text-xs text-muted">No users assigned</span>
+    return <span className="text-caption">No users assigned</span>
   }
   const spent = budget.total_spend
   if (budget.max_budget === null) {
@@ -606,7 +606,7 @@ function DeploymentBudgetsPage() {
             {/* Only a prefix is rendered, so the id an API call needs is not on the
               page in full; the copy hands over the whole thing. */}
             <CopyableValue value={b.budget_id} label="budget id">
-              <code className="text-caption" title={b.budget_id}>
+              <code className="font-mono text-caption" title={b.budget_id}>
                 {shortId(b.budget_id)}
               </code>
             </CopyableValue>
@@ -643,7 +643,7 @@ function DeploymentBudgetsPage() {
         cell: (b) => {
           const holders = defaultFor.get(b.budget_id)
           if (!holders || holders.length === 0) {
-            return <span className="text-xs text-muted">&mdash;</span>
+            return <span className="text-caption">&mdash;</span>
           }
           return (
             <div className="flex flex-wrap gap-1">

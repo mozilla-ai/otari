@@ -48,7 +48,7 @@ export function RecoverPasswordPage() {
         description="If that address has a password on this gateway, a reset link is on its way."
         footer={<PublicAuthLink to="#/">Back to sign in</PublicAuthLink>}
       >
-        <p className="text-center text-xs text-muted">
+        <p className="text-center text-caption">
           The link is single-use and expires. Requesting another replaces the
           one before it.
         </p>

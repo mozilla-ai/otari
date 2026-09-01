@@ -121,7 +121,7 @@ export function AcceptInvitationPage() {
               </p>
               {isAuthenticated ? (
                 <>
-                  <p className="text-center text-xs text-muted">
+                  <p className="text-center text-caption">
                     You're already signed in, so there is nothing left to set
                     up.
                   </p>
@@ -144,7 +144,7 @@ export function AcceptInvitationPage() {
                 </>
               ) : offersClaim ? (
                 <>
-                  <p className="text-center text-xs text-muted">
+                  <p className="text-center text-caption">
                     Next, set your password to sign in.
                   </p>
                   <Button
@@ -168,7 +168,7 @@ export function AcceptInvitationPage() {
                       no endpoint for that. `PUT /v1/auth/password` only ever
                       acts on the caller's own identity, so that advice named
                       something nobody on this deployment can do. */}
-                  <p className="text-center text-xs text-muted">
+                  <p className="text-center text-caption">
                     {offersProviderSignIn
                       ? "Setting a password works by emailing you a link, and this deployment sends no mail. Sign in with one of the providers on the sign-in screen instead."
                       : "Setting a password works by emailing you a link, and this deployment sends no mail. An operator can turn that on by configuring outgoing mail and a public base URL for this gateway."}

@@ -236,7 +236,7 @@ export function McpServerDialog({
                   <Checkbox isSelected={enabled} onChange={setEnabled}>
                     Enabled
                   </Checkbox>
-                  <span className="text-xs text-muted">
+                  <span className="text-caption">
                     A disabled server keeps its row and its token. A request
                     that names it skips it rather than failing.
                   </span>

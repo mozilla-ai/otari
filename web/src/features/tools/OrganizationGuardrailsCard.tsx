@@ -108,7 +108,7 @@ function WorkspaceScope({
             </Checkbox>
           ))}
           {workspaces.length === 0 ? (
-            <span className="text-xs text-muted">
+            <span className="text-caption">
               No workspaces to choose from yet.
             </span>
           ) : null}
@@ -425,7 +425,7 @@ function AddGuardrailForm({
           {create.isPending ? "Adding…" : "Add"}
         </Button>
       </div>
-      <span className="text-xs text-muted">
+      <span className="text-caption">
         The profile has to exist on the guardrails service. A caller can tighten
         a mandated guardrail but never weaken it. A credential needs an https
         endpoint of its own, since the URL above may be a plain-http sidecar,

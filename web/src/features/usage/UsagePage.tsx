@@ -1016,7 +1016,7 @@ export function UsagePage() {
         ))}
         end={
           <>
-            <span className="text-xs text-muted">
+            <span className="text-caption">
               Showing {formatWindowLabel(effectiveStart, effectiveEnd)} · UTC
             </span>
             <RefreshButton
@@ -1256,7 +1256,7 @@ export function UsagePage() {
                     area is TrendChart's drag-to-zoom target and a button there
                     would swallow the drag. Only rendered inside this branch, so a
                     range with no data offers no share affordance at all. */}
-                <figcaption className="flex items-start justify-between gap-3 text-xs text-muted">
+                <figcaption className="flex items-start justify-between gap-3 text-caption">
                   <span>
                     {formatValue(peak)} peak · {chart.data.length}{" "}
                     {bucket === "hour" ? "hours" : "days"} (times in UTC) · drag
@@ -1399,7 +1399,7 @@ export function UsagePage() {
             <div className="rounded-2xl border border-border bg-surface p-4">
               <div className="mb-3 flex flex-col gap-1">
                 <h2 className="text-title">Gateway-run tools</h2>
-                <p className="text-xs text-muted">
+                <p className="text-caption">
                   Tools Otari ran itself, billed per call. MCP tools are not
                   listed here: their names come from your own server, so they
                   appear on each request instead.

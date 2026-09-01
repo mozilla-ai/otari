@@ -161,7 +161,7 @@ export function SpendCeilingDialog({
                         ? `, on ${editing.provider_key_id}`
                         : ", on every provider"}
                     </span>
-                    <span className="text-xs text-muted">
+                    <span className="text-caption">
                       What a ceiling caps cannot be changed. Delete it and add
                       one for the other identity.
                     </span>

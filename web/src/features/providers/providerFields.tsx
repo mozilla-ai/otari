@@ -197,9 +197,7 @@ export function ProviderComboBox({
           )}
         </ListBox>
       </ComboBox.Popover>
-      {description ? (
-        <span className="text-xs text-muted">{description}</span>
-      ) : null}
+      {description ? <span className="text-caption">{description}</span> : null}
     </ComboBox.Root>
   )
 }

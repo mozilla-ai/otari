@@ -267,7 +267,7 @@ export function ActivityTimeline({
           </Button>
         ))}
         <div className="ml-auto flex items-center gap-3">
-          <span className="text-xs text-muted">Showing {label} · UTC</span>
+          <span className="text-caption">Showing {label} · UTC</span>
           {action}
         </div>
       </div>
@@ -281,7 +281,7 @@ export function ActivityTimeline({
             <ChartLegend series={chartSeries} />
           </span>
           <div className="flex items-center gap-1.5">
-            <span className="hidden text-xs text-muted sm:inline">
+            <span className="hidden text-caption sm:inline">
               drag across the chart to zoom
             </span>
             <Button
@@ -339,7 +339,7 @@ export function ActivityTimeline({
             <Spinner size="sm" />
           </div>
         ) : n === 0 ? (
-          <div className="flex h-[90px] items-center justify-center text-xs text-muted">
+          <div className="flex h-[90px] items-center justify-center text-caption">
             No activity in this range.
           </div>
         ) : (

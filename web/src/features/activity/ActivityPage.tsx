@@ -226,7 +226,7 @@ function InFlightControl({
         <Popover.Dialog>
           <div className="flex w-80 flex-col gap-2">
             <Popover.Heading className="text-title">In flight</Popover.Heading>
-            <p className="text-xs text-muted">
+            <p className="text-caption">
               Running right now, across the whole gateway; longest-running
               first. Not narrowed by the filters above.
             </p>
@@ -244,7 +244,7 @@ function InFlightControl({
                   >
                     <span className="min-w-0">
                       <span className="block truncate">{request.model}</span>
-                      <span className="block truncate text-xs text-muted">
+                      <span className="block truncate text-caption">
                         {request.user_id ?? "—"}
                         {request.policy_name ? ` · ${request.policy_name}` : ""}
                       </span>
@@ -259,7 +259,7 @@ function InFlightControl({
             {/* Only when the endpoint's cap actually bit, which takes more
                 concurrency than a live list can usefully show anyway. */}
             {hidden > 0 ? (
-              <p className="text-xs text-muted">
+              <p className="text-caption">
                 {hidden.toLocaleString()} further{" "}
                 {hidden === 1 ? "request is" : "requests are"} in flight beyond
                 the {shown.length.toLocaleString()} listed.
@@ -745,7 +745,7 @@ function RoutingCell({
           the model that served), and a qualified target is routinely longer than
           the column. The Model column wraps for the same reason. */}
       {sentence ? (
-        <span className="text-xs break-words text-muted">{sentence}</span>
+        <span className="text-caption break-words">{sentence}</span>
       ) : null}
     </span>
   )
@@ -888,7 +888,7 @@ function RoutingPlan({ entry }: { entry: UsageEntry }) {
           </tbody>
         </table>
       </div>
-      <span className="text-xs text-muted">
+      <span className="text-caption">
         Cost and tool charges settle on the attempt that served, so a failed
         attempt carries its tokens and no charge.
       </span>
@@ -1070,7 +1070,7 @@ function RequestDetail({
               Price this model
             </Button>
           ) : null}
-          <span className="text-xs text-muted">
+          <span className="text-caption">
             {onPriceModel ? (
               <>
                 This request carries no cost. Set a price for{" "}
@@ -2044,7 +2044,7 @@ export function ActivityPage() {
               ) : null}
               {newRowsUnknown ? (
                 <span
-                  className="text-xs text-muted"
+                  className="text-caption"
                   title="The row count could not be read, so this page cannot tell whether newer requests have landed. Refresh to load whatever is there."
                 >
                   Newer rows unknown

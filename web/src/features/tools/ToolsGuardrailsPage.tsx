@@ -164,7 +164,7 @@ function FieldLabel({
       {field.description ? (
         <p className="mt-1 text-sm text-muted">{field.description}</p>
       ) : null}
-      {help ? <p className="mt-1 text-xs text-muted">{help}</p> : null}
+      {help ? <p className="mt-1 text-caption">{help}</p> : null}
     </div>
   )
 }
@@ -428,7 +428,7 @@ function ToolPriceRow({
         <span className="text-sm font-medium text-foreground">
           Price per call
         </span>
-        <span className="text-xs text-muted">
+        <span className="text-caption">
           {configured === null ? (
             <>
               Not priced. Calls are recorded but billed nothing, and with{" "}
@@ -445,7 +445,7 @@ function ToolPriceRow({
         </span>
       </div>
       <div className="flex items-center gap-1.5 sm:col-start-2 sm:justify-self-end">
-        <span className="text-xs text-muted">USD</span>
+        <span className="text-caption">USD</span>
         <input
           type="number"
           min="0"

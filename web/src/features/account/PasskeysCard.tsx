@@ -67,7 +67,7 @@ function PasskeyRow({
           <p className="truncate text-sm font-medium text-foreground">
             {passkey.name}
           </p>
-          <p className="text-xs text-muted">
+          <p className="text-caption">
             {passkey.backed_up
               ? "Synced to your credential manager"
               : "Stored on one device"}
@@ -310,7 +310,7 @@ export function PasskeysCard() {
                   placeholder="Work laptop"
                   maxLength={MAX_PASSKEY_NAME_LENGTH}
                 />
-                <Description className="text-xs text-muted">
+                <Description className="text-caption">
                   Optional. It is only a label, so you can tell this passkey
                   from the others.
                 </Description>

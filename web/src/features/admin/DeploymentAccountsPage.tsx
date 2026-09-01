@@ -86,7 +86,7 @@ export function DeploymentAccountsPage() {
                 only whitespace falls back to the email up there, so testing the
                 untrimmed value here would print the same address twice. */}
             {account.full_name?.trim() && account.email ? (
-              <span className="text-xs text-muted">{account.email}</span>
+              <span className="text-caption">{account.email}</span>
             ) : null}
           </div>
         ),

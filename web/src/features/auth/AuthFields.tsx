@@ -61,7 +61,7 @@ export function AuthEmailField({
       {description ? (
         // HeroUI's Description reaches the input as aria-describedby through
         // the TextField's "description" slot, which a raw span does not.
-        <Description className="text-xs text-muted">{description}</Description>
+        <Description className="text-caption">{description}</Description>
       ) : null}
     </TextField>
   )
@@ -91,7 +91,7 @@ export function AuthPasswordField({
       <Label className="text-sm font-medium text-foreground">{label}</Label>
       <Input autoComplete={autoComplete} />
       {description ? (
-        <Description className="text-xs text-muted">{description}</Description>
+        <Description className="text-caption">{description}</Description>
       ) : null}
     </TextField>
   )
@@ -119,7 +119,7 @@ export function AuthTextField({
       <Label className="text-sm font-medium text-foreground">{label}</Label>
       <Input autoComplete={autoComplete} />
       {description ? (
-        <Description className="text-xs text-muted">{description}</Description>
+        <Description className="text-caption">{description}</Description>
       ) : null}
     </TextField>
   )

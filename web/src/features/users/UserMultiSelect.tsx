@@ -81,9 +81,7 @@ export function UserMultiSelect({
     <div className="flex flex-col gap-2">
       <div>
         <span className="text-sm font-medium text-foreground">{label}</span>
-        {description ? (
-          <p className="text-xs text-muted">{description}</p>
-        ) : null}
+        {description ? <p className="text-caption">{description}</p> : null}
       </div>
       {value.length > 0 ? (
         <div className="flex flex-wrap gap-1.5">
@@ -106,7 +104,7 @@ export function UserMultiSelect({
         </div>
       ) : null}
       {options.length === 0 ? (
-        <span className="text-xs text-muted">
+        <span className="text-caption">
           Nobody to assign yet. Add people under Members &amp; roles, or issue a
           key, and they can be assigned here.
         </span>

@@ -37,7 +37,7 @@ export function CheckEmailPage({ hash }: { hash: string }) {
         Open the link in that message to confirm the address. Signing in is
         blocked until you do.
       </p>
-      <p className="text-center text-xs text-muted">
+      <p className="text-center text-caption">
         The link expires, and a new one can be sent at any time.
       </p>
     </PublicAuthLayout>

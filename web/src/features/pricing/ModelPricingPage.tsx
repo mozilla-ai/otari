@@ -99,7 +99,7 @@ function PricingRefreshDialog({
               </ul>
             ) : null}
             {preview.changes_truncated ? (
-              <p className="text-xs text-muted">
+              <p className="text-caption">
                 Only the first 100 changes are shown.
               </p>
             ) : null}

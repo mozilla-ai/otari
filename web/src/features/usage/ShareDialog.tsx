@@ -260,7 +260,7 @@ export function ShareDialog(props: ShareDialogProps) {
               </AlertDialog.Heading>
             </AlertDialog.Header>
             <AlertDialog.Body className="flex max-h-[70vh] flex-col gap-4 overflow-y-auto">
-              <p className="text-xs text-muted">
+              <p className="text-caption">
                 The card shows the window and filters currently applied above.
                 Change them on the page to change what it says.
               </p>
@@ -284,7 +284,7 @@ export function ShareDialog(props: ShareDialogProps) {
                       className="h-auto w-full rounded-md border border-border"
                     />
                   ) : (
-                    <div className="flex aspect-square w-full items-center justify-center rounded-md border border-dashed border-border text-xs text-muted">
+                    <div className="flex aspect-square w-full items-center justify-center rounded-md border border-dashed border-border text-caption">
                       Rendering preview…
                     </div>
                   )}
@@ -469,7 +469,7 @@ function Field({
 }) {
   return (
     <div className="flex flex-col gap-1">
-      <span className="text-xs font-medium text-muted">{label}</span>
+      <span className="text-caption">{label}</span>
       {children}
     </div>
   )

@@ -183,7 +183,7 @@ function SetupGuide({
             >
               Create a setup key
             </Button>
-            <span className="text-xs text-muted">
+            <span className="text-caption">
               An API key for this workspace, shown once. It appears on the API
               keys page as “Setup guide”.
             </span>
@@ -242,7 +242,7 @@ function IssuedKey({ issued }: { issued: ActivationApiKey }) {
       <CopyField label="API key" value={issued.key} />
       {snippetInput === undefined ? <MissingGatewayAddressNotice /> : null}
       {snippetInput !== undefined && model === undefined ? (
-        <p className="text-xs text-muted">
+        <p className="text-caption">
           No model is being served yet, so the snippets name{" "}
           <code>{SNIPPET_MODEL_PLACEHOLDER}</code>. Replace it with a model from
           the{" "}
@@ -307,7 +307,7 @@ function ListeningRow({
             <span className="text-sm font-medium text-danger">
               Request failed: {failure.cause}
             </span>
-            <span className="text-xs text-muted">
+            <span className="text-caption">
               Still listening. Fix it and send the request again.
               {attempt?.occurred_at
                 ? ` Last attempt ${formatRelative(attempt.occurred_at)}.`
@@ -329,7 +329,7 @@ function ListeningRow({
                 ? "The gateway could not be checked"
                 : "Listening for your first request"}
             </span>
-            <span className="text-xs text-muted">
+            <span className="text-caption">
               {checkFailed
                 ? "Leave this page open and try again."
                 : "This page notices it within a few seconds."}
@@ -380,9 +380,7 @@ function SetupComplete({
             fill in from here.
           </p>
           {receipt.length > 0 ? (
-            <p className="font-mono text-xs text-muted">
-              {receipt.join(" · ")}
-            </p>
+            <p className="font-mono text-caption">{receipt.join(" · ")}</p>
           ) : null}
         </div>
         <div className="flex flex-wrap items-center gap-2">
