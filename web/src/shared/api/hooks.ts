@@ -2171,7 +2171,7 @@ export function useRevokeOrganizationMemberInvitation() {
 // The accept-invitation page's two calls. Both hit routes the server never
 // gates on a session or the master key: the token in the emailed link is the
 // caller's whole credential, and the gateway answers 404/400 for a bad one,
-// never 401, so apiFetch's session-bounce on 401/403 never triggers here.
+// never 401, so apiFetch's session-bounce never triggers here.
 export function useValidateInvitation(token: string) {
   return useQuery({
     queryKey: ["invitation-preview", token],
@@ -2206,7 +2206,7 @@ export function useAcceptInvitation() {
 // master key, because a caller completing a signup or opening an emailed link
 // holds neither. The gateway answers 400 for a bad token, 429 when the shared
 // sign-in limiter fires, and 503 when this deployment cannot send mail, so
-// apiFetch's session-bounce on 401/403 never triggers on any of them.
+// apiFetch's session-bounce never triggers on any of them.
 //
 // None of them invalidates anything. They write to an identity this
 // unauthenticated caller cannot read back, and the cache they would touch

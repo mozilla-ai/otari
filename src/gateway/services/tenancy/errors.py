@@ -93,13 +93,12 @@ class NotAuthorizedError(TenancyForbiddenError):
 class DeploymentAdministrationUnavailableError(TenancyNotFoundError):
     """The caller is not an operator of this deployment, so the surface is not there.
 
-    A 404 and not the 403 the condition really is, for two reasons that point the
-    same way. The dashboard's ``apiFetch`` treats a 403 as "this session cannot
-    use the management API" and drops the session, so refusing one page that way
-    signs the caller out of every other page they *are* allowed. And a surface
-    that answers 403 confirms it exists to anyone who asks, which for a
-    deployment-wide account list is a thing worth not confirming. The hosted
-    backends' own admin surface refuses the same way (mozilla-ai/otari-ai#1842).
+    A 404 and not the 403 the condition really is, because a surface that answers
+    403 confirms it exists to anyone who asks, which for a deployment-wide
+    account list is a thing worth not confirming. A caller who is not an operator
+    gets the answer an unentitled deployment gets, which is the one that tells
+    them least. The hosted backends' own admin surface refuses the same way
+    (mozilla-ai/otari-ai#1842).
     """
 
     def __init__(self) -> None:
