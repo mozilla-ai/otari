@@ -520,7 +520,10 @@ async def read_capped_decoded_body(
             buffer.extend(chunk)
         return CappedBody(content=bytes(buffer), truncated=False)
 
-    return await deadline.run(read())
+    try:
+        return await deadline.run(read())
+    finally:
+        await response.aclose()
 
 
 @dataclass(frozen=True, slots=True)
