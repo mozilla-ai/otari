@@ -326,7 +326,11 @@ function NavGroup({
       className={clsx("flex flex-col", open && "gap-0.5")}
     >
       <Disclosure.Heading>
-        <Disclosure.Trigger className={navRowClass({ isActive: holdsCurrent })}>
+        {/* `ancestor`, not `isActive`: the selected row is the child below,
+              which is visible whenever this trigger is expanded. The collapsed
+              rail's trigger a few lines up keeps the full selected marker,
+              because there no child is on screen to carry it. */}
+        <Disclosure.Trigger className={navRowClass({ ancestor: holdsCurrent })}>
           <item.icon className={NAV_ICON_CLASS} aria-hidden="true" />
           <span className="min-w-0 flex-1 truncate text-left">
             {item.label}

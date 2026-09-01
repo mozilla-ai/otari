@@ -28,7 +28,7 @@ import {
 } from "@/shared/api/hooks"
 import { BulkActionBar } from "@/shared/components/BulkActionBar"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
-import { Dot, TableScrollFrame } from "@/shared/components/surface"
+import { Dot, Section, TableScrollFrame } from "@/shared/components/surface"
 import { TablePagination } from "@/shared/components/TablePagination"
 import {
   ConfirmButton,
@@ -845,7 +845,10 @@ function ModelDetailPanel({
   )
 
   return (
-    <section className="flex flex-col gap-5 border-y border-border py-5">
+    <Section
+      className="border-y border-border py-5"
+      contentClassName="flex flex-col gap-5"
+    >
       <div className="flex items-start justify-between gap-3">
         <div className="min-w-0">
           <div className="flex items-center gap-2">
@@ -941,7 +944,7 @@ function ModelDetailPanel({
           </span>
         )}
       </PanelSection>
-    </section>
+    </Section>
   )
 }
 
@@ -1158,11 +1161,21 @@ function PriceCell({
   secondaryLabel: string
   onEdit: () => void
 }) {
-  const number = (value: number | null, label: string) => (
+  // Each half gets the same fixed width, so the slash sits in one column all the
+  // way down and the two numbers can be read as two columns rather than as one
+  // ragged string. Without it the pair is right-aligned as a whole, which puts
+  // every row's slash somewhere different and makes the input prices, the half
+  // an operator actually scans, impossible to compare. `min-w` rather than `w`:
+  // an unusually long price pushes its own row wider instead of being clipped.
+  const number = (
+    value: number | null,
+    label: string,
+    align: "text-right" | "text-left",
+  ) => (
     <button
       type="button"
       aria-label={`Edit ${label} price for ${rowKey}`}
-      className="tabular-nums hover:text-link hover:underline"
+      className={`min-w-[7ch] tabular-nums ${align} hover:text-link hover:underline`}
       onClick={(event) => {
         event.stopPropagation()
         onEdit()
@@ -1173,9 +1186,9 @@ function PriceCell({
   )
   return (
     <span className="inline-flex items-center justify-end gap-1">
-      {number(primary, primaryLabel)}
+      {number(primary, primaryLabel, "text-right")}
       <span className="text-muted">/</span>
-      {number(secondary, secondaryLabel)}
+      {number(secondary, secondaryLabel, "text-left")}
     </span>
   )
 }
@@ -1192,14 +1205,14 @@ function CachingCell({
   const entries = [
     rates.cacheReadPrice == null
       ? null
-      : `R ${formatCost(rates.cacheReadPrice)}`,
+      : { key: "R", value: formatCost(rates.cacheReadPrice) },
     rates.cacheWritePrice == null
       ? null
-      : `W ${formatCost(rates.cacheWritePrice)}`,
+      : { key: "W", value: formatCost(rates.cacheWritePrice) },
     rates.cacheWrite1hPrice == null
       ? null
-      : `1h ${formatCost(rates.cacheWrite1hPrice)}`,
-  ].filter((entry): entry is string => entry !== null)
+      : { key: "1h", value: formatCost(rates.cacheWrite1hPrice) },
+  ].filter((entry): entry is { key: string; value: string } => entry !== null)
   return (
     <button
       type="button"
@@ -1210,7 +1223,24 @@ function CachingCell({
         onEdit()
       }}
     >
-      {entries.length > 0 ? entries.join(" · ") : "Input-rate fallback"}
+      {/* The same fixed-width treatment as the input/output pair next door, for
+          the same reason: joined into one string these read as prose and the
+          read and write prices cannot be compared down the column. */}
+      {entries.length > 0 ? (
+        <span className="inline-flex items-center justify-end">
+          {entries.map((entry, index) => (
+            <span key={entry.key} className="inline-flex items-center gap-1">
+              {index > 0 ? <span className="px-1">·</span> : null}
+              <span className="text-subtle">{entry.key}</span>
+              <span className="min-w-[7ch] text-right tabular-nums">
+                {entry.value}
+              </span>
+            </span>
+          ))}
+        </span>
+      ) : (
+        "Input-rate fallback"
+      )}
     </button>
   )
 }
@@ -1445,7 +1475,10 @@ function DiscoveredErrors({
     // fill and no radius. Danger rather than caution because an unlistable
     // provider means models are missing from the table under it, which is a
     // wrong answer rather than a caveat.
-    <div className="flex items-start gap-3 border-y border-border py-3 text-sm text-muted">
+    <Section
+      className="border-y border-border py-3"
+      contentClassName="flex items-start gap-3 text-sm text-muted"
+    >
       <Dot className="mt-2 bg-danger" />
       <div className="flex flex-col gap-1">
         {unreachable.length > 0 ? (
@@ -1483,7 +1516,7 @@ function DiscoveredErrors({
           </span>
         ) : null}
       </div>
-    </div>
+    </Section>
   )
 }
 
@@ -2144,7 +2177,10 @@ export function ModelsPage() {
           />
 
           {pricingRow ? (
-            <section className="flex flex-col border-y border-border">
+            <Section
+              className="border-y border-border"
+              contentClassName="flex flex-col"
+            >
               <div className="flex items-center justify-between border-b border-border py-2">
                 <h2 className="text-title">Edit pricing</h2>
                 <Button
@@ -2159,7 +2195,7 @@ export function ModelsPage() {
                 row={pricingRow}
                 onClose={() => setPricingKey(null)}
               />
-            </section>
+            </Section>
           ) : null}
 
           <TablePagination

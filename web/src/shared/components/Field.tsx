@@ -8,6 +8,9 @@ interface FieldProps {
   placeholder?: string
   type?: "text" | "datetime-local"
   isRequired?: boolean
+  /** Renders the input read-only and dimmed. A caller that cannot write should
+      say so on the field rather than only on the button that commits it. */
+  isDisabled?: boolean
   description?: ReactNode
   autoFocus?: boolean
   /** Marks the input invalid, which is what makes `errorMessage` render. */
@@ -24,6 +27,7 @@ export function Field({
   placeholder,
   type = "text",
   isRequired,
+  isDisabled,
   description,
   autoFocus,
   isInvalid,
@@ -34,6 +38,7 @@ export function Field({
       value={value}
       onChange={onChange}
       isRequired={isRequired}
+      isDisabled={isDisabled}
       isInvalid={isInvalid}
       className="flex max-w-md flex-col gap-1"
     >

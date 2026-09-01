@@ -19,7 +19,7 @@ import {
   useTools,
   useUpdateToolSettings,
 } from "@/shared/api/hooks"
-import { Dot } from "@/shared/components/surface"
+import { Dot, Section } from "@/shared/components/surface"
 import {
   ErrorBanner,
   errorMessage,
@@ -748,7 +748,10 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
                 <p className="text-sm text-muted">{service.blurb}</p>
                 {/* A settings list: rows divided by rules, on the page ground,
                     with no box around them. */}
-                <div className="flex flex-col divide-y divide-border border-y border-border">
+                <Section
+                  className="border-y border-border"
+                  contentClassName="flex flex-col divide-y divide-border"
+                >
                   {service.pricingKey ? (
                     <ToolPriceRow
                       pricingKey={service.pricingKey}
@@ -779,7 +782,7 @@ export function ToolsGuardrailsPage({ only }: { only?: ToolServiceName } = {}) {
                     />
                   ))}
                   {managed ? <HowToCallCard tool={managed} /> : null}
-                </div>
+                </Section>
               </section>
               {/* Directly below the in-loop web-search settings, because a searxng
                 search tool that declares no backend URL of its own inherits the

@@ -26,7 +26,13 @@ import {
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import { Field } from "@/shared/components/Field"
 import { SecretField } from "@/shared/components/SecretField"
-import { Dot, Tab, TableScrollFrame, TabRow } from "@/shared/components/surface"
+import {
+  Dot,
+  Section,
+  Tab,
+  TableScrollFrame,
+  TabRow,
+} from "@/shared/components/surface"
 import {
   ConfirmButton,
   ErrorBanner,
@@ -373,7 +379,10 @@ function AddProviderForm({ onClose }: { onClose: () => void }) {
   const [tab, setTab] = useState<ProviderTab>("known")
 
   return (
-    <section className="flex flex-col gap-4 border-y border-border py-5">
+    <Section
+      className="border-y border-border py-5"
+      contentClassName="flex flex-col gap-4"
+    >
       <div className="flex items-center justify-between">
         <TabRow>
           {(
@@ -393,7 +402,7 @@ function AddProviderForm({ onClose }: { onClose: () => void }) {
       ) : (
         <CustomProviderForm onClose={onClose} />
       )}
-    </section>
+    </Section>
   )
 }
 
@@ -445,7 +454,10 @@ function EditProviderForm({
   }
 
   return (
-    <section className="flex flex-col gap-4 border-y border-border py-5">
+    <Section
+      className="border-y border-border py-5"
+      contentClassName="flex flex-col gap-4"
+    >
       <div className="text-title">
         Edit <code>{provider.instance}</code>
       </div>
@@ -519,7 +531,7 @@ function EditProviderForm({
           Cancel
         </Button>
       </div>
-    </section>
+    </Section>
   )
 }
 
@@ -666,7 +678,10 @@ function HealthSummary({
     // A band of the page rather than a card, which is what the rest of this page
     // became: the summary is a region between rules, so the rules are what bound
     // it and the fill goes.
-    <div className="flex flex-wrap items-center gap-3 border-y border-border py-3 text-sm">
+    <Section
+      className="border-y border-border py-3"
+      contentClassName="flex flex-wrap items-center gap-3 text-sm"
+    >
       <Dot className={dot} />
       <span className="font-medium text-foreground">
         {healthy} of {total} provider{total === 1 ? "" : "s"} reachable
@@ -688,7 +703,7 @@ function HealthSummary({
       >
         {recheck.isPending ? "Re-checking…" : "Re-check all"}
       </Button>
-    </div>
+    </Section>
   )
 }
 
@@ -730,7 +745,10 @@ function OnboardingPanel({
   secretKeyConfigured: boolean
 }) {
   return (
-    <section className="flex flex-col gap-4 border-y border-border py-5">
+    <Section
+      className="border-y border-border py-5"
+      contentClassName="flex flex-col gap-4"
+    >
       <div className="flex items-start gap-3">
         <Dot className="mt-2.5 bg-accent" />
         <div>
@@ -801,7 +819,7 @@ function OnboardingPanel({
           Add your first provider
         </Button>
       </div>
-    </section>
+    </Section>
   )
 }
 
@@ -1075,7 +1093,10 @@ export function ProvidersPage() {
           named in mono so it is copyable by eye, and the consequence in muted
           prose. No fill, no border, no radius. */}
       {!secretKeyConfigured ? (
-        <div className="flex items-start gap-3 border-y border-border py-3 text-sm">
+        <Section
+          className="border-y border-border py-3"
+          contentClassName="flex items-start gap-3 text-sm"
+        >
           <Dot className="mt-2 bg-danger" />
           <p className="text-muted">
             <span className="font-mono text-[13px] text-foreground">
@@ -1087,7 +1108,7 @@ export function ProvidersPage() {
             <span className="font-mono text-[13px]">config.yml</span> keep
             working without it.
           </p>
-        </div>
+        </Section>
       ) : null}
 
       {showOnboarding ? (

@@ -862,11 +862,17 @@ describe("ModelsPage", () => {
     // The compact cache-policy cell keeps the table readable while opening the
     // full structured editor on click.
     const row = tableRow("anthropic:claude-sonnet-4")
-    expect(
-      within(row).getByRole("button", {
-        name: "Edit caching price for anthropic:claude-sonnet-4",
-      }),
-    ).toHaveTextContent("R $0.30 · W $3.75")
+    // The read and write prices each sit in a fixed-width box so the column can
+    // be scanned downward, which means the spacing between them is layout and
+    // not text. Asserting the concatenation back would pin the old single-string
+    // cell rather than what a reader sees.
+    const cachingCell = within(row).getByRole("button", {
+      name: "Edit caching price for anthropic:claude-sonnet-4",
+    })
+    expect(cachingCell).toHaveTextContent("R")
+    expect(cachingCell).toHaveTextContent("$0.30")
+    expect(cachingCell).toHaveTextContent("W")
+    expect(cachingCell).toHaveTextContent("$3.75")
 
     const detail = await selectModel(user, "anthropic:claude-sonnet-4")
     expect(within(detail).getByText("Cache read")).toBeInTheDocument()

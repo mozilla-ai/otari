@@ -195,19 +195,39 @@ const ROW_RESTING = `border-transparent text-muted hover:bg-surface-alt hover:te
  */
 const ROW_SELECTED = "bg-surface-subtle text-foreground border-foreground"
 
+/**
+ * A group whose selected child is visible below it: brightened ink, and neither
+ * of the other two channels.
+ *
+ * Measured before the ruling: the Routing trigger and its Policies child were
+ * byte-identical, fill and edge included, with only the child carrying
+ * `aria-current`. The page said two rows are current and the accessibility tree
+ * said one, and the page was the one that was wrong. The fill and the edge
+ * belong to the row you are actually on; a parent's relationship to it is
+ * already carried by the open chevron and by the child sitting under it, so ink
+ * is the whole of what this state needs to add.
+ *
+ * It keeps hover and press, unlike the selected row, because clicking it does
+ * something: it collapses the group.
+ */
+const ROW_ANCESTOR = `border-transparent text-foreground hover:bg-surface-alt ${ROW_PRESSED}`
+
 /** The class list for one sidebar row. */
 export function navRowClass({
   isActive = false,
+  ancestor = false,
   collapsed = false,
   nested = false,
 }: {
   isActive?: boolean
+  /** This row is the group holding the selected row, not the selected row. */
+  ancestor?: boolean
   collapsed?: boolean
   nested?: boolean
 } = {}): string {
   return [
     ROW_BASE,
-    isActive ? ROW_SELECTED : ROW_RESTING,
+    isActive ? ROW_SELECTED : ancestor ? ROW_ANCESTOR : ROW_RESTING,
     nested ? "pl-[3.125rem]" : "",
     collapsed ? "min-w-11 justify-center px-0" : "",
   ]

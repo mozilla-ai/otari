@@ -221,8 +221,11 @@ export function WorkspaceWebSearchCard({
       <Card>
         <Card.Content className="flex flex-col gap-4 px-5 py-4">
           <ErrorBanner error={query.error} />
+          {/* A ceiling, not a caution: nothing is broken and nothing on this
+              page can change it, so it reads on the subtle dot. The danger
+              dot is for the things worth acting on. */}
           {config && !config.web_search_configured ? (
-            <InfoBanner tone="warning">
+            <InfoBanner>
               This deployment has no in-loop search backend configured, so
               otari_web_search is unavailable here whatever this workspace
               allows. The search URL is set above. Blocking still takes effect

@@ -23,7 +23,13 @@ import {
 } from "@/shared/api/hooks"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import { Field } from "@/shared/components/Field"
-import { Dot, Tab, TableScrollFrame, TabRow } from "@/shared/components/surface"
+import {
+  Dot,
+  Section,
+  Tab,
+  TableScrollFrame,
+  TabRow,
+} from "@/shared/components/surface"
 import {
   ConfirmButton,
   CopyableValue,
@@ -607,7 +613,10 @@ function PolicyForm({
 
   return (
     <div className="flex flex-col gap-4">
-      <section className="flex flex-col gap-5 border-y border-border py-5">
+      <Section
+        className="border-y border-border py-5"
+        contentClassName="flex flex-col gap-5"
+      >
         <div className="text-title">
           {editing ? (
             <>
@@ -1203,7 +1212,7 @@ function PolicyForm({
             </span>
           ) : null}
         </div>
-      </section>
+      </Section>
     </div>
   )
 }

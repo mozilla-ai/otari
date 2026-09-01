@@ -81,6 +81,21 @@ describe("navRowClass", () => {
     expect(selected).not.toContain("dark:bg-")
   })
 
+  it("gives the group holding the selected row ink and nothing else", () => {
+    const ancestor = navRowClass({ ancestor: true })
+    expect(ancestor).toContain("text-foreground")
+    // Neither of the two channels that say "this is the row you are on". The
+    // measured bug: an expanded group and its selected child were byte-identical
+    // while only the child carried aria-current, so the page claimed two current
+    // rows and the accessibility tree claimed one.
+    expect(ancestor).not.toMatch(/(?<![\w:-])bg-/)
+    expect(ancestor).toContain("border-transparent")
+    expect(ancestor).not.toContain("border-foreground")
+    // It still answers the pointer, unlike the selected row: clicking it
+    // collapses the group, so there is something for an affordance to promise.
+    expect(ancestor).toContain("hover:bg-surface-alt")
+  })
+
   it("does not answer the pointer on a selected row at all", () => {
     // Neither hover nor press. It is the current page, so clicking it is a
     // no-op and there is nothing for an affordance to promise. A hover fill
