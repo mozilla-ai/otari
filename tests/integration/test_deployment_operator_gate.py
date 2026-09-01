@@ -17,6 +17,10 @@ and drives the three credential-test endpoints at a URL of its choosing.
 Both halves are asserted here, and the second half is the point: the control
 cases at the bottom are what catches a fix that swung too wide and took the
 tenant-scoped routers with it.
+
+What the gate does over HTTP is this file. Where it is declared, and that it
+covers every route on every deployment-wide router rather than the roster of
+paths probed below, is `tests/unit/test_operator_gate_declarations.py`.
 """
 
 import uuid

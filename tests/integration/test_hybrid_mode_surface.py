@@ -142,9 +142,10 @@ def test_hybrid_mode_disables_dashboard_management_endpoints(monkeypatch: pytest
 
 
 def test_hybrid_mode_omits_model_management_endpoints(monkeypatch: pytest.MonkeyPatch) -> None:
-    # models.router is standalone-only (register_routers returns early in hybrid),
-    # so the dashboard's model-management reads have no route at all. Guards
-    # against re-mounting models.router in hybrid, which would expose them.
+    # The models routers are standalone-only (register_routers returns early in
+    # hybrid), so the dashboard's model-management reads have no route at all.
+    # Guards against re-mounting either of them in hybrid, which would expose
+    # them.
     monkeypatch.setenv("OTARI_AI_TOKEN", "gw_test_token")
 
     config = GatewayConfig(
