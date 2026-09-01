@@ -1,6 +1,6 @@
 ---
 name: pr-cycle
-description: Take one or more GitHub issues to a ready PR end-to-end in mozilla-ai/otari: implement, self-review, open the PR, request review from the two bots and the team, wait for it, apply the fixes. Use when asked to "open a PR for issue X", "work through these issues", or run the implement/review/fix cycle (optionally fanned out across several issues in parallel).
+description: Take one or more GitHub issues to a ready PR end-to-end in mozilla-ai/otari: implement, self-review, open the PR, request review from CodeRabbit and the team, wait for it, apply the fixes. Use when asked to "open a PR for issue X", "work through these issues", or run the implement/review/fix cycle (optionally fanned out across several issues in parallel).
 ---
 
 # PR Cycle (otari)
@@ -97,31 +97,24 @@ a screenshot entry so the page is covered when the suite becomes a gate.
 
 ## Requesting reviewers
 
-**Two bots review this repo, not one.** Requesting Copilot and reading back its comments is half
-the surface: **CodeRabbit** reviews automatically, without being requested, and leaves inline
-comments of its own. Poll for both before calling a review loop finished, and address CodeRabbit's
-threads the same way (reply, then resolve). It tends to arrive first.
+**One bot reviews this repo.** **CodeRabbit** reviews automatically, without being requested,
+and leaves inline comments of its own; address its threads the way you would a person's (reply,
+then resolve). Nothing has to be requested to get it.
 
-- **Copilot.** `gh pr edit --add-reviewer` fails on the bot login ("Could not resolve user"), so
-  use the REST endpoint:
-  ```bash
-  gh api -X POST repos/mozilla-ai/otari/pulls/<n>/requested_reviewers \
-    -f 'reviewers[]=copilot-pull-request-reviewer[bot]'
-  ```
-  It reviews against `.github/instructions/*.instructions.md`, matched by `applyTo` glob, so a
-  `src/gateway/` diff draws the security and performance instructions and a `web/` diff draws the
-  frontend ones. The skills are not loaded for it, which is why those files restate what they do.
+**Copilot is gone.** The org gave up its access in September 2026, so do not request it. The
+attempt fails silently rather than erroring: `POST /pulls/<n>/requested_reviewers` returns
+`201 Created` and GraphQL `requestReviews` returns success, both while adding no reviewer, so a
+poll for its review waits out the timeout on a bot that was never coming.
+
 - **Team.** `gh pr edit <n> --add-reviewer mozilla-ai/otari-team`. CODEOWNERS auto-requests that
   team only on the open-core guardrail paths (`ARCHITECTURE.md`, `scripts/check_architecture.py`,
   `.github/CODEOWNERS`), so every other PR needs the request made explicitly.
 
 ## Handling the review
 
-1. **Wait for BOTH bots to finish**, not whichever answers first. Each appears under
-   `/pulls/<n>/reviews` with state `COMMENTED` once it is done, and Copilot also leaves
-   `requested_reviewers`. Poll for both; neither is instant, and CodeRabbit usually arrives first.
-   This is the step where a review gets called finished early: two CodeRabbit comments on a PR
-   went unread because only Copilot was polled, and one of them had caught a real regression.
+1. **Wait for CodeRabbit to finish.** It appears under `/pulls/<n>/reviews` with state
+   `COMMENTED` once done. It is not instant, and its summary comment can land before the inline
+   threads do, so a review that looks empty may not be finished.
 2. **Read the comments.** The summary body is in `/pulls/<n>/reviews`. **Inline comments can be
    missing from the REST `/pulls/<n>/comments` endpoint for bot reviews** even when the summary
    claims N comments, so fetch the threads over GraphQL:
@@ -181,11 +174,9 @@ tool, `isolation: "worktree"`), each executing the cycle above.
   `git rebase origin/main` and `git push --force-with-lease` rather than merging `main` in: the
   PR diff and CI stay about your change.
 - **Poll for reviews centrally**, not inside each agent, since an agent idling on a review burns
-  its run for nothing, and poll for **both** bots (see
-  [Requesting reviewers](#requesting-reviewers)). Once a wave's PRs are open, poll until each PR
-  has a completed review from **both** of them, not just whichever arrived first, then route the
-  fixes back to the original agents with `SendMessage` (their worktree and context are intact)
-  rather than starting fresh ones.
+  its run for nothing. Once a wave's PRs are open, poll until each has a completed CodeRabbit
+  review, then route the fixes back to the original agents with `SendMessage` (their worktree and
+  context are intact) rather than starting fresh ones.
 - **Resource note.** Each agent running the integration suite boots its own Testcontainers
   Postgres. Stagger them rather than sharing one `TEST_DATABASE_URL`: two suites running at once
   against one server pick the same worker database names and drop each other's database out from
@@ -204,9 +195,9 @@ tool, `isolation: "worktree"`), each executing the cycle above.
   version of this file claimed `main` was unprotected on the strength of that 404.
 
   The `protect-main` ruleset requires, on the default branch:
-  - **one approving review**, and a bot's `COMMENTED` review does not satisfy it. Copilot and
-    CodeRabbit both comment rather than approve, so a PR with both bots through and green CI
-    still reports `mergeStateStatus: BLOCKED` and `reviewDecision: REVIEW_REQUIRED`.
+  - **one approving review**, and a bot's `COMMENTED` review does not satisfy it. CodeRabbit
+    comments rather than approves, so a PR with its threads resolved and green CI still reports
+    `mergeStateStatus: BLOCKED` and `reviewDecision: REVIEW_REQUIRED`.
   - **every review thread resolved** (`required_review_thread_resolution`). See the warning in
     [Handling the review](#handling-the-review) about your own self-review counting here.
   - **an extra approval for unattributed changes**
