@@ -175,7 +175,6 @@ async def validate_retrieval_target(
     value: str | CanonicalWebURL,
     *,
     policy: DomainPolicy | None = None,
-    allow_private_addresses: bool = False,
     resolver: AddressResolver | None = None,
     deadline: NetworkDeadline | None = None,
 ) -> ValidatedTarget:
@@ -183,8 +182,7 @@ async def validate_retrieval_target(
 
     If any DNS answer is unsafe, the whole target is rejected. This prevents a
     hostname with mixed public and internal answers from selecting the internal
-    address through retry or address ordering. Search enrichment can explicitly
-    admit private answers, but it still resolves and pins them.
+    address through retry or address ordering.
     """
     try:
         canonical_url = value if isinstance(value, CanonicalWebURL) else canonicalize_web_url(value)
@@ -208,10 +206,9 @@ async def validate_retrieval_target(
     seen: set[IPAddress] = set()
     for address in resolved:
         canonical_address = ipaddress.ip_address(str(address))
-        if not allow_private_addresses:
-            reason = _blocked_address_reason(canonical_address)
-            if reason is not None:
-                raise RetrievalAddressError(f"destination resolves to a disallowed {reason} address")
+        reason = _blocked_address_reason(canonical_address)
+        if reason is not None:
+            raise RetrievalAddressError(f"destination resolves to a disallowed {reason} address")
         if canonical_address not in seen:
             admitted.append(canonical_address)
             seen.add(canonical_address)
