@@ -1,8 +1,8 @@
-import { Button, Card, Chip } from "@heroui/react"
+import { Button, Card, Chip, Modal } from "@heroui/react"
 import { Link } from "@tanstack/react-router"
 import {
-  type KeyboardEvent as ReactKeyboardEvent,
   type ReactNode,
+  type RefObject,
   useCallback,
   useEffect,
   useMemo,
@@ -39,6 +39,7 @@ import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
 import { Field } from "@/shared/components/Field"
 import { MissingGatewayAddressNotice } from "@/shared/components/MissingGatewayAddressNotice"
 import {
+  Checkbox,
   CopyField,
   EmptyState,
   ErrorBanner,
@@ -58,6 +59,7 @@ import {
   useTableSelection,
 } from "@/shared/helpers/tableSelection"
 import { useSelectedWorkspace } from "@/shared/hooks/SelectedWorkspace"
+import { useConfirmationFocus } from "@/shared/hooks/useConfirmationFocus"
 import { useDeployment } from "@/shared/hooks/useDeployment"
 
 // ---------- helpers ----------
@@ -105,19 +107,22 @@ const getKeyRowKey = (k: ApiKey): string => k.id
 
 // ---------- one-time reveal ----------
 
-// The highest-stakes moment: the plaintext key is shown once. A focus-trapped
-// dialog that cannot be dismissed by backdrop or Esc, only by an explicit "I've
-// saved this key". Doubles as an activation moment: a copy-paste first call.
+// The highest-stakes moment: the plaintext key is shown once, so the dialog
+// refuses a backdrop press and Esc and closes only on an explicit "I've saved
+// this key". `ConfirmDialog` passes the same two props the other way round,
+// because dismissing a confirm costs nothing and dismissing this loses the key.
+// Doubles as an activation moment: a copy-paste first call.
 function RevealSecretModal({
   title,
   result,
+  returnFocusRef,
   onClose,
 }: {
   title: string
   result: CreateKeyResponse
+  returnFocusRef: RefObject<HTMLButtonElement | null>
   onClose: () => void
 }) {
-  const dialogRef = useRef<HTMLDivElement>(null)
   const secretRef = useRef<HTMLInputElement | HTMLTextAreaElement | null>(null)
   // Where a request from this deployment belongs, which is not always the address
   // that served this page: a hosted control plane serves the dashboard and not
@@ -132,23 +137,20 @@ function RevealSecretModal({
     secretRef.current?.select()
   }, [])
 
-  const onKeyDown = (event: ReactKeyboardEvent<HTMLDivElement>) => {
-    // Esc is intentionally ignored; closing is an explicit acknowledgement.
-    if (event.key !== "Tab") return
-    const focusables = dialogRef.current?.querySelectorAll<HTMLElement>(
-      'button, input, textarea, a[href], [tabindex]:not([tabindex="-1"])',
-    )
-    if (!focusables || focusables.length === 0) return
-    const first = focusables[0]
-    const last = focusables[focusables.length - 1]
-    if (event.shiftKey && document.activeElement === first) {
-      event.preventDefault()
-      last.focus()
-    } else if (!event.shiftKey && document.activeElement === last) {
-      event.preventDefault()
-      first.focus()
-    }
-  }
+  useEffect(
+    () => () => {
+      // The dialog restores focus to its own trigger, which is hidden here
+      // because the reveal opens from a mutation result, so the restore has
+      // nowhere to land. A frame later it has had its turn: an empty
+      // document.body then means nothing caught the focus.
+      requestAnimationFrame(() => {
+        if (document.activeElement === document.body) {
+          returnFocusRef.current?.focus()
+        }
+      })
+    },
+    [returnFocusRef],
+  )
 
   // The same two calls the setup guide hands out with its own key; the builders
   // are shared so an operator cannot be shown two dialects of one request.
@@ -162,61 +164,67 @@ function RevealSecretModal({
     : undefined
 
   return (
-    <div
-      className="fixed inset-0 z-50 flex items-center justify-center bg-backdrop/40 p-4"
-      role="presentation"
-    >
-      <div
-        ref={dialogRef}
-        role="dialog"
-        aria-modal="true"
-        aria-labelledby="reveal-title"
-        onKeyDown={onKeyDown}
-        className="flex max-h-[90vh] w-full max-w-2xl flex-col gap-4 overflow-y-auto rounded-xl bg-surface p-6 shadow-xl"
-      >
-        <h2 id="reveal-title" className="text-title">
-          {title}
-        </h2>
-        <InfoBanner tone="warning">
-          Copy this key now. For security it is shown only once and cannot be
-          retrieved later. If you lose it, use Regenerate to issue a new secret.
-        </InfoBanner>
-        <p className="text-xs text-muted">
-          Model access: {accessLabel(result.allowed_models).text}.
-        </p>
-        <CopyField label="Secret key" value={secret} fieldRef={secretRef} />
-        <div className="flex flex-col gap-2">
-          <div>
-            <div className="text-sm font-medium text-foreground">
-              Make your first call
-            </div>
-            {snippets === undefined ? (
-              <MissingGatewayAddressNotice />
-            ) : (
+    <Modal isOpen>
+      {/* The reveal opens from a mutation result rather than a press, and HeroUI
+          warns when the trigger slot is empty; `WorkspaceSwitcher` fills it the
+          same way. */}
+      <Modal.Trigger className="hidden">Show the new key</Modal.Trigger>
+      <Modal.Backdrop isDismissable={false} isKeyboardDismissDisabled>
+        {/* `scroll="outside"` because globals.css pins `.modal__body` to
+            `overflow: visible`: with the default the two snippets past the fold
+            would be clipped by the dialog with nothing able to scroll them. */}
+        <Modal.Container placement="center" scroll="outside">
+          <Modal.Dialog>
+            <Modal.Header>
+              <Modal.Heading className="text-title">{title}</Modal.Heading>
+            </Modal.Header>
+            <Modal.Body className="flex flex-col gap-4">
+              <InfoBanner tone="warning">
+                Copy this key now. For security it is shown only once and cannot
+                be retrieved later. If you lose it, use Regenerate to issue a
+                new secret.
+              </InfoBanner>
               <p className="text-xs text-muted">
-                Replace <code>{SNIPPET_MODEL_PLACEHOLDER}</code> with a model
-                from the Models page.
+                Model access: {accessLabel(result.allowed_models).text}.
               </p>
-            )}
-          </div>
-          {snippets !== undefined ? (
-            <>
-              <CopyField label="curl" value={snippets.curl} multiline />
               <CopyField
-                label="Python (OpenAI SDK)"
-                value={snippets.python}
-                multiline
+                label="Secret key"
+                value={secret}
+                fieldRef={secretRef}
               />
-            </>
-          ) : null}
-        </div>
-        <div className="flex justify-end">
-          <Button variant="primary" onPress={onClose}>
-            I&rsquo;ve saved this key
-          </Button>
-        </div>
-      </div>
-    </div>
+              <div className="flex flex-col gap-2">
+                <div>
+                  <h3 className="text-title">Make your first call</h3>
+                  {snippets === undefined ? (
+                    <MissingGatewayAddressNotice />
+                  ) : (
+                    <p className="text-xs text-muted">
+                      Replace <code>{SNIPPET_MODEL_PLACEHOLDER}</code> with a
+                      model from the Models page.
+                    </p>
+                  )}
+                </div>
+                {snippets !== undefined ? (
+                  <>
+                    <CopyField label="curl" value={snippets.curl} multiline />
+                    <CopyField
+                      label="Python (OpenAI SDK)"
+                      value={snippets.python}
+                      multiline
+                    />
+                  </>
+                ) : null}
+              </div>
+            </Modal.Body>
+            <Modal.Footer>
+              <Button variant="primary" onPress={onClose}>
+                I&rsquo;ve saved this key
+              </Button>
+            </Modal.Footer>
+          </Modal.Dialog>
+        </Modal.Container>
+      </Modal.Backdrop>
+    </Modal>
   )
 }
 
@@ -236,10 +244,16 @@ function InlineConfirm({
   onConfirm: () => void
 }) {
   const [armed, setArmed] = useState(false)
+  const { triggerRef, confirmRef } = useConfirmationFocus(armed)
 
   if (!armed) {
     return (
-      <Button size="sm" variant="danger-soft" onPress={() => setArmed(true)}>
+      <Button
+        ref={triggerRef}
+        size="sm"
+        variant="danger-soft"
+        onPress={() => setArmed(true)}
+      >
         {trigger}
       </Button>
     )
@@ -250,6 +264,7 @@ function InlineConfirm({
       <span className="max-w-xs text-xs text-warning">{message}</span>
       <span className="inline-flex gap-1">
         <Button
+          ref={confirmRef}
           size="sm"
           variant="danger"
           isDisabled={isPending}
@@ -323,22 +338,18 @@ function BudgetExemptToggle({
   onChange: (value: boolean) => void
 }) {
   return (
-    <label className="flex items-start gap-2 rounded-lg border border-border p-3 text-sm">
-      <input
-        type="checkbox"
-        checked={checked}
-        onChange={(e) => onChange(e.target.checked)}
-        className="mt-0.5 h-4 w-4 accent-accent"
-        aria-label="Exempt this key from budget"
-      />
-      <span className="flex flex-col gap-0.5">
+    <div className="flex flex-col gap-0.5 rounded-lg border border-border p-3">
+      {/* The consequence sits beside the control rather than inside its label:
+          a checkbox whose accessible name is a whole paragraph is read out in
+          full on every focus. */}
+      <Checkbox isSelected={checked} onChange={onChange}>
         <span className="font-medium text-foreground">Exempt from budget</span>
-        <span className="text-xs text-muted">
-          Requests on this key are logged with their cost but never counted
-          toward the owner&apos;s budget or spend, and never blocked by it.
-        </span>
-      </span>
-    </label>
+      </Checkbox>
+      <p className="text-xs text-muted">
+        Requests on this key are logged with their cost but never counted toward
+        the owner&apos;s budget or spend, and never blocked by it.
+      </p>
+    </div>
   )
 }
 
@@ -467,7 +478,7 @@ function CreateKeyForm({
   return (
     <Card>
       <Card.Content className="flex flex-col gap-4 p-5">
-        <div className="text-title">Create API key</div>
+        <h2 className="text-title">Create API key</h2>
         <ErrorBanner error={create.error} />
         <div className="grid gap-4 sm:grid-cols-2">
           <Field
@@ -616,9 +627,9 @@ function EditKeyForm({
   return (
     <Card>
       <Card.Content className="flex flex-col gap-4 p-5">
-        <div className="text-title">
+        <h2 className="text-title">
           Edit <code>{apiKey.key_name ?? apiKey.id}</code>
-        </div>
+        </h2>
         <ErrorBanner error={update.error} />
         <div className="grid gap-4 sm:grid-cols-2">
           <Field
@@ -743,6 +754,11 @@ export function KeysPage() {
     title: string
     result: CreateKeyResponse
   } | null>(null)
+  // Where focus lands when the reveal closes. The control that opened it is
+  // either gone (the create form) or behind a confirm that has been consumed
+  // (a regenerate), so the page's own primary action is the stable landing
+  // spot nearest to where the operator was.
+  const createButtonRef = useRef<HTMLButtonElement>(null)
 
   const rows = keys.data ?? []
   // An unresolved scope is a loading state: which surface the page reads, and
@@ -1005,6 +1021,7 @@ export function KeysPage() {
         action={
           addOpen ? null : (
             <Button
+              ref={createButtonRef}
               variant="primary"
               onPress={() => {
                 setEditing(null)
@@ -1178,6 +1195,7 @@ export function KeysPage() {
         <RevealSecretModal
           title={revealed.title}
           result={revealed.result}
+          returnFocusRef={createButtonRef}
           onClose={() => {
             setRevealed(null)
             // Drop the one-time secret from mutation state so reopening Create/Regenerate

@@ -1,5 +1,5 @@
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query"
-import { screen, within } from "@testing-library/react"
+import { screen, waitFor, within } from "@testing-library/react"
 import userEvent from "@testing-library/user-event"
 import type { ReactElement } from "react"
 import { afterEach, describe, expect, it, vi } from "vitest"
@@ -364,6 +364,87 @@ describe("KeysPage", () => {
     expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
   })
 
+  it("refuses a backdrop press and inerts the page behind the reveal", async () => {
+    mockApi({ keys: [] })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    await screen.findByText("No API keys yet")
+    await user.click(
+      screen.getByRole("button", { name: "Create your first key" }),
+    )
+    await user.type(screen.getByPlaceholderText(/Pick a user/), "alice")
+    await user.keyboard("{Escape}")
+    await user.click(screen.getByRole("button", { name: "Create key" }))
+
+    const dialog = await screen.findByRole("dialog")
+    // The page behind is out of the accessibility tree, so the create action
+    // the reveal came from is not reachable while the secret is on screen.
+    expect(screen.queryByRole("button", { name: "Create key" })).toBeNull()
+
+    await user.click(
+      document.querySelector('[data-slot="modal-backdrop"]') as HTMLElement,
+    )
+    expect(screen.getByRole("dialog")).toBeInTheDocument()
+
+    await user.click(
+      within(dialog).getByRole("button", { name: /I.?ve saved this key/ }),
+    )
+    expect(screen.queryByRole("dialog")).not.toBeInTheDocument()
+  })
+
+  it("returns focus to the page's create action when the reveal closes", async () => {
+    mockApi({ keys: [] })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    await screen.findByText("No API keys yet")
+    await user.click(
+      screen.getByRole("button", { name: "Create your first key" }),
+    )
+    await user.type(screen.getByPlaceholderText(/Pick a user/), "alice")
+    await user.keyboard("{Escape}")
+    await user.click(screen.getByRole("button", { name: "Create key" }))
+
+    const dialog = await screen.findByRole("dialog")
+    await user.click(
+      within(dialog).getByRole("button", { name: /I.?ve saved this key/ }),
+    )
+
+    // The form that opened the reveal is gone by now, so the dialog's own
+    // restore has nowhere to land and focus would otherwise be on <body>.
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        screen.getByRole("button", { name: "Create key" }),
+      ),
+    )
+  })
+
+  it("moves focus onto the confirm and back on cancel, so a regenerate never drops it", async () => {
+    mockApi({ keys: [apiKey()] })
+    const user = userEvent.setup()
+    renderPage(<KeysPage />)
+
+    const row = (await screen.findByText("ci-bot")).closest("tr")!
+    await user.click(within(row).getByRole("button", { name: "Regenerate" }))
+
+    // Arming unmounts the button that was pressed, so focus has to follow the
+    // swap rather than falling back to <body>.
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        within(row).getByRole("button", { name: "Regenerate" }),
+      ),
+    )
+    expect(document.activeElement).not.toBe(document.body)
+
+    await user.click(within(row).getByRole("button", { name: "Cancel" }))
+    await waitFor(() =>
+      expect(document.activeElement).toBe(
+        within(row).getByRole("button", { name: "Regenerate" }),
+      ),
+    )
+  })
+
   it("confirms Copied when the clipboard API is available", async () => {
     mockApi({ keys: [] })
     const user = userEvent.setup()
@@ -514,7 +595,7 @@ describe("KeysPage", () => {
     await user.keyboard("{Escape}")
     // The exempt toggle lives under the Advanced disclosure.
     await user.click(screen.getByRole("button", { name: "Advanced" }))
-    await user.click(screen.getByLabelText("Exempt this key from budget"))
+    await user.click(screen.getByLabelText("Exempt from budget"))
     await user.click(screen.getByRole("button", { name: "Create key" }))
 
     const post = fetchMock.mock.calls.find(
@@ -740,9 +821,7 @@ describe("KeysPage", () => {
 
     const row = (await screen.findByText("ci-bot")).closest("tr")!
     await user.click(within(row).getByRole("button", { name: "Edit" }))
-    await user.click(
-      await screen.findByLabelText("Exempt this key from budget"),
-    )
+    await user.click(await screen.findByLabelText("Exempt from budget"))
     await user.click(screen.getByRole("button", { name: "Save changes" }))
 
     const patch = fetchMock.mock.calls.find(
@@ -978,7 +1057,7 @@ describe("KeysPage", () => {
 
       await usr.click(screen.getByRole("button", { name: "Advanced" }))
       expect(
-        screen.queryByLabelText("Exempt this key from budget"),
+        screen.queryByLabelText("Exempt from budget"),
       ).not.toBeInTheDocument()
 
       await usr.type(screen.getByPlaceholderText("ci-bot"), "my-key")
@@ -1010,7 +1089,7 @@ describe("KeysPage", () => {
       const row = (await screen.findByText("mine")).closest("tr")!
       await usr.click(within(row).getByRole("button", { name: "Edit" }))
       expect(
-        screen.queryByLabelText("Exempt this key from budget"),
+        screen.queryByLabelText("Exempt from budget"),
       ).not.toBeInTheDocument()
 
       await usr.click(screen.getByRole("button", { name: "Save changes" }))

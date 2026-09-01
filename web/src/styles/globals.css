@@ -906,11 +906,11 @@ body {
  *
  * Patched here rather than at the call sites because there are seven of them
  * and a future one would start out wrong again, and rather than in the token
- * because the two backdrops that already pass their own alpha
- * (`WorkspaceSwitcher`'s `/50`, `KeysPage`'s `/40`) would then compound it and
- * come out at a quarter strength. This is the last resort the frontend
- * standards describe, a rule against the library's own class, and it is here
- * because nothing above it reaches the value. */
+ * because the one backdrop that passes its own alpha (`WorkspaceSwitcher`'s
+ * `/50`) would then compound it and come out at a quarter strength. This is
+ * the last resort the frontend standards describe, a rule against the
+ * library's own class, and it is here because nothing above it reaches the
+ * value. */
 .alert-dialog__backdrop--opaque,
 .modal__backdrop--opaque,
 .drawer__backdrop--opaque {
