@@ -108,7 +108,16 @@ export function TablePagination({
       </div>
 
       <div className="flex items-center gap-3">
-        <span className="text-sm text-muted tabular-nums">{summary}</span>
+        {/* The live text the spinner above defers to: the range changes in
+            place on every page, page-size and filter change, and a screen
+            reader has nothing else to learn the new one from. */}
+        <span
+          role="status"
+          aria-live="polite"
+          className="text-sm text-muted tabular-nums"
+        >
+          {summary}
+        </span>
         <div className="flex items-center gap-1">
           <Button
             size="sm"

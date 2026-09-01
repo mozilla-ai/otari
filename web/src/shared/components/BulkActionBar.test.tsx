@@ -44,6 +44,22 @@ describe("BulkActionBar", () => {
     expect(onSelectAllMatching).toHaveBeenCalled()
   })
 
+  it("announces the count, which changes as rows are ticked", () => {
+    render(
+      <BulkActionBar
+        selectedCount={3}
+        allMatching={false}
+        matchingTotal={4231}
+        canSelectAllMatching={false}
+        onSelectAllMatching={vi.fn()}
+        onClear={vi.fn()}
+      >
+        <Button size="sm">Delete</Button>
+      </BulkActionBar>,
+    )
+    expect(screen.getByRole("status")).toHaveTextContent("3 selected")
+  })
+
   it("reads the whole-filter selection when all matching", () => {
     render(
       <BulkActionBar

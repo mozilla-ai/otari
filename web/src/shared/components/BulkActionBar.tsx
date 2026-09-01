@@ -46,7 +46,14 @@ export function BulkActionBar({
       aria-label="Bulk actions"
       className="otari-bulk-bar fixed bottom-4 left-1/2 z-40 flex w-[calc(100%-2rem)] max-w-3xl -translate-x-1/2 flex-wrap items-center gap-3 rounded-xl border border-accent bg-surface px-4 py-2.5 shadow-lg"
     >
-      <span className="text-sm font-medium text-accent">{label}</span>
+      {/* The count changes as rows are ticked, with no focus move to carry it. */}
+      <span
+        role="status"
+        aria-live="polite"
+        className="text-sm font-medium text-accent"
+      >
+        {label}
+      </span>
       {!allMatching && canSelectAllMatching && matchingTotal != null ? (
         <Button size="sm" variant="ghost" onPress={onSelectAllMatching}>
           Select all {matchingTotal.toLocaleString()} matching this filter

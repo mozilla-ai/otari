@@ -72,6 +72,13 @@ describe("TablePagination", () => {
     expect(screen.getByRole("button", { name: "Next page" })).toBeEnabled()
   })
 
+  it("announces the range, which changes with no focus move to carry it", () => {
+    setup()
+    // `role="status"` rather than a plain span: paging, resizing and filtering
+    // all rewrite this text in place, and the controls that did it keep focus.
+    expect(screen.getByRole("status")).toHaveTextContent("1–100 of 4,231")
+  })
+
   it("with an unknown total and a short page, disables next", () => {
     setup({ total: null, hasNextFallback: false, rowsOnPage: 40, page: 2 })
     expect(screen.getByRole("button", { name: "Next page" })).toBeDisabled()
