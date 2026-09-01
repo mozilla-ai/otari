@@ -267,7 +267,10 @@ describe("KeysPage", () => {
     await user.click(screen.getByRole("button", { name: "Create key" }))
 
     // The reveal shows the secret and a runnable curl snippet with the key injected.
-    const dialog = await screen.findByRole("dialog")
+    // Named by its own heading, which is what the parity spec locates it by.
+    const dialog = await screen.findByRole("dialog", {
+      name: "API key created",
+    })
     expect(within(dialog).getByDisplayValue(NEW_SECRET)).toBeInTheDocument()
     const curl = within(dialog).getByDisplayValue(
       new RegExp(`Otari-Key: ${NEW_SECRET}`),

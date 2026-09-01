@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react"
+import { type RefObject, useEffect, useRef } from "react"
 
 /**
  * Keeps focus on the two-step confirm pattern (a trigger that swaps itself for
@@ -11,8 +11,8 @@ import { useEffect, useRef } from "react"
  * cancel step has to hand it back.
  */
 export function useConfirmationFocus(armed: boolean): {
-  triggerRef: React.RefObject<HTMLButtonElement | null>
-  confirmRef: React.RefObject<HTMLButtonElement | null>
+  triggerRef: RefObject<HTMLButtonElement | null>
+  confirmRef: RefObject<HTMLButtonElement | null>
 } {
   const triggerRef = useRef<HTMLButtonElement>(null)
   const confirmRef = useRef<HTMLButtonElement>(null)
