@@ -5,12 +5,20 @@ import type { ReactNode } from "react"
  * The sparse page: a 56px bar carrying the mark, a column pinned to the left
  * with a full-height rule down its right, and empty ground beyond it.
  *
- * Pinned rather than centered, and that is the whole of the pattern. The
- * signed-in pages put their content in a column starting at the page's left
- * gutter, so a centered card meant the page moved sideways at the moment of
- * signing in; this way the column the eye is reading is in the same place
- * before and after. The ground to the right is deliberately empty: there is one
- * thing to do on this screen.
+ * Pinned rather than centered, and the reason is not the one first written
+ * here. That reason said the column sits where the signed-in pages put theirs,
+ * so nothing moves at the moment of signing in. It is false, and measurably so:
+ * signed in, the content column starts at 288px, because the rail is in front
+ * of it; here it starts at 24px. The column moves 264px across sign-in and
+ * always will.
+ *
+ * The argument that survives is about this page on its own. A centered column
+ * on an empty screen has nothing to align to, which is exactly why the card
+ * that used to be here needed a border: with elevation zeroed, a floating
+ * column had to manufacture its own edge or have none at all. Pinning it to the
+ * page's gutter with a rule down its right gives it a real one, made of the
+ * page rather than drawn around the content. The ground beyond is deliberately
+ * empty: there is one thing to do on this screen.
  *
  * Exported because `Login` renders the same shell and the two must not drift.
  * `Login` has three states with different bodies and so composes the shell

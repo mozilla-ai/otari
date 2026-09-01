@@ -11,7 +11,7 @@ import {
   useStoredProviders,
   useUpdateSettings,
 } from "@/shared/api/hooks"
-import { PageIntro, SettingsGroup } from "@/shared/components/surface"
+import { PageIntro, SettingsGroup, Toolbar } from "@/shared/components/surface"
 import {
   ErrorBanner,
   FilterSelect,
@@ -650,7 +650,7 @@ export function SettingsPage() {
 
       <ErrorBanner error={settings.error ?? updateSettings.error} />
 
-      <div className="flex flex-wrap items-center gap-3 pb-3">
+      <Toolbar className="pb-3">
         <input
           ref={searchRef}
           type="search"
@@ -672,7 +672,7 @@ export function SettingsPage() {
           />
           Settable only
         </label>
-      </div>
+      </Toolbar>
 
       {data ? (
         <p className="pb-2 text-xs text-subtle">

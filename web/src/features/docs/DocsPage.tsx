@@ -189,7 +189,10 @@ function CodeBlock({ node: _node, children, ...props }: MdProps<"pre">) {
 export function DocsPage() {
   return (
     <div className="flex flex-col">
-      <PageIntro title="User guide">
+      {/* The prose measure, not the app's 620px default: on the one page whose
+          subject is the measure, the widest line should not be the scanning-size
+          paragraph at the top of it. */}
+      <PageIntro title="User guide" descriptionClassName="max-w-[560px]">
         A reference for operating this dashboard, bundled with and
         version-matched to the running gateway. New here? The get-started
         walkthrough lives at /welcome.

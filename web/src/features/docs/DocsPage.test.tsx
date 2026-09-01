@@ -153,6 +153,22 @@ describe("DocsPage code blocks", () => {
     writeText.mockRestore()
   })
 
+  it("keeps the label row out of the block's own scroller", () => {
+    // The invariant behind a check that cannot be made on this page: the label
+    // is a SIBLING of the `<pre>`, so scrolling a wide block horizontally moves
+    // the code and not the row above it. Confirmed once in a browser with a
+    // temporary wide fence (the label stayed at x=312 with the block scrolled
+    // 1812px right, both the language and Copy still on screen); this is what
+    // holds that shape in place, since the guide has no fence to see it on.
+    const { container } = renderFence("```bash\necho hello\n```\n")
+    const block = container.querySelector(".otari-code-block")
+    const label = container.querySelector(".otari-code-label")
+    const pre = container.querySelector("pre")
+    expect(label?.parentElement).toBe(block)
+    expect(pre?.parentElement).toBe(block)
+    expect(pre?.contains(label ?? null)).toBe(false)
+  })
+
   it("renders no copy control when there is nothing to copy", () => {
     // An empty fence still produces a block; a control that would put an empty
     // string on the clipboard is worse than no control.

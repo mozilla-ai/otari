@@ -1061,6 +1061,39 @@ body {
  * reason `@utility otari-focus-ring` exists below; anywhere else, `outline-none`
  * silently removes the ring and should not be written. */
 /* =============================================================
+ * Field height, in two named sizes and no others.
+ *
+ * HeroUI ships no `--field-height`: `.input` comes out 38px because its own
+ * rule is `px-3 py-2 sm:text-sm`, which is 8 + 20 + 8 plus 2px of border. So
+ * this is a rule rather than a token, and it has to move the select trigger
+ * with the input, because the two sit in the same row on six pages and
+ * currently agree.
+ *
+ * 40px is the form size: a field somebody fills in. 38px is the dense size, and
+ * it exists for one reason: a filter control above a table sits on the table's
+ * own header row, and a 40px control outgrows it. Dense is opted into by
+ * PLACE, not per field, which is what `.otari-toolbar` is for. A call site says
+ * "this row is a toolbar" and every control in it takes the smaller size; no
+ * site picks a height.
+ *
+ * `min-height` rather than new padding: an input centers its text in the
+ * content box, so growing the box keeps the text centered without a second
+ * number to keep in step with the first.
+ * ============================================================= */
+.input,
+.select__trigger,
+.otari-markdown textarea,
+textarea.input {
+  min-height: 40px;
+}
+.otari-toolbar .input,
+.otari-toolbar .select__trigger,
+.otari-toolbar input[type="search"] {
+  min-height: 38px;
+}
+
+/* =============================================================
+ * Full-bleed sections inside a centered column./* =============================================================
  * Full-bleed sections inside a centered column.
  *
  * `<main>`'s content sits in a centered `max-width` column, which is right for

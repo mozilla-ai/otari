@@ -142,7 +142,12 @@ export function TablePagination({
                 }
               }}
               onBlur={commitPage}
-              className="w-12 border border-control-border bg-surface-alt px-2 py-1 text-center text-sm text-foreground tabular-nums focus:border-accent focus:outline-none"
+              // Neither a form field nor a toolbar filter, and so not on
+              // either named field height: it is one control inside the
+              // pagination group and it matches the small buttons it sits
+              // between. It measured 30px against their 32, which was a
+              // mismatch nobody chose rather than a size anybody picked.
+              className="h-8 w-12 border border-control-border bg-surface-alt px-2 text-center text-sm text-foreground tabular-nums focus:border-accent focus:outline-none"
             />
             {pageCount != null ? (
               <span className="tabular-nums">

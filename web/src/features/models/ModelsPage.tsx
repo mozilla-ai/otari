@@ -28,7 +28,12 @@ import {
 } from "@/shared/api/hooks"
 import { BulkActionBar } from "@/shared/components/BulkActionBar"
 import { DataTable, type DataTableColumn } from "@/shared/components/DataTable"
-import { Dot, Section, TableScrollFrame } from "@/shared/components/surface"
+import {
+  Dot,
+  Section,
+  TableScrollFrame,
+  Toolbar,
+} from "@/shared/components/surface"
 import { TablePagination } from "@/shared/components/TablePagination"
 import {
   ConfirmButton,
@@ -36,6 +41,7 @@ import {
   ErrorBanner,
   errorMessage,
   FilterSelect,
+  INPUT_CLASS,
 } from "@/shared/components/ui"
 import {
   formatContext,
@@ -965,7 +971,10 @@ function SearchInput({
       onChange={(event) => onChange(event.target.value)}
       placeholder={placeholder}
       aria-label={placeholder}
-      className="w-full max-w-xs rounded-md border border-field-border bg-field px-3 py-1.5 text-sm focus:border-accent focus:outline-none"
+      // The product's field, not a fourth spelling of one. It measured 34px
+      // and had a corner radius nothing else had; inside a `Toolbar` it takes
+      // the dense height like the filter selects beside it.
+      className={`max-w-xs ${INPUT_CLASS}`}
     />
   )
 }
@@ -2064,7 +2073,7 @@ export function ModelsPage() {
         }`}
       >
         <div className="flex min-w-0 flex-col gap-3">
-          <div className="flex flex-wrap items-center gap-2">
+          <Toolbar>
             <SearchInput
               value={search}
               onChange={changeSearch}
@@ -2134,7 +2143,7 @@ export function ModelsPage() {
               onChange={changeFilter(setReleaseFilter)}
               options={RELEASE_OPTIONS}
             />
-          </div>
+          </Toolbar>
 
           <DiscoveredErrors
             providers={discoveredErrors}

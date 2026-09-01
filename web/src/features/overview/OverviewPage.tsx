@@ -28,8 +28,8 @@ import {
   Dot,
   KpiCell,
   KpiStrip,
-  Meter,
   Section,
+  SpendMeter,
 } from "@/shared/components/surface"
 import { TrendChip } from "@/shared/components/TrendChip"
 import {
@@ -511,10 +511,17 @@ export function OverviewPage({
                   ? "no budgets set"
                   : "no data"
           }
+          // `SpendMeter`, not the plain accent `Meter` it used to be, and this
+          // was the gap: the strip named the state in words and drew it in one
+          // colour, so a budget 37% past its limit and one comfortably inside
+          // it produced the same teal bar. Same component as the Budgets
+          // table's cell now, so the two cannot say different things about the
+          // same budget.
           graphic={
             !isEmpty && budgets.data && budget.worst ? (
-              <Meter
-                fraction={budget.worst.pct}
+              <SpendMeter
+                spent={budget.worst.spent}
+                allocated={budget.worst.allocated}
                 ariaLabel={`Worst budget usage: ${budget.worst.name}`}
               />
             ) : undefined

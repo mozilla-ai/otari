@@ -804,9 +804,20 @@ export function ConfirmButton({
   )
 }
 
-/** The bare text/password input the feature cards use where a HeroUI field is too much. */
+/**
+ * A bare `<input>` dressed as the product's field, for the places that need an
+ * element rather than a HeroUI `TextField` (a grid cell that supplies its own
+ * label, a row whose control sits in a column of its own).
+ *
+ * It used to be its own smaller, rounder thing: `px-2 py-1` on `bg-surface`
+ * with `rounded-md`, which came out 30px against the real field's 38 and was
+ * the last rounded corner in the product. Its docstring said it was for "where
+ * a HeroUI field is too much", and the cards it was written for are gone. So it
+ * is the same field now, in the same tokens at the same height, and the only
+ * thing it still is is an element rather than a component.
+ */
 export const INPUT_CLASS =
-  "rounded-md border border-border bg-surface px-2 py-1 text-sm focus:border-accent focus:outline-none disabled:opacity-50"
+  "input input--primary min-h-10 w-full px-3 py-2 text-sm"
 
 /**
  * A small status pill for a row that has something to say about itself.
