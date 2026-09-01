@@ -1,6 +1,6 @@
 """Manage the tenancy-scoped USD ceilings in ``scoped_budgets``.
 
-Standalone-mode only, and master-key authed on the router itself.
+Standalone-mode only, and operator-gated on the router itself.
 Deliberately minimal: a scope's ceiling is created, listed, retimed and removed
 here, and everything about how one is enforced lives in
 ``services/scoped_budget_service.py``.

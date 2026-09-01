@@ -26,7 +26,11 @@ _KEY_EXCEEDS_USER_DETAIL = (
     "the user's model access, not broaden it."
 )
 
-router = APIRouter(prefix="/v1/keys", tags=["keys"])
+router = APIRouter(
+    prefix="/v1/keys",
+    tags=["keys"],
+    dependencies=[Depends(require_deployment_operator)],
+)
 
 
 async def _caller_organization_id(
@@ -216,7 +220,7 @@ class UpdateKeyRequest(BaseModel):
     metadata: dict[str, Any] | None = None
 
 
-@router.post("", dependencies=[Depends(require_deployment_operator)])
+@router.post("")
 async def create_key(
     request: CreateKeyRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -336,7 +340,7 @@ async def create_key(
     )
 
 
-@router.get("", dependencies=[Depends(require_deployment_operator)])
+@router.get("")
 async def list_keys(
     db: Annotated[AsyncSession, Depends(get_db)],
     organization_id: CallerOrganization,
@@ -363,7 +367,7 @@ async def list_keys(
     return [KeyInfo.from_model(key) for key in keys]
 
 
-@router.get("/{key_id}", dependencies=[Depends(require_deployment_operator)])
+@router.get("/{key_id}")
 async def get_key(
     key_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -378,7 +382,7 @@ async def get_key(
     return KeyInfo.from_model(key)
 
 
-@router.patch("/{key_id}", dependencies=[Depends(require_deployment_operator)])
+@router.patch("/{key_id}")
 async def update_key(
     key_id: str,
     request: UpdateKeyRequest,
@@ -440,7 +444,7 @@ async def update_key(
     return KeyInfo.from_model(key)
 
 
-@router.post("/{key_id}/rotate", dependencies=[Depends(require_deployment_operator)])
+@router.post("/{key_id}/rotate")
 async def rotate_key(
     key_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -479,7 +483,7 @@ async def rotate_key(
     )
 
 
-@router.delete("/{key_id}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_deployment_operator)])
+@router.delete("/{key_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_key(
     key_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],

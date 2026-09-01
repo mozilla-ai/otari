@@ -31,7 +31,11 @@ from gateway.core.env import otari_env
 from gateway.services.sandbox_backend import code_execution_tool_definition
 from gateway.services.web_search_backend import web_search_tool_definition
 
-router = APIRouter(prefix="/v1", tags=["tools"])
+router = APIRouter(
+    prefix="/v1",
+    tags=["tools"],
+    dependencies=[Depends(verify_catalog_reader)],
+)
 
 
 class ManagedTool(BaseModel):
@@ -93,7 +97,7 @@ def _managed_tools(config: GatewayConfig) -> list[ManagedTool]:
     ]
 
 
-@router.get("/tools", dependencies=[Depends(verify_catalog_reader)])
+@router.get("/tools")
 async def list_tools(config: Annotated[GatewayConfig, Depends(get_config)]) -> ToolsResponse:
     """List the tools Otari runs itself, with the declaration forms it accepts.
 

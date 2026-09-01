@@ -12,7 +12,7 @@ who is then the only caller that resolves it. Omitting ``workspace_id`` means th
 deployment's default workspace, so a single-workspace deployment never names one.
 See ``services/policy_store`` for precedence between the layers.
 
-Master-key gated on every verb, like alias management. That is what makes a policy
+Operator-gated on every verb, like alias management. That is what makes a policy
 safe as a unit of access: only an operator can decide which models a name reaches,
 so a caller cannot widen their own access by writing a policy.
 """
@@ -48,7 +48,11 @@ from gateway.services.routing import (
 from gateway.services.routing.decide import explain_router_ordering
 from gateway.services.routing.knn import unpriced_router_candidates
 
-router = APIRouter(prefix="/v1/routing/policies", tags=["routing"])
+router = APIRouter(
+    prefix="/v1/routing/policies",
+    tags=["routing"],
+    dependencies=[Depends(require_deployment_operator)],
+)
 
 
 class PolicyRequest(BaseModel):
@@ -372,7 +376,7 @@ async def _refresh_quietly(db: AsyncSession, name: str) -> None:
         logger.warning("Policy cache refresh failed after writing '%s'; converges within TTL", name)
 
 
-@router.get("", dependencies=[Depends(require_deployment_operator)])
+@router.get("")
 async def list_policies(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
@@ -427,7 +431,7 @@ async def list_policies(
     )
 
 
-@router.post("", dependencies=[Depends(require_deployment_operator)])
+@router.post("")
 async def set_policy(
     request: PolicyRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -542,11 +546,7 @@ async def set_policy(
     return PolicyResponse.from_model(policy, is_dynamic=spec.is_dynamic)
 
 
-@router.delete(
-    "/{name:path}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_deployment_operator)],
-)
+@router.delete("/{name:path}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_policy(
     name: str,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -594,7 +594,7 @@ async def delete_policy(
     await _refresh_quietly(db, name)
 
 
-@router.post("/explain", dependencies=[Depends(require_deployment_operator)])
+@router.post("/explain")
 async def explain_policy(
     request: ExplainRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -602,7 +602,7 @@ async def explain_policy(
 ) -> ExplainResponse:
     """Compile a policy and return the plan, without dispatching anything.
 
-    Master-key gated, and deliberately so: the response enumerates the policy's
+    Operator-gated, and deliberately so: the response enumerates the policy's
     targets, which is exactly the information a policy exists to keep off the wire.
     It is a management surface, not a caller-facing one.
 

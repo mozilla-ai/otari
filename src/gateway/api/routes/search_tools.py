@@ -12,7 +12,7 @@ Config-file tools stay honored and stay read-only here; they are reported by the
 list endpoint so the dashboard can show every tool a request could name, not just
 the editable ones.
 
-Master-key gated and standalone-only (the router is not mounted in hybrid). URL
+Operator-gated and standalone-only (the router is not mounted in hybrid). URL
 validation is structural, matching ``/v1/tool-settings`` rather than the provider
 SSRF gate: the backend this most often points at is a SearXNG sidecar on a
 private address, which a deny-private gate would refuse.
@@ -55,7 +55,11 @@ from gateway.services.secret_box import (
 )
 from gateway.services.tool_settings_service import validate_url
 
-router = APIRouter(prefix="/v1/search-tools", tags=["search-tools"])
+router = APIRouter(
+    prefix="/v1/search-tools",
+    tags=["search-tools"],
+    dependencies=[Depends(require_deployment_operator)],
+)
 
 
 class SearchProviderSchema(BaseModel):
@@ -228,7 +232,7 @@ async def _apply_write(db: AsyncSession, config: GatewayConfig, name: str) -> No
         logger.warning("Search tool overlay refresh failed after writing '%s'; converges within TTL", name)
 
 
-@router.get("/providers", dependencies=[Depends(require_deployment_operator)])
+@router.get("/providers")
 async def list_search_providers(
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> list[SearchProviderSchema]:
@@ -249,7 +253,7 @@ async def list_search_providers(
     ]
 
 
-@router.get("", dependencies=[Depends(require_deployment_operator)])
+@router.get("")
 async def list_all_search_tools(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
@@ -285,7 +289,7 @@ async def list_all_search_tools(
     )
 
 
-@router.post("/reencrypt", dependencies=[Depends(require_deployment_operator)])
+@router.post("/reencrypt")
 async def reencrypt_stored_search_tool_keys(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
@@ -313,7 +317,7 @@ async def reencrypt_stored_search_tool_keys(
     return ReencryptSearchToolsResponse(reencrypted=reencrypted, unreadable=unreadable)
 
 
-@router.post("", status_code=status.HTTP_201_CREATED, dependencies=[Depends(require_deployment_operator)])
+@router.post("", status_code=status.HTTP_201_CREATED)
 async def create_search_tool(
     request: CreateSearchToolRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -361,7 +365,7 @@ async def create_search_tool(
     return StoredSearchToolSchema.from_model(row, shadows_config=shadows_config)
 
 
-@router.patch("/{name}", dependencies=[Depends(require_deployment_operator)])
+@router.patch("/{name}")
 async def update_search_tool(
     name: str,
     request: UpdateSearchToolRequest,
@@ -423,7 +427,7 @@ async def update_search_tool(
     return StoredSearchToolSchema.from_model(row, shadows_config=name in config_file_search_tools(config))
 
 
-@router.delete("/{name}", status_code=status.HTTP_204_NO_CONTENT, dependencies=[Depends(require_deployment_operator)])
+@router.delete("/{name}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_stored_search_tool(
     name: str,
     db: Annotated[AsyncSession, Depends(get_db)],

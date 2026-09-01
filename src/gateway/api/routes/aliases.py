@@ -36,7 +36,11 @@ from gateway.repositories.users_repository import get_active_user
 from gateway.services.alias_service import all_alias_names, refresh_alias_cache
 from gateway.services.policy_store import all_policy_names
 
-router = APIRouter(prefix="/v1/aliases", tags=["aliases"])
+router = APIRouter(
+    prefix="/v1/aliases",
+    tags=["aliases"],
+    dependencies=[Depends(require_deployment_operator)],
+)
 
 
 class AliasRequest(BaseModel):
@@ -150,7 +154,7 @@ async def _require_user(db: AsyncSession, user_id: str) -> None:
         raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"User '{user_id}' not found")
 
 
-@router.get("", dependencies=[Depends(require_deployment_operator)])
+@router.get("")
 async def list_aliases(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
@@ -195,7 +199,7 @@ async def list_aliases(
     )
 
 
-@router.post("", dependencies=[Depends(require_deployment_operator)])
+@router.post("")
 async def set_alias(
     request: AliasRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -250,11 +254,7 @@ async def set_alias(
     return AliasResponse.from_model(alias)
 
 
-@router.delete(
-    "/{name:path}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_deployment_operator)],
-)
+@router.delete("/{name:path}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_alias(
     name: str,
     db: Annotated[AsyncSession, Depends(get_db)],

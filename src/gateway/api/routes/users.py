@@ -17,7 +17,11 @@ from gateway.repositories.users_repository import get_active_user
 from gateway.services.budget_periods import budget_window
 from gateway.services.model_access import validate_allowed_models
 
-router = APIRouter(prefix="/v1/users", tags=["users"])
+router = APIRouter(
+    prefix="/v1/users",
+    tags=["users"],
+    dependencies=[Depends(require_deployment_operator)],
+)
 
 
 class CreateUserRequest(BaseModel):
@@ -118,7 +122,7 @@ class UsageLogResponse(BaseModel):
         )
 
 
-@router.post("", dependencies=[Depends(require_deployment_operator)])
+@router.post("")
 async def create_user(
     request: CreateUserRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -190,7 +194,7 @@ async def create_user(
     return UserResponse.from_model(user)
 
 
-@router.get("", dependencies=[Depends(require_deployment_operator)])
+@router.get("")
 async def list_users(
     db: Annotated[AsyncSession, Depends(get_db)],
     skip: Annotated[int, Query(ge=0)] = 0,
@@ -203,7 +207,7 @@ async def list_users(
     return [UserResponse.from_model(user) for user in users]
 
 
-@router.get("/{user_id}", dependencies=[Depends(require_deployment_operator)])
+@router.get("/{user_id}")
 async def get_user(
     user_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -220,7 +224,7 @@ async def get_user(
     return UserResponse.from_model(user)
 
 
-@router.patch("/{user_id}", dependencies=[Depends(require_deployment_operator)])
+@router.patch("/{user_id}")
 async def update_user(
     user_id: str,
     request: UpdateUserRequest,
@@ -291,11 +295,7 @@ async def update_user(
     return UserResponse.from_model(user)
 
 
-@router.delete(
-    "/{user_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_deployment_operator)],
-)
+@router.delete("/{user_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_user(
     user_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -356,7 +356,7 @@ async def delete_user(
         ) from None
 
 
-@router.get("/{user_id}/usage", dependencies=[Depends(require_deployment_operator)])
+@router.get("/{user_id}/usage")
 async def get_user_usage(
     user_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],

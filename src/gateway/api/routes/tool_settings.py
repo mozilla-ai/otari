@@ -39,7 +39,11 @@ from gateway.services.tool_settings_service import (
 )
 from gateway.services.url_safety import redact_url_secrets
 
-router = APIRouter(prefix="/v1/tool-settings", tags=["tool-settings"])
+router = APIRouter(
+    prefix="/v1/tool-settings",
+    tags=["tool-settings"],
+    dependencies=[Depends(require_deployment_operator)],
+)
 
 _URL_FIELDS = frozenset(SERVICE_URL_FIELD.values())
 
@@ -121,7 +125,7 @@ def _current_fields(config: GatewayConfig) -> ToolSettingsResponse:
     return ToolSettingsResponse(fields=fields)
 
 
-@router.get("", dependencies=[Depends(require_deployment_operator)])
+@router.get("")
 async def get_tool_settings(
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> ToolSettingsResponse:
@@ -129,7 +133,7 @@ async def get_tool_settings(
     return _current_fields(config)
 
 
-@router.patch("", dependencies=[Depends(require_deployment_operator)])
+@router.patch("")
 async def update_tool_settings(
     request: UpdateToolSettingsRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -138,7 +142,7 @@ async def update_tool_settings(
     """Persist and apply tool/guardrail setting changes.
 
     Uses ``model_fields_set`` so an explicit ``null`` clears a field while an
-    omitted field is left unchanged. Master-key gated and standalone-only.
+    omitted field is left unchanged. Operator-gated and standalone-only.
     """
     updates: dict[str, SettingValue] = {
         key: getattr(request, key) for key in request.model_fields_set if key in TOOL_SETTABLE_KEYS
@@ -169,7 +173,7 @@ async def update_tool_settings(
     return _current_fields(config)
 
 
-@router.post("/{service}/test", dependencies=[Depends(require_deployment_operator)])
+@router.post("/{service}/test")
 async def test_service(
     service: str,
     request: TestServiceRequest,

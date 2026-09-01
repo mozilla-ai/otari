@@ -50,8 +50,11 @@ handler.
 `verify_master_key` authenticates either a header master key or an active
 dashboard session. It does not prove that the session may act deployment-wide.
 
-- Deployment-wide management routes declare
-  `require_deployment_operator`.
+- Deployment-wide management routers declare
+  `require_deployment_operator` on the router, not per route, so a route added
+  to one inherits it. Where such a router holds a route with a different rule
+  (a catalog read, external usage ingestion), that route goes on a router of its
+  own rather than overriding the gate in place.
 - Tenant routes authenticate, resolve `CurrentIdentity`, and authorize the
   organization or workspace in `services/tenancy/authorization.py`.
 - Data-plane routes use `verify_api_key_or_master_key`, which never accepts a

@@ -1,6 +1,6 @@
 """Outgoing mail settings, and the operator's way to prove they work.
 
-Two endpoints under ``/v1/settings``, master-key gated and standalone-only like
+Two endpoints under ``/v1/settings``, operator-gated and standalone-only like
 the rest of the management API:
 
 * ``GET /v1/settings/mail`` reports which transport (if any) this deployment
@@ -28,7 +28,11 @@ from gateway.core.config import GatewayConfig
 from gateway.log_config import logger
 from gateway.services.mail import Mailer, MailNotConfiguredError, normalized_address
 
-router = APIRouter(prefix="/v1/settings/mail", tags=["settings"])
+router = APIRouter(
+    prefix="/v1/settings/mail",
+    tags=["settings"],
+    dependencies=[Depends(require_deployment_operator)],
+)
 
 
 class MailSettings(BaseModel):
@@ -100,13 +104,13 @@ def _settings(config: GatewayConfig) -> MailSettings:
     )
 
 
-@router.get("", dependencies=[Depends(require_deployment_operator)])
+@router.get("")
 async def get_mail_settings(config: Annotated[GatewayConfig, Depends(get_config)]) -> MailSettings:
     """Report the effective outgoing-mail configuration."""
     return _settings(config)
 
 
-@router.post("/test", dependencies=[Depends(require_deployment_operator)])
+@router.post("/test")
 async def send_test_mail(
     request: SendTestMailRequest,
     config: Annotated[GatewayConfig, Depends(get_config)],

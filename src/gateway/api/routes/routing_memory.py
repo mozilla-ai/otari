@@ -17,7 +17,7 @@ are budget-checked and land in the usage log like all other provider spend. A
 convenience endpoint that skipped both would be the only unmetered way to spend
 money through this gateway.
 
-Master-key gated, like ``/v1/routing/policies``, with ``user_id`` naming whose
+Operator-gated, like ``/v1/routing/policies``, with ``user_id`` naming whose
 memory is being taught rather than taking it from the calling key: which model
 serves a caller is an operator decision, exactly as a policy's targets are.
 
@@ -59,7 +59,11 @@ from gateway.services.provider_kwargs import resolve_provider_selector
 from gateway.services.routing import KNN_BACKEND, backend_pool_is_teachable, get_router_backend
 from gateway.services.routing.knn import KnnRoutingMemory
 
-router = APIRouter(prefix="/v1/routing", tags=["routing"])
+router = APIRouter(
+    prefix="/v1/routing",
+    tags=["routing"],
+    dependencies=[Depends(require_deployment_operator)],
+)
 
 # One request may not teach more than this. Each example costs an embedding call,
 # so a batch is a loop with a bound rather than an unbounded fan-out.
@@ -373,7 +377,7 @@ async def _pool_counts(
     return total, [(str(task_id), int(count)) for task_id, count in rows]
 
 
-@router.post("/preferences/rank", dependencies=[Depends(require_deployment_operator)])
+@router.post("/preferences/rank")
 async def rank_candidates(
     request: RankRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -489,7 +493,7 @@ async def rank_candidates(
     return RankResponse(recorded=recorded, seed_count=backend.seed_count, pools=pools)
 
 
-@router.get("/status", dependencies=[Depends(require_deployment_operator)])
+@router.get("/status")
 async def routing_memory_status(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],

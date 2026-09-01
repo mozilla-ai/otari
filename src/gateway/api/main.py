@@ -161,10 +161,14 @@ def _register_core_routers(app: FastAPI, config: GatewayConfig) -> None:
         app.include_router(search.router)
         app.include_router(batches.router)
         app.include_router(moderations.router)
-    # Not gated: /v1/models is discovery, not dispatch. A control plane needs it
-    # to tell a tenant which models their gateway could route to, and "models"
-    # is one of the surfaces bootstrap publishes for a hosted deployment.
-    app.include_router(models.router)
+    # The catalog reads are not operator-gated: /v1/models is discovery, not
+    # dispatch. A control plane needs it to tell a tenant which models their
+    # gateway could route to, and "models" is one of the surfaces bootstrap
+    # publishes for a hosted deployment. The operator router goes first so
+    # /v1/models/discoverable and /v1/models/metadata stay ahead of the
+    # /v1/models/{model_id:path} catch-all the catalog router ends with.
+    app.include_router(models.operator_router)
+    app.include_router(models.catalog_router)
     app.include_router(providers.router)
     app.include_router(keys.router)
     app.include_router(users.router)
@@ -175,7 +179,7 @@ def _register_core_routers(app: FastAPI, config: GatewayConfig) -> None:
     app.include_router(organization_guardrails.router)
     # The tenant-scoped read over the same rows ``/v1/usage`` serves to an
     # operator. Mounted with the rest of the ``/v1/organizations/me`` surface
-    # rather than beside ``usage.router``, because what it is scoped to is what
+    # rather than beside the usage routers, because what it is scoped to is what
     # decides who may call it (otari#837).
     app.include_router(organization_usage.router)
     # The tenant-scoped read over the same table ``/v1/routing/policies`` serves
@@ -200,8 +204,14 @@ def _register_core_routers(app: FastAPI, config: GatewayConfig) -> None:
     app.include_router(aliases.router)
     app.include_router(routing.router)
     app.include_router(routing_memory.router)
-    app.include_router(pricing.router)
-    app.include_router(usage.router)
+    # Both prefixed /v1/pricing, split by who may call them; operator first, so
+    # its DELETE /{model_key:path} does not sit behind the catalog catch-all.
+    app.include_router(pricing.operator_router)
+    app.include_router(pricing.catalog_router)
+    # Both prefixed /v1/usage. POST /external-events authenticates with an API
+    # key rather than operator standing, so it is mounted on its own router.
+    app.include_router(usage.operator_router)
+    app.include_router(usage.ingest_router)
     app.include_router(agent_telemetry.router)
     app.include_router(otlp.router)
     app.include_router(settings.router)

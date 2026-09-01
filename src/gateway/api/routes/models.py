@@ -44,7 +44,22 @@ from gateway.services.provider_kwargs import normalize_pricing_key
 if TYPE_CHECKING:
     from any_llm.types.model import Model
 
-router = APIRouter(prefix="/v1", tags=["models"])
+# Two routers under one prefix, one per authorization rule, so that adding a
+# route defaults to refusing a caller who is not a deployment operator and
+# opening one up to any catalog reader has to be spelled by the router it is
+# declared on. The catalog reads name ``verify_catalog_reader`` a second time as
+# a parameter because they use what it resolves; ``Depends`` caching means it
+# still runs once per request.
+operator_router = APIRouter(
+    prefix="/v1",
+    tags=["models"],
+    dependencies=[Depends(require_deployment_operator)],
+)
+catalog_router = APIRouter(
+    prefix="/v1",
+    tags=["models"],
+    dependencies=[Depends(verify_catalog_reader)],
+)
 
 # ``owned_by`` reported for alias entries. Aliases intentionally hide the
 # underlying provider, so the gateway itself is named as the owner rather than
@@ -418,7 +433,7 @@ async def _get_pricing_map(
     return {p.model_key: p for p in pricings}
 
 
-@router.get("/models")
+@catalog_router.get("/models")
 async def list_models(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
@@ -580,12 +595,13 @@ async def list_models(
     return ModelListResponse(data=sorted_models)
 
 
-# Declared before GET /models/{model_id:path}: FastAPI matches routes in
-# registration order, so a later declaration would be shadowed and "discoverable"
-# would arrive as a model id. The corollary is that a provider model literally
-# named "discoverable" is unreachable via GET /v1/models/discoverable; that is
-# accepted, and such a model is still listed by GET /v1/models.
-@router.get("/models/discoverable", dependencies=[Depends(require_deployment_operator)])
+# Served before GET /models/{model_id:path}, which FastAPI would otherwise match
+# first and hand "discoverable" to as a model id. The two are now on different
+# routers, so what keeps this true is the order ``api/main.py`` mounts them in,
+# not the order they are declared in here. The corollary is that a provider model
+# literally named "discoverable" is unreachable via GET /v1/models/discoverable;
+# that is accepted, and such a model is still listed by GET /v1/models.
+@operator_router.get("/models/discoverable")
 async def list_discoverable_models(
     config: Annotated[GatewayConfig, Depends(get_config)],
     refresh: Annotated[
@@ -598,7 +614,7 @@ async def list_discoverable_models(
     Operator-facing counterpart to GET /v1/models, which serves a curated catalog
     to API callers. This reports each provider separately and keeps its error, so
     a provider with a bad key is distinguishable from one with no models. It is
-    master-key gated because a provider error message describes the gateway's own
+    operator-gated because a provider error message describes the gateway's own
     configuration.
 
     Answers from the discovery cache, which a background refresher keeps warm, so
@@ -629,9 +645,8 @@ async def list_discoverable_models(
     return DiscoverableModelsResponse(providers=sorted(providers, key=lambda p: p.provider))
 
 
-# Declared before GET /models/{model_id:path} for the same route-order reason as
-# /models/discoverable above.
-@router.get("/models/metadata", dependencies=[Depends(require_deployment_operator)])
+# Ahead of GET /models/{model_id:path} for the same reason as /models/discoverable.
+@operator_router.get("/models/metadata")
 async def list_model_metadata(
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> ModelMetadataResponse:
@@ -641,7 +656,7 @@ async def list_model_metadata(
     ``instance:model`` selector the dashboard uses. ``available`` is false when
     enrichment is disabled (``models_dev_metadata``) or models.dev could not be
     reached; the response is then empty and the UI falls back to bundled data.
-    Master-key gated: it describes the gateway's configured providers.
+    Operator-gated: it describes the gateway's configured providers.
 
     Answers from the cached catalog, kept warm by a background refresher, so the
     dashboard never waits on the models.dev fetch timeout.
@@ -654,7 +669,7 @@ async def list_model_metadata(
     )
 
 
-@router.get("/models/{model_id:path}")
+@catalog_router.get("/models/{model_id:path}")
 async def get_model(
     model_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],

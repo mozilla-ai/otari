@@ -1446,7 +1446,7 @@ export interface paths {
          *     Operator-facing counterpart to GET /v1/models, which serves a curated catalog
          *     to API callers. This reports each provider separately and keeps its error, so
          *     a provider with a bad key is distinguishable from one with no models. It is
-         *     master-key gated because a provider error message describes the gateway's own
+         *     operator-gated because a provider error message describes the gateway's own
          *     configuration.
          *
          *     Answers from the discovery cache, which a background refresher keeps warm, so
@@ -1478,7 +1478,7 @@ export interface paths {
          *     ``instance:model`` selector the dashboard uses. ``available`` is false when
          *     enrichment is disabled (``models_dev_metadata``) or models.dev could not be
          *     reached; the response is then empty and the UI falls back to bundled data.
-         *     Master-key gated: it describes the gateway's configured providers.
+         *     Operator-gated: it describes the gateway's configured providers.
          *
          *     Answers from the cached catalog, kept warm by a background refresher, so the
          *     dashboard never waits on the models.dev fetch timeout.
@@ -2577,7 +2577,6 @@ export interface paths {
          *     Operator-facing: reports each provider's capabilities, documentation and
          *     pricing links, and display name from the bundled any-llm and genai-prices
          *     datasets. No provider is contacted, so this is cheap and always available.
-         *     Master-key gated because it describes the gateway's own configuration.
          */
         get: operations["list_providers_v1_providers_get"];
         put?: never;
@@ -2603,7 +2602,6 @@ export interface paths {
          *     any-llm registry and names from the bundled genai-prices dataset, so no
          *     provider SDK is imported. The autofill hints for a chosen provider come from
          *     GET /v1/providers/catalog/{provider_id}, which imports only that one SDK.
-         *     Master-key gated because it is operator-facing dashboard data.
          */
         get: operations["provider_catalog_v1_providers_catalog_get"];
         put?: never;
@@ -2628,7 +2626,7 @@ export interface paths {
          *     Imports only the selected provider's any-llm module (not the whole catalog)
          *     to report its credential env var, default endpoint, whether a key is required,
          *     and whether that env var is already set on the server. Returns 404 for an
-         *     unknown provider id. Master-key gated because it is operator-facing.
+         *     unknown provider id.
          *
          *     The SDK import is offloaded to a worker thread: the first fetch for a given
          *     provider imports that provider's module, which would otherwise block the event
@@ -2658,7 +2656,7 @@ export interface paths {
          *     when its credentials can list models. Results are served from the discovery
          *     cache (cheap enough to poll), so ``checked_at`` reflects when each provider
          *     was actually dialed. Pass ``refresh=true`` to force a live re-dial of every
-         *     provider. Master-key gated because it describes the gateway's own providers.
+         *     provider.
          *
          *     A provider whose backend serves no model-listing endpoint cannot be verified
          *     this way, but it is not unreachable either: it is reported with
@@ -2777,7 +2775,7 @@ export interface paths {
          * Explain Policy
          * @description Compile a policy and return the plan, without dispatching anything.
          *
-         *     Master-key gated, and deliberately so: the response enumerates the policy's
+         *     Operator-gated, and deliberately so: the response enumerates the policy's
          *     targets, which is exactly the information a policy exists to keep off the wire.
          *     It is a management surface, not a caller-facing one.
          *
@@ -3138,7 +3136,7 @@ export interface paths {
          * @description Persist and apply runtime setting changes.
          *
          *     Each provided field is stored as an override (winning over config/env) and
-         *     applied to the running gateway immediately. Master-key gated: these change
+         *     applied to the running gateway immediately. Operator-gated: these change
          *     how the gateway meters and lists models.
          */
         patch: operations["update_settings_v1_settings_patch"];
@@ -3274,7 +3272,7 @@ export interface paths {
          * @description Persist and apply tool/guardrail setting changes.
          *
          *     Uses ``model_fields_set`` so an explicit ``null`` clears a field while an
-         *     omitted field is left unchanged. Master-key gated and standalone-only.
+         *     omitted field is left unchanged. Operator-gated and standalone-only.
          */
         patch: operations["update_tool_settings_v1_tool_settings_patch"];
         trace?: never;

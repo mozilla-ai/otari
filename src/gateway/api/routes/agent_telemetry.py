@@ -60,7 +60,11 @@ from gateway.services.agent_telemetry_service import (
     series_point_increments,
 )
 
-router = APIRouter(prefix="/v1/agent-telemetry", tags=["agent-telemetry"])
+router = APIRouter(
+    prefix="/v1/agent-telemetry",
+    tags=["agent-telemetry"],
+    dependencies=[Depends(require_deployment_operator)],
+)
 
 TelemetryGroupBy = Literal["user_id", "api_key_id"]
 
@@ -368,7 +372,7 @@ def _fold_behavior(counts: BehaviorCounts) -> AgentTelemetryBehavior:
     return behavior
 
 
-@router.get("/summary", dependencies=[Depends(require_deployment_operator)])
+@router.get("/summary")
 async def agent_telemetry_summary(
     db: Annotated[AsyncSession, Depends(get_db)],
     storage: TelemetryStoragePortDep,
@@ -518,7 +522,7 @@ async def _summary_series(
     )
 
 
-@router.get("/count", dependencies=[Depends(require_deployment_operator)])
+@router.get("/count")
 async def count_agent_telemetry(
     storage: TelemetryStoragePortDep,
     start_date: datetime | None = Query(default=None, description=_START_DESC),
@@ -539,7 +543,7 @@ async def count_agent_telemetry(
     return AgentTelemetryCount(total=await storage.count(filters=scope))
 
 
-@router.get("/series", dependencies=[Depends(require_deployment_operator)])
+@router.get("/series")
 async def agent_telemetry_series(
     storage: TelemetryStoragePortDep,
     group_by: TelemetryGroupBy = Query(description="Dimension to split the series by"),
@@ -600,7 +604,7 @@ async def agent_telemetry_series(
     )
 
 
-@router.delete("", dependencies=[Depends(require_deployment_operator)])
+@router.delete("")
 async def delete_agent_telemetry_rows(
     request: AgentTelemetryDeleteRequest,
     storage: TelemetryStoragePortDep,

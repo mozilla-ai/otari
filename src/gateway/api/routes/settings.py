@@ -49,7 +49,11 @@ from gateway.services.secret_box import secret_box_configured
 from gateway.services.url_safety import redact_url_secrets
 from gateway.version import __version__
 
-router = APIRouter(prefix="/v1/settings", tags=["settings"])
+router = APIRouter(
+    prefix="/v1/settings",
+    tags=["settings"],
+    dependencies=[Depends(require_deployment_operator)],
+)
 
 # The effective-config view, in display order. Each entry is a group label and
 # the config field names shown under it. Only non-secret scalar fields appear;
@@ -376,7 +380,7 @@ def _current_settings(config: GatewayConfig) -> GatewaySettings:
     )
 
 
-@router.get("", dependencies=[Depends(require_deployment_operator)])
+@router.get("")
 async def get_settings(
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> GatewaySettings:
@@ -384,7 +388,7 @@ async def get_settings(
     return _current_settings(config)
 
 
-@router.patch("", dependencies=[Depends(require_deployment_operator)])
+@router.patch("")
 async def update_settings(
     request: UpdateSettingsRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -393,7 +397,7 @@ async def update_settings(
     """Persist and apply runtime setting changes.
 
     Each provided field is stored as an override (winning over config/env) and
-    applied to the running gateway immediately. Master-key gated: these change
+    applied to the running gateway immediately. Operator-gated: these change
     how the gateway meters and lists models.
     """
     # Every field on the request maps 1:1 onto a settable key. Use the set of
@@ -425,7 +429,7 @@ async def update_settings(
     return _current_settings(config)
 
 
-@router.post("/master-key/rotate", dependencies=[Depends(require_deployment_operator)])
+@router.post("/master-key/rotate")
 async def rotate_master_key(
     request: Request,
     response: Response,

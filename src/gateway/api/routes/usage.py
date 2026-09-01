@@ -47,7 +47,24 @@ from gateway.services.usage_admin_service import (
 )
 from gateway.services.web_search_backend import WEB_SEARCH_TOOL_NAME
 
-router = APIRouter(prefix="/v1/usage", tags=["usage"])
+# Two routers under one prefix, because the two planes that meet here
+# authenticate differently. Reading or amending every tenant's usage rows is
+# deployment-wide, so that gate is declared on the router and a route added later
+# inherits it; ``POST /external-events`` files rows on behalf of the API key that
+# holds them, and is split onto a router of its own rather than left as a
+# route-level override so that admitting a non-operator is spelled here. Each
+# router names its own rule, so adding a route to either one inherits a gate
+# rather than none.
+operator_router = APIRouter(
+    prefix="/v1/usage",
+    tags=["usage"],
+    dependencies=[Depends(require_deployment_operator)],
+)
+ingest_router = APIRouter(
+    prefix="/v1/usage",
+    tags=["usage"],
+    dependencies=[Depends(verify_api_key_or_master_key)],
+)
 
 # The analytics summary is range-bounded, unlike the raw list. Absent a start_date
 # it looks back this far; a wider explicit window is clamped to the hard cap so a
@@ -439,7 +456,7 @@ def _usage_filters(
     return conditions
 
 
-@router.get("", dependencies=[Depends(require_deployment_operator)])
+@operator_router.get("")
 async def list_usage(
     db: Annotated[AsyncSession, Depends(get_db)],
     start_date: datetime | None = Query(default=None, description=_START_DESC),
@@ -514,7 +531,7 @@ async def list_usage(
     ]
 
 
-@router.post("/external-events")
+@ingest_router.post("/external-events")
 async def ingest_external_usage(
     request: ExternalEventsRequest,
     auth_result: Annotated[tuple[APIKey | None, bool], Depends(verify_api_key_or_master_key)],
@@ -543,7 +560,7 @@ async def ingest_external_usage(
     )
 
 
-@router.get("/count", dependencies=[Depends(require_deployment_operator)])
+@operator_router.get("/count")
 async def count_usage(
     db: Annotated[AsyncSession, Depends(get_db)],
     start_date: datetime | None = Query(default=None, description=_START_DESC),
@@ -599,7 +616,7 @@ async def count_usage(
     return UsageCount(total=total)
 
 
-@router.get("/in-flight", dependencies=[Depends(require_deployment_operator)])
+@operator_router.get("/in-flight")
 async def list_in_flight(raw_request: Request) -> InFlightResponse:
     """Requests the gateway is currently serving, longest-running first.
 
@@ -639,7 +656,7 @@ async def list_in_flight(raw_request: Request) -> InFlightResponse:
     )
 
 
-@router.delete("", dependencies=[Depends(require_deployment_operator)])
+@operator_router.delete("")
 async def delete_usage_rows(
     request: UsageDeleteRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -656,7 +673,7 @@ async def delete_usage_rows(
     return await delete_usage(db, request)
 
 
-@router.post("/set-price", dependencies=[Depends(require_deployment_operator)])
+@operator_router.post("/set-price")
 async def set_usage_price_rows(
     request: UsageSetPriceRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -1438,7 +1455,7 @@ async def _summary_response(
     )
 
 
-@router.get("/summary", dependencies=[Depends(require_deployment_operator)])
+@operator_router.get("/summary")
 async def usage_summary(
     db: Annotated[AsyncSession, Depends(get_db)],
     start_date: datetime | None = Query(default=None, description=_START_DESC),
@@ -1600,7 +1617,7 @@ async def _grouped_series_response(
     )
 
 
-@router.get("/series", dependencies=[Depends(require_deployment_operator)])
+@operator_router.get("/series")
 async def usage_series(
     db: Annotated[AsyncSession, Depends(get_db)],
     group_by: SeriesGroupBy = Query(description="Dimension to split the series by"),

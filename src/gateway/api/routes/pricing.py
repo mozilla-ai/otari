@@ -24,7 +24,21 @@ from gateway.services.pricing_refresh_service import (
 from gateway.services.pricing_service import normalize_effective_at
 from gateway.services.provider_kwargs import normalize_pricing_key, provider_key, split_selector
 
-router = APIRouter(prefix="/v1/pricing", tags=["pricing"])
+# Two routers under one prefix, one per authorization rule, so that adding a
+# route defaults to refusing a caller who is not a deployment operator and
+# opening one up to any catalog reader has to be spelled by the router it is
+# declared on. See ``api/deps.verify_catalog_reader`` for why the reads are open
+# at all.
+operator_router = APIRouter(
+    prefix="/v1/pricing",
+    tags=["pricing"],
+    dependencies=[Depends(require_deployment_operator)],
+)
+catalog_router = APIRouter(
+    prefix="/v1/pricing",
+    tags=["pricing"],
+    dependencies=[Depends(verify_catalog_reader)],
+)
 
 
 class PricingTier(BaseModel):
@@ -174,11 +188,7 @@ def _candidate_model_keys(raw_key: str) -> list[str]:
     return candidates
 
 
-@router.post(
-    "/refresh",
-    response_model=PricingRefreshPreviewResponse,
-    dependencies=[Depends(require_deployment_operator)],
-)
+@operator_router.post("/refresh", response_model=PricingRefreshPreviewResponse)
 async def preview_pricing_refresh(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> PricingRefreshPreviewResponse:
@@ -209,11 +219,7 @@ async def preview_pricing_refresh(
     )
 
 
-@router.post(
-    "/refresh/confirm",
-    response_model=PricingRefreshConfirmationResponse,
-    dependencies=[Depends(require_deployment_operator)],
-)
+@operator_router.post("/refresh/confirm", response_model=PricingRefreshConfirmationResponse)
 async def confirm_pricing_refresh(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> PricingRefreshConfirmationResponse:
@@ -231,11 +237,7 @@ async def confirm_pricing_refresh(
     return PricingRefreshConfirmationResponse()
 
 
-@router.post(
-    "/refresh/reject",
-    status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_deployment_operator)],
-)
+@operator_router.post("/refresh/reject", status_code=status.HTTP_204_NO_CONTENT)
 async def reject_pricing_refresh(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> None:
@@ -314,7 +316,7 @@ def _policy_pricing_detail(config: GatewayConfig, request: SetPricingRequest) ->
     )
 
 
-@router.post("", dependencies=[Depends(require_deployment_operator)])
+@operator_router.post("")
 async def set_pricing(
     request: SetPricingRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -433,7 +435,7 @@ async def set_pricing(
     return PricingResponse.from_model(pricing)
 
 
-@router.get("", dependencies=[Depends(verify_catalog_reader)])
+@catalog_router.get("")
 async def list_pricing(
     db: Annotated[AsyncSession, Depends(get_db)],
     skip: Annotated[int, Query(ge=0)] = 0,
@@ -452,7 +454,7 @@ async def list_pricing(
     return [PricingResponse.from_model(pricing) for pricing in pricings]
 
 
-@router.get("/{model_key:path}/history", dependencies=[Depends(verify_catalog_reader)])
+@catalog_router.get("/{model_key:path}/history")
 async def get_pricing_history(
     model_key: str,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -470,7 +472,7 @@ async def get_pricing_history(
     return [PricingResponse.from_model(pricing) for pricing in pricings]
 
 
-@router.get("/{model_key:path}", dependencies=[Depends(verify_catalog_reader)])
+@catalog_router.get("/{model_key:path}")
 async def get_pricing(
     model_key: str,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -490,11 +492,7 @@ async def get_pricing(
     return PricingResponse.from_model(pricing)
 
 
-@router.delete(
-    "/{model_key:path}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_deployment_operator)],
-)
+@operator_router.delete("/{model_key:path}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_pricing(
     model_key: str,
     db: Annotated[AsyncSession, Depends(get_db)],

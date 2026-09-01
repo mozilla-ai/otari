@@ -17559,7 +17559,7 @@
     },
     "/v1/models/discoverable": {
       "get": {
-        "description": "List every model the configured provider credentials can reach.\n\nOperator-facing counterpart to GET /v1/models, which serves a curated catalog\nto API callers. This reports each provider separately and keeps its error, so\na provider with a bad key is distinguishable from one with no models. It is\nmaster-key gated because a provider error message describes the gateway's own\nconfiguration.\n\nAnswers from the discovery cache, which a background refresher keeps warm, so\nthe call does not wait on a slow or unreachable provider. Each provider\ncarries the ``checked_at`` its result was produced at; a null one has not been\ndialed yet. Pass ``refresh=true`` to force a live re-dial of every provider.",
+        "description": "List every model the configured provider credentials can reach.\n\nOperator-facing counterpart to GET /v1/models, which serves a curated catalog\nto API callers. This reports each provider separately and keeps its error, so\na provider with a bad key is distinguishable from one with no models. It is\noperator-gated because a provider error message describes the gateway's own\nconfiguration.\n\nAnswers from the discovery cache, which a background refresher keeps warm, so\nthe call does not wait on a slow or unreachable provider. Each provider\ncarries the ``checked_at`` its result was produced at; a null one has not been\ndialed yet. Pass ``refresh=true`` to force a live re-dial of every provider.",
         "operationId": "list_discoverable_models_v1_models_discoverable_get",
         "parameters": [
           {
@@ -17613,7 +17613,7 @@
     },
     "/v1/models/metadata": {
       "get": {
-        "description": "Per-model metadata for the dashboard's detail view, from models.dev.\n\nCovers every model models.dev lists under a configured provider, keyed by the\n``instance:model`` selector the dashboard uses. ``available`` is false when\nenrichment is disabled (``models_dev_metadata``) or models.dev could not be\nreached; the response is then empty and the UI falls back to bundled data.\nMaster-key gated: it describes the gateway's configured providers.\n\nAnswers from the cached catalog, kept warm by a background refresher, so the\ndashboard never waits on the models.dev fetch timeout.",
+        "description": "Per-model metadata for the dashboard's detail view, from models.dev.\n\nCovers every model models.dev lists under a configured provider, keyed by the\n``instance:model`` selector the dashboard uses. ``available`` is false when\nenrichment is disabled (``models_dev_metadata``) or models.dev could not be\nreached; the response is then empty and the UI falls back to bundled data.\nOperator-gated: it describes the gateway's configured providers.\n\nAnswers from the cached catalog, kept warm by a background refresher, so the\ndashboard never waits on the models.dev fetch timeout.",
         "operationId": "list_model_metadata_v1_models_metadata_get",
         "responses": {
           "200": {
@@ -22143,7 +22143,7 @@
     },
     "/v1/providers": {
       "get": {
-        "description": "List static metadata for every configured provider.\n\nOperator-facing: reports each provider's capabilities, documentation and\npricing links, and display name from the bundled any-llm and genai-prices\ndatasets. No provider is contacted, so this is cheap and always available.\nMaster-key gated because it describes the gateway's own configuration.",
+        "description": "List static metadata for every configured provider.\n\nOperator-facing: reports each provider's capabilities, documentation and\npricing links, and display name from the bundled any-llm and genai-prices\ndatasets. No provider is contacted, so this is cheap and always available.",
         "operationId": "list_providers_v1_providers_get",
         "responses": {
           "200": {
@@ -22173,7 +22173,7 @@
     },
     "/v1/providers/catalog": {
       "get": {
-        "description": "List every known provider for the add-provider picker: id and name only.\n\nLightweight by design so the picker never lags: provider ids come from the\nany-llm registry and names from the bundled genai-prices dataset, so no\nprovider SDK is imported. The autofill hints for a chosen provider come from\nGET /v1/providers/catalog/{provider_id}, which imports only that one SDK.\nMaster-key gated because it is operator-facing dashboard data.",
+        "description": "List every known provider for the add-provider picker: id and name only.\n\nLightweight by design so the picker never lags: provider ids come from the\nany-llm registry and names from the bundled genai-prices dataset, so no\nprovider SDK is imported. The autofill hints for a chosen provider come from\nGET /v1/providers/catalog/{provider_id}, which imports only that one SDK.",
         "operationId": "provider_catalog_v1_providers_catalog_get",
         "responses": {
           "200": {
@@ -22207,7 +22207,7 @@
     },
     "/v1/providers/catalog/{provider_id}": {
       "get": {
-        "description": "Autofill hints for one provider the add-provider form has selected.\n\nImports only the selected provider's any-llm module (not the whole catalog)\nto report its credential env var, default endpoint, whether a key is required,\nand whether that env var is already set on the server. Returns 404 for an\nunknown provider id. Master-key gated because it is operator-facing.\n\nThe SDK import is offloaded to a worker thread: the first fetch for a given\nprovider imports that provider's module, which would otherwise block the event\nloop (and thus every concurrent request) for the import's duration.",
+        "description": "Autofill hints for one provider the add-provider form has selected.\n\nImports only the selected provider's any-llm module (not the whole catalog)\nto report its credential env var, default endpoint, whether a key is required,\nand whether that env var is already set on the server. Returns 404 for an\nunknown provider id.\n\nThe SDK import is offloaded to a worker thread: the first fetch for a given\nprovider imports that provider's module, which would otherwise block the event\nloop (and thus every concurrent request) for the import's duration.",
         "operationId": "provider_catalog_detail_v1_providers_catalog__provider_id__get",
         "parameters": [
           {
@@ -22258,7 +22258,7 @@
     },
     "/v1/providers/health": {
       "get": {
-        "description": "Report every configured provider's reachability, with a last-checked time.\n\nReuses the per-provider model-discovery test path, so a provider is healthy\nwhen its credentials can list models. Results are served from the discovery\ncache (cheap enough to poll), so ``checked_at`` reflects when each provider\nwas actually dialed. Pass ``refresh=true`` to force a live re-dial of every\nprovider. Master-key gated because it describes the gateway's own providers.\n\nA provider whose backend serves no model-listing endpoint cannot be verified\nthis way, but it is not unreachable either: it is reported with\n``discovery_unsupported`` and counted under ``degraded`` rather than as a\nreachability failure.",
+        "description": "Report every configured provider's reachability, with a last-checked time.\n\nReuses the per-provider model-discovery test path, so a provider is healthy\nwhen its credentials can list models. Results are served from the discovery\ncache (cheap enough to poll), so ``checked_at`` reflects when each provider\nwas actually dialed. Pass ``refresh=true`` to force a live re-dial of every\nprovider.\n\nA provider whose backend serves no model-listing endpoint cannot be verified\nthis way, but it is not unreachable either: it is reported with\n``discovery_unsupported`` and counted under ``degraded`` rather than as a\nreachability failure.",
         "operationId": "provider_health_v1_providers_health_get",
         "parameters": [
           {
@@ -22519,7 +22519,7 @@
     },
     "/v1/routing/policies/explain": {
       "post": {
-        "description": "Compile a policy and return the plan, without dispatching anything.\n\nMaster-key gated, and deliberately so: the response enumerates the policy's\ntargets, which is exactly the information a policy exists to keep off the wire.\nIt is a management surface, not a caller-facing one.\n\nAccepts an unsaved ``spec`` as well as a saved ``name``, so a form can validate\nwhat the operator is about to save. The response includes dropped candidates\nwith reasons, which is the part that catches a \"failover\" policy that has\nquietly compiled down to a single attempt.",
+        "description": "Compile a policy and return the plan, without dispatching anything.\n\nOperator-gated, and deliberately so: the response enumerates the policy's\ntargets, which is exactly the information a policy exists to keep off the wire.\nIt is a management surface, not a caller-facing one.\n\nAccepts an unsaved ``spec`` as well as a saved ``name``, so a form can validate\nwhat the operator is about to save. The response includes dropped candidates\nwith reasons, which is the part that catches a \"failover\" policy that has\nquietly compiled down to a single attempt.",
         "operationId": "explain_policy_v1_routing_policies_explain_post",
         "requestBody": {
           "content": {
@@ -23467,7 +23467,7 @@
         ]
       },
       "patch": {
-        "description": "Persist and apply runtime setting changes.\n\nEach provided field is stored as an override (winning over config/env) and\napplied to the running gateway immediately. Master-key gated: these change\nhow the gateway meters and lists models.",
+        "description": "Persist and apply runtime setting changes.\n\nEach provided field is stored as an override (winning over config/env) and\napplied to the running gateway immediately. Operator-gated: these change\nhow the gateway meters and lists models.",
         "operationId": "update_settings_v1_settings_patch",
         "requestBody": {
           "content": {
@@ -23733,7 +23733,7 @@
         ]
       },
       "patch": {
-        "description": "Persist and apply tool/guardrail setting changes.\n\nUses ``model_fields_set`` so an explicit ``null`` clears a field while an\nomitted field is left unchanged. Master-key gated and standalone-only.",
+        "description": "Persist and apply tool/guardrail setting changes.\n\nUses ``model_fields_set`` so an explicit ``null`` clears a field while an\nomitted field is left unchanged. Operator-gated and standalone-only.",
         "operationId": "update_tool_settings_v1_tool_settings_patch",
         "requestBody": {
           "content": {

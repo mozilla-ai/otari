@@ -360,18 +360,20 @@ async def require_deployment_operator(
     """Refuse a deployment-wide management request from a non-operator identity.
 
     ``verify_master_key`` answers *authenticated*, not *authorized*: a dashboard
-    session clears it for any active, email-verified identity. That is right for
-    the tenant-scoped routers (`organizations.py`, `workspaces.py`,
-    `org_provider_keys.py`, `admin.py`), which declare it as their authentication
-    gate and then re-check the caller's role against the organization, workspace
-    or deployment they are acting on. It is wrong for the deployment-wide
-    routers, where clearing it *is* the whole authorization: `/v1/keys` mints a
-    key into any workspace, `/v1/provider-credentials` holds process-global
-    provider secrets, and `POST /v1/settings/master-key/rotate` replaces the
-    deployment credential. On a single-operator deployment every login is that
-    operator and the distinction is invisible; once mutually-untrusting tenants
-    sign in to one process, a member of one organization holding master-key
-    authority is a cross-organization breach (otari-ai#1880).
+    session clears it for any identity still active. (Address verification is a
+    condition of minting a session, not of resolving one, so it says nothing
+    about authority either way.) That is right for the tenant-scoped routers
+    (`organizations.py`, `workspaces.py`, `org_provider_keys.py`, `admin.py`),
+    which declare it as their authentication gate and then re-check the caller's
+    role against the organization, workspace or deployment they are acting on.
+    It is wrong for the deployment-wide routers, where clearing it *is* the
+    whole authorization: `/v1/keys` mints a key into any workspace,
+    `/v1/provider-credentials` holds process-global provider secrets, and
+    `POST /v1/settings/master-key/rotate` replaces the deployment credential. On
+    a single-operator deployment every login is that operator and the
+    distinction is invisible; once mutually-untrusting tenants sign in to one
+    process, a member of one organization holding master-key authority is a
+    cross-organization breach (otari-ai#1880).
 
     A **header master key** is the deployment credential itself, so it passes; it
     names nobody, and ``get_current_identity`` resolves it to the bootstrap
@@ -382,10 +384,16 @@ async def require_deployment_operator(
     than re-derived so the routers guarded here and the account administration
     that can grant the authority cannot come to disagree about who holds it.
 
-    Declared as a dependency and not a check inside each handler so it composes
-    the way the router it guards already declares auth, and so ``Depends``
-    caching means the master-key verification underneath runs once per request
-    however many of these a route pulls in.
+    Declared on the router rather than per route, and as a dependency rather
+    than a check inside each handler: a route added to one of those routers
+    later inherits the gate instead of being reachable with no credential at
+    all until someone notices the missing decorator. ``Depends`` caching means
+    the master-key verification underneath still runs once per request however
+    many of these a route pulls in. The three modules that hold an exception
+    (``models.py`` and ``pricing.py`` for the catalog reads, ``usage.py`` for
+    external-event ingestion) put it on a router of its own, so admitting a
+    non-operator is spelled at a router instead of hidden in one route's
+    decorator.
     """
     if session_identity is not None and not await DeploymentUserService(db).has_administration_access(
         session_identity
@@ -455,8 +463,10 @@ async def verify_catalog_reader(
     deployment-wide costs a signed-in caller's own organization nothing.
 
     Split out rather than left as a branch inside the other dependency so that
-    adding a route to this plane defaults to refusing the cookie, and admitting
-    one is a decision spelled at the route.
+    adding a route to this plane defaults to refusing the cookie. The three
+    routers that serve these reads declare it on the router for the same reason,
+    so admitting a session is spelled where the route is mounted rather than in
+    one route's decorator.
     """
     if session_identity is not None:
         return None, True

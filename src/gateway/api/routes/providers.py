@@ -3,8 +3,9 @@
 The ``/v1/providers`` endpoint reports static, network-free metadata for every
 configured provider. The ``/v1/provider-credentials`` endpoints manage the
 ``provider_credentials`` table: providers an operator adds at runtime through the
-dashboard, encrypted at rest and merged over config.yml providers. All routes are
-master-key gated and standalone-mode only (the router is not mounted in hybrid).
+dashboard, encrypted at rest and merged over config.yml providers. Every route
+here describes or changes the gateway's own configuration, so the router is
+operator-gated; standalone-mode only (it is not mounted in hybrid).
 """
 
 import asyncio
@@ -52,7 +53,11 @@ from gateway.services.secret_box import (
 )
 from gateway.services.url_safety import UnsafeURLError, validate_provider_api_base
 
-router = APIRouter(prefix="/v1", tags=["providers"])
+router = APIRouter(
+    prefix="/v1",
+    tags=["providers"],
+    dependencies=[Depends(require_deployment_operator)],
+)
 
 
 class ProviderCapabilitiesSchema(BaseModel):
@@ -116,7 +121,7 @@ def _to_schema(info: ProviderInfo) -> ProviderInfoSchema:
     )
 
 
-@router.get("/providers", dependencies=[Depends(require_deployment_operator)])
+@router.get("/providers")
 async def list_providers(
     config: Annotated[GatewayConfig, Depends(get_config)],
 ) -> ProvidersResponse:
@@ -125,7 +130,6 @@ async def list_providers(
     Operator-facing: reports each provider's capabilities, documentation and
     pricing links, and display name from the bundled any-llm and genai-prices
     datasets. No provider is contacted, so this is cheap and always available.
-    Master-key gated because it describes the gateway's own configuration.
     """
     return ProvidersResponse(providers=[_to_schema(info) for info in list_provider_info(config)])
 
@@ -166,7 +170,7 @@ def _to_known_schema(provider: KnownProvider) -> KnownProviderSchema:
     )
 
 
-@router.get("/providers/catalog", dependencies=[Depends(require_deployment_operator)])
+@router.get("/providers/catalog")
 async def provider_catalog() -> list[KnownProviderSummarySchema]:
     """List every known provider for the add-provider picker: id and name only.
 
@@ -174,19 +178,18 @@ async def provider_catalog() -> list[KnownProviderSummarySchema]:
     any-llm registry and names from the bundled genai-prices dataset, so no
     provider SDK is imported. The autofill hints for a chosen provider come from
     GET /v1/providers/catalog/{provider_id}, which imports only that one SDK.
-    Master-key gated because it is operator-facing dashboard data.
     """
     return [_to_summary_schema(summary) for summary in list_known_provider_summaries()]
 
 
-@router.get("/providers/catalog/{provider_id}", dependencies=[Depends(require_deployment_operator)])
+@router.get("/providers/catalog/{provider_id}")
 async def provider_catalog_detail(provider_id: str) -> KnownProviderSchema:
     """Autofill hints for one provider the add-provider form has selected.
 
     Imports only the selected provider's any-llm module (not the whole catalog)
     to report its credential env var, default endpoint, whether a key is required,
     and whether that env var is already set on the server. Returns 404 for an
-    unknown provider id. Master-key gated because it is operator-facing.
+    unknown provider id.
 
     The SDK import is offloaded to a worker thread: the first fetch for a given
     provider imports that provider's module, which would otherwise block the event
@@ -253,7 +256,7 @@ def _to_health_schema(health: ProviderHealth) -> ProviderHealthSchema:
     )
 
 
-@router.get("/providers/health", dependencies=[Depends(require_deployment_operator)])
+@router.get("/providers/health")
 async def provider_health(
     config: Annotated[GatewayConfig, Depends(get_config)],
     refresh: bool = False,
@@ -264,7 +267,7 @@ async def provider_health(
     when its credentials can list models. Results are served from the discovery
     cache (cheap enough to poll), so ``checked_at`` reflects when each provider
     was actually dialed. Pass ``refresh=true`` to force a live re-dial of every
-    provider. Master-key gated because it describes the gateway's own providers.
+    provider.
 
     A provider whose backend serves no model-listing endpoint cannot be verified
     this way, but it is not unreachable either: it is reported with
@@ -454,7 +457,7 @@ async def _apply_write(db: AsyncSession, config: GatewayConfig, instance: str) -
         logger.warning("Provider overlay refresh failed after writing '%s'; converges within TTL", instance)
 
 
-@router.post("/provider-credentials/test", dependencies=[Depends(require_deployment_operator)])
+@router.post("/provider-credentials/test")
 async def test_provider_connection(
     request: TestProviderRequest,
     config: Annotated[GatewayConfig, Depends(get_config)],
@@ -491,7 +494,7 @@ async def test_provider_connection(
     )
 
 
-@router.post("/provider-credentials/reencrypt", dependencies=[Depends(require_deployment_operator)])
+@router.post("/provider-credentials/reencrypt")
 async def reencrypt_stored_provider_keys(
     db: Annotated[AsyncSession, Depends(get_db)],
     config: Annotated[GatewayConfig, Depends(get_config)],
@@ -520,7 +523,7 @@ async def reencrypt_stored_provider_keys(
     return ReencryptProviderCredentialsResponse(reencrypted=reencrypted, unreadable=unreadable)
 
 
-@router.get("/provider-credentials", dependencies=[Depends(require_deployment_operator)])
+@router.get("/provider-credentials")
 async def list_stored_providers(
     db: Annotated[AsyncSession, Depends(get_db)],
 ) -> list[StoredProviderResponse]:
@@ -530,11 +533,7 @@ async def list_stored_providers(
     ]
 
 
-@router.post(
-    "/provider-credentials",
-    status_code=status.HTTP_201_CREATED,
-    dependencies=[Depends(require_deployment_operator)],
-)
+@router.post("/provider-credentials", status_code=status.HTTP_201_CREATED)
 async def create_stored_provider(
     request: CreateStoredProviderRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -574,7 +573,7 @@ async def create_stored_provider(
     return StoredProviderResponse.from_model(row)
 
 
-@router.patch("/provider-credentials/{instance}", dependencies=[Depends(require_deployment_operator)])
+@router.patch("/provider-credentials/{instance}")
 async def update_stored_provider(
     instance: str,
     request: UpdateStoredProviderRequest,
@@ -620,11 +619,7 @@ async def update_stored_provider(
     return StoredProviderResponse.from_model(row)
 
 
-@router.delete(
-    "/provider-credentials/{instance}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_deployment_operator)],
-)
+@router.delete("/provider-credentials/{instance}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_stored_provider(
     instance: str,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -640,7 +635,7 @@ async def delete_stored_provider(
     await _apply_write(db, config, instance)
 
 
-@router.post("/provider-credentials/{instance}/test", dependencies=[Depends(require_deployment_operator)])
+@router.post("/provider-credentials/{instance}/test")
 async def test_stored_provider(
     instance: str,
     db: Annotated[AsyncSession, Depends(get_db)],

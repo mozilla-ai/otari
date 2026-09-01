@@ -1,6 +1,6 @@
 """The maintenance-mode switch: freeze and unfreeze dashboard sign-ins.
 
-Two endpoints under ``/v1/settings``, master-key gated and standalone-only like
+Two endpoints under ``/v1/settings``, operator-gated and standalone-only like
 the rest of the management API. The state itself, and why it is stored the way
 it is, belongs to ``services/maintenance_mode_service.py``.
 
@@ -29,7 +29,11 @@ from gateway.api.deps import get_db, require_deployment_operator
 from gateway.log_config import logger
 from gateway.services.maintenance_mode_service import is_maintenance_mode, stage_maintenance_mode
 
-router = APIRouter(prefix="/v1/settings/maintenance-mode", tags=["settings"])
+router = APIRouter(
+    prefix="/v1/settings/maintenance-mode",
+    tags=["settings"],
+    dependencies=[Depends(require_deployment_operator)],
+)
 
 
 class MaintenanceMode(BaseModel):
@@ -51,13 +55,13 @@ class UpdateMaintenanceModeRequest(BaseModel):
     enabled: bool = Field(description="True to freeze new dashboard sign-ins, false to allow them again.")
 
 
-@router.get("", dependencies=[Depends(require_deployment_operator)])
+@router.get("")
 async def get_maintenance_mode(db: Annotated[AsyncSession, Depends(get_db)]) -> MaintenanceMode:
     """Report whether new dashboard sign-ins are frozen."""
     return MaintenanceMode(enabled=await is_maintenance_mode(db))
 
 
-@router.patch("", dependencies=[Depends(require_deployment_operator)])
+@router.patch("")
 async def update_maintenance_mode(
     request: UpdateMaintenanceModeRequest,
     db: Annotated[AsyncSession, Depends(get_db)],

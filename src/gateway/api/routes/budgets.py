@@ -15,7 +15,11 @@ from gateway.models.tenancy import Workspace
 from gateway.services.budget_retiming import cadence_of, retime_ceilings_for_budget
 from gateway.services.scoped_budget_service import ResetAlignment
 
-router = APIRouter(prefix="/v1/budgets", tags=["budgets"])
+router = APIRouter(
+    prefix="/v1/budgets",
+    tags=["budgets"],
+    dependencies=[Depends(require_deployment_operator)],
+)
 
 # The rollup below sums exact counters, so its coalesce default is exact too.
 _ZERO = Decimal(0)
@@ -149,7 +153,7 @@ async def _budget_usage(db: AsyncSession, budget_id: str) -> tuple[int, float, f
     return int(row[0]), float(row[1]), float(row[2])
 
 
-@router.post("", dependencies=[Depends(require_deployment_operator)])
+@router.post("")
 async def create_budget(
     request: CreateBudgetRequest,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -178,7 +182,7 @@ async def create_budget(
     return BudgetResponse.from_model(budget)
 
 
-@router.get("", dependencies=[Depends(require_deployment_operator)])
+@router.get("")
 async def list_budgets(
     db: Annotated[AsyncSession, Depends(get_db)],
     skip: Annotated[int, Query(ge=0)] = 0,
@@ -218,7 +222,7 @@ async def list_budgets(
     ]
 
 
-@router.get("/{budget_id}", dependencies=[Depends(require_deployment_operator)])
+@router.get("/{budget_id}")
 async def get_budget(
     budget_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -239,7 +243,7 @@ async def get_budget(
     )
 
 
-@router.patch("/{budget_id}", dependencies=[Depends(require_deployment_operator)])
+@router.patch("/{budget_id}")
 async def update_budget(
     budget_id: str,
     request: UpdateBudgetRequest,
@@ -316,11 +320,7 @@ async def update_budget(
     )
 
 
-@router.delete(
-    "/{budget_id}",
-    status_code=status.HTTP_204_NO_CONTENT,
-    dependencies=[Depends(require_deployment_operator)],
-)
+@router.delete("/{budget_id}", status_code=status.HTTP_204_NO_CONTENT)
 async def delete_budget(
     budget_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
@@ -392,7 +392,7 @@ async def delete_budget(
         ) from None
 
 
-@router.get("/{budget_id}/reset-logs", dependencies=[Depends(require_deployment_operator)])
+@router.get("/{budget_id}/reset-logs")
 async def list_budget_reset_logs(
     budget_id: str,
     db: Annotated[AsyncSession, Depends(get_db)],
