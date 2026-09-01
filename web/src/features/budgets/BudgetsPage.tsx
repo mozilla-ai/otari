@@ -211,6 +211,7 @@ function BudgetForm({
   onClose,
   assignUsers,
   assignedUserIds,
+  assignmentNote,
 }: {
   title: string
   submitLabel: string
@@ -231,6 +232,9 @@ function BudgetForm({
   // Who already holds this budget, so edit opens with them selected rather than
   // reading as an empty assignment that would clear them on save.
   assignedUserIds?: string[]
+  // Why the multiselect is absent, where its absence is a rule rather than a
+  // failed read. The failed-roster case is explained by the page's banner.
+  assignmentNote?: string
 }) {
   const [name, setName] = useState(initial.name ?? "")
   const [limit, setLimit] = useState(
@@ -299,6 +303,8 @@ function BudgetForm({
             onChange={setUserIds}
             users={assignUsers}
           />
+        ) : assignmentNote ? (
+          <p className="text-caption">{assignmentNote}</p>
         ) : null}
         <div className="flex gap-2">
           <Button variant="primary" isDisabled={!canSubmit} onPress={submit}>
@@ -492,6 +498,14 @@ function budgetLabel(budget: Budget): string {
   return budget.name ?? shortId(budget.budget_id)
 }
 
+// Whose budget a row is: a tenant's carries an organization, the deployment's own
+// carries none. `/v1/users` refuses to cap a gateway user at a tenant's
+// (otari#881), so the page marks the row and withholds the assignment control
+// rather than offering a save the API answers 404.
+function isOrganizationOwned(budget: Budget): boolean {
+  return budget.organization_id !== null
+}
+
 /**
  * The deployment's own budgets page, which is what an operator sees.
  *
@@ -603,6 +617,15 @@ function DeploymentBudgetsPage() {
             <span className="font-medium text-foreground">
               {b.name ?? <span className="text-muted">(unnamed)</span>}
             </span>
+            {isOrganizationOwned(b) ? (
+              // Not a warning: the budget is a real one this page may still
+              // relabel and refigure, it is simply not one a gateway user can be
+              // held to. The mirror of the tenant page's "Set at the deployment
+              // level".
+              <Chip className="self-start" size="sm" variant="secondary">
+                Owned by an organization
+              </Chip>
+            ) : null}
             {/* Only a prefix is rendered, so the id an API call needs is not on the
               page in full; the copy hands over the whole thing. */}
             <CopyableValue value={b.budget_id} label="budget id">
@@ -862,7 +885,16 @@ function DeploymentBudgetsPage() {
           }}
           error={updateBudget.error ?? assignmentError}
           isPending={updateBudget.isPending || assigningUsers}
-          assignUsers={rosterReady ? (users.data ?? []) : undefined}
+          assignUsers={
+            rosterReady && !isOrganizationOwned(editingBudget)
+              ? (users.data ?? [])
+              : undefined
+          }
+          assignmentNote={
+            isOrganizationOwned(editingBudget)
+              ? "This budget belongs to an organization, so people here cannot be held to it. Its limit and reset are still the deployment's to change."
+              : undefined
+          }
           assignedUserIds={(users.data ?? [])
             .filter((u) => u.budget_id === editingBudget.budget_id)
             .map((u) => u.user_id)}

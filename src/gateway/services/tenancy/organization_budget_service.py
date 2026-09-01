@@ -596,13 +596,13 @@ class OrganizationBudgetService:
         so the refusal can say which.
 
         ``users.budget_id`` is counted but not named. It can hold a tenant's
-        budget, because ``GET /v1/budgets`` is unfiltered and ``POST /v1/users``
-        accepts any id it lists, and ``Budget.users`` is a plain relationship, so
-        deleting the budget would not refuse: the ORM nulls the column out and
-        the assignment an operator made disappears with no refusal to either of
-        them. The count is what stops that, and it says only that the budget is
-        held, because saying "3 users" to an admin who cannot see the users page
-        would name a thing they cannot act on.
+        budget: the assignment sites refuse one since otari#881, so what remains
+        is a row assigned before that, and ``Budget.users`` is a plain
+        relationship, so deleting the budget would not refuse. The ORM nulls the
+        column out and the assignment an operator made disappears with no refusal
+        to either of them. The count is what stops that, and it says only that
+        the budget is held, because saying "3 users" to an admin who cannot see
+        the users page would name a thing they cannot act on.
 
         ``budget_reset_logs.budget_id`` is the same shape with a NOT NULL column,
         so its null-out fails instead, as an ``IntegrityError`` at the commit.

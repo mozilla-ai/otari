@@ -344,6 +344,9 @@ export function scopedBudget(
 export function budget(overrides: Partial<Budget> = {}): Budget {
   return {
     budget_id: "77777777-7777-7777-7777-777777777777",
+    // The deployment's own. A tenant's carries its organization, and no gateway
+    // user may be held to one.
+    organization_id: null,
     name: "Team standard",
     max_budget: 100,
     budget_duration_sec: 2_592_000,

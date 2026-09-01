@@ -1,3 +1,4 @@
+import uuid
 from decimal import Decimal
 from typing import Annotated
 
@@ -68,6 +69,11 @@ class BudgetResponse(BaseModel):
     """
 
     budget_id: str
+    # Null for the deployment's own, and a tenant's organization when set. Carried
+    # so a caller can tell the two apart before offering one: an organization's is
+    # listed here for the operator to see, and `POST /v1/users` refuses to cap a
+    # gateway user at it (mozilla-ai/otari#881).
+    organization_id: uuid.UUID | None
     name: str | None
     max_budget: float | None
     budget_duration_sec: int | None
@@ -90,6 +96,7 @@ class BudgetResponse(BaseModel):
         """Create a BudgetResponse from a Budget ORM model and its usage rollup."""
         return cls(
             budget_id=budget.budget_id,
+            organization_id=budget.organization_id,
             name=budget.name,
             # Narrowed on the way out: the cap is exact in the database, while
             # the wire contract and the dashboard client stay float.

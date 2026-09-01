@@ -205,35 +205,55 @@ def test_every_recognized_alignment_is_accepted(
         assert created.json()["reset_alignment"] == alignment
 
 
-def test_a_budget_a_gateway_user_holds_is_refused_rather_than_unassigned(
+def test_a_gateway_user_may_not_be_created_on_an_organizations_budget(
     client: TestClient,
     master_key_header: dict[str, str],
 ) -> None:
-    """The delete refuses instead of silently clearing ``users.budget_id``.
+    """404, the same one an id naming nothing gets.
 
-    An operator can assign a gateway user to any budget ``GET /v1/budgets``
-    lists, tenant-owned ones included. ``Budget.users`` is a plain relationship,
-    so an unchecked delete does not fail: the ORM nulls the column out, and an
-    admin who cannot see that table removes the operator's assignment with it.
+    A ``users`` row is deployment-wide with no tenancy column, so a tenant's
+    budget is never the right cap for one: the admin editing its figure would be
+    moving what a gateway user may spend, and neither side can see the coupling.
     """
-    budget = client.post(_BUDGETS, json=_budget_body(), headers=master_key_header).json()
+    tenant = client.post(_BUDGETS, json=_budget_body(), headers=master_key_header).json()
+    user_id = f"holder-{uuid.uuid4().hex[:8]}"
+
+    refused = client.post(
+        "/v1/users",
+        json={"user_id": user_id, "budget_id": tenant["budget_id"]},
+        headers=master_key_header,
+    )
+    assert refused.status_code == status.HTTP_404_NOT_FOUND, refused.text
+    assert refused.json()["detail"] == f"Budget with id '{tenant['budget_id']}' not found"
+
+    # Refused whole, rather than the user landing uncapped.
+    assert client.get(f"/v1/users/{user_id}", headers=master_key_header).status_code == status.HTTP_404_NOT_FOUND
+
+
+def test_a_gateway_user_may_not_be_moved_onto_an_organizations_budget(
+    client: TestClient,
+    master_key_header: dict[str, str],
+) -> None:
+    """The other assignment site, and the cap it already had survives the refusal."""
+    deployment = client.post("/v1/budgets", json={"max_budget": 10.0}, headers=master_key_header).json()
+    tenant = client.post(_BUDGETS, json=_budget_body(), headers=master_key_header).json()
     user_id = f"holder-{uuid.uuid4().hex[:8]}"
     created = client.post(
         "/v1/users",
-        json={"user_id": user_id, "budget_id": budget["budget_id"]},
+        json={"user_id": user_id, "budget_id": deployment["budget_id"]},
         headers=master_key_header,
     )
-    assert created.status_code in {status.HTTP_200_OK, status.HTTP_201_CREATED}, created.text
+    assert created.status_code == status.HTTP_200_OK, created.text
 
-    refused = client.delete(f"{_BUDGETS}/{budget['budget_id']}", headers=master_key_header)
-    assert refused.status_code == status.HTTP_409_CONFLICT, refused.text
-    assert "still in use" in refused.json()["detail"]
+    refused = client.patch(
+        f"/v1/users/{user_id}",
+        json={"budget_id": tenant["budget_id"]},
+        headers=master_key_header,
+    )
+    assert refused.status_code == status.HTTP_404_NOT_FOUND, refused.text
 
-    # The assignment is still the operator's, and the budget is still there.
-    still_assigned = client.get(f"/v1/users/{user_id}", headers=master_key_header)
-    assert still_assigned.status_code == status.HTTP_200_OK, still_assigned.text
-    assert still_assigned.json()["budget_id"] == budget["budget_id"]
-    assert client.get(_BUDGETS, headers=master_key_header).json()["count"] == 1
+    still_capped = client.get(f"/v1/users/{user_id}", headers=master_key_header)
+    assert still_capped.json()["budget_id"] == deployment["budget_id"]
 
 
 def test_an_unknown_budget_is_not_found(client: TestClient, master_key_header: dict[str, str]) -> None:
@@ -441,6 +461,11 @@ def test_the_deployment_budget_list_is_not_this_one(
         deployment.json()["budget_id"],
         tenant["budget_id"],
     }
+    # And each row says which it is, so the operator's assignment control can
+    # withhold the one `POST /v1/users` would refuse.
+    owners = {row["budget_id"]: row["organization_id"] for row in everything}
+    assert owners[deployment.json()["budget_id"]] is None
+    assert owners[tenant["budget_id"]] == tenant["organization_id"]
 
 
 def test_a_ceiling_may_not_name_a_deployment_budget(
@@ -1023,6 +1048,27 @@ async def test_an_explicit_null_clears_the_cap_as_the_schema_says(async_db: Asyn
     )
     assert renamed.max_budget is None
     assert renamed.name == "Uncapped"
+
+@pytest.mark.asyncio
+async def test_a_delete_is_refused_while_a_gateway_user_holds_the_budget(async_db: AsyncSession) -> None:
+    """The hold the assignment sites no longer create, and still have to refuse.
+
+    Since otari#881 neither `/v1/users` site will point a gateway user at a
+    tenant's budget, so a row in this shape was assigned before that. Seeded
+    directly for the same reason. `Budget.users` is a plain relationship, so an
+    unchecked delete does not fail on it: the ORM nulls the column out, and an
+    admin who cannot see that table removes the operator's assignment with it.
+    """
+    organization = await _organization(async_db, slug="acme-user-hold")
+    owner = await _member(async_db, organization, role="owner", full_name="Owner")
+    service = OrganizationBudgetService(async_db)
+    budget = await service.create_budget(user=owner, request=_create())
+    async_db.add(ApiUser(user_id="capped-user", budget_id=budget.budget_id))
+    await async_db.flush()
+
+    with pytest.raises(OrganizationBudgetHeldElsewhereError):
+        await service.delete_budget(user=owner, budget_id=budget.budget_id)
+
 
 @pytest.mark.asyncio
 async def test_a_delete_is_refused_while_a_reset_record_names_the_budget(async_db: AsyncSession) -> None:

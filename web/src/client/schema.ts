@@ -4846,6 +4846,8 @@ export interface components {
             max_budget: number | null;
             /** Name */
             name: string | null;
+            /** Organization Id */
+            organization_id: string | null;
             /** Reset Alignment */
             reset_alignment: string | null;
             /**

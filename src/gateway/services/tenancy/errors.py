@@ -847,10 +847,12 @@ class OrganizationBudgetHeldElsewhereError(TenancyConflictError):
     """Something outside this organization's own surface still names the budget.
 
     ``users.budget_id`` and ``budget_reset_logs.budget_id``, neither of which is
-    a tenant's to see: an operator can assign a gateway user to any budget
-    ``GET /v1/budgets`` lists, tenant-owned ones included. Left unchecked the
-    first is nulled out by the ORM and the second fails at the commit, so the
-    refusal says the budget is held without naming the rows holding it.
+    a tenant's to see. Since otari#881 neither assignment site will point a
+    gateway user at a tenant's budget, so a live hold is one made before that,
+    and a reset record outlives the assignment that produced it either way. Left
+    unchecked the first is nulled out by the ORM and the second fails at the
+    commit, so the refusal says the budget is held without naming the rows
+    holding it.
     """
 
     def __init__(self, budget_id: object):

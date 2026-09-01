@@ -1,5 +1,6 @@
 """Unit tests for pure helper behavior shared by route handlers."""
 
+import uuid
 from datetime import UTC, datetime
 from unittest.mock import MagicMock
 
@@ -195,6 +196,7 @@ def test_resolve_user_id_empty_string_treated_as_missing() -> None:
 def test_budget_response_from_model() -> None:
     budget = MagicMock()
     budget.budget_id = "budget-1"
+    budget.organization_id = None
     budget.name = "team-free"
     budget.max_budget = 100.0
     budget.budget_duration_sec = 86400
@@ -212,11 +214,31 @@ def test_budget_response_from_model() -> None:
     # A freshly serialized budget has no assigned users yet.
     assert resp.user_count == 0
     assert resp.total_spend == 0.0
+    # No organization, so this is the deployment's own and assignable to a
+    # gateway user.
+    assert resp.organization_id is None
+
+
+def test_budget_response_carries_the_owning_organization() -> None:
+    """A tenant's budget is marked as one, which is what keeps a caller from offering it."""
+    organization_id = uuid.uuid4()
+    budget = MagicMock()
+    budget.budget_id = "budget-3"
+    budget.organization_id = organization_id
+    budget.name = "Engineering monthly"
+    budget.max_budget = 250.0
+    budget.budget_duration_sec = None
+    budget.reset_alignment = "calendar_month"
+    budget.created_at = datetime(2025, 1, 1, tzinfo=UTC)
+    budget.updated_at = datetime(2025, 1, 2, tzinfo=UTC)
+
+    assert BudgetResponse.from_model(budget).organization_id == organization_id
 
 
 def test_budget_response_from_model_nullable_fields() -> None:
     budget = MagicMock()
     budget.budget_id = "budget-2"
+    budget.organization_id = None
     budget.name = None
     budget.max_budget = None
     budget.budget_duration_sec = None

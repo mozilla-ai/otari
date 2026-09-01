@@ -12,6 +12,7 @@ import { usageTotals } from "@/tests/fixtures"
 function budget(over: Partial<Budget>): Budget {
   return {
     budget_id: "b",
+    organization_id: null,
     name: null,
     max_budget: 100,
     reset_alignment: null,

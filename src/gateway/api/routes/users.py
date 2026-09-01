@@ -122,6 +122,26 @@ class UsageLogResponse(BaseModel):
         )
 
 
+def _require_assignable_budget(budget: Budget | None, budget_id: str) -> Budget:
+    """The budget a gateway user may be capped at, or the not-found an unknown id gets.
+
+    An organization's budget is not one. A ``users`` row is deployment-wide with
+    no tenancy column, so pointing one at a tenant's budget lets a tenant admin
+    editing their own figure move what a gateway user may spend, and neither side
+    can see the coupling: the admin cannot reach this surface, and the operator
+    sees no sign the budget they picked is a tenant's. Answered as the 404 this
+    route already gives an id naming nothing, because from the deployment
+    surface's point of view a tenant's budget is not one it may assign, and
+    telling the two apart says nothing useful.
+    """
+    if budget is None or budget.organization_id is not None:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail=f"Budget with id '{budget_id}' not found",
+        )
+    return budget
+
+
 @router.post("")
 async def create_user(
     request: CreateUserRequest,
@@ -145,12 +165,7 @@ async def create_user(
     budget: Budget | None = None
     if request.budget_id:
         budget_result = await db.execute(select(Budget).where(Budget.budget_id == request.budget_id))
-        budget = budget_result.scalar_one_or_none()
-        if not budget:
-            raise HTTPException(
-                status_code=status.HTTP_404_NOT_FOUND,
-                detail=f"Budget with id '{request.budget_id}' not found",
-            )
+        budget = _require_assignable_budget(budget_result.scalar_one_or_none(), request.budget_id)
 
     if existing_user and existing_user.deleted_at is not None:
         user = existing_user
@@ -264,12 +279,7 @@ async def update_user(
             user.next_budget_reset_at = None
         else:
             budget_result = await db.execute(select(Budget).where(Budget.budget_id == request.budget_id))
-            budget = budget_result.scalar_one_or_none()
-            if not budget:
-                raise HTTPException(
-                    status_code=status.HTTP_404_NOT_FOUND,
-                    detail=f"Budget with id '{request.budget_id}' not found",
-                )
+            budget = _require_assignable_budget(budget_result.scalar_one_or_none(), request.budget_id)
 
             user.budget_id = request.budget_id
             now = datetime.now(UTC)

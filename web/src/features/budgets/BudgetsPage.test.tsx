@@ -34,6 +34,7 @@ function testUser(user_id: string): User {
 function budget(overrides: Partial<Budget> = {}): Budget {
   return {
     budget_id: "11111111-2222-3333-4444-555555555555",
+    organization_id: null,
     name: null,
     max_budget: 100,
     reset_alignment: null,
@@ -490,6 +491,45 @@ describe("BudgetsPage", () => {
       await screen.findByRole("button", { name: "Save changes" }),
     ).toBeInTheDocument()
     expect(screen.getByLabelText("Spending limit (USD)")).toHaveValue("42")
+  })
+
+  it("marks a budget an organization owns and withholds assignment on it", async () => {
+    // `/v1/users` refuses to cap a gateway user at a tenant's budget, so offering
+    // the multiselect would be offering a save that answers 404.
+    mockApi({
+      budgets: [
+        budget({ organization_id: "99999999-8888-7777-6666-555555555555" }),
+      ],
+      users: [testUser("alice")],
+    })
+    const user = userEvent.setup()
+    renderPage(<BudgetsPage />)
+
+    const row = (await screen.findByText("11111111")).closest("tr")!
+    expect(
+      within(row).getByText("Owned by an organization"),
+    ).toBeInTheDocument()
+
+    await user.click(within(row).getByRole("button", { name: "Edit" }))
+    expect(
+      await screen.findByRole("button", { name: "Save changes" }),
+    ).toBeInTheDocument()
+    expect(screen.queryByText("Assign to people (optional)")).toBeNull()
+    expect(screen.getByText(/belongs to an organization/)).toBeInTheDocument()
+  })
+
+  it("keeps the assignment control on the deployment's own budget", async () => {
+    mockApi({ budgets: [budget()], users: [testUser("alice")] })
+    const user = userEvent.setup()
+    renderPage(<BudgetsPage />)
+
+    const row = (await screen.findByText("11111111")).closest("tr")!
+    expect(within(row).queryByText("Owned by an organization")).toBeNull()
+
+    await user.click(within(row).getByRole("button", { name: "Edit" }))
+    expect(
+      await screen.findByText("Assign to people (optional)"),
+    ).toBeInTheDocument()
   })
 
   it("reveals per-user reset history on demand", async () => {

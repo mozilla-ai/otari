@@ -1531,6 +1531,18 @@
             ],
             "title": "Name"
           },
+          "organization_id": {
+            "anyOf": [
+              {
+                "format": "uuid",
+                "type": "string"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "title": "Organization Id"
+          },
           "reset_alignment": {
             "anyOf": [
               {
@@ -1564,6 +1576,7 @@
         },
         "required": [
           "budget_id",
+          "organization_id",
           "name",
           "max_budget",
           "budget_duration_sec",
