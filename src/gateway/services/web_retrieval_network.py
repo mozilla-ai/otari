@@ -570,8 +570,6 @@ async def read_capped_decoded_body(
         raise ValueError("max_bytes cannot be negative")
     if chunk_size <= 0:
         raise ValueError("chunk_size must be positive")
-    if response.is_stream_consumed:
-        raise httpx.StreamConsumed()
 
     decode_chunk_size = min(chunk_size, _MAX_DECODE_CHUNK_BYTES)
 
@@ -587,6 +585,8 @@ async def read_capped_decoded_body(
         return CappedBody(content=bytes(buffer), truncated=False)
 
     try:
+        if response.is_stream_consumed:
+            raise httpx.StreamConsumed()
         return await deadline.run(read())
     finally:
         await response.aclose()
