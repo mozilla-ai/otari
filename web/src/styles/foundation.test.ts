@@ -567,13 +567,26 @@ describe("content text wears a type role", () => {
     "text-caption",
     "text-overline",
   ] as const
-  const ANY_ROLE = `text-(?:${ROLES.map((role) => role.slice(5)).join("|")})`
+  const ANY_ROLE = `text-(?:${ROLES.map((role) => role.slice("text-".length)).join("|")})`
   // The ink each role sets for itself, and therefore the one a call site wearing
   // it never repeats.
   const ROLE_INK: Array<[string, string]> = [
     ["text-(?:caption|overline)", "text-muted"],
     ["text-(?:display|heading|title|body|emphasis)", "text-foreground"],
   ]
+
+  it("gives every role an ink it must not repeat", () => {
+    // ROLE_INK spells the role names a second time, so one added above and
+    // missed below would go unchecked rather than fail. This is the guard on
+    // that guard.
+    const covered = ROLE_INK.flatMap(([roles]) =>
+      roles
+        .replace(/^text-\(\?:|\)$/g, "")
+        .split("|")
+        .map((name) => `text-${name}`),
+    )
+    expect(covered.sort()).toEqual([...ROLES].sort())
+  })
 
   it.each(ROLES)("declares %s in globals.css", (role) => {
     // Same failure the documented-utilities list guards against: a role named in
