@@ -261,10 +261,11 @@ async def _request_with_target(
     target: ValidatedTarget,
     *,
     url: str | None = None,
+    stream: bool = False,
 ) -> httpx.Response:
     request = client.build_request("GET", url or str(target.url))
     request.extensions[PINNED_TARGET_EXTENSION] = target
-    return await client.send(request)
+    return await client.send(request, stream=stream)
 
 
 @pytest.mark.asyncio
@@ -397,6 +398,11 @@ async def test_transport_retries_only_validated_addresses() -> None:
     assert factory.backends[1].connects == [(str(_OTHER_PUBLIC_V4), 80)]
 
 
+def test_transport_requires_positive_pool_bound() -> None:
+    with pytest.raises(ValueError, match="max_pools"):
+        PinnedAsyncHTTPTransport(max_pools=0)
+
+
 @pytest.mark.asyncio
 async def test_pool_keys_isolate_origin_and_pinned_address() -> None:
     factory = BackendFactory()
@@ -412,6 +418,47 @@ async def test_pool_keys_isolate_origin_and_pinned_address() -> None:
             await response.aread()
 
         assert len(transport._pools) == 3  # noqa: SLF001 - verifies the security pool key
+
+
+@pytest.mark.asyncio
+async def test_pool_bound_evicts_least_recently_used_idle_pool() -> None:
+    factory = BackendFactory()
+    transport = PinnedAsyncHTTPTransport(backend_factory=factory, max_pools=2)
+    first = ValidatedTarget(canonicalize_web_url("http://first.example/"), (_PUBLIC_V4,))
+    second = ValidatedTarget(canonicalize_web_url("http://second.example/"), (_PUBLIC_V4,))
+    third = ValidatedTarget(canonicalize_web_url("http://third.example/"), (_PUBLIC_V4,))
+
+    async with httpx.AsyncClient(transport=transport) as client:
+        await (await _request_with_target(client, first)).aread()
+        await (await _request_with_target(client, second)).aread()
+        await (await _request_with_target(client, first)).aread()
+        await (await _request_with_target(client, third)).aread()
+
+        assert list(transport._pools) == [  # noqa: SLF001 - verifies bounded LRU eviction
+            transport._pool_key(first, _PUBLIC_V4),  # noqa: SLF001
+            transport._pool_key(third, _PUBLIC_V4),  # noqa: SLF001
+        ]
+
+
+@pytest.mark.asyncio
+async def test_pool_bound_never_evicts_an_active_response() -> None:
+    factory = BackendFactory()
+    transport = PinnedAsyncHTTPTransport(backend_factory=factory, max_pools=1)
+    first = ValidatedTarget(canonicalize_web_url("http://first.example/"), (_PUBLIC_V4,))
+    second = ValidatedTarget(canonicalize_web_url("http://second.example/"), (_PUBLIC_V4,))
+
+    async with httpx.AsyncClient(transport=transport) as client:
+        active_response = await _request_with_target(client, first, stream=True)
+        with pytest.raises(PinnedTransportError, match="capacity"):
+            await _request_with_target(client, second, stream=True)
+
+        await active_response.aclose()
+        second_response = await _request_with_target(client, second, stream=True)
+        await second_response.aclose()
+
+        assert list(transport._pools) == [  # noqa: SLF001 - verifies release before eviction
+            transport._pool_key(second, _PUBLIC_V4)  # noqa: SLF001
+        ]
 
 
 @pytest.mark.asyncio
