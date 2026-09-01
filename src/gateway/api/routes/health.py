@@ -6,7 +6,7 @@ from sqlalchemy import text
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from gateway.api.deps import get_config, get_db_if_needed
-from gateway.core.config import GatewayConfig
+from gateway.core.config import DEFAULT_PLATFORM_HEALTH_PATH, GatewayConfig
 from gateway.log_config import logger
 from gateway.version import __version__
 
@@ -14,20 +14,33 @@ router = APIRouter(prefix="/health", tags=["health"])
 
 
 async def _check_platform_reachability(config: GatewayConfig) -> bool:
+    """Report whether the platform peer serves its health route.
+
+    Only a 2xx answers that question. A 404 from a peer that does not serve the
+    configured path, a 401 from an authenticated route, and a redirect to a login
+    page all prove something is listening without proving it is the peer this
+    gateway resolves credentials from. Redirects are left unfollowed for the same
+    reason: the 200 at the end of one belongs to whatever it landed on.
+    """
     platform_base_url = config.platform.get("base_url")
     if not platform_base_url:
         return False
 
-    health_path = config.platform.get("health_path", "/utils/health-check/")
+    health_path = config.platform.get("health_path", DEFAULT_PLATFORM_HEALTH_PATH)
     timeout_ms = int(config.platform.get("resolve_timeout_ms", 5000))
     health_url = f"{platform_base_url.rstrip('/')}/{health_path.lstrip('/')}"
 
     try:
-        async with httpx.AsyncClient(timeout=timeout_ms / 1000) as client:
+        async with httpx.AsyncClient(timeout=timeout_ms / 1000, follow_redirects=False) as client:
             response = await client.get(health_url)
-        return response.status_code < 500
-    except (httpx.TimeoutException, httpx.NetworkError):
+    except (httpx.HTTPError, httpx.InvalidURL) as e:
+        logger.debug("Platform health probe to %s failed: %s", health_url, e)
         return False
+
+    if not response.is_success:
+        logger.debug("Platform health probe to %s answered %s", health_url, response.status_code)
+        return False
+    return True
 
 
 @router.get("")

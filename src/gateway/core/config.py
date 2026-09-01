@@ -66,6 +66,10 @@ DEFAULT_PLATFORM_BASE_URL = "https://api.otari.ai/api/v1"
 # link to the dashboard that actually manages this gateway; an operator pointed
 # at a staging platform overrides it with platform.management_url.
 DEFAULT_PLATFORM_MANAGEMENT_URL = "https://otari.ai"
+# The route the reachability probe asks for under DEFAULT_PLATFORM_BASE_URL. It
+# is an otari.ai route, so a deployment resolving against any other peer sets
+# platform.health_path (PLATFORM_HEALTH_PATH) to one that peer serves.
+DEFAULT_PLATFORM_HEALTH_PATH = "/utils/health-check/"
 PLATFORM_TOKEN_ENV_VAR = "OTARI_AI_TOKEN"
 # User-facing config env vars use the OTARI_ prefix (e.g. OTARI_MASTER_KEY,
 # OTARI_PORT), which is also the native pydantic prefix below.

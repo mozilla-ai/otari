@@ -11,15 +11,14 @@ host: "127.0.0.1"
 port: 8010
 platform:
   # The standalone gateway this suite already boots, standing in for otari.ai.
-  # Reachability is one HTTP GET that has to answer below 500 (see
+  # Reachability is one HTTP GET that has to answer 2xx (see
   # _check_platform_reachability), so a live gateway is a faithful stand-in and
   # the landing page's connection row is asserted in its "Connected" state
   # rather than only in its failure one.
   base_url: "http://127.0.0.1:8000"
   # Named explicitly rather than left to the default (otari.ai's
-  # /utils/health-check/), which this stand-in does not serve. It would still
-  # report reachable, since a 404 is below 500, so without this the assertion
-  # would pass for the wrong reason.
+  # /utils/health-check/), which this stand-in does not serve and would answer
+  # 404 to, reporting unreachable.
   health_path: "/health"
   # The link the landing page offers, and the value /v1/bootstrap publishes.
   management_url: "https://otari.ai"
