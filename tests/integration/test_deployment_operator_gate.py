@@ -105,12 +105,14 @@ _CATALOG_PROBES: list[tuple[str, str]] = [
 # joined them in otari-ai#1944), and their own 403 is indistinguishable here
 # from the one this file is about.
 #
-# ``GET /v1/tool-settings`` is the odd one in this list: its router is
-# deployment-wide and every other verb on it is operator-only. The read resolves
-# the caller itself and *narrows* rather than refuses, withholding the three
-# service-endpoint fields from a non-operator (otari-ai#1969), which is why it
-# belongs here rather than above. What it withholds is pinned in
-# ``test_tool_settings_tenant_read.py``; this file only pins that it answers.
+# ``GET /v1/tool-settings`` sits here because it *narrows* rather than refuses,
+# withholding the three service-endpoint fields from a non-operator
+# (otari-ai#1969). It rides its own ``reader_router`` for that, since a
+# router-level gate always runs and a route cannot opt out of one in place, which
+# is the same split #895 made in ``models.py`` and ``pricing.py``. The write
+# verbs keep the operator router, and their probes are above. What the read
+# withholds is pinned in ``test_tool_settings_tenant_read.py``; this file only
+# pins that it answers.
 _TENANT_SCOPED_PROBES: list[tuple[str, str]] = [
     ("GET", "/v1/organizations/me"),
     ("GET", "/v1/workspaces"),
