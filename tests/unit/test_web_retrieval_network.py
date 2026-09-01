@@ -21,6 +21,7 @@ from httpcore._backends.base import AsyncNetworkBackend, AsyncNetworkStream
 
 from gateway.services.web_retrieval_network import (
     PINNED_TARGET_EXTENSION,
+    AddressResolver,
     CappedBody,
     ContentDecodingError,
     NetworkDeadline,
@@ -55,9 +56,13 @@ _PRIVATE_V4 = ipaddress.ip_address("10.0.0.5")
 class OneChunkByteStream(httpx.AsyncByteStream):
     def __init__(self, content: bytes) -> None:
         self._content = content
+        self.closed = False
 
     async def __aiter__(self) -> AsyncIterator[bytes]:
         yield self._content
+
+    async def aclose(self) -> None:
+        self.closed = True
 
 
 class StaticResolver:
@@ -574,6 +579,17 @@ async def test_capped_body_marks_overflow_without_retaining_it() -> None:
 
 
 @pytest.mark.asyncio
+async def test_capped_body_closes_stream_after_truncation() -> None:
+    stream = OneChunkByteStream(b"abcdefghijk")
+    response = httpx.Response(200, stream=stream)
+
+    body = await read_capped_decoded_body(response, deadline=NetworkDeadline(1), max_bytes=8, chunk_size=3)
+
+    assert body == CappedBody(content=b"abcdefgh", truncated=True)
+    assert stream.closed
+
+
+@pytest.mark.asyncio
 async def test_capped_body_distinguishes_exact_limit() -> None:
     response = httpx.Response(200, content=b"abcdefgh")
 
@@ -639,15 +655,24 @@ async def test_capped_body_rejects_unsupported_content_encoding() -> None:
 @pytest.mark.asyncio
 async def test_slow_stream_cannot_reset_absolute_deadline_per_chunk() -> None:
     class SlowStream(httpx.AsyncByteStream):
+        def __init__(self) -> None:
+            self.closed = False
+
         async def __aiter__(self) -> AsyncIterator[bytes]:
             for _ in range(10):
                 await asyncio.sleep(0.01)
                 yield b"a"
 
-    response = httpx.Response(200, stream=SlowStream())
+        async def aclose(self) -> None:
+            self.closed = True
+
+    stream = SlowStream()
+    response = httpx.Response(200, stream=stream)
 
     with pytest.raises(NetworkDeadlineExceeded):
         await read_capped_decoded_body(response, deadline=NetworkDeadline(0.035), max_bytes=100)
+
+    assert stream.closed
 
 
 @pytest.mark.parametrize(
@@ -674,4 +699,6 @@ def test_utf8_safe_truncation(
 
 
 def test_system_resolver_is_protocol_compatible() -> None:
-    assert isinstance(SystemAddressResolver(), SystemAddressResolver)
+    resolver: AddressResolver = SystemAddressResolver()
+
+    assert callable(resolver.resolve)
