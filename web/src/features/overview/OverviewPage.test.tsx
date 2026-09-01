@@ -650,20 +650,19 @@ describe("OverviewIndex routing", () => {
   })
 })
 
-// The wire for a caller who does not operate the deployment: `/v1/admin/access`
-// answers an explicit no, the organization context agrees, and the usage hooks
-// therefore read `/v1/organizations/me/usage` (otari#837). Everything else is
-// an endpoint this caller must never be asked to read, so it refuses the way
-// the server would; a leak fails the assertions loudly instead of rendering a
-// plausible tile. Every URL is recorded so the tests can say so.
+// The wire for a caller who does not operate the deployment: the organization
+// context says so, and the usage hooks therefore read
+// `/v1/organizations/me/usage` (otari#837). Everything else is an endpoint this
+// caller must never be asked to read, so it refuses the way the server would; a
+// leak fails the assertions loudly instead of rendering a plausible tile. Every
+// URL is recorded so the tests can say so, `/v1/admin/access` included: this
+// page decides from the context alone, so asking it at all is the bug
+// otari-ai#1936 is about.
 function mockScopedApi(b: Bodies): string[] {
   const requested: string[] = []
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input)
     requested.push(url)
-    if (url.endsWith("/v1/admin/access")) {
-      return jsonResponse({ granted: false })
-    }
     if (url.endsWith("/v1/organizations/me")) {
       return jsonResponse(organizationContext({ deployment_operator: false }))
     }
@@ -718,14 +717,15 @@ describe("OverviewIndex for a caller who does not operate the deployment", () =>
     expect(screen.queryByText("Budget health")).not.toBeInTheDocument()
     expect(screen.queryByText("Active keys")).not.toBeInTheDocument()
     expect(screen.queryByText("Active members")).not.toBeInTheDocument()
-    // And nothing left the scoped surface: beyond the gate and the context,
-    // every request this page made names /v1/organizations/me/usage. A bare
-    // /v1/usage read here would be a cross-tenant read the server refuses, so
-    // the page must not even attempt it.
+    // And nothing left the scoped surface: beyond the context, every request
+    // this page made names /v1/organizations/me/usage. A bare /v1/usage read
+    // here would be a cross-tenant read the server refuses, so the page must
+    // not even attempt it.
+    expect(requested.some((url) => url.endsWith("/v1/admin/access"))).toBe(
+      false,
+    )
     const scoped = requested.filter(
-      (url) =>
-        !url.endsWith("/v1/admin/access") &&
-        !url.endsWith("/v1/organizations/me"),
+      (url) => !url.endsWith("/v1/organizations/me"),
     )
     expect(scoped.length).toBeGreaterThan(0)
     for (const url of scoped) {
@@ -773,9 +773,6 @@ describe("OverviewIndex for a caller who does not operate the deployment", () =>
     // every "vs prev" chip and look like there was nothing to compare.
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
-      if (url.endsWith("/v1/admin/access")) {
-        return jsonResponse({ granted: false })
-      }
       if (url.endsWith("/v1/organizations/me")) {
         return jsonResponse(organizationContext({ deployment_operator: false }))
       }
@@ -801,9 +798,6 @@ describe("OverviewIndex for a caller who does not operate the deployment", () =>
   it("reports a failed scoped summary instead of a silent wall of dashes", async () => {
     vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
       const url = String(input)
-      if (url.endsWith("/v1/admin/access")) {
-        return jsonResponse({ granted: false })
-      }
       if (url.endsWith("/v1/organizations/me")) {
         return jsonResponse(organizationContext({ deployment_operator: false }))
       }
@@ -818,5 +812,105 @@ describe("OverviewIndex for a caller who does not operate the deployment", () =>
     renderPage(<OverviewIndex />)
 
     expect(await screen.findByText(/usage exploded/)).toBeInTheDocument()
+  })
+})
+
+// One question, one source. The page picks its variant and the usage hooks pick
+// their surface off the same `deployment_operator` field, so the operator panels
+// can never end up beside tiles reading the other one (otari-ai#1936).
+describe("OverviewIndex operator-ness", () => {
+  afterEach(() => {
+    vi.restoreAllMocks()
+  })
+
+  it("renders the operator page off the context, without asking /v1/admin/access", async () => {
+    const requested: string[] = []
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input)
+      requested.push(url)
+      if (url.endsWith("/v1/organizations/me")) {
+        return jsonResponse(organizationContext())
+      }
+      if (url.includes("/v1/usage/summary")) {
+        return jsonResponse(summary({ cost: 200, request_count: 2000 }))
+      }
+      if (url.includes("/v1/providers/health")) {
+        return jsonResponse({
+          providers: [],
+          healthy: 1,
+          total: 1,
+          checked_at: null,
+        })
+      }
+      if (url.includes("/v1/providers")) {
+        return jsonResponse({ providers: [{ provider: "openai" }] })
+      }
+      return jsonResponse([])
+    })
+    renderPage(<OverviewIndex />)
+
+    expect(
+      await screen.findByText(
+        "At-a-glance spend, traffic, and health across the gateway.",
+      ),
+    ).toBeInTheDocument()
+    expect(requested.some((url) => url.endsWith("/v1/admin/access"))).toBe(
+      false,
+    )
+  })
+
+  it("lands a failed context on the scoped page, where its tiles already read", async () => {
+    // The failure the two sources used to disagree about: the context read is
+    // what the usage hooks scope off, so a page that decided operator-ness some
+    // other way would render the deployment-wide panels above tiles quietly
+    // serving this caller's own organization, with nothing on screen to say so.
+    const requested: string[] = []
+    vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input)
+      requested.push(url)
+      if (url.endsWith("/v1/organizations/me")) {
+        return jsonResponse({ detail: "context exploded" }, 500)
+      }
+      if (url.includes("/v1/organizations/me/usage/summary")) {
+        if (url.includes("bucket=hour"))
+          return jsonResponse(summary({ cost: 5 }))
+        return jsonResponse(summary({ cost: 200, request_count: 2000 }))
+      }
+      if (url.includes("/v1/organizations/me/usage")) {
+        return jsonResponse([])
+      }
+      return jsonResponse({ detail: "forbidden" }, 403)
+    })
+    renderPage(<OverviewIndex />)
+
+    // The scoped page, rendering scoped numbers: an errored context is an
+    // answer, so the page is not stranded on its loading state either.
+    expect(await screen.findByText("$200.00")).toBeInTheDocument()
+    expect(screen.getByText("$5.00")).toBeInTheDocument()
+    expect(
+      screen.queryByText(
+        "At-a-glance spend, traffic, and health across the gateway.",
+      ),
+    ).not.toBeInTheDocument()
+    expect(screen.queryByText("Budget health")).not.toBeInTheDocument()
+
+    // And it settled there. The usage hooks behind those tiles observe the same
+    // errored context, and their mount asks it to refetch; a page reading the
+    // transient pending state would flip back to its spinner, unmount them, and
+    // ask again without end. The tiles asserted above are what such a page never
+    // reaches, and this is the request storm underneath it.
+    expect(
+      requested.filter((url) => url.endsWith("/v1/organizations/me")).length,
+    ).toBeLessThan(4)
+
+    // And it asked nothing the deployment-wide page would have: not the gate,
+    // and no endpoint outside the surface the hooks fell back to.
+    const asked = requested.filter(
+      (url) => !url.endsWith("/v1/organizations/me"),
+    )
+    expect(asked.length).toBeGreaterThan(0)
+    for (const url of asked) {
+      expect(url).toContain("/v1/organizations/me/usage")
+    }
   })
 })

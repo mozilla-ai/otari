@@ -3237,12 +3237,11 @@ export function useDeleteOrganizationSpendCeiling() {
 // 404: a gate cannot be built on a failed request, and hiding a destination
 // grants nothing either way.
 //
-// Read by the two pages that decide in their own words what the caller sees (the
-// deployment accounts page's refusal, the Overview's member view), and no longer
-// by the sidebar: the rail needs the same answer before its first paint, so it
-// takes `deployment_operator` off the organization context instead, which is the
-// same server-side predicate on a read the shell already makes (otari#836). Both
-// pages hold their decision until this lands, so neither pays what the rail did.
+// Read by the deployment accounts page alone, to word its own refusal, and it
+// holds that decision until this lands. Nothing else asks: the rail and the
+// Overview index need the answer before their first paint, so they take
+// `deployment_operator` off the organization context, which is the same
+// server-side predicate on a read the shell already makes (otari#836).
 // ---------------------------------------------------------------------------
 
 export function useDeploymentAdminAccess() {
@@ -3253,15 +3252,12 @@ export function useDeploymentAdminAccess() {
         (body) => body.granted,
       ),
     staleTime: 60_000,
-    // No `enabled` parameter any more: it existed for the rail alone, so it could
-    // withhold the request on a gateway that does not host `/v1/admin` and keep
-    // that 404 from becoming a second reading of `surfaces`. Neither remaining
-    // caller ever passed one. The accounts page does not need to, being behind a
-    // route that declares `surface: "admin"`; the Overview index has no surface
-    // of its own, is the deployment's front page, and already asked
-    // unconditionally. Deliberately still not inferred from a 404 here, which is
-    // the scattered mode check the surface axis replaced; the ordinary retry
-    // policy applies, and a failure is a failure.
+    // No `enabled` parameter: the one caller sits behind a route declaring
+    // `surface: "admin"`, so a deployment that does not host `/v1/admin` never
+    // renders it and the 404 never becomes a second reading of `surfaces`.
+    // Deliberately not inferred from a 404 here either, which is the scattered
+    // mode check the surface axis replaced; the ordinary retry policy applies,
+    // and a failure is a failure.
   })
 }
 

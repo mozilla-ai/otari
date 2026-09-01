@@ -4,6 +4,7 @@ import { Link, useNavigate } from "@tanstack/react-router"
 import { useEffect, useMemo, useState } from "react"
 import type { UsageEntry } from "@/client"
 import { SetupGuideCard } from "@/features/onboarding/SetupGuideCard"
+import { isDeploymentOperator } from "@/features/organization/roles"
 import {
   budgetHealth,
   errorRateHealth,
@@ -13,8 +14,8 @@ import {
 import {
   NO_BREAKDOWNS,
   useBudgets,
-  useDeploymentAdminAccess,
   useKeys,
+  useOrganizationContext,
   useOrganizationMembers,
   useProviderHealth,
   useProviders,
@@ -262,20 +263,33 @@ function UsageStatTiles({
  * a component that is not rendered runs none of them: that is what keeps a
  * tenant's first page from being a row of failed requests.
  *
- * It fails toward the operator view on purpose. Only an explicit `false` shows
- * the organization-scoped page, so a deployment with no operator surface to ask
- * (hybrid) and a transient failure of the question both land on the panels,
- * which report their own errors, rather than telling a real operator this page
- * is not theirs.
+ * Decided from the organization context, which is where `useUsageScope` and the
+ * nav rail take the same answer from, so nothing on screen can hold a different
+ * one (otari-ai#1936). Two sources compose into a page that reports nothing
+ * while being wrong: the deployment-wide panels beside usage tiles quietly
+ * reading `/v1/organizations/me/usage`, every number disagreeing with its
+ * neighbor and each query happy with its own. It also costs no request, since
+ * the shell reads this context before it paints.
+ *
+ * So it fails toward the scoped page, the direction the hooks behind those tiles
+ * already fail in: the narrower surface understates rather than refusing, and
+ * reports its own error where this page can show it. An errored context is an
+ * answer, not a wait, for `useUsageScope`'s reason: holding the page on a
+ * loading state that no retry clears renders nothing at all.
  */
 export function OverviewIndex() {
-  const access = useDeploymentAdminAccess()
+  const context = useOrganizationContext()
 
-  if (access.data === false) {
-    return <OrganizationOverview />
-  }
-  if (access.isLoading) {
+  // `isFetched`, not `isPending`: a query that errored with no data goes back to
+  // pending on its next fetch, and the page below this line mounts a second
+  // observer of the same context (the usage hooks), whose mount is what asks for
+  // that fetch. Reading the transient state would swing the page back to this
+  // spinner, unmount the observer, and start the round again forever.
+  if (!context.isFetched) {
     return <PageLoading />
+  }
+  if (!isDeploymentOperator(context.data)) {
+    return <OrganizationOverview />
   }
   return <OperatorOverviewIndex />
 }
