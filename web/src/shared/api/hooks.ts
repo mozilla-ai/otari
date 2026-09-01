@@ -1587,16 +1587,26 @@ function usageParams(filters: UsageFilters): URLSearchParams {
 //
 // The base is part of every query key it feeds, so two callers on one browser
 // can never read each other's cached rows.
-export function useUsageScope(): {
+//
+// `"organization"` pins the narrow surface regardless of who is asking. It
+// exists for the organization-wide Usage page (otari-ai#1963), whose question is
+// "this organization", so for an operator the caller-derived scope would answer
+// a different one: `/v1/usage` reads every tenant on the deployment, and a page
+// titled with the organization would silently overstate it. A pinned base needs
+// no context answer to be known, so it is ready on first paint.
+export type UsageScope = "caller" | "organization"
+
+export function useUsageScope(scope: UsageScope = "caller"): {
   base: string
   isReady: boolean
   isDeploymentWide: boolean
 } {
   const context = useOrganizationContext()
-  const isDeploymentWide = context.data?.deployment_operator === true
+  const isDeploymentWide =
+    scope === "caller" && context.data?.deployment_operator === true
   return {
     base: isDeploymentWide ? "/v1/usage" : "/v1/organizations/me/usage",
-    isReady: context.isSuccess || context.isError,
+    isReady: scope === "organization" || context.isSuccess || context.isError,
     isDeploymentWide,
   }
 }
@@ -1845,8 +1855,9 @@ export function useUsageSummary(
   bucket: UsageBucket,
   dimensions?: SummaryDimension[],
   enabled = true,
+  usageScope: UsageScope = "caller",
 ) {
-  const scope = useUsageScope()
+  const scope = useUsageScope(usageScope)
   return useQuery({
     queryKey: [
       USAGE,
@@ -1884,8 +1895,9 @@ export function useUsageGroupedSeries(
   bucket: UsageBucket,
   groupBy: UsageGroupBy | null,
   enabled = true,
+  usageScope: UsageScope = "caller",
 ) {
-  const scope = useUsageScope()
+  const scope = useUsageScope(usageScope)
   return useQuery({
     queryKey: [USAGE, "series", scope.base, filters, bucket, groupBy],
     queryFn: () => {
@@ -2300,11 +2312,14 @@ export function useResetPassword() {
   })
 }
 
-export function useWorkspaces() {
+// `enabled` lets a page that only sometimes offers a workspace control (the
+// organization-wide Usage page's filter) skip the read everywhere else.
+export function useWorkspaces(enabled = true) {
   return useQuery({
     queryKey: [WORKSPACES],
     queryFn: () => fetchAllPaged<Workspace>("/v1/workspaces"),
     staleTime: 60_000,
+    enabled,
   })
 }
 

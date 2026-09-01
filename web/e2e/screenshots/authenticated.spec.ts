@@ -122,6 +122,32 @@ test.describe("organization rail", () => {
     ).toBeVisible()
     await captureScreenshot(page, "organization-model-pricing")
   })
+
+  test("organization usage", async ({ page }) => {
+    // This gateway is standalone, whose bootstrap does not report the
+    // organization_usage surface (its organization is the deployment, so /usage
+    // already answers it whole). The surface is patched in before the shell
+    // boots, which is why the stub precedes `login` here: `gotoRoute` changes
+    // only the hash, so the boot-time bootstrap read is the one that counts.
+    // Everything behind the route is served for real, because
+    // /v1/organizations/me/usage is mounted on both editions.
+    await page.route("**/v1/bootstrap", async (route) => {
+      const response = await route.fetch()
+      const bootstrap = await response.json()
+      await route.fulfill({
+        json: {
+          ...bootstrap,
+          surfaces: [...bootstrap.surfaces, "organization_usage"],
+        },
+      })
+    })
+    await login(page)
+    await gotoRoute(page, "/organization/usage")
+    await expect(
+      page.getByRole("heading", { name: /organization usage/i }).first(),
+    ).toBeVisible()
+    await captureScreenshot(page, "organization-usage")
+  })
 })
 
 /**

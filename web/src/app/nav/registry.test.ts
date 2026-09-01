@@ -42,6 +42,7 @@ describe("nav registry", () => {
     // The second rail, reached from the sidebar footer. Its own registry, so
     // its order is asserted separately from the workspace one's.
     expect(ORG_NAV_SECTIONS.map((section) => section.id)).toEqual([
+      "org-observe",
       "org-people",
       "org-money",
       "org-gateway",
@@ -65,6 +66,7 @@ describe("nav registry", () => {
       "API keys",
       "Providers",
       "Members",
+      "Usage",
       "Workspaces",
       "Members & roles",
       "Providers",

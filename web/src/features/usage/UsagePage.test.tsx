@@ -349,6 +349,68 @@ describe("UsagePage", () => {
     ).toBe(true)
   })
 
+  it("asks for the whole organization on the organization page, whatever the switcher selects", async () => {
+    // The switcher holds a selection and the fixture's caller even operates the
+    // deployment; the organization page must let neither leak in. Narrowed by
+    // the switcher it would repeat the workspace page, and widened to
+    // `/v1/usage` it would title every tenant's traffic as this organization's.
+    const fetchMock = mockApi(summary(), {
+      "/v1/organizations/me": organizationContext({
+        workspace_memberships: [
+          {
+            workspace_id: "ws-1",
+            name: "Platform team",
+            role: "owner",
+          },
+        ],
+      }),
+    })
+    renderPage(<UsagePage scope="organization" />, { scoped: true })
+    await screen.findByText("$1,240.50")
+
+    const reads = fetchMock.mock.calls
+      .map(([url]) => String(url))
+      .filter((url) => url.includes("/usage/"))
+    expect(reads).not.toHaveLength(0)
+    for (const url of reads) {
+      expect(url).toContain("/v1/organizations/me/usage/")
+      expect(url).not.toContain("workspace_id=")
+    }
+  })
+
+  it("narrows the organization page through its own workspace filter", async () => {
+    const user = userEvent.setup()
+    const fetchMock = mockApi(summary(), {
+      "/v1/workspaces": {
+        data: [
+          {
+            id: "ws-2",
+            name: "Research",
+            organization_id: "org-1",
+            created_at: "2026-08-01T00:00:00+00:00",
+            updated_at: "2026-08-01T00:00:00+00:00",
+          },
+        ],
+        count: 1,
+      },
+    })
+    renderPage(<UsagePage scope="organization" />)
+    await screen.findByText("$1,240.50")
+
+    await pickOption(user, "Workspace", "Research")
+
+    const summaryCalls = fetchMock.mock.calls
+      .map(([u]) => String(u))
+      .filter((u) => u.includes("/v1/organizations/me/usage/summary"))
+    expect(summaryCalls.some((u) => u.includes("workspace_id=ws-2"))).toBe(true)
+    // The narrowing is visible and revocable where every other filter is.
+    expect(
+      screen.getByRole("button", {
+        name: "Remove Workspace filter Research",
+      }),
+    ).toBeInTheDocument()
+  })
+
   it("renders totals tiles with compact currency and error rate", async () => {
     mockApi(summary())
     renderPage(<UsagePage />)

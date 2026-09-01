@@ -19,8 +19,10 @@ import {
 import { ApiError } from "@/shared/api/client"
 import {
   NO_BREAKDOWNS,
+  type UsageScope,
   useUsageGroupedSeries,
   useUsageSummary,
+  useWorkspaces,
 } from "@/shared/api/hooks"
 import {
   ChartLegend,
@@ -188,8 +190,11 @@ interface BreakdownProps {
   // has gone missing (a deleted user); a dimension where NULL is a normal state
   // (gateway rows carry no session label) passes its own wording.
   unknownLabel?: string
-  // Turns a row key into the Activity-page filter to drill into.
-  onDrill: (key: string) => void
+  // Turns a row key into the Activity-page filter to drill into. Absent on the
+  // organization-wide page: Activity narrows to the sidebar's selected
+  // workspace, so a jump from an organization-wide row would silently show a
+  // subset of what the row counted.
+  onDrill?: (key: string) => void
   loading: boolean
 }
 
@@ -279,12 +284,16 @@ function BreakdownTable({
         getRowKey={rowKey}
         isLoading={loading}
         emptyContent={emptyLabel}
-        onRowAction={(key) => {
-          // Only real groups drill; the fold and deleted-user rows have no id to filter on.
-          if (key !== OTHER_KEY && key !== UNKNOWN_KEY) {
-            onDrill(key)
-          }
-        }}
+        onRowAction={
+          onDrill
+            ? (key) => {
+                // Only real groups drill; the fold and deleted-user rows have no id to filter on.
+                if (key !== OTHER_KEY && key !== UNKNOWN_KEY) {
+                  onDrill(key)
+                }
+              }
+            : undefined
+        }
       />
       {!loading && hidden > 0 ? (
         <Button size="sm" variant="ghost" onPress={() => setShowAll(true)}>
@@ -312,7 +321,8 @@ function ToolBreakdownTable({
 }: {
   rows: UsageSummary["by_tool"]
   totalCost: number
-  onDrill: (tool: string) => void
+  // Optional for the reason BreakdownTable's is.
+  onDrill?: (tool: string) => void
   loading: boolean
 }) {
   const columns: DataTableColumn<UsageSummary["by_tool"][number]>[] = [
@@ -380,7 +390,7 @@ function ToolBreakdownTable({
       getRowKey={(row) => row.tool}
       isLoading={loading}
       emptyContent="No gateway-run tool calls in this range."
-      onRowAction={(key) => onDrill(String(key))}
+      onRowAction={onDrill ? (key) => onDrill(String(key)) : undefined}
     />
   )
 }
@@ -428,7 +438,15 @@ interface BreakdownDimensionDef {
 
 // ---------- page ----------
 
-export function UsagePage() {
+// One page, two scopes. `"caller"` is the workspace rail's Usage destination:
+// whatever the caller may read, narrowed to the sidebar's selected workspace.
+// `"organization"` is the organization rail's (otari-ai#1963): the same
+// analytics pinned to `/v1/organizations/me/usage` and unnarrowed by default,
+// so an admin can finally ask about the organization as a whole; an explicit
+// workspace filter replaces the sidebar switcher, because the server lets an
+// admin narrow to any workspace in the organization, member of it or not.
+export function UsagePage({ scope = "caller" }: { scope?: UsageScope } = {}) {
+  const orgWide = scope === "organization"
   const navigate = useNavigate()
 
   // The share panel curates presentation only; the data it renders is whatever
@@ -468,19 +486,33 @@ export function UsagePage() {
     : preset.bucket
 
   const { selected: workspace } = useSelectedWorkspace()
+  // The organization page's own workspace narrowing, in place of the sidebar's
+  // switcher (which offers only the caller's memberships).
+  const [workspaceFilter, setWorkspaceFilter] = useState<string | undefined>()
+  const workspaces = useWorkspaces(orgWide)
   const filters: UsageFilters = useMemo(
     () => ({
-      // From the sidebar's switcher, like the request log's. `previousFilters`
+      // From the sidebar's switcher, like the request log's; the organization
+      // page swaps that for its own filter, unset by default. `previousFilters`
       // spreads this, so the period-over-period comparison is scoped to the
       // same workspace as the window it is compared against.
-      workspace_id: workspace?.workspace_id,
+      workspace_id: orgWide ? workspaceFilter : workspace?.workspace_id,
       start_date: winStart,
       end_date: winEnd,
       model: modelFilters.length > 0 ? modelFilters : undefined,
       user_id: userFilters.length > 0 ? userFilters : undefined,
       api_key_id: apiKeyFilters.length > 0 ? apiKeyFilters : undefined,
     }),
-    [workspace, winStart, winEnd, modelFilters, userFilters, apiKeyFilters],
+    [
+      orgWide,
+      workspaceFilter,
+      workspace,
+      winStart,
+      winEnd,
+      modelFilters,
+      userFilters,
+      apiKeyFilters,
+    ],
   )
 
   // The immediately-preceding window of equal length, for period-over-period
@@ -507,16 +539,23 @@ export function UsagePage() {
     }
   }, [customMode, winStart, winEnd, filters, preset.seconds, startDate])
 
-  const summary = useUsageSummary(filters, bucket, PAGE_BREAKDOWNS)
+  const summary = useUsageSummary(filters, bucket, PAGE_BREAKDOWNS, true, scope)
   // Deltas read `totals` only, so the previous window skips every breakdown.
   const previous = useUsageSummary(
     previousFilters ?? filters,
     bucket,
     NO_BREAKDOWNS,
     previousFilters !== null,
+    scope,
   )
   // The per-group stack, fetched only while a dimension is selected.
-  const grouped = useUsageGroupedSeries(filters, bucket, groupBy || null)
+  const grouped = useUsageGroupedSeries(
+    filters,
+    bucket,
+    groupBy || null,
+    true,
+    scope,
+  )
   // A 404 from the grouped endpoint is version skew: a gateway older than this
   // dashboard (most often one not yet restarted onto the build that ships it).
   // Fall back to the ungrouped view with a notice instead of a bare error.
@@ -543,6 +582,8 @@ export function UsagePage() {
     modelSuggestFilters,
     bucket,
     MODEL_BREAKDOWN,
+    true,
+    scope,
   )
   const realGroups = (rows: UsageGroupRow[] | undefined) =>
     (rows ?? []).filter((r) => !r.is_other && r.key !== null)
@@ -558,6 +599,8 @@ export function UsagePage() {
     entitySuggestFilters,
     bucket,
     ENTITY_BREAKDOWNS,
+    true,
+    scope,
   )
   const userOptions = realGroups(entitySuggest.data?.by_user).map((r) => ({
     value: r.key as string,
@@ -572,6 +615,16 @@ export function UsagePage() {
   // the picker hides what is already selected and the chips carry the raw name.
   const modelOptionList = modelOptions.map((m) => ({ value: m, label: m }))
 
+  // Every workspace in the organization, not just the caller's memberships,
+  // which is what separates this filter from the sidebar switcher. Only fetched
+  // on the organization page.
+  const workspaceOptions = (workspaces.data ?? []).map((w) => ({
+    value: w.id,
+    label: w.name,
+  }))
+  const workspaceLabel = (id: string) =>
+    workspaceOptions.find((o) => o.value === id)?.label ?? id
+
   // The default 30d window is the baseline (like the old "All" was), so it does
   // not count as a user-applied time filter: clearing returns to it, and an
   // empty gateway on the default view still reads as onboarding, not "no match".
@@ -580,11 +633,13 @@ export function UsagePage() {
     modelFilters.length > 0 ||
     userFilters.length > 0 ||
     apiKeyFilters.length > 0 ||
+    workspaceFilter !== undefined ||
     timeFiltered
 
   // Named on the share card's face. A card whose numbers came from a filtered
   // window has to say so, or a reader takes the figure for the whole gateway.
   const shareScopeSuffix = [
+    workspaceFilter !== undefined ? workspaceLabel(workspaceFilter) : null,
     userFilters.length > 0
       ? `${userFilters.length} user${userFilters.length > 1 ? "s" : ""}`
       : null,
@@ -609,6 +664,7 @@ export function UsagePage() {
     setModelFilters([])
     setUserFilters([])
     setApiKeyFilters([])
+    setWorkspaceFilter(undefined)
   }
   const valueChips = (
     dimension: string,
@@ -627,6 +683,19 @@ export function UsagePage() {
       onClear: () => setValues(values.filter((v) => v !== value)),
     }))
   const filterChips: FilterChip[] = [
+    // The workspace filter is single-valued (the endpoint takes one id), so its
+    // chip is built directly rather than through valueChips.
+    ...(workspaceFilter !== undefined
+      ? [
+          {
+            key: `workspace:${workspaceFilter}`,
+            label: "Workspace",
+            value: workspaceLabel(workspaceFilter),
+            clearLabel: `Remove Workspace filter ${workspaceLabel(workspaceFilter)}`,
+            onClear: () => setWorkspaceFilter(undefined),
+          },
+        ]
+      : []),
     ...valueChips(
       "user",
       "User",
@@ -984,8 +1053,12 @@ export function UsagePage() {
   return (
     <div className="flex flex-col gap-6">
       <PageHeader
-        title="Usage & analytics"
-        description="Spend, tokens, cache use, and request volume over time. Group the chart by model, user, key, or source, and click a breakdown row to drill into the request log."
+        title={orgWide ? "Organization usage" : "Usage & analytics"}
+        description={
+          orgWide
+            ? "Spend, tokens, cache use, and request volume across every workspace in your organization. Group the chart by model, user, key, or source, or narrow to a single workspace."
+            : "Spend, tokens, cache use, and request volume over time. Group the chart by model, user, key, or source, and click a breakdown row to drill into the request log."
+        }
       />
 
       <ErrorBanner
@@ -1027,6 +1100,17 @@ export function UsagePage() {
           </>
         }
       >
+        {orgWide ? (
+          <FilterSelect
+            ariaLabel="Workspace"
+            value={workspaceFilter ?? ""}
+            onChange={(value) => setWorkspaceFilter(value || undefined)}
+            options={[
+              { value: "", label: "All workspaces" },
+              ...workspaceOptions,
+            ]}
+          />
+        ) : null}
         {/* allowsCustom because the options are the in-window top spenders (a
             breakdown capped at 100): an entity below that rank, or with no traffic
             in the window, is not offered, so Enter has to commit a pasted id. */}
@@ -1352,7 +1436,7 @@ export function UsagePage() {
                     : "No usage recorded yet."
                 }
                 unknownLabel={activePrimary.unknownLabel}
-                onDrill={activePrimary.drill}
+                onDrill={orgWide ? undefined : activePrimary.drill}
                 loading={summary.isLoading}
               />
             </div>
@@ -1385,7 +1469,7 @@ export function UsagePage() {
                     : "No usage recorded yet."
                 }
                 unknownLabel={activeSecondary.unknownLabel}
-                onDrill={activeSecondary.drill}
+                onDrill={orgWide ? undefined : activeSecondary.drill}
                 loading={summary.isLoading}
               />
             </div>
@@ -1408,7 +1492,7 @@ export function UsagePage() {
               <ToolBreakdownTable
                 rows={toolRows}
                 totalCost={totals?.cost ?? 0}
-                onDrill={(tool) => drillTo({ tool })}
+                onDrill={orgWide ? undefined : (tool) => drillTo({ tool })}
                 loading={summary.isLoading}
               />
             </div>

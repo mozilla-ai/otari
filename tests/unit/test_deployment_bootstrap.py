@@ -219,7 +219,10 @@ def test_mail_ready_turns_on_only_with_a_transport_and_a_public_url(tmp_path: Pa
 # would collapse them into the roster surface, which is a different page with
 # different access. Listed here rather than in the surface tuple itself so the
 # tuple stays the plain list of names the dashboard gates on.
-SURFACE_ROUTE_PREFIXES = {"organization_providers": "/v1/organizations/me/provider-keys"}
+SURFACE_ROUTE_PREFIXES = {
+    "organization_providers": "/v1/organizations/me/provider-keys",
+    "organization_usage": "/v1/organizations/me/usage",
+}
 
 
 @pytest.mark.parametrize(
@@ -251,13 +254,15 @@ def test_every_surface_names_a_route_the_gateway_mounts(
 
 
 def test_hosted_swaps_the_process_wide_provider_page_for_the_per_organization_one(tmp_path: Path) -> None:
-    """The whole point of the hosted surface set, in the two rows that differ.
+    """The whole point of the hosted surface set, in the rows that differ.
 
     ``provider_credentials`` is keyed on the instance name alone, so a credential
     added through ``/providers`` is served to every organization on the
     deployment and shadows that organization's own BYO key. The page is right for
     the single-tenant product and wrong for a control plane, and the
-    organization-scoped one is the other way around.
+    organization-scoped one is the other way around. ``organization_usage`` is
+    the row that exists only where tenants do: standalone's organization is the
+    deployment, so ``/usage`` already answers it whole (otari-ai#1963).
     """
     app = create_app(_hosted(tmp_path))
 
@@ -269,10 +274,15 @@ def test_hosted_swaps_the_process_wide_provider_page_for_the_per_organization_on
     # somebody else's account system, which no build here does.
     assert answered["session_type"] == "local_operator"
     assert "organization_providers" in answered["surfaces"]
+    assert "organization_usage" in answered["surfaces"]
     assert "providers" not in answered["surfaces"]
     # Everything else is standalone's set, so a surface added there is not
     # silently withheld from a control plane.
-    assert set(answered["surfaces"]) ^ set(STANDALONE_SURFACES) == {"organization_providers", "providers"}
+    assert set(answered["surfaces"]) ^ set(STANDALONE_SURFACES) == {
+        "organization_providers",
+        "organization_usage",
+        "providers",
+    }
 
 
 

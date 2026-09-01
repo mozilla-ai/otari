@@ -116,9 +116,17 @@ STANDALONE_SURFACES: tuple[str, ...] = (
 # Dropping the surface is not itself a guard over the table: ``config.yml``'s
 # ``providers:`` block and ``/v1/provider-credentials`` still populate it with no
 # page in front of them, which is #818's to close.
+#
+# ``organization_usage`` appears for a different reason: not a credential's
+# ownership but a question that only exists once tenants do. The router behind it
+# (``/v1/organizations/me/usage``) is mounted on both editions, but on standalone
+# the organization is the deployment and ``/usage`` already answers it whole, so
+# the dashboard's organization-wide Usage page is a destination only where "my
+# organization" is narrower than "everything" (otari-ai#1963).
 HOSTED_SURFACES: tuple[str, ...] = (
     *(surface for surface in STANDALONE_SURFACES if surface != "providers"),
     "organization_providers",
+    "organization_usage",
 )
 
 

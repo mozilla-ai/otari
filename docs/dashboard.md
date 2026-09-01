@@ -77,6 +77,7 @@ The workspace view contains day-to-day gateway operations:
 
 The organization view contains tenant-wide administration:
 
+- Organization-wide usage, in hosted mode
 - Workspaces and organization members
 - Spend and budgets
 - Organization pricing
