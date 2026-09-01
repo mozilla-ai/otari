@@ -421,6 +421,34 @@ async def test_pool_keys_isolate_origin_and_pinned_address() -> None:
 
 
 @pytest.mark.asyncio
+async def test_transport_close_waits_for_every_pool_when_one_close_fails(monkeypatch: pytest.MonkeyPatch) -> None:
+    transport = PinnedAsyncHTTPTransport(backend_factory=BackendFactory())
+    first = ValidatedTarget(canonicalize_web_url("http://first.example/"), (_PUBLIC_V4,))
+    second = ValidatedTarget(canonicalize_web_url("http://second.example/"), (_PUBLIC_V4,))
+    _, first_entry = await transport._acquire_pool(first, _PUBLIC_V4)  # noqa: SLF001
+    _, second_entry = await transport._acquire_pool(second, _PUBLIC_V4)  # noqa: SLF001
+    first_close_started = asyncio.Event()
+    close_attempts: list[str] = []
+
+    async def failing_close() -> None:
+        close_attempts.append("first")
+        first_close_started.set()
+        raise RuntimeError("scripted close failure")
+
+    async def successful_close() -> None:
+        await first_close_started.wait()
+        await asyncio.sleep(0)
+        close_attempts.append("second")
+
+    monkeypatch.setattr(first_entry.pool, "aclose", failing_close)
+    monkeypatch.setattr(second_entry.pool, "aclose", successful_close)
+
+    await transport.aclose()
+
+    assert close_attempts == ["first", "second"]
+
+
+@pytest.mark.asyncio
 async def test_pool_bound_evicts_least_recently_used_idle_pool() -> None:
     factory = BackendFactory()
     transport = PinnedAsyncHTTPTransport(backend_factory=factory, max_pools=2)
@@ -603,8 +631,16 @@ async def test_dns_resolution_observes_network_deadline() -> None:
 
 
 @pytest.mark.asyncio
+async def test_capped_body_rejects_already_read_response() -> None:
+    response = httpx.Response(200, content=b"already buffered")
+
+    with pytest.raises(httpx.StreamConsumed):
+        await read_capped_decoded_body(response, deadline=NetworkDeadline(1))
+
+
+@pytest.mark.asyncio
 async def test_capped_body_marks_overflow_without_retaining_it() -> None:
-    response = httpx.Response(200, content=b"abcdefghijk")
+    response = httpx.Response(200, stream=OneChunkByteStream(b"abcdefghijk"))
 
     body = await read_capped_decoded_body(response, deadline=NetworkDeadline(1), max_bytes=8, chunk_size=3)
 
@@ -624,7 +660,7 @@ async def test_capped_body_closes_stream_after_truncation() -> None:
 
 @pytest.mark.asyncio
 async def test_capped_body_distinguishes_exact_limit() -> None:
-    response = httpx.Response(200, content=b"abcdefgh")
+    response = httpx.Response(200, stream=OneChunkByteStream(b"abcdefgh"))
 
     body = await read_capped_decoded_body(response, deadline=NetworkDeadline(1), max_bytes=8, chunk_size=4)
 
