@@ -55,7 +55,6 @@ _DEPLOYMENT_WIDE_PROBES: list[tuple[str, str]] = [
     ("GET", "/v1/models/discoverable"),
     ("GET", "/v1/provider-credentials"),
     ("GET", "/v1/search-tools"),
-    ("GET", "/v1/tool-settings"),
     ("GET", "/v1/settings"),
     ("GET", "/v1/settings/mail"),
     ("GET", "/v1/settings/maintenance-mode"),
@@ -105,10 +104,18 @@ _CATALOG_PROBES: list[tuple[str, str]] = [
 # guardrails and pricing are entirely owner/admin, and the provider-keys list
 # joined them in otari-ai#1944), and their own 403 is indistinguishable here
 # from the one this file is about.
+#
+# ``GET /v1/tool-settings`` is the odd one in this list: its router is
+# deployment-wide and every other verb on it is operator-only. The read resolves
+# the caller itself and *narrows* rather than refuses, withholding the three
+# service-endpoint fields from a non-operator (otari-ai#1969), which is why it
+# belongs here rather than above. What it withholds is pinned in
+# ``test_tool_settings_tenant_read.py``; this file only pins that it answers.
 _TENANT_SCOPED_PROBES: list[tuple[str, str]] = [
     ("GET", "/v1/organizations/me"),
     ("GET", "/v1/workspaces"),
     ("GET", "/v1/admin/access"),
+    ("GET", "/v1/tool-settings"),
 ]
 
 
