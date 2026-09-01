@@ -664,13 +664,13 @@ describe("content text wears a type role", () => {
 // a scale with no single place to read it and nothing to keep it from growing a
 // seventh. Both halves are asserted: the roles exist, and the chrome uses them.
 describe("the shell chrome's type roles", () => {
-  const CHROME_ROLES = [
-    "text-chrome-row",
-    "text-chrome-meta",
-    "text-chrome-initials",
+  const SHELL_ROLES = [
+    "text-shell-label",
+    "text-shell-secondary",
+    "text-shell-monogram",
   ]
 
-  it.each(CHROME_ROLES)("declares %s in globals.css", (role) => {
+  it.each(SHELL_ROLES)("declares %s in globals.css", (role) => {
     // The same failure the documented-utilities list guards against: a role
     // named in the scale's comment but never declared is a className that
     // produces no CSS, on text that looks merely unstyled rather than broken.
@@ -695,7 +695,7 @@ describe("no font size is written at a call site", () => {
 
     expect(
       offenders,
-      "use a type role (text-caption, text-overline, …) or a text-chrome-* one, or add one",
+      "use a type role (text-caption, text-overline, …) or a text-shell-* one, or add one",
     ).toEqual([])
   })
 })

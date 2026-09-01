@@ -620,7 +620,7 @@
      `-step` rather than `--text-caption` on purpose: a `--text-*` key generates
      a same-named utility that would outrank `@utility text-caption` in the same
      layer and silently kill the role's own metrics. Nothing consumes this but
-     that role and `text-chrome-row`, so it needs no utility of its own. */
+     that role and `text-shell-label`, so it needs no utility of its own. */
   --text-caption-step: 13px;
   --text-caption-step--line-height: 19px;
   --text-caption-step--letter-spacing: 0.0075em;
@@ -681,9 +681,9 @@
  * size repeated inline in a component is a scale nobody can see the whole of,
  * and these were six arbitrary values across four nav files before.
  *
- *   text-chrome-row      — a row label in the rail, the menu, or the top bar.
- *   text-chrome-meta     — the second line under one of those labels.
- *   text-chrome-initials — initials in an avatar.
+ *   text-shell-label     — a row label in the rail, the menu, or the top bar.
+ *   text-shell-secondary — the second line under one of those labels.
+ *   text-shell-monogram  — the initials in an avatar.
  *
  * These three carry metrics only, no color and no weight: one menu row is
  * `text-foreground` resting and `text-muted` disabled, and an identity line is
@@ -769,17 +769,17 @@
   text-transform: uppercase;
   color: var(--color-text-muted);
 }
-@utility text-chrome-row {
+@utility text-shell-label {
   font-size: var(--text-caption-step);
   line-height: var(--text-caption-step--line-height);
   letter-spacing: var(--text-caption-step--letter-spacing);
 }
-@utility text-chrome-meta {
+@utility text-shell-secondary {
   font-size: var(--text-xs);
   line-height: var(--text-xs--line-height);
   letter-spacing: var(--text-xs--letter-spacing);
 }
-@utility text-chrome-initials {
+@utility text-shell-monogram {
   /* Deliberately off-scale, and the one documented exception. Two letters in a
      26px avatar are recognized, not read, so putting them on the scale would
      either overflow the avatar or drag a real text step down to 9px to suit a

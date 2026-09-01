@@ -58,7 +58,7 @@ const THEME_LABELS: Record<ThemePreference, string> = {
 // That 36px is a desk figure. This menu also renders inside the mobile drawer,
 // where these rows are tapped, so below `md` they take the 44px touch floor and
 // the menu's own scale resumes at the breakpoint.
-const MENU_ROW = `flex min-h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-chrome-row font-medium md:min-h-9 ${NAV_TRANSITION}`
+const MENU_ROW = `flex min-h-11 w-full items-center gap-2.5 rounded-md px-2.5 text-left text-shell-label font-medium md:min-h-9 ${NAV_TRANSITION}`
 const MENU_ROW_RESTING = "text-foreground hover:bg-surface-alt"
 const MENU_ROW_DISABLED = "cursor-not-allowed text-muted opacity-60"
 // No vertical margin: the dialog's own 6px gap is the menu's rhythm, and a
@@ -175,7 +175,7 @@ function MenuItem({
           takes, so the one row that carries a value does not push its own label
           out of the column the others sit in. */}
       {trailing ? (
-        <span className="w-11 shrink-0 text-right text-chrome-meta font-normal text-muted">
+        <span className="w-11 shrink-0 text-right text-shell-secondary font-normal text-muted">
           {trailing}
         </span>
       ) : (
@@ -305,7 +305,7 @@ export function AccountMenu({ collapsed }: { collapsed: boolean }) {
         aria-label={`Account: ${identity.name}`}
         className={`${navRowClass({ collapsed })} w-auto! justify-start`}
       >
-        <span className="flex h-[1.625rem] w-[1.625rem] shrink-0 items-center justify-center rounded-full border border-border bg-surface-alt text-chrome-initials font-semibold text-muted">
+        <span className="flex h-[1.625rem] w-[1.625rem] shrink-0 items-center justify-center rounded-full border border-border bg-surface-alt text-shell-monogram font-semibold text-muted">
           {identity.initials}
         </span>
         {collapsed ? null : (

@@ -201,16 +201,16 @@ identifier does not belong in it.
 The shell chrome is the other scale: the rails, the account menu and the top bar, which read a
 step below the content roles because they are furniture around a page rather than part of one.
 
-`text-chrome-row` (13px, the caption step: a row label in either rail, the menu, or the top bar)
-· `text-chrome-meta` (12px, `--text-xs`: the second line under one of those labels) ·
-`text-chrome-initials` (9px, sized to a 26px avatar).
+`text-shell-label` (13px, the caption step: a row label in either rail, the menu, or the top bar)
+· `text-shell-secondary` (12px, `--text-xs`: the second line under one of those labels) ·
+`text-shell-monogram` (9px, sized to a 26px avatar).
 
 These three carry metrics only. No weight and no ink, because one menu row is `text-foreground`
 resting and `text-muted` disabled and an identity line is medium over semibold, so the call site
-is where the weight and the colour belong: `text-chrome-meta text-muted` is the shape to write,
-not a wart to clean up. That is the opposite of the content contract above, so check which scale
-a role belongs to before deciding a class beside it is redundant. `text-chrome-initials` is the
-one documented off-scale size, and globals.css says why: two letters in a 26px avatar are
+is where the weight and the colour belong: `text-shell-secondary text-muted` is the shape to
+write, not a wart to clean up. That is the opposite of the content contract above, so check which
+scale a role belongs to before deciding a class beside it is redundant. `text-shell-monogram` is
+the one documented off-scale size, and globals.css says why: two letters in a 26px avatar are
 recognized rather than read.
 
 Zilla Slab is spent on `text-display` alone; every other content role, `text-heading`

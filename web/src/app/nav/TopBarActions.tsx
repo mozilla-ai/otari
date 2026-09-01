@@ -23,7 +23,7 @@ import { useDeployment } from "@/shared/hooks/useDeployment"
 // file to fill. It renders nothing here.
 
 const ACTION =
-  "flex min-h-[2.125rem] items-center rounded-md px-1 text-chrome-row font-medium text-muted transition-colors hover:text-foreground"
+  "flex min-h-[2.125rem] items-center rounded-md px-1 text-shell-label font-medium text-muted transition-colors hover:text-foreground"
 
 export function TopBarActions() {
   const { docs_url } = useDeployment()

@@ -143,7 +143,7 @@ export function WorkspaceSwitcher({
                 <span className="truncate text-sm leading-[1.125rem] font-semibold tracking-[-0.01em] text-foreground">
                   {workspaceName}
                 </span>
-                <span className="truncate text-chrome-meta font-medium text-muted">
+                <span className="truncate text-shell-secondary font-medium text-muted">
                   {organizationName}
                 </span>
               </span>
@@ -225,11 +225,11 @@ export function WorkspaceSwitcher({
               Workspaces ({memberships.length})
             </p>
             {isLoading ? (
-              <p className="px-2.5 py-1 text-chrome-meta text-muted">
+              <p className="px-2.5 py-1 text-shell-secondary text-muted">
                 Loading workspaces…
               </p>
             ) : memberships.length === 0 ? (
-              <p className="px-2.5 py-1 text-chrome-meta text-muted">
+              <p className="px-2.5 py-1 text-shell-secondary text-muted">
                 You do not belong to a workspace yet.
               </p>
             ) : (

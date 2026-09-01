@@ -99,7 +99,7 @@ owner is usually a component: HeroUI's styling guide points at a wrapper built w
 heavy-handed". `DataTable` is exactly that wrapper: pages declare columns and rows and never
 style a table. A value-shaped decision, rather than a markup-shaped one, is where a utility or a
 shared class string comes in: the `@utility text-heading` family in `globals.css` carries the
-type roles, and `navRowClass` and `NAV_TRANSITION` in `app/nav/rowStyles.ts` carry a chrome row.
+type roles, and `navRowClass` and `NAV_TRANSITION` in `app/nav/rowStyles.ts` carry a shell row.
 Two copies of a class list are two surfaces that are meant to match and will stop matching one
 fix at a time, and the copy that missed the fix is the one somebody notices.
 
